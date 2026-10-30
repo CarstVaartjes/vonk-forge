@@ -187,7 +187,7 @@ def test_canonical_recipe_resolution_uses_selected_file_identity_and_provenance(
             document=recipe_document,
         )
 
-    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    service = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     first = service.resolve_artifact_set(recipe_revision_id=recipe.id)
     assert first.model_content_sha256 == model_digest
     assert first.recipe_revision_sha256 == _digest(recipe_document)
@@ -427,7 +427,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
             revision_number=2,
         )
 
-    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    service = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     first = service.resolve_artifact_set(recipe_revision_id=first_recipe.id)
     second = service.resolve_artifact_set(recipe_revision_id=second_recipe.id)
     assert second.digest == first.digest

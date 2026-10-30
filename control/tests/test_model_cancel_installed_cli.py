@@ -38,7 +38,7 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
     operation_key = "00000000-0000-4000-8000-000000000151"
     cancellation_key = "00000000-0000-4000-8000-000000000152"
     service = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
     preview = service.download_preview(
         model_content_sha256="a" * 64, artifacts=[artifact]
@@ -145,7 +145,7 @@ def test_installed_model_cancel_recovers_lost_receipt_and_observes_settlement(
         # Reconstruct the storage owner after process death and settle only the
         # durable cancellation. The staged bytes remain resumable, not published.
         restarted = ModelCacheService(
-            sessions, cache_root, reserve_bytes=0, fixture_sources=True
+            sessions, cache_root, free_fraction=0, fixture_sources=True
         )
         restarted._reconcile_pending_cancellations()
         settled = restarted.get_operation(operation.id)

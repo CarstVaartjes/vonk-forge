@@ -88,11 +88,27 @@ class StorageMixin:
         if cache._storage_demands is not None:
             cache._storage_demands.request(
                 NAS_MODELS,
-                new_bytes + cache._reserve_bytes,
+                new_bytes + cache.reserve_of(shutil.disk_usage(cache._root).total),
                 source="model-download",
                 subject="",
                 reason=reason,
             )
+
+    def _ranges_fit(self, reservation: int) -> bool:
+        """Whether ``reservation`` fits beyond the reserve and the ranges in flight."""
+        cache = cast("ModelCacheService", self)
+
+        return cache.free_bytes() - cache._range_reserved_bytes >= reservation
+
+    def _capacity_detail(self, waiting_for: str, required_bytes: int) -> str:
+        """The figures behind a capacity wait, for the person reading it."""
+        cache = cast("ModelCacheService", self)
+
+        usage = shutil.disk_usage(cache._root)
+        return (
+            f"{waiting_for}: needs {required_bytes} bytes free beyond the "
+            f"{cache.reserve_of(usage.total)}-byte reserve, {usage.free} free"
+        )
 
     def free_bytes(self) -> int:
         """Free NAS bytes beyond the reserve: one ``statvfs``, no object scan.
@@ -104,7 +120,8 @@ class StorageMixin:
         """
         cache = cast("ModelCacheService", self)
 
-        return max(0, shutil.disk_usage(cache._root).free - cache._reserve_bytes)
+        usage = shutil.disk_usage(cache._root)
+        return max(0, usage.free - cache.reserve_of(usage.total))
 
     def _transfer_need(
         self,
@@ -201,6 +218,22 @@ class StorageMixin:
             )
         return running
 
+    def _committed_bytes(
+        self,
+        need: TransferNeed,
+        running: RunningTransfers,
+        *,
+        operation_id: str | None = None,
+    ) -> int:
+        """Free bytes a transfer needs beside the running ones; 0 when it adds nothing."""
+        others, peaks = _in_flight(running, excluding=operation_id)
+        own = need.peak + sum(
+            remaining
+            for digest, remaining in need.objects.items()
+            if digest not in others
+        )
+        return 0 if own == 0 else own + sum(others.values()) + peaks
+
     def _storage_fits(
         self,
         need: TransferNeed,
@@ -218,15 +251,9 @@ class StorageMixin:
         """
         cache = cast("ModelCacheService", self)
 
-        others, peaks = _in_flight(running, excluding=operation_id)
-        own = need.peak + sum(
-            remaining
-            for digest, remaining in need.objects.items()
-            if digest not in others
-        )
-        if own == 0:
+        committed = cache._committed_bytes(need, running, operation_id=operation_id)
+        if committed == 0:
             return True
-        committed = own + sum(others.values()) + peaks
         if committed <= cache.free_bytes():
             return True
         cache._request_storage(
@@ -278,11 +305,12 @@ class StorageMixin:
             in_flight_bytes = sum(
                 _in_flight(cache._running_transfers(session))[0].values()
             )
-        available = max(0, usage.free - cache._reserve_bytes)
+        reserve = cache.reserve_of(usage.total)
+        available = max(0, usage.free - reserve)
         return StorageSummary(
             total_bytes=usage.total,
             free_bytes=usage.free,
-            reserve_bytes=cache._reserve_bytes,
+            reserve_bytes=reserve,
             available_bytes=available,
             unique_used_bytes=unique_used,
             in_flight_bytes=in_flight_bytes,

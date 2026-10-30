@@ -39,7 +39,7 @@ def _removal_service(
     service = ModelCacheService(
         sessions,
         tmp_path / "model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     return service, sessions

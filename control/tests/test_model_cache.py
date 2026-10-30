@@ -162,7 +162,7 @@ def cache(tmp_path: Path):
     service = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         runtime_archive_available=runtime_archive_available,
     )
@@ -228,7 +228,7 @@ def threaded_cache(tmp_path: Path):
     service = ModelCacheService(
         sessions,
         tmp_path / "background-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     try:
@@ -685,7 +685,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         )
     ) as client:
         service = ModelCacheService(
-            sessions, tmp_path / "operator-cache", reserve_bytes=0, http_client=client
+            sessions, tmp_path / "operator-cache", free_fraction=0, http_client=client
         )
         key = "00000000-0000-4000-8000-000000000097"
         accepted = service.download_model_selector(
@@ -725,7 +725,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
                 created_at=NOW,
             )
         )
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=10**30)
+    restarted = ModelCacheService(sessions, service.root, free_fraction=1.0)
     assert (
         restarted.download_model_selector(
             selector, actor="operator", request_key=key, force=True
@@ -2063,7 +2063,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     restarted = ModelCacheService(
         sessions,
         service.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     assert restarted.resume_operations() == 1
@@ -2170,7 +2170,7 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     assert max(delays) <= 2 * min(delays) + 1
 
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     restarted._open_source = flaky_source
     assert restarted.resume_operations() == 1
@@ -2527,7 +2527,7 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
     service = ModelCacheService(
         sessions,
         tmp_path / "http-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=http_client,
         fixture_sources=True,
     )
@@ -2621,7 +2621,7 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     )
     service.close()
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     offsets = []
     original = restarted._open_source
@@ -2894,7 +2894,7 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
     restarted = ModelCacheService(
         sessions,
         service.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: clock[0],
     )
@@ -3026,7 +3026,7 @@ def _http_cache_service(tmp_path: Path, sessions, handler, *, clock=None):
     service = ModelCacheService(
         sessions,
         tmp_path / "http-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=client,
         fixture_sources=True,
         clock=clock,
@@ -3510,7 +3510,7 @@ def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
     assert cancelled.state == "cancelled"
     assert cancelled.progress["phase"] == "completed"
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     try:
         assert restarted.run_pending() == 0
@@ -3537,7 +3537,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
     payload = b"c" * 8192
     operation_id = []
     api = ModelCacheService(
-        sessions, tmp_path / "http-nas-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "http-nas-cache", free_fraction=0, fixture_sources=True
     )
 
     class CancelStream(httpx2.SyncByteStream):
@@ -4135,7 +4135,7 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
         artifacts=[artifact],
     )
     api = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     real_verify = service._verify_file
 
@@ -4420,7 +4420,7 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
         service = ModelCacheService(
             sessions,
             tmp_path / "http-nas-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             http_client=client,
             fixture_sources=True,
             clock=lambda: NOW,

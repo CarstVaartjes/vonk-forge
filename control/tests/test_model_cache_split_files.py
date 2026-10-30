@@ -138,7 +138,7 @@ def service(tmp_path: Path, sessions, hub: FakeHub):
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=client,
         fixture_sources=True,
     )

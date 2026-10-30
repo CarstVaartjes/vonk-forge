@@ -386,7 +386,7 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
 def _seed_cache(engine: Engine, root: Path, expected: int = 10) -> str:
     sessions = sessionmaker(engine, expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, root, fixture_sources=True, reserve_bytes=0, clock=lambda: NOW
+        sessions, root, fixture_sources=True, free_fraction=0, clock=lambda: NOW
     )
     try:
         artifact = _artifact(
@@ -804,7 +804,7 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
         sessions,
         tmp_path / "cache",
         fixture_sources=True,
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: NOW,
     )
     accepted = []
@@ -890,7 +890,7 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
         sessions,
         tmp_path / "cache",
         fixture_sources=True,
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: NOW,
     )
     try:

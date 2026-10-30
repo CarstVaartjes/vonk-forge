@@ -109,7 +109,7 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
     # No model revision exists: the verified recipe's content pin still scopes
     # the reference, including when its saved draft or active head is damaged.
     service = ModelCacheService(
-        world.sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
     )
     try:
         protected = _download(

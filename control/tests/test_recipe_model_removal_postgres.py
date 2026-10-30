@@ -241,7 +241,7 @@ def test_postgres_recipe_removal_with_model_resumes_exact_child_after_service_re
     restarted_cache = ModelCacheService(
         sessions,
         model_root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )

@@ -2193,7 +2193,7 @@ def cached(tmp_path: Path, world: Catalog):
     """A real model cache over the same database, holding one model."""
 
     service = ModelCacheService(
-        world.sessions, tmp_path / "nas-cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "nas-cache", free_fraction=0, fixture_sources=True
     )
     downloaded = _download(
         service,
@@ -3318,3 +3318,203 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
         # Only private bytes can be promised. The live operation still pins
         # the shared object in the native store after the uninstall drops links.
         assert spark_eviction_capacity(session, nodes[0], _REAL_CLOCK).freeable == 1000
+
+
+# -- the NAS keeps a tenth of its volume free ----------------------------------------
+
+
+class _Volume:
+    """A NAS volume of ``total`` bytes: the cache's own files plus what other
+    services (PostgreSQL, backups, builds) hold, so deleting a model frees space."""
+
+    def __init__(self, root: Path, total: int) -> None:
+        self.root = root
+        self.total = total
+        self.external = 0
+
+    def cache_used(self) -> int:
+        return sum(
+            path.stat().st_size for path in self.root.rglob("*") if path.is_file()
+        )
+
+    @property
+    def free(self) -> int:
+        return self.total - self.external - self.cache_used()
+
+    def fill_until_free(self, free: int) -> None:
+        self.external = 0
+        self.external = self.total - self.cache_used() - free
+
+    def usage(self, _path: object = None):
+        from collections import namedtuple
+
+        usage = namedtuple("usage", "total used free")
+        return usage(self.total, self.total - self.free, self.free)
+
+    def pair(self, _path: Path) -> tuple[int, int]:
+        return self.total, self.free
+
+
+@pytest.fixture
+def squeezed(postgres_engine: Engine, tmp_path: Path, monkeypatch):
+    """A cache holding one 1000-byte model on a 10000-byte volume that has
+    exactly its reserve (a tenth) free, and a collector for that volume."""
+
+    Base.metadata.create_all(postgres_engine)
+    world = Catalog(postgres_engine)
+    volume = _Volume(tmp_path / "nas-cache", 10_000)
+    monkeypatch.setattr("shutil.disk_usage", volume.usage)
+    service = ModelCacheService(world.sessions, volume.root, fixture_sources=True)
+    demands = StorageDemands(lambda: datetime.now(UTC))
+    service.bind_storage_demands(demands)
+    stored = _download(
+        service,
+        [_artifact(tmp_path, b"w" * 1000, model_content_sha256=A_MODEL)],
+        model_content_sha256=A_MODEL,
+        request_key=str(uuid.uuid4()),
+    )
+    assert stored.state == "succeeded"
+    volume.fill_until_free(1000)
+    collector = _models(
+        world,
+        service,
+        demands=demands,
+        disk_usage=volume.pair,
+        reserve_fraction=0,
+        reserve_floor_bytes=0,
+    )
+    yield SimpleNamespace(
+        world=world,
+        volume=volume,
+        demands=demands,
+        collector=collector,
+        set_digest=str(stored.artifact_set_sha256),
+        service=service,
+    )
+    service.close()
+
+
+def _wait_for_download(service: ModelCacheService, tmp_path: Path):
+    other = tmp_path / "other"
+    other.mkdir()
+    return _download(
+        service,
+        [_artifact(other, b"n" * 500, model_content_sha256="b" * 64)],
+        model_content_sha256="b" * 64,
+        request_key=str(uuid.uuid4()),
+    )
+
+
+def test_the_reserve_is_a_tenth_of_the_volume(tmp_path: Path, monkeypatch) -> None:
+    """Catches a fixed 10 GiB reserve on a 10 TB volume shared with PostgreSQL."""
+    from vonk_control.settings import (
+        FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
+        STORAGE_LOW_FREE_FRACTION,
+    )
+
+    volume = _Volume(tmp_path / "cache", 10_000)
+    monkeypatch.setattr("shutil.disk_usage", volume.usage)
+    engine = create_engine(f"sqlite:///{tmp_path / 'c.sqlite'}")
+    Base.metadata.create_all(engine)
+    service = ModelCacheService(sessionmaker(engine), volume.root)
+    try:
+        volume.external = 4000
+        summary = service.storage_summary()
+        assert summary.reserve_bytes == 1000
+        assert service.free_bytes() == 5000
+        volume.total = 100_000
+        assert service.storage_summary().reserve_bytes == 10_000
+        # The same line the collector keeps: one number owns both.
+        assert FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION == STORAGE_LOW_FREE_FRACTION
+    finally:
+        service.close()
+
+
+def test_a_download_that_would_breach_the_reserve_evicts_unused_models_then_runs(
+    squeezed, tmp_path: Path
+) -> None:
+    """Catches a download admitted into the reserve, or one that waits while
+    unused models sit on the volume."""
+
+    world, service, demands = squeezed.world, squeezed.service, squeezed.demands
+    waiting = _wait_for_download(service, tmp_path)
+    assert waiting.failure is not None
+    detail = str(waiting.failure["detail"])
+    assert waiting.failure["code"] == "download_blocked"
+    assert "insufficient-reserved-storage" in detail
+    assert "needs 500 bytes free beyond the 1000-byte reserve" in detail
+    (demand,) = demands.active()
+    assert (demand.scope, demand.required_free_bytes) == (NAS_MODELS, 1500)
+    assert (
+        service._claim_operations(limit=1, respect_backoff=False, transfer_slots=1)
+        == []
+    )
+
+    assert squeezed.collector.collect().models == 1
+    _settle(service)
+
+    assert not _set_exists(world, squeezed.set_digest)
+    claimed = service._claim_operations(
+        limit=1, respect_backoff=False, transfer_slots=1
+    )
+    assert [operation for operation, _kind in claimed] == [waiting.id]
+
+
+@pytest.mark.parametrize("protection", ["profile", "workload"])
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_download_waits_with_its_reason_when_only_protected_models_could_be_freed(
+    squeezed, tmp_path: Path, protection: str
+) -> None:
+    """Catches evicting a profile's or a running workload's model for a download,
+    and a wait that vanishes or ends when nothing can be reclaimed."""
+
+    world, service, demands = squeezed.world, squeezed.service, squeezed.demands
+    set_digest = squeezed.set_digest
+    if protection == "profile":
+        _head_recipe_naming(world, A_MODEL)
+        _profile(world, "vonk-forge/glm")
+    else:
+        old = world.revision("old", 1)
+        world.revision("old", 2, head="active")
+        installation, _ = world.workload(old, run="stopped")
+        with world.sessions.begin() as session:
+            row = session.get(RecipeInstallation, installation)
+            assert row is not None
+            row.plan = {"model": A_MODEL}
+    waiting = _wait_for_download(service, tmp_path)
+
+    swept = squeezed.collector.collect()
+
+    assert swept.models == 0
+    assert _set_exists(world, set_digest)
+    assert _scope(swept, "nas")["outcome"] == "insufficient_after_eviction"
+    view = service.get_operation(waiting.id)
+    assert view.failure is not None
+    assert view.failure["code"] == "download_blocked"
+    assert view.failure["retryable"] is True
+    assert view.next_attempt_at is not None
+    assert demands.active()
+    assert (
+        service._claim_operations(limit=1, respect_backoff=False, transfer_slots=1)
+        == []
+    )
+
+
+def test_unused_models_go_when_free_space_falls_below_the_reserve_with_no_download(
+    squeezed,
+) -> None:
+    """Catches reclaiming only on a refused download: backups, builds and database
+    growth consume the volume with no download pending."""
+
+    world, service, volume = squeezed.world, squeezed.service, squeezed.volume
+    collector, set_digest = squeezed.collector, squeezed.set_digest
+    assert collector.tick() is False  # exactly the reserve free: nothing to do
+    assert _set_exists(world, set_digest)
+    volume.external += 100  # something else takes 100 bytes: below the reserve
+
+    world.now += timedelta(seconds=3600)
+    assert collector.tick() is True
+
+    _settle(service)
+    assert not _set_exists(world, set_digest)
+    assert volume.free > service.reserve_of(volume.total)

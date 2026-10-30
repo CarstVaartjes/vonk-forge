@@ -106,7 +106,7 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -142,7 +142,7 @@ def test_finished_recipe_model_eviction_is_exact_durable_and_waits_for_evidence(
         cache = ModelCacheService(
             world.sessions,
             tmp_path / "nas",
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
             clock=lambda: now[0],
         )
@@ -188,7 +188,7 @@ def test_fleet_removal_confirms_from_a_report_a_slow_agent_clock_stamped_early(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -229,7 +229,7 @@ def test_shared_content_is_retained_on_nas_and_spark(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -282,7 +282,7 @@ def test_shared_content_is_retained_on_nas_and_spark(
             cache = ModelCacheService(
                 world.sessions,
                 tmp_path / "nas",
-                reserve_bytes=0,
+                free_fraction=0,
                 fixture_sources=True,
                 clock=lambda: now,
             )
@@ -365,7 +365,7 @@ def test_unused_installation_uninstalls_through_existing_job(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -452,7 +452,7 @@ def test_profile_or_running_workload_retains_model_and_installation(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -517,7 +517,7 @@ def test_profile_added_after_review_replans_without_fencing_or_deleting(
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
@@ -576,7 +576,7 @@ def test_lost_owner_authority_expires_before_fresh_reference(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -694,7 +694,7 @@ def test_changed_persisted_scope_never_authorizes_remote_eviction(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )
