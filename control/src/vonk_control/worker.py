@@ -843,6 +843,16 @@ def assemble_production_worker(
         CatalogRevisionCollector(sessions, clock=clock).tick,
         TerminalHistoryCollector(sessions, clock=clock).tick,
     )
+    if model_cache is not None and model_cache_root is not None:
+        from .model_cache.partials_collection import ModelPartialsCollector
+
+        # An unfinished download is not a model file: its partials go a day
+        # after the last live operation stopped writing them.
+        worker_background_services += (
+            ModelPartialsCollector(
+                sessions, model_cache, model_cache_root, clock=clock
+            ).tick,
+        )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     artifact_jobs = ArtifactJobService(
         sessions,
