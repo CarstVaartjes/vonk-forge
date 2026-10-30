@@ -116,22 +116,57 @@ backup_loop() {
   trap 'cleanup; exit 0' TERM INT
   # A SIGKILLed container never ran the trap; drop its leftovers before any attempt.
   cleanup
-  # Free bytes of the filesystem of $1, or "unknown" when it cannot be read
-  # within ten seconds (an unreachable off-host mount must not hang the loop).
+  # Free bytes of the filesystem of $1 and its device name, or "unknown" when
+  # df cannot answer within ten seconds (an unreachable mount must not hang us).
   free_bytes() {
     timeout 10 df -Pk "$1" 2>/dev/null | { read -r _ || :; read -r _ _ _ available _ || :; case "${available:-}" in ''|*[!0-9]*) echo unknown ;; *) echo $((available * 1024)) ;; esac; }
   }
+  filesystem_of() {
+    timeout 10 df -Pk "$1" 2>/dev/null | { read -r _ || :; read -r name _ || :; echo "${name:-}"; }
+  }
   # Succeeds when the filesystem of $1 has $2 bytes free. Short space is
-  # reported; unknown space is reported and not treated as short, because the
-  # step that really needs the space fails on its own.
+  # reported. Unknown space is reported; $3 decides: "short" for volumes shared
+  # with the database (never risk ENOSPC there), "continue" for the off-host
+  # mount, whose own copy step fails and heals when it comes back.
   has_space() {
     free=$(free_bytes "$1")
     if [ "$free" = unknown ]; then
+      if [ "$3" = short ]; then
+        echo "PostgreSQL backup cannot read the free space of $1; treating it as short" >&2
+        return 1
+      fi
       echo "PostgreSQL backup cannot read the free space of $1; continuing" >&2
     elif [ "$free" -lt "$2" ]; then
       echo "PostgreSQL backup needs $2 bytes free on $1 but only $free are free" >&2
       return 1
     fi
+  }
+  # Keep the newest $keep dumps of directory $1 plus the newest dump that a
+  # passed restore verification covers. Runs at every loop pass, so attempts
+  # that publish but fail later cannot pile dumps up and make the space check
+  # refuse every attempt for good.
+  prune_dumps() {
+    protected=
+    verified_epoch=$(cat /state/last-backup-restore-verification.epoch 2>/dev/null || true)
+    case "$verified_epoch" in
+      ''|*[!0-9]*) ;;
+      *)
+        for backup in $(ls -1 /backups/postgres-*.sql.gz 2>/dev/null | sort -r); do
+          if [ "$(stat -c %Y "$backup")" -le "$verified_epoch" ]; then
+            protected=$(basename "$backup")
+            break
+          fi
+        done
+        ;;
+    esac
+    count=0
+    # Filenames are generated above and contain neither spaces nor newlines.
+    for backup in $(timeout 10 ls -1 "$1"/postgres-*.sql.gz 2>/dev/null | sort -r); do
+      count=$((count + 1))
+      if [ "$count" -gt "$keep" ] && [ "$(basename "$backup")" != "$protected" ]; then
+        rm -f "$backup"
+      fi
+    done
   }
   restore_verify() (
     set -e
@@ -155,9 +190,9 @@ backup_loop() {
     rm -rf -- "${restore_directory:?}"
   )
   # One attempt. Any failed step ends it. The backup marker means a dump was
-  # published, gzip-tested and copied off-host; the restore-verification marker
-  # is written only when the isolated restore also succeeded (it is skipped,
-  # not failed, while scratch space is short).
+  # published and gzip-tested, and copied off-host when configured; the
+  # restore-verification marker is written only when the isolated restore also
+  # succeeded (it is skipped, not failed, while scratch space is short).
   # Call it as a plain command: shells ignore errexit inside a condition.
   backup_once() (
     set -e
@@ -181,14 +216,14 @@ backup_loop() {
     offhost_needed=0
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
       offhost_needed=$needed
-      backups_device=$(timeout 10 stat -c %d /backups 2>/dev/null) || backups_device=
-      offhost_device=$(timeout 10 stat -c %d /offhost 2>/dev/null) || offhost_device=
+      backups_device=$(filesystem_of /backups)
+      offhost_device=$(filesystem_of /offhost)
       if [ -n "$backups_device" ] && [ "$backups_device" = "$offhost_device" ]; then
         needed=$((needed + offhost_needed))
       fi
     fi
-    has_space /backups "$needed"
-    [ "$offhost_needed" -eq 0 ] || has_space /offhost "$offhost_needed"
+    has_space /backups "$needed" short
+    [ "$offhost_needed" -eq 0 ] || has_space /offhost "$offhost_needed" continue
     step=dump
     # dash has no pipefail: record the dump status so a failed dump cannot hide
     # behind a gzip that happily compressed its partial output.
@@ -207,14 +242,17 @@ backup_loop() {
     chmod 0600 "$destination"
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
       step=off-host-copy
-      [ -d /offhost ]
-      cp "$destination" "$offhost_temporary"
-      gzip -t "$offhost_temporary"
-      mv "$offhost_temporary" "/offhost/$(basename "$destination")"
+      # An unreachable mount must fail the step, never hang the loop: allow
+      # one MiB/s plus a minute for the copy.
+      copy_seconds=$(($(stat -c %s "$destination") / 1048576 + 60))
+      timeout 10 test -d /offhost
+      timeout "$copy_seconds" cp "$destination" "$offhost_temporary"
+      timeout "$copy_seconds" gzip -t "$offhost_temporary"
+      timeout 60 mv "$offhost_temporary" "/offhost/$(basename "$destination")"
     fi
     step=restore-verification
     verified=1
-    if ! has_space /tmp $((database_bytes * 2 + margin)); then
+    if ! has_space /tmp $((database_bytes * 2 + margin)) short; then
       echo "PostgreSQL restore verification skipped this round: not enough scratch space" >&2
       verified=0
     else
@@ -246,25 +284,16 @@ backup_loop() {
         continue
         ;;
     esac
+    prune_dumps /backups
+    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then prune_dumps /offhost; fi
     backup_once
     attempt_status=$?
     if [ "$attempt_status" -ne 0 ]; then
       sleep 300 & wait $!
       continue
     fi
-    # Filenames are generated above and contain neither spaces nor newlines.
-    count=0
-    for backup in $(ls -1 /backups/postgres-*.sql.gz | sort -r); do
-      count=$((count + 1))
-      if [ "$count" -gt "$keep" ]; then rm -f "$backup"; fi
-    done
-    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
-      offhost_count=0
-      for backup in $(ls -1 /offhost/postgres-*.sql.gz 2>/dev/null | sort -r); do
-        offhost_count=$((offhost_count + 1))
-        if [ "$offhost_count" -gt "$keep" ]; then rm -f "$backup"; fi
-      done
-    fi
+    prune_dumps /backups
+    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then prune_dumps /offhost; fi
     sleep "$interval" & wait $!
   done
 }
