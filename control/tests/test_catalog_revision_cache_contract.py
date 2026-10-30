@@ -65,7 +65,7 @@ def test_model_cache_operation_payload_round_trips_through_database_and_reads_ma
     cache = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     artifact = _artifact("contract", b"contract payload")

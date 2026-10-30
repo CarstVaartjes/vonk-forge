@@ -68,12 +68,37 @@ MODES = (
     "movement",
     "exit-causes",
     "nas-space",
+    "fixed-reserves",
     "model-sets",
     "openers",
     "follow-validators",
     "item-counts",
     "event-loops",
 )
+# A name that reserves volume space (not "reserved": space a run holds) bound to
+# a number or a constant, anywhere on the line, annotated or not.
+FIXED_RESERVE = re.compile(
+    r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
+)
+# Fixed reserves that guard something other than NAS volume space.
+FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MINIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk floor",
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MAXIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk cap",
+    (
+        "control/src/vonk_control/settings.py",
+        "STORAGE_EVICTION_RESERVE_FLOOR_BYTES",
+    ): "headroom the collector evicts beyond a shortfall, not a gate",
+    (
+        "control/src/vonk_control/unused_storage_collection/service.py",
+        "reserve_floor_bytes",
+    ): "the collector's headroom floor, defaulted from that setting",
+}
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
@@ -1514,13 +1539,28 @@ def check_source(
         and path.startswith("control/src/vonk_control/model_cache/")
         and path != "control/src/vonk_control/model_cache/storage.py"
     ):
-        # NAS space is decided once, in storage.py's _storage_fits, next to what
+        # NAS space is decided once, in storage.py's _storage_shortfall, next to what
         # the running transfers still write. A comparison with the free disk
         # alone let parallel downloads overcommit the volume (#1910).
         hits.extend(
-            (line, "NAS space read outside storage.py; use _storage_fits")
+            (line, "NAS space read outside storage.py; use _storage_shortfall")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "fixed-reserves" in modes
+        and path.startswith("control/src/")
+    ):
+        # A reserve of volume space is a share of the volume (#1962): a fixed
+        # byte count was 0.1 % of the NAS volume PostgreSQL shares with the
+        # model cache, and a full volume stopped the database.
+        hits.extend(
+            (line, "fixed byte reserve; derive it from the volume's total")
+            for line, text in enumerate(source.splitlines(), 1)
+            if (match := FIXED_RESERVE.search(text))
+            and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
         )
     if (
         python

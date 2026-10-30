@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-import shutil
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime
 from io import BufferedReader
@@ -381,8 +380,7 @@ class DownloadMixin:
             )
         reservation = 2 * spec.expected_bytes
         with cache._lock:
-            free = shutil.disk_usage(cache._root).free
-            if free - cache._reserve_bytes - cache._range_reserved_bytes < reservation:
+            if not cache._ranges_fit(reservation):
                 cleanup_ranges(
                     part, spec.expected_bytes, workers=_PARALLEL_RANGE_WORKERS
                 )

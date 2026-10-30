@@ -6,6 +6,7 @@ import fcntl
 import os
 import shutil
 import stat
+import threading
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
@@ -58,10 +59,16 @@ from .persistence import (
     _model_removal_intent_digest,
     _write_operation_payload,
 )
+from .split_transfer import HELD_PARTIALS_OWNERS, REPAIR_PARTIALS_PREFIX
 from .views import CacheOperationView, ModelCacheRemovalScope
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+# Concurrent first creation of one lock file by pool threads can fail spuriously
+# with ENOENT on some filesystems (APFS); creation is therefore serialized.
+_CREATE_LOCK = threading.Lock()
 
 
 class RemovalAcceptanceMixin:
@@ -377,12 +384,23 @@ class RemovalAcceptanceMixin:
 
     @contextmanager
     def _model_storage_lock(
-        self, digest: str, *, model_set: bool = False
+        self, digest: str, *, model_set: bool = False, shared: bool = False
     ) -> Iterator[None]:
-        """Take one stable managed-storage lock without waiting for its owner."""
+        """Take one stable managed-storage lock without waiting for its owner.
+
+        A model-set lock names a partials owner: a set digest or a repair
+        directory. Writers of that directory hold it ``shared``; its remover
+        (set removal, partials collector) holds it exclusive.
+        """
         cache = cast("ModelCacheService", self)
 
-        ArtifactIdentity("model-set" if model_set else "model-object", digest)
+        if model_set and digest.startswith(REPAIR_PARTIALS_PREFIX):
+            try:
+                uuid.UUID(digest.removeprefix(REPAIR_PARTIALS_PREFIX))
+            except ValueError:
+                raise InvalidValue("partials owner is invalid") from None
+        else:
+            ArtifactIdentity("model-set" if model_set else "model-object", digest)
         lock_root = cache._root / "locks"
         directory_fd = os.open(
             lock_root,
@@ -393,15 +411,16 @@ class RemovalAcceptanceMixin:
         )
         filename = f"model-set-{digest}" if model_set else digest
         try:
-            descriptor = os.open(
-                filename,
-                os.O_CREAT
-                | os.O_RDWR
-                | getattr(os, "O_NOFOLLOW", 0)
-                | getattr(os, "O_CLOEXEC", 0),
-                0o600,
-                dir_fd=directory_fd,
-            )
+            with _CREATE_LOCK:
+                descriptor = os.open(
+                    filename,
+                    os.O_CREAT
+                    | os.O_RDWR
+                    | getattr(os, "O_NOFOLLOW", 0)
+                    | getattr(os, "O_CLOEXEC", 0),
+                    0o600,
+                    dir_fd=directory_fd,
+                )
         finally:
             os.close(directory_fd)
         with os.fdopen(descriptor, "a+b") as lock_file:
@@ -411,12 +430,22 @@ class RemovalAcceptanceMixin:
                     "managed-cache lock is not a regular file",
                 )
             try:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(
+                    lock_file.fileno(),
+                    (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB,
+                )
             except BlockingIOError:
-                raise _ArtifactWriterBusy(digest) from None
+                raise _ArtifactWriterBusy(
+                    digest, subject="partials owner" if model_set else "object"
+                ) from None
+            held = HELD_PARTIALS_OWNERS.__dict__.setdefault("owners", set())
+            if model_set:
+                held.add(digest)
             try:
                 yield
             finally:
+                if model_set:
+                    held.discard(digest)
                 fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _model_object_size(self, digest: str) -> int:

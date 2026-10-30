@@ -3,27 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from itertools import chain
 
-from pydantic import TypeAdapter
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition
 
 from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..catalog_revision_contract import read_catalog_document
+from ..content_identity import recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest
+from ..model_cache_contract import ModelCacheSetState
 from ..models import (
     ArtifactDistributionAssignment,
-    CatalogDocumentRevision,
-    CatalogRecipeModelReference,
     FleetProfile,
     FleetProfileApplication,
     Job,
@@ -38,7 +35,7 @@ from .intents import (
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selector_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
 from .types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -54,11 +51,9 @@ def model_set_reference_findings(
 ) -> dict[str, tuple[ArtifactReferenceFinding, ...]]:
     """Find typed saved-profile and active owners of exact model sets."""
 
-    from ..model_cache.catalog_helpers import (
-        _canonical_model_artifacts,
-        _recipe_model_content_digests,
-        _recipe_model_file_ids,
-    )
+    from ..model_cache.errors import ModelCacheError
+    from ..model_cache.lineage import lineage_contents, model_sets
+    from ..model_cache.resolution import resolve_recipe_set
 
     selected = set(set_digests)
     if not selected:
@@ -81,92 +76,88 @@ def model_set_reference_findings(
         digest: set() for digest in selected
     }
 
-    # Resolve relational owner pointers first; only content digests decide which
-    # bytes a binding protects. Identical recipe content shares these bindings.
-    recipe_content = {
-        owner_id: digest
-        for owner_id, digest in session.execute(
-            select(
-                CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest
-            ).where(CatalogDocumentRevision.kind == "recipe")
+    # A set is held when it is the set a protected recipe revision resolves to,
+    # as a download resolves it (identical files resolve to the same set,
+    # whichever model document the recipe names). A revision that cannot be
+    # resolved, or whose resolved set is not cached yet (a refresh in flight),
+    # holds the selected sets of its models' lineage until the new set is cached.
+    profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
+    named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
+    resolved = _selectors_revisions(
+        session, {selector for chosen in named.values() for selector in chosen or ()}
+    )
+    running = list(
+        session.scalars(
+            select(RecipeInstallation)
+            .where(
+                or_(
+                    RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
+                    select(RecipeRun.id)
+                    .where(
+                        RecipeRun.installation_id == RecipeInstallation.id,
+                        RecipeRun.state.in_(RUN_LIVE),
+                    )
+                    .exists(),
+                )
+            )
+            .order_by(RecipeInstallation.id)
         )
-    }
-    bound_models: dict[str, set[str]] = {}
-    for owner_id, model_digest in session.execute(
-        select(
-            CatalogRecipeModelReference.recipe_revision_id,
-            CatalogRecipeModelReference.model_content_digest,
-        )
-    ):
-        digest = recipe_content.get(owner_id)
-        if digest is not None:
-            bound_models.setdefault(digest, set()).add(model_digest)
+    )
+    bound = recipe_model_digests(
+        session, {revision.id for found in resolved.values() for revision in found}
+    )
 
-    for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
-        selectors = saved_profile_selectors(profile)
+    bound_installation = recipe_model_digests(
+        session, {row.recipe_revision_id for row in running}
+    )
+    lineages: dict[str, frozenset[str]] = {}
+    lineage_held: dict[frozenset[str], set[str]] = {}
+
+    def lineage_sets(models: Iterable[str]) -> set[str]:
+        """The selected sets cached for these models' lineage (no parsing)."""
+        contents = frozenset(
+            content
+            for model in models
+            for content in lineages.setdefault(model, lineage_contents(session, model))
+        )
+        if contents not in lineage_held:
+            lineage_held[contents] = set(
+                chain(*model_sets(session, contents, among=selected))
+            )
+        return lineage_held[contents]
+
+    resolves: dict[str, str | None] = {}
+
+    def resolved_set(ident: str) -> str | None:
+        if ident not in resolves:
+            try:
+                digest = resolve_recipe_set(session, ident).digest
+            except (ModelCacheError, TypeError, ValueError):
+                digest = None
+            if digest is not None and digest not in sets:
+                # A set that is not complete yet is not the resolved set yet.
+                row = session.get(ModelCacheSet, digest)
+                if row is None or row.state != ModelCacheSetState.CACHED:
+                    digest = None
+            resolves[ident] = digest
+        return resolves[ident]
+
+    for profile in profiles:
+        selectors = named[profile.id]
         if selectors is None:
             _protect_saved(findings, profile, "model-set", selected)
             continue
         for selector in selectors:
-            revisions = _selector_revisions(session, selector)
-            if not revisions:
-                _protect_saved(findings, profile, "model-set", selected)
-                continue
-            for record in revisions:
-                model_digests = set(bound_models.get(record.content_digest, ()))
-                required: set[str] = set()
-                readable = True
-                try:
-                    recipe = TypeAdapter(RecipeDefinition).validate_json(
-                        read_catalog_document(record).model_dump_json(), strict=True
-                    )
-                    model_digests.update(_recipe_model_content_digests(recipe))
-                    for model_digest in model_digests:
-                        model = session.scalar(
-                            select(CatalogDocumentRevision)
-                            .where(
-                                CatalogDocumentRevision.kind == "model",
-                                CatalogDocumentRevision.content_digest == model_digest,
-                            )
-                            .order_by(CatalogDocumentRevision.created_at.desc())
-                            .limit(1)
-                        )
-                        if model is None:
-                            readable = False
-                            continue
-                        file_ids = _recipe_model_file_ids(recipe, model_digest)
-                        required.update(
-                            artifact.sha256
-                            for artifact in _canonical_model_artifacts(model)
-                            if file_ids is None or artifact.id in file_ids
-                        )
-                except (TypeError, ValueError, RuntimeError):
-                    readable = False
-                protected: set[str] = set()
-                for set_digest, row in sets.items():
-                    if (
-                        row.recipe_revision_sha256 == record.content_digest
-                        or row.model_content_sha256 in model_digests
-                    ):
-                        protected.add(set_digest)
-                        continue
-                    try:
-                        manifest = CacheManifest.model_validate_json(
-                            canonical_message(row.manifest), strict=True
-                        )
-                    except (TypeError, ValueError):
-                        protected.add(set_digest)
-                        continue
-                    if required and required <= {
-                        artifact.sha256 for artifact in manifest.artifacts
-                    }:
-                        protected.add(set_digest)
-                    elif not readable and (
-                        not model_digests or row.model_content_sha256 is None
-                    ):
-                        # There is no exact independent scope for these bytes.
-                        protected.add(set_digest)
-                _protect_saved(findings, profile, "model-set", protected)
+            found = resolved[selector]
+            held = set() if found else set(selected)
+            for revision in found:
+                digest = resolved_set(revision.id)
+                held |= (
+                    {digest} & selected
+                    if digest is not None
+                    else lineage_sets(bound.get(revision.id, ()))
+                )
+            _protect_saved(findings, profile, "model-set", held)
 
     def account(value: object) -> None:
         try:
@@ -230,58 +221,35 @@ def model_set_reference_findings(
                     )
                 )
 
-    for installation in session.scalars(
-        select(RecipeInstallation)
-        .where(
-            or_(
-                RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
-                select(RecipeRun.id)
-                .where(
-                    RecipeRun.installation_id == RecipeInstallation.id,
-                    RecipeRun.state.in_(RUN_LIVE),
-                )
-                .exists(),
-            )
-        )
-        .order_by(RecipeInstallation.id)
-        .execution_options(yield_per=64)
-    ):
-        installed = _installation_plan(installation)
-        if installed is not None:
+    for row in running:
+        plan = _installation_plan(row)
+        if plan is not None:
             held = selected & {
                 compiled.identity.model_artifact_set_sha256
-                for compiled in installed.compiled_execution_plans.values()
+                for compiled in plan.compiled_execution_plans.values()
             }
             detail = "accepted installation uses this model set"
-            reason = f"installation {installation.id}"
+            label = f"installation {row.id}"
         else:
-            # Residue scoped to this installation: the sets of the model and
-            # recipe its own row names, or every selected set when it names none.
-            recipe = recipe_content.get(installation.recipe_revision_id)
-            model = installation.model_content_sha256
-            held = (
-                {
-                    set_digest
-                    for set_digest, row in sets.items()
-                    if row.model_content_sha256 in {None, model}
-                    or row.recipe_revision_sha256 == recipe
-                }
-                if model is not None or recipe is not None
-                else selected
+            # Its plan cannot be read: it keeps the sets of the models its rows
+            # name, and every selected set when they name none.
+            models = bound_installation.get(row.recipe_revision_id, frozenset()) | (
+                {row.model_content_sha256} if row.model_content_sha256 else set()
             )
+            held = lineage_sets(models) if models else selected
             detail = "installation plan is unreadable; it keeps the sets it names"
-            reason = f"installation {installation.id} (plan unreadable)"
+            label = f"installation {row.id} (plan unreadable)"
         for set_digest in held:
             findings[set_digest].add(
                 _finding(
                     "model-set",
                     set_digest,
                     owner_kind="recipe-installation",
-                    owner_id=installation.id,
-                    state=installation.state,
+                    owner_id=row.id,
+                    state=row.state,
                     classification="active-work",
                     detail=detail,
-                    reason=reason,
+                    reason=label,
                 )
             )
 

@@ -40,7 +40,7 @@ def test_recipe_children_reach_their_owner_and_fresh_run_is_admitted(
             operations,
             distribution,
             model_cache=ModelCacheService(
-                sessions, tmp_path / "cache", reserve_bytes=0
+                sessions, tmp_path / "cache", free_fraction=0
             ),
             clock=lambda: NOW,
         )

@@ -266,7 +266,7 @@ def _removal_gate(tmp_path: Path, engine: Engine, ending: str) -> None:
             now=now,
         )
     service = ModelCacheService(
-        sessions, tmp_path / "model-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "model-cache", free_fraction=0, fixture_sources=True
     )
 
     service.reconcile_removal_gates()
@@ -533,7 +533,7 @@ def _live_removal_gate(tmp_path: Path, engine: Engine) -> None:
             now=now,
         )
     ModelCacheService(
-        sessions, tmp_path / "model-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "model-cache", free_fraction=0, fixture_sources=True
     ).reconcile_removal_gates()
 
     with sessions.begin() as session, pytest.raises(ArtifactReferenceUnsettled):

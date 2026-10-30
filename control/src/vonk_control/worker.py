@@ -843,6 +843,14 @@ def assemble_production_worker(
         CatalogRevisionCollector(sessions, clock=clock).tick,
         TerminalHistoryCollector(sessions, clock=clock).tick,
     )
+    if model_cache is not None:
+        from .model_cache.partials_collection import ModelPartialsCollector
+
+        # An unfinished download is not a model file: its partials go a day
+        # after the last live operation stopped writing them.
+        worker_background_services += (
+            ModelPartialsCollector(sessions, model_cache, clock=clock).tick,
+        )
     telemetry_maintenance = TelemetryMaintenance(sessions, clock=clock)
     artifact_jobs = ArtifactJobService(
         sessions,
@@ -1007,9 +1015,9 @@ if __name__ == "__main__":
         ARTIFACT_JOB_RETENTION_SECONDS,
         ARTIFACT_JOB_STORAGE_MAX_BYTES,
         DISTRIBUTED_START_TIMEOUT_SECONDS,
+        FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
         MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
         MODEL_CACHE_PARALLEL_DOWNLOADS,
-        MODEL_CACHE_RESERVE_BYTES,
         RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         WORKER_MEMORY_SAMPLE_INTERVAL_SECONDS,
         WORKER_MEMORY_TRACE_FRAMES,
@@ -1071,7 +1079,7 @@ if __name__ == "__main__":
         cache = ModelCacheService(
             sessions,
             settings.model_cache_root,
-            reserve_bytes=MODEL_CACHE_RESERVE_BYTES,
+            free_fraction=FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
             max_parallel_downloads=MODEL_CACHE_PARALLEL_DOWNLOADS,
             max_download_streams=MODEL_CACHE_MAX_DOWNLOAD_STREAMS,
             clock=clock,

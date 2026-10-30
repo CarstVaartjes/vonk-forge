@@ -444,7 +444,7 @@ def test_queued_download_progress_is_projected_on_postgres(tmp_path, postgres_en
                 )
             )
     cache = ModelCacheService(
-        sessions, tmp_path / "model-cache", reserve_bytes=0, clock=lambda: NOW
+        sessions, tmp_path / "model-cache", free_fraction=0, clock=lambda: NOW
     )
     _check_queued_download_projection(sessions, tmp_path, cache)
 
@@ -930,7 +930,7 @@ def test_completed_cache_change_is_visible_without_storage_refresh(
     cache = ModelCacheService(
         sessions,
         existing_cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: NOW,
     )

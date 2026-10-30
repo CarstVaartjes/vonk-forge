@@ -88,6 +88,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     ClusterMapping,
     InstallationNode,
     Job,
@@ -616,8 +617,10 @@ def setup_services(
         )
         session.add(model_catalog)
         session.flush()
+        model_revision_id = str(uuid.uuid4())
         session.add(
             CatalogDocumentRevision(
+                id=model_revision_id,
                 document_id=model_catalog.id,
                 kind="model",
                 publisher=model_catalog.publisher,
@@ -643,6 +646,21 @@ def setup_services(
                 projected={},
                 created_by="admin",
                 created_at=NOW,
+            )
+        )
+        session.flush()
+        # An active recipe revision is always bound to its models, as the catalog
+        # writes it.
+        session.add(
+            CatalogRecipeModelReference(
+                recipe_revision_id=revision.id,
+                recipe_kind="recipe",
+                selection_id=str(document["models"][0]["id"]),
+                model_revision_id=model_revision_id,
+                model_kind="model",
+                model_publisher=model_catalog.publisher,
+                model_slug=model_catalog.slug,
+                model_content_digest=model_digest,
             )
         )
         session.flush()

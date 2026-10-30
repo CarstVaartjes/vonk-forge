@@ -332,7 +332,7 @@ engine = create_engine(config["database"])
 service = ModelCacheService(
     sessionmaker(engine, expire_on_commit=False),
     Path(config["root"]),
-    reserve_bytes=0,
+    free_fraction=0,
 )
 persist = service._persist_model_removal_checkpoint
 def exit_before_completion(*args, **kwargs):
@@ -370,7 +370,7 @@ raise AssertionError("removal worker did not reach the post-unlink checkpoint")
         restarted = ModelCacheService(
             sessions,
             service.root,
-            reserve_bytes=0,
+            free_fraction=0,
         )
         settled = _settle_removal(restarted, accepted)
         assert settled.id == accepted.id

@@ -31,7 +31,7 @@ def test_busy_artifact_releases_slot_and_recovers_without_exhausting_retries(
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         max_parallel_downloads=1,
         clock=lambda: now[0],
@@ -171,7 +171,7 @@ def test_model_worker_death_resumes_real_prefix_and_fresh_cli_reconnects(
     now = datetime.now(UTC)
     root = tmp_path / "cache"
     service = ModelCacheService(
-        sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: now
+        sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: now
     )
     data = bytes(range(256)) * 16000
     artifact = _artifact(tmp_path, data, model_content_sha256="c" * 64)
@@ -212,7 +212,7 @@ from vonk_control.model_cache import ModelCacheService
 configuration = json.loads(Path(sys.argv[1]).read_text())
 engine = create_engine(configuration["database"])
 sessions = sessionmaker(engine)
-service = ModelCacheService(sessions, Path(configuration["root"]), reserve_bytes=0, fixture_sources=True, clock=lambda: datetime.fromisoformat(configuration["now"]))
+service = ModelCacheService(sessions, Path(configuration["root"]), free_fraction=0, fixture_sources=True, clock=lambda: datetime.fromisoformat(configuration["now"]))
 if sys.argv[2] == "die":
     checkpoint = service._checkpoint_artifact
     def die_after_checkpoint(*args, **kwargs):

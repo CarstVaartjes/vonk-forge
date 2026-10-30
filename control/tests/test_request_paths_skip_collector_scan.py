@@ -30,7 +30,7 @@ def test_fleet_review_accept_inventory_and_load_review_skip_the_24_hour_scan(
     cache = ModelCacheService(
         world.sessions,
         tmp_path / "nas",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now,
     )

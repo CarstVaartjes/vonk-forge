@@ -42,7 +42,7 @@ def _hold_model_worker(
     engine = create_engine(dsn, pool_pre_ping=True)
     sessions = sessionmaker(engine, expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, Path(cache_root), reserve_bytes=0, fixture_sources=True
+        sessions, Path(cache_root), free_fraction=0, fixture_sources=True
     )
     verify = cache._verify_file
 
@@ -84,7 +84,7 @@ recipe = RecipeDefinition.model_validate_json(json.dumps(config["recipe"]))
 artifact = config["artifact"]
 model_digest = config["model_digest"]
 cache = ModelCacheService(
-    sessions, Path(config["cache_root"]), reserve_bytes=0, fixture_sources=True,
+    sessions, Path(config["cache_root"]), free_fraction=0, fixture_sources=True,
     clock=lambda: now,
 )
 
@@ -99,8 +99,8 @@ class CacheAdapter:
         return cache.resolve_artifact_set(
             model_content_sha256=model_digest, artifacts=[artifact]
         )
-    def list_operations(self, *, limit=100):
-        return cache.list_operations(limit=limit)
+    def reusable_operation(self, **kwargs):
+        return cache.reusable_operation(**kwargs)
     def start_download(self, **kwargs):
         kwargs.pop("recipe_revision_id", None)
         return cache.start_download(
@@ -284,7 +284,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
     cache_root = tmp_path / "model-cache"
     image_root = tmp_path / "image-cache"
     cache = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
 
     class CacheAdapter:
@@ -300,8 +300,8 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
                 model_content_sha256=model_digest, artifacts=[artifact]
             )
 
-        def list_operations(self, *, limit: int = 100):
-            return cache.list_operations(limit=limit)
+        def reusable_operation(self, **kwargs):
+            return cache.reusable_operation(**kwargs)
 
         def start_download(self, **kwargs: Any):
             kwargs.pop("recipe_revision_id", None)

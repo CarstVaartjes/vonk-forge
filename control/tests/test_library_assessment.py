@@ -84,7 +84,7 @@ def assessed_library(tmp_path: Path):
     cache = ModelCacheService(
         sessions,
         tmp_path / "model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: NOW,
         runtime_archive_available=storage.build_archive_available,
     )

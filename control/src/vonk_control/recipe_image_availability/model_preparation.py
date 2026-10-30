@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import model_cache_states
 from ..job_documents import (
     AvailabilityModelChild,
 )
@@ -142,34 +141,11 @@ def _ensure_model_child(
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         operation = None
-        list_operations = getattr(self._model_cache, "list_operations", None)
-        if list_operations is not None:
-            candidates = [
-                candidate
-                for candidate in list_operations(limit=100)
-                if (
-                    candidate.artifact_set_sha256 == artifact_set_sha256
-                    and candidate.state
-                    in {*model_cache_states.ACTIVE, LifecycleState.SUCCEEDED}
-                    and not (
-                        candidate.state == LifecycleState.SUCCEEDED and new_bytes > 0
-                    )
-                )
-            ]
-            state_rank = {
-                LifecycleState.SUCCEEDED: 0,
-                LifecycleState.QUEUED: 1,
-                LifecycleState.RUNNING: 1,
-                model_cache_states.BACKOFF: 1,
-                LifecycleState.FAILED: 2,
-            }
-            operation = min(
-                candidates,
-                key=lambda candidate: (
-                    state_rank.get(candidate.state, 3),
-                    str(candidate.id),
-                ),
-                default=None,
+        reusable_operation = getattr(self._model_cache, "reusable_operation", None)
+        if reusable_operation is not None:
+            operation = reusable_operation(
+                artifact_set_sha256=artifact_set_sha256,
+                include_succeeded=new_bytes <= 0,
             )
             if operation is not None and operation.state == LifecycleState.FAILED:
                 failure = _read(AvailabilityOperationFailure, operation.failure)
@@ -293,32 +269,12 @@ def _resume_model_child(
         operation = self._model_cache.get_operation(child_id)
         if operation.state == LifecycleState.FAILED:
             reused = None
-            list_operations = getattr(self._model_cache, "list_operations", None)
-            if list_operations is not None:
-                candidates = [
-                    candidate
-                    for candidate in list_operations(limit=100)
-                    if (
-                        candidate.id != child_id
-                        and candidate.artifact_set_sha256
-                        == operation.artifact_set_sha256
-                        and candidate.state
-                        in {*model_cache_states.ACTIVE, LifecycleState.SUCCEEDED}
-                    )
-                ]
-                state_rank = {
-                    LifecycleState.SUCCEEDED: 0,
-                    LifecycleState.QUEUED: 1,
-                    LifecycleState.RUNNING: 1,
-                    model_cache_states.BACKOFF: 1,
-                }
-                reused = min(
-                    candidates,
-                    key=lambda candidate: (
-                        state_rank.get(candidate.state, 2),
-                        str(candidate.id),
-                    ),
-                    default=None,
+            reusable_operation = getattr(self._model_cache, "reusable_operation", None)
+            if reusable_operation is not None:
+                reused = reusable_operation(
+                    artifact_set_sha256=operation.artifact_set_sha256,
+                    include_succeeded=True,
+                    excluding=child_id,
                 )
             if reused is not None:
                 operation = reused

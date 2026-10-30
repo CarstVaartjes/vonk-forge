@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
+    ImageStoreCode,
     LifecycleState,
     PrebuiltImageCode,
     RecipeBuildCode,
@@ -728,6 +729,177 @@ def test_a_spark_build_upload_is_converted_into_the_store_after_success(
             ADDRESS,
             IMAGE_BYTES,
         )
+
+
+class _FailingArchive(_Registry):
+    """A registry whose copy of one particular archive always fails."""
+
+    def __init__(self, artifact_root: Path, bad_archive: str) -> None:
+        super().__init__(artifact_root)
+        self._bad: str | None = bad_archive
+        self.attempted: list[str] = []
+
+    def heal(self) -> None:
+        self._bad = None
+
+    def import_archive(self, archive: Path) -> StoredImage | StoreUnknown:
+        self.attempted.append(archive.name)
+        if archive.name == self._bad:
+            return StoreUnknown(ImageStoreCode.COPY_FAILED, "unsupported archive")
+        return super().import_archive(archive)
+
+
+def _succeeded_upload(sessions, revision_id: str, tmp_path: Path, n: int, at) -> str:
+    sha = f"{n:x}" * 64
+    upload = tmp_path / IMAGE_CACHE_DIRECTORY / sha
+    upload.parent.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"docker archive")
+    with sessions.begin() as session:
+        session.add(
+            RecipeBuild(
+                id=f"00000000-0000-4000-8000-00000000e00{n}",
+                recipe_revision_id=revision_id,
+                builder_node_id=NODE,
+                source_bundle_sha256="b" * 64,
+                build_input_sha256=f"{n:x}" * 64,
+                state="succeeded",
+                policy_report=valid_policy_report(),
+                plan={},
+                image_digest="sha256:" + "d" * 64,
+                oci_layout_sha256=sha,
+                image_bytes=14,
+                created_at=at,
+                updated_at=at,
+            )
+        )
+    return sha
+
+
+_FAILING_BUILD = "00000000-0000-4000-8000-00000000e001"
+
+
+def _error_of(sessions, build_id: str) -> str | None:
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        return build.error
+
+
+def test_one_archive_that_keeps_failing_does_not_block_the_next_one(
+    tmp_path: Path,
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    now = [NOW]
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    good = _succeeded_upload(
+        sessions, revision_id, tmp_path, 2, NOW - timedelta(hours=1)
+    )
+    registry = _FailingArchive(tmp_path, bad)
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: now[0], store=registry
+    )
+
+    assert importer.run_pending() == 1  # the older archive fails ...
+    assert importer.run_pending() == 1  # ... and the next one gets its turn
+    assert importer.run_pending() == 0
+    assert registry.attempted == [bad, good]
+    assert not (tmp_path / IMAGE_CACHE_DIRECTORY / good).exists()
+    error = _error_of(sessions, _FAILING_BUILD)
+    assert error is not None
+    assert error.startswith(
+        f"conversion failed: {ImageStoreCode.COPY_FAILED}; retried until the upload"
+    )
+    assert "expires at" in error
+
+    # It is retried with a growing backoff, never in a tight loop.
+    for _ in range(4):
+        now[0] += timedelta(hours=3)
+        assert importer.run_pending() == 1
+    assert registry.attempted.count(bad) == 5
+    assert _error_of(sessions, _FAILING_BUILD) == error  # still true, no attempt count
+
+
+def test_a_restarted_importer_still_lets_the_next_archive_convert(
+    tmp_path: Path,
+) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    _succeeded_upload(sessions, revision_id, tmp_path, 2, NOW - timedelta(hours=1))
+    registry = _FailingArchive(tmp_path, bad)
+    first = PrebuiltImageImporter(sessions, tmp_path, clock=lambda: NOW, store=registry)
+    assert first.run_pending() == 1
+
+    restarted = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=registry
+    )
+    assert restarted.run_pending() == 1  # the failing archive is tried afresh
+    assert restarted.run_pending() == 1  # and does not hold the next one back
+    assert restarted.run_pending() == 0
+    assert not (tmp_path / IMAGE_CACHE_DIRECTORY / ("2" * 64)).exists()
+
+
+def test_a_fault_that_heals_converts_on_the_next_due_attempt(tmp_path: Path) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    now = [NOW]
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    registry = _FailingArchive(tmp_path, bad)
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: now[0], store=registry
+    )
+    assert importer.run_pending() == 1
+    assert importer.run_pending() == 0  # not due yet
+
+    registry.heal()
+    now[0] += timedelta(hours=3)
+    assert importer.run_pending() == 1
+    assert not (tmp_path / IMAGE_CACHE_DIRECTORY / bad).exists()
+    assert _error_of(sessions, _FAILING_BUILD) is None
+
+
+def test_a_reopened_build_with_a_new_archive_converts(tmp_path: Path) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    registry = _FailingArchive(tmp_path, bad)
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=registry
+    )
+    assert importer.run_pending() == 1  # fails, now backing off
+
+    # The build row is reopened and rebuilt: same row, a new archive.
+    fresh = "9" * 64
+    (tmp_path / IMAGE_CACHE_DIRECTORY / bad).unlink()
+    (tmp_path / IMAGE_CACHE_DIRECTORY / fresh).write_bytes(b"docker archive")
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, _FAILING_BUILD)
+        assert build is not None
+        build.oci_layout_sha256 = fresh
+    assert importer.run_pending() == 1
+    assert not (tmp_path / IMAGE_CACHE_DIRECTORY / fresh).exists()
+    assert importer._conversion_failures == {}
+
+
+def test_a_removed_archive_prunes_its_retry_entry(tmp_path: Path) -> None:
+    sessions, revision_id = _published_library(tmp_path)
+    bad = _succeeded_upload(
+        sessions, revision_id, tmp_path, 1, NOW - timedelta(hours=2)
+    )
+    importer = PrebuiltImageImporter(
+        sessions, tmp_path, clock=lambda: NOW, store=_FailingArchive(tmp_path, bad)
+    )
+    assert importer.run_pending() == 1
+    assert set(importer._conversion_failures) == {bad}
+
+    (tmp_path / IMAGE_CACHE_DIRECTORY / bad).unlink()  # the collection dropped it
+    assert importer.run_pending() == 0
+    assert importer._conversion_failures == {}
 
 
 def test_prebuilt_import_observes_cancellation_between_claim_and_io(

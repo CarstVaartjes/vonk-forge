@@ -11,7 +11,7 @@ from enum import StrEnum
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from ..artifact_reference_scan import _selector_revisions
+from ..artifact_reference_scan import _selectors_revisions
 from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
 from ..content_identity import catalog_selector_membership
 from ..models import (
@@ -99,11 +99,13 @@ class _Evidence:
         )
         head_ids = {item[0] for item in newest.values()}
         if pointers is not None:
-            for publisher, slug in pointers:
-                head_ids.update(
-                    revision.id
-                    for revision in _selector_revisions(session, f"{publisher}/{slug}")
-                )
+            head_ids.update(
+                revision.id
+                for found in _selectors_revisions(
+                    session, [f"{publisher}/{slug}" for publisher, slug in pointers]
+                ).values()
+                for revision in found
+            )
         # A load that is queued, admission-waiting or running needs the exact
         # revisions its plan resolved, whatever the saved profiles say now (a
         # sweep rewrites its profile between steps). A load waiting for
@@ -261,6 +263,12 @@ class _Pressure:
     why: str
     #: Work was refused for this space, so removing too little would not help it.
     demanded: bool
+    #: Bytes missing for the low-space line, whether or not work was refused.
+    #: Eviction goes toward the line even when the refused work cannot be met.
+    line_shortfall: int = 0
+    #: What a pass frees toward the line alone (the line shortfall plus a
+    #: reserve) when the refused work cannot be met.
+    line_need: int = 0
 
 
 class StorageItemKind(StrEnum):

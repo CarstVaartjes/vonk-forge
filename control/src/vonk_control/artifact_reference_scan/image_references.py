@@ -37,7 +37,7 @@ from .intents import (
     _run_switch_plan,
     _run_switch_runtime_image_intent,
 )
-from .model_sets import _protect_saved, _selector_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
 from .types import (
     _ACTIVE_ARTIFACT_JOBS,
     _ACTIVE_INSTALLATIONS,
@@ -91,13 +91,18 @@ def runtime_image_reference_findings(
     if not selected:
         return {}
 
-    for profile in session.scalars(select(FleetProfile).order_by(FleetProfile.id)):
-        selectors = saved_profile_selectors(profile)
+    profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
+    named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
+    resolved = _selectors_revisions(
+        session, {selector for chosen in named.values() for selector in chosen or ()}
+    )
+    for profile in profiles:
+        selectors = named[profile.id]
         if selectors is None:
             _protect_saved(findings, profile, "runtime-image", selected)
             continue
         for selector in selectors:
-            revisions = _selector_revisions(session, selector)
+            revisions = resolved[selector]
             if not revisions:
                 _protect_saved(findings, profile, "runtime-image", selected)
                 continue

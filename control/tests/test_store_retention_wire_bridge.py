@@ -51,7 +51,7 @@ def test_full_disk_load_evicts_unused_objects_keeps_installed_content_and_retrie
     world.now = now
     target = 120 * 1024
     cache = ModelCacheService(
-        world.sessions, tmp_path / "nas-cache", reserve_bytes=0, fixture_sources=True
+        world.sessions, tmp_path / "nas-cache", free_fraction=0, fixture_sources=True
     )
     try:
         downloaded = _download(

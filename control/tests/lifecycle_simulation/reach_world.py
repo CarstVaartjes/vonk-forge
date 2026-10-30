@@ -235,7 +235,7 @@ class ReachWorld(World):
         cache = ModelCacheService(
             self.sessions,
             self.root / "nas-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             clock=clock,
             http_client=httpx2.Client(
                 transport=httpx2.MockTransport(self.provider.handle),

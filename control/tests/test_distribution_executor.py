@@ -1190,7 +1190,7 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     service = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     model_content_sha256 = "a" * 64
@@ -1293,7 +1293,7 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     cache = ModelCacheService(
         services.sessions,
         tmp_path / "model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     model = ModelDefinition.model_validate(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -12,6 +13,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.agent_api.common import (
+    _open_upload_storage,
+    _prepare_recipe_image_upload,
+)
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
 from vonk_control.models import (
     AgentNode,
@@ -20,11 +25,13 @@ from vonk_control.models import (
     RecipeBuild,
 )
 from vonk_control.oci_image_store import StoredImage
+from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
 )
 
 from .runtime_image_fixtures import place_test_image
+from .test_recipe_builds import setup as recipe_build_setup
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 NODE = "spk_" + "1" * 32
@@ -152,13 +159,56 @@ def test_an_upload_no_build_waits_on_is_reclaimed(system) -> None:
     for upload in (waiting, abandoned):
         upload.write_bytes(b"docker archive")
     _age(waiting, abandoned)
-    _build(sessions, "5" * 64, state="succeeded", updated_at=NOW - timedelta(days=3))
+    expired = storage.root / ("7" * 64)
+    expired.write_bytes(b"docker archive")
+    _age(expired)
+    _build(sessions, "5" * 64, state="succeeded", updated_at=NOW - timedelta(hours=2))
     _build(sessions, "6" * 64, state="failed", updated_at=NOW - timedelta(days=3))
+    # Succeeded more than 24 h ago and still not converted: dropped like any
+    # cache loss; the build runs again on demand.
+    _build(sessions, "7" * 64, state="succeeded", updated_at=NOW - timedelta(days=3))
 
     collector.collect()
 
     assert waiting.exists()
     assert not abandoned.exists()
+    assert not expired.exists()
+
+
+def test_an_abandoned_partial_upload_is_removed_and_a_locked_one_kept(system) -> None:
+    _sessions, storage, collector = system
+    cache = storage.root
+    cache.mkdir(parents=True, exist_ok=True)
+    # The real writer creates the partial and locks it; a killed writer's
+    # lock is dropped by the kernel when its descriptor closes.
+    killed, live, fresh = ("a" * 64, "b" * 64, "c" * 64)
+    paths = {}
+    for key in (killed, live, fresh):
+        descriptor, paths[key] = _prepare_recipe_image_upload(cache, key)
+        os.write(descriptor, b"partial docker archive")
+        if key != live:
+            os.close(descriptor)
+    assert paths[killed].name == f".{killed}.upload"
+    # Each key's publisher lock is a zero-byte sibling, left by a killed one.
+    publish = {key: cache / f".{key}.publish" for key in (killed, live)}
+    for lock in publish.values():
+        os.close(_open_upload_storage(lock))
+    held = _open_upload_storage(publish[live])
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    _age(paths[killed], paths[live], *publish.values())
+
+    collector.collect()
+
+    assert not paths[killed].exists()
+    assert paths[live].exists()
+    assert paths[fresh].exists()
+    assert not publish[killed].exists()
+    assert publish[live].exists()
+    # A fresh upload of the removed key is admitted.
+    descriptor, again = _prepare_recipe_image_upload(cache, killed)
+    assert again.exists()
+    os.close(descriptor)
+    os.close(_open_upload_storage(publish[killed]))
 
 
 def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:
@@ -314,3 +364,40 @@ def test_collection_runs_once_per_interval(system) -> None:
     _age(*_image(storage, "c" * 64))
     assert collector.tick() is False
     assert len(_blobs(storage)) > 0
+
+
+def test_after_the_upload_expires_a_fresh_request_rebuilds_it(tmp_path: Path) -> None:
+    """An archive that never converted is dropped at 24 h, then built again."""
+
+    sessions, bundles, now, node_id, revision = recipe_build_setup(tmp_path)
+    storage = FilesystemRuntimeImageStorage(tmp_path / "images")
+    builds = RecipeBuildService(
+        sessions,
+        bundles=bundles,
+        build_archive_available=storage.build_archive_available,
+        prepared_builds=storage.find_build,
+    )
+    plan = builds.plan(revision.id, node_id, now=now)
+    upload = storage.root / ("8" * 64)
+    storage.root.mkdir(parents=True, exist_ok=True)
+    upload.write_bytes(b"docker archive")
+    _age(upload)
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        build.state = "succeeded"
+        build.image_digest = "sha256:" + "d" * 64
+        build.oci_layout_sha256 = "8" * 64
+        build.image_bytes = 14
+        build.updated_at = now - timedelta(days=3)
+
+    ImageStoreCollector(
+        sessions, tmp_path / "images", clock=lambda: now, store=storage.layout
+    ).collect()
+    assert not upload.exists()
+
+    builds.plan(revision.id, node_id, now=now)  # the fresh run request
+    with sessions() as session:
+        build = session.get(RecipeBuild, plan.build_id)
+        assert build is not None
+        assert (build.state, build.oci_layout_sha256) == ("planned", None)
