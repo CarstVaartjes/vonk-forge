@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -12,7 +13,10 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.agent_api.common import _prepare_recipe_image_upload
+from vonk_control.agent_api.common import (
+    _open_upload_storage,
+    _prepare_recipe_image_upload,
+)
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
 from vonk_control.models import (
     AgentNode,
@@ -176,13 +180,26 @@ def test_an_abandoned_partial_upload_is_removed_and_a_locked_one_kept(system) ->
         if key != live:
             os.close(descriptor)
     assert paths[killed].name == f".{killed}.upload"
-    _age(paths[killed], paths[live])
+    # Each key's publisher lock is a zero-byte sibling, left by a killed one.
+    publish = {key: cache / f".{key}.publish" for key in (killed, live)}
+    for lock in publish.values():
+        os.close(_open_upload_storage(lock))
+    held = _open_upload_storage(publish[live])
+    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    _age(paths[killed], paths[live], *publish.values())
 
     collector.collect()
 
     assert not paths[killed].exists()
     assert paths[live].exists()
     assert paths[fresh].exists()
+    assert not publish[killed].exists()
+    assert publish[live].exists()
+    # A fresh upload of the removed key is admitted.
+    descriptor, again = _prepare_recipe_image_upload(cache, killed)
+    assert again.exists()
+    os.close(descriptor)
+    os.close(_open_upload_storage(publish[killed]))
 
 
 def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:

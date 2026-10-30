@@ -62,7 +62,8 @@ _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
 # A partial upload, written by ``agent_api.common._prepare_recipe_image_upload``
 # while it holds an exclusive ``flock`` on the file.
-_PARTIAL_UPLOAD = re.compile(r"^\.[0-9a-f]{64}\.upload$")
+# Its publisher lock (``_commit_recipe_image_upload``) is a zero-byte sibling.
+_PARTIAL_UPLOAD = re.compile(r"^\.[0-9a-f]{64}\.(upload|publish)$")
 _RECEIPT = re.compile(r"^([0-9a-f]{64})\.receipt\.json$")
 # Damaged receipted images evicted by one pass; the rest follow next interval.
 _MAX_REPAIRS = 64
@@ -265,7 +266,9 @@ class ImageStoreCollector:
             return Collection(0, 0)
         for upload in uploads:
             if _PARTIAL_UPLOAD.fullmatch(upload.name) is not None:
-                size = _remove_abandoned_partial(upload, cutoff)
+                size = _remove_abandoned_partial(
+                    upload, cutoff, lock_file=upload.name.endswith(".publish")
+                )
                 if size is not None:
                     removed += 1
                     reclaimed += size
@@ -284,7 +287,9 @@ class ImageStoreCollector:
         return Collection(removed, reclaimed)
 
 
-def _remove_abandoned_partial(partial: Path, cutoff: float) -> int | None:
+def _remove_abandoned_partial(
+    partial: Path, cutoff: float, *, lock_file: bool
+) -> int | None:
     """Remove a partial upload nobody wrote to since ``cutoff``; return its size.
 
     The writer holds an exclusive ``flock`` for as long as it works, and the
@@ -306,7 +311,11 @@ def _remove_abandoned_partial(partial: Path, cutoff: float) -> int | None:
         return None
     try:
         status = os.fstat(descriptor)
-        if not stat.S_ISREG(status.st_mode) or status.st_mtime > cutoff:
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or status.st_mtime > cutoff
+            or (lock_file and status.st_size != 0)
+        ):
             return None
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
