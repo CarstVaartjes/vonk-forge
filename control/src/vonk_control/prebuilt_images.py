@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select, true
+from sqlalchemy import select, true, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentFailureKind,
@@ -74,12 +74,12 @@ PREBUILT_KEY_SCHEMA_VERSION = 1
 PREBUILT_BUILD_KIND = "recipe.build.v1"
 # A Controller pull of one image; renewed while the pull runs.
 _CLAIM_LEASE = timedelta(minutes=5)
-# One uploaded archive that fails to convert is retried a bounded number of
-# times, spaced out, so it never holds back the archives behind it. After the
-# last attempt it waits for the image-store collection to drop it (24 h after
-# its build succeeded) and the build runs again on demand.
-_CONVERSION_ATTEMPTS = 3
+# One uploaded archive that fails to convert is retried with a growing backoff
+# so it never holds back the archives behind it. The bound is the image-store
+# collection, which drops the upload 24 h after its build succeeded; a healed
+# fault converts on the next due attempt.
 _CONVERSION_BACKOFF = timedelta(minutes=10)
+_CONVERSION_BACKOFF_CAP = timedelta(hours=2)
 _REFERENCE = re.compile(PREBUILT_REFERENCE_PATTERN)
 
 # Why a plan did or did not use the catalog's prebuilt image.  The codes are
@@ -518,7 +518,7 @@ class PrebuiltImageImporter:
             max_workers=1, thread_name_prefix="prebuilt-image"
         )
         self._active: Future[None] | None = None
-        # build id -> (failed attempts, earliest next attempt); in memory, so a
+        # archive sha256 -> (failed attempts, earliest next attempt); in memory, so a
         # restart simply starts the bounded attempts again.
         self._conversion_failures: dict[str, tuple[int, datetime]] = {}
         self._lock = threading.Lock()
@@ -567,6 +567,9 @@ class PrebuiltImageImporter:
         first, and only then is the row rewritten to the stored image.
         """
         now = self._clock()
+        for archive_sha256 in list(self._conversion_failures):
+            if not (self._image_cache / archive_sha256).is_file():
+                del self._conversion_failures[archive_sha256]
         with self._sessions() as session:
             for build_id, layout in session.execute(
                 select(RecipeBuild.id, RecipeBuild.oci_layout_sha256)
@@ -579,36 +582,36 @@ class PrebuiltImageImporter:
                 if (
                     isinstance(layout, str)
                     and (self._image_cache / layout).is_file()
-                    and self._conversion_due(str(build_id), now)
+                    and self._conversion_due(layout, now)
                 ):
                     return str(build_id)
         return None
 
-    def _conversion_due(self, build_id: str, now: datetime) -> bool:
-        attempts, retry_at = self._conversion_failures.get(build_id, (0, now))
-        return attempts < _CONVERSION_ATTEMPTS and retry_at <= now
+    def _conversion_due(self, archive_sha256: str, now: datetime) -> bool:
+        _attempts, retry_at = self._conversion_failures.get(archive_sha256, (0, now))
+        return retry_at <= now
 
     def _record_conversion_failure(
-        self, build_id: str, archive_sha256: str, failure: StoreUnknown
+        self, row: str, archive_sha256: str, failure: StoreUnknown
     ) -> None:
         now = self._clock()
-        attempts = self._conversion_failures.get(build_id, (0, now))[0] + 1
-        retry_at = now + _CONVERSION_BACKOFF * attempts
-        self._conversion_failures[build_id] = (attempts, retry_at)
-        outcome = (
-            f"next attempt {retry_at.isoformat()}"
-            if attempts < _CONVERSION_ATTEMPTS
-            else "no more attempts; the upload is dropped 24 h after the build"
-        )
+        attempts = self._conversion_failures.get(archive_sha256, (0, now))[0] + 1
+        retry_at = now + min(_CONVERSION_BACKOFF * attempts, _CONVERSION_BACKOFF_CAP)
+        self._conversion_failures[archive_sha256] = (attempts, retry_at)
         detail = (
-            f"{failure.code}: uploaded image not stored (attempt {attempts} of "
-            f"{_CONVERSION_ATTEMPTS}, {outcome}): {failure.detail}"
+            f"{failure.code}: uploaded image not stored (attempt {attempts}, "
+            f"next attempt {retry_at.isoformat()}): {failure.detail}"
         )
-        _LOGGER.warning("uploaded build %s: %s", build_id, detail)
+        _LOGGER.warning("uploaded build %s: %s", row, detail)
         with self._sessions.begin() as session:
-            build = session.get(RecipeBuild, build_id, with_for_update=True)
-            if build is not None and build.oci_layout_sha256 == archive_sha256:
-                build.error = detail[:512]
+            session.execute(
+                update(RecipeBuild)
+                .where(
+                    RecipeBuild.id == row,
+                    RecipeBuild.oci_layout_sha256 == archive_sha256,
+                )
+                .values(error=detail[:512])
+            )
 
     def convert_upload(self, build_id: str) -> None:
         """Move a Spark build's uploaded archive into the layered store."""
@@ -625,7 +628,7 @@ class PrebuiltImageImporter:
                 # A busy store is not this archive's fault: it simply goes again.
                 self._record_conversion_failure(build_id, archive_sha256, image)
             return
-        self._conversion_failures.pop(build_id, None)
+        self._conversion_failures.pop(archive_sha256, None)
         with self._sessions.begin() as session:
             build = session.get(RecipeBuild, build_id, with_for_update=True)
             if build is None or build.oci_layout_sha256 != archive_sha256:
