@@ -283,8 +283,10 @@ recipes reproducible rather than to restrict them.
   installs, image imports, rehydration, prefetch) is trusted. Loads, installs
   of already-present content, restarts and reuse check identity, existence and
   length only; no path re-reads or re-hashes installed bytes. Nothing rehashes
-  model weights on read, serve, load or after a restart (a profile load that
-  ran a verify phase over 665.9 GiB on the Sparks is the precedent). Signed release, package and
+  model weights on read, serve, load or after a restart. Hashing belongs only
+  at ingress (outside downloads, uploads, signed packages) and to resuming an
+  unfinished ingress (`.partial` files); a general "hash unless cached" helper
+  gets no new caller on stored content. Signed release, package and
   installer verification is a separate trust boundary and stays.
 - Identity is content; provenance is never identity. A runtime image is its
   manifest digest, OCI archive sha256, bytes and architecture, a model file is
