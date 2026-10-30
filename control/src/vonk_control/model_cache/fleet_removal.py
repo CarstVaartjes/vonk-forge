@@ -250,8 +250,6 @@ class FleetRemovalMixin:
                 ),
             )
             if isinstance(plan, Residue):
-                if installation.id not in named:
-                    continue
                 issues.append(_observation_issue(plan))
                 protected = True
                 keep_detail = "Installation model references are unavailable; refresh owner evidence."

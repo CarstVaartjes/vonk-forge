@@ -31,11 +31,12 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control import catalog_revision_collection
 from vonk_control.model_cache import ModelCacheService
+from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.model_cache_contract import CacheManifest
 from vonk_control.models import (
     Base,
@@ -44,7 +45,9 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
     FleetProfile,
+    FleetProfileApplication,
     Job,
+    ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeInstallation,
@@ -395,6 +398,9 @@ def _unrelated_load(
             )
         extra = _noise_models(session, NOW, load.models, start=MODELS)
         _cached_sets(session, extra, None, NOW, count=load.models, prefix="h")
+        session.flush()
+        _revision_history(session, load.models)
+        _finished_work(session, load.models, now)
         payload = _availability_payload(recipes[0]).model_dump(mode="json")
         recent = now - timedelta(hours=1)
         for index in range(load.jobs):
@@ -413,6 +419,60 @@ def _unrelated_load(
                     updated_at=recent,
                 )
             )
+
+
+def _revision_history(session: Session, count: int) -> None:
+    """Older candidate revisions of the noise models and of every noise recipe."""
+    old = session.scalars(
+        select(CatalogDocumentRevision)
+        .where(
+            CatalogDocumentRevision.slug.like("noise-%"),
+            CatalogDocumentRevision.revision_number == 1,
+        )
+        .order_by(CatalogDocumentRevision.slug)
+    ).all()
+    columns = [c.key for c in CatalogDocumentRevision.__table__.columns]
+    for index, row in enumerate(old[: count + SELECTORS]):
+        values = {key: getattr(row, key) for key in columns}
+        values.update(
+            id=str(uuid.uuid4()),
+            revision_number=2,
+            state="candidate",
+            content_digest=_hex(f"old-revision/{index}"),
+        )
+        session.add(CatalogDocumentRevision(**values))
+
+
+def _finished_work(session: Session, count: int, now: datetime) -> None:
+    """Finished profile applications and finished model-cache operations."""
+    profile = session.scalars(select(FleetProfile)).first()
+    assert profile is not None
+    for index in range(count):
+        session.add(
+            FleetProfileApplication(
+                request_key=str(uuid.uuid4()),
+                profile_id=profile.id,
+                profile_digest=_hex(f"application/{index}"),
+                plan_digest=_hex(f"application-plan/{index}"),
+                state="succeeded",
+                plan={},
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            ModelCacheOperation(
+                request_key=str(uuid.uuid4()),
+                kind="download",
+                state="succeeded",
+                payload={},
+                progress={},
+                actor="test",
+                created_at=now,
+                updated_at=now,
+            )
+        )
 
 
 @dataclass
@@ -612,8 +672,7 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         )
         assert len(aged.statements) == len(base.statements)
         assert aged.parses == base.parses
-        assert aged.loaded["Job"] == base.loaded["Job"]
-        assert aged.loaded["RecipeInstallation"] == base.loaded["RecipeInstallation"]
+        assert dict(aged.loaded) == dict(base.loaded)
         scans = SCANS[operation]
         recipes = (PROTECTED.selectors - ONE_OF_EACH.selectors) * scans
         running = (PROTECTED.installations - ONE_OF_EACH.installations) * scans
@@ -630,3 +689,63 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         alone.cache.close()
         history.cache.close()
         protected.cache.close()
+
+
+def test_a_damaged_installation_plan_blocks_the_removal(tmp_path: Path) -> None:
+    """Catches skipping an unreadable plan because its columns name another model.
+
+    The plan cannot say which sets it uses, so an installed installation with a
+    damaged plan keeps the removal from being accepted, whatever its columns name.
+    """
+    world = _world(tmp_path, "damaged", unrelated=ONE_OF_EACH)
+    try:
+        with world.sessions.begin() as session:
+            real = session.scalars(select(RecipeInstallation)).first()
+            other = session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.slug == "noise-recipe-0000",
+                    CatalogDocumentRevision.kind == "recipe",
+                )
+            ).first()
+            assert real is not None and other is not None
+            damaged_id = str(uuid.uuid4())
+            session.add(
+                RecipeInstallation(
+                    id=damaged_id,
+                    recipe_revision_id=other.id,
+                    model_content_sha256=_hex("elsewhere"),
+                    mapping_id=real.mapping_id,
+                    mapping_generation=real.mapping_generation,
+                    recipe_build_id=real.recipe_build_id,
+                    image_digest=real.image_digest,
+                    plan_digest=_hex("damaged-plan"),
+                    plan=real.plan,
+                    state="installed",
+                    actor="test",
+                    created_at=world.now,
+                    updated_at=world.now,
+                )
+            )
+            session.flush()
+            # Past the write guard, as damage reaches a stored row.
+            session.execute(
+                text("UPDATE recipe_installations SET plan = :plan WHERE id = :id"),
+                {"plan": '{"damaged": true}', "id": damaged_id},
+            )
+        objects = [
+            ModelStoreObject(sha256=_hex(f"target/{n}"), bytes=3) for n in range(FILES)
+        ]
+        for node in world.nodes:
+            inventory(world.sessions, node, world.now + timedelta(seconds=1), objects)
+        review = world.cache.review_fleet_model_removal(world.target)
+        assert review.fleet is not None and review.fleet.observation_issues
+        accept = world.cache.remove_fleet_model_selector
+        with pytest.raises(ModelCacheConflictInvalid):
+            accept(
+                world.target,
+                actor="operator",
+                request_key=str(uuid.uuid4()),
+                review_digest=review.review_digest,
+            )
+    finally:
+        world.cache.close()

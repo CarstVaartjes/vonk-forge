@@ -18,6 +18,7 @@ from ..artifact_lifecycle import (
 )
 from ..content_identity import recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
+from ..model_cache_contract import ModelCacheSetState
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -103,17 +104,27 @@ def model_set_reference_findings(
         )
     )
     bound = recipe_model_digests(
-        session,
-        {revision.id for found in resolved.values() for revision in found}
-        | {row.recipe_revision_id for row in running},
+        session, {revision.id for found in resolved.values() for revision in found}
     )
+
+    bound_installation = recipe_model_digests(
+        session, {row.recipe_revision_id for row in running}
+    )
+    lineages: dict[str, frozenset[str]] = {}
+    lineage_held: dict[frozenset[str], set[str]] = {}
 
     def lineage_sets(models: Iterable[str]) -> set[str]:
         """The selected sets cached for these models' lineage (no parsing)."""
-        contents = {
-            content for model in models for content in lineage_contents(session, model)
-        }
-        return selected & set(chain(*model_sets(session, contents)))
+        contents = frozenset(
+            content
+            for model in models
+            for content in lineages.setdefault(model, lineage_contents(session, model))
+        )
+        if contents not in lineage_held:
+            lineage_held[contents] = set(
+                chain(*model_sets(session, contents, among=selected))
+            )
+        return lineage_held[contents]
 
     resolves: dict[str, str | None] = {}
 
@@ -123,12 +134,11 @@ def model_set_reference_findings(
                 digest = resolve_recipe_set(session, ident).digest
             except (ModelCacheError, TypeError, ValueError):
                 digest = None
-            if (
-                digest is not None
-                and digest not in sets
-                and session.get(ModelCacheSet, digest) is None
-            ):
-                digest = None
+            if digest is not None and digest not in sets:
+                # A set that is not complete yet is not the resolved set yet.
+                row = session.get(ModelCacheSet, digest)
+                if row is None or row.state != ModelCacheSetState.CACHED:
+                    digest = None
             resolves[ident] = digest
         return resolves[ident]
 
@@ -219,11 +229,12 @@ def model_set_reference_findings(
                 for compiled in plan.compiled_execution_plans.values()
             }
         else:
-            # Its plan cannot be read: it keeps the sets of the models its rows name.
-            held = lineage_sets(
-                bound.get(row.recipe_revision_id, frozenset())
-                | ({row.model_content_sha256} if row.model_content_sha256 else set())
+            # Its plan cannot be read: it keeps the sets of the models its rows
+            # name, and every selected set when they name none.
+            models = bound_installation.get(row.recipe_revision_id, frozenset()) | (
+                {row.model_content_sha256} if row.model_content_sha256 else set()
             )
+            held = lineage_sets(models) if models else selected
         label = f"installation {row.id}"
         for set_digest in held:
             findings[set_digest].add(

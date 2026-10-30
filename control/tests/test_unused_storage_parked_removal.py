@@ -7,7 +7,6 @@ the collector wait for fresh free-space numbers.
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,7 +22,6 @@ from vonk_control.artifact_lifecycle import (
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     Base,
-    CatalogDocumentRevision,
     ModelCacheOperation,
     ModelCacheSet,
     ModelCacheSetArtifact,
@@ -34,11 +32,7 @@ from vonk_control.unused_storage_collection.common import _Kept
 
 from .removal_settle import advance_until_ended
 from .test_catalog_revision_collection import Catalog
-from .test_model_cache import (
-    _artifact,
-    _canonical_model,
-    _download,
-)
+from .test_model_cache import _artifact, _download
 from .test_unused_storage_collection import (
     ACTOR,
     GIB,
@@ -105,25 +99,6 @@ def _parked_world(world: Catalog, service: ModelCacheService, root: Path):
     _touch(world, older, base)
     _touch(world, newer, base + timedelta(days=1))
     _touch(world, parked, base + timedelta(days=2))
-
-    # The catalog declares the parked model's file, so the sets holding it are
-    # known.
-    model = world.revision(
-        "parked-model",
-        1,
-        kind="model",
-        state="candidate",
-        document=_canonical_model(
-            publisher="vonk-forge",
-            slug="parked-model",
-            file_id="weights",
-            file_digest=hashlib.sha256(b"parked-weights").hexdigest(),
-        ).model_dump(mode="json"),
-    )
-    with world.sessions.begin() as session:
-        revision_row = session.get(CatalogDocumentRevision, model)
-        assert revision_row is not None
-        revision_row.content_digest = PARKED
 
     # An installation that never settled holds the third model.
     revision = world.revision("held", 1)

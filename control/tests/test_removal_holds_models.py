@@ -218,7 +218,7 @@ def profile(session: Session, recipe_slug: str) -> None:
     )
 
 
-def cache_resolved(session: Session, revision_id: str) -> str:
+def cache_resolved(session: Session, revision_id: str, state: str = "cached") -> str:
     """Cache the set a recipe revision resolves to, as a download would."""
     manifest = resolve_recipe_set(session, revision_id)
     session.add(
@@ -230,7 +230,7 @@ def cache_resolved(session: Session, revision_id: str) -> str:
             manifest=manifest.document(),
             expected_bytes=1,
             verified_bytes=1,
-            state="cached",
+            state=state,
             protected=False,
             protected_reasons=[],
             created_at=NOW,
@@ -319,7 +319,11 @@ def test_a_refresh_keeps_the_old_set_until_the_new_set_is_cached(sessions) -> No
     with sessions() as s:
         assert model_set_reference_findings(s, (old,))[old]
     with sessions.begin() as s:
-        cache_resolved(s, new_recipe)
+        new = cache_resolved(s, new_recipe, state="downloading")
+    with sessions() as s:
+        assert model_set_reference_findings(s, (old,))[old], "the new set is incomplete"
+    with sessions.begin() as s:
+        s.get(ModelCacheSet, new).state = "cached"
     with sessions() as s:
         assert not model_set_reference_findings(s, (old,))[old]
 
