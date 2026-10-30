@@ -33,6 +33,8 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
+    ClusterMapping,
+    ClusterMappingNode,
     FleetProfile,
     InstallationNode,
     Job,
@@ -94,6 +96,9 @@ class World:
     # statement and every table, so a column select that the code filters in
     # Python counts as much as an entity load.
     fetched: list[int]
+    # SQLite virtual-machine steps: work done inside SQL, such as a text scan
+    # of JSON, that no row count shows.
+    steps: list[int]
     root: Path
     target_recipe_slug: str
     target_build: str
@@ -324,6 +329,12 @@ def _unrelated_history(
             column.name: getattr(real_build, column.name)
             for column in RecipeBuild.__table__.columns
         }
+        real_mapping = session.get(ClusterMapping, real.mapping_id)
+        assert real_mapping is not None
+        mapping_columns = {
+            column.name: getattr(real_mapping, column.name)
+            for column in ClusterMapping.__table__.columns
+        }
         revision_digests = {
             revision.id: revision.content_digest
             for revision in session.scalars(
@@ -342,6 +353,7 @@ def _unrelated_history(
             node = spark if local else other_node
             digest = models[index][1]
             installation_id, build_id = str(uuid.uuid4()), str(uuid.uuid4())
+            mapping_id = str(uuid.uuid4())
             archive = _hex(f"archive/{index}")
             image_digest = f"sha256:{_hex(f'image/{index}')}"
             swaps = {
@@ -353,8 +365,36 @@ def _unrelated_history(
                 real_build.oci_layout_sha256 or "": archive,
                 real.image_digest or "": image_digest,
                 real_build.build_input_sha256: _hex(f"input/{index}"),
+                real.plan_digest: _hex(f"plan/{index}"),
+                real_mapping.id: mapping_id,
+                real_mapping.placement_digest: _hex(f"placement/{index}"),
             }
 
+            # Its own placement: a mapping of one rank on its own Spark.
+            session.add(
+                ClusterMapping(
+                    **{
+                        **mapping_columns,
+                        "id": mapping_id,
+                        "recipe_revision_id": recipes[index],
+                        "placement_digest": _hex(f"placement/{index}"),
+                        "endpoint_owner_node_id": node,
+                        "node_count": 1,
+                        "parameters": _own(real_mapping.parameters, swaps),
+                    }
+                )
+            )
+            session.flush()
+            session.add(
+                ClusterMappingNode(
+                    mapping_id=mapping_id,
+                    node_id=node,
+                    rank=0,
+                    role="entrypoint",
+                    endpoint_owner=True,
+                    created_at=now,
+                )
+            )
             session.add(
                 RecipeBuild(
                     **{
@@ -375,8 +415,8 @@ def _unrelated_history(
                     id=installation_id,
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
-                    mapping_id=real.mapping_id,
-                    mapping_generation=real.mapping_generation,
+                    mapping_id=mapping_id,
+                    mapping_generation=real_mapping.generation,
                     recipe_build_id=build_id,
                     image_digest=image_digest,
                     plan_digest=_hex(f"plan/{index}"),
@@ -428,6 +468,11 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         connect_args={"check_same_thread": False},
     )
     fetched = [0]
+    steps = [0]
+
+    def count_step() -> int:
+        steps[0] += 1
+        return 0
 
     def count_fetched(_cursor: object, row: tuple[object, ...]) -> tuple[object, ...]:
         fetched[0] += 1
@@ -436,6 +481,7 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
     @event.listens_for(engine, "connect")
     def _count_rows(dbapi_connection: Any, _record: object) -> None:
         dbapi_connection.row_factory = count_fetched
+        dbapi_connection.set_progress_handler(count_step, 1)
 
     sessions, operations, _, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=engine, nodes=2, mapping_node_count=1
@@ -534,6 +580,7 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
         nodes[1],
         now,
         fetched,
+        steps,
         tmp_path,
         slug,
         build_id,

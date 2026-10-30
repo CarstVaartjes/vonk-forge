@@ -22,9 +22,12 @@ into a failure. A check that already asks the target is registered without a
 finding as a positive control. A new request-path review is added to
 ``TARGET_CHECKS``.
 
-Blind spot: rows are counted, not bytes, and SQLite ignores ``FOR UPDATE``. A
-read of the same number of rows that loads a 100 KB document where a column
-would do, or locks every row, is not seen here.
+Counted per check: statements, rows handed back by the driver, SQLite VM steps
+(so a scan inside SQL cannot hide behind a small result) and parses.
+
+Blind spot: bytes are not counted and SQLite ignores ``FOR UPDATE``. A read of
+the same rows that loads a 100 KB document where a column would do, or locks
+every row, is not seen here.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from collections import Counter
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import pydantic
 import pytest
@@ -50,6 +54,8 @@ from vonk_control.auth import Actor
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.models import (
     CatalogDocumentRevision,
+    ClusterMapping,
+    ClusterMappingNode,
     InstallationNode,
     RecipeBuild,
     RecipeInstallation,
@@ -184,6 +190,31 @@ def _inventory_record(world: World) -> object:
     )
 
 
+def _node_keyed_lookup(world: World) -> object:
+    """The installations of one Spark and their mapping, by indexed columns only."""
+    with world.sessions() as session:
+        return session.execute(
+            select(
+                RecipeInstallation.id,
+                RecipeInstallation.recipe_revision_id,
+                RecipeInstallation.model_content_sha256,
+                ClusterMappingNode.rank,
+            )
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .join(
+                ClusterMappingNode,
+                ClusterMappingNode.mapping_id == RecipeInstallation.mapping_id,
+            )
+            .where(
+                InstallationNode.node_id == world.node,
+                ClusterMappingNode.node_id == world.node,
+            )
+        ).all()
+
+
 TARGET_CHECKS: dict[str, TargetCheck] = {
     "inventory_retention": TargetCheck(
         _retention,
@@ -200,9 +231,14 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "A3",
         "the image and model reference scans walk every profile, installation and run",
     ),
-    # Positive control: accepting only queues the removal; the impact review
-    # runs in the worker's observe step, not in the request.
-    "recipe_removal_accept": TargetCheck(_recipe_removal_accept, once=True),
+    # Accepting only queues the removal (equal statements and rows), but the
+    # SQL it runs scans something that grows with history: VM steps differ.
+    "recipe_removal_accept": TargetCheck(
+        _recipe_removal_accept,
+        "A3",
+        "accept runs a scan inside SQL that grows with history (equal rows, more VM steps)",
+        once=True,
+    ),
     "image_reference_scan": TargetCheck(
         _image_reference_scan,
         "A3",
@@ -228,6 +264,9 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "#1965",
         "PR #1965 (fix/removal-review-bounded) bounds it; the finding goes when it does",
     ),
+    # Positive control: the seeding admits an implementation that asks the
+    # target (a node-keyed lookup through the mapping) at constant cost.
+    "node_keyed_lookup": TargetCheck(_node_keyed_lookup),
     # Positive control: a Spark's report is keyed by its node (audit A14).
     "inventory_record": TargetCheck(_inventory_record),
 }
@@ -237,6 +276,9 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
 class Cost:
     statements: int
     rows: int
+    # SQLite virtual-machine steps: a JSON-text scan inside SQL costs steps
+    # without costing rows.
+    steps: int
     parses: dict[str, int]
 
 
@@ -289,12 +331,14 @@ def measure(world: World, monkeypatch: pytest.MonkeyPatch, check: TargetCheck) -
 
     _count_parses(monkeypatch, parses)
     event.listen(world.engine, "before_cursor_execute", count)
-    fetched = world.fetched[0]
+    fetched, steps = world.fetched[0], world.steps[0]
     try:
         check.run(world)
     finally:
         event.remove(world.engine, "before_cursor_execute", count)
-    return Cost(statements[0], world.fetched[0] - fetched, dict(parses))
+    return Cost(
+        statements[0], world.fetched[0] - fetched, world.steps[0] - steps, dict(parses)
+    )
 
 
 @pytest.fixture(scope="module")
@@ -376,6 +420,17 @@ def test_unrelated_installations_hold_their_own_archive_and_nodes(
                 )
             )
             assert held == set(plan.compiled_execution_plans)
+            assert plan.plan_digest == installation.plan_digest
+            mapping = session.get(ClusterMapping, installation.mapping_id)
+            assert mapping is not None
+            assert mapping.id != world_mapping(world, session)
+            assert held == set(
+                session.scalars(
+                    select(ClusterMappingNode.node_id).where(
+                        ClusterMappingNode.mapping_id == mapping.id
+                    )
+                )
+            )
         on_target_node = [
             installation
             for installation in others
@@ -389,3 +444,9 @@ def test_unrelated_installations_hold_their_own_archive_and_nodes(
             )
         ]
         assert len(on_target_node) == 3
+
+
+def world_mapping(world: World, session: object) -> str | None:
+    """The target installation's mapping id."""
+    target = cast(Any, session).get(RecipeInstallation, world.target_installation)
+    return None if target is None else target.mapping_id
