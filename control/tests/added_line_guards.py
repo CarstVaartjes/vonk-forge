@@ -283,7 +283,7 @@ def model_sized_count_caps(source: str) -> list[int]:
 
 
 _MODEL_SIZED_PLURALS = frozenset(
-    {"files", "digests", "artifacts", "objects", "shards", "paths"}
+    token for token in _MODEL_SIZED_TOKENS if token.endswith("s")
 )
 _MAX_CONSTANT = re.compile(r"^_?MAX_[A-Z0-9_]+$")
 
@@ -330,6 +330,12 @@ def runtime_count_caps(source: str) -> list[int]:
                 ):
                     cap = True
                     named = bool(_words(other.id) & _MODEL_SIZED_TOKENS)
+                elif isinstance(other, ast.Attribute) and re.match(
+                    r"(?i)^_?max_", other.attr
+                ):
+                    # ``len(files) >= limits.max_files``
+                    cap = True
+                    named = bool(_words(other.attr) & _MODEL_SIZED_TOKENS)
                 elif (
                     isinstance(other, ast.Constant)
                     and isinstance(other.value, int)

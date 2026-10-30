@@ -1684,7 +1684,8 @@ def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> No
 
 
 # The three runtime caps the model-cache change deleted, line for line (main's
-# model_cache/artifacts.py:395 and :420, catalog_helpers.py:368).
+# model_cache/artifacts.py:395 and :420, catalog_helpers.py:368), and the attribute
+# form of a live one (control source_bundles.py:509).
 _RUNTIME_CAPS = (
     "def parts(parts):\n"
     "    return (\n"
@@ -1702,6 +1703,13 @@ _RUNTIME_CAPS = (
     "        raise ValueError\n"
     "    if len(result) < 2 or len(result) > MAX_NODES or len(result) > 3:\n"
     "        raise ValueError\n"
+    "\n"
+    "\n"
+    "def bundle(files, limits):\n"
+    "    if len(files) >= limits.max_files:\n"
+    "        raise ValueError\n"
+    "    if len(nodes) >= limits.max_nodes:\n"
+    "        raise ValueError\n"
 )
 
 
@@ -1711,7 +1719,9 @@ def test_runtime_len_caps_on_model_sized_collections_are_flagged() -> None:
     for line in (3, 8, 13):
         assert check_source(path, _RUNTIME_CAPS, {line}, modes=("item-counts",)), line
     # A small literal or a name with no model-sized word is a shape check.
-    assert not check_source(path, _RUNTIME_CAPS, {15}, modes=("item-counts",))
+    # ``limits.max_files`` is the same cap behind an attribute (source_bundles.py:509).
+    assert check_source(path, _RUNTIME_CAPS, {20}, modes=("item-counts",))
+    assert not check_source(path, _RUNTIME_CAPS, {15, 22}, modes=("item-counts",))
     assert not check_source(path, _RUNTIME_CAPS, {1, 2, 7}, modes=("item-counts",))
     lt = "class P(M):\n    artifact_count: int = Field(lt=1024)\n"
     assert check_source(path, lt, {2}, modes=("item-counts",))
