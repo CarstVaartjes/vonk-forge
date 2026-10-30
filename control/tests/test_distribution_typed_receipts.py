@@ -31,7 +31,7 @@ def _plan() -> RunSwitchPlan:
         build=SimpleNamespace(
             oci_layout_sha256=LAYOUT, image_bytes=11, build_input_sha256=None
         ),
-        storage=SimpleNamespace(artifact_digests=["c" * 64]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
     )
 
 

@@ -888,7 +888,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     cache = ModelCacheService(
         sessions,
         tmp_path / "models",
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: now[0],
         fixture_sources=True,
     )
@@ -907,8 +907,8 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
                 model_content_sha256=model_digest, artifacts=[artifact]
             )
 
-        def list_operations(self, *, limit: int = 100):
-            return cache.list_operations(limit=limit)
+        def reusable_operation(self, **kwargs):
+            return cache.reusable_operation(**kwargs)
 
         def start_download(self, **kwargs: Any):
             kwargs.pop("recipe_revision_id", None)

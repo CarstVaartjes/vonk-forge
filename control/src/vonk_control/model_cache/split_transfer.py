@@ -33,6 +33,28 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
+#: The partials directory of a repair is this prefix plus its transfer id; a
+#: download's is its set digest. The one owner name every writer, remover and
+#: the partials collector derive.
+REPAIR_PARTIALS_PREFIX = "repair-"
+
+
+#: The partials owners this thread holds the lock of, for the runtime net below.
+HELD_PARTIALS_OWNERS = threading.local()
+
+
+def require_partials_owner_lock(owner: str) -> None:
+    """Fail loudly when a writer reaches ``partials/<owner>`` without its lock.
+
+    The partials collector removes a directory only under the exclusive owner
+    lock, so every writer must hold it shared; this net catches a path that does
+    not, in tests and in production, before it writes a byte.
+    """
+
+    if owner not in getattr(HELD_PARTIALS_OWNERS, "owners", ()):
+        raise RuntimeError(f"partials owner {owner} written without its lock")
+
+
 class SplitTransferMixin:
     """Split transfer behavior of the cache service."""
 
@@ -41,6 +63,7 @@ class SplitTransferMixin:
         spec: ArtifactSpec,
         set_digest: str,
         *,
+        owner: str,
         operation_id: str,
         force: bool,
         interrupt_after_bytes: int | None,
@@ -66,7 +89,7 @@ class SplitTransferMixin:
                 "split artifact metadata is unavailable",
                 recovery=OperatorActionName.RESUME,
             )
-        owner = cache._partial_owner(operation_id, set_digest)
+        require_partials_owner_lock(owner)
         assembled = cache._partial_path(owner, spec.sha256)
         assembled.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if assembled.is_symlink() or (assembled.exists() and not assembled.is_file()):
@@ -99,6 +122,7 @@ class SplitTransferMixin:
             cache._download_artifact(
                 part_spec,
                 set_digest,
+                owner=owner,
                 operation_id=operation_id,
                 completed_artifacts=0,
                 force=force,
@@ -362,13 +386,14 @@ class SplitTransferMixin:
             payload = cache._payload_or_none(operation)
             if not isinstance(payload, ModelCacheRepairPayload):
                 return set_digest
-            return "repair-" + payload.repair_checkpoint.transfer_id
+            return REPAIR_PARTIALS_PREFIX + payload.repair_checkpoint.transfer_id
 
     def _download_artifact(
         self,
         spec: ArtifactSpec,
         set_digest: str,
         *,
+        owner: str,
         operation_id: str,
         completed_artifacts: int,
         force: bool,
@@ -382,8 +407,8 @@ class SplitTransferMixin:
         belongs to, and is never a cache object.
         """
         cache = cast("ModelCacheService", self)
-        partial_owner = cache._partial_owner(operation_id, set_digest)
-        part = cache._partial_path(partial_owner, spec.sha256)
+        require_partials_owner_lock(owner)
+        part = cache._partial_path(owner, spec.sha256)
         part.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
         if part.is_symlink():
             part.unlink(missing_ok=True)

@@ -283,6 +283,24 @@ def test_provenance_assignment_identity_is_rejected():
     )
 
 
+def test_a_primary_key_row_lookup_is_not_a_provenance_comparison():
+    assert not check_source(
+        PATH,
+        "stmt = update(RecipeBuild).where(RecipeBuild.id == build_id)\n",
+        {1},
+        modes=("identity",),
+    )
+    assert check_source(
+        PATH,
+        "same = a.recipe_build_id == b.recipe_build_id\n",
+        {1},
+        modes=("identity",),
+    )
+    assert check_source(
+        PATH, "same = a.assignment_id == b.assignment_id\n", {1}, modes=("identity",)
+    )
+
+
 def test_contract_definition_can_spell_its_member_but_consumer_cannot():
     path = "agent_protocol/src/vonk_agent_protocol/agent_words.py"
     source = "class Phase(WireEnum):\n    RUNNING = 'running'\n\nvalue = 'running'\n"
@@ -1442,6 +1460,43 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "reserve_bytes: int = 10 * 1024**3\n",
+        "_MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "NAS_RESERVE_BYTES = (4 << 30)\n",
+        "X_RESERVE_BYTES = OTHER_CONSTANT\n",
+        "def f(self, reserve_bytes: int = 5 * 1024**3): ...\n",
+    ],
+)
+def test_a_fixed_byte_reserve_is_flagged(source: str) -> None:
+    path = "control/src/vonk_control/settings.py"
+    assert check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            "control/src/vonk_control/recipe_builds/common.py",
+            "MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3\n",
+        ),
+        ("control/src/vonk_control/other.py", "RESERVE_FRACTION = 0.1\n"),
+        (
+            "control/src/vonk_control/other.py",
+            "reserve_bytes=cache.reserve_of(total)\n",
+        ),
+        ("control/src/vonk_control/other.py", "reserve_bytes: int = Field(ge=0)\n"),
+        ("control/src/vonk_control/other.py", "reserved_bytes = 4096\n"),
+        ("control/tests/test_x.py", "RESERVE_BYTES = 10 * 1024**3\n"),
+    ],
+)
+def test_other_reserve_lines_are_not_flagged(path: str, source: str) -> None:
+    assert not check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
 _SET_SELECTION = (
     "def sets(session, digest):\n"
     "    return session.scalars(\n"
@@ -1620,3 +1675,64 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     assert not check_source(
         "control/src/vonk_control/example.py", source, {1}, modes=("document-reads",)
     )
+
+
+_ITEM_COUNT = (
+    "class Plan(Model):\n"
+    "    artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)\n"
+    "    objects: tuple[Obj, ...] = Field(\n"
+    "        min_length=1,\n"
+    "        max_length=4096,\n"
+    "    )\n"
+    "    files: list[F] = Field(max_length=8)  # item-count-limit: wire frame\n"
+    "    node_ids: list[str] = Field(max_length=32)\n"
+    "    digest: str = Field(max_length=64)\n"
+    "    input_files: list[In] = Field(max_length=MAX_INPUT_FILES)\n"
+    "    artifact_count: int = Field(ge=1, le=1024)\n"
+    "    artifact_bytes: int = Field(ge=1, le=1024)\n"
+    "    object_ids: list[str] = Field(max_length=MAX_FLEET)\n"
+    "    profile_count: int = Field(ge=0, le=MAX_DATABASE_INTEGER)\n"
+    "    rooms: list[str] = Field(max_length=MAX_DATABASE_INTEGER)\n"
+)
+
+
+def test_item_count_cap_on_a_model_sized_list_is_flagged() -> None:
+    """Catches a digest/object cap like the 256-digest one that failed a plan."""
+    path = "control/src/vonk_control/plan_contract.py"
+    assert check_source(path, _ITEM_COUNT, {2}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {5}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {7, 8, 9}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {1}, modes=("item-counts",))
+    # A named constant is a count too; so is ``le`` on a count field.
+    assert check_source(path, _ITEM_COUNT, {10}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {11}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {12}, modes=("item-counts",))
+    # Whole name tokens only: ``object_ids`` has the token ``object``; a database
+    # range constant and names without a model-sized token are not counts.
+    assert check_source(path, _ITEM_COUNT, {13}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {14, 15}, modes=("item-counts",))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "asyncio.run(main())",
+        "asyncio.Runner()",
+        "uvloop.run(main())",
+        "anyio.run(main)",
+        "loop.run_until_complete(main())",
+    ],
+)
+def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> None:
+    source = f"def go(main, loop):\n    return {call}\n"
+    path = "src/cluster_profiles/cli.py"
+    assert check_source(path, source, {2}, modes=("event-loops",)), call
+    # The transport owns the entry; other trees and old lines stay quiet.
+    owner = "src/cluster_profiles/control_transport.py"
+    assert not check_source(owner, source, {2}, modes=("event-loops",))
+    assert not check_source(
+        "control/src/vonk_control/x.py", source, {2}, modes=("event-loops",)
+    )
+    assert not check_source(path, source, {1}, modes=("event-loops",))
+    quiet = "def go(runner, work):\n    return runner.run(work)  # asyncio.run(x)\n"
+    assert not check_source(path, quiet, {2}, modes=("event-loops",))

@@ -83,7 +83,7 @@ def test_unreadable_recipe_revision_recovers_only_identical_content(
         old_id = old.id
     _replace_stored_document(sessions, old_id, {"kind": "old"})
 
-    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    service = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     try:
         with observe_unknown():
             observed = service.resolve_artifact_set(recipe_revision_id=old_id)
@@ -144,7 +144,7 @@ def test_unreadable_model_revision_never_substitutes_new_content(tmp_path: Path)
         recipe_id = recipe.id
 
     _replace_stored_document(sessions, old_id, {"kind": "old"})
-    service = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    service = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     try:
         # The bounded request ends with no manifest; no new path is adopted.
         with observe_unknown():
@@ -257,7 +257,7 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
         current_id = current.id
 
     _replace_stored_document(sessions, old_id, {"kind": "old"})
-    cache = ModelCacheService(sessions, tmp_path / "cache", reserve_bytes=0)
+    cache = ModelCacheService(sessions, tmp_path / "cache", free_fraction=0)
     with sessions() as session:
         inspection = DatabaseRunSwitchArtifactInspector(cache).inspect(
             session,

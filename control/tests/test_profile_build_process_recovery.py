@@ -94,7 +94,6 @@ class _PreparedArtifactExecutor(RecordingArtifactExecutor):
                     result=_phase_result(
                         {
                             "verified": True,
-                            "verified_digests": list(plan.storage.artifact_digests),
                             "verified_build_id": plan.recipe_build_id,
                             "verified_image_digest": image.image_digest,
                             "verified_oci_layout_sha256": image.oci_layout_sha256,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -69,10 +70,10 @@ class CoreMixin:
         cache = cast("ModelCacheService", self)
         return cache._root
 
-    @property
-    def reserve_bytes(self) -> int:
+    def reserve_of(self, total_bytes: int) -> int:
+        """Bytes kept free on a volume of ``total_bytes`` for co-located services."""
         cache = cast("ModelCacheService", self)
-        return cache._reserve_bytes
+        return math.ceil(total_bytes * cache._free_fraction)
 
     @contextmanager
     def _session(self, *, write: bool = False) -> Iterator[Session]:

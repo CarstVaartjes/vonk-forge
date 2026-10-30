@@ -31,7 +31,7 @@ def world(tmp_path: Path, postgres_engine: Engine):
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     cache = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
     )
     tokens = TokenCodec(b"m" * 32)
     app = create_app(

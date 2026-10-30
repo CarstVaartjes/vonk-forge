@@ -43,7 +43,7 @@ def observed_cache(postgres_engine, tmp_path):
     cache = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -267,7 +267,7 @@ def test_observer_corrects_stale_cached_rows_and_missing_objects(observed_cache)
 def _crash_after_checkpoint(database_url, root, manifest_json, clock):
     sessions = sessionmaker(create_engine(database_url), expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: clock
+        sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: clock
     )
     manifest = ArtifactSetManifest.from_contract(
         CacheManifest.model_validate_json(manifest_json)
@@ -314,7 +314,7 @@ def test_restart_resumes_checkpoint_without_reobserving_completed_objects(
     restarted = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -433,7 +433,7 @@ def test_other_observer_reports_live_checkpoint_without_taking_writer_lock(
     other = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -494,7 +494,7 @@ def test_model_only_checkpoint_reloads_required_null_fields(
     other = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -583,7 +583,7 @@ def test_cold_api_preparation_collects_worker_checkpoint_on_first_review(
     api = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -613,7 +613,7 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
     api = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )

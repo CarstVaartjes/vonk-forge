@@ -40,7 +40,9 @@ class ArtifactVerificationResult(StrictModel):
 
     skipped: bool = False
     verified: Literal[True]
-    verified_digests: list[Digest] = Field(max_length=256)
+    # Receipts stored before the set identity carried the plan list this; new ones
+    # leave it empty and nothing reads it (delete once in-flight work has turned over).
+    verified_digests: list[Digest] = Field(default_factory=list)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")
@@ -156,7 +158,9 @@ class RunSwitchCachedTransferResult(_RunSwitchPhaseBase):
     subphase: Literal["target-copy"]
     skipped: Literal[True]
     verified: Literal[False]
-    verified_digests: list[Digest] = Field(max_length=256)
+    # Receipts stored before the set identity carried the plan list this; new ones
+    # leave it empty and nothing reads it (delete once in-flight work has turned over).
+    verified_digests: list[Digest] = Field(default_factory=list)
     verified_build_id: UuidId | None
     verified_image_digest: Annotated[
         str, StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$")

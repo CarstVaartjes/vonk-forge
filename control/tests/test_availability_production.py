@@ -2449,7 +2449,7 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     model_cache = ModelCacheService(
         sessions,
         tmp_path / "model-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=1,
         fixture_sources=True,
         http_client=model_http,

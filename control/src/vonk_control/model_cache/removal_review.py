@@ -280,6 +280,12 @@ class RemovalReviewMixin:
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:
         """Return the current owner-derived model removal impact without writes."""
+        return self._review_model_removal(selector)[0]
+
+    def _review_model_removal(
+        self, selector: str
+    ) -> tuple[CacheRemovalReview, ModelCacheRemovalScope]:
+        """The review and the scope it was derived from."""
         cache = cast("ModelCacheService", self)
 
         normalized_selector = _model_selector(selector).casefold()
@@ -389,7 +395,7 @@ class RemovalReviewMixin:
             observed_at=cache._clock().isoformat(),
         )
         review = seal_cache_removal_review(content)
-        return review
+        return review, scope
 
     def removal_owner_findings_in_session(
         self, session: Session, scope: ModelCacheRemovalScope

@@ -204,7 +204,7 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
         session.add(User(subject="operator", role="operator"))
     cache_root = tmp_path / "cache"
     service = ModelCacheService(
-        sessions, cache_root, reserve_bytes=0, fixture_sources=True
+        sessions, cache_root, free_fraction=0, fixture_sources=True
     )
     try:
         artifact = _artifact(tmp_path / "source", b"receipt boundary")
@@ -238,7 +238,7 @@ def test_model_cancel_dropped_response_and_schema_valid_unchanged_success(
             )
         service.close()
         service = ModelCacheService(
-            sessions, cache_root, reserve_bytes=0, fixture_sources=True
+            sessions, cache_root, free_fraction=0, fixture_sources=True
         )
         restarted, headers = _api(sessions, model_cache=service)
         receipt = _receipt(

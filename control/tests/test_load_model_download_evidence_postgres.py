@@ -113,7 +113,7 @@ class _Nas:
         self.cache = ModelCacheService(
             sessions,
             tmp_path / "nas-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             clock=lambda: self.now,
             http_client=httpx2.Client(
                 transport=httpx2.MockTransport(self.upstream.handle),
@@ -144,7 +144,6 @@ class _Nas:
                 None,
                 artifact_set_sha256=manifest.digest,
                 artifact_set_bytes=manifest.expected_bytes,
-                artifact_digests=[item.sha256 for item in manifest.artifacts],
                 missing_nas_bytes=manifest.expected_bytes,
             ),
         )

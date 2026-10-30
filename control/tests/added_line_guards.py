@@ -67,10 +67,37 @@ MODES = (
     "movement",
     "exit-causes",
     "nas-space",
+    "fixed-reserves",
     "model-sets",
     "openers",
     "follow-validators",
+    "item-counts",
+    "event-loops",
 )
+# A name that reserves volume space (not "reserved": space a run holds) bound to
+# a number or a constant, anywhere on the line, annotated or not.
+FIXED_RESERVE = re.compile(
+    r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
+)
+# Fixed reserves that guard something other than NAS volume space.
+FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MINIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk floor",
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MAXIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk cap",
+    (
+        "control/src/vonk_control/settings.py",
+        "STORAGE_EVICTION_RESERVE_FLOOR_BYTES",
+    ): "headroom the collector evicts beyond a shortfall, not a gate",
+    (
+        "control/src/vonk_control/unused_storage_collection/service.py",
+        "reserve_floor_bytes",
+    ): "the collector's headroom floor, defaulted from that setting",
+}
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
@@ -200,6 +227,78 @@ def security_refusals() -> frozenset[str]:
         if names == previous:
             break
     return frozenset(names)
+
+
+# Sizes the model or recipe sets (files, digests, artifacts, objects, shards)
+# are bounded by bytes (the document or wire budget), never by an item count:
+# a 286-file model failed planning on a 256-digest cap.
+_MODEL_SIZED_TOKENS = frozenset(
+    {
+        "file",
+        "files",
+        "digest",
+        "digests",
+        "artifact",
+        "artifacts",
+        "object",
+        "objects",
+        "shard",
+        "shards",
+        "path",
+        "paths",
+    }
+)
+# Database-range and fleet-size constants are not item counts.
+_RANGE_CONSTANTS = frozenset(
+    {"MAX_DATABASE_INTEGER", "_MAX_SIGNED_BIGINT", "_MAX_FLEET_NODES"}
+)
+# A real protocol limit states why on the line: ``# item-count-limit: <why>``.
+ITEM_COUNT_PRAGMA = "# item-count-limit:"
+
+
+def model_sized_count_caps(source: str) -> list[int]:
+    """Lines capping a model-sized list (``max_length``) or count (``le``)."""
+    lines = source.splitlines()
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        tokens = node.target.id.split("_")
+        # A byte size is the bound the owner wants; only counts are refused.
+        if "bytes" in tokens:
+            continue
+        sized = any(token in _MODEL_SIZED_TOKENS for token in tokens)
+        counted = (
+            len(tokens) > 1
+            and tokens[-1] == "count"
+            and tokens[-2] in _MODEL_SIZED_TOKENS
+        )
+        if not (sized or counted):
+            continue
+        annotation = ast.unparse(node.annotation)
+        is_list = bool(re.search(r"\b(?:list|tuple|Sequence)\[", annotation))
+        is_int = bool(re.search(r"\bint\b", annotation))
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            for keyword in call.keywords:
+                capped = (
+                    (is_list and keyword.arg == "max_length")
+                    or (is_int and not is_list and counted and keyword.arg == "le")
+                ) and (
+                    # A number or a named constant: both are an item count.
+                    (
+                        isinstance(keyword.value, ast.Name)
+                        and keyword.value.id not in _RANGE_CONSTANTS
+                    )
+                    or (
+                        isinstance(keyword.value, ast.Constant)
+                        and isinstance(keyword.value.value, int)
+                    )
+                )
+                if capped and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]:
+                    found.add(keyword.value.lineno)
+    return sorted(found)
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
@@ -1362,13 +1461,28 @@ def check_source(
         and path.startswith("control/src/vonk_control/model_cache/")
         and path != "control/src/vonk_control/model_cache/storage.py"
     ):
-        # NAS space is decided once, in storage.py's _storage_fits, next to what
+        # NAS space is decided once, in storage.py's _storage_shortfall, next to what
         # the running transfers still write. A comparison with the free disk
         # alone let parallel downloads overcommit the volume (#1910).
         hits.extend(
-            (line, "NAS space read outside storage.py; use _storage_fits")
+            (line, "NAS space read outside storage.py; use _storage_shortfall")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "fixed-reserves" in modes
+        and path.startswith("control/src/")
+    ):
+        # A reserve of volume space is a share of the volume (#1962): a fixed
+        # byte count was 0.1 % of the NAS volume PostgreSQL shares with the
+        # model cache, and a full volume stopped the database.
+        hits.extend(
+            (line, "fixed byte reserve; derive it from the volume's total")
+            for line, text in enumerate(source.splitlines(), 1)
+            if (match := FIXED_RESERVE.search(text))
+            and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
         )
     if (
         python
@@ -1387,6 +1501,16 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "item-counts" in modes
+        and path.startswith(("control/src/", "agent_protocol/src/"))
+    ):
+        hits.extend(
+            (line, "item-count cap on a model-sized list; bound by bytes instead")
+            for line in model_sized_count_caps(source)
         )
     if (
         python
@@ -1433,6 +1557,23 @@ def check_source(
                 r"\blen\((?:active|operations|queued|running)\w*\)\s*(?:>|>=)"
                 r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
                 text,
+            )
+        )
+    if (
+        python
+        and not is_test
+        and "event-loops" in modes
+        and path.startswith("src/cluster_profiles/")
+        and path != "src/cluster_profiles/control_transport.py"
+    ):
+        # Every event-loop entry goes through HTTPSResponse._run, which keeps
+        # a Ctrl-C a Ctrl-C (exit 130) however the runner's SIGINT race lands.
+        hits.extend(
+            (line, "event loop entered outside control_transport.py:HTTPSResponse._run")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\b(?:asyncio\.run|asyncio\.Runner|uvloop\.run|anyio\.run)\(|\.run_until_complete\(",
+                text.split("#", 1)[0],
             )
         )
     if python and is_test and "clocks" in modes:

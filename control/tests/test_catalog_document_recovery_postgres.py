@@ -137,10 +137,11 @@ def test_historical_damage_is_retired_without_blocking_current_reads(
             )
         )
         assert target is not None
-        # Even superseded healthy documents still count as shared content.
+        # Sharing is set membership: catalog documents (even healthy ones) of
+        # other models share nothing while no cached set lists their files.
         objects, shared = _model_objects(session, target.content_digest)
         assert objects == {model.files[0].sha256}
-        assert shared == objects | {changed.files[0].sha256}
+        assert shared == set()
     with catalog._sessions.begin() as session:
         _damage(session, old.id)
     with catalog._sessions() as session:
@@ -149,10 +150,7 @@ def test_historical_damage_is_retired_without_blocking_current_reads(
         assert not failures[0].current_head
         assert failures[0].slug == sibling.identity.slug
         # A mutation consumer uses the same scan, without an exception or gate.
-        assert _model_objects(session, target.content_digest) == (
-            objects,
-            {changed.files[0].sha256},
-        )
+        assert _model_objects(session, target.content_digest) == (objects, set())
         assert "files.0.size_bytes" in failures[0].residue.note
         assert "private-input" not in failures[0].residue.note
     cache = ModelCacheService(catalog._sessions, tmp_path / "nas", clock=lambda: NOW)
