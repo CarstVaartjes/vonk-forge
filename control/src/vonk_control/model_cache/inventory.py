@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import stat
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
@@ -19,7 +19,7 @@ from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..categorized_errors import InvalidValue
 from ..fleet_profile_contract import FleetProfileAssignmentInput
-from ..inventory_items import inventory_artifacts
+from ..inventory_items_contract import InventoryArtifactItem
 from ..lifecycle.evidence import Residue
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache_contract import CacheManifest
@@ -50,15 +50,19 @@ class InventoryMixin:
     """Inventory behavior of the cache service."""
 
     def reclaimable_bytes_for_sets(
-        self, session: Session, node_id: str, set_digests: Iterable[str]
+        self,
+        session: Session,
+        set_digests: Iterable[str],
+        inventories: Iterable[Sequence[InventoryArtifactItem]],
     ) -> int:
-        """Bytes a Spark would free by dropping these model sets.
+        """Bytes the given Sparks would free by dropping these model sets.
 
         The one answer callers get about unused model files: they see models
-        (set digest + bytes), the cache keeps its per-object logic. A file also
-        used elsewhere on the node is not freed, and a file is counted once
-        however many of the sets name it. A set this cache does not hold frees
-        nothing.
+        (set digest + bytes), the cache keeps its per-object logic. The set
+        membership is read once; ``inventories`` are the Sparks' artifact rows
+        the caller already loaded. A file also used elsewhere on its Spark is
+        not freed, a file is counted once per Spark however many sets name it,
+        and a set this cache does not hold frees nothing.
         """
 
         requested = tuple(set(set_digests))
@@ -73,7 +77,8 @@ class InventoryMixin:
         )
         return sum(
             artifact.size_bytes
-            for artifact in inventory_artifacts(session, node_id)
+            for artifacts in inventories
+            for artifact in artifacts
             if artifact.digest in names
             and artifact.state == ModelFileState.VERIFIED
             and artifact.ref_count == 0

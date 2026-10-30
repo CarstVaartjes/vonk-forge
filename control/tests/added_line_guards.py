@@ -288,17 +288,30 @@ _MODEL_SIZED_PLURALS = frozenset(
 _MAX_CONSTANT = re.compile(r"^_?MAX_[A-Z0-9_]+$")
 
 
+def _words(text: str) -> set[str]:
+    return {
+        part for token in re.split(r"\W+", text.lower()) for part in token.split("_")
+    }
+
+
 def runtime_count_caps(source: str) -> list[int]:
-    """Lines comparing ``len(<model-sized>)`` with a ``MAX_*`` name or a big number.
+    """Lines comparing ``len(...)`` with a count constant for model-sized things.
 
     ``len(artifacts) > _MAX_ARTIFACTS`` is the runtime form of a ``max_length``
     cap and refuses a model for its file count; a byte bound is the one to use.
-    Small literals (``len(x) < 2``) are shape checks, not caps.
+    A cap is a ``MAX_*`` name or a number of 64 or more, and the collection is
+    model-sized when its own name says so (``len(files)``) or the ``MAX_*`` name
+    does (``len(result) > _MAX_ARTIFACTS``). Small literals (``len(x) < 2``) are
+    shape checks, and ``len(path)`` measures a string.
     """
 
     found: set[int] = set()
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Compare):
+            continue
+        if not any(
+            isinstance(op, ast.Gt | ast.GtE | ast.Lt | ast.LtE) for op in node.ops
+        ):
             continue
         sides = [node.left, *node.comparators]
         for left, right in pairwise(sides):
@@ -310,26 +323,27 @@ def runtime_count_caps(source: str) -> list[int]:
                     and call.args
                 ):
                     continue
-                tokens = set(re.split(r"\W+", ast.unparse(call.args[0]).lower()))
-                tokens = {part for token in tokens for part in token.split("_")}
-                # Collections only: ``len(path)`` or ``len(digest)`` measure a string.
-                if not tokens & _MODEL_SIZED_PLURALS:
-                    continue
-                if not any(
-                    isinstance(op, ast.Gt | ast.GtE | ast.Lt | ast.LtE)
-                    for op in node.ops
-                ):
-                    continue
                 if (
                     isinstance(other, ast.Name)
                     and _MAX_CONSTANT.match(other.id)
                     and other.id not in _RANGE_CONSTANTS
-                ) or (
+                ):
+                    cap = True
+                    named = bool(_words(other.id) & _MODEL_SIZED_TOKENS)
+                elif (
                     isinstance(other, ast.Constant)
                     and isinstance(other.value, int)
                     and not isinstance(other.value, bool)
                     and other.value >= 64
                 ):
+                    cap = True
+                    named = False
+                else:
+                    continue
+                collection = bool(
+                    _words(ast.unparse(call.args[0])) & _MODEL_SIZED_PLURALS
+                )
+                if cap and (named or collection):
                     found.add(node.lineno)
     return sorted(found)
 

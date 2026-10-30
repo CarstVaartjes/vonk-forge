@@ -1683,28 +1683,35 @@ def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> No
     assert not check_source(path, quiet, {2}, modes=("event-loops",))
 
 
-_RUNTIME_CAP = (
-    "def check(value, artifacts, parts):\n"
-    "    if len(value.artifacts) > _MAX_ARTIFACTS:\n"
-    "        raise ValueError('too many')\n"
-    "    if not 2 <= len(value.files) <= MAX_FILES:\n"
-    "        raise ValueError('parts')\n"
-    "    if len(artifacts) > 4096:\n"
-    "        raise ValueError('big')\n"
-    "    if len(artifacts) < 2 or len(value.nodes) > MAX_NODES:\n"
-    "        raise ValueError('shape')\n"
-    "    "
+# The three runtime caps the model-cache change deleted, line for line (main's
+# model_cache/artifacts.py:395 and :420, catalog_helpers.py:368).
+_RUNTIME_CAPS = (
+    "def parts(parts):\n"
+    "    return (\n"
+    "        not 2 <= len(parts) <= _MAX_ARTIFACT_PARTS\n"
+    "    )\n"
+    "\n"
+    "\n"
+    "def manifest(value):\n"
+    "    if len(value.artifacts) < 1 or len(value.artifacts) > _MAX_ARTIFACTS:\n"
+    "        raise ValueError\n"
+    "\n"
+    "\n"
+    "def models(result):\n"
+    "    if len(result) > _MAX_ARTIFACTS:\n"
+    "        raise ValueError\n"
+    "    if len(result) < 2 or len(result) > MAX_NODES or len(result) > 3:\n"
+    "        raise ValueError\n"
 )
 
 
 def test_runtime_len_caps_on_model_sized_collections_are_flagged() -> None:
-    """Catches ``len(artifacts) > _MAX_ARTIFACTS``, the runtime form of a cap."""
+    """Catches the three runtime ``len(...)`` caps the model-cache change deleted."""
     path = "control/src/vonk_control/model_cache/x.py"
-    assert check_source(path, _RUNTIME_CAP, {2}, modes=("item-counts",))
-    assert check_source(path, _RUNTIME_CAP, {4}, modes=("item-counts",))
-    assert check_source(path, _RUNTIME_CAP, {6}, modes=("item-counts",))
-    # A small literal is a shape check, and a non-model-sized collection is free.
-    assert not check_source(path, _RUNTIME_CAP, {8}, modes=("item-counts",))
-    assert not check_source(path, _RUNTIME_CAP, {1, 3}, modes=("item-counts",))
+    for line in (3, 8, 13):
+        assert check_source(path, _RUNTIME_CAPS, {line}, modes=("item-counts",)), line
+    # A small literal or a name with no model-sized word is a shape check.
+    assert not check_source(path, _RUNTIME_CAPS, {15}, modes=("item-counts",))
+    assert not check_source(path, _RUNTIME_CAPS, {1, 2, 7}, modes=("item-counts",))
     lt = "class P(M):\n    artifact_count: int = Field(lt=1024)\n"
     assert check_source(path, lt, {2}, modes=("item-counts",))

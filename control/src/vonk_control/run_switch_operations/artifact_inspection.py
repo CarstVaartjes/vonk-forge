@@ -162,10 +162,11 @@ class DatabaseRunSwitchArtifactInspector:
         reused = 0
         missing_spark = 0
         missing_by_node: dict[str, int] = {}
-        reclaimable = 0
+        inventories = []
         for node_id in node_ids:
             missing_by_node[node_id] = 0
             rows = inventory_artifacts(session, node_id)
+            inventories.append(rows)
             by_digest = {row.digest: row for row in rows}
             for digest, size in expected_by_digest.items():
                 row = by_digest.get(digest)
@@ -178,12 +179,15 @@ class DatabaseRunSwitchArtifactInspector:
                 else:
                     missing_spark += size
                     missing_by_node[node_id] += size
-            if retention == "reclaim-unreferenced":
-                # The cache owns which of a set's files are unused: callers see
-                # models (set digest + bytes), never files.
-                reclaimable += model_cache.reclaimable_bytes_for_sets(
-                    session, node_id, (artifact_set_sha256,)
-                )
+        # The cache owns which of a set's files are unused: callers see models
+        # (set digest + bytes), never files.
+        reclaimable = (
+            model_cache.reclaimable_bytes_for_sets(
+                session, (artifact_set_sha256,), inventories
+            )
+            if retention == "reclaim-unreferenced"
+            else 0
+        )
         if missing_nas_bytes:
             warnings.append(
                 _as_reason(
