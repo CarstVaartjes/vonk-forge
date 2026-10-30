@@ -785,3 +785,36 @@ def test_interrupt_before_runner_adopts_read_closes_coroutines(monkeypatch):
     finally:
         for item in [work, *captured]:
             item.close()
+
+
+def test_sigint_landing_as_the_runner_arms_is_still_a_ctrl_c(monkeypatch):
+    """Runner.run resets its interrupt counter after installing its handler.
+
+    A SIGINT in that window cancels the task but is forgotten, so the runner
+    re-raises CancelledError. The transport must still report Ctrl-C (exit 130).
+    """
+    from cluster_profiles.control_transport import HTTPSResponse
+
+    real_signal = signal.signal
+    delivered = []
+
+    def signal_then_interrupt(number, handler):
+        previous = real_signal(number, handler)
+        if number == signal.SIGINT and not delivered and handler is not previous:
+            delivered.append(True)
+            signal.raise_signal(signal.SIGINT)
+        return previous
+
+    response = object.__new__(HTTPSResponse)
+    response._interrupted = False
+    with asyncio.Runner() as runner:
+        response._runner = runner
+        response._deadline = runner.get_loop().time() + 30
+        monkeypatch.setattr(signal, "signal", signal_then_interrupt)
+        try:
+            with pytest.raises(KeyboardInterrupt):
+                response._run(asyncio.sleep(30))
+        finally:
+            monkeypatch.undo()
+    assert delivered
+    assert response._interrupted

@@ -103,6 +103,14 @@ class HTTPSResponse(io.BufferedIOBase):
             # bookkeeping, leaving the loop unfit to drive more work.
             self._interrupted = True
             raise
+        except asyncio.CancelledError:
+            # Only the runner's SIGINT handler cancels this task (the deadline
+            # becomes TimeoutError). Runner.run reports that cancel as Ctrl-C
+            # only when its own interrupt counter saw it, and a signal landing
+            # between handler install and counter reset is missed. Whichever
+            # await it lands in, a cancelled task is the operator's interrupt.
+            self._interrupted = True
+            raise KeyboardInterrupt from None
         except (httpx2.HTTPError, OSError) as error:
             # Keep the typed cause for safe classification, never its raw text.
             raise urllib.error.URLError(error) from None
