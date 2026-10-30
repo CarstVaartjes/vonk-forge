@@ -139,6 +139,10 @@ def _model_objects(
             continue
         assert isinstance(model, ModelDefinition)
         target_objects.update(file.sha256 for file in model.files)
+    if not include_shared and target_objects:
+        # Acquiring a pin needs only this immutable model's files. A readable
+        # copy proves the same content even when its cache history is damaged.
+        return target_objects, set()
     for row in session.scalars(
         select(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256.in_(owned))
     ):
