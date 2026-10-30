@@ -18,7 +18,12 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import InstallationState, LifecycleState, RunState
+from vonk_agent_protocol import (
+    InstallationState,
+    LifecycleState,
+    ModelCacheCode,
+    RunState,
+)
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog_revision_collection import operation_tokens
 from vonk_control.fleet_profile_contract import (
@@ -3356,12 +3361,10 @@ class _Volume:
 
 
 @pytest.fixture
-def squeezed(postgres_engine: Engine, tmp_path: Path, monkeypatch):
+def squeezed(world: Catalog, tmp_path: Path, monkeypatch):
     """A cache holding one 1000-byte model on a 10000-byte volume that has
     exactly its reserve (a tenth) free, and a collector for that volume."""
 
-    Base.metadata.create_all(postgres_engine)
-    world = Catalog(postgres_engine)
     volume = _Volume(tmp_path / "nas-cache", 10_000)
     monkeypatch.setattr("shutil.disk_usage", volume.usage)
     service = ModelCacheService(world.sessions, volume.root, fixture_sources=True)
@@ -3440,7 +3443,7 @@ def test_a_download_that_would_breach_the_reserve_evicts_unused_models_then_runs
     waiting = _wait_for_download(service, tmp_path)
     assert waiting.failure is not None
     detail = str(waiting.failure["detail"])
-    assert waiting.failure["code"] == "download_blocked"
+    assert waiting.failure["code"] == ModelCacheCode.DOWNLOAD_BLOCKED
     assert "insufficient-reserved-storage" in detail
     assert "needs 500 bytes free beyond the 1000-byte reserve" in detail
     (demand,) = demands.active()
@@ -3490,7 +3493,7 @@ def test_a_download_waits_with_its_reason_when_only_protected_models_could_be_fr
     assert _scope(swept, "nas")["outcome"] == "insufficient_after_eviction"
     view = service.get_operation(waiting.id)
     assert view.failure is not None
-    assert view.failure["code"] == "download_blocked"
+    assert view.failure["code"] == ModelCacheCode.DOWNLOAD_BLOCKED
     assert view.failure["retryable"] is True
     assert view.next_attempt_at is not None
     assert demands.active()
