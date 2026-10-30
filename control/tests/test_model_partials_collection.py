@@ -531,6 +531,27 @@ def test_a_failed_query_or_unreadable_directory_does_not_stop_the_pass(
     assert gatherer.collect() == (2, False)
 
 
+def test_a_directory_no_writer_can_use_is_removed_by_age_and_logged_once(
+    collector, caplog
+) -> None:
+    gatherer, service, clock = collector
+    stray = _orphan(service, "stray-name")
+    clock.advance(hours=-72 + 23)
+    assert gatherer.collect() == (0, False)
+    assert stray.exists()
+    clock.advance(hours=1)
+    with caplog.at_level("INFO"):
+        assert gatherer.collect() == (1, False)
+        assert gatherer.collect() == (0, False)
+    assert not stray.exists()
+    logged = [
+        r for r in caplog.records if "model_partials.unknown_removed" in r.getMessage()
+    ]
+    assert len(logged) == 1
+    assert "stray-name" in logged[0].getMessage()
+    assert "10" in logged[0].getMessage()
+
+
 def test_a_writer_without_the_owner_lock_fails_loudly(collector, tmp_path: Path):
     _, service, _ = collector
     artifact = _artifact(tmp_path, b"w" * 64)

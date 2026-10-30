@@ -25,6 +25,7 @@ import os
 import re
 import stat
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -50,6 +51,21 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _is_owner(name: str) -> bool:
+    """Whether the name is one a transfer writes: a set digest or a repair."""
+
+    if _DIGEST.match(name):
+        return True
+    suffix = name.removeprefix(REPAIR_PARTIALS_PREFIX)
+    if suffix == name:
+        return False
+    try:
+        uuid.UUID(suffix)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -152,6 +168,18 @@ class ModelPartialsCollector:
         # No database for a directory that changed within the grace period.
         if newest is None or not self._older_than_grace(newest):
             return 0
+        if not _is_owner(name):
+            # No writer can use this name, so no lock protects it: it goes by age.
+            size = self._size(name)
+            self._cache._remove_model_partial_set(name)
+            log_event(
+                _LOGGER,
+                "model_partials.unknown_removed",
+                service="control-worker",
+                name=name,
+                bytes=size,
+            )
+            return 1
         try:
             with self._cache._model_storage_lock(name, model_set=True):
                 # Judged under the lock: a writer that held it shared has
@@ -165,6 +193,16 @@ class ModelPartialsCollector:
         except _ArtifactWriterBusy:
             return 0
         return 1
+
+    def _size(self, name: str) -> int:
+        total = 0
+        for root, _directories, files in os.walk(self._partials / name):
+            for file in files:
+                try:
+                    total += os.lstat(os.path.join(root, file)).st_size
+                except OSError:
+                    continue
+        return total
 
     def _older_than_grace(self, moment: float | None) -> bool:
         if moment is None:
