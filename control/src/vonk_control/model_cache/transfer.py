@@ -41,6 +41,7 @@ from .constants import (
     SCHEMA_VERSION,
 )
 from .errors import ModelCacheError, _ArtifactWriterBusy
+from .partial_owner_lock import partial_owner_lock
 from .persistence import _manifest_of, _operation_cancellation, _store_operation_payload
 
 if TYPE_CHECKING:
@@ -492,7 +493,16 @@ class TransferMixin:
         try:
             # Neither local nor cross-process contention can park a transfer
             # slot. The durable operation is rescheduled after releasing it.
-            with (cache._root / "locks" / spec.sha256).open("a+b") as lock_file:
+            # Every writer of the owner's partials directory holds the shared
+            # owner lock, so the partials collector never removes bytes under it.
+            with (
+                partial_owner_lock(
+                    cache._root,
+                    cache._partial_owner(operation_id, set_digest),
+                    exclusive=False,
+                ),
+                (cache._root / "locks" / spec.sha256).open("a+b") as lock_file,
+            ):
                 try:
                     fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
