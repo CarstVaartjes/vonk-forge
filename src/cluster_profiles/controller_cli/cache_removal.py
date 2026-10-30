@@ -203,7 +203,9 @@ def _confirm_removal(
         return True
     if not args.yes:
         with redirect_stdout(sys.stderr):
-            render_payload(review, noun, action="preview")
+            render_payload(
+                review, noun, action="preview", wide=getattr(args, "wide", False)
+            )
         _confirm_action(args, f"Remove {noun} selector {selector}?")
     return True
 

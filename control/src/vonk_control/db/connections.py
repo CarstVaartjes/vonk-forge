@@ -17,6 +17,7 @@ from sqlalchemy.exc import (
 )
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..logging import redact_text
 from ..settings import DATABASE_WAIT_BUDGETS
 from .constants import (
     _ALEMBIC_CONFIG,
@@ -36,15 +37,26 @@ def _database_sqlstate(error: BaseException) -> str | None:
     return code if isinstance(code, str) else None
 
 
+def _driver_detail(error: BaseException) -> str:
+    """The driver's own words for a failure, redacted and one line long.
+
+    libpq and psycopg state the cause (resolution, refusal, timeout, closed
+    connection, authentication) in the message; no structured code exists.
+    """
+    driver = getattr(error, "orig", None) or error
+    message = " ".join(str(driver).split())
+    return redact_text(message or type(driver).__name__)[:400]
+
+
 def _startup_retryable(error: BaseException) -> bool:
     if isinstance(error, (_DatabaseStartupContention, TimeoutError)):
         return True
     if not isinstance(error, (InterfaceError, OperationalError)):
         return False
     code = _database_sqlstate(error)
-    # Failed connection establishment may lack SQLSTATE even after a server
-    # authentication refusal. Its cause remains unknown: retry is bounded and
-    # never changes credentials or grants access.
+    # Failed connection establishment carries no SQLSTATE, even after a server
+    # authentication refusal, so it stays retryable; the log names the driver's
+    # message. Retry is bounded and never changes credentials or grants access.
     # Retry only a connection fault or PostgreSQL's cannot-connect-now startup
     # response. Permissions, schema damage and integrity refusals remain fatal.
     return code is None or code.startswith("08") or code == "57P03"
@@ -133,10 +145,11 @@ def run_with_database_startup_retry[T](
 
     Container DNS and PostgreSQL can become available in either order after a
     host or Docker restart.  Keep startup deterministic by retrying only
-    typed connection faults, unknown connection establishment and exact startup
-    contention. Diagnostics remain redacted and the fixed deadline never resets.
-    Known schema and permission refusals remain fatal immediately; an untyped
-    handshake failure remains unknown until the bounded attempt expires.
+    typed connection faults, connection establishment failures and exact startup
+    contention. Diagnostics carry the driver's own redacted message and the
+    fixed deadline never resets. Known schema and permission refusals remain
+    fatal immediately; a handshake failure without SQLSTATE stays retryable
+    until the bounded attempt expires.
     The deadline controls retry admission; an individual connection attempt has
     its own per-host driver budget and can finish after that deadline.
     """
@@ -150,6 +163,13 @@ def run_with_database_startup_retry[T](
             return operation()
         except (*_DATABASE_RETRYABLE_ERRORS, _DatabaseStartupContention) as error:
             if not _startup_retryable(error):
+                if isinstance(error, (InterfaceError, OperationalError)):
+                    print(
+                        f"{label} startup failed; not retrying; "
+                        f"{_driver_detail(error)}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 raise
             remaining = deadline - monotonic()
             if remaining <= 0:
@@ -158,8 +178,8 @@ def run_with_database_startup_retry[T](
                     and _database_sqlstate(error) is None
                 ):
                     print(
-                        f"{label} startup deadline expired; connection establishment "
-                        "cause unknown (driver SQLSTATE unavailable); credentials unchanged",
+                        f"{label} startup deadline expired; "
+                        f"{_driver_detail(error)}; credentials unchanged",
                         file=sys.stderr,
                         flush=True,
                     )
@@ -167,19 +187,19 @@ def run_with_database_startup_retry[T](
             wait = min(delay, remaining)
             attempts += 1
             if isinstance(error, _DatabaseStartupContention):
-                reason = str(error)
+                failure = str(error)
             elif isinstance(error, (InterfaceError, OperationalError)):
                 code = _database_sqlstate(error)
-                reason = (
-                    f"{type(error).__name__}; SQLSTATE {code}"
+                failure = (
+                    f"{type(error).__name__}; SQLSTATE {code}; {_driver_detail(error)}"
                     if code is not None
-                    else "connection establishment cause unknown; driver SQLSTATE unavailable"
+                    else _driver_detail(error)
                 )
             else:
-                reason = type(error).__name__
+                failure = type(error).__name__
             print(
                 f"{label} unavailable during startup (attempt {attempts}; "
-                f"{reason}); retrying in {wait:.1f}s",
+                f"{failure}); retrying in {wait:.1f}s",
                 file=sys.stderr,
                 flush=True,
             )

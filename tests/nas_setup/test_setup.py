@@ -207,9 +207,7 @@ def test_absent_custody_does_not_block_compose_and_fresh_request_recovers(
     )
     with pytest.raises(ObservationUnavailable):
         prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
-    assert (
-        installed / "docker-compose.yaml"
-    ).read_text() == template.docker_compose_yaml
+    assert (installed / "docker-compose.yaml").read_text() == ("services:\n  new: {}\n")
     assert not signer.exists()
     retained.write_bytes(original)
     prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)

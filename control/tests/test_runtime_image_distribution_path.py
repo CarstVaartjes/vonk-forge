@@ -80,7 +80,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     nodes = ("spk_" + "1" * 32,)
     plan = RunSwitchPlan.model_construct(
         preparation=None,
-        storage=SimpleNamespace(artifact_digests=[model.sha256]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
         image_digest=BUILT_IMAGE_DIGEST,
         build=SimpleNamespace(
             oci_layout_sha256=None, image_bytes=None, build_input_sha256=None
@@ -211,7 +211,7 @@ def _archive_gate_service(tmp_path: Path):
     service = DistributionService(source, sessions=sessions)
     plan = RunSwitchPlan.model_construct(
         preparation=None,
-        storage=SimpleNamespace(artifact_digests=["b" * 64]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
         image_digest=BUILT_IMAGE_DIGEST,
         build=SimpleNamespace(
             oci_layout_sha256=None, image_bytes=None, build_input_sha256=None

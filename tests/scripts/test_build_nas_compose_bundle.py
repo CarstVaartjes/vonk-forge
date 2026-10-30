@@ -343,3 +343,113 @@ def test_ci_secret_group_helper_uses_the_compose_gid() -> None:
     }
     assert gids == {"64400"}
     assert "gid=64400\n" in helper
+
+
+@pytest.mark.parametrize(
+    ("mode", "hermes", "selection", "expected"),
+    [
+        ("lab", False, "", set()),
+        ("secure-remote", False, "secure-remote", {"tailscale"}),
+        ("secure-remote", True, "secure-remote,hermes", {"tailscale", "hermes"}),
+    ],
+)
+def test_installer_writes_the_selected_services_without_profiles(
+    tmp_path: Path, mode: str, hermes: bool, selection: str, expected: set[str]
+) -> None:
+    """Catch a profiled service the NAS Docker UI (no profile flags) never deploys."""
+    import io
+
+    from vonk_agent_protocol.installer_setup import NasInstallTemplate
+    from vonk_nas_setup.environment import parse_environment
+    from vonk_nas_setup.prompts import PromptIo
+    from vonk_nas_setup.setup import prepare
+
+    payload = tmp_path / "payload.json"
+    assert _build(_render(tmp_path), payload).returncode == 0
+    template = NasInstallTemplate.model_validate_json(payload.read_text("utf-8"))
+    answers = {
+        "lab": "lab\n192.168.1.5\n\n\n",
+        "secure-remote": "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\n"
+        "id\nsecret\n\n\n",
+    }[mode]
+    bundle = prepare(
+        template,
+        tmp_path / "nas",
+        PromptIo(io.StringIO(answers + ("yes\n" if hermes else "no\n"))),
+    ).root
+
+    assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == selection
+    written = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
+    assert all("profiles" not in service for service in written["services"].values())
+    optional = {
+        "tailscale": {"tailscale-gateway", "tailscale-configurator"},
+        "hermes": {"hermes-agent", "hermes-litellm-key-provisioner"},
+    }
+    present = set(written["services"])
+    assert present == SERVICES - set().union(
+        *(names for key, names in optional.items() if key not in expected)
+    )
+    # Anything only an unselected service used is gone, and the selection that
+    # reaches the container is the literal one from .env.
+    if "tailscale" not in expected:
+        assert "tailscale-state" not in written["volumes"]
+        assert "tailscale-oauth-client-id" not in written["secrets"]
+    else:
+        configurator = written["services"]["tailscale-configurator"]
+        assert configurator["environment"]["VONK_SELECTED_PROFILES"] == selection
+
+
+@pytest.mark.parametrize(
+    ("first", "hermes", "selection", "present", "absent"),
+    [
+        (
+            "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\nyes\n",
+            None,
+            "secure-remote,hermes",
+            {"tailscale-gateway", "tailscale-configurator", "hermes-agent"},
+            set(),
+        ),
+        (
+            "lab\n192.168.1.5\n\n\n",
+            True,
+            "hermes",
+            {"hermes-agent", "hermes-litellm-key-provisioner"},
+            {"tailscale-gateway", "tailscale-configurator"},
+        ),
+    ],
+)
+def test_upgrade_rewrites_the_selected_services_without_profiles(
+    tmp_path: Path,
+    first: str,
+    hermes: bool | None,
+    selection: str,
+    present: set[str],
+    absent: set[str],
+) -> None:
+    """Catch an upgrade that rewrites the profiled payload or loses the selection."""
+    import io
+
+    from vonk_agent_protocol.installer_setup import NasInstallTemplate
+    from vonk_nas_setup.environment import parse_environment
+    from vonk_nas_setup.prompts import PromptIo
+    from vonk_nas_setup.setup import prepare
+
+    payload = tmp_path / "payload.json"
+    assert _build(_render(tmp_path), payload).returncode == 0
+    template = NasInstallTemplate.model_validate_json(payload.read_text("utf-8"))
+    nas = tmp_path / "nas"
+    bundle = prepare(template, nas, PromptIo(io.StringIO(first))).root
+    # Upgrade from an older, stale file: it must be rewritten from the payload.
+    (bundle / "docker-compose.yaml").write_text("services: {}\n")
+    prepare(
+        template, nas, PromptIo(io.StringIO("")), upgrade=True, hermes_enabled=hermes
+    )
+
+    assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == selection
+    written = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
+    assert all("profiles" not in service for service in written["services"].values())
+    assert present <= set(written["services"])
+    assert not absent & set(written["services"])
+    if "tailscale-configurator" in present:
+        configurator = written["services"]["tailscale-configurator"]
+        assert configurator["environment"]["VONK_SELECTED_PROFILES"] == selection

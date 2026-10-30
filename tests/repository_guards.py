@@ -37,6 +37,9 @@ GUARDS: tuple[str, ...] = (
     "tests/test_shell_destructive_guard.py",
     "tests/test_workflow_assertions.py",
     "tests/test_workflow_event_context.py",
+    "tests/test_ci_label_events.py",
+    "tests/test_ci_cache_warm.py",
+    "tests/test_workflow_cache_saves.py",
     "tests/test_workflow_script_environments.py",
     "tests/test_reusable_workflow_permissions.py",
     "tests/test_release_workflow.py",
@@ -89,6 +92,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     ),
     (
         "tests/nas_setup/test_cli.py",
+        "Portable NAS setup behavior and recovery; no whole-tree product scan.",
+    ),
+    (
+        "tests/nas_setup/test_compose.py",
         "Portable NAS setup behavior and recovery; no whole-tree product scan.",
     ),
     (

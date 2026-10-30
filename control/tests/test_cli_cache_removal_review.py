@@ -325,10 +325,8 @@ def test_review_presentation_keeps_owner_findings_and_blockers(
     render_payload(_review("model", "publisher/model"), "model", action="preview")
     text = capsys.readouterr().out
 
-    assert "Saved references:" in text
-    assert "profile profile-4" in text
-    assert "Active work:" in text
-    assert "download operation-5" in text
+    assert "Saved references: profile (current): profile profile-4" in text
+    assert "Active work: download (running): download operation-5" in text
     assert "publisher/model" in text
 
 

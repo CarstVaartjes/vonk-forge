@@ -86,9 +86,6 @@ class DistributionIdentity:
         objects = tuple(getter(model_set_digest))
         if not objects or any(item.kind != "model" for item in objects):
             raise RuntimeError("verified model cache manifest is incomplete")
-        expected_digests = set(plan.storage.artifact_digests)
-        if expected_digests and {item.sha256 for item in objects} != expected_digests:
-            raise RuntimeError("verified model cache manifest does not match the plan")
         # Content identity: identical content at several paths counts once.
         actual_bytes = sum({item.sha256: item.bytes for item in objects}.values())
         if model_set_bytes is not None and actual_bytes != model_set_bytes:
