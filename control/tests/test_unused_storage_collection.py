@@ -3398,11 +3398,22 @@ def squeezed(world: Catalog, tmp_path: Path, monkeypatch):
 
 
 def _wait_for_download(service: ModelCacheService, tmp_path: Path):
+    return _wait_for_download_of(service, tmp_path, 500)
+
+
+def _touch_set(world: Catalog, set_digest: str, when: datetime) -> None:
+    with world.sessions.begin() as session:
+        row = session.get(ModelCacheSet, set_digest)
+        assert row is not None
+        row.last_accessed_at = row.updated_at = when
+
+
+def _wait_for_download_of(service: ModelCacheService, tmp_path: Path, size: int):
     other = tmp_path / "other"
     other.mkdir()
     return _download(
         service,
-        [_artifact(other, b"n" * 500, model_content_sha256="b" * 64)],
+        [_artifact(other, b"n" * size, model_content_sha256="b" * 64)],
         model_content_sha256="b" * 64,
         request_key=str(uuid.uuid4()),
     )
@@ -3545,3 +3556,86 @@ def test_eviction_goes_toward_the_line_when_a_waiting_download_cannot_be_met(
     assert squeezed.volume.free >= 1300
     # Still short of the whole demand (500 + 1000): the download keeps waiting.
     assert service.get_operation(waiting.id).failure is not None
+
+
+def test_an_unmet_demand_evicts_only_as_far_as_the_line(
+    world: Catalog, tmp_path: Path, monkeypatch
+) -> None:
+    """Catches evicting every unused model for a download that cannot be met:
+    the cached models would go and the download would still wait."""
+
+    volume = _Volume(tmp_path / "nas-cache", 10_000)
+    monkeypatch.setattr("shutil.disk_usage", volume.usage)
+    service = ModelCacheService(world.sessions, volume.root, fixture_sources=True)
+    demands = StorageDemands(lambda: datetime.now(UTC))
+    service.bind_storage_demands(demands)
+    try:
+        digests = []
+        for index in range(3):
+            source = tmp_path / f"src{index}"
+            source.mkdir()
+            model = f"{index + 1:064x}"
+            stored = _download(
+                service,
+                [
+                    _artifact(
+                        source, bytes([index + 1]) * 1000, model_content_sha256=model
+                    )
+                ],
+                model_content_sha256=model,
+                request_key=str(uuid.uuid4()),
+            )
+            assert stored.state == "succeeded"
+            digests.append(str(stored.artifact_set_sha256))
+            _touch_set(world, digests[-1], NOW - timedelta(days=9 - index))
+        volume.fill_until_free(999)  # one byte under the 1000-byte line
+        waiting = _wait_for_download_of(service, tmp_path, 5000)
+        assert waiting.failure is not None
+        collector = _models(
+            world,
+            service,
+            demands=demands,
+            disk_usage=volume.pair,
+            reserve_fraction=0,
+            reserve_floor_bytes=0,
+            # The line stays at a tenth although the waiting set is larger.
+            low_free_cap_fraction=0.1,
+        )
+
+        swept = collector.collect()
+
+        _settle(service)
+        assert swept.models == 1
+        assert _scope(swept, "nas")["outcome"] == "insufficient_after_eviction"
+        assert [_set_exists(world, digest) for digest in digests] == [False, True, True]
+    finally:
+        service.close()
+
+
+def test_an_unmet_spark_demand_uninstalls_only_as_far_as_the_line(
+    world: Catalog,
+) -> None:
+    """Catches uninstalling every unused installation for a load that cannot be
+    met by all of them together."""
+
+    oldest, _middle, _newest = _three_idle(world, newest_age=timedelta(days=2))
+    lifecycle = FakeLifecycle(world.sessions)
+    demands = StorageDemands(lambda: world.now)
+    _within_grace(world)
+    collector = _collector(world, lifecycle, free=90 * GIB, demands=demands)
+    demands.request(
+        spark_scope(NODE),
+        900 * GIB,
+        source="profile-load",
+        subject="p",
+        reason="run-switch.insufficient-disk",
+    )
+
+    result = collector.collect()
+
+    assert lifecycle.removed == [oldest]
+    assert _scope(result, spark_scope(NODE))["outcome"] == "insufficient_after_eviction"
+    relief = collector.relief_for_spark(
+        NODE, 900 * GIB, source="profile-load", subject="p", reason="x"
+    )
+    assert relief is not None and relief.code == STORAGE_INSUFFICIENT

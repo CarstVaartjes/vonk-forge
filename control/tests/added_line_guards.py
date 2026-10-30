@@ -72,7 +72,11 @@ MODES = (
     "openers",
     "follow-validators",
 )
-FIXED_RESERVE = re.compile(r"([A-Z][A-Z0-9_]*RESERVE[A-Z0-9_]*_BYTES)\s*=\s*[\d(]")
+# A name that reserves volume space (not "reserved": space a run holds) bound to
+# a number or a constant, anywhere on the line, annotated or not.
+FIXED_RESERVE = re.compile(
+    r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
+)
 # Fixed reserves that guard something other than NAS volume space.
 FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
     (
@@ -87,6 +91,10 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
         "control/src/vonk_control/settings.py",
         "STORAGE_EVICTION_RESERVE_FLOOR_BYTES",
     ): "headroom the collector evicts beyond a shortfall, not a gate",
+    (
+        "control/src/vonk_control/unused_storage_collection/service.py",
+        "reserve_floor_bytes",
+    ): "the collector's headroom floor, defaulted from that setting",
 }
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
@@ -1399,7 +1407,7 @@ def check_source(
         hits.extend(
             (line, "fixed byte reserve; derive it from the volume's total")
             for line, text in enumerate(source.splitlines(), 1)
-            if (match := FIXED_RESERVE.match(text))
+            if (match := FIXED_RESERVE.search(text))
             and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
         )
     if (

@@ -126,9 +126,9 @@ class DownloadAdmissionMixin:
             if isinstance(planned, ModelCacheTransfer)
             else cache._transfer_state_for_manifest(manifest, force=force)
         )
-        capacity = cache._capacity_wait(
-            waiting_for, int(str(preview["_required_bytes"]))
-        )
+        required = preview["_required_bytes"]
+        assert isinstance(required, int)
+        capacity = cache._capacity_wait(waiting_for, required)
         wait_until = None if capacity is None else capacity[1]
         payload = _write_operation_payload(
             "download",

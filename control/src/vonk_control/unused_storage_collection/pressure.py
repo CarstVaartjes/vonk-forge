@@ -165,6 +165,7 @@ def _pressure(
         why,
         demanded,
         line_shortfall,
+        line_shortfall + reserve if line_shortfall else 0,
     )
 
 
@@ -225,14 +226,15 @@ def _relieve(
         # the work that asked, and nothing else is short.
         outcome.outcome = "insufficient_after_eviction"
         return outcome
-    # Below the low-space line, eviction goes on toward the line (and as far
-    # as the demand, as far as the unused items reach) even when the refused
-    # work cannot be met: the co-located services need the line either way.
+    # Below the low-space line, eviction goes on toward the line even when the
+    # refused work cannot be met (the co-located services need the line either
+    # way), and stops there: more would cost cached items and still not admit it.
+    target = pressure.line_need if unmet else pressure.need
     ordered = _eviction_order(items)
     queued = 0
     measured_removal = 0
     for item in ordered:
-        if queued >= pressure.need or outcome.stopping:
+        if queued >= target or outcome.stopping:
             # A failed run's Stop must land before more is judged needed.
             break
         done = attempted.get((item.kind, item.key))

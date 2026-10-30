@@ -264,6 +264,9 @@ class _Pressure:
     #: Bytes missing for the low-space line, whether or not work was refused.
     #: Eviction goes toward the line even when the refused work cannot be met.
     line_shortfall: int = 0
+    #: What a pass frees toward the line alone (the line shortfall plus a
+    #: reserve) when the refused work cannot be met.
+    line_need: int = 0
 
 
 class StorageItemKind(StrEnum):
