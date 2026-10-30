@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_control.agent_api.common import _prepare_recipe_image_upload
 from vonk_control.image_store_collection import GRACE, ImageStoreCollector
 from vonk_control.models import (
     AgentNode,
@@ -159,6 +160,29 @@ def test_an_upload_no_build_waits_on_is_reclaimed(system) -> None:
 
     assert waiting.exists()
     assert not abandoned.exists()
+
+
+def test_an_abandoned_partial_upload_is_removed_and_a_locked_one_kept(system) -> None:
+    _sessions, storage, collector = system
+    cache = storage.root
+    cache.mkdir(parents=True, exist_ok=True)
+    # The real writer creates the partial and locks it; a killed writer's
+    # lock is dropped by the kernel when its descriptor closes.
+    killed, live, fresh = ("a" * 64, "b" * 64, "c" * 64)
+    paths = {}
+    for key in (killed, live, fresh):
+        descriptor, paths[key] = _prepare_recipe_image_upload(cache, key)
+        os.write(descriptor, b"partial docker archive")
+        if key != live:
+            os.close(descriptor)
+    assert paths[killed].name == f".{killed}.upload"
+    _age(paths[killed], paths[live])
+
+    collector.collect()
+
+    assert not paths[killed].exists()
+    assert paths[live].exists()
+    assert paths[fresh].exists()
 
 
 def _damage_manifest(storage, address: str, how: str, monkeypatch) -> None:
