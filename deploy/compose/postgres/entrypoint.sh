@@ -109,10 +109,24 @@ backup_loop() {
   state_temporary=/state/.last-successful-backup.epoch.tmp
   verification_temporary=/state/.last-backup-restore-verification.epoch.tmp
   offhost_temporary=/offhost/.postgres-backup.tmp.gz
+  margin=268435456
   cleanup() {
-    rm -f "$temporary" "$temporary.gz" "$state_temporary" "$verification_temporary" "$offhost_temporary"
+    rm -f "$temporary" "$temporary.gz" "$temporary.status" "$state_temporary" "$verification_temporary" "$offhost_temporary"
   }
   trap 'cleanup; exit 0' TERM INT
+  # A SIGKILLed container never ran the trap; drop its leftovers before any attempt.
+  cleanup
+  free_bytes() {
+    df -Pk "$1" 2>/dev/null | { read -r _; read -r _ _ _ available _; echo $((${available:-0} * 1024)); }
+  }
+  # Succeeds when the filesystem of $1 has $2 bytes free; otherwise says so.
+  has_space() {
+    free=$(free_bytes "$1")
+    if [ "$free" -lt "$2" ]; then
+      echo "PostgreSQL backup needs $2 bytes free on $1 but only $free are free" >&2
+      return 1
+    fi
+  }
   restore_verify() (
     set -e
     restore_directory=$(mktemp -d /tmp/vonk-backup-restore.XXXXXX)
@@ -146,9 +160,26 @@ backup_loop() {
       fi
     }
     trap 'report_failure "$?"' EXIT
+    step=space-check
+    database_bytes=$(gosu postgres psql --username "$POSTGRES_USER" --dbname postgres -XtAc \
+      'SELECT coalesce(sum(pg_database_size(datname)), 0)::bigint FROM pg_database')
+    # The compressed dump stays below the database size; the off-host copy may
+    # share the backup volume, in which case both copies must fit.
+    needed=$((database_bytes + margin))
+    offhost_needed=0
+    if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
+      offhost_needed=$needed
+      [ "$(stat -c %d /backups)" = "$(stat -c %d /offhost 2>/dev/null)" ] && needed=$((needed + offhost_needed))
+    fi
+    has_space /backups "$needed"
+    [ "$offhost_needed" -eq 0 ] || has_space /offhost "$offhost_needed"
     step=dump
-    gosu postgres pg_dumpall --username "$POSTGRES_USER" --database postgres > "$temporary"
-    gzip -c "$temporary" > "$temporary.gz"
+    # dash has no pipefail: record the dump status so a failed dump cannot hide
+    # behind a gzip that happily compressed its partial output.
+    { gosu postgres pg_dumpall --username "$POSTGRES_USER" --database postgres \
+      && echo 0 > "$temporary.status" || echo 1 > "$temporary.status"; } | gzip -c > "$temporary.gz"
+    [ "$(cat "$temporary.status")" = 0 ]
+    rm -f "$temporary.status"
     gzip -t "$temporary.gz"
     step=publish
     destination=/backups/postgres-$(date -u +%Y%m%dT%H%M%SZ).sql.gz
@@ -158,7 +189,6 @@ backup_loop() {
     # UID/GID so the invoking user can inspect and prune them safely.
     chown "$backup_owner" "$destination"
     chmod 0600 "$destination"
-    rm -f "$temporary"
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then
       step=off-host-copy
       [ -d /offhost ]
@@ -167,16 +197,24 @@ backup_loop() {
       mv "$offhost_temporary" "/offhost/$(basename "$destination")"
     fi
     step=restore-verification
-    restore_verify
+    verified=1
+    if ! has_space /tmp $((database_bytes * 2 + margin)); then
+      echo "PostgreSQL restore verification skipped this round: not enough scratch space" >&2
+      verified=0
+    else
+      restore_verify
+    fi
     step=success-marker
     now=$(date +%s)
-    printf '%s\n' "$now" > "$verification_temporary"
-    chmod 0644 "$verification_temporary"
-    mv "$verification_temporary" /state/last-backup-restore-verification.epoch
+    if [ "$verified" -eq 1 ]; then
+      printf '%s\n' "$now" > "$verification_temporary"
+      chmod 0644 "$verification_temporary"
+      mv "$verification_temporary" /state/last-backup-restore-verification.epoch
+    fi
     printf '%s\n' "$now" > "$state_temporary"
     chmod 0644 "$state_temporary"
     mv "$state_temporary" /state/last-successful-backup.epoch
-    echo "PostgreSQL backup completed and restore-verified: $destination"
+    echo "PostgreSQL backup completed (restore-verified: $verified): $destination"
   )
   while :; do
     if [ ! -d /backups ]; then

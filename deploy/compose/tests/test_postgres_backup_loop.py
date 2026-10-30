@@ -26,10 +26,26 @@ STUBS = {
     "initdb": "exit 0\n",
     "pg_ctl": "exit 0\n",
     "install": 'for last; do :; done\nexec mkdir -p "$last"\n',
-    "pg_dumpall": "printf '%s\\n' 'CREATE DATABASE litellm;'\n",
+    # Records what is on disk while the dump streams, then dumps (or fails).
+    "pg_dumpall": (
+        'ls -A "$BACKUPS" >"$LISTING"\n'
+        "printf '%s\\n' 'CREATE DATABASE litellm;'\n"
+        '[ "$FAULT" = dump ] && exit 1\n'
+        "exit 0\n"
+    ),
+    # POSIX df output; /tmp is the restore scratch location.
+    "df": (
+        'case "$*" in\n'
+        "  */tmp) kb=${FREE_TMP_KB:-100000000} ;;\n"
+        "  *) kb=${FREE_KB:-100000000} ;;\n"
+        "esac\n"
+        "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+        'echo "stub 1 1 $kb 1% /"\n'
+    ),
     # The verification query answers how many expected databases exist.
     "psql": (
         'case "$*" in\n'
+        "  *pg_database_size*) echo 1000 ;;\n"
         '  *-tAc*) [ "$FAULT" = verify ] && echo 1 || echo 2 ;;\n'
         "  *) cat >/dev/null ;;\n"
         "esac\n"
@@ -68,7 +84,12 @@ def _backup_loop(root: Path) -> str:
 
 
 def _start(
-    tmp_path: Path, fault: str, *, sleep_seconds: str = "0.05"
+    tmp_path: Path,
+    fault: str,
+    *,
+    sleep_seconds: str = "0.05",
+    seed: Callable[[Path], None] | None = None,
+    extra_environment: dict[str, str] | None = None,
 ) -> tuple[subprocess.Popen[str], Path]:
     dash = shutil.which("dash")
     if dash is None:
@@ -81,6 +102,8 @@ def _start(
         stub = tmp_path / "bin" / name
         stub.write_text("#!/bin/sh\n" + body, encoding="ascii")
         stub.chmod(0o755)
+    if seed is not None:
+        seed(tmp_path)
     script = tmp_path / "loop.sh"
     # The entrypoint runs under `set -eu`, which the loop inherits.
     script.write_text(
@@ -92,6 +115,9 @@ def _start(
     environment = {
         **os.environ,
         "FAULT": fault,
+        "BACKUPS": str(tmp_path / "backups"),
+        "LISTING": str(tmp_path / "listing"),
+        **(extra_environment or {}),
         "WORKER_PID": str(tmp_path / "worker.pid"),
         "FAULTS": str(tmp_path / "faults"),
         "PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}",
@@ -186,3 +212,106 @@ def test_signalling_the_background_pid_runs_the_backup_cleanup(tmp_path: Path) -
         assert not temporary.exists(), "the loop's signal trap never ran"
     finally:
         _terminate(loop)
+
+
+def _run_until_marker(loop: subprocess.Popen[str], state: Path) -> str:
+    try:
+        _wait_for((state / "last-successful-backup.epoch").is_file, loop)
+    except BaseException:
+        _terminate(loop)
+        raise
+    return _terminate(loop)
+
+
+def test_the_dump_streams_into_gzip_without_an_uncompressed_temporary(
+    tmp_path: Path,
+) -> None:
+    loop, state = _start(tmp_path, "none", sleep_seconds="30")
+    _run_until_marker(loop, state)
+
+    # While pg_dumpall ran, no uncompressed dump file existed on the volume.
+    listing = (tmp_path / "listing").read_text(encoding="ascii").split()
+    assert ".postgres-backup.tmp" not in listing
+    assert (state / "last-backup-restore-verification.epoch").is_file()
+
+
+def test_temporaries_left_by_a_killed_run_are_removed_at_start(tmp_path: Path) -> None:
+    def leftovers(root: Path) -> None:
+        for name in (
+            "backups/.postgres-backup.tmp",
+            "backups/.postgres-backup.tmp.gz",
+            "backups/.postgres-backup.tmp.status",
+            "offhost/.postgres-backup.tmp.gz",
+        ):
+            (root / name).write_text("left by SIGKILL", encoding="ascii")
+
+    loop, state = _start(tmp_path, "none", sleep_seconds="30", seed=leftovers)
+    _run_until_marker(loop, state)
+
+    assert not list((tmp_path / "backups").glob(".postgres-backup.tmp*"))
+    assert not list((tmp_path / "offhost").glob(".postgres-backup.tmp*"))
+
+
+def test_insufficient_space_skips_the_attempt_and_keeps_the_old_marker(
+    tmp_path: Path,
+) -> None:
+    def old_marker(root: Path) -> None:
+        (root / "state/last-successful-backup.epoch").write_text("123\n")
+
+    loop, state = _start(
+        tmp_path, "none", seed=old_marker, extra_environment={"FREE_KB": "1"}
+    )
+    sleeps = tmp_path / "sleeps"
+    try:
+        _wait_for(
+            lambda: (
+                sleeps.is_file()
+                and sleeps.read_text(encoding="ascii").split().count("300") >= 2
+            ),
+            loop,
+        )
+    finally:
+        stderr = _terminate(loop)
+
+    assert "needs" in stderr and "bytes free" in stderr
+    assert (state / "last-successful-backup.epoch").read_text() == "123\n"
+    assert not (tmp_path / "listing").exists(), "the dump started without space"
+    assert not list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+    assert not list((tmp_path / "backups").glob(".postgres-backup.tmp*"))
+
+
+def test_a_failed_dump_fails_the_attempt_even_when_gzip_succeeds(
+    tmp_path: Path,
+) -> None:
+    loop, state = _start(tmp_path, "dump")
+    sleeps = tmp_path / "sleeps"
+    try:
+        _wait_for(
+            lambda: (
+                sleeps.is_file()
+                and sleeps.read_text(encoding="ascii").split().count("300") >= 2
+            ),
+            loop,
+        )
+    finally:
+        stderr = _terminate(loop)
+
+    assert "failed at step dump" in stderr
+    assert not list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+    assert not (state / "last-successful-backup.epoch").exists()
+
+
+def test_restore_verification_is_skipped_when_the_scratch_space_is_short(
+    tmp_path: Path,
+) -> None:
+    loop, state = _start(
+        tmp_path,
+        "none",
+        sleep_seconds="30",
+        extra_environment={"FREE_TMP_KB": "1"},
+    )
+    stderr = _run_until_marker(loop, state)
+
+    assert "restore verification skipped" in stderr
+    assert list((tmp_path / "backups").glob("postgres-*.sql.gz"))
+    assert not (state / "last-backup-restore-verification.epoch").exists()
