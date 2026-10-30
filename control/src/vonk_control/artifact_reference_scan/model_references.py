@@ -15,8 +15,13 @@ from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import recipe_model_digests
+from ..content_identity import (
+    installation_uses_models,
+    recipe_model_digests,
+    recipe_revisions_using_models,
+)
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
+from ..model_cache_contract import CacheManifest
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -24,10 +29,10 @@ from ..models import (
     Job,
     ModelCacheOperation,
     ModelCacheSet,
-    ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
 )
+from ..stored_json import read_row_column
 from .intents import (
     _installation_plan,
     _profile_plan,
@@ -51,6 +56,7 @@ def model_set_reference_findings(
     """Find typed saved-profile and active owners of exact model sets."""
 
     from ..model_cache.errors import ModelCacheError
+    from ..model_cache.lineage import lineage_contents, set_bindings
     from ..model_cache.resolution import resolve_recipe_set
 
     selected = set(set_digests)
@@ -75,34 +81,31 @@ def model_set_reference_findings(
     }
 
     # A set is held when it is the set a protected recipe revision resolves to,
-    # as a download resolves it (identical files resolve to the same set). A
-    # revision that cannot be resolved holds the sets bound to its models.
-    present = set(
-        session.scalars(
-            select(ModelCacheSetArtifact.artifact_set_sha256)
-            .where(ModelCacheSetArtifact.artifact_set_sha256.in_(sorted(selected)))
-            .distinct()
+    # as a download resolves it (identical files resolve to the same set). Only
+    # revisions and installations bound to the target's model lineage can name
+    # these sets, so only those are read. A revision that cannot be resolved, or
+    # whose resolved set is not cached yet (a refresh in flight), holds the
+    # selected sets of its models' lineage until the new set is cached.
+    serves: dict[str, frozenset[str]] = {}
+    for digest, row in sets.items():
+        manifest = read_row_column(row, "manifest")
+        serves[digest] = set_bindings(
+            row.model_content_sha256,
+            manifest.verified_models if isinstance(manifest, CacheManifest) else (),
         )
-    )
-    for set_digest in selected - present:
-        label = f"model set {set_digest} has no membership"
-        findings[set_digest].add(
-            _finding(
-                "model-set",
-                set_digest,
-                owner_kind="model-cache-set",
-                owner_id=set_digest,
-                state="unverified",
-                classification="active-work",
-                detail="the set's membership is unavailable, so it is kept",
-                reason=label,
-            )
-        )
-
+    lineage = {
+        content
+        for model in set().union(*serves.values())
+        for content in lineage_contents(session, model)
+    }
     profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
     named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
     resolved = _selectors_revisions(
         session, {selector for chosen in named.values() for selector in chosen or ()}
+    )
+    revision_ids = {revision.id for found in resolved.values() for revision in found}
+    related = set(
+        session.scalars(recipe_revisions_using_models(lineage, among=revision_ids))
     )
     running = list(
         session.scalars(
@@ -116,31 +119,43 @@ def model_set_reference_findings(
                         RecipeRun.state.in_(RUN_LIVE),
                     )
                     .exists(),
-                )
+                ),
+                installation_uses_models(lineage),
             )
             .order_by(RecipeInstallation.id)
         )
     )
-    revision_ids = {revision.id for found in resolved.values() for revision in found}
     bound = recipe_model_digests(
-        session, revision_ids | {row.recipe_revision_id for row in running}
+        session, related | {row.recipe_revision_id for row in running}
     )
+    by_lineage: dict[str, set[str]] = {}
 
-    def bound_sets(models: Iterable[str]) -> set[str]:
-        """The selected sets first cached for these models (no parsing)."""
-        wanted = set(models)
-        return {
-            digest for digest, row in sets.items() if row.model_content_sha256 in wanted
+    def lineage_sets(models: Iterable[str]) -> set[str]:
+        """The selected sets cached for these models' lineage (no parsing)."""
+        wanted = {
+            content
+            for model in models
+            for content in by_lineage.setdefault(
+                model, set(lineage_contents(session, model))
+            )
         }
+        return {digest for digest, models in serves.items() if models & wanted}
 
     resolves: dict[str, str | None] = {}
 
     def resolved_set(ident: str) -> str | None:
         if ident not in resolves:
             try:
-                resolves[ident] = resolve_recipe_set(session, ident).digest
+                digest = resolve_recipe_set(session, ident).digest
             except (ModelCacheError, TypeError, ValueError):
-                resolves[ident] = None
+                digest = None
+            if (
+                digest is not None
+                and digest not in sets
+                and session.get(ModelCacheSet, digest) is None
+            ):
+                digest = None
+            resolves[ident] = digest
         return resolves[ident]
 
     for profile in profiles:
@@ -152,11 +167,13 @@ def model_set_reference_findings(
             found = resolved[selector]
             held = set() if found else set(selected)
             for revision in found:
+                if revision.id not in related:
+                    continue
                 digest = resolved_set(revision.id)
                 held |= (
                     {digest} & selected
                     if digest is not None
-                    else bound_sets(bound.get(revision.id, ()))
+                    else lineage_sets(bound.get(revision.id, ()))
                 )
             _protect_saved(findings, profile, "model-set", held)
 
@@ -231,7 +248,7 @@ def model_set_reference_findings(
             }
         else:
             # Its plan cannot be read: it keeps the sets of the models its rows name.
-            held = bound_sets(
+            held = lineage_sets(
                 bound.get(row.recipe_revision_id, frozenset())
                 | ({row.model_content_sha256} if row.model_content_sha256 else set())
             )

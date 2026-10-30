@@ -15,7 +15,7 @@ from importlib.resources import files
 from typing import cast
 
 import pytest
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_control.artifact_reference_scan import model_set_reference_findings
@@ -124,6 +124,7 @@ def model(
     depends_on: tuple[tuple[str, str], ...] = (),
     version: str = "1.0.0",
     number: int = 1,
+    upstream: str = "0" * 40,
 ) -> str:
     """A catalog model with one file per name; returns its content digest."""
     document = _example("model-definition.json")
@@ -131,7 +132,7 @@ def model(
     document["identity"]["model"].update(publisher=PUBLISHER, slug=slug)
     document["source"] = {
         "repository": f"https://huggingface.co/{PUBLISHER}/{slug}",
-        "revision": "0" * 40,
+        "revision": upstream,
     }
     document["files"] = [
         {
@@ -303,6 +304,25 @@ def test_a_refreshed_model_with_identical_files_stays_held(
         assert model_set_reference_findings(s, (cached,))[cached]
 
 
+def test_a_refresh_keeps_the_old_set_until_the_new_set_is_cached(sessions) -> None:
+    """Identical bytes, new upstream revision: the new set is another digest."""
+    with sessions.begin() as s:
+        first = model(s, "tiny", ["w"], version="1.0.0")
+        refreshed = model(
+            s, "tiny", ["w"], version="1.0.1", number=2, upstream="1" * 40
+        )
+        old = cache_resolved(s, recipe(s, "recipe-first", "tiny", first, ["w"]))
+        new_recipe = recipe(s, "recipe-refreshed", "tiny", refreshed, ["w"])
+        profile(s, "recipe-refreshed")
+        assert resolve_recipe_set(s, new_recipe).digest != old
+    with sessions() as s:
+        assert model_set_reference_findings(s, (old,))[old]
+    with sessions.begin() as s:
+        cache_resolved(s, new_recipe)
+    with sessions() as s:
+        assert not model_set_reference_findings(s, (old,))[old]
+
+
 def test_a_retracted_recipe_still_holds_its_set_and_only_its_set(sessions) -> None:
     """Catches a recipe with no active head either holding everything or nothing."""
     with sessions.begin() as s:
@@ -362,17 +382,6 @@ def test_a_selector_with_no_revision_at_all_holds_every_set(sessions) -> None:
         assert model_set_reference_findings(s, (free,))[free]
 
 
-def test_a_set_without_members_is_held_and_does_not_fail_the_call(sessions) -> None:
-    with sessions.begin() as s:
-        other = model(s, "other", ["other-weights"])
-        kept = cache_resolved(
-            s, recipe(s, "recipe-other", "other", other, ["other-weights"])
-        )
-        s.execute(delete(ModelCacheSetArtifact))
-    with sessions() as s:
-        assert model_set_reference_findings(s, (kept,))[kept]
-
-
 def test_installation_holds_the_set_its_plan_names(tmp_path):
     """Catches ownership by first requester: the plan names these sets.
 
@@ -390,11 +399,27 @@ def test_installation_holds_the_set_its_plan_names(tmp_path):
             select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == w.target)
         ).first()
         first = hashlib.sha256(b"first-requester").hexdigest()
+        target_revision = s.scalars(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.content_digest == w.target
+            )
+        ).first()
+        assert target_revision is not None
         assert template is not None
         duplicate = hashlib.sha256(b"duplicate-bytes").hexdigest()
         for digest in used | {duplicate}:
             manifest = copy.deepcopy(template.manifest)
             manifest["model_content_sha256"] = first
+            # The set serves the target through a verified binding, as the
+            # removal's selected sets do; its first requester is another model.
+            manifest["verified_models"] = [
+                {
+                    "kind": "model",
+                    "publisher": target_revision.publisher,
+                    "slug": target_revision.slug,
+                    "content_sha256": w.target,
+                }
+            ]
             s.add(
                 ModelCacheSet(
                     artifact_set_sha256=digest,

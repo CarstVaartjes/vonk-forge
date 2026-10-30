@@ -77,13 +77,6 @@ FILES = 40
 CACHED_SETS = 130
 SELECTORS = 55
 SPARK_OBJECTS = 500
-# Owner scans (model_set_reference_findings) per operation.
-SCANS = {
-    "review_model_removal": 1,
-    "review_fleet_model_removal": 1,
-    "remove_fleet_model_selector": 2,
-    "store_retention_request": 0,
-}
 PUBLISHER = "vonk-forge"
 
 
@@ -557,25 +550,12 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
             f"parses={full.parses} job_rows={full.loaded['Job']} "
             f"installation_rows={full.loaded['RecipeInstallation']}"
         )
-        # What grows is the PROTECTED work, scanned once per owner scan: a saved
-        # profile's recipe is resolved the way a download resolves it (a few
-        # statements each) and a running installation's plan is read. Unrelated
-        # models, sets, jobs and idle rows add nothing.
-        scans = SCANS[operation]
-        recipes = (PRODUCTION.selectors - ONE_OF_EACH.selectors) * scans
-        running = (PRODUCTION.installations - ONE_OF_EACH.installations) * scans
-        assert len(full.statements) - len(base.statements) <= 4 * recipes
-        assert full.parses - base.parses <= running
+        # Unrelated models, sets, recipes, profiles, installations and jobs add
+        # nothing: a request reads only what can name the target's sets.
+        assert len(full.statements) == len(base.statements)
+        assert full.parses == base.parses
         assert full.loaded["Job"] == base.loaded["Job"]
-        if scans:
-            for table in ("CatalogDocumentRevision", "CatalogDocumentHead"):
-                assert full.loaded[table] - base.loaded[table] <= 4 * recipes, table
-        assert (
-            full.loaded["RecipeInstallation"] - base.loaded["RecipeInstallation"]
-            <= 2 * running
-        )
-        if not scans:
-            assert len(full.statements) == len(base.statements)
+        assert full.loaded["RecipeInstallation"] == base.loaded["RecipeInstallation"]
         for statement in full.statements:
             if any(f"FROM {table}" in statement for table in FILTERED_TABLES):
                 assert re.search(r"\bWHERE\b", statement), statement
