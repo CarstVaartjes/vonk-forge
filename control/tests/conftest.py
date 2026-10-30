@@ -19,8 +19,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from vonk_control.models import Base
 from vonk_control.stored_json import install_write_guard
 
+from . import metadata_type_snapshot
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
 )
@@ -486,3 +488,12 @@ def controller_image() -> str:
 @pytest.fixture(scope="session")
 def worker_image() -> str:
     return _built_image("VONK_TEST_WORKER_IMAGE")
+
+
+@pytest.fixture(autouse=True)
+def shared_metadata_column_types_unchanged() -> Iterator[None]:
+    """A test must not retype shared ``Base.metadata`` columns (#1968)."""
+    before = metadata_type_snapshot.snapshot(Base.metadata)
+    yield
+    changed = metadata_type_snapshot.drift(Base.metadata, before)
+    assert not changed, f"test retyped shared metadata columns: {changed}"
