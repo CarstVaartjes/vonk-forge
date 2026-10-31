@@ -220,10 +220,14 @@ class RecipeOperationAdapter:
         *,
         failed: bool,
         reason: str | None = None,
-        keep: bool = True,
     ) -> Decision:
         """The orders ended: a definite success or failure (rule 5: not retried here,
-        each order was retried by its own core before it reported)."""
+        each order was retried by its own core before it reported).
+
+        The end records its own reason, never a wait note left from before it
+        (a scheduled retry, a claim note): with none given, the parent's
+        aggregate takes the failed order's report.
+        """
 
         before = self.lifecycle(job, issued=True, now=now)
         event = (
@@ -232,7 +236,7 @@ class RecipeOperationAdapter:
             else Reported(Outcome.DONE, reason=reason)
         )
         decision = transition(before, event, self, aware(now))
-        self._write(job, decision.row, now, reason, keep)
+        self._write(job, decision.row, now, reason, False)
         return decision
 
     def cancelled(

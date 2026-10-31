@@ -159,7 +159,6 @@ def consume_orphan_cleanup(
             reason=None
             if not failures and exact
             else "cleanup target observation ended",
-            keep=False,
         )
     if projected and recorded is not None:
         job.result = serialize_json_value(
