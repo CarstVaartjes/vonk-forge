@@ -76,11 +76,15 @@ pub const RECENT_SAMPLE_SPACING: Duration = Duration::from_secs(1);
 pub const PRESSURE_PROPERTY: &str = "pressure_readings";
 pub const RECENT_PROPERTY: &str = "recent_samples";
 /// The readings `PRESSURE_PROPERTY` packs, in order.
-pub const PRESSURE_FIELDS: [&str; 8] = [
+pub const PRESSURE_FIELDS: [&str; 12] = [
     "loading",
     "mem_free_mib",
     "swap_total_mib",
     "swap_free_mib",
+    "anon_mib",
+    "shmem_mib",
+    "active_anon_mib",
+    "inactive_anon_mib",
     "memory_full_avg60",
     "swapin_per_s",
     "swapout_per_s",

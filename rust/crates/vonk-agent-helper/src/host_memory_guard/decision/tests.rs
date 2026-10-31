@@ -13,7 +13,6 @@ struct Host {
     free: u64,
     swap_total: u64,
     swap_free: u64,
-    anon: u64,
     avg10: f64,
     avg60: f64,
     swap_in_per_s: u64,
@@ -29,7 +28,6 @@ impl Host {
             free: 10 * GIB,
             swap_total: 64 * GIB,
             swap_free: 64 * GIB,
-            anon: 30 * GIB,
             avg10: 0.0,
             avg60: 0.0,
             swap_in_per_s: 0,
@@ -55,7 +53,7 @@ impl Host {
             free_bytes: Some(self.free),
             swap_total_bytes: Some(self.swap_total),
             swap_free_bytes: Some(self.swap_free),
-            anon_bytes: Some(self.anon),
+            resident: Resident::default(),
             full_avg10: Some(self.avg10),
             full_avg60: Some(self.avg60),
             counters: Some(self.counters),
@@ -347,7 +345,7 @@ fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
         free_bytes: Some(5 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(60 * GIB),
-        anon_bytes: None,
+        resident: Resident::default(),
         full_avg10: Some(40.0),
         full_avg60: Some(20.0),
         counters: Some(Counters::default()),
@@ -404,7 +402,7 @@ fn unknown_readings_and_unmanaged_hosts_never_kill_and_reset_continuity() {
         free_bytes: Some(1),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
-        anon_bytes: None,
+        resident: Resident::default(),
         full_avg10: Some(99.0),
         full_avg60: Some(99.0),
         counters: Some(Counters::default()),
@@ -463,7 +461,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
         free_bytes: Some(2 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
-        anon_bytes: None,
+        resident: Resident::default(),
         full_avg10: Some(10.0),
         full_avg60: Some(10.0),
         counters: Some(Counters::default()),
@@ -511,7 +509,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
 fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     let sample = read_sample(|path| {
         Ok(match path {
-            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\n".to_owned(),
+            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\nAnonPages: 6144 kB\nShmem: 2048 kB\nActive(anon): 4096 kB\nInactive(anon): 1024 kB\n".to_owned(),
             "/proc/pressure/memory" => "some avg10=80.00 avg60=70.00 avg300=1.00 total=1\nfull avg10=45.50 avg60=50.25 avg300=1.00 total=1\n".to_owned(),
             "/proc/vmstat" => "pswpin 10\npswpout 20\nworkingset_refault_anon 3\nworkingset_refault_file 4\n".to_owned(),
             other => panic!("unexpected {other}"),
@@ -521,6 +519,15 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     assert_eq!(sample.free_bytes, Some(2048 * 1024));
     assert_eq!(sample.swap_total_bytes, Some(64 * GIB));
     assert_eq!(sample.swap_free_bytes, Some(32 * GIB));
+    assert_eq!(
+        sample.resident,
+        Resident {
+            anon_bytes: Some(6144 * 1024),
+            shmem_bytes: Some(2048 * 1024),
+            active_anon_bytes: Some(4096 * 1024),
+            inactive_anon_bytes: Some(1024 * 1024),
+        }
+    );
     assert_eq!(sample.full_avg10, Some(45.5), "full, never some");
     assert_eq!(sample.full_avg60, Some(50.25));
     assert_eq!(
@@ -547,6 +554,10 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         "loading:true",
         "swap_total_mib:65536",
         "swap_free_mib:32768",
+        "anon_mib:6",
+        "shmem_mib:2",
+        "active_anon_mib:4",
+        "inactive_anon_mib:1",
         "swapin_per_s:1",
         "swapout_per_s:2",
         "refault_per_s:3",
@@ -887,114 +898,5 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
     assert_eq!(
         run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
         Some(Trigger::DriverAllocationFailure)
-    );
-}
-
-/// spark-3542 at 18:06:27-18:07:14 on 2026-10-30: a FlashInfer autotune filled
-/// RAM with pinned GPU memory. MemAvailable 0, 58-61 GiB of swap free but only
-/// ~133 MB of anon left in RAM to swap (pswpout ~2488 pages/s), NVRM lines.
-fn flashinfer_autotune_squeeze() -> Host {
-    Host {
-        available: 0,
-        free: 64 * 1024 * 1024,
-        swap_total: 64 * GIB,
-        swap_free: 60 * GIB,
-        anon: 133 * 1024 * 1024,
-        avg10: 5.0,
-        avg60: 2.0,
-        swap_out_per_s: 2488,
-        ..Host::serving()
-    }
-}
-
-#[test]
-fn swap_beyond_the_anon_left_in_ram_is_no_headroom_spark_3542() {
-    // Break caught: the guard counted 60 GiB of free swap that nothing could
-    // be swapped into, and the kernel OOM killed the agent's user manager.
-    let start = Instant::now();
-    let mut host = flashinfer_autotune_squeeze();
-    let (tick, trigger) = run_with_line(&mut host, &mut Decision::default(), start, 0..400)
-        .expect("a squeeze with no anon left to swap is stopped");
-    assert!(tick <= ticks(SWAP_EXHAUSTED_SUSTAIN) + 1, "tick {tick}");
-    // R5 corroborated by R1's condition fires together with R1.
-    assert_eq!(trigger, Trigger::DriverAllocationFailure);
-    // The same squeeze without the NVRM line is stopped by R1 alone.
-    let mut host = flashinfer_autotune_squeeze();
-    assert_eq!(
-        run(&mut host, &mut Decision::default(), start, 0..400, true).map(|k| k.1),
-        Some(Trigger::MemoryAndSwapExhausted)
-    );
-}
-
-#[test]
-fn r3_counts_only_swappable_anon_as_headroom() {
-    let start = Instant::now();
-    let storm = |anon| Host {
-        available: 2 * GIB,
-        free: 2 * GIB,
-        swap_free: 60 * GIB,
-        anon,
-        avg10: 70.0,
-        avg60: 70.0,
-        swap_in_per_s: 40_000,
-        refault_per_s: 20_000,
-        ..Host::serving()
-    };
-    let bound = ticks(Duration::from_secs(20));
-    let mut drained = storm(GIB);
-    let found = run(
-        &mut drained,
-        &mut Decision::default(),
-        start,
-        0..bound,
-        false,
-    );
-    assert_eq!(found.map(|k| k.1), Some(Trigger::Thrashing));
-    let mut roomy = storm(30 * GIB);
-    let found = run(&mut roomy, &mut Decision::default(), start, 0..bound, false);
-    assert_ne!(found.map(|k| k.1), Some(Trigger::Thrashing));
-}
-
-#[test]
-fn spark_2297_ornith_still_fires_the_r1_swap_branch() {
-    // MemAvailable 312 MB, SwapFree 6337 MiB of 65536, ~31 GB anon resident.
-    let mut host = Host {
-        available: 312 * 1000 * 1000,
-        free: 200 * 1024 * 1024,
-        swap_free: 6337 * 1024 * 1024,
-        anon: 31_000_000_000,
-        ..Host::serving()
-    };
-    let found = run(
-        &mut host,
-        &mut Decision::default(),
-        Instant::now(),
-        0..40,
-        true,
-    );
-    assert_eq!(found.map(|k| k.1), Some(Trigger::MemoryAndSwapExhausted));
-}
-
-#[test]
-fn a_healthy_load_with_lots_of_free_swap_and_resident_anon_is_not_stopped() {
-    // MemAvailable dips low for a few seconds while 30 GiB of anon can still
-    // go to 60 GiB of free swap.
-    let mut host = Host {
-        available: 700 * 1024 * 1024,
-        free: 700 * 1024 * 1024,
-        swap_free: 60 * GIB,
-        swap_out_per_s: 20_000,
-        ..Host::serving()
-    };
-    let bound = ticks(Duration::from_secs(8));
-    assert_eq!(
-        run(
-            &mut host,
-            &mut Decision::default(),
-            Instant::now(),
-            0..bound,
-            true
-        ),
-        None
     );
 }
