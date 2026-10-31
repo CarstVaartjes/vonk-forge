@@ -75,6 +75,7 @@ MODES = (
     "item-counts",
     "event-loops",
     "trap-waits",
+    "plan-digests",
 )
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
@@ -894,6 +895,44 @@ def start_budget_derivations(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+def replanned_digest_reads(source: str) -> list[int]:
+    """``<x>.plan_digest`` read after ``accept_run_in_session`` in one function.
+
+    Admission re-plans and saves the run with the fresh digest, so the plan the
+    caller held is stale from that call on: the saved ``run.plan_digest`` is the
+    one reader of what the run carries (the 2026-10-31 superseded Start).
+    """
+    found: set[int] = set()
+    for scope in ast.walk(ast.parse(source)):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        accepts = [
+            node.lineno
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Call)
+            and (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else node.func.id
+                if isinstance(node.func, ast.Name)
+                else ""
+            )
+            == "accept_run_in_session"
+        ]
+        if not accepts:
+            continue
+        found.update(
+            node.lineno
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Attribute)
+            and node.attr == "plan_digest"
+            and isinstance(node.ctx, ast.Load)
+            and not (isinstance(node.value, ast.Name) and node.value.id == "run")
+            and node.lineno > min(accepts)
+        )
+    return sorted(found)
+
+
 # A provider is contacted only through ``download.py:_open_provider``, which
 # holds back a provider under its cooldown and narrows the parallel streams on
 # its rate limit. A direct opener call bypassed both (the Hugging Face
@@ -1521,6 +1560,16 @@ def check_source(
             (line, "start budget derived from a stored start timestamp")
             for line, function in start_budget_derivations(source)
             if (path, function) not in START_BUDGET_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "plan-digests" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "plan digest read from the pre-admission plan (use run.plan_digest)")
+            for line in replanned_digest_reads(source)
         )
     if (
         python

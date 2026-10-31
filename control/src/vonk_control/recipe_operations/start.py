@@ -244,7 +244,7 @@ class StartMixin:
                         recipe_revision_id=plan.recipe_revision_id,
                         mapping_id=run.mapping_id,
                         run_generation=run.run_generation,
-                        plan_digest=plan.plan_digest,
+                        plan_digest=run.plan_digest,
                         placement=RecipeStartPlacement(
                             node_id,
                             node.rank,
@@ -335,7 +335,7 @@ class StartMixin:
                 kind=WireAgentOperation.RECIPE_START.value,
                 owner_kind="run",
                 owner_id=run_id,
-                plan_digest=plan.plan_digest,
+                plan_digest=run.plan_digest,
                 actor=actor,
                 request_id=request_id,
                 node_payloads=start_payloads,

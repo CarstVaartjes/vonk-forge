@@ -1257,6 +1257,24 @@ def test_added_line_guard_rejects_start_budget_from_stored_timestamps(body):
     assert not check_source(PATH, source, {1}, modes=("start-budgets",))
 
 
+def test_plan_digest_guard_flags_reads_of_the_replanned_plan_only():
+    source = (
+        "def start(service, session, plan, run_id):\n"
+        "    if plan.plan_digest != reviewed:\n"
+        "        raise ValueError\n"
+        "    run_id = service.accept_run_in_session(session, plan)\n"
+        "    run = session.get(RecipeRun, run_id)\n"
+        "    stale = plan.plan_digest\n"
+        "    saved = run.plan_digest\n"
+        "def other(plan):\n"
+        "    return plan.plan_digest\n"
+    )
+    modes = ("plan-digests",)
+    assert check_source(PATH, source, {6}, modes=modes)
+    assert not check_source(PATH, source, {2, 7, 9}, modes=modes)
+    assert not check_source("control/tests/test_example.py", source, {6}, modes=modes)
+
+
 def test_start_budget_guard_allows_reviewed_sites_settings_and_other_clocks():
     source = (
         "def _anchor_start_budget(session, operation, now):\n"
