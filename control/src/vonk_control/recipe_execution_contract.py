@@ -257,6 +257,7 @@ def installation_matches_runtime_image(
     image_digest: str | None,
     oci_layout_sha256: str | None,
     image_bytes: int | None,
+    plan: StoredInstallationPlan | None = None,
 ) -> bool:
     """Whether the stored execution plan uses this exact immutable image.
 
@@ -268,7 +269,7 @@ def installation_matches_runtime_image(
     """
     if image_digest is None or oci_layout_sha256 is None or image_bytes is None:
         return False
-    plan = parse_stored_installation_plan(installation.plan)
+    plan = plan or parse_stored_installation_plan(installation.plan)
     expected = ImageContent(
         image_digest=image_digest,
         archive_sha256=oci_layout_sha256,

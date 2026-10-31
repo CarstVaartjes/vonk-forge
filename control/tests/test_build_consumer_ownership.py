@@ -41,7 +41,7 @@ from .test_build_cancellation_recovery import (
     _settle_cleanup,
 )
 from .test_profile_build_memory import _accepted_build_profile, _parent_build_request
-from .test_profile_port_claims import _ready_profile
+from .test_profile_capacity_admission import _capacity_profile
 
 
 def _assert_observation_failure(receipt):
@@ -325,7 +325,7 @@ def test_profile_protects_its_build_before_the_execution_child_exists(
 def test_profile_acceptance_joins_the_build_cancellation_boundary(
     tmp_path, postgres_engine
 ):
-    sessions, _profiles, _planner, profile, api, headers, _nodes, _ = _ready_profile(
+    sessions, _profiles, _planner, profile, api, headers, _nodes, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
@@ -350,7 +350,7 @@ def test_profile_acceptance_joins_the_build_cancellation_boundary(
 def test_profile_holds_build_dependency_until_its_acceptance_commits(
     tmp_path, postgres_engine, monkeypatch
 ):
-    sessions, _profiles, _planner, profile, api, headers, _nodes, _ = _ready_profile(
+    sessions, _profiles, _planner, profile, api, headers, _nodes, _ = _capacity_profile(
         tmp_path, postgres_engine
     )
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers).json()
