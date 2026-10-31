@@ -73,6 +73,8 @@ pub struct Sample {
     pub free_bytes: Option<u64>,
     pub swap_total_bytes: Option<u64>,
     pub swap_free_bytes: Option<u64>,
+    /// AnonPages: what is still resident in RAM and so can still be swapped.
+    pub anon_bytes: Option<u64>,
     pub full_avg10: Option<f64>,
     pub full_avg60: Option<f64>,
     pub counters: Option<Counters>,
@@ -150,6 +152,7 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
         free_bytes: field("MemFree:"),
         swap_total_bytes: field("SwapTotal:"),
         swap_free_bytes: field("SwapFree:"),
+        anon_bytes: field("AnonPages:"),
         full_avg10: full("avg10="),
         full_avg60: full("avg60="),
         counters,
@@ -159,6 +162,15 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
 /// Whether an NVRM line seen at `line` still counts at `now` (R5).
 pub fn driver_line_counts(line: Instant, now: Instant) -> bool {
     now.saturating_duration_since(line) <= DRIVER_LINE_WINDOW
+}
+
+/// Free swap that can still absorb memory: swap-out moves only anon pages
+/// resident in RAM, so free swap beyond them is unusable. An unreadable
+/// AnonPages leaves SwapFree as is.
+fn usable_swap_bytes(sample: &Sample) -> Option<u64> {
+    sample
+        .swap_free_bytes
+        .map(|free| sample.anon_bytes.map_or(free, |anon| free.min(anon)))
 }
 
 /// Each rule's condition, evaluated on one sample. Unknown readings never
@@ -178,7 +190,8 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
     let below = |value: Option<u64>, bar: u64| value.is_some_and(|value| value < bar);
     let swap_total = sample.swap_total_bytes.filter(|total| *total > 0);
     let swap = swap_total.is_some() && sample.swap_free_bytes.is_some();
-    let exhausted = match (swap_total, sample.swap_free_bytes) {
+    let usable_swap = usable_swap_bytes(sample);
+    let exhausted = match (swap_total, usable_swap) {
         (Some(total), Some(free)) => {
             below(available, SWAP_EXHAUSTED_MEMORY_BYTES)
                 && free
@@ -194,7 +207,7 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
         }
         _ => false,
     };
-    let headroom = available.map(|bytes| bytes.saturating_add(sample.swap_free_bytes.unwrap_or(0)));
+    let headroom = available.map(|bytes| bytes.saturating_add(usable_swap.unwrap_or(0)));
     let thrashing = rates.is_some_and(|rates| rates.thrash() >= THRASH_PAGES_PER_SECOND as f64)
         && sample
             .full_avg10
