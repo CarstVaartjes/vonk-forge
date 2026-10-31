@@ -9,12 +9,12 @@ use vonk_agent_protocol::generated::ResourceTermProblem;
 use vonk_agent_protocol::host_memory_guard_policy::{
     DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND, DRIVER_FAILURE_SUSTAIN,
     DRIVER_LINE_WINDOW, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT, LOADING_PRESSURE_SUSTAIN,
-    PRESSURE_FIELDS, PRESSURE_HEADROOM_BYTES, PRESSURE_PROPERTY, PSI_FALLING_RATIO, RECENT_FIELDS,
+    PRESSURE_AVAILABLE_BYTES, PRESSURE_FIELDS, PRESSURE_PROPERTY, PSI_FALLING_RATIO, RECENT_FIELDS,
     RECENT_PROPERTY, RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT,
     SERVING_PRESSURE_SUSTAIN, SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES,
     SWAP_EXHAUSTED_FREE_PERCENT, SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN,
     SWAP_FILLING_MEMORY_BYTES, SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT,
-    THRASH_FULL_PSI_PERCENT, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
+    THRASH_FULL_PSI_PERCENT, THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
 };
 
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
@@ -212,13 +212,12 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
         _ => false,
     };
     let headroom = available.map(|bytes| bytes.saturating_add(sample.swap_free_bytes.unwrap_or(0)));
-    let low_headroom = below(headroom, PRESSURE_HEADROOM_BYTES);
     let thrashing = rates.is_some_and(|rates| rates.thrash() >= THRASH_PAGES_PER_SECOND as f64)
         && sample
             .full_avg10
             .is_some_and(|psi| psi > THRASH_FULL_PSI_PERCENT)
-        && low_headroom;
-    let pressure = low_headroom
+        && below(headroom, THRASH_HEADROOM_BYTES);
+    let pressure = below(available, PRESSURE_AVAILABLE_BYTES)
         && if loading {
             match (sample.full_avg60, sample.full_avg10) {
                 (Some(avg60), Some(avg10)) => {
