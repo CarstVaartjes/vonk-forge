@@ -404,22 +404,43 @@ def _worker_process(config: dict, crash: str) -> None:
 # PostgreSQL. That process boundary is the behaviour under test.
 @pytest.mark.slow(30)
 @pytest.mark.parametrize(
-    ("boundary", "complete_while_down", "initially_installed", "replacement"),
+    (
+        "boundary",
+        "complete_while_down",
+        "initially_installed",
+        "replacement",
+        "lost_image",
+    ),
     [
-        ("build-before", False, False, None),
-        ("build-after", False, False, None),
-        ("build-after", True, False, None),
-        ("start-before", False, False, None),
-        ("start-after", False, False, None),
-        ("start-after", True, False, None),
-        pytest.param("build-after", True, True, None, id="installed-restore"),
+        ("build-before", False, False, None, False),
+        ("build-after", False, False, None, False),
+        ("build-after", True, False, None, False),
+        ("start-before", False, False, None, False),
+        ("start-after", False, False, None, False),
+        ("start-after", True, False, None, False),
+        # An installed recipe whose image is intact starts without any build,
+        # even though the NAS copy is gone (the short start path).
         pytest.param(
-            "build-after", True, False, "image", id="first-install-changed-image"
+            "start-before", False, True, None, False, id="installed-start-before"
         ),
-        pytest.param("build-after", True, True, "image", id="installed-changed-image"),
         pytest.param(
-            "build-after", True, True, "archive", id="installed-changed-archive"
+            "start-after", False, True, None, False, id="installed-start-after"
         ),
+        pytest.param(
+            "start-after", True, True, None, False, id="installed-start-complete"
+        ),
+        pytest.param(
+            "build-after", True, False, "image", False, id="first-install-changed-image"
+        ),
+        pytest.param(
+            "build-after", True, True, "image", False, id="installed-changed-image"
+        ),
+        pytest.param(
+            "build-after", True, True, "archive", False, id="installed-changed-archive"
+        ),
+        # The intact installation is reused only with its image on every Spark;
+        # a lost copy takes the full path and installs again.
+        pytest.param("build-after", True, True, None, True, id="installed-image-lost"),
     ],
 )
 def test_profile_recovers_after_worker_process_death(
@@ -429,10 +450,16 @@ def test_profile_recovers_after_worker_process_death(
     complete_while_down,
     initially_installed,
     replacement,
+    lost_image,
 ):
     sessions, profiles, _planner, _node, application_id, selected = (
         _accepted_build_profile(
-            tmp_path, postgres_engine, initially_installed=initially_installed
+            tmp_path,
+            postgres_engine,
+            initially_installed=initially_installed,
+            # A replaced image is a different image from the installed one.
+            installation_is_other_image=replacement is not None,
+            image_lost_on_sparks=lost_image,
         )
     )
     assert application_id is not None
@@ -467,6 +494,13 @@ def test_profile_recovers_after_worker_process_death(
         original_installations = {
             row.id: row.plan for row in session.scalars(select(RecipeInstallation))
         }
+        original_work = set(
+            session.scalars(
+                select(Job.id).where(
+                    Job.kind.in_(("recipe.build.v1", "recipe.install"))
+                )
+            )
+        )
         claim_ids = {
             claim.id
             for claim in session.scalars(
@@ -677,20 +711,56 @@ def test_profile_recovers_after_worker_process_death(
         "state": "succeeded",
     }
     with sessions() as session:
-        for child_kind in ("recipe.build.v1", "recipe.install", "recipe.start"):
+        # An intact installation starts as it is: no build, no install.
+        reused = initially_installed and not lost_image
+        children = (
+            ("recipe.start",)
+            if reused
+            else (
+                "recipe.build.v1",
+                "recipe.install",
+                "recipe.start",
+            )
+        )
+        for child_kind in children:
             jobs = tuple(session.scalars(select(Job).where(Job.kind == child_kind)))
-            assert len(jobs) == 1 and jobs[0].state == "succeeded"
+            # A healed load installs again beside the first installation.
+            expected = 2 if lost_image and child_kind == "recipe.install" else 1
+            assert len(jobs) == expected
+            assert all(job.state == "succeeded" for job in jobs)
             if child_kind == kind and child_id is not None:
                 assert jobs[0].id == child_id
+        if reused:
+            assert (
+                set(
+                    session.scalars(
+                        select(Job.id).where(
+                            Job.kind.in_(("recipe.build.v1", "recipe.install"))
+                        )
+                    )
+                )
+                == original_work
+            )
+            assert {
+                row.id: row.plan for row in session.scalars(select(RecipeInstallation))
+            } == original_installations
         runs = tuple(session.scalars(select(RecipeRun)))
         assert len(runs) == 1 and runs[0].state == "running"
         assert runs[0].route_state == "published"
         assert runs[0].route_generation is not None
-        assert len(tuple(session.scalars(select(RecipeInstallation)))) == 1
-        if initially_installed:
-            assert {
-                row.id: row.plan for row in session.scalars(select(RecipeInstallation))
-            } == original_installations
+        installations = {
+            row.id: row.plan for row in session.scalars(select(RecipeInstallation))
+        }
+        if lost_image:
+            # A new installation serves the run; the first one is untouched.
+            assert len(installations) == len(original_installations) + 1
+            assert runs[0].installation_id not in original_installations
+            assert all(
+                installations[key] == plan
+                for key, plan in original_installations.items()
+            )
+        else:
+            assert len(installations) == 1 or reused
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None and application.state == "succeeded"
         for claim_id in claim_ids:
