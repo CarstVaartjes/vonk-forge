@@ -58,9 +58,9 @@ swap-aware policy (owner approved 2026-10-28) stops managed workloads when:
 R1 MemAvailable < 1 GiB and free swap < max(2 GiB, 10% of swap) for 2 s (no
 swap: MemAvailable < 256 MiB for 3 s); R2 swap > 90% used, still swapping out,
 MemAvailable < 4 GiB for 3 s; R3 swap-ins plus refaults ≥ 50k pages/s with full
-avg10 > 60% and MemAvailable + free swap < 8 GiB for 10 s; R4 full avg10 > 60%
-for 30 s while serving, or full avg60 > 80% and not falling for 60 s while a load
-runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
+avg10 > 60% and MemAvailable + free swap < 8 GiB for 10 s; R4 MemAvailable < 8 GiB
+and full avg10 > 60% for 30 s while serving, or MemAvailable < 8 GiB and full
+avg60 > 80% and not falling for 60 s while a load runs (the agent's page-cache drop cadence marks a loading Spark). An NVIDIA
 `NVRM: Out of memory [NV_ERR_NO_MEMORY]` line (R5, non-fatal alone on GB10)
 stops only together with R1's or R3's condition or MemFree < 1 GiB while swap-out
 is about zero (always, on a host without swap), held for 2 s like R1 (never one

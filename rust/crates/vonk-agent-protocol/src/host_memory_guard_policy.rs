@@ -46,8 +46,10 @@ pub const THRASH_SUSTAIN: Duration = Duration::from_secs(10);
 // PRESSURE_AVAILABLE_BYTES. R1 and R2 apply in both. CALIBRATABLE.
 // MemAvailable alone, not headroom: free swap does not help unswappable
 // GPU/pinned growth. The floor spares pressured-but-healthy runs (2026-10-31
-// MiniMax H3: 11.5 GiB available, killed at 75 GiB headroom) and still stops
-// unswappable growth before the kernel OOM (2026-10-30 spark-3542).
+// MiniMax H3: 11.5 GiB available, killed at 75 GiB headroom) and keeps R4's
+// existing behaviour for unswappable growth once MemAvailable falls below it.
+// It does not change the spark-3542 2026-10-30 case, whose 47 s squeeze during
+// a load stays open (#1987).
 pub const PRESSURE_AVAILABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const SERVING_FULL_PSI_PERCENT: f64 = 60.0;
 pub const SERVING_PRESSURE_SUSTAIN: Duration = Duration::from_secs(30);

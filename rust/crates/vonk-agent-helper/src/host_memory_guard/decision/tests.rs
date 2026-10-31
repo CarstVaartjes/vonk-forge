@@ -419,6 +419,44 @@ fn r4_needs_low_mem_available_in_both_phases() {
 }
 
 #[test]
+fn r4_kills_within_its_bound_of_memory_available_crossing_the_floor() {
+    // Unswappable growth: swap stays fully free while MemAvailable falls from
+    // 20 GiB through the 8 GiB floor under full PSI already above 60%. The
+    // window starts at the crossing, so the kill lands one bound later.
+    let start = Instant::now();
+    let per_tick = 12 * GIB / u64::from(ticks(Duration::from_secs(60)));
+    for (loading, bound) in [
+        (false, ticks(SERVING_PRESSURE_SUSTAIN)),
+        (true, ticks(LOADING_PRESSURE_SUSTAIN)),
+    ] {
+        let mut host = Host {
+            avg10: 90.0,
+            avg60: 90.0,
+            ..Host::serving()
+        };
+        let mut decision = Decision::default();
+        let mut crossing = None;
+        let killed = (0..ticks(Duration::from_secs(300))).find_map(|tick| {
+            host.available = (20 * GIB).saturating_sub(per_tick * u64::from(tick));
+            if host.available < PRESSURE_AVAILABLE_BYTES {
+                crossing.get_or_insert(tick);
+            }
+            let sample = host.tick();
+            decision
+                .observe(start + SAMPLE_INTERVAL * tick, sample, false, true, loading)
+                .map(|trigger| (tick, trigger))
+        });
+        let (tick, trigger) = killed.expect("falling MemAvailable is killed");
+        assert_eq!(trigger, Trigger::SustainedPressure);
+        let crossing = crossing.expect("crossed the floor");
+        assert!(
+            (crossing + bound..=crossing + bound + 1).contains(&tick),
+            "loading={loading}: crossing {crossing}, kill {tick}, bound {bound}"
+        );
+    }
+}
+
+#[test]
 fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
     // Break caught: a healthy load's derived MemFree touches ~0.9 GB at its
     // NVRM line for one sample (GLM mosaic a0 2026-10-28); one sample never kills.
