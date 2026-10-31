@@ -53,6 +53,7 @@ impl Host {
             free_bytes: Some(self.free),
             swap_total_bytes: Some(self.swap_total),
             swap_free_bytes: Some(self.swap_free),
+            resident: Resident::default(),
             full_avg10: Some(self.avg10),
             full_avg60: Some(self.avg60),
             counters: Some(self.counters),
@@ -344,6 +345,7 @@ fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
         free_bytes: Some(5 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(60 * GIB),
+        resident: Resident::default(),
         full_avg10: Some(40.0),
         full_avg60: Some(20.0),
         counters: Some(Counters::default()),
@@ -400,6 +402,7 @@ fn unknown_readings_and_unmanaged_hosts_never_kill_and_reset_continuity() {
         free_bytes: Some(1),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
+        resident: Resident::default(),
         full_avg10: Some(99.0),
         full_avg60: Some(99.0),
         counters: Some(Counters::default()),
@@ -458,6 +461,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
         free_bytes: Some(2 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
+        resident: Resident::default(),
         full_avg10: Some(10.0),
         full_avg60: Some(10.0),
         counters: Some(Counters::default()),
@@ -505,7 +509,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
 fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     let sample = read_sample(|path| {
         Ok(match path {
-            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\n".to_owned(),
+            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\nAnonPages: 6144 kB\nShmem: 2048 kB\nActive(anon): 4096 kB\nInactive(anon): 1024 kB\n".to_owned(),
             "/proc/pressure/memory" => "some avg10=80.00 avg60=70.00 avg300=1.00 total=1\nfull avg10=45.50 avg60=50.25 avg300=1.00 total=1\n".to_owned(),
             "/proc/vmstat" => "pswpin 10\npswpout 20\nworkingset_refault_anon 3\nworkingset_refault_file 4\n".to_owned(),
             other => panic!("unexpected {other}"),
@@ -515,6 +519,15 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     assert_eq!(sample.free_bytes, Some(2048 * 1024));
     assert_eq!(sample.swap_total_bytes, Some(64 * GIB));
     assert_eq!(sample.swap_free_bytes, Some(32 * GIB));
+    assert_eq!(
+        sample.resident,
+        Resident {
+            anon_bytes: Some(6144 * 1024),
+            shmem_bytes: Some(2048 * 1024),
+            active_anon_bytes: Some(4096 * 1024),
+            inactive_anon_bytes: Some(1024 * 1024),
+        }
+    );
     assert_eq!(sample.full_avg10, Some(45.5), "full, never some");
     assert_eq!(sample.full_avg60, Some(50.25));
     assert_eq!(
@@ -541,6 +554,10 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         "loading:true",
         "swap_total_mib:65536",
         "swap_free_mib:32768",
+        "anon_mib:6",
+        "shmem_mib:2",
+        "active_anon_mib:4",
+        "inactive_anon_mib:1",
         "swapin_per_s:1",
         "swapout_per_s:2",
         "refault_per_s:3",
