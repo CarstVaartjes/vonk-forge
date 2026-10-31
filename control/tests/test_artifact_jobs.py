@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import hashlib
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -309,6 +310,46 @@ def running_artifact_service(tmp_path, *, recipe_transform=None, engine=None):
         activated.owner_id,
         nodes[0],
     )
+
+
+def test_activation_parent_carries_the_saved_runs_plan_digest_when_admission_replans(
+    tmp_path,
+) -> None:
+    sessions, recipe_operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, recipe_transform=_configure_artifact_recipe
+    )
+    installation = installed_recipe(
+        recipe_operations,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id="00000000-0000-4000-8000-000000000101",
+    )
+    plan = recipe_operations.preview_run(installation.owner_id, "image-job")
+    real_plan_run = recipe_operations._run_admission.plan_run
+    calls: list[str] = []
+
+    def replanning(*args, **kwargs):
+        fresh = real_plan_run(*args, **kwargs)
+        calls.append(fresh.plan_digest)
+        if len(calls) == 1:
+            return fresh
+        return dataclasses.replace(fresh, plan_digest="d" * 64)
+
+    recipe_operations._run_admission.plan_run = replanning
+    activated = recipe_operations.activate_job_run(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000102",
+    )
+
+    with sessions() as session:
+        run = session.get(RecipeRun, activated.owner_id)
+        job = session.get(Job, activated.id)
+        assert run is not None and job is not None
+        assert run.plan_digest == "d" * 64
+        assert job.payload["plan_digest"] == run.plan_digest
 
 
 def test_activate_replay_uses_no_request_advisory_key(tmp_path, monkeypatch) -> None:

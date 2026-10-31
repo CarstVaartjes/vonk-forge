@@ -194,7 +194,7 @@ class JobActivationMixin:
                 "schema_version": 1,
                 "owner_kind": "run",
                 "owner_id": run_id,
-                "plan_digest": plan.plan_digest,
+                "plan_digest": run.plan_digest,
                 "execution_mode": "one-shot-jobs",
                 "workload_intent_ordinal": workload_intent_ordinal,
             }

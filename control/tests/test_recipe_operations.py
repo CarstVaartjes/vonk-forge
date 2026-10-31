@@ -2673,6 +2673,67 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
         assert session.scalar(select(Job).where(Job.request_id == "c" * 36)) is None
 
 
+def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
+    tmp_path: Path,
+) -> None:
+    """The run row is the one reader of the plan digest.
+
+    Admission re-plans under its row locks; observations (inventory time,
+    memory figures) are hashed, so a fresh snapshot between the plans gives
+    the saved run a different digest than the one the start was planned with.
+    The start job and orders must carry the saved run's digest, or the
+    host-runtime grant refuses the Start as superseded.
+    """
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "7"
+    )
+    plan = service.preview_run(installation.owner_id, "qwen")
+    real_plan_run = service._run_admission.plan_run
+    calls: list[str] = []
+
+    def replanning(*args: Any, **kwargs: Any):
+        fresh = real_plan_run(*args, **kwargs)
+        calls.append(fresh.plan_digest)
+        if len(calls) == 1:
+            return fresh
+        # Admission's own plan: a later observation hashes differently.
+        return replace(fresh, plan_digest="d" * 64)
+
+    service._run_admission.plan_run = replanning  # type: ignore[method-assign]
+    started = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "8",
+    )
+
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, started.owner_id))
+        assert run.plan_digest == "d" * 64
+        assert calls[0] != run.plan_digest
+        job = _required(session.get(Job, started.id))
+        assert job.payload["plan_digest"] == run.plan_digest
+        operations = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            )
+        )
+        assert operations
+        for operation in operations:
+            assert operation.payload["plan_digest"] == run.plan_digest
+            binding = derive_runtime_plan_binding(
+                session,
+                parent=job,
+                operation=operation,
+                node_id=operation.node_id,
+                action=ContainerRuntimeAction.START,
+                stop_plan_sha256=None,
+            )
+            assert binding.runtime_run_id == run.id
+
+
 def test_start_uses_current_alias_and_replays_by_request_identity(
     tmp_path: Path,
 ) -> None:
