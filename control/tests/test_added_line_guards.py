@@ -1792,6 +1792,8 @@ TRAP_PATH = "deploy/compose/postgres/entrypoint.sh"
         "trap 'cleanup; exit 0' TERM INT\nwhile kill -0 \"$pid\"; do\n  sleep 5\ndone\n",
         # The Tailscale reconciler's old sleep.
         'trap shutdown_services 1 2 15\nwhile :; do\n    sleep "${reconcile_interval}"\ndone\n',
+        "trap -- 'cleanup' TERM\nsleep 5 && true\n",
+        "trap cleanup TERM\nsleep 5 &\ntrue\n",
     ],
 )
 def test_a_foreground_sleep_under_a_termination_trap_fails(source):
@@ -1811,6 +1813,11 @@ def test_a_foreground_sleep_under_a_termination_trap_fails(source):
         "trap cleanup 0\nsleep 5\n",
         "sleep 5\n",
         "trap 'cleanup' TERM\n# sleep 5\n",
+        'trap cleanup TERM\nsleep 5 & wait "$!"\n',
+        'trap cleanup TERM\nsleep 5 & pid=$!; wait "$pid"\n',
+        "trap cleanup TERM\nsleep 5 &\nwait $!\n",
+        "trap cleanup TERM\necho sleep 1\n",
+        "trap - TERM\nsleep 5\n",
     ],
 )
 def test_interruptible_or_untrapped_sleeps_pass(source):
