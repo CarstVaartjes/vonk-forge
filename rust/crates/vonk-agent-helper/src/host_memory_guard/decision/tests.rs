@@ -6,6 +6,14 @@ use vonk_agent_protocol::host_memory_guard_policy::SAMPLE_INTERVAL;
 const GIB: u64 = 1024 * 1024 * 1024;
 const PAGE: u64 = 4096;
 
+/// Swap just above R1's free-swap margin (10% of 64 GiB), so with 300 MiB
+/// available only R4 sees an emergency; headroom stays under the floor.
+const UNSWAPPABLE_SWAP_FREE: u64 = 7 * GIB;
+
+/// Free memory and swap both nearly gone: below the pressure headroom floor,
+/// with no swap traffic so only R4 can act.
+const LOW_HEADROOM: (u64, u64) = (2 * GIB, 4 * GIB);
+
 /// One Spark under load, advanced one sample at a time.
 #[derive(Clone, Copy)]
 struct Host {
@@ -281,6 +289,8 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     let pressured = Host {
         avg10: 65.0,
         avg60: 70.0,
+        available: LOW_HEADROOM.0,
+        swap_free: LOW_HEADROOM.1,
         ..Host::serving()
     };
     let start = Instant::now();
@@ -308,6 +318,8 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     let mut stuck = Host {
         avg10: 85.0,
         avg60: 85.0,
+        available: LOW_HEADROOM.0,
+        swap_free: LOW_HEADROOM.1,
         ..Host::serving()
     };
     let bound = ticks(LOADING_PRESSURE_SUSTAIN);
@@ -332,6 +344,87 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
             true
         ),
         None
+    );
+}
+
+/// The production 2026-10-31 12:20Z reading that killed a MiniMax H3 job on
+/// spark-3542: reclaim absorbing the load into 64 GiB of free swap.
+fn minimax_h3_reading() -> Host {
+    Host {
+        available: 11 * GIB + 512 * 1024 * 1024,
+        free: 2 * GIB,
+        swap_total: 65_536 * 1024 * 1024,
+        swap_free: 64_789 * 1024 * 1024,
+        avg10: 70.0,
+        avg60: 43.0,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn r4_needs_low_headroom_in_both_phases() {
+    let start = Instant::now();
+    // Serving: 30 s of full PSI 70% with ~75 GiB of headroom is not a kill.
+    let mut roomy = minimax_h3_reading();
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(120)),
+            false
+        ),
+        None
+    );
+    // The same PSI with the headroom under 8 GiB is.
+    let bound = ticks(SERVING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 2 * GIB,
+        swap_free: 4 * GIB,
+        ..minimax_h3_reading()
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            false
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+    // Loading: avg60 above 80% and not falling, for 60 s, the same pair.
+    let stuck = Host {
+        avg10: 85.0,
+        avg60: 85.0,
+        ..minimax_h3_reading()
+    };
+    let mut roomy = stuck;
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(300)),
+            true
+        ),
+        None
+    );
+    let bound = ticks(LOADING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 2 * GIB,
+        swap_free: 4 * GIB,
+        ..stuck
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            true
+        ),
+        Some((bound, Trigger::SustainedPressure))
     );
 }
 
@@ -581,6 +674,8 @@ fn a_phase_flip_starts_the_pressure_window_over() {
     let mut host = Host {
         avg10: 85.0,
         avg60: 85.0,
+        available: LOW_HEADROOM.0,
+        swap_free: LOW_HEADROOM.1,
         ..Host::serving()
     };
     let mut decision = Decision::default();
@@ -601,10 +696,11 @@ fn a_phase_flip_starts_the_pressure_window_over() {
 #[test]
 fn unswappable_growth_with_swap_still_free_is_killed_by_the_pressure_backstop() {
     // GPU and pinned allocations never reach swap: memory runs out while swap
-    // stays free, so only R4 (and R5 with the driver line) can act.
+    // stays mostly unused (headroom still under the floor), so only R4 (and R5 with the driver line) can act.
     let mut host = Host {
         available: 300 * 1024 * 1024,
         free: 200 * 1024 * 1024,
+        swap_free: UNSWAPPABLE_SWAP_FREE,
         avg10: 95.0,
         avg60: 90.0,
         ..Host::serving()
@@ -741,6 +837,7 @@ fn gpu_pinned_growth_with_swap_free_is_killed_within_two_and_a_half_minutes_load
         let mut host = Host {
             available: 300 * 1024 * 1024,
             free: 1536 * 1024 * 1024,
+            swap_free: UNSWAPPABLE_SWAP_FREE,
             ..Host::serving()
         };
         let mut decision = Decision::default();

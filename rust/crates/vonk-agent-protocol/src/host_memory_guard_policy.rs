@@ -9,7 +9,7 @@ use crate::swap::{GIB, SWAP_POLICY};
 // Swap-aware policy R1-R5 (owner approved 2026-10-28). A load that swaps
 // steadily is a cushion working, not a wedge: MemAvailable leaves out free
 // swap, and kswapd reclaim alone raises full PSI past 30%. The shapes follow
-// systemd-oomd (full avg10 60% for 30 s; memory AND swap low), Meta oomd
+// systemd-oomd (full avg10 60% for 30 s; memory AND swap low, which R3 and R4 both require), Meta oomd
 // (avg60 80% for 60 s not falling; swap below 10% while still swapping out)
 // and earlyoom (memory AND swap below 10%). Every threshold below marked
 // CALIBRATABLE is a starting value to measure on hardware (kill evidence
@@ -38,11 +38,15 @@ pub const SWAP_FILLING_SUSTAIN: Duration = Duration::from_secs(3);
 // 10 s. Refaults, not steady swap-out, are the freeze precursor. CALIBRATABLE.
 pub const THRASH_PAGES_PER_SECOND: u64 = 50_000;
 pub const THRASH_FULL_PSI_PERCENT: f64 = 60.0;
-pub const THRASH_HEADROOM_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+// R3 and R4 act only below this headroom (MemAvailable + free swap).
+pub const PRESSURE_HEADROOM_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const THRASH_SUSTAIN: Duration = Duration::from_secs(10);
-// R4, the PSI backstop. Serving: full avg10 above 60% for 30 s. A declared
-// loading phase: full avg60 above 80% for 60 s while avg10 is not falling
-// (avg10 at least 0.85 x avg60). R1 and R2 apply in both. CALIBRATABLE.
+// R4, the PSI backstop, acts only with MemAvailable + free swap below
+// PRESSURE_HEADROOM_BYTES (owner 2026-10-31: spark-3542 killed a job at 75 GiB
+// headroom on full avg10 70% that was reclaim absorbing the load). Serving:
+// full avg10 above 60% for 30 s. A declared loading phase: full avg60 above
+// 80% for 60 s while avg10 is not falling (avg10 at least 0.85 x avg60). R1
+// and R2 apply in both. CALIBRATABLE.
 pub const SERVING_FULL_PSI_PERCENT: f64 = 60.0;
 pub const SERVING_PRESSURE_SUSTAIN: Duration = Duration::from_secs(30);
 pub const LOADING_FULL_AVG60_PERCENT: f64 = 80.0;
