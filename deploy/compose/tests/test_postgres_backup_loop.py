@@ -29,8 +29,22 @@ STALL_SECONDS = "600"
 
 STUBS = {
     "gosu": 'shift\nexec "$@"\n',
-    "initdb": "exit 0\n",
-    "pg_ctl": "exit 0\n",
+    # FAULT=hangrestore stalls the restore verification inside initdb.
+    "initdb": (
+        'if [ "$FAULT" = hangrestore ]; then\n'
+        '  echo $$ >"$FAULTS/initdb.pid"\n'
+        '  exec "$REAL_SLEEP" "$STALL_SECONDS"\n'
+        "fi\n"
+        "exit 0\n"
+    ),
+    # Every call is logged so a test can count the restore's cleanup stops.
+    # The stop is slow in the hangrestore case, so a worker that exits without
+    # waiting for the restore's cleanup is seen as exiting before the log line.
+    "pg_ctl": (
+        'case "$*" in *immediate*) [ "$FAULT" = hangrestore ] && "$REAL_SLEEP" 1 ;; esac\n'
+        'echo "$*" >>"$FAULTS/pg_ctl.log"\n'
+        "exit 0\n"
+    ),
     "install": 'for last; do :; done\nexec mkdir -p "$last"\n',
     # Records what is on disk while the dump streams, then dumps (or fails).
     "pg_dumpall": (
@@ -92,6 +106,12 @@ STUBS = {
         'case "$*" in *offhost*) ;; *) exec "$REAL_CP" "$@" ;; esac\n'
         'ls "$BACKUPS"/postgres-*.sql.gz | wc -l >>"$COUNTS"\n'
         '[ "$FAULT" = hangcp ] && exec "$REAL_SLEEP" "$STALL_SECONDS"\n'
+        # A copy that keeps growing never trips the stall bound: only a signal
+        # ends it, like a multi-gigabyte copy.
+        'if [ "$FAULT" = growcp ]; then\n'
+        '  echo $$ >"$FAULTS/cp.pid"\n'
+        '  while :; do printf x >>"$2"; "$REAL_SLEEP" 0.05; done\n'
+        "fi\n"
         # A truncated copy, and a slow copy that keeps growing before it completes.
         '[ "$FAULT" = shortcp ] && head -c 1 "$1" >"$2" && exit 0\n'
         'if [ "$FAULT" = slowcp ]; then\n'
@@ -306,6 +326,53 @@ def test_signalling_the_background_pid_runs_the_backup_cleanup(tmp_path: Path) -
         os.kill(worker, signal.SIGTERM)
         loop.wait(timeout=HANG_GUARD_SECONDS)
         assert not temporary.exists(), "the loop's signal trap never ran"
+    finally:
+        _terminate(loop)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize(
+    ("fault", "pid_file"),
+    [("growcp", "cp.pid"), ("hangrestore", "initdb.pid")],
+)
+def test_a_term_to_the_worker_alone_ends_a_running_attempt_promptly(
+    tmp_path: Path, fault: str, pid_file: str
+) -> None:
+    # The signal goes to the worker pid only (as forward_signal sends it), while
+    # an attempt is inside a long foreground step. The trap must not wait for
+    # that step: the worker exits, its cleanup runs and the step is ended too.
+    loop, _ = _start(tmp_path, fault)
+    pid_path = tmp_path / "faults" / pid_file
+    try:
+        _wait_for(pid_path.is_file, loop)
+        step = int(pid_path.read_text())
+        stale = tmp_path / "state/.last-successful-backup.epoch.tmp"
+        stale.write_text("interrupted", encoding="ascii")
+        worker = int((tmp_path / "worker.pid").read_text())
+        os.kill(worker, signal.SIGTERM)
+        loop.wait(timeout=HANG_GUARD_SECONDS)
+        assert not stale.exists(), "the loop's signal trap never ran"
+        if fault == "hangrestore":
+            # The restore's own cleanup finished before the worker exited.
+            log = tmp_path / "faults" / "pg_ctl.log"
+            stops = [
+                line
+                for line in log.read_text(encoding="ascii").splitlines()
+                if "-m immediate stop" in line
+            ]
+            assert len(stops) == 1, "the restore cleanup did not run exactly once"
+            assert not list((tmp_path / "tmp").glob("vonk-backup-restore.*"))
+        deadline = time.monotonic() + HANG_GUARD_SECONDS
+        while _alive(step):
+            assert time.monotonic() < deadline, "the stalled step was left running"
+            time.sleep(0.05)
     finally:
         _terminate(loop)
 

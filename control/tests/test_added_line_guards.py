@@ -1780,3 +1780,46 @@ def test_runtime_len_caps_on_model_sized_collections_are_flagged() -> None:
     assert not check_source(path, _RUNTIME_CAPS, {1, 2, 7}, modes=("item-counts",))
     lt = "class P(M):\n    artifact_count: int = Field(lt=1024)\n"
     assert check_source(path, lt, {2}, modes=("item-counts",))
+
+
+TRAP_PATH = "deploy/compose/postgres/entrypoint.sh"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The backup worker's old copy poll.
+        "trap 'cleanup; exit 0' TERM INT\nwhile kill -0 \"$pid\"; do\n  sleep 5\ndone\n",
+        # The Tailscale reconciler's old sleep.
+        'trap shutdown_services 1 2 15\nwhile :; do\n    sleep "${reconcile_interval}"\ndone\n',
+        "trap -- 'cleanup' TERM\nsleep 5 && true\n",
+        "trap cleanup TERM\nsleep 5 &\ntrue\n",
+    ],
+)
+def test_a_foreground_sleep_under_a_termination_trap_fails(source):
+    line = next(
+        number for number, text in enumerate(source.splitlines(), 1) if "sleep" in text
+    )
+    assert check_source(TRAP_PATH, source, {line}, modes=("trap-waits",))
+    # Only an added line can fail the change.
+    assert not check_source(TRAP_PATH, source, {line + 1}, modes=("trap-waits",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "trap 'cleanup; exit 0' TERM INT\nsleep 5 & wait $!\n",
+        'trap shutdown_services 1 2 15\nsleep "${reconcile_interval}" & wait $!\n',
+        "trap cleanup 0\nsleep 5\n",
+        "sleep 5\n",
+        "trap 'cleanup' TERM\n# sleep 5\n",
+        'trap cleanup TERM\nsleep 5 & wait "$!"\n',
+        'trap cleanup TERM\nsleep 5 & pid=$!; wait "$pid"\n',
+        "trap cleanup TERM\nsleep 5 &\nwait $!\n",
+        "trap cleanup TERM\necho sleep 1\n",
+        "trap - TERM\nsleep 5\n",
+    ],
+)
+def test_interruptible_or_untrapped_sleeps_pass(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(TRAP_PATH, source, lines, modes=("trap-waits",))

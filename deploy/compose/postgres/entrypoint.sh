@@ -117,7 +117,41 @@ backup_loop() {
     # An unreachable off-host mount must not hang the local cleanup.
     timeout 10 rm -f "$offhost_temporary"
   }
-  trap 'cleanup; exit 0' TERM INT
+  # A shell runs a trap only after the foreground command it waits on ends. So
+  # an attempt runs in the background and is awaited with the interruptible
+  # `wait`; the trap then stops the attempt and everything below it (cp,
+  # pg_dumpall, restore; `timeout` moves itself to its own process group, so
+  # parentage is followed, not the group) instead of waiting for them.
+  attempt_pid=
+  descendants() {
+    for stat in /proc/[0-9]*/stat; do
+      line=
+      { read -r line <"$stat"; } 2>/dev/null || continue
+      rest=${line##*) }
+      # shellcheck disable=SC2086 # the stat fields are split into words on purpose
+      set -- $rest
+      pid=${stat#/proc/}
+      pid=${pid%/stat}
+      [ "${2:-}" = "$parent" ] && echo "$pid"
+    done
+  }
+  stop_attempt() {
+    [ -n "$attempt_pid" ] || return 0
+    doomed=$attempt_pid
+    frontier=$attempt_pid
+    while [ -n "$frontier" ]; do
+      next=
+      for parent in $frontier; do next="$next $(descendants)"; done
+      doomed="$doomed $next"
+      # shellcheck disable=SC2086 # word splitting trims the pid list on purpose
+      frontier=$(echo $next)
+    done
+    # shellcheck disable=SC2086 # one argument per pid on purpose
+    kill -TERM $doomed 2>/dev/null || true
+    wait "$attempt_pid" 2>/dev/null || true
+    attempt_pid=
+  }
+  trap 'stop_attempt; cleanup; exit 0' TERM INT
   # A SIGKILLed container never ran the trap; drop its leftovers before any attempt.
   cleanup
   rm -rf /tmp/vonk-backup-restore.*
@@ -192,12 +226,13 @@ backup_loop() {
         echo "PostgreSQL off-host copy made no progress for $stalled seconds" >&2
         return 1
       fi
-      sleep 5
+      sleep 5 & wait $!
     done
     wait "$copy_pid"
   }
   restore_verify() (
     set -e
+    trap 'exit 143' TERM INT
     restore_directory=$(mktemp -d /tmp/vonk-backup-restore.XXXXXX)
     trap 'gosu postgres pg_ctl -D "$restore_directory/data" -m immediate stop >/dev/null 2>&1 || true; rm -rf -- "${restore_directory:?}"' EXIT
     chown postgres:postgres "$restore_directory"
@@ -221,9 +256,12 @@ backup_loop() {
   # published and gzip-tested, and copied off-host when configured; the
   # restore-verification marker is written only when the isolated restore also
   # succeeded (it is skipped, not failed, while scratch space is short).
-  # Call it as a plain command: shells ignore errexit inside a condition.
-  backup_once() (
+  # Run it in the background (`backup_once &`): the fork isolates errexit and
+  # the traps below, and, with a brace body, is the only fork, so $! is the
+  # process whose exit follows its own EXIT traps. Never call it in a condition.
+  backup_once() {
     set -e
+    trap 'exit 143' TERM INT
     report_failure() {
       if [ "$1" -ne 0 ]; then
         echo "PostgreSQL backup failed at step $step (status $1); keeping previous success marker; retrying in five minutes" >&2
@@ -297,7 +335,7 @@ backup_loop() {
     chmod 0644 "$state_temporary"
     mv "$state_temporary" /state/last-successful-backup.epoch
     echo "PostgreSQL backup completed (restore-verified: $verified): $destination"
-  )
+  }
   while :; do
     if [ ! -d /backups ]; then
       echo "PostgreSQL backup directory /backups is unavailable; retrying shortly" >&2
@@ -314,8 +352,10 @@ backup_loop() {
     esac
     prune_dumps /backups
     if [ -n "${VONK_BACKUP_OFFHOST_PATH:-}" ]; then prune_dumps /offhost; fi
-    backup_once
+    backup_once & attempt_pid=$!
+    wait "$attempt_pid"
     attempt_status=$?
+    attempt_pid=
     if [ "$attempt_status" -ne 0 ]; then
       sleep 300 & wait $!
       continue

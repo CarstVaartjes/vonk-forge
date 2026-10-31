@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import shutil
+import signal
 import socket
 import subprocess
 import tempfile
@@ -1168,6 +1171,59 @@ def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_saf
         if invocation.startswith("serve set-config --all ")
     )
     assert drain_api < clear_api < drain_dashboard < clear_dashboard < clear_all
+
+
+def test_reconciler_withdraws_services_at_once_during_its_interval_sleep(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    """A TERM during the (long) reconcile sleep runs the withdrawal trap now.
+
+    A foreground sleep defers the trap until it ends, which is past Docker's
+    10 s grace for this container, so the services were never withdrawn.
+    """
+    socket_path = short_socket_directory / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    state, calls = _write_stateful_tailscale(tmp_path)
+    # Signals that the reconciler sits in its interval sleep.
+    sleeping = tmp_path / "interval-sleep-started"
+    real_sleep = shutil.which("sleep")
+    fake = tmp_path / "sleep"
+    fake.write_text(
+        f'#!/bin/sh\n[ "$1" = 600 ] && : >{os.fspath(sleeping)!r}\nexec {real_sleep!r} "$@"\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    reconciler = subprocess.Popen(
+        ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+        env=os.environ
+        | {
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "TS_SOCKET_PATH": str(socket_path),
+            "TS_RECONCILE_INTERVAL_SECONDS": "600",
+            "TS_TEST_STATE": str(state),
+            "TS_TEST_CALLS": str(calls),
+        },
+        # The detached sleep would keep inherited pipes open.
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
+        deadline = time.monotonic() + 120
+        while not sleeping.exists():
+            assert reconciler.poll() is None, "the reconciler exited early"
+            assert time.monotonic() < deadline, "the reconciler never slept"
+            time.sleep(0.05)
+        reconciler.terminate()
+        # Only a hang guard: the exit follows the trap, not a clock.
+        assert reconciler.wait(timeout=120) == 0
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(reconciler.pid, signal.SIGKILL)
+        daemon_socket.close()
+    assert json.loads(state.read_text(encoding="utf-8"))["advertised"] == []
 
 
 def test_healthcheck_mode_cannot_register_service_withdrawal_trap() -> None:
