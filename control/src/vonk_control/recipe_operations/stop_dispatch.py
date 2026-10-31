@@ -275,7 +275,6 @@ class StopDispatchMixin:
         )
         if accepted_parent is not None:
             RecipeOperationAdapter().finish(accepted_parent, now, failed=False)
-            accepted_parent.status_reason = None
             accepted_parent.result = serialize_json_value(
                 _validated_result(job.kind, read_row_column(job, "result"))
             )

@@ -149,7 +149,7 @@ class OfflineStopMixin:
                     ):
                         reason = redact_text(str(error))[:1024]
                         RecipeOperationAdapter().finish(
-                            retained, now, failed=True, reason=reason, keep=False
+                            retained, now, failed=True, reason=reason
                         )
                         retained.result = serialize_json_value(
                             RecipeOperationResult(
@@ -335,9 +335,7 @@ class OfflineStopMixin:
         run = session.get(RecipeRun, run_id) if run_id is not None else None
         if run is None:
             reason = f"{ProjectionCode.NODE_OFFLINE}: exact Stop owner observation unavailable"
-            RecipeOperationAdapter().finish(
-                job, now, failed=True, reason=reason, keep=False
-            )
+            RecipeOperationAdapter().finish(job, now, failed=True, reason=reason)
             job.result = serialize_json_value(
                 RecipeOperationResult(
                     successful_nodes=[],
@@ -376,9 +374,7 @@ class OfflineStopMixin:
             if complete
             else f"{ProjectionCode.NODE_OFFLINE}: exact Stop pending reconnect"
         )
-        RecipeOperationAdapter().finish(
-            job, now, failed=failed, reason=run.route_error, keep=False
-        )
+        RecipeOperationAdapter().finish(job, now, failed=failed, reason=run.route_error)
         recorded = _recorded_result(
             job.kind, read_row_column(job, "result"), subject=job.id
         )

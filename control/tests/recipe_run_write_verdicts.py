@@ -166,7 +166,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/offline_stop.py": {
         "_finish_offline_stop": (
-            "21ddcb729c738342d18dd6bd039fe2cb08c21ed7a647aa0b1dea53a46795f093",
+            "9456d413adb86ea41f2930913da2804c748891875536023d73bf35b7e73c9e0c",
             "retain: confirmed offline Stop releases only its exact run",
         ),
     },

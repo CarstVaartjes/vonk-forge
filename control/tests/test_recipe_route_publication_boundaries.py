@@ -781,10 +781,12 @@ def test_authenticated_observation_producer_repairs_between_request_attempts(
         assert _recipe_run(session, run_id).route_state == "published"
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
-    tmp_path,
-):
+def _exhaust_publication(tmp_path, *, stale_reason=None):
+    """Run publication to exhaustion with a Start job carrying `stale_reason`.
+
+    Returns the ended Start job's (id, state, status_reason, result) and the
+    fresh run id plus the service, for the caller to assert on.
+    """
     from datetime import UTC, timedelta
 
     from vonk_agent_protocol import AgentOperation, LifecycleState, RunState
@@ -806,6 +808,7 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
             payload_digest="a" * 64,
             payload={"owner_id": first, "recovery": {"deadline": "damaged"}},
             state=LifecycleState.RUNNING,
+            status_reason=stale_reason,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -827,7 +830,33 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
         assert ended.state != LifecycleState.RUNNING
         assert _recipe_run(session, first).state == RunState.RUNNING
         assert _recipe_run(session, first).next_action_at is None
+        snapshot = (ended.state, ended.status_reason, ended.result)
     clock.now = NOW
     service.publish_run(fresh)
     # The failed, never-published owner has no accepted route to retain.
     assert _live_aliases(tmp_path / "live") == {"fresh"}
+    return snapshot
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
+    tmp_path,
+):
+    _exhaust_publication(tmp_path)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_exhausted_publication_ends_the_start_with_its_own_reason(tmp_path):
+    """Catches the failed Start keeping a wait note from before the end.
+
+    On main the end kept the existing reason, so an earlier retry note
+    survived instead of the publication error.
+    """
+    from vonk_agent_protocol import LifecycleState
+
+    state, reason, result = _exhaust_publication(
+        tmp_path, stale_reason="retry scheduled at 2026-01-01T00:00:00Z"
+    )
+    assert state != LifecycleState.RUNNING
+    assert reason and "retry scheduled" not in reason
+    assert result is not None and reason == result["recovery_error"]
