@@ -21,7 +21,7 @@ from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
-from . import request_path_scans
+from . import request_path_scans, shell_trap_waits
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -74,6 +74,7 @@ MODES = (
     "follow-validators",
     "item-counts",
     "event-loops",
+    "trap-waits",
 )
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
@@ -1655,6 +1656,16 @@ def check_source(
                 r"\b(?:asyncio\.run|asyncio\.Runner|uvloop\.run|anyio\.run)\(|\.run_until_complete\(",
                 text.split("#", 1)[0],
             )
+        )
+    if (
+        path.startswith("deploy/compose/")
+        and path.endswith(".sh")
+        and not is_test
+        and "trap-waits" in modes
+    ):
+        hits.extend(
+            (line, shell_trap_waits.KIND)
+            for line in shell_trap_waits.scan_source(source)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

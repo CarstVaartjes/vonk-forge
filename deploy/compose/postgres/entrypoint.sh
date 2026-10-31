@@ -256,8 +256,10 @@ backup_loop() {
   # published and gzip-tested, and copied off-host when configured; the
   # restore-verification marker is written only when the isolated restore also
   # succeeded (it is skipped, not failed, while scratch space is short).
-  # Call it as a plain command: shells ignore errexit inside a condition.
-  backup_once() (
+  # Run it in the background (`backup_once &`): the fork isolates errexit and
+  # the traps below, and, with a brace body, is the only fork, so $! is the
+  # process whose exit follows its own EXIT traps. Never call it in a condition.
+  backup_once() {
     set -e
     trap 'exit 143' TERM INT
     report_failure() {
@@ -333,7 +335,7 @@ backup_loop() {
     chmod 0644 "$state_temporary"
     mv "$state_temporary" /state/last-successful-backup.epoch
     echo "PostgreSQL backup completed (restore-verified: $verified): $destination"
-  )
+  }
   while :; do
     if [ ! -d /backups ]; then
       echo "PostgreSQL backup directory /backups is unavailable; retrying shortly" >&2

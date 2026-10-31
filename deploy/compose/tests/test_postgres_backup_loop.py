@@ -37,7 +37,8 @@ STUBS = {
         "fi\n"
         "exit 0\n"
     ),
-    "pg_ctl": "exit 0\n",
+    # Every call is logged so a test can count the restore's cleanup stops.
+    "pg_ctl": 'echo "$*" >>"$FAULTS/pg_ctl.log"\nexit 0\n',
     "install": 'for last; do :; done\nexec mkdir -p "$last"\n',
     # Records what is on disk while the dump streams, then dumps (or fails).
     "pg_dumpall": (
@@ -332,14 +333,11 @@ def _alive(pid: int) -> bool:
 
 
 @pytest.mark.parametrize(
-    ("fault", "pid_file", "temporary"),
-    [
-        ("growcp", "cp.pid", ".postgres-backup.tmp.gz"),
-        ("hangrestore", "initdb.pid", ".postgres-backup.tmp.gz"),
-    ],
+    ("fault", "pid_file"),
+    [("growcp", "cp.pid"), ("hangrestore", "initdb.pid")],
 )
 def test_a_term_to_the_worker_alone_ends_a_running_attempt_promptly(
-    tmp_path: Path, fault: str, pid_file: str, temporary: str
+    tmp_path: Path, fault: str, pid_file: str
 ) -> None:
     # The signal goes to the worker pid only (as forward_signal sends it), while
     # an attempt is inside a long foreground step. The trap must not wait for
@@ -355,6 +353,16 @@ def test_a_term_to_the_worker_alone_ends_a_running_attempt_promptly(
         os.kill(worker, signal.SIGTERM)
         loop.wait(timeout=HANG_GUARD_SECONDS)
         assert not stale.exists(), "the loop's signal trap never ran"
+        if fault == "hangrestore":
+            # The restore's own cleanup finished before the worker exited.
+            log = tmp_path / "faults" / "pg_ctl.log"
+            stops = [
+                line
+                for line in log.read_text(encoding="ascii").splitlines()
+                if "-m immediate stop" in line
+            ]
+            assert len(stops) == 1, "the restore cleanup did not run exactly once"
+            assert not list((tmp_path / "tmp").glob("vonk-backup-restore.*"))
         deadline = time.monotonic() + HANG_GUARD_SECONDS
         while _alive(step):
             assert time.monotonic() < deadline, "the stalled step was left running"
