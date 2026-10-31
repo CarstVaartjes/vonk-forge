@@ -395,7 +395,8 @@ fn transient_host_runtime_failures_remain_retryable_past_the_systemd_start_limit
 /// probe is ready.
 struct PodmanDownRunner {
     inner: FakeRunner,
-    stdout: &'static [u8],
+    /// (exit code, success, stdout) of the Podman probe.
+    answer: (i32, bool, &'static [u8]),
 }
 
 impl ProcessRunner for PodmanDownRunner {
@@ -407,9 +408,9 @@ impl ProcessRunner for PodmanDownRunner {
     ) -> Result<ProcessOutput, ProcessError> {
         if program == Program::Podman {
             return Ok(ProcessOutput {
-                exit_code: Some(125),
-                success: self.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
-                stdout: self.stdout.to_vec(),
+                exit_code: Some(self.answer.0),
+                success: self.answer.1,
+                stdout: self.answer.2.to_vec(),
                 stderr: b"cannot connect to /run/user/128: no such file".to_vec(),
             });
         }
@@ -419,8 +420,8 @@ impl ProcessRunner for PodmanDownRunner {
 
 #[test]
 fn dead_podman_removes_build_capabilities_but_not_the_capacity_report() {
-    // A failed probe and a blank answer degrade alike.
-    for stdout in [&b""[..], &b"\n"[..]] {
+    // A failed probe and a successful but blank answer degrade alike.
+    for answer in [(125, false, &b""[..]), (0, true, &b"\n"[..])] {
         let directory = tempdir().unwrap();
         let meminfo = directory.path().join("meminfo");
         fs::write(
@@ -434,7 +435,7 @@ fn dead_podman_removes_build_capabilities_but_not_the_capacity_report() {
                 gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
                 cdi_output: b"nvidia.com/gpu=all\n",
             },
-            stdout,
+            answer,
         };
         let inventory = InventoryCollector {
             runner: &runner,
@@ -446,6 +447,31 @@ fn dead_podman_removes_build_capabilities_but_not_the_capacity_report() {
         }
         .collect()
         .unwrap();
+
+        // Healing: once Podman answers again the next report restores them.
+        let healthy = FakeRunner {
+            calls: RefCell::new(vec![]),
+            gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+            cdi_output: b"nvidia.com/gpu=all\n",
+        };
+        let healed = InventoryCollector {
+            runner: &healthy,
+            meminfo_path: &meminfo,
+            store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+        }
+        .collect()
+        .unwrap();
+        for build in [
+            "build.rootless-podman.v1",
+            "recipe.build.v1",
+            "recipe.build.cleanup.v1",
+            "recipe.build.egress-proxy.v1",
+        ] {
+            assert!(healed.capabilities.contains(&build.to_owned()), "{build}");
+        }
 
         assert_eq!(inventory.memory_total_bytes, 123456 * 1024);
         assert_eq!(inventory.gpu_count, 1);
