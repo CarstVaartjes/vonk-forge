@@ -128,6 +128,7 @@ backup_loop() {
       line=
       { read -r line <"$stat"; } 2>/dev/null || continue
       rest=${line##*) }
+      # shellcheck disable=SC2086 # the stat fields are split into words on purpose
       set -- $rest
       pid=${stat#/proc/}
       pid=${pid%/stat}
@@ -142,8 +143,10 @@ backup_loop() {
       next=
       for parent in $frontier; do next="$next $(descendants)"; done
       doomed="$doomed $next"
+      # shellcheck disable=SC2086 # word splitting trims the pid list on purpose
       frontier=$(echo $next)
     done
+    # shellcheck disable=SC2086 # one argument per pid on purpose
     kill -TERM $doomed 2>/dev/null || true
     wait "$attempt_pid" 2>/dev/null || true
     attempt_pid=
