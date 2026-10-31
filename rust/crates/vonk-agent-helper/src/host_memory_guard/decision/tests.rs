@@ -279,6 +279,7 @@ fn r3_a_refault_storm_without_headroom_kills_after_ten_seconds() {
 #[test]
 fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     let pressured = Host {
+        available: 2 * GIB,
         avg10: 65.0,
         avg60: 70.0,
         ..Host::serving()
@@ -306,6 +307,7 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     );
     // Loading: avg60 above 80% and not falling, for 60 s.
     let mut stuck = Host {
+        available: 2 * GIB,
         avg10: 85.0,
         avg60: 85.0,
         ..Host::serving()
@@ -333,6 +335,125 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
         ),
         None
     );
+}
+
+/// The production 2026-10-31 12:20Z reading that killed a MiniMax H3 job on
+/// spark-3542: reclaim absorbing the load into 64 GiB of free swap.
+fn minimax_h3_reading() -> Host {
+    Host {
+        available: 11 * GIB + 512 * 1024 * 1024,
+        free: 2 * GIB,
+        swap_total: 65_536 * 1024 * 1024,
+        swap_free: 64_789 * 1024 * 1024,
+        avg10: 70.0,
+        avg60: 43.0,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn r4_needs_low_mem_available_in_both_phases() {
+    let start = Instant::now();
+    // Serving: full PSI 70% with 11.5 GiB available is not a kill.
+    let mut roomy = minimax_h3_reading();
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(120)),
+            false
+        ),
+        None
+    );
+    // The same PSI with MemAvailable under 8 GiB and swap fully free is.
+    let bound = ticks(SERVING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 7 * GIB,
+        swap_free: 65_536 * 1024 * 1024,
+        ..minimax_h3_reading()
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            false
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+    // Loading: avg60 above 80% and not falling, for 60 s, the same pair.
+    let stuck = Host {
+        avg10: 85.0,
+        avg60: 85.0,
+        ..minimax_h3_reading()
+    };
+    let mut roomy = stuck;
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(300)),
+            true
+        ),
+        None
+    );
+    let bound = ticks(LOADING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 7 * GIB,
+        swap_free: 65_536 * 1024 * 1024,
+        ..stuck
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            true
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+}
+
+#[test]
+fn r4_kills_within_its_bound_of_memory_available_crossing_the_floor() {
+    // Unswappable growth: swap stays fully free while MemAvailable falls from
+    // 20 GiB through the 8 GiB floor under full PSI already above 60%. The
+    // window starts at the crossing, so the kill lands one bound later.
+    let start = Instant::now();
+    let per_tick = 12 * GIB / u64::from(ticks(Duration::from_secs(60)));
+    for (loading, bound) in [
+        (false, ticks(SERVING_PRESSURE_SUSTAIN)),
+        (true, ticks(LOADING_PRESSURE_SUSTAIN)),
+    ] {
+        let mut host = Host {
+            avg10: 90.0,
+            avg60: 90.0,
+            ..Host::serving()
+        };
+        let mut decision = Decision::default();
+        let mut crossing = None;
+        let killed = (0..ticks(Duration::from_secs(300))).find_map(|tick| {
+            host.available = (20 * GIB).saturating_sub(per_tick * u64::from(tick));
+            if host.available < PRESSURE_AVAILABLE_BYTES {
+                crossing.get_or_insert(tick);
+            }
+            let sample = host.tick();
+            decision
+                .observe(start + SAMPLE_INTERVAL * tick, sample, false, true, loading)
+                .map(|trigger| (tick, trigger))
+        });
+        let (tick, trigger) = killed.expect("falling MemAvailable is killed");
+        assert_eq!(trigger, Trigger::SustainedPressure);
+        let crossing = crossing.expect("crossed the floor");
+        assert!(
+            (crossing + bound..=crossing + bound + 1).contains(&tick),
+            "loading={loading}: crossing {crossing}, kill {tick}, bound {bound}"
+        );
+    }
 }
 
 #[test]
@@ -579,6 +700,7 @@ fn a_phase_flip_starts_the_pressure_window_over() {
     // Break caught: 40 s of loading pressure read as 40 s of serving pressure
     // the moment one slow drop let the loading phase lapse.
     let mut host = Host {
+        available: 2 * GIB,
         avg10: 85.0,
         avg60: 85.0,
         ..Host::serving()

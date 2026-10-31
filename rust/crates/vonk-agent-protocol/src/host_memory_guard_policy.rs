@@ -9,7 +9,7 @@ use crate::swap::{GIB, SWAP_POLICY};
 // Swap-aware policy R1-R5 (owner approved 2026-10-28). A load that swaps
 // steadily is a cushion working, not a wedge: MemAvailable leaves out free
 // swap, and kswapd reclaim alone raises full PSI past 30%. The shapes follow
-// systemd-oomd (full avg10 60% for 30 s; memory AND swap low), Meta oomd
+// systemd-oomd (full avg10 60% for 30 s; memory AND swap low, R3 and R5 keep that shape), Meta oomd
 // (avg60 80% for 60 s not falling; swap below 10% while still swapping out)
 // and earlyoom (memory AND swap below 10%). Every threshold below marked
 // CALIBRATABLE is a starting value to measure on hardware (kill evidence
@@ -42,7 +42,15 @@ pub const THRASH_HEADROOM_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const THRASH_SUSTAIN: Duration = Duration::from_secs(10);
 // R4, the PSI backstop. Serving: full avg10 above 60% for 30 s. A declared
 // loading phase: full avg60 above 80% for 60 s while avg10 is not falling
-// (avg10 at least 0.85 x avg60). R1 and R2 apply in both. CALIBRATABLE.
+// (avg10 at least 0.85 x avg60). Both also need MemAvailable below
+// PRESSURE_AVAILABLE_BYTES. R1 and R2 apply in both. CALIBRATABLE.
+// MemAvailable alone, not headroom: free swap does not help unswappable
+// GPU/pinned growth. The floor spares pressured-but-healthy runs (2026-10-31
+// MiniMax H3: 11.5 GiB available, killed at 75 GiB headroom) and keeps R4's
+// existing behaviour for unswappable growth once MemAvailable falls below it.
+// It does not change the spark-3542 2026-10-30 case, whose 47 s squeeze during
+// a load stays open (#1987).
+pub const PRESSURE_AVAILABLE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 pub const SERVING_FULL_PSI_PERCENT: f64 = 60.0;
 pub const SERVING_PRESSURE_SUSTAIN: Duration = Duration::from_secs(30);
 pub const LOADING_FULL_AVG60_PERCENT: f64 = 80.0;
