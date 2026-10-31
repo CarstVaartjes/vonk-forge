@@ -38,7 +38,13 @@ STUBS = {
         "exit 0\n"
     ),
     # Every call is logged so a test can count the restore's cleanup stops.
-    "pg_ctl": 'echo "$*" >>"$FAULTS/pg_ctl.log"\nexit 0\n',
+    # The stop is slow in the hangrestore case, so a worker that exits without
+    # waiting for the restore's cleanup is seen as exiting before the log line.
+    "pg_ctl": (
+        'case "$*" in *immediate*) [ "$FAULT" = hangrestore ] && "$REAL_SLEEP" 1 ;; esac\n'
+        'echo "$*" >>"$FAULTS/pg_ctl.log"\n'
+        "exit 0\n"
+    ),
     "install": 'for last; do :; done\nexec mkdir -p "$last"\n',
     # Records what is on disk while the dump streams, then dumps (or fails).
     "pg_dumpall": (
