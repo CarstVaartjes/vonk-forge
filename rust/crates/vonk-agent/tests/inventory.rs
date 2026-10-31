@@ -66,7 +66,7 @@ impl ProcessRunner for DelayedReadyRunner {
         timeout: Duration,
     ) -> Result<ProcessOutput, ProcessError> {
         let failures = self.failures_remaining.get();
-        if failures > 0 && program == Program::Podman {
+        if failures > 0 && program == Program::Docker {
             self.failures_remaining.set(failures - 1);
             return Ok(ProcessOutput {
                 exit_code: None,
@@ -389,6 +389,84 @@ fn transient_host_runtime_failures_remain_retryable_past_the_systemd_start_limit
         assert!(collector.collect().is_err());
     }
     assert_eq!(collector.collect().unwrap().gpu_count, 1);
+}
+
+/// A Spark whose Podman is dead (its user manager was lost): every other
+/// probe is ready.
+struct PodmanDownRunner {
+    inner: FakeRunner,
+    stdout: &'static [u8],
+}
+
+impl ProcessRunner for PodmanDownRunner {
+    fn run(
+        &self,
+        program: Program,
+        arguments: &[String],
+        timeout: Duration,
+    ) -> Result<ProcessOutput, ProcessError> {
+        if program == Program::Podman {
+            return Ok(ProcessOutput {
+                exit_code: Some(125),
+                success: self.stdout.iter().any(|byte| !byte.is_ascii_whitespace()),
+                stdout: self.stdout.to_vec(),
+                stderr: b"cannot connect to /run/user/128: no such file".to_vec(),
+            });
+        }
+        self.inner.run(program, arguments, timeout)
+    }
+}
+
+#[test]
+fn dead_podman_removes_build_capabilities_but_not_the_capacity_report() {
+    // A failed probe and a blank answer degrade alike.
+    for stdout in [&b""[..], &b"\n"[..]] {
+        let directory = tempdir().unwrap();
+        let meminfo = directory.path().join("meminfo");
+        fs::write(
+            &meminfo,
+            "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+        )
+        .unwrap();
+        let runner = PodmanDownRunner {
+            inner: FakeRunner {
+                calls: RefCell::new(vec![]),
+                gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+                cdi_output: b"nvidia.com/gpu=all\n",
+            },
+            stdout,
+        };
+        let inventory = InventoryCollector {
+            runner: &runner,
+            meminfo_path: &meminfo,
+            store_path: directory.path(),
+            egress_binary_path: Path::new("/bin/true"),
+            fabric_address: None,
+            fabric_bandwidth_mbps: None,
+        }
+        .collect()
+        .unwrap();
+
+        assert_eq!(inventory.memory_total_bytes, 123456 * 1024);
+        assert_eq!(inventory.gpu_count, 1);
+        assert!(inventory.disk_total_bytes > 0);
+        for build in [
+            "build.rootless-podman.v1",
+            "recipe.build.v1",
+            "recipe.build.cleanup.v1",
+            "recipe.build.egress-proxy.v1",
+        ] {
+            assert!(
+                !inventory.capabilities.contains(&build.to_owned()),
+                "{build}"
+            );
+        }
+        assert!(
+            inventory
+                .capabilities
+                .contains(&"runtime.spark-docker-nvidia.v1".to_owned())
+        );
+    }
 }
 
 /// Answers `systemctl` as a given host does; every other probe is ready.
