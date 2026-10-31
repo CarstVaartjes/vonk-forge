@@ -2697,9 +2697,35 @@ def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
         fresh = real_plan_run(*args, **kwargs)
         calls.append(fresh.plan_digest)
         if len(calls) == 1:
-            return fresh
-        # Admission's own plan: a later observation hashes differently.
-        return replace(fresh, plan_digest="d" * 64)
+            # A newer report lands between the start's plan and admission's.
+            InventoryRepository(sessions, clock=lambda: NOW).record(
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            "node_id": nodes[0],
+                            "observed_at": NOW + timedelta(seconds=1),
+                            "disk_total_bytes": 10_000,
+                            "disk_free_bytes": 8_000,
+                            "host_memory_total_bytes": 10_000,
+                            "host_memory_free_bytes": 8_000,
+                            "gpu_memory_total_bytes": 10_000,
+                            "gpu_memory_free_bytes": 8_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": [
+                                "runtime.vonk.v1",
+                                "recipe.image.pull.v1",
+                                "recipe.operations.v1",
+                            ],
+                            "memory_pool": "shared",
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
+                )
+            )
+        return fresh
 
     service._run_admission.plan_run = replanning  # type: ignore[method-assign]
     started = service.start(
@@ -2711,7 +2737,6 @@ def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
 
     with sessions() as session:
         run = _required(session.get(RecipeRun, started.owner_id))
-        assert run.plan_digest == "d" * 64
         assert calls[0] != run.plan_digest
         job = _required(session.get(Job, started.id))
         assert job.payload["plan_digest"] == run.plan_digest
