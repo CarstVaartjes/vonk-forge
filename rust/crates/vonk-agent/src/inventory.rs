@@ -434,7 +434,10 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             }
             (0, 0, 0, "not observed".to_owned(), MemoryPool::Separate)
         });
-        let podman = startup_probe(
+        // Podman only builds recipes; loads and installs run on Docker. A dead
+        // Podman (for example a lost user manager) removes the build
+        // capabilities, never the capacity report.
+        let builds_available = match startup_probe(
             self.runner,
             Program::Podman,
             &[
@@ -444,10 +447,17 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             ],
             Duration::from_secs(10),
             "Podman",
-        )?;
-        if podman.stdout.iter().all(u8::is_ascii_whitespace) {
-            return Err(InventoryError::PrerequisiteUnavailable("Podman"));
-        }
+        ) {
+            Ok(podman) if !podman.stdout.iter().all(u8::is_ascii_whitespace) => true,
+            Ok(_) => {
+                eprintln!("vonk-agent: recipe builds unavailable: Podman reported no version");
+                false
+            }
+            Err(error) => {
+                eprintln!("vonk-agent: recipe builds unavailable: {error}");
+                false
+            }
+        };
         let docker = startup_probe(
             self.runner,
             Program::Docker,
@@ -476,18 +486,22 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
         }
         let mut capabilities = vec![
             "recipe.operations.v1".to_owned(),
-            "build.rootless-podman.v1".to_owned(),
             "runtime.spark-docker-nvidia.v1".to_owned(),
-            "recipe.build.v1".to_owned(),
-            "recipe.build.cleanup.v1".to_owned(),
             // Pulls pinned runtime images from the Controller's layered
             // image store through a loopback forwarder.
             "recipe.image.pull.v1".to_owned(),
             "recipe.job.run.v1".to_owned(),
             "runtime.vonk.v1".to_owned(),
         ];
-        if egress_boundary_available(self.egress_binary_path) {
-            capabilities.push("recipe.build.egress-proxy.v1".to_owned());
+        if builds_available {
+            capabilities.extend([
+                "build.rootless-podman.v1".to_owned(),
+                "recipe.build.v1".to_owned(),
+                "recipe.build.cleanup.v1".to_owned(),
+            ]);
+            if egress_boundary_available(self.egress_binary_path) {
+                capabilities.push("recipe.build.egress-proxy.v1".to_owned());
+            }
         }
         if let Some(speed) = self.fabric_bandwidth_mbps {
             capabilities.push(format!("fabric.connected.mbps.{speed}"));
@@ -609,6 +623,9 @@ fn startup_probe<R: ProcessRunner>(
             error => InventoryError::Process(error),
         })?;
     if !output.success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr: String = stderr.trim().chars().take(400).collect();
+        eprintln!("vonk-agent: {dependency} probe exited unsuccessfully: {stderr}");
         return Err(InventoryError::PrerequisiteUnavailable(dependency));
     }
     Ok(output)
