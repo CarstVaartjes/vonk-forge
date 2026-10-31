@@ -20,6 +20,12 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[3]
 ENTRYPOINT = ROOT / "deploy/compose/postgres/entrypoint.sh"
+# Only a hang guard: every wait below ends on the event it waits for. It is
+# never the thing under test, so a loaded runner cannot trip it.
+HANG_GUARD_SECONDS = 120
+# Injected stalls sleep far longer than any wait, so only the script's own bound
+# (the stubbed `timeout` below) can end them.
+STALL_SECONDS = "600"
 
 STUBS = {
     "gosu": 'shift\nexec "$@"\n',
@@ -44,7 +50,7 @@ STUBS = {
     "df": (
         'case "$*" in\n'
         '  *"${DF_FAIL:-NO-SUCH-SUFFIX}")\n'
-        '    [ -n "${DF_STALL:-}" ] && exec "$REAL_SLEEP" 30\n'
+        '    [ -n "${DF_STALL:-}" ] && exec "$REAL_SLEEP" "$STALL_SECONDS"\n'
         "    exit 1\n"
         "    ;;\n"
         "esac\n"
@@ -61,8 +67,9 @@ STUBS = {
         "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
         'echo "$device 1 1 $kb 1% /"\n'
     ),
-    # The probes' real bounds are seconds; the tests shorten every bound.
-    "timeout": 'shift\nexec "$REAL_TIMEOUT" 0.5 "$@"\n',
+    # The probes' real bounds are seconds. Tests that inject a stall shorten the
+    # bound (STUB_TIMEOUT); all others keep it far above any loaded runner's delay.
+    "timeout": 'shift\nexec "$REAL_TIMEOUT" "$STUB_TIMEOUT" "$@"\n',
     # Distinct dump names even within one second.
     "date": (
         'case "$*" in\n'
@@ -76,7 +83,7 @@ STUBS = {
     ),
     # An unreachable off-host mount: removing there never returns.
     "rm": (
-        'case "$*" in *offhost*) [ -n "${RM_HANG:-}" ] && exec "$REAL_SLEEP" 30 ;; esac\n'
+        'case "$*" in *offhost*) [ -n "${RM_HANG:-}" ] && exec "$REAL_SLEEP" "$STALL_SECONDS" ;; esac\n'
         'exec "$REAL_RM" "$@"\n'
     ),
     # Off-host copies fail CP_FAILURES times (or hang); the first copy after that
@@ -84,12 +91,18 @@ STUBS = {
     "cp": (
         'case "$*" in *offhost*) ;; *) exec "$REAL_CP" "$@" ;; esac\n'
         'ls "$BACKUPS"/postgres-*.sql.gz | wc -l >>"$COUNTS"\n'
-        '[ "$FAULT" = hangcp ] && exec "$REAL_SLEEP" 30\n'
+        '[ "$FAULT" = hangcp ] && exec "$REAL_SLEEP" "$STALL_SECONDS"\n'
         # A truncated copy, and a slow copy that keeps growing before it completes.
         '[ "$FAULT" = shortcp ] && head -c 1 "$1" >"$2" && exit 0\n'
         'if [ "$FAULT" = slowcp ]; then\n'
-        "  for chunk in $(seq 1 60); do\n"
-        '    printf x >>"$2"; "$REAL_SLEEP" 0.02\n'
+        # Each chunk waits for the loop's next poll (it logs a sleep), so the
+        # copy visibly grows between polls however slowly the runner schedules.
+        "  for chunk in $(seq 1 30); do\n"
+        '    seen=$({ cat "$SLEEPS" 2>/dev/null || :; } | wc -l)\n'
+        '    printf x >>"$2"\n'
+        '    while [ "$({ cat "$SLEEPS" 2>/dev/null || :; } | wc -l)" -le "$seen" ]; do\n'
+        '      "$REAL_SLEEP" 0.01\n'
+        "    done\n"
         "  done\n"
         "fi\n"
         "attempt=0\n"
@@ -200,9 +213,14 @@ def _start(
         "REAL_MV": str(shutil.which("mv")),
         "REAL_SLEEP": str(shutil.which("sleep")),
         "SLEEPS": str(tmp_path / "sleeps"),
+        "STALL_SECONDS": STALL_SECONDS,
         "LOOP_TEST_SLEEP": sleep_seconds,
         "VONK_BACKUP_OFFHOST_PATH": "/srv/offhost",
     }
+    stalls = fault == "hangcp" or any(
+        (extra_environment or {}).get(name) for name in ("DF_STALL", "RM_HANG")
+    )
+    environment["STUB_TIMEOUT"] = "1" if stalls else str(HANG_GUARD_SECONDS)
     loop = subprocess.Popen(
         [dash, str(script)],
         env=environment,
@@ -215,7 +233,7 @@ def _start(
 
 
 def _wait_for(condition: Callable[[], bool], loop: subprocess.Popen[str]) -> None:
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + HANG_GUARD_SECONDS
     while not condition():
         assert loop.poll() is None, "the backup loop exited"
         assert time.monotonic() < deadline, "the backup loop made no progress"
@@ -226,7 +244,7 @@ def _terminate(loop: subprocess.Popen[str]) -> str:
     try:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(loop.pid, signal.SIGTERM)
-        _, stderr = loop.communicate(timeout=10)
+        _, stderr = loop.communicate(timeout=HANG_GUARD_SECONDS)
     finally:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(loop.pid, signal.SIGKILL)
@@ -286,7 +304,7 @@ def test_signalling_the_background_pid_runs_the_backup_cleanup(tmp_path: Path) -
         temporary.write_text("interrupted dump", encoding="ascii")
         worker = int((tmp_path / "worker.pid").read_text())
         os.kill(worker, signal.SIGTERM)
-        loop.wait(timeout=10)
+        loop.wait(timeout=HANG_GUARD_SECONDS)
         assert not temporary.exists(), "the loop's signal trap never ran"
     finally:
         _terminate(loop)
@@ -528,7 +546,6 @@ def test_unreadable_offhost_space_continues_and_unreadable_local_space_is_short(
 ) -> None:
     # An unreachable (failing or stalled) /offhost is reported unknown, never
     # "0 bytes free", and heals through the copy step; it does not block.
-    started = time.monotonic()
     loop, state = _start(
         tmp_path,
         "none",
@@ -540,7 +557,6 @@ def test_unreadable_offhost_space_continues_and_unreadable_local_space_is_short(
     assert "cannot read the free space" in stderr
     assert "offhost; continuing" in stderr
     assert "0 are free" not in stderr
-    assert time.monotonic() - started < 8, "the stalled df was not bounded"
 
 
 @pytest.mark.parametrize("stall", ["", "1"])
