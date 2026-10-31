@@ -160,7 +160,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "16f418aba1f78f93edbebdd31d9771f6219cdc3764d0e3453db0a3f4d27982a7",
+            "381aab92244881ed24e907acca256e794897dd9442bdcdd3228a65b36385efe1",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },

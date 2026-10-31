@@ -40,7 +40,6 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
-from ..logging import redact_text
 from ..models import (
     AgentOperation,
     CatalogDocumentRevision,
@@ -195,17 +194,7 @@ class TerminalProjectionMixin:
                 successful = sorted(set(successful) - set(failed))
                 job_failed = True
                 recovery_error = DistributedLifecycleError(profile_completion_note)
-        own_cause = (
-            str(recovery_error) or "unproven"
-            if recovery_error is not None
-            else reconciliation_error
-        )
-        RecipeOperationAdapter().finish(
-            job,
-            now,
-            failed=job_failed,
-            reason=redact_text(own_cause)[:1024] if own_cause else None,
-        )
+        RecipeOperationAdapter().finish(job, now, failed=job_failed)
         projected_result = _recorded_result(
             job.kind, read_row_column(job, "result"), subject=job.id
         )
