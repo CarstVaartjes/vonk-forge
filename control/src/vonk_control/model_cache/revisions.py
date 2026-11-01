@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, defer
-from vonk_agent_protocol import Disposition, LifecycleState
+from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
 from ..artifact_reference_scan import model_set_reference_reasons
 from ..catalog_queries import active_head_revision
-from ..failure_classification import disposition, wait_reason
+from ..failure_classification import wait_reason
 from ..logging import log_event
 from ..model_cache_contract import (
     CacheOperationKind,
@@ -41,9 +41,10 @@ _REVISION_SCAN_INTERVAL = timedelta(seconds=30)
 
 #: Each set's row and stored manifest (None: damaged and not re-derived), by digest.
 type _StoredSets = dict[str, tuple[ModelCacheSet, ArtifactSetManifest | None]]
-#: Re-observation backoffs, in revision scans: an outcome that may clear soon
-#: (an unreadable row, a missing dependency) and a settled one (a resolved set
-#: that is not held, invalid content) that only an in-place repair can change.
+#: Re-observation backoffs, in revision scans: a stored manifest that does not
+#: read and is not re-derived (retried soon), and a settled binding outcome (an
+#: unreadable row, a missing dependency, a resolved set that is not held) that
+#: only an in-place repair or a later catalog sync can change.
 _OBSERVE_RECHECK_SCANS = (2.0, 3.0)
 _SETTLED_RECHECK_SCANS = (20.0, 40.0)
 
@@ -294,10 +295,13 @@ class RevisionsMixin:
         entry, transfer bytes or authorize a workload. True when it adopted a
         set.
 
-        Each unbound model digest is resolved on a jittered re-observation
-        schedule, not on every pass: soon after an outcome that may clear, much
-        later after a settled one (the catalog can repair a row in place), and
-        at once when the set it resolved to becomes held.
+        Each unbound model digest is resolved once per pass on a jittered
+        re-observation schedule, not with the in-request retry loop: catalogue
+        revision content is immutable, so a failed resolve is re-observed on the
+        settled schedule (the catalog can repair a row in place), at once when
+        its set becomes held, and on request. A missing dependency can resolve
+        after a later catalog-sync commit: it is then picked up on that
+        schedule or at once on a request or download (bounded, typed reason).
         """
         cache = cast("ModelCacheService", self)
         held = {
@@ -336,7 +340,7 @@ class RevisionsMixin:
             if known is not None and now < known[1] and known[0] not in held:
                 continue
             try:
-                manifest = cache.resolve_artifact_set(model_content_sha256=digest)
+                manifest = cache._resolve_artifact_set_once(model_content_sha256=digest)
                 rechecks[digest] = (
                     manifest.digest,
                     _recheck_at(now, _SETTLED_RECHECK_SCANS),
@@ -347,13 +351,7 @@ class RevisionsMixin:
                     cache.adopt_verified_set(manifest)
                     adopted = True
             except ModelCacheError as error:
-                verdict = disposition(error)
-                due = _recheck_at(
-                    now,
-                    _OBSERVE_RECHECK_SCANS
-                    if verdict in {Disposition.WAIT, Disposition.OBSERVE}
-                    else _SETTLED_RECHECK_SCANS,
-                )
+                due = _recheck_at(now, _SETTLED_RECHECK_SCANS)
                 rechecks[digest] = (None, due)
                 log_event(
                     _LOGGER,
@@ -361,7 +359,6 @@ class RevisionsMixin:
                     service="control-worker",
                     model_content_sha256=digest,
                     code=error.code,
-                    disposition=verdict,
                     reason=wait_reason(error),
                     detail=error.detail,
                     retry_at=due,

@@ -22,8 +22,8 @@ from .test_model_removal_reference_lifecycle import _register_model
 
 # Production carries about 300 current model heads, most of them not cached.
 UNCACHED_MODELS = 120
-# Past the longest jittered backoff before an outcome that may clear (an
-# unreadable row, a missing dependency) is observed again: 3 scans of 30 s.
+# Past the longest jittered backoff of a short re-observation: 3 scans of 30 s.
+# No binding outcome uses it now; it proves a settled outcome is not re-observed.
 PAST_BACKOFF = timedelta(seconds=91)
 # Past the longest backoff before a settled outcome is re-observed: 40 scans.
 PAST_SETTLED = timedelta(seconds=1201)
@@ -116,7 +116,6 @@ def test_revision_scan_resolves_only_model_digests_the_catalog_changed(
         assert scan() == {added}
         assert scan() == set()
         now[0] += PAST_BACKOFF
-        assert scan() == {unresolvable}
         assert scan() == set()
         # A resolved set that is not held is no final answer either.
         now[0] += PAST_SETTLED
@@ -182,7 +181,7 @@ def _divergent(alias: dict) -> dict:
 
 @pytest.mark.parametrize(
     ("damage", "backoff"),
-    [(_unreadable, PAST_BACKOFF), (_divergent, PAST_SETTLED)],
+    [(_unreadable, PAST_SETTLED), (_divergent, PAST_SETTLED)],
     ids=["unreadable", "divergent"],
 )
 def test_head_repaired_in_place_is_adopted_into_its_held_set(
@@ -255,6 +254,63 @@ def test_cached_set_with_a_damaged_manifest_is_adopted_and_repaired(
         scan = _counting_scans(service, monkeypatch)
         assert document_sha256(alias) in scan()
         assert document_sha256(alias) in _bound(sessions, service, set_digest)
+    finally:
+        service.close()
+        engine.dispose()
+
+
+def test_unreadable_heads_are_resolved_once_per_scan_and_settled(
+    tmp_path, monkeypatch, no_model_object_io
+) -> None:
+    """Catches the background binding scan using the in-request retry loop:
+    unreadable heads (immutable content) were re-resolved with sleeps every
+    minute, holding the worker step far past its budget."""
+    now = [datetime(2026, 10, 25, tzinfo=UTC)]
+    engine, sessions, service = _cache(tmp_path, now)
+    try:
+        cached = _model(sessions, "cached")
+        _download(
+            service,
+            [_artifact(tmp_path, b"abc", model_content_sha256=cached)],
+            model_content_sha256=cached,
+            request_key=str(uuid4()),
+        )
+        unreadable = {_model(sessions, f"unreadable-{i}") for i in range(5)}
+        for digest in unreadable:
+            with sessions() as session:
+                document = session.scalars(
+                    select(CatalogDocumentRevision.document).where(
+                        CatalogDocumentRevision.content_digest == digest
+                    )
+                ).one()
+            _store_document(engine, digest, _unreadable(document))
+        calls: list[str | None] = []
+        resolve_once = ModelCacheService._resolve_artifact_set_once
+
+        def recording(self, **kwargs):
+            calls.append(kwargs.get("model_content_sha256"))
+            return resolve_once(self, **kwargs)
+
+        monkeypatch.setattr(ModelCacheService, "_resolve_artifact_set_once", recording)
+        no_model_object_io(service)
+
+        def scan() -> list[str | None]:
+            calls.clear()
+            service._revision_scan_at = None
+            service.reconcile_model_revisions()
+            return list(calls)
+
+        first = scan()
+        assert {digest: first.count(digest) for digest in unreadable} == {
+            digest: 1 for digest in unreadable
+        }
+        now[0] += PAST_BACKOFF
+        assert scan() == []
+        now[0] += PAST_SETTLED
+        again = scan()
+        assert {digest: again.count(digest) for digest in unreadable} == {
+            digest: 1 for digest in unreadable
+        }
     finally:
         service.close()
         engine.dispose()
