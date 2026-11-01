@@ -220,6 +220,12 @@ class CancellationMixin:
                     "cancellation target was not found",
                 )
             return False  # gone: a parent waits for nothing
+        if operation.kind != "download":
+            # Only downloads cancel; never let this path retire a removal row.
+            raise ModelCacheConflictInvalid(
+                ModelCacheCode.NOT_CANCELLABLE,
+                "model download is not active or cancellation key conflicts",
+            )
         payload = cache._payload_or_retire(operation)
         if payload is None:
             if not preserve_existing_owner:

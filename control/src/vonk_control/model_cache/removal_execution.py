@@ -43,7 +43,7 @@ from ..models import (
 )
 from ..validation_detail import validation_error_detail
 from .constants import _REMOVAL_BATCH_SECONDS, _RETRY_BASE_SECONDS, SCHEMA_VERSION
-from .errors import _ArtifactWriterBusy
+from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .persistence import (
     _operation_progress,
     _operation_removal,
@@ -75,14 +75,20 @@ class RemovalExecutionMixin:
                 cache._retire_unreadable(row, residue, now=now)
 
     def _advance_model_removal(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         observed_at = now or cache._clock()
         try:
             if not cache._advance_fleet_removal(operation_id, now=observed_at):
                 return False
-            changed = cache._advance_model_removal_step(operation_id, now=observed_at)
+            changed = cache._advance_model_removal_step(
+                operation_id, now=observed_at, deadline=deadline
+            )
             if changed:
                 return True
             with cache._session() as session:
@@ -130,7 +136,11 @@ class RemovalExecutionMixin:
         return False
 
     def _advance_model_removal_step(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         now = now or cache._clock()
@@ -192,7 +202,9 @@ class RemovalExecutionMixin:
                 return False
             # The scope and fences are committed before any byte effect.
             # Continue once, through the same executor, with the resolved scope.
-            return cache._advance_model_removal_step(operation_id, now=now)
+            return cache._advance_model_removal_step(
+                operation_id, now=now, deadline=deadline
+            )
         if newer is not None:
             # Newer intent wins: a removal that has removed nothing yet ends
             # and releases its fences instead of blocking the newer consumer.
@@ -214,7 +226,10 @@ class RemovalExecutionMixin:
             # A model is a set of files: delete this removal's exclusive objects
             # in a time-bounded batch, one checkpoint per batch. A crash before
             # the checkpoint only undercounts bytes; the unlinks are idempotent.
-            deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
+            # The worker step shares one deadline; each removal still deletes
+            # at least one object.
+            if deadline is None:
+                deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
             completed = 0
             reclaimed = 0
             failure: Exception | None = None
@@ -233,7 +248,12 @@ class RemovalExecutionMixin:
                                 break
                         size = cache._model_object_size(digest)
                         cache._remove_model_object_files(digest)
-                except (_ArtifactWriterBusy, ArtifactLifecycleError, OSError) as error:
+                except (
+                    _ArtifactWriterBusy,
+                    ArtifactLifecycleError,
+                    ModelCacheStorageRefused,
+                    OSError,
+                ) as error:
                     failure = error
                     break
                 completed += 1
@@ -243,10 +263,6 @@ class RemovalExecutionMixin:
             if completed and not cache._persist_model_removal_checkpoint(
                 operation_id,
                 fence=fence,
-                identities=[
-                    ArtifactIdentity("model-object", str(item))
-                    for item in delete_objects[object_index : object_index + completed]
-                ],
                 expected_index=object_index,
                 object_step=True,
                 completed=completed,
@@ -264,6 +280,11 @@ class RemovalExecutionMixin:
             if isinstance(failure, ArtifactLifecycleError):
                 cache._defer_model_removal(
                     operation_id, detail=failure.detail, retry_after_seconds=5
+                )
+                return False
+            if isinstance(failure, ModelCacheStorageRefused):
+                cache._defer_model_removal(
+                    operation_id, detail=failure.detail, cause=failure
                 )
                 return False
             if isinstance(failure, OSError):
@@ -288,7 +309,6 @@ class RemovalExecutionMixin:
                     return cache._persist_model_removal_checkpoint(
                         operation_id,
                         fence=fence,
-                        identities=[identity],
                         expected_index=set_index,
                         object_step=False,
                         completed=1,

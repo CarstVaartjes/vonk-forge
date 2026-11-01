@@ -43,15 +43,6 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_artifact_jobs(connection)
     if adopted:
         _LOGGER.info("Adopted %d artifact jobs onto the core state vocabulary", adopted)
-    # Removal checkpoints no longer carry object_pending_bytes, and payload
-    # models forbid extra keys. Delete this statement after the next deploy.
-    connection.execute(
-        text(
-            "UPDATE model_cache_operations "
-            "SET payload = (payload::jsonb - 'object_pending_bytes')::json "
-            "WHERE kind = 'remove' AND payload::jsonb ? 'object_pending_bytes'"
-        )
-    )
     from ..lifecycle.model_cache import adopt_legacy_operations
 
     adopted = adopt_legacy_operations(connection)
@@ -62,6 +53,22 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_states(connection)
     if adopted:
         _LOGGER.info("Rewrote %d lifecycle rows onto the core state words", adopted)
+
+
+def strip_retired_removal_key(connection: Connection) -> None:
+    """Drop the retired ``object_pending_bytes`` key from stored removal rows.
+
+    Payload models forbid extra keys. The worker is the only writer of removal
+    checkpoints, so it strips at its own start, after the previous worker is
+    gone. Delete this function after the next deploy.
+    """
+    connection.execute(
+        text(
+            "UPDATE model_cache_operations "
+            "SET payload = (payload::jsonb - 'object_pending_bytes')::json "
+            "WHERE kind = 'remove' AND payload::jsonb ? 'object_pending_bytes'"
+        )
+    )
 
 
 def initialize_database(

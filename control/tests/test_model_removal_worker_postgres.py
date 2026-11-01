@@ -140,10 +140,10 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     monkeypatch.setattr(removal_execution, "model_set_reference_reasons", observe_scan)
 
     def contend_after_candidate_select(
-        operation_id: str, *, now: datetime | None = None
+        operation_id: str, *, now: datetime | None = None, deadline: float | None = None
     ) -> bool:
         if operation_id != accepted.id:
-            return original_advance(operation_id, now=now)
+            return original_advance(operation_id, now=now, deadline=deadline)
         with sessions() as holder:
             holder.begin()
             locked = holder.scalar(
@@ -155,7 +155,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
             key_acquired.set()
             try:
                 try:
-                    outcome = original_advance(operation_id, now=now)
+                    outcome = original_advance(operation_id, now=now, deadline=deadline)
                 except Exception as error:
                     step_errors.append(error)
                     result_observed.set()
@@ -493,7 +493,7 @@ def test_startup_strips_the_retired_byte_checkpoint_key(
     postgres_engine, tmp_path: Path
 ) -> None:
     from sqlalchemy import text
-    from vonk_control.db.startup import adopt_legacy_rows
+    from vonk_control.db.startup import strip_retired_removal_key
 
     service, sessions = _removal_service(postgres_engine, tmp_path)
     accepted, _model_digest, _object_path = _seed_removal(
@@ -513,7 +513,34 @@ def test_startup_strips_the_retired_byte_checkpoint_key(
         assert operation is not None and "object_pending_bytes" in operation.payload
 
     with postgres_engine.begin() as connection:
-        adopt_legacy_rows(connection)
+        strip_retired_removal_key(connection)
 
+    with sessions() as session:
+        operation = session.get(ModelCacheOperation, accepted.id)
+        assert operation is not None and "object_pending_bytes" not in operation.payload
     assert _removal_payload(sessions, accepted.id).object_index == 0
+    service.close()
+
+
+def test_batch_budget_is_shared_and_each_removal_makes_progress(
+    postgres_engine, tmp_path: Path, frozen_pass_budgets
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    accepted, _digests, paths = _many_object_removal(service, sessions, tmp_path, 6)
+    original = service._remove_model_object_files
+
+    def slow_unlink(digest: str) -> None:
+        original(digest)
+        frozen_pass_budgets.advance(10.0)  # the 5 s budget is spent
+
+    service._remove_model_object_files = slow_unlink
+    service.advance_removals(limit=1)  # scope observation and first batch
+    first = _removal_payload(sessions, accepted.id).object_index
+    service.advance_removals(limit=1)
+    second = _removal_payload(sessions, accepted.id).object_index
+    assert first == 1 and second == 2
+    assert sum(path.exists() for path in paths) == 4
+
+    service._remove_model_object_files = original
+    assert _settle_removal(service, accepted).state == "succeeded"
     service.close()
