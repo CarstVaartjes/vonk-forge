@@ -42,7 +42,7 @@ from ..models import (
     RecipeInstallation,
 )
 from ..validation_detail import validation_error_detail
-from .constants import _REMOVAL_BATCH_SECONDS, _RETRY_BASE_SECONDS, SCHEMA_VERSION
+from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
 from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .persistence import (
     _operation_progress,
@@ -229,7 +229,7 @@ class RemovalExecutionMixin:
             # The worker step shares one deadline; each removal still deletes
             # at least one object.
             if deadline is None:
-                deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
+                deadline = time.monotonic() + REMOVAL_BATCH_SECONDS
             completed = 0
             reclaimed = 0
             failure: Exception | None = None

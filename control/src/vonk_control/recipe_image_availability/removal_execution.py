@@ -39,6 +39,7 @@ from ..model_cache import (
     ModelCacheError,
     ModelCacheNotFound,
 )
+from ..model_cache.constants import REMOVAL_BATCH_SECONDS
 from ..model_cache_contract import (
     ModelCacheRemovalResult,
 )
@@ -70,8 +71,6 @@ from .contracts import (
 )
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25
-# One worker step's budget for the removals it advances; each makes progress.
-REMOVAL_BATCH_SECONDS = 5.0
 
 
 if TYPE_CHECKING:
