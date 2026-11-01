@@ -1858,6 +1858,10 @@ def test_background_owners_may_not_add_request_retry_calls():
     assert check_source(
         routes, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
     )
+    service = "control/src/vonk_control/recipe_routes/service.py"
+    assert check_source(
+        service, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
     assert not check_source(
         owner,
         "cache._resolve_artifact_set_once(model_content_sha256=d)\n",

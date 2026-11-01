@@ -97,20 +97,8 @@ class RecipeRouteService:
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
         """Observe acquisition in fresh transactions, then reconcile the exact effect."""
-        last: Exception | None = None
-        for _attempt in bounded_attempts():
-            try:
-                publication = self._claim_run(run_id)
-                break
-            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
-                raise
-            except RecipeRouteNotReady as error:
-                last = error
-            except Exception as error:  # noqa: BLE001
-                last = error
-        else:
-            assert last is not None
-            raise last
+        # One claim, one publish: the worker records the durable per-run backoff.
+        publication = self._claim_run(run_id)
         return self._execute(publication)
 
     def _claim_run(self, run_id: str) -> _Publication:

@@ -2478,3 +2478,66 @@ def test_withdrawal_maintenance_raises_after_one_decision(
     with pytest.raises(RecipeRouteNotReady):
         withdrawal_steps.maintain(service)
     assert calls[0] == 1
+
+
+def test_maintenance_decides_again_after_the_owner_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one retry path: wait out the durable backoff, then decide again."""
+    now = [NOW]
+    service, _publisher, _applied, _run_id = setup(tmp_path, clock=lambda: now[0])
+    real = service._maintenance_step_in_session
+    calls = [0]
+
+    def once_not_ready(session: Session) -> object:
+        calls[0] += 1
+        if calls[0] == 1:
+            raise RecipeRouteNotReady("evidence is not there yet")
+        return real(session)
+
+    monkeypatch.setattr(service, "_maintenance_step_in_session", once_not_ready)
+    assert service.maintain() is False
+    with service.sessions() as session:
+        due = _publication_owner(session).next_action_at
+    assert due is not None
+    assert service.maintain() is False  # still inside the backoff
+    assert calls[0] == 1
+    now[0] = _aware(due) + timedelta(seconds=1)
+    service.maintain()
+    assert calls[0] == 2
+    with service.sessions() as session:
+        owner = _publication_owner(session)
+        assert owner.next_action_at is None  # the pass converged, no new wait
+        assert owner.reconciliation_attempts == 0
+
+
+def test_maintain_does_not_retry_a_failed_pass_in_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _publisher, _applied, _run_id = setup(tmp_path)
+    calls = [0]
+
+    def broken() -> bool:
+        calls[0] += 1
+        raise OSError("observation store unavailable")
+
+    monkeypatch.setattr(service, "_maintain_once", broken)
+    assert service.maintain() is False
+    assert calls[0] == 1
+
+
+def test_publish_run_claims_and_publishes_once_per_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches in-request retries inside the worker's publication pass."""
+    service, _publisher, _applied, run_id = setup(tmp_path)
+    calls = [0]
+
+    def not_ready(_run_id: str) -> object:
+        calls[0] += 1
+        raise RecipeRouteNotReady("evidence is not there yet")
+
+    monkeypatch.setattr(service, "_claim_run", not_ready)
+    with pytest.raises(RecipeRouteNotReady):
+        service.publish_run(run_id)
+    assert calls[0] == 1
