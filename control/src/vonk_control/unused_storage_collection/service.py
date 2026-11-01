@@ -203,16 +203,13 @@ class UnusedStorageCollector:
         pressures = self._pressures(now)
         with self._sessions() as session:
             evidence = _CollectorEvidence.read(session, now)
-        # The budget starts after the inventory so every pass reaches an item.
-        deadline = time.monotonic() + self._budget_seconds
         kept: Counter[str] = Counter()
         # An installation on two Sparks is one removal for both of them.
         attempted: dict[tuple[str, str], bool] = {}
         outcomes = [
-            self._relieve(pressure, evidence, deadline, kept, attempted)
-            for pressure in pressures
+            self._relieve(pressure, evidence, kept, attempted) for pressure in pressures
         ]
-        expired = self._expire(evidence, deadline, kept, attempted)
+        expired = self._expire(evidence, kept, attempted)
         if expired.removed.total():
             outcomes.append(expired)
         if any("sweep budget" in reason for reason in kept):
@@ -248,7 +245,6 @@ class UnusedStorageCollector:
     def _expire(
         self,
         evidence: _CollectorEvidence,
-        deadline: float,
         kept: Counter[str],
         attempted: dict[tuple[str, str], bool],
     ) -> _Outcome:
@@ -291,6 +287,8 @@ class UnusedStorageCollector:
                 for item in self._image_items(evidence, Counter())
                 if not item.recent and item.last_used < evidence.reference.cutoff
             )
+        # The budget starts after this scope's inventory: every pass reaches an item.
+        deadline = time.monotonic() + self._budget_seconds
         for item in items:
             if (item.kind, item.key) in attempted:
                 continue

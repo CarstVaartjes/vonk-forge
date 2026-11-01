@@ -1430,6 +1430,86 @@ def test_evidence_slower_than_the_budget_still_advances_the_pass(
     assert len(lifecycle.removed) == 1
 
 
+_INSTALLATION_SLOW_STEPS = (
+    "evidence read",
+    "spark inventory",
+    "expiry image inventory",
+)
+_NAS_SLOW_STEPS = ("model inventory", "image inventory")
+_PASS_BUDGET = 30.0
+
+
+@pytest.mark.parametrize("step", _NAS_SLOW_STEPS)
+def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
+    world: Catalog, cached, frozen_pass_budgets, step: str
+) -> None:
+    """Catches any NAS inventory step slower than the budget leaving the pass
+    with nothing attempted, so the next pass repeats it forever."""
+
+    service, _ = cached
+    collector = _models(world, service)
+    if step == "model inventory":
+        measure = service.unused_set_bytes
+
+        def slow_bytes(digest: str) -> int | None:
+            frozen_pass_budgets.advance(_PASS_BUDGET + 1)
+            return measure(digest)
+
+        service.unused_set_bytes = slow_bytes  # type: ignore[method-assign]
+    else:
+        images = collector._image_items
+
+        def slow_images(*args, **kwargs):
+            frozen_pass_budgets.advance(_PASS_BUDGET + 1)
+            return images(*args, **kwargs)
+
+        collector._image_items = slow_images  # type: ignore[method-assign]
+
+    result = collector.collect()
+
+    assert result.models == 1, result.kept
+    assert _kept(result, "sweep budget") == 0
+
+
+@pytest.mark.parametrize("step", _INSTALLATION_SLOW_STEPS)
+def test_a_slow_inventory_step_still_attempts_an_installation_removal(
+    world: Catalog, frozen_pass_budgets, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    """Catches the pass budget starting before an inventory step: each slow
+    step advances the pass clock past the budget and the pass must still
+    attempt at least one item."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    world.workload(old, run="stopped")
+    lifecycle = FakeLifecycle(world.sessions)
+    # Expiry alone (no pressure) must not be starved by its own inventory.
+    free = TOTAL // 2 if step == "expiry image inventory" else GIB
+    collector = _collector(world, lifecycle, free=free)
+
+    def slowed(original):
+        def wrapper(*args, **kwargs):
+            frozen_pass_budgets.advance(_PASS_BUDGET + 1)
+            return original(*args, **kwargs)
+
+        return wrapper
+
+    if step == "evidence read":
+        monkeypatch.setattr(_Evidence, "read", slowed(_Evidence.read))
+    elif step == "spark inventory":
+        original = UnusedStorageCollector._spark_items
+        monkeypatch.setattr(
+            UnusedStorageCollector, "_spark_items", staticmethod(slowed(original))
+        )
+    else:
+        collector._image_items = slowed(collector._image_items)  # type: ignore[method-assign]
+
+    result = collector.collect()
+
+    assert lifecycle.removed, result.kept
+    assert _kept(result, "sweep budget") == 0
+
+
 def test_one_sweep_per_interval(world: Catalog) -> None:
     """Catches a sweep on every worker pass."""
 

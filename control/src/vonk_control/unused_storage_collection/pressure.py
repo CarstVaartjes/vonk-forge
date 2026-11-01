@@ -195,7 +195,6 @@ def _relieve(
     self: UnusedStorageCollector,
     pressure: _Pressure,
     evidence: _CollectorEvidence,
-    deadline: float,
     kept: Counter[str],
     attempted: dict[tuple[str, str], bool],
 ) -> _Outcome:
@@ -231,6 +230,8 @@ def _relieve(
     # way), and stops there: more would cost cached items and still not admit it.
     target = pressure.line_need if unmet else pressure.need
     ordered = _eviction_order(items)
+    # The budget starts after this scope's inventory: every pass reaches an item.
+    deadline = time.monotonic() + self._budget_seconds
     queued = 0
     measured_removal = 0
     for item in ordered:
