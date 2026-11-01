@@ -10,6 +10,10 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
+from vonk_agent_protocol.agent_words import (
+    ProfileDocumentState,
+    RunSwitchReasonScopeName,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
@@ -85,8 +89,6 @@ def _newest_cached_per_identity(
             CatalogDocumentRevision.created_at,
             CatalogDocumentRevision.content_digest,
         ).where(
-            CatalogDocumentRevision.kind == "model",
-            CatalogDocumentRevision.state == "active",
             *selection,
             CatalogDocumentRevision.content_digest.in_(
                 select(ModelCacheSet.model_content_sha256)
@@ -305,7 +307,11 @@ class ResolutionMixin:
             if rows:
                 return selector
         elif re.fullmatch(UUID_PATTERN, selector):
-            fallback = [CatalogDocumentRevision.document_id == selector]
+            fallback = [
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.document_id == selector,
+            ]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
@@ -332,7 +338,7 @@ class ResolutionMixin:
                 conditions.append(CatalogDocumentRevision.slug == slug)
             else:
                 conditions.append(CatalogDocumentRevision.slug == selector)
-            fallback = conditions[2:]
+            fallback = conditions
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
