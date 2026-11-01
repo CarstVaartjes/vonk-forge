@@ -119,6 +119,7 @@ mod tests {
     const WINDOW: Duration = Duration::from_millis(600);
     const CHUNKS: usize = 16;
     const CHUNK: usize = 16 * 1024;
+    const REQUEST_LIMIT: usize = 8 * 1024;
 
     /// Serve `chunks` body chunks, one per `pause`; zero chunks holds the
     /// response open silently for several windows. The server is detached:
@@ -133,7 +134,10 @@ mod tests {
             // (exit 56) before it reads the body.
             let mut request = Vec::new();
             let mut byte = [0u8; 1];
-            while !request.ends_with(b"\r\n\r\n") {
+            for _ in 0..REQUEST_LIMIT {
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
                 match stream.read(&mut byte) {
                     Ok(1) => request.push(byte[0]),
                     _ => return,
