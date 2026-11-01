@@ -115,9 +115,9 @@ that exception bucket-scoped and rotate it deliberately.
 The canary environment holds the two factory Tailscale secrets named in the
 table (plus the optional cleanup pair described below): `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` and
 `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET`. That one factory OAuth
-client is the sole owner of the disposable-child-tailnet lifecycle, and it is
-the only durable Tailscale credential in the environment or the workflow. It
-must carry only the Tailscale `tailnets` write scope, no device tags, and no
+client owns child creation and listing, and it is the only Tailscale
+credential that creates children (an optional second, delete-only cleanup client
+is described below). It must carry only the Tailscale `tailnets` write scope, no device tags, and no
 other scopes. Never store an operator tailnet's DNS suffix, machine OAuth
 credential, or policy in this environment. `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID`
 and `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET` are not environment
@@ -160,7 +160,9 @@ infrastructure termination can prevent every runner-local finalizer from
 running, and GitHub Actions cannot make unconditional cleanup claims for those
 events. Before creation, the workflow lists API-only tailnets and fails closed
 when a `Vonk Forge CI ...` child older than the maximum job lifetime exists. It
-reports only the exact child ID and display name and creates nothing new.
+reports only the exact child ID and display name and creates nothing new, unless
+the optional cleanup client below is configured, in which case it deletes the
+first stale child (one per run) and continues.
 
 Remove that residual with the sanctioned cleanup rather than by hand. Dispatch
 `.github/workflows/installer-maintenance.yml` on `main`, optionally passing the
@@ -176,14 +178,13 @@ credential at runtime: a factory credential without the `all` scope fails the
 token exchange before any deletion. Rerun publication only after the factory
 list no longer contains the residual.
 
-The `installer-canary-dev` environment declares exactly two Tailscale secrets --
+The `installer-canary-dev` environment declares two factory Tailscale secrets (plus the optional cleanup pair) --
 `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` and
 `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET` -- and the workflow passes
 that pair to the create step and to this cleanup job rather than relying on a
 repository-wide secret, because a missing credential must fail at the token
-exchange instead of after selecting a child. Those two factory secrets are the
-whole of the environment's tailnet authority, the sole owner of the
-disposable-child-tailnet lifecycle for both creation and cleanup; the
+exchange instead of after selecting a child. Those two factory secrets own child creation and listing; deletion
+belongs to the optional cleanup pair when configured; the
 `VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_*` names exist only as generated
 outputs of the child's own response and are never environment secrets. The
 factory client holds the `tailnets` write scope alone, so it can create one
@@ -212,7 +213,9 @@ only one of the two secrets fails closed. If the cleanup client's own token
 exchange is refused, the error names `VONK_ACCEPTANCE_TAILNET_CLEANUP_OAUTH_CLIENT_ID`
 so the owner can check its scopes under Trust credentials.
 
-Owner setup, once: in the Tailscale admin console create an OAuth client with the
+Owner setup, once: in the Tailscale admin console of the same separate CI
+Tailscale account that issued the factory client (never the production
+tailnet's console), create an OAuth client with the
 `all` scope (no device tags), then add its id and secret as the
 `VONK_ACCEPTANCE_TAILNET_CLEANUP_OAUTH_CLIENT_ID` and
 `VONK_ACCEPTANCE_TAILNET_CLEANUP_OAUTH_CLIENT_SECRET` secrets next to the factory

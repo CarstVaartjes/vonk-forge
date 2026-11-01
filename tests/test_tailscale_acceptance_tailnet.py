@@ -2072,6 +2072,7 @@ def test_orphan_that_reappears_after_the_one_retry_is_refused(
             TimeoutError("The read operation timed out"),
             _listing_response(orphan),
         ],
+        _ScopedUrlopen,
     )
 
     with pytest.raises(lifecycle.LifecycleError, match="response was lost"):
@@ -2140,3 +2141,142 @@ def test_refused_cleanup_client_exchange_names_the_cleanup_client(
     assert "cleanup-secret" not in message
     assert _deleted_ids(urlopen) == []
     assert len(_post_creates(urlopen)) == 0
+
+
+def test_create_deletes_at_most_one_stale_child_per_run(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _factory_environment(monkeypatch)
+    _cleanup_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    second = _organization_child(
+        child_id="tailnet_stale_888",
+        display_name="Vonk Forge CI 35232305044 attempt 1",
+        created_at=_created_at(minutes_old=95, now=now),
+    )
+    plan = _success_create_responses()
+    urlopen = _install_scoped_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            *plan[: plan.phases["tailnet_list"]],
+            _listing_response(_stale_child(now), second),
+            *_child_delete_responses("tailnet_stale_999"),
+            *plan[plan.phases["tailnet_create"] :],
+        ],
+    )
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    assert _deleted_ids(urlopen) == ["tailnet_stale_999"]
+
+
+def test_stale_delete_on_create_path_stops_at_the_retry_budget(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _factory_environment(monkeypatch)
+    _cleanup_environment(monkeypatch)
+    now = _freeze_now(lifecycle, monkeypatch)
+    monkeypatch.setattr(lifecycle, "RETRY_BUDGET_SECONDS", 0.5)
+    sleeps: list[float] = []
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+    urlopen = _install_scoped_urlopen(
+        lifecycle,
+        monkeypatch,
+        [
+            _Response({"access_token": "factory-token"}),
+            _listing_response(_stale_child(now)),
+            _Response({"access_token": "delete-token"}),
+            _http_error(503),
+        ],
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="retry budget spent"):
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    assert sleeps == []
+    assert len(_cleanup_requests(urlopen)) == 1
+    assert _post_creates(urlopen) == []
+
+
+def test_orphan_delete_on_create_path_stops_at_the_retry_budget(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _cleanup_environment(monkeypatch)
+    orphan = _organization_child(
+        child_id="tailnet_orphan_1",
+        display_name="Vonk Forge CI 123 attempt 1",
+        created_at=_created_at(minutes_old=1, now=datetime.now(UTC)),
+    )
+    urlopen, _ = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [
+            TimeoutError("The read operation timed out"),
+            _listing_response(orphan),
+            _Response({"access_token": "delete-token"}),
+            _http_error(503),
+            _Response({"access_token": "delete-token"}),
+            _http_error(503),
+        ],
+        _ScopedUrlopen,
+    )
+    clock = [0.0]
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: clock[0])
+    # Each backoff burns most of the budget: slow deletes must end the run.
+    monkeypatch.setattr(
+        lifecycle.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + 60)
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="retry budget spent"):
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    assert len(_post_creates(urlopen)) == 1
+
+
+def test_orphan_with_a_non_ci_name_is_never_deleted(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _cleanup_environment(monkeypatch)
+    orphan = _organization_child(
+        child_id="tailnet_prod_1",
+        display_name="Production Tailnet",
+        created_at=_created_at(minutes_old=1, now=datetime.now(UTC)),
+    )
+    urlopen, _ = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [TimeoutError("The read operation timed out"), _listing_response(orphan)],
+        _ScopedUrlopen,
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="response was lost"):
+        lifecycle.create(
+            display_name="Production Tailnet",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    assert _deleted_ids(urlopen) == []
