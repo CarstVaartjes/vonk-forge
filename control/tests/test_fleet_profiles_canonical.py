@@ -845,7 +845,11 @@ def test_a_retracted_recipe_needs_attention_until_published_again() -> None:
     view = service.get_number(profile.number)
     assert view.assignments[0].recipe.state == "Needs attention"
     assert any("no longer published" in warning for warning in view.warnings)
-    assert not service.preview(profile.id).allowed
+    retracted = service.preview(profile.id)
+    assert not retracted.allowed
+    assert any(
+        reason.code == "profile.recipe_unavailable" for reason in retracted.reasons
+    )
 
     set_head(RECIPE_REVISION_ID)
     view = service.get_number(profile.number)
@@ -854,6 +858,10 @@ def test_a_retracted_recipe_needs_attention_until_published_again() -> None:
         assert FleetProfileService._recipe_identity(
             session, "vonk-forge/synthetic-tiny-build"
         ) == (RECIPE_DOCUMENT_ID, RECIPE_REVISION_ID)
+    republished = service.preview(profile.id)
+    assert all(
+        reason.code != "profile.recipe_unavailable" for reason in republished.reasons
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

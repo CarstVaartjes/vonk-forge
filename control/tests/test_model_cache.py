@@ -1132,13 +1132,86 @@ def test_resolve_latest_cached_returns_the_head_even_when_an_older_revision_is_c
     assert exact.recipe.content_sha256 == new_digest
     assert "recipe-not-cached" in exact.blockers
 
+    real_open = os.open
+
+    def deny_model_object(path, *args, **kwargs):
+        if Path(path) == model_object:
+            raise PermissionError("model object is inaccessible")
+        return real_open(path, *args, **kwargs)
+
+    def deny_runtime_archive(_digest: str, _size: int) -> bool:
+        raise PermissionError("runtime archive is inaccessible")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(os, "open", deny_model_object)
+        observed = service.resolve_latest_cached(
+            recipe_identity="vonk-forge/resolver-recipe",
+            model_variant="fp16",
+            exact_revision_id=old_revision.id,
+        )
+        assert not (observed.model.cached and observed.recipe.cached)
+    restored = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
+    )
+    assert not restored.blockers
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            service,
+            "_runtime_archive_available",
+            deny_runtime_archive,
+        )
+        observed = service.resolve_latest_cached(
+            recipe_identity="vonk-forge/resolver-recipe",
+            model_variant="fp16",
+            exact_revision_id=old_revision.id,
+        )
+        assert not (observed.model.cached and observed.recipe.cached)
+
+    model_object.unlink()
+    missing_model_bytes = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
+    )
+    assert missing_model_bytes.recipe.cached is True
+    assert missing_model_bytes.model.cached is False
+    assert "model-not-cached" in missing_model_bytes.blockers
+    model_object.write_bytes(b"one")
+
+    image_object.unlink()
+    missing_image_bytes = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
+    )
+    assert missing_image_bytes.recipe.recipe_revision_id == old_revision.id
+    assert missing_image_bytes.recipe.cached is False
+    assert "recipe-not-cached" in missing_image_bytes.blockers
+    image_object.write_bytes(b"x" * build.image_bytes)
+
+    with sessions.begin() as session:
+        session.delete(model_cache)
+    image_only = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
+    )
+    assert image_only.recipe.cached is True
+    assert image_only.model.cached is False
+    assert image_only.resources.additional_disk_bytes is None
+
     with sessions.begin() as session:
         session.delete(build)
     missing = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
-    assert missing.recipe.recipe_revision_id == new_revision.id
+    assert missing.recipe.recipe_revision_id == old_revision.id
     assert missing.recipe.expected_bytes is None
+    assert missing.model.expected_bytes is None
     assert missing.resources.additional_disk_bytes is None
 
 
