@@ -382,3 +382,16 @@ def test_a_reverted_recipe_keeps_the_head_not_the_highest_revision_number() -> N
         reads = session.info["profile_recipe_documents"]
         assert reads.documents[choice.recipe_selector][1].id == REVISION_1
         assert newest_active_revisions(session, {RECIPE_ID})[RECIPE_ID].id == REVISION_1
+
+
+def test_a_spark_running_the_reverted_revision_is_told_about_the_head() -> None:
+    sessions = _sessions()
+    _seed(sessions, running=REVISION_2, head=REVISION_1)
+
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+
+    (run,) = node.loaded
+    notice = run.recipe_update
+    assert notice is not None
+    assert notice.running_revision_id == REVISION_2
+    assert notice.newest_revision_id == REVISION_1

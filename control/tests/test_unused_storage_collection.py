@@ -563,6 +563,28 @@ def test_installation_of_the_loaded_profile_is_never_evicted(
     assert loaded
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_reverted_recipe_keeps_the_head_installation_the_loaded_profile_runs(
+    world: Catalog,
+) -> None:
+    """After A, B, A the head is A while B stays active with the higher number:
+    the loaded profile's installation of A is kept, the reverted B is not."""
+
+    head = world.revision("glm", 1, head="active")
+    reverted = world.revision("glm", 2)
+    loaded, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
+    stale, _ = world.workload(reverted, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    result = _collector(world, lifecycle).collect()
+
+    assert loaded not in lifecycle.removed
+    assert stale in lifecycle.removed
+    assert _kept(result, "profile") == 1
+
+
 def test_pointed_installations_are_planned_least_recently_used_first(
     world: Catalog,
 ) -> None:

@@ -12,6 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..artifact_reference_scan import _selectors_revisions
+from ..catalog_queries import active_head_revision
 from ..catalog_revision_collection import GRACE, operation_tokens, plan_tokens, tokens
 from ..content_identity import catalog_selector_membership
 from ..models import (
@@ -73,23 +74,22 @@ class _Evidence:
         they keep nothing for its review (the collector itself passes none)."""
 
         cutoff = now - GRACE
-        revisions = session.execute(
-            select(
-                CatalogDocumentRevision.id,
-                CatalogDocumentRevision.document_id,
-                CatalogDocumentRevision.revision_number,
-                CatalogDocumentRevision.created_at,
-                CatalogDocumentRevision.content_digest,
-            ).where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+        newest: dict[str, tuple[str, datetime, int, str]] = {
+            document_id: (revision_id, _utc(created), number, digest)
+            for revision_id, document_id, number, created, digest in session.execute(
+                select(
+                    CatalogDocumentRevision.id,
+                    CatalogDocumentRevision.document_id,
+                    CatalogDocumentRevision.revision_number,
+                    CatalogDocumentRevision.created_at,
+                    CatalogDocumentRevision.content_digest,
+                ).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                )
             )
-        )
-        newest: dict[str, tuple[str, datetime, int, str]] = {}
-        for revision_id, document_id, number, created, digest in revisions:
-            known = newest.get(document_id)
-            if known is None or number > known[2]:
-                newest[document_id] = (revision_id, _utc(created), number, digest)
+        }
         pointers = _profile_pointers(session)
         selected = session.scalar(select(FleetProfileSelection.profile_id))
         loaded_pointers = (

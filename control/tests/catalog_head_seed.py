@@ -4,20 +4,29 @@ Production only activates a recipe revision through the catalog services, which
 move the head with it. Tests that insert active revisions directly would
 otherwise have no current revision, since current is defined by the head. The
 seeded head follows the newest seeded revision; a head a test states itself wins.
+Only a recipe revision inserted directly as active is seeded: the catalog
+services insert candidates and promote them, so they are never affected.
 """
 
 from __future__ import annotations
 
 import uuid
+from weakref import WeakKeyDictionary
 
-from sqlalchemy import event, select
+from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session
 from vonk_control.models import CatalogDocumentHead, CatalogDocumentRevision
 
 _Key = tuple[str, str]
-# Seeded head id -> revision_number of the revision it points at. Ids are
-# unique per test database, so nothing carries between tests.
-_SEEDED: dict[str, int] = {}
+# Weak: a test's entries go with its engine.
+_BY_ENGINE: WeakKeyDictionary[Engine, dict[str, int]] = WeakKeyDictionary()
+
+
+def _seeded(session: Session) -> dict[str, int]:
+    """Seeded head id -> revision_number it points at, kept on the test engine."""
+    bind = session.get_bind()
+    engine = bind if isinstance(bind, Engine) else bind.engine
+    return _BY_ENGINE.setdefault(engine, {})
 
 
 def install_seeded_heads() -> None:
@@ -37,29 +46,30 @@ def _head_for(session: Session, key: _Key) -> CatalogDocumentHead | None:
 
 
 def _note_seeded(session: Session, _context: object, _instances: object) -> None:
+    ids = _seeded(session)
     for head in list(session.new):
         if not (isinstance(head, CatalogDocumentHead) and head.kind == "recipe"):
             continue
-        if head.id in _SEEDED:
+        if head.id in ids:
             continue
         key = (head.publisher, head.slug)
-        seeded = next(
+        standing = next(
             (
                 other
                 for other in session.new
                 if isinstance(other, CatalogDocumentHead)
-                and other.id in _SEEDED
+                and other.id in ids
                 and (other.publisher, other.slug) == key
             ),
             None,
         ) or _head_for(session, key)
-        if seeded is not None and seeded.id in _SEEDED:
+        if standing is not None and standing.id in ids:
             # The test states its own head after the seed made one: its
             # statement wins, on the head row that already exists.
-            del _SEEDED[seeded.id]
-            seeded.active_revision_id = head.active_revision_id
-            seeded.candidate_revision_id = head.candidate_revision_id
-            seeded.generation = head.generation or 0
+            del ids[standing.id]
+            standing.active_revision_id = head.active_revision_id
+            standing.candidate_revision_id = head.candidate_revision_id
+            standing.generation = head.generation or 0
             session.expunge(head)
     pending: dict[_Key, CatalogDocumentRevision] = session.info.setdefault(
         "seeded_revisions", {}
@@ -89,6 +99,7 @@ def _note_seeded(session: Session, _context: object, _instances: object) -> None
 
 
 def _add_heads(session: Session, _context: object) -> None:
+    ids = _seeded(session)
     pending: dict[_Key, CatalogDocumentRevision] = session.info.pop(
         "seeded_revisions", {}
     )
@@ -104,7 +115,7 @@ def _add_heads(session: Session, _context: object) -> None:
                 generation=0,
             )
             session.add(head)
-            _SEEDED[head.id] = row.revision_number
-        elif head.id in _SEEDED and row.revision_number > _SEEDED[head.id]:
+            ids[head.id] = row.revision_number
+        elif head.id in ids and row.revision_number > ids[head.id]:
             head.active_revision_id = row.id
-            _SEEDED[head.id] = row.revision_number
+            ids[head.id] = row.revision_number

@@ -13,17 +13,10 @@ PATH = "control/src/vonk_control/example.py"
         ("vocabulary", "value = 'running'\n", 1),
         ("mapping", "value: dict[str, object]\n", 1),
         ("identity", "same = a.build_id == b.build_id\n", 1),
-        # A recipe's current revision is the catalog head, never the highest number.
-        (
-            "identity",
-            "q = select(R).order_by(R.revision_number.desc())\n",
-            1,
-        ),
-        (
-            "identity",
-            "rank = func.row_number().over(order_by=(R.revision_number.desc(),))\n",
-            1,
-        ),
+        # A recipe's current revision is the catalog head, never a number.
+        ("identity", "q = select(R).order_by(R.revision_number.desc())\n", 1),
+        ("identity", "best = max(rows, key=lambda row: row.revision_number)\n", 1),
+        ("identity", "ok = newest.revision_number <= running.revision_number\n", 1),
         ("security", "raise SecurityRefusalError(reason)\n", 1),
         ("waits", "while True:\n    sleep(1)\n", 1),
         # A fixed deadline is the shape P1 forbids for a wait.

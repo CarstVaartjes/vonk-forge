@@ -131,8 +131,8 @@ class FleetProfileService:
                 )
                 warnings.append(
                     f"Recipe {choice.recipe_selector} needs attention: "
-                    "no readable revision is available; the recipe catalog "
-                    "sync will replace it"
+                    "no current revision is available: the recipe is no longer "
+                    "published, or its current revision is unreadable"
                 )
                 cache_unknown += 1
                 assignments.append(

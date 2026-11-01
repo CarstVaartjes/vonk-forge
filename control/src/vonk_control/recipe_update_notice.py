@@ -90,11 +90,9 @@ def recipe_update_notice(
     running: CatalogDocumentRevision,
     newest: CatalogDocumentRevision | None,
 ) -> RecipeUpdateNotice | None:
-    """The notice when `running` is not the newest active revision, else None."""
+    """The notice when `running` is not the catalog head, else None."""
 
     if newest is None or newest.id == running.id:
-        return None
-    if newest.revision_number <= running.revision_number:
         return None
     running_version, running_date = _release(running.document)
     newest_version, newest_date = _release(newest.document)

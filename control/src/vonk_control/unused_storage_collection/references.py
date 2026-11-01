@@ -57,9 +57,9 @@ def _installation_kept(
             CatalogDocumentRevision.content_digest,
         ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
     ).one_or_none()
-    # A profile follows the newest active revision of its recipe. A revision
+    # A profile follows the catalog head of its recipe. A revision
     # row that is gone, or a recipe with no active revision left, is history
-    # nothing can point to; it never keeps the installation's disk.
+    # nothing can point to (a retracted recipe has no head); it never keeps the installation's disk.
     newest = evidence.newest.get(revision.document_id) if revision else None
     nodes = set(
         session.scalars(

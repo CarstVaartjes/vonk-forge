@@ -33,6 +33,7 @@ from vonk_control.models import (
     AgentNodeProfile,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     FleetProfileApplication,
     User,
@@ -810,6 +811,49 @@ def test_profile_reports_an_unreadable_head_without_substituting_older_content()
     view = service.get_number(profile.number)
     assert view.assignments[0].recipe.state == "Needs attention"
     assert view.assignments[0].spark_ids == [NODE_1]
+
+
+def test_a_retracted_recipe_needs_attention_until_published_again() -> None:
+    """A recipe the library no longer lists has no head: its revisions stay
+    active, but the profile does not load one of them; publishing it again
+    makes it current and admits a fresh load."""
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(
+        FleetProfileInput(
+            name="Retracted",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+
+    def set_head(revision_id: str | None) -> None:
+        with sessions.begin() as session:
+            session.execute(
+                update(CatalogDocumentHead)
+                .where(CatalogDocumentHead.kind == "recipe")
+                .values(active_revision_id=revision_id)
+            )
+
+    set_head(None)
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe.state == "Needs attention"
+    assert any("no longer published" in warning for warning in view.warnings)
+    assert not service.preview(profile.id).allowed
+
+    set_head(RECIPE_REVISION_ID)
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe.state != "Needs attention"
+    with sessions() as session:
+        assert FleetProfileService._recipe_identity(
+            session, "vonk-forge/synthetic-tiny-build"
+        ) == (RECIPE_DOCUMENT_ID, RECIPE_REVISION_ID)
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
