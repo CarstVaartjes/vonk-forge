@@ -211,7 +211,10 @@ def _catalog_documents[T](
             )
             if kind == "recipe"
             else or_(
-                CatalogDocumentRevision.state == "active",
+                and_(
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                ),
                 CatalogDocumentRevision.content_digest.in_(local_digests),
                 select(ModelCacheSet.artifact_set_sha256)
                 .where(

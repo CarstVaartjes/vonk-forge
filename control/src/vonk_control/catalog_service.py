@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import IO, TYPE_CHECKING, Literal
@@ -296,29 +296,34 @@ class CatalogService:
                     )
         return result
 
-    def retract_recipes_absent_from(
-        self, published: Sequence[tuple[str, str]]
+    def retract_absent_from(
+        self, published: Collection[tuple[str, str, str]]
     ) -> list[RecipeCatalogLocalRevision]:
-        """Stop offering every recipe the published library no longer lists.
+        """Stop offering every document the published library no longer lists.
 
-        The recipe's head is cleared; its immutable revisions stay, so
-        installations and runs that reference them keep working until they are
-        replaced or retention removes them.  A recipe that is published again
-        becomes current through the normal import.
+        ``published`` names each listed document as ``(kind, publisher,
+        slug)``. A kind the library lists nothing of is left as it is: such a
+        view may be incomplete. Each other head the view leaves out is cleared;
+        its immutable revisions stay, so installations, runs and cached sets
+        that reference them keep working until they are replaced or retention
+        removes them. A document that is published again becomes current
+        through the normal import. Returns the retracted recipes, for the sync
+        report.
         """
         keep = set(published)
+        kinds = {kind for kind, _publisher, _slug in keep}
         retracted: list[RecipeCatalogLocalRevision] = []
         with self._sessions.begin() as session:
             heads = session.scalars(
                 select(CatalogDocumentHead)
                 .where(
-                    CatalogDocumentHead.kind == "recipe",
+                    CatalogDocumentHead.kind.in_(kinds),
                     CatalogDocumentHead.active_revision_id.is_not(None),
                 )
                 .with_for_update()
             ).all()
             for head in heads:
-                identity = (head.publisher, head.slug)
+                identity = (head.kind, head.publisher, head.slug)
                 if identity in keep:
                     continue
                 revision = session.get(CatalogDocumentRevision, head.active_revision_id)
@@ -326,14 +331,17 @@ class CatalogService:
                 head.generation += 1
                 root = session.scalar(
                     select(CatalogDocument).where(
-                        CatalogDocument.kind == "recipe",
+                        CatalogDocument.kind == head.kind,
                         CatalogDocument.publisher == head.publisher,
                         CatalogDocument.slug == head.slug,
                     )
                 )
                 if root is not None:
                     root.updated_at = self._clock()
-                if revision is not None:
+                if (
+                    revision is not None
+                    and revision.kind == RunSwitchReasonScopeName.RECIPE
+                ):
                     retracted.append(
                         RecipeCatalogLocalRevision(
                             recipe_id=revision.document_id,

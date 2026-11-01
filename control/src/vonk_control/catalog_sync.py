@@ -29,6 +29,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import RecipeDisplay, document_sha256
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
@@ -817,8 +818,19 @@ class ManagedRecipeCatalogSyncService:
         withdrawals_observed = False
         if trigger == "automatic" and snapshot.items and not snapshot.problems:
             withdrawals_observed = True
-            retracted = self._catalog.retract_recipes_absent_from(
-                [(item.publisher, item.slug) for item in snapshot.items]
+            retracted = self._catalog.retract_absent_from(
+                [
+                    (RunSwitchReasonScopeName.RECIPE, item.publisher, item.slug)
+                    for item in snapshot.items
+                ]
+                + [
+                    (
+                        RunSwitchReasonScopeName.MODEL,
+                        entry.display.identity.publisher,
+                        entry.display.identity.slug,
+                    )
+                    for entry in snapshot.catalog_entities
+                ]
             )
             for revision in retracted:
                 # The catalog accepts looser release labels than the result

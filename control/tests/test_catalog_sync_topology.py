@@ -74,7 +74,7 @@ class _Catalog:
     def apply_displays(self, displays) -> list:
         return []
 
-    def retract_recipes_absent_from(self, published):
+    def retract_absent_from(self, published):
         return []
 
     def store_source_bundle(self, *args) -> None:
