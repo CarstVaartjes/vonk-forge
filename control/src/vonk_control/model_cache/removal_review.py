@@ -23,7 +23,7 @@ from ..cache_removal_review import (
 )
 from ..categorized_errors import InvalidValue
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import ModelCacheRemovalPayload
+from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheSetState
 from ..models import (
     ArtifactLifecycleGate,
     CatalogDocumentRevision,
@@ -227,7 +227,7 @@ class RemovalReviewMixin:
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
             row = session.get(ModelCacheSet, set_digest)
-            if row is not None and row.state == "cached":
+            if row is not None and row.state == ModelCacheSetState.CACHED:
                 manifest = cache._stored_manifest(row)
                 if manifest is None:
                     return None
