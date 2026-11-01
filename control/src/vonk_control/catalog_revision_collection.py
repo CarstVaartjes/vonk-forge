@@ -75,10 +75,11 @@ from vonk_agent_protocol import (
     stored_words,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_forge_contracts import ModelDefinition
 
 from . import job_states
 from .agent_jobs import release_owned_reservations_in_session
-from .catalog_revision_contract import UnprojectedRevision
+from .catalog_revision_contract import UnprojectedRevision, cached_catalog_document
 from .logging import log_event
 from .model_cache_contract import CacheManifest, CacheOperationKind
 from .models import (
@@ -241,6 +242,15 @@ class CatalogRevisionCollector:
                         if item.kind != RunSwitchReasonScopeName.MODEL
                         or item.content_digest not in cached
                     ]
+                # A Model another Model still declares as a dependency stays;
+                # it follows once nothing depending on it is left.
+                depended = _model_dependencies(session)
+                candidates = [
+                    item
+                    for item in candidates
+                    if item.kind != RunSwitchReasonScopeName.MODEL
+                    or item.content_digest not in depended
+                ]
         # The budget starts after the inventory so every pass reaches a candidate.
         deadline = time.monotonic() + self._budget_seconds
         removed = 0
@@ -585,6 +595,8 @@ class CatalogRevisionCollector:
                     for reference in manifest.verified_models
                 ):
                     raise _Kept(WaitOwnerKind.MODEL_CACHE.value)
+            if revision.content_digest in _model_dependencies(session):
+                raise _Kept("model dependency")
         for name, reference in (
             (
                 "recipe binding",
@@ -680,6 +692,30 @@ class CatalogRevisionCollector:
                 continue
             removed += 1
         return removed
+
+
+def _model_dependencies(session: Session) -> frozenset[str]:
+    """Model digests any readable Model revision declares as a dependency.
+
+    A document this contract cannot read resolves no set (the model cache
+    reports it missing), so it protects nothing and never holds the sweep.
+    """
+
+    found: set[str] = set()
+    for digest, document in session.execute(
+        select(CatalogDocumentRevision.content_digest, CatalogDocumentRevision.document)
+        .where(CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL)
+        .execution_options(yield_per=_SCAN_BATCH)
+    ):
+        try:
+            model = cached_catalog_document(
+                RunSwitchReasonScopeName.MODEL, digest, document
+            )
+        except (TypeError, ValueError):
+            continue
+        if isinstance(model, ModelDefinition):
+            found.update(item.content_sha256 for item in model.dependencies)
+    return frozenset(found)
 
 
 def operation_tokens(
