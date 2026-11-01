@@ -1872,3 +1872,48 @@ def test_background_owners_may_not_add_request_retry_calls():
         {1},
         modes=modes,
     )
+
+
+LOCKED_READ = """\
+def claim(cache, spec):
+    with cache._session(write=True) as session:
+        row = session.scalar(select(Op).with_for_update(skip_locked=True))
+        {call}
+"""
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "cache._object_is_stored(spec)",
+        "cache._transfer_need(manifest, transfer, replaces=False)",
+        "cache._transfer_state_for_manifest(manifest, force=False)",
+        "cache._running_transfers(session)",
+        "os.scandir(root)",
+        "path.lstat()",
+    ],
+)
+def test_storage_io_inside_a_locking_transaction_fails(call):
+    source = LOCKED_READ.format(call=call)
+    lines = {1, 2, 3, 4}
+    assert check_source(PATH, source, lines, modes=("locked-io",))
+    assert not check_source(PATH, source, set(), modes=("locked-io",))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "cache._transfer_state_for_manifest(manifest, force=False, cached=stored)",
+        "cache._payload_or_none(row)",
+    ],
+)
+def test_facts_read_before_the_transaction_pass(call):
+    source = LOCKED_READ.format(call=call)
+    assert not check_source(PATH, source, {1, 2, 3, 4}, modes=("locked-io",))
+    unlocked = source.replace(".with_for_update(skip_locked=True)", "")
+    assert not check_source(
+        PATH,
+        unlocked.replace(call, "cache._object_is_stored(spec)"),
+        {1, 2, 3, 4},
+        modes=("locked-io",),
+    )

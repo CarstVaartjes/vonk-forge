@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -25,6 +26,7 @@ from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
     ModelCacheDownloadResult,
+    ModelCacheTransfer,
 )
 from ..models import ModelCacheOperation, ModelCacheSet
 from .artifacts import ArtifactSetManifest, _unique_artifacts
@@ -36,17 +38,40 @@ from .constants import (
     _TRANSFER_CLAIM_SECONDS,
     SCHEMA_VERSION,
 )
-from .errors import _ArtifactWriterBusy
+from .errors import ModelCacheError, _ArtifactWriterBusy
 from .persistence import (
     _cache_failure,
     _manifest_of,
     _store_operation_payload,
     _updated,
 )
+from .storage import RunningTransfers, TransferNeed
 from .views import _BackgroundTransfer
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+@dataclass(frozen=True, slots=True)
+class _ClaimFact:
+    """What one due candidate's claim needs from the disk, read before the claim.
+
+    ``payload`` is the document the facts were read for: the claim only uses
+    them while the locked row still holds exactly it. ``need`` is set when the
+    claim would transfer bytes; ``replanned`` when an object has gone missing.
+    """
+
+    payload: ModelCacheDownloadPayload | None
+    replanned: ModelCacheTransfer | None = None
+    need: TransferNeed | None = None
+
+
+@dataclass(slots=True)
+class _ClaimFacts:
+    """The disk facts of one claim pass, in claim order, read with no lock held."""
+
+    candidates: dict[str, _ClaimFact] = field(default_factory=dict)
+    running: RunningTransfers = field(default_factory=dict)
 
 
 class SchedulerMixin:
@@ -157,6 +182,9 @@ class SchedulerMixin:
             if requested_id is None
             else 0
         )
+        # The disk is read before the lock: download threads take it for every
+        # checkpoint and publication, so no claim holds it across file I/O.
+        facts = cache._claim_facts(respect_backoff=True, requested_id=requested_id)
         with cache._lock:
             completed = cache._advance_background_operations()
             # A download whose objects are all stored takes no transfer slot:
@@ -167,6 +195,7 @@ class SchedulerMixin:
                 transfer_slots=cache._available_transfer_slots(),
                 respect_backoff=True,
                 requested_id=requested_id,
+                facts=facts,
             )
             for operation_id, kind in claimed:
                 with cache._session() as session:
@@ -435,36 +464,30 @@ class SchedulerMixin:
         respect_backoff: bool,
         requested_id: str | None = None,
         transfer_slots: int | None = None,
+        facts: _ClaimFacts | None = None,
     ) -> list[tuple[str, str]]:
         """Claim up to ``limit`` due operations.
 
         With ``transfer_slots``, at most that many claims may need a transfer;
         a download whose objects are all stored needs none and is always due.
+        Each claim is one short database transaction over ``facts`` (read with
+        no lock held); a row changed since its facts were read waits a tick.
         """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         claimed: list[tuple[str, str]] = []
         transfers = 0
-        with cache._session(write=True) as session:
-            # Each claim reserves its remaining bytes in this pass, so the pass
-            # never admits more downloads than the disk holds between them.
-            running = cache._running_transfers(session)
-            candidate_ids = list(
-                session.scalars(
-                    select(ModelCacheOperation.id)
-                    .where(
-                        ModelCacheOperation.id == requested_id
-                        if requested_id is not None
-                        else true()
-                    )
-                    .where(ModelCacheOperation.kind.in_(["download", "repair"]))
-                    .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
-                    .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
-                )
+        if facts is None:
+            facts = cache._claim_facts(
+                respect_backoff=respect_backoff, requested_id=requested_id
             )
-            for operation_id in candidate_ids:
-                if len(claimed) >= limit:
-                    break
+        # Each claim reserves its remaining bytes in this pass, so the pass
+        # never admits more downloads than the disk holds between them.
+        running = facts.running
+        for operation_id, fact in facts.candidates.items():
+            if len(claimed) >= limit:
+                break
+            with cache._session(write=True) as session:
                 operation = session.scalar(
                     select(ModelCacheOperation)
                     .where(
@@ -506,6 +529,8 @@ class SchedulerMixin:
                 payload = cache._transfer_or_retire(operation, now=now)
                 if payload is None or payload.cancellation is not None:
                     continue
+                if payload != fact.payload:
+                    continue  # changed since the facts were read: the next tick re-plans
                 if (
                     payload.failure is not None
                     and payload.failure.code in _CREDENTIAL_FAILURE_PUBLIC_CODES
@@ -575,39 +600,20 @@ class SchedulerMixin:
                         ),
                     )
                     continue
-                transfers_bytes = (
-                    operation.kind == CacheOperationKind.REPAIR
-                    or payload.force_refresh
-                    or payload.transfer.total_bytes > 0
-                )
-                if not transfers_bytes and not all(
-                    cache._object_is_stored(spec)
-                    for spec in _unique_artifacts(manifest.artifacts).values()
-                ):
+                need = fact.need
+                if fact.replanned is not None:
                     # The plan found every object stored, but one has gone
-                    # since: re-plan its bytes, and it takes a transfer slot
-                    # like any other download.
-                    payload = _updated(
-                        payload,
-                        transfer=cache._transfer_state_for_manifest(
-                            manifest, force=False
-                        ),
-                    )
+                    # since: its bytes were re-planned, and it takes a transfer
+                    # slot like any other download.
+                    payload = _updated(payload, transfer=fact.replanned)
                     _store_operation_payload(operation, operation.kind, payload)
-                    transfers_bytes = True
                 if (
-                    transfers_bytes
+                    need is not None
                     and transfer_slots is not None
                     and transfers >= transfer_slots
                 ):
                     continue  # due again once a transfer slot is free
-                need = cache._transfer_need(
-                    manifest,
-                    payload.transfer,
-                    replaces=operation.kind == CacheOperationKind.REPAIR
-                    or payload.force_refresh,
-                )
-                if transfers_bytes and cache._capacity_holds(
+                if need is not None and cache._capacity_holds(
                     operation, need, now, running
                 ):
                     # A lapsed attempt waits now: its bytes are not in flight.
@@ -622,7 +628,90 @@ class SchedulerMixin:
                 ):
                     continue
                 claimed.append((operation.id, operation.kind))
-                transfers += int(transfers_bytes)
-                if transfers_bytes:
+                if need is not None:
+                    transfers += 1
                     running[operation.id] = need
         return claimed
+
+    def _claim_facts(
+        self, *, respect_backoff: bool, requested_id: str | None = None
+    ) -> _ClaimFacts:
+        """Read the disk facts every due candidate's claim needs.
+
+        No lock and no transaction is held while the files are read: a row that
+        cannot be claimed now (live lease, backoff, a cancel being settled) is
+        passed over without a read, and what the running transfers still write
+        is read once, for the first candidate that would move bytes.
+        """
+        cache = cast("ModelCacheService", self)
+        now = cache._clock()
+        with cache._session() as session:
+            snapshots: list[tuple[str, str, ModelCacheDownloadPayload | None]] = []
+            for operation in session.scalars(
+                select(ModelCacheOperation)
+                .where(
+                    ModelCacheOperation.id == requested_id
+                    if requested_id is not None
+                    else true()
+                )
+                .where(ModelCacheOperation.kind.in_(["download", "repair"]))
+                .where(ModelCacheOperation.state.in_(model_cache_states.LIVE))
+                .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
+            ):
+                row = cache._lifecycle.lifecycle(operation, now)
+                if row.state is State.OBSERVING or (
+                    row.state is State.RUNNING
+                    and row.lease_deadline is not None
+                    and row.lease_deadline > _aware(now)
+                ):
+                    continue  # a cancel is being settled / a live lease
+                if (
+                    respect_backoff
+                    and row.state is not State.RUNNING
+                    and row.next_action_at is not None
+                    and row.next_action_at > _aware(now)
+                ):
+                    continue
+                snapshots.append(
+                    (operation.id, operation.kind, cache._transfer_or_none(operation))
+                )
+        facts = _ClaimFacts()
+        running_read = False
+        for operation_id, kind, payload in snapshots:
+            fact = _ClaimFact(payload)
+            try:
+                manifest = None if payload is None else _manifest_of(payload)
+            except (TypeError, ValueError, ModelCacheError):
+                manifest = None
+                fact = _ClaimFact(None)  # unreadable: never claimed on these facts
+            if payload is not None and manifest is not None:
+                if payload.cancellation is not None:
+                    facts.candidates[operation_id] = fact
+                    continue
+                replaces = kind == CacheOperationKind.REPAIR or payload.force_refresh
+                transfer = payload.transfer
+                replanned = None
+                unique = _unique_artifacts(manifest.artifacts)
+                if not replaces and transfer.total_bytes == 0:
+                    cached = frozenset(
+                        digest
+                        for digest, spec in unique.items()
+                        if cache._object_is_stored(spec)
+                    )
+                    if len(cached) < len(unique):
+                        replanned = cache._transfer_state_for_manifest(
+                            manifest, force=False, cached=cached
+                        )
+                        transfer = replanned
+                if replanned is not None or replaces or transfer.total_bytes > 0:
+                    if not running_read:
+                        with cache._session() as session:
+                            facts.running = cache._running_transfers(session)
+                        running_read = True
+                    fact = _ClaimFact(
+                        payload,
+                        replanned,
+                        cache._transfer_need(manifest, transfer, replaces=replaces),
+                    )
+            facts.candidates[operation_id] = fact
+        return facts
