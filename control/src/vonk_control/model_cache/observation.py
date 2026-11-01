@@ -39,6 +39,17 @@ _REFRESH_SECONDS = 30
 _RECHECK_SECONDS = 5
 
 
+def _settled(value: ModelCacheStorageObservation | None) -> bool:
+    """A completed checkpoint with every object available and no error."""
+    return (
+        value is not None
+        and value.completed_at is not None
+        and value.completed_at >= value.started_at
+        and value.detail is None
+        and all(entry.available for entry in value.objects.values())
+    )
+
+
 class StorageObserver:
     def __init__(self, cache: ModelCacheService) -> None:
         self._cache = cache
@@ -176,7 +187,9 @@ class StorageObserver:
             reason=WaitReason.OBSERVATION_UNAVAILABLE,
         )
 
-    def schedule(self, manifest: ArtifactSetManifest) -> threading.Event | None:
+    def schedule(
+        self, manifest: ArtifactSetManifest, *, refresh: bool = True
+    ) -> threading.Event | None:
         with self._lock:
             self._pending = {
                 key: task for key, task in self._pending.items() if not task.done()
@@ -195,7 +208,7 @@ class StorageObserver:
 
                 def observe() -> None:
                     try:
-                        self._observe(manifest)
+                        self._observe(manifest, refresh)
                     finally:
                         collected.set()
 
@@ -214,18 +227,34 @@ class StorageObserver:
 
     def _discover(self) -> None:
         try:
+            # A settled set is re-observed only when a request reads it after
+            # it goes stale; discovery covers new, errored and repair sets.
+            with self._cache._session() as session:
+                digests = session.scalars(
+                    select(ModelCacheSet.artifact_set_sha256)
+                ).all()
+            with self._lock:
+                unknown = {
+                    digest
+                    for digest in digests
+                    if not _settled(self._snapshots.get(digest))
+                }
             with self._cache._session() as session:
                 manifests = [
                     manifest
-                    for row in session.scalars(select(ModelCacheSet))
+                    for row in session.scalars(
+                        select(ModelCacheSet).where(
+                            ModelCacheSet.artifact_set_sha256.in_(unknown)
+                        )
+                    )
                     if (manifest := self._cache._stored_manifest(row)) is not None
                 ]
             for manifest in manifests:
-                self.schedule(manifest)
+                self.schedule(manifest, refresh=False)
         except Exception:  # noqa: BLE001 -- next worker tick retries discovery
             _LOGGER.exception("cache observation discovery failed")
 
-    def _observe(self, manifest: ArtifactSetManifest) -> None:
+    def _observe(self, manifest: ArtifactSetManifest, refresh: bool = True) -> None:
         root = self._cache.root / "observations"
         try:
             with (root / f"{manifest.digest}.lock").open("a") as lock:
@@ -246,7 +275,7 @@ class StorageObserver:
                     value is not None
                     and value.completed_at is not None
                     and value.completed_at >= value.started_at
-                    and now < value.next_check_at
+                    and ((not refresh and _settled(value)) or now < value.next_check_at)
                 ):
                     return
                 if value is None:

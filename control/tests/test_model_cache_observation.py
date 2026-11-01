@@ -652,3 +652,75 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
     finally:
         release.set()
         api.close()
+
+
+def _discover_and_join(cache, manifest):
+    observer = cache._storage_observer
+    observer.tick()
+    assert observer._discovery is not None
+    observer._discovery.result(timeout=30)
+    for task in list(observer._pending.values()):
+        task.result(timeout=30)
+
+
+def test_discovery_does_not_reobserve_a_cached_set(observed_cache, no_model_object_io):
+    """Catches the 30 s timer re-reading every object of every cached set."""
+    cache, _sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    before = cache._storage_observer._snapshots[manifest.digest]
+    now[0] += timedelta(seconds=31)
+    no_model_object_io(cache)
+    _discover_and_join(cache, manifest)
+    # The observer records a refused object touch as ``detail``.
+    after = cache._storage_observer._snapshots[manifest.digest]
+    assert after.detail is None
+    assert after.started_at == before.started_at
+
+
+def test_restart_publishes_completed_checkpoint_without_object_reads(
+    observed_cache, no_model_object_io
+):
+    """Catches a restart re-reading objects of sets whose checkpoint is complete."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    before = cache._storage_observer._snapshots[manifest.digest]
+    restarted = ModelCacheService(
+        sessions,
+        cache.root,
+        free_fraction=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    try:
+        now[0] += timedelta(seconds=31)
+        no_model_object_io(restarted)
+        _discover_and_join(restarted, manifest)
+        value = restarted._storage_observer._snapshots[manifest.digest]
+        assert value.detail is None
+        assert value.started_at == before.started_at
+        assert value.completed_at == before.completed_at
+        assert all(entry.available for entry in value.objects.values())
+        assert cache._storage_observer.read(manifest) is not None
+    finally:
+        restarted.close()
+
+
+def test_a_stale_read_refreshes_a_cached_set(observed_cache):
+    """Catches a stale request failing to re-check a cached set's objects."""
+    cache, _sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    now[0] += timedelta(seconds=31)
+    calls = []
+    real = cache._stored_object
+
+    def record(digest, expected):
+        calls.append(digest)
+        return real(digest, expected)
+
+    with patch.object(cache, "_stored_object", record):
+        cache._storage_observer.read(manifest)
+        _finish(cache, manifest)
+    assert len(calls) == len({spec.sha256 for spec in manifest.artifacts})
