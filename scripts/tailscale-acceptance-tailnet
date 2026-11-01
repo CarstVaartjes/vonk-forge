@@ -48,6 +48,10 @@ ORGANIZATION_TAILNET_LIST_LIMIT = 100
 # dead runs.  Refuse a listing that would delete more than this rather than
 # emptying an organization in one manual dispatch.
 MAX_CLEANUP_CHILDREN = 20
+# Statuses worth another attempt, shared by every retrying caller.  A missing
+# status (transport failure or timeout) is always retryable too.
+TRANSIENT_STATUSES = frozenset({408, 409, 425, 429, *range(500, 600)})
+MAX_ATTEMPTS = 4
 
 
 class LifecycleError(RuntimeError):
@@ -177,9 +181,7 @@ def _request(
     return ApiResponse(document=document, etag=etag)
 
 
-def _delete_token_refusal(
-    error: ApiRequestError, request_path: str
-) -> ApiRequestError:
+def _delete_token_refusal(error: ApiRequestError, request_path: str) -> ApiRequestError:
     """Explain a refused `all`-scoped token exchange for a child deletion.
 
     The API answers a scope refusal on this exchange with the same 403 and the
@@ -324,16 +326,12 @@ def _child_token_factory(
     """
 
     def token() -> str:
-        return _oauth_token(
-            client_id, client_secret, scope="all", tailnet=tailnet_id
-        )
+        return _oauth_token(client_id, client_secret, scope="all", tailnet=tailnet_id)
 
     return token
 
 
-def _delete_tailnet(
-    tailnet_id: str, access_token_factory: Callable[[], str]
-) -> None:
+def _delete_tailnet(tailnet_id: str, access_token_factory: Callable[[], str]) -> None:
     """Delete exactly one tailnet, with one owner for the DELETE request.
 
     The token is minted per attempt so a retry cannot present an expired
@@ -343,8 +341,7 @@ def _delete_tailnet(
     if SAFE_ID.fullmatch(tailnet_id) is None:
         raise LifecycleError("disposable tailnet ID is invalid")
     path = f"/tailnet/{urllib.parse.quote(tailnet_id, safe='')}"
-    transient_statuses = {408, 409, 425, 429, *range(500, 600)}
-    for attempt in range(4):
+    for attempt in range(MAX_ATTEMPTS):
         try:
             _request("DELETE", path, access_token=access_token_factory())
             return
@@ -355,13 +352,18 @@ def _delete_tailnet(
                 and error.status_code == 404
             ):
                 return
-            retryable = (
-                error.status_code is None or error.status_code in transient_statuses
-            )
-            if not retryable or attempt == 3:
+            if not _retryable(error) or attempt == MAX_ATTEMPTS - 1:
                 raise
-            time.sleep(min(2**attempt, 4))
+            _backoff(attempt)
     raise AssertionError("unreachable")
+
+
+def _retryable(error: ApiRequestError) -> bool:
+    return error.status_code is None or error.status_code in TRANSIENT_STATUSES
+
+
+def _backoff(attempt: int) -> None:
+    time.sleep(min(2**attempt, 4))
 
 
 def _list_organization_tailnets(access_token: str) -> list[dict[str, Any]]:
@@ -510,9 +512,7 @@ def cleanup(*, child_id: str | None = None) -> None:
         for tailnet_id, display_name in stale:
             _delete_tailnet(
                 tailnet_id,
-                _child_token_factory(
-                    factory_id, factory_secret, tailnet_id=tailnet_id
-                ),
+                _child_token_factory(factory_id, factory_secret, tailnet_id=tailnet_id),
             )
             deleted += 1
             print(f"Deleted stale disposable CI tailnet {tailnet_id} ({display_name})")
@@ -521,6 +521,46 @@ def cleanup(*, child_id: str | None = None) -> None:
             f"Stale disposable CI tailnet cleanup: deleted {deleted} of "
             f"{len(stale)} selected (bounded at {MAX_CLEANUP_CHILDREN})"
         )
+
+
+def _create_child_tailnet(
+    access_token: str, display_name: str, factory_id: str, factory_secret: str
+) -> ApiResponse:
+    """Create the child, surviving a create whose outcome the caller never saw.
+
+    The create POST is not idempotent: a timeout or 5xx may mean the child
+    exists server-side, and its deletion credentials went to a response we never
+    read.  Before every retry the organization listing is therefore observed for
+    this run's exact display name (unique per run and attempt).  A child found
+    there cannot be deleted with credentials we do not hold, so it is deleted
+    through the factory-minted tailnet-targeted token, the same route `cleanup`
+    uses, and only then is the create repeated.  That never leaves two children
+    and never trips the `alreadyExists` refusal on a retry.
+    """
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return _request(
+                "POST",
+                "/organizations/-/tailnets",
+                access_token=access_token,
+                json_body={"displayName": display_name},
+            )
+        except ApiRequestError as error:
+            if not _retryable(error) or attempt == MAX_ATTEMPTS - 1:
+                raise
+        _backoff(attempt)
+        for tailnet in _list_organization_tailnets(access_token):
+            orphan = tailnet.get("id")
+            if tailnet.get("displayName") != display_name:
+                continue
+            if not isinstance(orphan, str) or SAFE_ID.fullmatch(orphan) is None:
+                raise LifecycleError("Tailscale returned an unsafe CI child identity")
+            _delete_tailnet(
+                orphan,
+                _child_token_factory(factory_id, factory_secret, tailnet_id=orphan),
+            )
+            print(f"Deleted orphaned child {orphan} of an unconfirmed create")
+    raise AssertionError("unreachable")
 
 
 def _configure_tailnet(
@@ -675,12 +715,7 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
     )
     token = _oauth_token(factory_id, factory_secret, scope="tailnets")
     _assert_no_stale_children(token)
-    response = _request(
-        "POST",
-        "/organizations/-/tailnets",
-        access_token=token,
-        json_body={"displayName": display_name},
-    )
+    response = _create_child_tailnet(token, display_name, factory_id, factory_secret)
     document = response.document
     tailnet_id = document.get("id")
     dns_name = document.get("dnsName")

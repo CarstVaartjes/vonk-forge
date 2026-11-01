@@ -1625,3 +1625,149 @@ def test_cleanup_403_refusal_names_the_documented_scope_requirement(
     # attempted, and the child is left for the operator rather than half-deleted.
     assert [request.method for request in urlopen.requests] == ["POST", "GET", "POST"]
     assert _cleanup_requests(urlopen) == []
+
+
+def _create_with_prefix(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    after_stale_check: list[object],
+) -> tuple[_Urlopen, list[int]]:
+    """Run `create` where the responses after the stale check are scripted."""
+    _factory_environment(monkeypatch)
+    plan = _success_create_responses()
+    scripted = [
+        *plan[: plan.phases["tailnet_create"]],
+        *after_stale_check,
+    ]
+    urlopen = _install_urlopen(lifecycle, monkeypatch, scripted)
+    sleeps: list[int] = []
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+    return urlopen, sleeps
+
+
+def _post_creates(urlopen: _Urlopen) -> list[Any]:
+    return [
+        request
+        for request in urlopen.requests
+        if request.method == "POST"
+        and urllib.parse.urlsplit(request.full_url).path
+        == "/api/v2/organizations/-/tailnets"
+    ]
+
+
+def test_create_timeout_with_no_child_retries_and_succeeds(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _success_create_responses()
+    tail = plan[plan.phases["tailnet_create"] :]
+    urlopen, sleeps = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [
+            TimeoutError("The read operation timed out"),
+            _listing_response(),
+            *tail,
+        ],
+    )
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    assert len(_post_creates(urlopen)) == 2
+    assert _deleted_ids(urlopen) == []
+    assert sleeps == [1]
+    assert (tmp_path / "state.json").exists()
+
+
+def test_create_timeout_after_server_created_child_deletes_it_then_retries(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _success_create_responses()
+    tail = plan[plan.phases["tailnet_create"] :]
+    now = datetime.now(UTC)
+    orphan = _organization_child(
+        child_id="tailnet_orphan_1",
+        display_name="Vonk Forge CI 123 attempt 1",
+        created_at=_created_at(minutes_old=1, now=now),
+    )
+    bystander = _organization_child(
+        child_id="tailnet_other_2",
+        display_name="Vonk Forge CI 456 attempt 1",
+        created_at=_created_at(minutes_old=1, now=now),
+    )
+    urlopen, _ = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [
+            TimeoutError("The read operation timed out"),
+            _listing_response(bystander, orphan),
+            *_child_delete_responses("tailnet_orphan_1"),
+            *tail,
+        ],
+    )
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    assert _deleted_ids(urlopen) == ["tailnet_orphan_1"]
+    methods_paths = [
+        (request.method, urllib.parse.urlsplit(request.full_url).path)
+        for request in urlopen.requests
+    ]
+    delete_at = methods_paths.index(("DELETE", "/api/v2/tailnet/tailnet_orphan_1"))
+    posts = [
+        index
+        for index, item in enumerate(methods_paths)
+        if item == ("POST", "/api/v2/organizations/-/tailnets")
+    ]
+    assert len(posts) == 2 and posts[0] < delete_at < posts[1]
+
+
+def test_create_persistent_timeout_is_bounded_and_keeps_the_error(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    timeout = TimeoutError("The read operation timed out")
+    urlopen, sleeps = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [
+            timeout,
+            _listing_response(),
+            timeout,
+            _listing_response(),
+            timeout,
+            _listing_response(),
+            timeout,
+        ],
+    )
+
+    with pytest.raises(lifecycle.ApiRequestError) as caught:
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    assert str(caught.value) == (
+        "Tailscale API POST /organizations/-/tailnets was unavailable "
+        "(TimeoutError: The read operation timed out)"
+    )
+    assert len(_post_creates(urlopen)) == 4
+    assert sleeps == [1, 2, 4]
+    assert not (tmp_path / "state.json").exists()
