@@ -126,7 +126,6 @@ class ModelPartialsCollector:
         The next pass starts after the last directory this one judged.
         """
 
-        deadline = time.monotonic() + PASS_BUDGET_SECONDS
         try:
             names = sorted(entry.name for entry in os.scandir(self._partials))
         except FileNotFoundError:
@@ -136,6 +135,8 @@ class ModelPartialsCollector:
         if cursor is not None:
             names = [n for n in names if n > cursor] + [n for n in names if n <= cursor]
         removed = 0
+        # The budget starts after the listing: a slow one still judges a directory.
+        deadline = time.monotonic() + PASS_BUDGET_SECONDS
         for name in names:
             if time.monotonic() >= deadline:
                 return removed, True

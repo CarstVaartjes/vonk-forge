@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
@@ -58,6 +57,7 @@ from .pressure import (
     _reclaim_blobs,
     _relieve,
     _remove,
+    _remove_within_budget,
 )
 from .references import (
     _installation_kept,
@@ -130,6 +130,7 @@ class UnusedStorageCollector:
         self._scan_interval = scan_interval
         self._cooldown = cooldown
         self._due_at: datetime | None = None
+        self._removal_seconds = 0.0
         self._rounds: dict[str, _Round] = {}
         self._paused_until: dict[str, datetime] = {}
         self._last_outcome: dict[str, str] = {}
@@ -200,6 +201,7 @@ class UnusedStorageCollector:
         now = self._clock()
         self._stopping.clear()
         self._refused.clear()
+        self._removal_seconds = 0.0
         pressures = self._pressures(now)
         with self._sessions() as session:
             evidence = _CollectorEvidence.read(session, now)
@@ -287,17 +289,18 @@ class UnusedStorageCollector:
                 for item in self._image_items(evidence, Counter())
                 if not item.recent and item.last_used < evidence.reference.cutoff
             )
-        # The budget starts after this scope's inventory: every pass reaches an item.
-        deadline = time.monotonic() + self._budget_seconds
+        reached = False
         for item in items:
             if (item.kind, item.key) in attempted:
                 continue
-            if time.monotonic() > deadline:
-                kept[f"{item.kind}: sweep budget"] += 1
+            if (
+                self._remove_within_budget(
+                    item, kept, outcome.removed, attempted, reached
+                )
+                is None
+            ):
                 continue
-            attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome.removed, attempted
-            )
+            reached = True
         if outcome.removed["image"]:
             self._reclaim_blobs()
         return outcome
@@ -509,6 +512,7 @@ class UnusedStorageCollector:
     _pressure = _pressure
     _nas_filesystems = _nas_filesystems
     _relieve = _relieve
+    _remove_within_budget = _remove_within_budget
     _check_round = _check_round
     _remove = _remove
     _reclaim_blobs = _reclaim_blobs

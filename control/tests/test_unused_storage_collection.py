@@ -67,7 +67,6 @@ from vonk_control.unused_storage_collection import (
     spark_eviction_capacity,
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
-from vonk_control.unused_storage_collection import service as unused_storage_service
 from vonk_control.unused_storage_collection.evidence import _Evidence
 
 from .removal_settle import advance_until_ended, release_ended_gates
@@ -1386,22 +1385,28 @@ def test_unknown_removal_is_deferred_and_retried_without_blocking_other_items(
 
 
 def test_a_sweep_that_runs_out_of_budget_continues_on_the_next_pass(
-    world: Catalog,
+    world: Catalog, frozen_pass_budgets
 ) -> None:
     """Catches waiting a whole interval to finish a sweep the budget cut short."""
 
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
-    world.workload(old, run="stopped")
-    lifecycle = FakeLifecycle(world.sessions)
-    collector = _collector(world, lifecycle, budget_seconds=-1.0)
+    for _ in range(3):
+        world.workload(old, run="stopped")
+    lifecycle = FakeLifecycle(
+        world.sessions,
+        between=lambda _id: frozen_pass_budgets.advance(_PASS_BUDGET + 1),
+    )
+    collector = _collector(world, lifecycle, budget_seconds=_PASS_BUDGET)
 
-    assert collector.tick() is False
-    assert lifecycle.removed == []
-
-    collector._budget_seconds = 30.0
+    # Each scope's first attempt always runs and spends the pass's attempt
+    # budget, so the third installation waits for the next pass.
     assert collector.tick() is True
-    assert len(lifecycle.removed) == 1
+    assert len(lifecycle.removed) == 2
+
+    assert collector._due_at == collector._clock()  # continues at once
+    assert collector.tick() is True
+    assert len(lifecycle.removed) == 3
 
 
 def test_evidence_slower_than_the_budget_still_advances_the_pass(
@@ -1422,7 +1427,6 @@ def test_evidence_slower_than_the_budget_still_advances_the_pass(
         return read(session, now)
 
     clock = SimpleNamespace(monotonic=lambda: elapsed[0])
-    monkeypatch.setattr(unused_storage_service, "time", clock)
     monkeypatch.setattr(unused_storage_pressure, "time", clock)
     monkeypatch.setattr(_Evidence, "read", slow_read)
 
@@ -1436,7 +1440,7 @@ _INSTALLATION_SLOW_STEPS = (
     "expiry image inventory",
 )
 _NAS_SLOW_STEPS = ("model inventory", "image inventory")
-_PASS_BUDGET = 30.0
+_PASS_BUDGET = 5.0  # passed to every collector below, never the default
 
 
 @pytest.mark.parametrize("step", _NAS_SLOW_STEPS)
@@ -1447,7 +1451,20 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
     with nothing attempted, so the next pass repeats it forever."""
 
     service, _ = cached
-    collector = _models(world, service)
+    demands = StorageDemands(lambda: world.now)
+    collector = _models(
+        world,
+        service,
+        free=200 * GIB,
+        demands=demands,
+        budget_seconds=_PASS_BUDGET,
+    )
+    demands.request(
+        NAS_MODELS,
+        200 * GIB + 3,
+        source="model-download",
+        reason="insufficient-reserved-storage",
+    )
     if step == "model inventory":
         measure = service.unused_set_bytes
 
@@ -1469,6 +1486,8 @@ def test_a_slow_nas_inventory_step_never_spends_the_pass_budget(
 
     assert result.models == 1, result.kept
     assert _kept(result, "sweep budget") == 0
+    # The refused download is served, not told nothing could be freed.
+    assert _scope(result, "nas")["outcome"] != "insufficient_after_eviction"
 
 
 @pytest.mark.parametrize("step", _INSTALLATION_SLOW_STEPS)
@@ -1485,7 +1504,7 @@ def test_a_slow_inventory_step_still_attempts_an_installation_removal(
     lifecycle = FakeLifecycle(world.sessions)
     # Expiry alone (no pressure) must not be starved by its own inventory.
     free = TOTAL // 2 if step == "expiry image inventory" else GIB
-    collector = _collector(world, lifecycle, free=free)
+    collector = _collector(world, lifecycle, free=free, budget_seconds=_PASS_BUDGET)
 
     def slowed(original):
         def wrapper(*args, **kwargs):
@@ -1508,6 +1527,104 @@ def test_a_slow_inventory_step_still_attempts_an_installation_removal(
 
     assert lifecycle.removed, result.kept
     assert _kept(result, "sweep budget") == 0
+
+
+def test_many_scopes_share_one_attempt_budget_and_each_attempts_its_first_item(
+    world: Catalog, tmp_path: Path, frozen_pass_budgets
+) -> None:
+    """Catches per-scope budgets (a pass with N scopes outgrowing the worker's
+    watchdog) and inventory time spent from the attempt budget: slow
+    inventories everywhere, NAS + two pressured Sparks + expiry."""
+
+    # Not the installations' image digest, which would make the model live.
+    service = ModelCacheService(
+        world.sessions, tmp_path / "nas-cache", free_fraction=0, fixture_sources=True
+    )
+    model = "c" * 64
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"weights", model_content_sha256=model)],
+        model_content_sha256=model,
+        request_key=str(uuid.uuid4()),
+    )
+    assert downloaded.state == "succeeded"
+    spark_a, spark_b, spark_c = NODE, "spk_" + "2" * 32, "spk_" + "3" * 32
+    other_model = {"models": [{"model": {"content_sha256": "b" * 64}}]}
+    old = world.revision("glm", 1, document=other_model)
+    world.revision("glm", 2, head="active", document=other_model)
+    on: dict[str, list[str]] = {spark_a: [], spark_b: [], spark_c: []}
+    for node, count in ((spark_a, 2), (spark_b, 2), (spark_c, 1)):
+        for _ in range(count):
+            installation, _run = world.workload(old, run="stopped")
+            on[node].append(installation)
+            _size(world, installation, 80 * GIB, model="b" * 64)
+            if node != NODE:
+                with world.sessions.begin() as session:
+                    if session.get(AgentNode, node) is None:
+                        session.add(
+                            AgentNode(
+                                node_id=node, state="active", workload_intent_ordinal=1
+                            )
+                        )
+                        session.flush()
+                    row = session.scalar(
+                        select(InstallationNode).where(
+                            InstallationNode.installation_id == installation
+                        )
+                    )
+                    assert row is not None
+                    row.node_id = node
+    attempt_cost = 10.0
+    lifecycle = FakeLifecycle(
+        world.sessions,
+        between=lambda _id: frozen_pass_budgets.advance(attempt_cost),
+    )
+    collector = _collector(
+        world,
+        lifecycle,
+        now=datetime.now(UTC) + GRACE + timedelta(hours=1),
+        model_cache=service,
+        model_cache_root=service._root,
+        budget_seconds=25.0,
+    )
+    _report_disk(world.sessions, GIB, at=world.now, node=spark_b)
+    _report_disk(world.sessions, 900 * GIB, at=world.now, node=spark_c)
+
+    def slow(original):
+        def wrapper(*args, **kwargs):
+            frozen_pass_budgets.advance(26.0)
+            return original(*args, **kwargs)
+
+        return wrapper
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(_Evidence, "read", slow(_Evidence.read))
+        monkey.setattr(service, "unused_set_bytes", slow(service.unused_set_bytes))
+        monkey.setattr(
+            UnusedStorageCollector,
+            "_spark_items",
+            staticmethod(slow(UnusedStorageCollector._spark_items)),
+        )
+        collector._image_items = slow(collector._image_items)  # type: ignore[method-assign]
+        before = frozen_pass_budgets.seconds
+        result = collector.collect()
+    finally:
+        monkey.undo()
+
+    service.close()
+    removed = set(lifecycle.removed)
+    assert removed & set(on[spark_a]), result.kept
+    assert removed & set(on[spark_b]), result.kept
+    # NAS, two Spark scopes and expiry: each scope's first item, no more.
+    assert len(removed) == 3, result.kept
+    assert result.models == 1, result.kept
+    # Past the shared budget only each scope's first attempt runs.
+    assert _kept(result, "sweep budget") >= 1
+    # Attempts are counted; the four slow inventories are not.
+    assert collector._removal_seconds >= attempt_cost * len(removed)
+    assert frozen_pass_budgets.seconds - before > 25.0 * 4  # inventories were slow
+    assert collector._due_at == collector._clock()
 
 
 def test_one_sweep_per_interval(world: Catalog) -> None:
