@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
@@ -58,8 +59,8 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
-def _is_cached(session: Session, digest: str) -> bool:
-    """Whether a cache set holds this model content digest."""
+def _has_cache_set(session: Session, digest: str) -> bool:
+    """Whether a cache set row, in any state, holds this model content digest."""
 
     return (
         session.scalar(
@@ -69,6 +70,34 @@ def _is_cached(session: Session, digest: str) -> bool:
         )
         is not None
     )
+
+
+def _newest_cached_per_identity(
+    session: Session, selection: list[ColumnElement[bool]]
+) -> list[str]:
+    """With no head, each identity answers with its newest revision holding a set."""
+
+    newest: dict[tuple[str, str], tuple[datetime, str]] = {}
+    for publisher, slug, created_at, digest in session.execute(
+        select(
+            CatalogDocumentRevision.publisher,
+            CatalogDocumentRevision.slug,
+            CatalogDocumentRevision.created_at,
+            CatalogDocumentRevision.content_digest,
+        ).where(
+            CatalogDocumentRevision.kind == "model",
+            CatalogDocumentRevision.state == "active",
+            *selection,
+            CatalogDocumentRevision.content_digest.in_(
+                select(ModelCacheSet.model_content_sha256)
+            ),
+        )
+    ):
+        if _is_digest(digest):
+            key = (publisher, slug)
+            if key not in newest or (created_at, digest) > newest[key]:
+                newest[key] = (created_at, digest)
+    return sorted({digest for _created, digest in newest.values()})
 
 
 class ResolutionMixin:
@@ -260,6 +289,7 @@ class ResolutionMixin:
     def _resolve_model_selector_in_session(session: Session, selector: str) -> str:
         """Resolve one current model selector inside its caller's snapshot."""
 
+        fallback: list[ColumnElement[bool]] | None = None
         if re.fullmatch(_DIGEST_PATTERN, selector):
             rows = list(
                 session.scalars(
@@ -270,11 +300,12 @@ class ResolutionMixin:
                     )
                 )
             )
-            if not rows and _is_cached(session, selector):
+            if not rows and _has_cache_set(session, selector):
                 return selector
             if rows:
                 return selector
         elif re.fullmatch(UUID_PATTERN, selector):
+            fallback = [CatalogDocumentRevision.document_id == selector]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
@@ -301,6 +332,7 @@ class ResolutionMixin:
                 conditions.append(CatalogDocumentRevision.slug == slug)
             else:
                 conditions.append(CatalogDocumentRevision.slug == selector)
+            fallback = conditions[2:]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
@@ -308,19 +340,12 @@ class ResolutionMixin:
                     )
                 )
             )
-            if not rows:
-                # No head (retracted): the identity's cached revisions still answer.
-                rows = [
-                    row
-                    for row in session.scalars(
-                        select(CatalogDocumentRevision).where(*conditions)
-                    )
-                    if _is_cached(session, row.content_digest)
-                ]
         # A catalog row whose identity digest is damaged cannot be pinned: it is
         # skipped like any row the catalog does not hold, and the rest carry on.
         rows = [row for row in rows if _is_digest(row.content_digest)]
         digests = sorted({row.content_digest for row in rows})
+        if not digests and fallback is not None:
+            digests = _newest_cached_per_identity(session, fallback)
         if not digests:
             raise ModelCacheNotFoundInvalid(
                 ModelCacheCode.SELECTOR_MISSING, "model selector was not found"
