@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import itertools
 import json
 import os
 import uuid
@@ -20,7 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState, ProgressPhase
+from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
@@ -40,6 +41,10 @@ from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
     _retry_after_seconds,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheNotFoundInvalid,
+    ModelCacheSelectorAmbiguous,
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
@@ -4540,3 +4545,220 @@ def _admit_fresh_download(service, model_digest, artifact):
 def _finish_cache_removal(service, receipt):
     advance_until_ended(service, receipt.id, rounds=10)
     return service.get_operation(receipt.id)
+
+
+def _ticking_catalog(sessions):
+    """A catalog whose revisions get strictly increasing creation times."""
+    ticks = itertools.count()
+    return CatalogEntityService(
+        sessions, clock=lambda: NOW + timedelta(seconds=next(ticks))
+    )
+
+
+def _cache_model_revision(
+    service, tmp_path, catalog, *, publisher="vonk-forge", slug, weight, document=None
+):
+    """Activate one model revision (a new document, or a revision of one) and cache it."""
+    model = _canonical_model(
+        publisher=publisher,
+        slug=slug,
+        file_id="weights",
+        file_digest=hashlib.sha256(weight).hexdigest(),
+    )
+    if document is None:
+        draft = catalog.create_draft(model.model_dump(mode="json"), actor="operator")
+        row = catalog.resolve(draft.id, actor="operator")
+    else:
+        revised = catalog.revise(
+            document, model.model_dump(mode="json"), actor="operator"
+        )
+        row = catalog.resolve(revised.id, actor="operator")
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                weight,
+                path="weights.safetensors",
+                model_content_sha256=row.content_digest,
+            )
+        ],
+        model_content_sha256=row.content_digest,
+        request_key=str(uuid.uuid4()),
+    )
+    return row
+
+
+def _retract_heads(sessions, slug):
+    """Retract the way the catalogue sync will: no active revision, generation up."""
+    with sessions.begin() as session:
+        for head in session.scalars(
+            select(CatalogDocumentHead).where(CatalogDocumentHead.slug == slug)
+        ):
+            head.active_revision_id = None
+            head.generation += 1
+
+
+def _retracted_lineage(service, sessions, tmp_path):
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    second = _cache_model_revision(
+        service,
+        tmp_path,
+        catalog,
+        slug="gone",
+        weight=b"bbb",
+        document=first.document_id,
+    )
+    return catalog, first, second
+
+
+def test_retracted_publisher_slug_resolves_to_the_newest_revision_with_a_set(
+    cache, tmp_path
+):
+    service, sessions = cache
+    _catalog, _first, second = _retracted_lineage(service, sessions, tmp_path)
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == second.content_digest
+    assert service._resolve_model_selector("gone") == second.content_digest
+    assert service._resolve_model_selector(second.document_id) == second.content_digest
+
+
+def test_retracted_selector_ignores_a_newer_revision_without_a_set(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    newer = _canonical_model(
+        publisher="vonk-forge",
+        slug="gone",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    catalog.resolve(
+        catalog.revise(
+            first.document_id, newer.model_dump(mode="json"), actor="operator"
+        ).id,
+        actor="operator",
+    )
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == first.content_digest
+
+
+def test_retracted_selector_counts_an_incomplete_set_as_a_set(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="gone",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    second = catalog.resolve(
+        catalog.revise(
+            first.document_id, model.model_dump(mode="json"), actor="operator"
+        ).id,
+        actor="operator",
+    )
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                b"bbb",
+                path="weights.safetensors",
+                model_content_sha256=second.content_digest,
+            )
+        ],
+        model_content_sha256=second.content_digest,
+        request_key=str(uuid.uuid4()),
+        interrupt_after_bytes=1,
+    )
+    with sessions() as session:
+        states = set(
+            session.scalars(
+                select(ModelCacheSet.state).where(
+                    ModelCacheSet.model_content_sha256 == second.content_digest
+                )
+            )
+        )
+    assert states
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == second.content_digest
+
+
+def test_retracted_bare_slug_across_publishers_is_ambiguous(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    rows = [
+        _cache_model_revision(
+            service, tmp_path, catalog, publisher=publisher, slug="gone", weight=weight
+        )
+        for publisher, weight in (("first", b"aaa"), ("second", b"bbb"))
+    ]
+    _retract_heads(sessions, "gone")
+    with pytest.raises(ModelCacheSelectorAmbiguous) as caught:
+        service._resolve_model_selector("gone")
+    assert caught.value.candidates == tuple(sorted(r.content_digest for r in rows))
+    for publisher, row in zip(("first", "second"), rows, strict=True):
+        assert (
+            service._resolve_model_selector(f"{publisher}/gone") == row.content_digest
+        )
+
+
+def test_retracted_selector_without_any_set_is_missing(cache):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="uncached",
+        file_id="weights",
+        file_digest="c" * 64,
+    )
+    catalog.resolve(
+        catalog.create_draft(model.model_dump(mode="json"), actor="operator").id,
+        actor="operator",
+    )
+    _retract_heads(sessions, "uncached")
+    with pytest.raises(ModelCacheNotFoundInvalid) as caught:
+        service._resolve_model_selector("vonk-forge/uncached")
+    assert caught.value.code == ModelCacheCode.SELECTOR_MISSING
+
+
+def test_publisher_slug_selector_with_a_head_still_follows_the_head(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="headed", weight=b"aaa"
+    )
+    second = _cache_model_revision(
+        service,
+        tmp_path,
+        catalog,
+        slug="headed",
+        weight=b"bbb",
+        document=first.document_id,
+    )
+    assert service._resolve_model_selector("vonk-forge/headed") == second.content_digest
+
+
+def test_removal_review_of_a_retracted_model_covers_every_set_of_the_lineage(
+    cache, tmp_path
+):
+    service, sessions = cache
+    _catalog, _first, second = _retracted_lineage(service, sessions, tmp_path)
+    _retract_heads(sessions, "gone")
+    review = service.review_model_removal("vonk-forge/gone")
+    assert review.target_identity == second.content_digest
+    assert not review.blockers
+    assets = {item.sha256 for item in review.assets}
+    assert {
+        hashlib.sha256(b"aaa").hexdigest(),
+        hashlib.sha256(b"bbb").hexdigest(),
+    } <= assets
