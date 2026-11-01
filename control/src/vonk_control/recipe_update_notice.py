@@ -1,6 +1,6 @@
 """One owner for "a newer revision of this recipe exists" (never restarts anything).
 
-Profile load and run always resolve the newest active revision. A workload that
+Profile load and run always resolve the catalog head. A workload that
 started earlier may still run an older one; this module names that difference
 once so the fleet, Spark, profile, CLI and web all say the same thing.
 """
@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ProjectionCode
 from vonk_forge_contracts import read_recipe
 
+from .catalog_queries import active_head_revision
 from .models import CatalogDocumentRevision
 from .strict_json import StrictJSONModel
 
@@ -45,7 +46,7 @@ class RecipeUpdateNotice(StrictJSONModel):
 def newest_active_revisions(
     session: Session, document_ids: Collection[str]
 ) -> dict[str, CatalogDocumentRevision]:
-    """The newest readable active revision per recipe id.
+    """The catalog head (current revision) per recipe id, when readable and active.
 
     This is the same choice profile load and run make, so "newest" here means
     exactly what a reload would start.
@@ -55,15 +56,11 @@ def newest_active_revisions(
     if not document_ids:
         return newest
     rows = session.scalars(
-        select(CatalogDocumentRevision)
-        .where(
+        select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == "recipe",
             CatalogDocumentRevision.state == "active",
             CatalogDocumentRevision.document_id.in_(sorted(document_ids)),
-        )
-        .order_by(
-            CatalogDocumentRevision.document_id,
-            CatalogDocumentRevision.revision_number.desc(),
+            active_head_revision(),
         )
     )
     for row in rows:
@@ -93,11 +90,9 @@ def recipe_update_notice(
     running: CatalogDocumentRevision,
     newest: CatalogDocumentRevision | None,
 ) -> RecipeUpdateNotice | None:
-    """The notice when `running` is not the newest active revision, else None."""
+    """The notice when `running` is not the catalog head, else None."""
 
     if newest is None or newest.id == running.id:
-        return None
-    if newest.revision_number <= running.revision_number:
         return None
     running_version, running_date = _release(running.document)
     newest_version, newest_date = _release(newest.document)

@@ -39,6 +39,7 @@ from .api_response_witness import (  # noqa: F401 - pytest discovers imported ho
 from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
+from .catalog_head_seed import install_seeded_heads
 from .pass_budget_clocks import (
     frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
 )
@@ -46,6 +47,7 @@ from .pass_budget_clocks import (
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.
 install_write_guard(strict=True)
+install_seeded_heads()
 
 # The same pinned PostgreSQL the Compose deployment runs; scripts/pull-test-images
 # pulls it before the suite, so starting the server never downloads.

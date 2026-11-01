@@ -122,6 +122,14 @@ SECURITY_EDGES = frozenset(
 )
 
 
+# The files that allocate the next revision_number; no other source names it.
+REVISION_NUMBER_ALLOCATORS = frozenset(
+    {
+        "control/src/vonk_control/catalog_entities.py",
+        "control/src/vonk_control/catalog_service.py",
+    }
+)
+
 # The one owner of how a container's exit cause is spelled and read.
 EXIT_CAUSE_OWNER = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
 
@@ -1364,6 +1372,21 @@ def check_source(
                             and node.func.attr == "document_sha256"
                         )
                     )
+                )
+            # One definition of a recipe's current revision: the catalog head
+            # (catalog_queries.active_head_revision). Any use of revision_number
+            # (ordering, max, comparison, sorting) can pick a reverted revision
+            # over the head. Only the revision-number allocators and the column
+            # definition may name it.
+            if (
+                path.startswith("control/src/vonk_control/")
+                and path not in REVISION_NUMBER_ALLOCATORS
+                and not path.startswith("control/src/vonk_control/models/")
+            ):
+                hits.extend(
+                    (line, "revision_number: current is the catalog head")
+                    for line, text in enumerate(source.splitlines(), 1)
+                    if line in added and re.search(r"\brevision_number\b", text)
                 )
             hits.extend(
                 (site.line, "provenance comparison")

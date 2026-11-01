@@ -368,15 +368,14 @@ class ResolutionMixin:
         model_variant: str | None = None,
         exact_revision_id: str | None = None,
     ) -> CacheResolution:
-        """Resolve one logical Recipe to its newest usable cached revision.
+        """Resolve one logical Recipe to its catalog head (or the exact revision).
 
         The profile read/load path calls this method for both web and CLI
         operators.  It is read-only: missing content is reported, never
-        downloaded.  A newer active revision may be uncached; in that case we
-        return the newest compatible cached receipt and mark that a catalog
-        update is available.  If no revision is cached, the newest active
-        revision is returned with unknown (``None``) resource estimates so a
-        load operation can prepare it explicitly.
+        downloaded.  The head may be uncached; it is still returned, with a
+        ``recipe-not-cached`` blocker, so a load operation can prepare it
+        explicitly.  An exact revision other than the head marks that a catalog
+        update is available.
 
         An explicitly selected exact revision is never replaced by an older
         cached one: either the caller names it in ``exact_revision_id``, or
@@ -459,7 +458,7 @@ class ResolutionMixin:
                         CatalogDocumentRevision.publisher == publisher,
                         CatalogDocumentRevision.slug == slug,
                     )
-                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                    .limit(1)
                 )
             else:
                 seed = session.scalar(
@@ -468,7 +467,8 @@ class ResolutionMixin:
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.slug == identity,
                     )
-                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                    .order_by(CatalogDocumentRevision.publisher)
+                    .limit(1)
                 )
             if seed is None:
                 raise ModelCacheStorageUnknown(
@@ -507,15 +507,11 @@ class ResolutionMixin:
 
             revisions = list(
                 session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
+                    select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.document_id == seed.document_id,
                         CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.id.desc(),
+                        active_head_revision(),
                     )
                 )
             )
@@ -686,14 +682,7 @@ class ResolutionMixin:
             recipe_cached = receipt is not None
             image_bytes = receipt.image_bytes if receipt is not None else None
             image_digest = receipt.image_digest if receipt is not None else None
-            latest = next(
-                (
-                    item
-                    for item in revisions
-                    if item.revision_number > revision.revision_number
-                ),
-                None,
-            )
+            latest = next((item for item in revisions if item.id != revision.id), None)
             additional = (
                 model_expected + image_bytes
                 if isinstance(model_expected, int) and isinstance(image_bytes, int)

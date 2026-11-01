@@ -5,12 +5,13 @@ from __future__ import annotations
 from copy import deepcopy
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import DesiredAssignmentState
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import (
     FleetProfileAssignment,
+    FleetProfileAssignmentInput,
     FleetProfileNode,
 )
 from vonk_control.fleet_profiles import FleetProfileService
@@ -21,6 +22,7 @@ from vonk_control.models import (
     AgentNodeContact,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     ClusterMapping,
     ClusterMappingNode,
@@ -60,6 +62,7 @@ def _seed(
     newest_version: str = "1.1.0",
     second_state: str = "active",
     first_release: bool = True,
+    head: str | None = None,
 ) -> None:
     """One Spark running the given revision of a recipe that has two revisions."""
     with sessions.begin() as session:
@@ -118,6 +121,16 @@ def _seed(
         session.flush()
         session.add_all([*revisions, second])
         session.flush()
+        if head is not None:
+            # The seed's head follows the newest active revision; move it for a revert.
+            seeded_head = session.scalar(
+                select(CatalogDocumentHead).where(
+                    CatalogDocumentHead.slug == first.slug
+                )
+            )
+            assert seeded_head is not None
+            seeded_head.active_revision_id = head
+            session.flush()
         mapping = ClusterMapping(
             id=_uuid(303),
             recipe_revision_id=running,
@@ -254,7 +267,7 @@ def test_a_run_on_the_newest_revision_is_not_flagged() -> None:
     assert all(w.code != "recipe.update_available" for w in node.warnings)
 
 
-def test_newest_is_the_highest_active_revision_and_ignores_candidates() -> None:
+def test_newest_is_the_head_revision_and_ignores_candidates() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1, second_state="candidate")
     with sessions() as session:
@@ -277,7 +290,7 @@ def test_notice_without_a_release_version_names_the_revision_number() -> None:
     assert notice.newest_revision_id == REVISION_2
 
 
-def test_profile_load_resolves_the_newest_active_revision() -> None:
+def test_profile_load_resolves_the_head_revision() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1)
     with sessions() as session:
@@ -287,7 +300,7 @@ def test_profile_load_resolves_the_newest_active_revision() -> None:
     assert identity == (RECIPE_ID, REVISION_2)
 
 
-def test_profile_load_ignores_a_candidate_and_keeps_the_newest_active() -> None:
+def test_profile_load_ignores_a_candidate_and_keeps_the_head() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_1, second_state="candidate")
     with sessions() as session:
@@ -349,3 +362,36 @@ def test_fleet_output_shows_the_update_as_information_not_attention(capsys) -> N
     before_updates = out.split("Updates available")[0]
     assert "Update available" not in before_updates
     assert "Update Recipe" in out
+
+
+def test_a_reverted_recipe_keeps_the_head_not_the_highest_revision_number() -> None:
+    """Import A, then B, then A again: the sync moves the head back to A, but
+    B stays active with the higher revision_number. Every reader follows the head."""
+    sessions = _sessions()
+    _seed(sessions, running=REVISION_2, head=REVISION_1)
+    with sessions() as session:
+        identity = FleetProfileService._recipe_identity(
+            session, "vonk-forge/update-recipe"
+        )
+        assert identity == (RECIPE_ID, REVISION_1)
+        choice = FleetProfileAssignmentInput(
+            recipe_selector="vonk-forge/update-recipe",
+            spark_ids=[NODE_A],
+        )
+        FleetProfileService._prefetch_recipe_documents(session, [choice])
+        reads = session.info["profile_recipe_documents"]
+        assert reads.documents[choice.recipe_selector][1].id == REVISION_1
+        assert newest_active_revisions(session, {RECIPE_ID})[RECIPE_ID].id == REVISION_1
+
+
+def test_a_spark_running_the_reverted_revision_is_told_about_the_head() -> None:
+    sessions = _sessions()
+    _seed(sessions, running=REVISION_2, head=REVISION_1)
+
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+
+    (run,) = node.loaded
+    notice = run.recipe_update
+    assert notice is not None
+    assert notice.running_revision_id == REVISION_2
+    assert notice.newest_revision_id == REVISION_1
