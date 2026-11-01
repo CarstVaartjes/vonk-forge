@@ -1100,6 +1100,7 @@ if __name__ == "__main__":
 
     from .agent_jobs import AgentJobService
     from .db import build_engine, session_factory, wait_for_database
+    from .db.startup import strip_retired_removal_key
     from .execution_plan_service import ControllerExecutionPlanService
     from .logging import configure_controller_logging
     from .model_cache import ModelCacheService
@@ -1143,7 +1144,10 @@ if __name__ == "__main__":
     capabilities = CapabilityRegistry()
     settings = Settings.from_env_and_secrets()
     wait_for_database(settings.database_url)
-    sessions = session_factory(build_engine(settings.database_url, component="worker"))
+    engine = build_engine(settings.database_url, component="worker")
+    with engine.begin() as connection:
+        strip_retired_removal_key(connection)
+    sessions = session_factory(engine)
 
     def clock() -> datetime:
         return datetime.now(UTC)

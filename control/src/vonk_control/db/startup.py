@@ -55,6 +55,22 @@ def adopt_legacy_rows(connection: Connection) -> None:
         _LOGGER.info("Rewrote %d lifecycle rows onto the core state words", adopted)
 
 
+def strip_retired_removal_key(connection: Connection) -> None:
+    """Drop the retired ``object_pending_bytes`` key from stored removal rows.
+
+    Payload models forbid extra keys. The worker is the only writer of removal
+    checkpoints, so it strips at its own start, after the previous worker is
+    gone. Delete this function after the next deploy.
+    """
+    connection.execute(
+        text(
+            "UPDATE model_cache_operations "
+            "SET payload = (payload::jsonb - 'object_pending_bytes')::json "
+            "WHERE kind = 'remove' AND payload::jsonb ? 'object_pending_bytes'"
+        )
+    )
+
+
 def initialize_database(
     database_url: str,
     *,

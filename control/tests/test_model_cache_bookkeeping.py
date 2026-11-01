@@ -112,7 +112,6 @@ def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
         # Every target is reconciled; then another set starts to reference it.
         payload["object_index"] = len(payload["delete_objects"])
         payload["set_index"] = len(payload["selected"])
-        payload["object_pending_bytes"] = None
         row.payload = payload
         session.add(
             ModelCacheSetArtifact(

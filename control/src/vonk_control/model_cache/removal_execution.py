@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -16,6 +17,7 @@ from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
+    check_removal_fence_nowait,
     clear_removal,
     lock_removal_fences,
     retryable_artifact_database_error,
@@ -40,8 +42,8 @@ from ..models import (
     RecipeInstallation,
 )
 from ..validation_detail import validation_error_detail
-from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
-from .errors import _ArtifactWriterBusy
+from .constants import _REMOVAL_BATCH_SECONDS, _RETRY_BASE_SECONDS, SCHEMA_VERSION
+from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .persistence import (
     _operation_progress,
     _operation_removal,
@@ -73,14 +75,20 @@ class RemovalExecutionMixin:
                 cache._retire_unreadable(row, residue, now=now)
 
     def _advance_model_removal(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         observed_at = now or cache._clock()
         try:
             if not cache._advance_fleet_removal(operation_id, now=observed_at):
                 return False
-            changed = cache._advance_model_removal_step(operation_id, now=observed_at)
+            changed = cache._advance_model_removal_step(
+                operation_id, now=observed_at, deadline=deadline
+            )
             if changed:
                 return True
             with cache._session() as session:
@@ -128,7 +136,11 @@ class RemovalExecutionMixin:
         return False
 
     def _advance_model_removal_step(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         now = now or cache._clock()
@@ -190,7 +202,9 @@ class RemovalExecutionMixin:
                 return False
             # The scope and fences are committed before any byte effect.
             # Continue once, through the same executor, with the resolved scope.
-            return cache._advance_model_removal_step(operation_id, now=now)
+            return cache._advance_model_removal_step(
+                operation_id, now=now, deadline=deadline
+            )
         if newer is not None:
             # Newer intent wins: a removal that has removed nothing yet ends
             # and releases its fences instead of blocking the newer consumer.
@@ -209,58 +223,78 @@ class RemovalExecutionMixin:
             )
             return False
         if object_index < len(delete_objects):
-            digest = str(delete_objects[object_index])
-            identity = ArtifactIdentity("model-object", digest)
-            try:
-                with cache._model_storage_lock(digest):
-                    current = cache._model_removal_owner_snapshot(
-                        operation_id, fence=fence, identity=identity
-                    )
-                    if current is None:
-                        return False
-                    if current.object_index != object_index:
-                        return False
-                    pending_bytes = current.object_pending_bytes
-                    if pending_bytes is None:
-                        pending_bytes = cache._model_object_size(digest)
-                    if not cache._persist_model_removal_checkpoint(
-                        operation_id,
-                        fence=fence,
-                        identity=identity,
-                        expected_index=object_index,
-                        object_step=True,
-                        pending_bytes=pending_bytes,
-                        complete_step=False,
-                    ):
-                        return False
-                    cache._remove_model_object_files(digest)
-                    return cache._persist_model_removal_checkpoint(
-                        operation_id,
-                        fence=fence,
-                        identity=identity,
-                        expected_index=object_index,
-                        object_step=True,
-                        pending_bytes=pending_bytes,
-                        complete_step=True,
-                    )
-            except _ArtifactWriterBusy as error:
+            # A model is a set of files: delete this removal's exclusive objects
+            # in a time-bounded batch, one checkpoint per batch. A crash before
+            # the checkpoint only undercounts bytes; the unlinks are idempotent.
+            # The worker step shares one deadline; each removal still deletes
+            # at least one object.
+            if deadline is None:
+                deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
+            completed = 0
+            reclaimed = 0
+            failure: Exception | None = None
+            for digest in (str(item) for item in delete_objects[object_index:]):
+                identity = ArtifactIdentity("model-object", digest)
+                try:
+                    with cache._model_storage_lock(digest):
+                        with cache._session() as session:
+                            if not check_removal_fence_nowait(
+                                session,
+                                identity,
+                                owner_kind="model-cache-operation",
+                                owner_id=operation_id,
+                                fence=fence,
+                            ):
+                                break
+                        size = cache._model_object_size(digest)
+                        cache._remove_model_object_files(digest)
+                except (
+                    _ArtifactWriterBusy,
+                    ArtifactLifecycleError,
+                    ModelCacheStorageRefused,
+                    OSError,
+                ) as error:
+                    failure = error
+                    break
+                completed += 1
+                reclaimed += size
+                if time.monotonic() >= deadline:
+                    break
+            if completed and not cache._persist_model_removal_checkpoint(
+                operation_id,
+                fence=fence,
+                expected_index=object_index,
+                object_step=True,
+                completed=completed,
+                reclaimed_bytes=reclaimed,
+            ):
+                return False
+            if isinstance(failure, _ArtifactWriterBusy):
                 cache._defer_model_removal(
                     operation_id,
-                    detail=error.detail,
-                    retry_after_seconds=error.retry_after_seconds or 5,
+                    detail=failure.detail,
+                    retry_after_seconds=failure.retry_after_seconds or 5,
                     cause=Disposition.WAIT,
                 )
                 return False
-            except ArtifactLifecycleError as error:
+            if isinstance(failure, ArtifactLifecycleError):
                 cache._defer_model_removal(
-                    operation_id, detail=error.detail, retry_after_seconds=5
+                    operation_id, detail=failure.detail, retry_after_seconds=5
                 )
                 return False
-            except OSError as error:
+            if isinstance(failure, ModelCacheStorageRefused):
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
+                    operation_id, detail=failure.detail, cause=failure
                 )
                 return False
+            if isinstance(failure, OSError):
+                cache._defer_model_removal(
+                    operation_id,
+                    detail=f"{type(failure).__name__}: {failure}",
+                    cause=failure,
+                )
+                return False
+            return bool(completed)
         if set_index < len(selected_sets):
             set_digest = str(selected_sets[set_index])
             identity = ArtifactIdentity("model-set", set_digest)
@@ -275,11 +309,10 @@ class RemovalExecutionMixin:
                     return cache._persist_model_removal_checkpoint(
                         operation_id,
                         fence=fence,
-                        identity=identity,
                         expected_index=set_index,
                         object_step=False,
-                        pending_bytes=None,
-                        complete_step=True,
+                        completed=1,
+                        reclaimed_bytes=0,
                     )
             except _ArtifactWriterBusy as error:
                 cache._defer_model_removal(
@@ -475,7 +508,6 @@ def _untouched(checkpoint: ModelCacheRemovalPayload) -> bool:
 
     return (
         checkpoint.object_index == 0
-        and checkpoint.object_pending_bytes is None
         and checkpoint.set_index == 0
         and checkpoint.reclaimed_bytes == 0
     )

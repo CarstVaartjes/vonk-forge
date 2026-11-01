@@ -318,7 +318,6 @@ class RemovalAcceptanceMixin:
             selected_objects=list(scope.selected_objects),
             delete_objects=list(delete_objects),
             object_index=0,
-            object_pending_bytes=None,
             reclaimed_bytes=0,
             set_index=0,
             retry=ModelCacheRetry(automatic_attempts=1, operator_retries=0),

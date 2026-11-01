@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, cast, get_args
@@ -38,7 +39,7 @@ from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCache
 from ..operation_contract import AvailabilityOperationFailure
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
-from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS
+from .constants import _LOGGER, _REMOVAL_BATCH_SECONDS, _TRANSFER_CLAIM_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
 from .lineage import lineage_contents, model_sets
 from .persistence import (
@@ -384,23 +385,14 @@ class RemovalReconcileMixin:
         operation_id: str,
         *,
         fence: str,
-        identity: ArtifactIdentity,
         expected_index: int,
         object_step: bool,
-        pending_bytes: int | None,
-        complete_step: bool,
+        completed: int,
+        reclaimed_bytes: int,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         with cache._session(write=True) as session:
-            if not check_removal_fence_nowait(
-                session,
-                identity,
-                owner_kind="model-cache-operation",
-                owner_id=operation_id,
-                fence=fence,
-            ):
-                return False
             operation = session.scalar(
                 select(ModelCacheOperation)
                 .where(ModelCacheOperation.id == operation_id)
@@ -419,38 +411,15 @@ class RemovalReconcileMixin:
             current_index = payload.object_index if object_step else payload.set_index
             if current_index != expected_index:
                 return False
-            object_index = payload.object_index
-            object_pending_bytes = payload.object_pending_bytes
-            reclaimed_bytes = payload.reclaimed_bytes
-            set_index = payload.set_index
-            if object_step:
-                if pending_bytes is None:
-                    return False  # no byte checkpoint yet: the step measures again
-                if complete_step:
-                    if payload.object_pending_bytes != pending_bytes:
-                        return False
-                    object_index = expected_index + 1
-                    object_pending_bytes = None
-                    reclaimed_bytes += pending_bytes
-                else:
-                    object_pending_bytes = pending_bytes
-            elif complete_step:
-                set_index = expected_index + 1
             try:
                 checkpoint = _updated(
                     payload,
-                    # Only a completed step is progress; the byte checkpoint taken
-                    # before an effect must not forgive a failing one.
-                    retry=(
-                        ModelCacheRetry(automatic_attempts=1, operator_retries=0)
-                        if complete_step
-                        else payload.retry
-                    ),
+                    retry=ModelCacheRetry(automatic_attempts=1, operator_retries=0),
                     failure=None,
-                    object_index=object_index,
-                    object_pending_bytes=object_pending_bytes,
-                    reclaimed_bytes=reclaimed_bytes,
-                    set_index=set_index,
+                    object_index=payload.object_index
+                    + (completed if object_step else 0),
+                    reclaimed_bytes=payload.reclaimed_bytes + reclaimed_bytes,
+                    set_index=payload.set_index + (0 if object_step else 1),
                 )
             except ValidationError:
                 return False  # the step's entry retires the unreadable row
@@ -834,11 +803,17 @@ class RemovalReconcileMixin:
                 )
             )
         advanced = 0
+        # One deadline for the whole worker step, shared by every removal.
+        deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
         for operation_id in operation_ids:
             if advanced >= limit:
                 break
             try:
-                advanced += int(cache._advance_model_removal(operation_id, now=now))
+                advanced += int(
+                    cache._advance_model_removal(
+                        operation_id, now=cache._clock(), deadline=deadline
+                    )
+                )
             except ModelCacheStorageError as error:
                 if error.code != ModelCacheCode.PAYLOAD_INVALID:
                     cache._defer_model_removal(operation_id, detail=error.detail)
