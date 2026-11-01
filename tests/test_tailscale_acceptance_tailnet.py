@@ -1556,12 +1556,12 @@ def test_transport_failure_names_the_underlying_cause(
 
     The disposable-tailnet flake reported only "was unavailable", which cannot
     distinguish a DNS failure from a refused connection from the 30-second read
-    timeout that the step's ~31s duration implies. Retrying was deliberately not
-    added, so the message is the only thing that makes the next occurrence
-    diagnosable.
+    timeout that the step's ~31s duration implies. The exchange now retries a bounded
+    number of times; the final message is what makes the failure diagnosable.
     """
     _factory_environment(monkeypatch)
-    _install_urlopen(lifecycle, monkeypatch, [failure])
+    _install_urlopen(lifecycle, monkeypatch, [failure] * 4)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _delay: None)
 
     with pytest.raises(lifecycle.ApiRequestError) as caught:
         lifecycle.create(
@@ -1686,13 +1686,11 @@ def test_create_timeout_with_no_child_retries_and_succeeds(
     assert (tmp_path / "state.json").exists()
 
 
-def test_create_timeout_after_server_created_child_deletes_it_then_retries(
+def test_create_timeout_after_server_created_child_refuses_without_second_post(
     lifecycle: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    plan = _success_create_responses()
-    tail = plan[plan.phases["tailnet_create"] :]
     now = datetime.now(UTC)
     orphan = _organization_child(
         child_id="tailnet_orphan_1",
@@ -1711,29 +1709,20 @@ def test_create_timeout_after_server_created_child_deletes_it_then_retries(
         [
             TimeoutError("The read operation timed out"),
             _listing_response(bystander, orphan),
-            *_child_delete_responses("tailnet_orphan_1"),
-            *tail,
         ],
     )
 
-    lifecycle.create(
-        display_name="Vonk Forge CI 123 attempt 1",
-        github_env=tmp_path / "github.env",
-        state=tmp_path / "state.json",
-    )
+    with pytest.raises(lifecycle.LifecycleError) as caught:
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
 
-    assert _deleted_ids(urlopen) == ["tailnet_orphan_1"]
-    methods_paths = [
-        (request.method, urllib.parse.urlsplit(request.full_url).path)
-        for request in urlopen.requests
-    ]
-    delete_at = methods_paths.index(("DELETE", "/api/v2/tailnet/tailnet_orphan_1"))
-    posts = [
-        index
-        for index, item in enumerate(methods_paths)
-        if item == ("POST", "/api/v2/organizations/-/tailnets")
-    ]
-    assert len(posts) == 2 and posts[0] < delete_at < posts[1]
+    assert "response was lost; it is left for stale cleanup" in str(caught.value)
+    assert len(_post_creates(urlopen)) == 1
+    assert _deleted_ids(urlopen) == []
+    assert not (tmp_path / "state.json").exists()
 
 
 def test_create_persistent_timeout_is_bounded_and_keeps_the_error(
@@ -1771,3 +1760,86 @@ def test_create_persistent_timeout_is_bounded_and_keeps_the_error(
     assert len(_post_creates(urlopen)) == 4
     assert sleeps == [1, 2, 4]
     assert not (tmp_path / "state.json").exists()
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ("child_oauth", "create_svc:vonk-forge", "service_readback", "policy_readback"),
+)
+def test_configure_transient_failure_is_retried_in_place(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    phase: str,
+) -> None:
+    plan = _success_create_responses()
+    at = plan.phases[phase]
+    scripted: list[object] = [*plan[:at], TimeoutError("timed out"), *plan[at:]]
+    _factory_environment(monkeypatch)
+    _install_urlopen(lifecycle, monkeypatch, scripted)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _delay: None)
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    assert (tmp_path / "state.json").exists()
+
+
+def test_policy_write_applied_but_unconfirmed_is_not_posted_twice(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _success_create_responses()
+    at = plan.phases["policy_write"]
+    scripted: list[object] = [
+        *plan[:at],
+        TimeoutError("timed out"),
+        _Response(CHILD_POLICY, etag='"applied"'),
+        *plan[at + 1 :],
+    ]
+    _factory_environment(monkeypatch)
+    urlopen = _install_urlopen(lifecycle, monkeypatch, scripted)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _delay: None)
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    acl_posts = [
+        request
+        for request in urlopen.requests
+        if request.method == "POST" and request.full_url.endswith("/acl")
+    ]
+    assert len(acl_posts) == 1
+
+
+def test_retries_stop_when_the_time_budget_is_spent(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    clock = iter([0.0, 1000.0, 1000.0, 1000.0])
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _delay: None)
+    plan = _success_create_responses()
+    urlopen, _ = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [TimeoutError("timed out"), *plan[plan.phases["tailnet_create"] :]],
+    )
+
+    with pytest.raises(lifecycle.ApiRequestError):
+        lifecycle.create(
+            display_name="Vonk Forge CI 123 attempt 1",
+            github_env=tmp_path / "github.env",
+            state=tmp_path / "state.json",
+        )
+
+    assert len(_post_creates(urlopen)) == 1

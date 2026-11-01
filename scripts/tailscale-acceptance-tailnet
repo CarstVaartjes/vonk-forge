@@ -52,6 +52,10 @@ MAX_CLEANUP_CHILDREN = 20
 # status (transport failure or timeout) is always retryable too.
 TRANSIENT_STATUSES = frozenset({408, 409, 425, 429, *range(500, 600)})
 MAX_ATTEMPTS = 4
+# The create step runs under `timeout-minutes: 5`.  Retries stop once this much
+# time has been spent, so the retrying calls end within the budget plus one
+# in-flight 30 s request, well inside the step limit.
+RETRY_BUDGET_SECONDS = 90.0
 
 
 class LifecycleError(RuntimeError):
@@ -366,6 +370,45 @@ def _backoff(attempt: int) -> None:
     time.sleep(min(2**attempt, 4))
 
 
+class RetryBudget:
+    """Wall-clock allowance shared by every retrying call of one `create`."""
+
+    def __init__(self) -> None:
+        self._started = time.monotonic()
+
+    def allows(self, delay: float) -> bool:
+        return time.monotonic() - self._started + delay < RETRY_BUDGET_SECONDS
+
+
+def _with_retries(
+    budget: RetryBudget,
+    operation: Callable[[], Any],
+    *,
+    before_retry: Callable[[], None] | None = None,
+) -> Any:
+    """Run an idempotent API operation, retrying transient failures.
+
+    One owner for retry classification, backoff and the shared time budget.
+    `before_retry` runs after the backoff and before the next attempt; the
+    non-idempotent create uses it to observe state first.
+    """
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            return operation()
+        except ApiRequestError as error:
+            delay = min(2**attempt, 4)
+            if (
+                not _retryable(error)
+                or attempt == MAX_ATTEMPTS - 1
+                or not budget.allows(delay)
+            ):
+                raise
+        _backoff(attempt)
+        if before_retry is not None:
+            before_retry()
+    raise AssertionError("unreachable")
+
+
 def _list_organization_tailnets(access_token: str) -> list[dict[str, Any]]:
     """Read the organization tailnet list. One owner for this request shape.
 
@@ -524,52 +567,59 @@ def cleanup(*, child_id: str | None = None) -> None:
 
 
 def _create_child_tailnet(
-    access_token: str, display_name: str, factory_id: str, factory_secret: str
+    access_token: str, display_name: str, budget: RetryBudget
 ) -> ApiResponse:
-    """Create the child, surviving a create whose outcome the caller never saw.
+    """Create the child, surviving a timeout when nothing was created.
 
     The create POST is not idempotent: a timeout or 5xx may mean the child
-    exists server-side, and its deletion credentials went to a response we never
-    read.  Before every retry the organization listing is therefore observed for
-    this run's exact display name (unique per run and attempt).  A child found
-    there cannot be deleted with credentials we do not hold, so it is deleted
-    through the factory-minted tailnet-targeted token, the same route `cleanup`
-    uses, and only then is the create repeated.  That never leaves two children
-    and never trips the `alreadyExists` refusal on a retry.
+    exists server-side while its deletion credentials went to a response we
+    never read.  Before every retry the organization listing is observed for
+    this run's exact display name (unique per run and attempt).  If the child
+    is there it is left alone and the run stops: creation never deletes, the
+    factory credential cannot delete it (no `all` scope), and a second POST
+    would risk `alreadyExists` or a second child.  Stale cleanup owns it.
     """
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            return _request(
-                "POST",
-                "/organizations/-/tailnets",
-                access_token=access_token,
-                json_body={"displayName": display_name},
-            )
-        except ApiRequestError as error:
-            if not _retryable(error) or attempt == MAX_ATTEMPTS - 1:
-                raise
-        _backoff(attempt)
+
+    def create_once() -> ApiResponse:
+        return _request(
+            "POST",
+            "/organizations/-/tailnets",
+            access_token=access_token,
+            json_body={"displayName": display_name},
+        )
+
+    def refuse_if_created() -> None:
         for tailnet in _list_organization_tailnets(access_token):
-            orphan = tailnet.get("id")
-            if tailnet.get("displayName") != display_name:
-                continue
-            if not isinstance(orphan, str) or SAFE_ID.fullmatch(orphan) is None:
-                raise LifecycleError("Tailscale returned an unsafe CI child identity")
-            _delete_tailnet(
-                orphan,
-                _child_token_factory(factory_id, factory_secret, tailnet_id=orphan),
-            )
-            print(f"Deleted orphaned child {orphan} of an unconfirmed create")
-    raise AssertionError("unreachable")
+            if tailnet.get("displayName") == display_name:
+                raise LifecycleError(
+                    f"Tailscale created the child tailnet {display_name!r} but "
+                    "the response was lost; it is left for stale cleanup"
+                )
+
+    return _with_retries(budget, create_once, before_retry=refuse_if_created)
 
 
 def _configure_tailnet(
-    tailnet_id: str, client_id: str, client_secret: str
+    tailnet_id: str, client_id: str, client_secret: str, budget: RetryBudget
 ) -> tuple[str, str]:
-    token = _oauth_token(client_id, client_secret, scope="all")
+    """Configure the child.  Every call retries transient failures.
+
+    Token mints, PUT and GET are idempotent and retry as they are.  The policy
+    POST is re-observed first (an applied-but-unconfirmed write is detected by
+    reading it back).  The gateway-client POST is not idempotent, but a retry can
+    at worst add an unused client to this disposable child, which is deleted
+    with it, so it retries plainly.
+    """
+
+    def call(method: str, path: str, **kwargs: Any) -> ApiResponse:
+        return _with_retries(budget, lambda: _request(method, path, **kwargs))
+
+    token = _with_retries(
+        budget, lambda: _oauth_token(client_id, client_secret, scope="all")
+    )
     quoted_tailnet = urllib.parse.quote(tailnet_id, safe="")
     for service, display_name in SERVICES:
-        response = _request(
+        response = call(
             "PUT",
             f"/tailnet/{quoted_tailnet}/services/"
             f"{urllib.parse.quote(service, safe='')}",
@@ -585,7 +635,7 @@ def _configure_tailnet(
             "ports"
         ) != ["tcp:443"]:
             raise LifecycleError(f"Tailscale did not create exact Service {service}")
-    listed_services = _request(
+    listed_services = call(
         "GET",
         f"/tailnet/{quoted_tailnet}/services",
         access_token=token,
@@ -618,33 +668,39 @@ def _configure_tailnet(
         ],
         "tagOwners": {"tag:vonk-gateway": ["autogroup:admin"]},
     }
-    policy = _request(
-        "GET",
-        f"/tailnet/{quoted_tailnet}/acl",
-        access_token=token,
-    )
-    if (
-        not isinstance(policy.etag, str)
-        or not policy.etag
-        or len(policy.etag) > 256
-        or any(character in policy.etag for character in "\0\r\n")
-    ):
-        raise LifecycleError("Tailscale did not return the child policy ETag")
-    _request(
-        "POST",
-        f"/tailnet/{quoted_tailnet}/acl",
-        access_token=token,
-        headers={"If-Match": policy.etag},
-        json_body=child_policy,
-    )
-    readback_policy = _request(
+    acl_path = f"/tailnet/{quoted_tailnet}/acl"
+
+    def apply_policy() -> None:
+        # Retried as one unit: each attempt re-reads the policy, so a write that
+        # was applied but not confirmed is seen and not repeated against a
+        # changed ETag.
+        policy = _request("GET", acl_path, access_token=token)
+        if policy.document == child_policy:
+            return
+        if (
+            not isinstance(policy.etag, str)
+            or not policy.etag
+            or len(policy.etag) > 256
+            or any(character in policy.etag for character in "\0\r\n")
+        ):
+            raise LifecycleError("Tailscale did not return the child policy ETag")
+        _request(
+            "POST",
+            acl_path,
+            access_token=token,
+            headers={"If-Match": policy.etag},
+            json_body=child_policy,
+        )
+
+    _with_retries(budget, apply_policy)
+    readback_policy = call(
         "GET",
         f"/tailnet/{quoted_tailnet}/acl",
         access_token=token,
     )
     if readback_policy.document != child_policy:
         raise LifecycleError("Tailscale child policy readback was not exact")
-    gateway_client = _request(
+    gateway_client = call(
         "POST",
         f"/tailnet/{quoted_tailnet}/keys",
         access_token=token,
@@ -669,7 +725,7 @@ def _configure_tailnet(
     ):
         raise LifecycleError("Tailscale returned an invalid gateway client")
     print(f"::add-mask::{gateway_secret}")
-    metadata = _request(
+    metadata = call(
         "GET",
         f"/tailnet/{quoted_tailnet}/keys/{urllib.parse.quote(gateway_id, safe='')}",
         access_token=token,
@@ -713,9 +769,12 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
     factory_secret = _required_environment(
         "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET"
     )
-    token = _oauth_token(factory_id, factory_secret, scope="tailnets")
+    budget = RetryBudget()
+    token = _with_retries(
+        budget, lambda: _oauth_token(factory_id, factory_secret, scope="tailnets")
+    )
     _assert_no_stale_children(token)
-    response = _create_child_tailnet(token, display_name, factory_id, factory_secret)
+    response = _create_child_tailnet(token, display_name, budget)
     document = response.document
     tailnet_id = document.get("id")
     dns_name = document.get("dnsName")
@@ -756,7 +815,7 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
         ):
             raise LifecycleError("Tailscale returned an invalid new-tailnet identity")
         gateway_client_id, gateway_client_secret = _configure_tailnet(
-            tailnet_id, client_id, client_secret
+            tailnet_id, client_id, client_secret, budget
         )
         _append_github_environment(
             github_env,
