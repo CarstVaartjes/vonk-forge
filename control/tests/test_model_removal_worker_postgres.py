@@ -399,10 +399,11 @@ def _many_object_removal(
     sessions: sessionmaker[Session],
     tmp_path: Path,
     count: int,
+    slug: str = "many-objects",
 ) -> tuple[CacheOperationView, list[str], list[Path]]:
-    base = _one_model(tmp_path, "many-objects", b"x")
+    base = _one_model(tmp_path, slug, b"x")
     document = base.model_dump(mode="json")
-    blobs = [f"object-{index}".encode() for index in range(count)]
+    blobs = [f"{slug}-{index}".encode() for index in range(count)]
     document["files"] = [
         {
             "id": f"w{index}",
@@ -416,7 +417,7 @@ def _many_object_removal(
     model = type(base).model_validate(document)
     selector = _register_model(sessions, model)
     model_digest = document_sha256(model.model_dump(mode="json"))
-    source_root = tmp_path / "source-many"
+    source_root = tmp_path / f"source-{slug}"
     source_root.mkdir()
     artifacts = [
         _artifact(
@@ -441,6 +442,8 @@ def _many_object_removal(
     return _accept_removal(service, selector, model_digest), digests, paths
 
 
+# Seeding 90 downloaded objects dominates the time.
+@pytest.mark.slow(30)
 def test_removal_deletes_all_exclusive_objects_in_one_batch(
     postgres_engine, tmp_path: Path
 ) -> None:
@@ -453,6 +456,9 @@ def test_removal_deletes_all_exclusive_objects_in_one_batch(
     assert not any(path.exists() for path in paths)
     payload = _removal_payload(sessions, accepted.id)
     assert payload.object_index == len(payload.delete_objects) == 90
+    with sessions() as session:
+        stored = session.get(ModelCacheOperation, accepted.id)
+        assert stored is not None and "object_pending_bytes" not in stored.payload
     service.close()
 
 
@@ -541,6 +547,18 @@ def test_batch_budget_is_shared_and_each_removal_makes_progress(
     assert first == 1 and second == 2
     assert sum(path.exists() for path in paths) == 4
 
+    # Two removals in one worker step share the spent budget: each still
+    # deletes exactly one object.
+    other, _other_digests, other_paths = _many_object_removal(
+        service, sessions, tmp_path, 6, slug="other-objects"
+    )
+    before = _removal_payload(sessions, accepted.id).object_index
+    service.advance_removals(limit=2)
+    assert _removal_payload(sessions, accepted.id).object_index == before + 1
+    assert _removal_payload(sessions, other.id).object_index == 1
+    assert sum(path.exists() for path in other_paths) == 5
+
     service._remove_model_object_files = original
     assert _settle_removal(service, accepted).state == "succeeded"
+    assert _settle_removal(service, other).state == "succeeded"
     service.close()
