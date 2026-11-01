@@ -2315,26 +2315,14 @@ def test_unused_set_bytes_exclude_a_file_another_cached_set_keeps(
 
 
 def test_model_items_under_pressure_read_no_model_object(
-    world: Catalog, cached, monkeypatch: pytest.MonkeyPatch
+    world: Catalog, cached, no_model_object_io
 ) -> None:
     """Catches the sweep measuring each set on the NAS (receipt, open, fstat, lstat)
     inside its database transaction: stored facts answer, storage is not touched."""
 
     service, _set_digest = cached
     _head_recipe_naming(world, "b" * 64)
-    objects = service._root / "objects"
-    real_lstat = Path.lstat
-
-    def refuse_object(*_args, **_kwargs):
-        raise AssertionError("model object touched while collecting")
-
-    def guarded_lstat(path: Path, *args, **kwargs):
-        if objects in path.parents:
-            raise AssertionError(f"lstat of {path}")
-        return real_lstat(path, *args, **kwargs)
-
-    monkeypatch.setattr(ModelCacheService, "_stored_object", refuse_object)
-    monkeypatch.setattr(Path, "lstat", guarded_lstat)
+    no_model_object_io(service)
 
     result = _models(world, service, disk_usage=lambda _p: (TOTAL, 0)).collect()
 
@@ -2347,18 +2335,21 @@ def test_model_items_under_pressure_read_no_model_object(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_unused_set_bytes_unknown_when_the_cached_manifest_is_unreadable(
-    world: Catalog, cached
+@pytest.mark.parametrize("pins_intact", [True, False])
+def test_unused_set_bytes_unknown_when_the_cached_manifest_is_damaged(
+    world: Catalog, cached, pins_intact: bool
 ) -> None:
-    """Catches a guessed size for a set whose manifest nothing can re-derive."""
+    """Catches a guessed size for a set whose stored manifest is damaged, with
+    the catalog pins still able to rebuild it or not."""
 
     service, set_digest = cached
     with world.sessions.begin() as session:
         row = session.get(ModelCacheSet, set_digest)
         assert row is not None
         row.manifest = {"schema_version": 2, "artifacts": "damaged"}
-        row.model_content_sha256 = None
-        row.recipe_revision_sha256 = None
+        if not pins_intact:
+            row.model_content_sha256 = None
+            row.recipe_revision_sha256 = None
 
     assert service.unused_set_bytes(set_digest) is None
 

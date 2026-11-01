@@ -12,7 +12,12 @@ from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
 
 from .. import model_cache_states
 from ..admission_locking import ConstraintReplay, admitting
-from ..artifact_lifecycle import ArtifactIdentity, ArtifactKind, ArtifactLifecycleError
+from ..artifact_lifecycle import (
+    ArtifactIdentity,
+    ArtifactKind,
+    ArtifactLifecycleError,
+    ArtifactReferenceUnsettled,
+)
 from ..artifact_reference_scan import model_set_objects, model_set_reference_findings
 from ..cache_removal_review import (
     CacheRemovalBlocker,
@@ -228,14 +233,18 @@ class RemovalReviewMixin:
         with cache._session() as session:
             row = session.get(ModelCacheSet, set_digest)
             if row is not None and row.state == ModelCacheSetState.CACHED:
+                try:
+                    deleted = set(
+                        cache._model_removal_scope_for_sets(
+                            session, (set_digest,)
+                        ).delete_objects
+                    )
+                except ArtifactReferenceUnsettled:
+                    return None
+                # The scope just validated the stored manifest, so this reads it.
                 manifest = cache._stored_manifest(row)
                 if manifest is None:
                     return None
-                deleted = set(
-                    cache._model_removal_scope_for_sets(
-                        session, (set_digest,)
-                    ).delete_objects
-                )
                 return sum(
                     spec.expected_bytes
                     for digest, spec in _unique_artifacts(manifest.artifacts).items()

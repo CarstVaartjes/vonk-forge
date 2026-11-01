@@ -497,3 +497,34 @@ def shared_metadata_column_types_unchanged() -> Iterator[None]:
     yield
     changed = metadata_type_snapshot.drift(Base.metadata, before)
     assert not changed, f"test retyped shared metadata columns: {changed}"
+
+
+@pytest.fixture
+def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
+    """Fail the test when code touches a model-cache object on storage.
+
+    Worker entry points that must answer from stored facts opt in by running
+    under this fixture; ``cache`` is the ``ModelCacheService`` whose objects
+    directory is guarded.
+    """
+    from pathlib import Path
+
+    from vonk_control.model_cache import ModelCacheService
+
+    real_lstat = Path.lstat
+
+    def guard(cache: ModelCacheService) -> None:
+        objects = cache._root / "objects"
+
+        def refuse_object(*_args, **_kwargs):
+            raise AssertionError("model object touched on storage")
+
+        def guarded_lstat(path: Path, *args, **kwargs):
+            if objects in path.parents:
+                raise AssertionError(f"lstat of model object {path}")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(ModelCacheService, "_stored_object", refuse_object)
+        monkeypatch.setattr(Path, "lstat", guarded_lstat)
+
+    return guard
