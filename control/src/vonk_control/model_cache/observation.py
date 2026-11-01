@@ -230,14 +230,19 @@ class StorageObserver:
             # A settled set is re-observed only when a request reads it after
             # it goes stale; discovery covers new, errored and repair sets.
             with self._cache._session() as session:
-                digests = session.scalars(
-                    select(ModelCacheSet.artifact_set_sha256)
-                ).all()
+                states = dict(
+                    session.execute(
+                        select(ModelCacheSet.artifact_set_sha256, ModelCacheSet.state)
+                    ).all()
+                )
+            # A row that is not cached is projected from storage again, even
+            # when its snapshot is settled.
             with self._lock:
                 unknown = {
                     digest
-                    for digest in digests
-                    if not _settled(self._snapshots.get(digest))
+                    for digest, state in states.items()
+                    if state != ModelCacheSetState.CACHED
+                    or not _settled(self._snapshots.get(digest))
                 }
             with self._cache._session() as session:
                 manifests = [
@@ -250,7 +255,10 @@ class StorageObserver:
                     if (manifest := self._cache._stored_manifest(row)) is not None
                 ]
             for manifest in manifests:
-                self.schedule(manifest, refresh=False)
+                self.schedule(
+                    manifest,
+                    refresh=states[manifest.digest] != ModelCacheSetState.CACHED,
+                )
         except Exception:  # noqa: BLE001 -- next worker tick retries discovery
             _LOGGER.exception("cache observation discovery failed")
 

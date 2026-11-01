@@ -654,7 +654,21 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
         api.close()
 
 
-def _discover_and_join(cache, manifest):
+@pytest.fixture
+def object_touches(monkeypatch):
+    """Count every model-object availability check, whichever service makes it."""
+    touches: list[str] = []
+    real = ModelCacheService._stored_object
+
+    def counted(self, digest, expected_bytes):
+        touches.append(digest)
+        return real(self, digest, expected_bytes)
+
+    monkeypatch.setattr(ModelCacheService, "_stored_object", counted)
+    return touches
+
+
+def _discover_and_join(cache):
     observer = cache._storage_observer
     observer.tick()
     assert observer._discovery is not None
@@ -663,23 +677,31 @@ def _discover_and_join(cache, manifest):
         task.result(timeout=30)
 
 
-def test_discovery_does_not_reobserve_a_cached_set(observed_cache, no_model_object_io):
+def _set_row_state(sessions, manifest, state):
+    with sessions() as session, session.begin():
+        session.get(ModelCacheSet, manifest.digest).state = state
+
+
+def _row_state(sessions, manifest):
+    with sessions() as session:
+        return session.get(ModelCacheSet, manifest.digest).state
+
+
+def test_discovery_does_not_reobserve_a_cached_set(observed_cache, object_touches):
     """Catches the 30 s timer re-reading every object of every cached set."""
     cache, _sessions, manifest, now = observed_cache
     cache._storage_observer.schedule(manifest)
     _finish(cache, manifest)
     before = cache._storage_observer._snapshots[manifest.digest]
+    object_touches.clear()
     now[0] += timedelta(seconds=31)
-    no_model_object_io(cache)
-    _discover_and_join(cache, manifest)
-    # The observer records a refused object touch as ``detail``.
-    after = cache._storage_observer._snapshots[manifest.digest]
-    assert after.detail is None
-    assert after.started_at == before.started_at
+    _discover_and_join(cache)
+    assert object_touches == []
+    assert cache._storage_observer._snapshots[manifest.digest] == before
 
 
 def test_restart_publishes_completed_checkpoint_without_object_reads(
-    observed_cache, no_model_object_io
+    observed_cache, object_touches
 ):
     """Catches a restart re-reading objects of sets whose checkpoint is complete."""
     cache, sessions, manifest, now = observed_cache
@@ -694,33 +716,85 @@ def test_restart_publishes_completed_checkpoint_without_object_reads(
         clock=lambda: now[0],
     )
     try:
+        object_touches.clear()
         now[0] += timedelta(seconds=31)
-        no_model_object_io(restarted)
-        _discover_and_join(restarted, manifest)
-        value = restarted._storage_observer._snapshots[manifest.digest]
-        assert value.detail is None
-        assert value.started_at == before.started_at
-        assert value.completed_at == before.completed_at
-        assert all(entry.available for entry in value.objects.values())
-        assert cache._storage_observer.read(manifest) is not None
+        _discover_and_join(restarted)
+        assert object_touches == []
+        assert restarted._storage_observer.read(manifest) == before
     finally:
         restarted.close()
 
 
-def test_a_stale_read_refreshes_a_cached_set(observed_cache):
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (ModelCacheSetState.NEEDS_REPAIR, ModelCacheSetState.CACHED),
+        (ModelCacheSetState.INCOMPLETE, ModelCacheSetState.CACHED),
+    ],
+)
+def test_discovery_corrects_a_row_that_disagrees_with_a_settled_snapshot(
+    observed_cache, stored, expected
+):
+    """Catches a settled snapshot hiding a SQL row another path flipped."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    _set_row_state(sessions, manifest, stored)
+    now[0] += timedelta(seconds=31)
+    _discover_and_join(cache)
+    assert _row_state(sessions, manifest) == expected
+
+
+def test_discovery_marks_a_cached_row_needing_repair_after_flip(observed_cache):
+    """Catches a row flipped to needs-repair staying so while objects are fine."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    _set_row_state(sessions, manifest, ModelCacheSetState.NEEDS_REPAIR)
+    cache._object_path(manifest.artifacts[0].sha256).unlink()
+    now[0] += timedelta(seconds=31)
+    _discover_and_join(cache)
+    assert _row_state(sessions, manifest) == ModelCacheSetState.NEEDS_REPAIR
+
+
+def test_a_stale_read_refreshes_a_cached_set(observed_cache, object_touches):
     """Catches a stale request failing to re-check a cached set's objects."""
     cache, _sessions, manifest, now = observed_cache
     cache._storage_observer.schedule(manifest)
     _finish(cache, manifest)
+    object_touches.clear()
     now[0] += timedelta(seconds=31)
-    calls = []
-    real = cache._stored_object
+    cache._storage_observer.read(manifest)
+    _finish(cache, manifest)
+    assert len(object_touches) == len({spec.sha256 for spec in manifest.artifacts})
 
-    def record(digest, expected):
-        calls.append(digest)
-        return real(digest, expected)
 
-    with patch.object(cache, "_stored_object", record):
-        cache._storage_observer.read(manifest)
-        _finish(cache, manifest)
-    assert len(calls) == len({spec.sha256 for spec in manifest.artifacts})
+def test_a_lost_object_is_healed_by_reads_and_a_download_is_admitted(observed_cache):
+    """Catches a vanished object of a cached set never reaching a request.
+
+    The first stale read returns the old snapshot and schedules the refresh; the
+    next read sees the lost object, the row needs repair and a download is
+    admitted.
+    """
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    lost = manifest.artifacts[0]
+    cache._object_path(lost.sha256).unlink()
+    now[0] += timedelta(seconds=31)
+    cache._storage_observer.read(manifest)  # old snapshot; refresh scheduled
+    _finish(cache, manifest)
+    value = cache._storage_observer.read(manifest)
+    assert not value.objects[lost.sha256].available
+    assert _row_state(sessions, manifest) == ModelCacheSetState.NEEDS_REPAIR
+    preview = profile_read(
+        lambda: cache.download_preview(artifact_set_sha256=manifest.digest)
+    )()
+    assert preview["new_bytes"] == lost.expected_bytes
+    admitted = cache.start_download(
+        actor="test",
+        request_key=str(uuid.uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        artifact_set_sha256=manifest.digest,
+    )
+    assert admitted.state is not None
