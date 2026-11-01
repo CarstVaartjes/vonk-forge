@@ -713,14 +713,13 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
     assert _live_aliases(root) == {"qwen"}
 
 
-def test_authenticated_observation_producer_repairs_between_request_attempts(
+def test_authenticated_observation_producer_repairs_between_passes(
     tmp_path, monkeypatch
 ):
     from datetime import timedelta
 
     from sqlalchemy import select
     from vonk_control.models import AgentCertificate, RunNode
-    from vonk_control.recipe_routes import service as service_module
 
     from .test_agent_api import agent_headers, make_agent_system
 
@@ -747,35 +746,31 @@ def test_authenticated_observation_producer_repairs_between_request_attempts(
             )
         )
 
-    attempts = []
+    from vonk_control.recipe_routes import RecipeRouteNotReady
 
-    def observations():
-        attempts.append(0)
-        yield 0
-        # The real observation writer must be able to commit here: the failed
-        # request observation has rolled back and released its owner/rank locks.
-        response = client.post(
-            "/agent/recipe-runs/observations",
-            headers=agent_headers(node_id, "route-serial"),
-            json={
-                "observed_at": NOW.isoformat(),
-                "runs": [
-                    {
-                        "run_id": run_id,
-                        "run_generation": 1,
-                        "process_running": True,
-                        "endpoint_ready": True,
-                    }
-                ],
-            },
-        )
-        assert response.status_code == 204, response.text
-        attempts.append(1)
-        yield 1
-
-    monkeypatch.setattr(service_module, "bounded_attempts", observations)
+    # The first pass finds no exact observation and ends: its request
+    # observation has rolled back and released the owner/rank locks.
+    with pytest.raises(RecipeRouteNotReady):
+        base.publish_run(run_id)
+    # The real observation writer must be able to commit between passes.
+    response = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(node_id, "route-serial"),
+        json={
+            "observed_at": NOW.isoformat(),
+            "runs": [
+                {
+                    "run_id": run_id,
+                    "run_generation": 1,
+                    "process_running": True,
+                    "endpoint_ready": True,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 204, response.text
+    # The next pass (after the worker's durable backoff) publishes.
     base.publish_run(run_id)
-    assert attempts[:2] == [0, 1]
     assert len(applied) == 1
     with services.sessions() as session:
         assert _recipe_run(session, run_id).route_state == "published"

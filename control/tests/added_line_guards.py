@@ -1579,7 +1579,8 @@ def check_source(
                 (
                     "in-request retry helper in a background owner (resolve once "
                     "and re-observe on its schedule; residue: core.py "
-                    "_stored_manifest.rebuild)"
+                    "_stored_manifest.rebuild, recipe_routes service "
+                    "decide_publication/_execute and withdrawal.py's hand-rolled loop)"
                 ),
             )
             for line in background_retry_calls(source)
@@ -1786,7 +1787,10 @@ def check_source(
 BACKGROUND_OWNERS = frozenset(
     f"control/src/vonk_control/model_cache/{name}.py"
     for name in ("revisions", "inventory", "observation", "storage", "repair")
-)
+) | {
+    f"control/src/vonk_control/recipe_routes/{name}.py"
+    for name in ("withdrawal", "service")
+}
 BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
 
 
