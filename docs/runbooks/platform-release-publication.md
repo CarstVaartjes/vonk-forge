@@ -123,7 +123,10 @@ process-bound heartbeat; only completed loops within the last 30 seconds appear
 as fresh observations. A restarted process must complete a loop before it is
 observable. Missing, damaged, or old package metadata remains nullable. No fresh
 worker yields `worker-observation-unavailable`; fresh workers with unknown
-package provenance yield `worker-provenance-unavailable`. Different fresh worker
+package provenance yield `worker-provenance-unavailable`. A worker whose current step has run for more than 10 seconds
+publishes that step, so a worker whose readiness heartbeat is stale while a
+step started within the last 180 seconds is still listed, with the step name
+and start time, under `worker-step-slow`. Different fresh worker
 sources remain separate observations, rather than one guessed Controller version.
 
 The existing packaged build-identity record also binds the CLI's shipped Control

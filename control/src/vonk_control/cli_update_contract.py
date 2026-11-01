@@ -83,7 +83,13 @@ def summarize_cli_update_contract(
         ]
         | None
     ) = None
-    if not workers or observation.worker_issue == "worker-observation-unavailable":
+    # The shipped CLI contract is a stable resource: a slow worker step is
+    # named in the platform view, but the update contract still reports the
+    # worker observation as unavailable while the heartbeat is stale.
+    if not workers or observation.worker_issue in (
+        "worker-observation-unavailable",
+        "worker-step-slow",
+    ):
         issue = "worker-observation-unavailable"
     elif observation.worker_issue is not None or None in sources or None in contracts:
         issue = "worker-provenance-unavailable"

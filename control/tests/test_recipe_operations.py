@@ -118,6 +118,7 @@ from vonk_control.recipe_operations import (
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
+    RecipeRecoveryDeadlineError,
     RecipeRouteService,
 )
 from vonk_control.route_runtime import (
@@ -5238,6 +5239,11 @@ def test_distributed_recovery_deadline_ends_attempt_and_retries_publication(
     mark_current_exact_observations(sessions, started.owner_id, routes._clock())
     publications_before = len(publisher.aliases)
 
+    # The pass that meets the expired deadline ends the attempt; the next
+    # pass (the worker's durable retry) publishes.
+    with pytest.raises(RecipeRecoveryDeadlineError):
+        routes.publish_run(started.owner_id)
+    assert len(publisher.aliases) == publications_before
     generation = routes.publish_run(started.owner_id)
 
     assert len(publisher.aliases) == publications_before + 1

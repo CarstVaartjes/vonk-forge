@@ -25,7 +25,6 @@ PASS_BUDGET_MODULES = (
     "vonk_control.terminal_history_collection",
     "vonk_control.catalog_revision_collection",
     "vonk_control.model_cache.partials_collection",
-    "vonk_control.unused_storage_collection.service",
     "vonk_control.unused_storage_collection.pressure",
     "vonk_control.fleet_profile_adapter_conversion",
     "vonk_control.recipe_image_availability.removal_acceptance",
