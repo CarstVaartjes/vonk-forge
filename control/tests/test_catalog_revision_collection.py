@@ -16,8 +16,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 from types import SimpleNamespace
+from typing import get_args
 
 import pytest
+from pydantic import BaseModel
 from sqlalchemy import create_engine, delete, event, func, insert, select, text, update
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -63,6 +65,7 @@ from vonk_control.source_bundles import (
     generate_source_bundle,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.model import ModelReference
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 OLD = NOW - GRACE - timedelta(hours=2)
@@ -1097,3 +1100,114 @@ def test_a_model_revision_a_kept_model_depends_on_is_kept(catalog: Catalog) -> N
     catalog.collector().collect()
     assert not catalog.exists(bound)
     assert not catalog.exists(by_kept)
+
+
+def test_a_dependent_imported_after_the_inventory_is_kept_by_the_fence_recheck(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches the fence trusting the pass inventory for a later import.
+
+    Wrong implementation caught: the dependency set is taken once before the
+    candidates and never rechecked, so a Model that declares the candidate as
+    a dependency, imported between the inventory and the candidate's
+    transaction, still lets the candidate be deleted.
+    """
+
+    encoder = catalog.revision("encoder", 1, kind="model")
+    catalog.revision("encoder", 2, kind="model", head="active")
+    real_fence = catalog_revision_collection._fence_references
+    imported: list[str] = []
+
+    def import_before_fence(session: Session, deadline: float) -> None:
+        if not imported:
+            imported.append(
+                catalog.revision(
+                    "vision",
+                    1,
+                    kind="model",
+                    created=NOW,
+                    head="active",
+                    document=_model_depending_on(_digest("encoder/1")),
+                )
+            )
+        real_fence(session, deadline)
+
+    monkeypatch.setattr(
+        catalog_revision_collection, "_fence_references", import_before_fence
+    )
+    result = catalog.collector().collect()
+
+    assert imported
+    assert catalog.exists(encoder)
+    assert result.kept == {"model dependency": 1}
+
+
+def test_the_dependency_inventory_parses_each_model_once_and_the_fence_none(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches rescanning every Model document per candidate under the fence."""
+
+    total = 300
+    for index in range(total):
+        catalog.revision(f"model-{index}", 1, kind="model", head="active")
+    stale = [catalog.revision("stale", 1, kind="model")]
+    stale += [catalog.revision("other", 1, kind="model")]
+    catalog.revision("stale", 2, kind="model", head="active")
+    catalog.revision("other", 2, kind="model", head="active")
+    parsed: list[str] = []
+    real_read = catalog_revision_collection.cached_catalog_document
+
+    def counting_read(kind: str, digest: str, raw: object) -> object:
+        parsed.append(digest)
+        return real_read(kind, digest, raw)
+
+    monkeypatch.setattr(
+        catalog_revision_collection, "cached_catalog_document", counting_read
+    )
+    result = catalog.collector().collect()
+
+    assert result.revisions == len(stale)
+    assert len(parsed) == total + 4  # every Model revision, once, for the pass
+    assert len(set(parsed)) == len(parsed)
+
+
+def _model_reference_fields(
+    root: type[BaseModel], seen: set[type[BaseModel]] | None = None
+) -> set[str]:
+    """``Class.field`` of every ``ModelReference``-typed field reachable from root."""
+
+    seen = set() if seen is None else seen
+    found: set[str] = set()
+
+    def classes(annotation: object) -> list[type]:
+        if isinstance(annotation, type):
+            return [annotation]
+        return [inner for part in get_args(annotation) for inner in classes(part)]
+
+    for name, field in root.model_fields.items():
+        for inner in classes(field.annotation):
+            if inner is ModelReference:
+                found.add(f"{root.__name__}.{name}")
+            elif issubclass(inner, BaseModel) and inner not in seen:
+                seen.add(inner)
+                found |= _model_reference_fields(inner, seen)
+    return found
+
+
+def test_every_model_reference_field_has_a_collector_protector() -> None:
+    """A new field that names a Model fails here until the collector protects it.
+
+    Wrong implementation caught: a contract gains a ModelReference field and
+    the collector keeps deleting the revision it names, as happened with
+    ``ModelDefinition.dependencies``.
+    """
+
+    protectors = {
+        "RecipeModelSelection.model": catalog_revision_collection.pinned_by_heads,
+        "ModelDefinition.dependencies": catalog_revision_collection._model_dependencies,
+    }
+    fields = _model_reference_fields(ModelDefinition) | _model_reference_fields(
+        RecipeDefinition
+    )
+
+    assert fields == set(protectors)

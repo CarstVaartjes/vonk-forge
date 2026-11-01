@@ -242,17 +242,21 @@ class CatalogRevisionCollector:
                         if item.kind != RunSwitchReasonScopeName.MODEL
                         or item.content_digest not in cached
                     ]
-                # A Model another Model still declares as a dependency stays;
-                # it follows once nothing depending on it is left.
-                depended = _model_dependencies(session)
-                candidates = [
-                    item
-                    for item in candidates
-                    if item.kind != RunSwitchReasonScopeName.MODEL
-                    or item.content_digest not in depended
-                ]
         # The budget starts after the inventory so every pass reaches a candidate.
         deadline = time.monotonic() + self._budget_seconds
+        depended: frozenset[str] = frozenset()
+        if any(item.kind == RunSwitchReasonScopeName.MODEL for item in candidates):
+            # A Model another Model still declares as a dependency stays; it
+            # follows once nothing depending on it is left. Decided once per
+            # pass outside the fence; the fence only adds newer revisions.
+            with self._sessions() as session:
+                depended = _model_dependencies(session)
+            candidates = [
+                item
+                for item in candidates
+                if item.kind != RunSwitchReasonScopeName.MODEL
+                or item.content_digest not in depended
+            ]
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
@@ -267,7 +271,7 @@ class CatalogRevisionCollector:
                     ) | pinned_by_heads(
                         session, require_complete=True, deadline=deadline
                     )
-                    self._remove(session, candidate, live, cutoff, now)
+                    self._remove(session, candidate, live, cutoff, now, depended)
             except _Kept as reason:
                 kept[str(reason)] += 1
                 continue
@@ -360,8 +364,12 @@ class CatalogRevisionCollector:
         live: frozenset[str],
         cutoff: datetime,
         now: datetime,
+        depended: frozenset[str],
     ) -> None:
-        """Delete one revision and what only it owned, or raise ``_Kept``."""
+        """Delete one revision and what only it owned, or raise ``_Kept``.
+
+        ``depended`` is the pass's Model dependency inventory, taken at ``now``.
+        """
 
         head = session.execute(
             select(
@@ -402,7 +410,7 @@ class CatalogRevisionCollector:
             heads=tuple(value for value in (head or ()) if value is not None),
         )
         self._delete_dead_rows(session, revision, installations, runs, now)
-        self._require_no_remaining_reference(session, revision)
+        self._require_no_remaining_reference(session, revision, depended, now)
         session.execute(
             delete(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.id == revision.id
@@ -577,8 +585,18 @@ class CatalogRevisionCollector:
         return frozenset(found)
 
     @staticmethod
-    def _require_no_remaining_reference(session: Session, revision: _Candidate) -> None:
-        """The database's own foreign keys, checked first-hand before the delete."""
+    def _require_no_remaining_reference(
+        session: Session,
+        revision: _Candidate,
+        depended: frozenset[str],
+        inventory_started: datetime,
+    ) -> None:
+        """The database's own foreign keys, checked first-hand before the delete.
+
+        Revisions are immutable, so a dependent imported since the pass's
+        inventory is the only thing the inventory can have missed: only those
+        rows are read under the fence.
+        """
 
         if revision.kind == RunSwitchReasonScopeName.MODEL:
             for value in session.scalars(
@@ -595,7 +613,9 @@ class CatalogRevisionCollector:
                     for reference in manifest.verified_models
                 ):
                     raise _Kept(WaitOwnerKind.MODEL_CACHE.value)
-            if revision.content_digest in _model_dependencies(session):
+            if revision.content_digest in depended | _model_dependencies(
+                session, since=inventory_started
+            ):
                 raise _Kept("model dependency")
         for name, reference in (
             (
@@ -694,8 +714,12 @@ class CatalogRevisionCollector:
         return removed
 
 
-def _model_dependencies(session: Session) -> frozenset[str]:
+def _model_dependencies(
+    session: Session, since: datetime | None = None
+) -> frozenset[str]:
     """Model digests any readable Model revision declares as a dependency.
+
+    ``since`` limits the read to revisions created at or after it.
 
     A document this contract cannot read resolves no set (the model cache
     reports it missing), so it protects nothing and never holds the sweep.
@@ -704,7 +728,14 @@ def _model_dependencies(session: Session) -> frozenset[str]:
     found: set[str] = set()
     for digest, document in session.execute(
         select(CatalogDocumentRevision.content_digest, CatalogDocumentRevision.document)
-        .where(CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL)
+        .where(
+            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+            *(
+                (CatalogDocumentRevision.created_at >= since,)
+                if since is not None
+                else ()
+            ),
+        )
         .execution_options(yield_per=_SCAN_BATCH)
     ):
         try:
