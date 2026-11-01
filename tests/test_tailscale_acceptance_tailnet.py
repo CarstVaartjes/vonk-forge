@@ -2185,7 +2185,10 @@ def test_stale_delete_on_create_path_stops_at_the_retry_budget(
     _factory_environment(monkeypatch)
     _cleanup_environment(monkeypatch)
     now = _freeze_now(lifecycle, monkeypatch)
-    monkeypatch.setattr(lifecycle, "RETRY_BUDGET_SECONDS", 0.5)
+    # The budget is already spent when the delete first fails.
+    monkeypatch.setattr(
+        lifecycle.time, "monotonic", iter([0.0, 1000.0, 1000.0]).__next__
+    )
     sleeps: list[float] = []
     monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
     urlopen = _install_scoped_urlopen(
