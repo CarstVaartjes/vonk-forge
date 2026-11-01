@@ -1889,6 +1889,7 @@ def claim(cache, spec):
         "cache._transfer_need(manifest, transfer, replaces=False)",
         "cache._transfer_state_for_manifest(manifest, force=False)",
         "cache._running_transfers(session)",
+        "cache._verified_bytes(session, digest)",
         "os.scandir(root)",
         "path.lstat()",
     ],

@@ -65,6 +65,10 @@ class CheckpointsMixin:
                 for key, value in cache._progress_checkpoint_at.items()
                 if 0 <= (now - value).total_seconds() < 1
             }
+        # The receipts are read with neither the cache lock nor row locks held:
+        # every download thread checkpoints through that lock.
+        verified_bytes = cache._verified_bytes_before(set_digest)
+        with cache._lock:
             with cache._session(write=True) as session:
                 operation = session.get(
                     ModelCacheOperation, operation_id, with_for_update=True
@@ -164,7 +168,7 @@ class CheckpointsMixin:
                         if state == ModelFileState.PARTIAL
                         else "verifying"
                     )
-                    row.verified_bytes = cache._verified_bytes(session, set_digest)
+                    row.verified_bytes = verified_bytes
                     row.updated_at = now
             cache._progress_checkpoint_at[operation_id] = now
 
@@ -225,9 +229,23 @@ class CheckpointsMixin:
     def _verified_bytes(self, session: Session, set_digest: str) -> int:
         cache = cast("ModelCacheService", self)
         row = session.get(ModelCacheSet, set_digest)
-        if row is None:
-            return 0
-        manifest = cache._stored_manifest(row)
+        manifest = None if row is None else cache._stored_manifest(row)
+        return cache._stored_bytes_of(manifest)
+
+    def _verified_bytes_before(self, set_digest: str) -> int:
+        """:meth:`_verified_bytes` read before a locking transaction opens.
+
+        The manifest is read and the session closed before any file is read, so
+        a transaction that locks rows only stores the figure.
+        """
+        cache = cast("ModelCacheService", self)
+        with cache._session() as session:
+            row = session.get(ModelCacheSet, set_digest)
+            manifest = None if row is None else cache._stored_manifest(row)
+        return cache._stored_bytes_of(manifest)
+
+    def _stored_bytes_of(self, manifest: ArtifactSetManifest | None) -> int:
+        cache = cast("ModelCacheService", self)
         if manifest is None:
             return 0  # unknown: counted again once the manifest is re-derived
         total = 0
@@ -251,6 +269,7 @@ class CheckpointsMixin:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         cancellation_pending = False
+        verified_bytes = cache._verified_bytes_before(set_digest)
         with cache._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
@@ -264,7 +283,7 @@ class CheckpointsMixin:
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
                     row.state = "incomplete"
-                    row.verified_bytes = cache._verified_bytes(session, set_digest)
+                    row.verified_bytes = verified_bytes
                     row.updated_at = now
                     row.last_error = detail[:512]
                 if operation is not None:

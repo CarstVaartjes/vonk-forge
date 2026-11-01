@@ -20,6 +20,7 @@ IO_CALLS = frozenset(
         "_stored_object",
         "_stored_object_bytes",
         "_transfer_need",
+        "_verified_bytes",
         "_partial_bytes",
         "_running_transfers",
         "scandir",
