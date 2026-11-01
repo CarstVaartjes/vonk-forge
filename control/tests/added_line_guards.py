@@ -596,6 +596,23 @@ def _enum_member_lines(source: str) -> set[int]:
     return lines
 
 
+def _mentions_revision_number(node: ast.AST) -> bool:
+    return any(
+        isinstance(item, ast.Attribute) and item.attr == "revision_number"
+        for item in ast.walk(node)
+    )
+
+
+def _ranks_by_revision_number(node: ast.Call) -> bool:
+    """`X.revision_number.desc()`, or a `.over(...)` window ordered by it."""
+    func = node.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    if func.attr == "desc":
+        return _mentions_revision_number(func.value)
+    return func.attr == "over" and _mentions_revision_number(node)
+
+
 def _rehashes_stored_row(node: ast.Compare) -> bool:
     """``row.payload_digest`` compared with a fresh ``sha256`` of a document."""
     operands = (node.left, *node.comparators)
@@ -1362,6 +1379,28 @@ def check_source(
                         or (
                             isinstance(node.func, ast.Attribute)
                             and node.func.attr == "document_sha256"
+                        )
+                    )
+                )
+            # One definition of a recipe's current revision: the catalog head
+            # (catalog_queries.active_head_revision). Ranking by revision_number
+            # picks a reverted revision over the head. Only the revision-number
+            # allocators (the ingress files above) and model resolution may.
+            if (
+                path.startswith("control/src/vonk_control/")
+                and not ingress
+                and not path.startswith("control/src/vonk_control/model_cache/")
+            ):
+                hits.extend(
+                    (node.lineno, "recipe revision ranked by revision_number")
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.Call)
+                    and (
+                        _ranks_by_revision_number(node)
+                        or (
+                            isinstance(node.func, ast.Attribute)
+                            and node.func.attr == "row_number"
+                            and _mentions_revision_number(node)
                         )
                     )
                 )

@@ -11,12 +11,15 @@ from sqlalchemy.orm import sessionmaker
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.catalog_queries import active_head_revision
 from vonk_control.catalog_service import CatalogService
+from vonk_control.fleet_profile_contract import FleetProfileAssignmentInput
+from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_contract import RecipeDetailResponse
 from vonk_control.library_projection import LibraryProjection, _canonical_recipe
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevision
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_control.recipe_update_notice import newest_active_revisions
+from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
 from .test_catalog_entities import _model, _recipe
 
@@ -249,3 +252,53 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     )
     catalog.entities.resolve(successor.id, actor="test")
     _assert_current(catalog, first, successor)
+
+
+def test_a_reverted_recipe_is_current_everywhere_by_its_head(catalog):
+    """Import A, then B, then A again: B stays active with the higher number, but
+    profile load, run planning, the update notice, Library and sync read A."""
+    model = _model()
+
+    def _import(document):
+        return catalog.import_recipe_library(
+            "test",
+            library_commit="a" * 40,
+            source_path="recipe.json",
+            document=document,
+            expected_content_sha256=document_sha256(document),
+            dependency_documents=[model],
+        )
+
+    a_document = _recipe(model)
+    a = _import(a_document)
+    b_document = copy.deepcopy(a_document)
+    _document_section(b_document, "metadata")["description"] = "Changed bytes"
+    b = _import(b_document)
+    assert b.id != a.id
+    reverted = _import(a_document)
+    assert reverted.id == a.id
+
+    with catalog._sessions() as session:
+        rows = {
+            row.id: row
+            for row in session.scalars(select(CatalogDocumentRevision)).all()
+            if row.kind == "recipe"
+        }
+        assert rows[b.id].state == "active"
+        assert rows[b.id].revision_number > rows[a.id].revision_number
+        selector = f"{rows[a.id].publisher}/{rows[a.id].slug}"
+        document_id = rows[a.id].document_id
+
+        assert FleetProfileService._recipe_identity(session, selector) == (
+            document_id,
+            a.id,
+        )
+        choice = FleetProfileAssignmentInput(
+            recipe_selector=selector, spark_ids=["spk_" + "0" * 32]
+        )
+        FleetProfileService._prefetch_recipe_documents(session, [choice])
+        prefetched = session.info["profile_recipe_documents"].documents[selector]
+        assert prefetched[1].id == a.id
+        assert newest_active_revisions(session, {document_id})[document_id].id == a.id
+
+    _assert_current(catalog, rows[a.id], rows[a.id])
