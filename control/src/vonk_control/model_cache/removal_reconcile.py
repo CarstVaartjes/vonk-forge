@@ -39,7 +39,7 @@ from ..models import ArtifactLifecycleGate, Job, ModelCacheOperation, ModelCache
 from ..operation_contract import AvailabilityOperationFailure
 from .artifacts import _is_digest
 from .catalog_helpers import _iso
-from .constants import _LOGGER, _REMOVAL_BATCH_SECONDS, _TRANSFER_CLAIM_SECONDS
+from .constants import _LOGGER, _TRANSFER_CLAIM_SECONDS, REMOVAL_BATCH_SECONDS
 from .errors import ModelCacheStorageError, _ArtifactWriterBusy
 from .lineage import lineage_contents, model_sets
 from .persistence import (
@@ -804,7 +804,7 @@ class RemovalReconcileMixin:
             )
         advanced = 0
         # One deadline for the whole worker step, shared by every removal.
-        deadline = time.monotonic() + _REMOVAL_BATCH_SECONDS
+        deadline = time.monotonic() + REMOVAL_BATCH_SECONDS
         for operation_id in operation_ids:
             if advanced >= limit:
                 break

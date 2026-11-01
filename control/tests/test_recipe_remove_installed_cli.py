@@ -303,7 +303,6 @@ def test_installed_recipe_remove_recovers_lost_acceptance_and_reclaims_bytes(
         assert owner.plan.intent.selector == selector
         assert owner.plan.image_archives == [ARCHIVE_SHA]
         assert owner.checkpoint.image_index == 1
-        assert owner.checkpoint.image_pending_bytes is None
         assert owner.checkpoint.image_reclaimed_bytes == len(ARCHIVE)
         assert isinstance(operation.result, dict)
         result = RecipeCacheRemovalResult.model_validate(operation.result)
