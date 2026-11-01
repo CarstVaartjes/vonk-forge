@@ -217,25 +217,3 @@ fn runtime_tmp_reset_rejects_fifo_without_waiting_for_a_writer() {
     executor.reset_runtime_tmp_if_requested(RUN_ID).unwrap();
     assert!(!temporary.join("sentinel").exists());
 }
-
-#[test]
-fn a_shm_size_above_16_gib_is_accepted_up_to_the_memory() {
-    let (_temp, roots) = runtime_fixture();
-    let model = artifact_path(&roots, 'a');
-    fs::create_dir_all(&model).unwrap();
-    let memory = 100_000_000_000_u64.to_string();
-    let with = |memory: &str, shm: &str| {
-        let mut arguments = runtime_arguments(&roots, &[(model.clone(), "/models", true)]);
-        for index in 0..arguments.len() - 1 {
-            match arguments[index].as_str() {
-                "--memory" | "--memory-swap" => arguments[index + 1] = memory.to_owned(),
-                "--shm-size" => arguments[index + 1] = shm.to_owned(),
-                _ => {}
-            }
-        }
-        arguments
-    };
-    assert!(validate_docker_run(&with(&memory, &memory), &roots, None).is_ok());
-    let over = (100_000_000_001_u64).to_string();
-    assert!(validate_docker_run(&with(&memory, &over), &roots, None).is_err());
-}

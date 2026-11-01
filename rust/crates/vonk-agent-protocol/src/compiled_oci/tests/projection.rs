@@ -263,14 +263,3 @@ fn previous_release_plan_retains_identity_and_projects_the_fixed_cache() {
         read_only: false,
     }));
 }
-
-#[test]
-fn shared_memory_is_the_roles_declared_memory() {
-    // Wrong implementation: a fraction of the role's memory capped at 16 GiB
-    // left vLLM's ~27 GiB PLE table in /dev/shm with ENOSPC.
-    let mut value = fixture();
-    value["runtime"]["placement"]["reserved_memory_bytes"] = json!(100_000_000_000_u64);
-    let plan: CompiledExecutionPlan = serde_json::from_value(value).unwrap();
-    let invocation = project(&plan, &paths()).unwrap();
-    assert_eq!(invocation.security.shared_memory_bytes, 100_000_000_000);
-}

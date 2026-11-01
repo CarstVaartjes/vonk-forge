@@ -141,14 +141,8 @@ pub fn project(
             _ => return Err(CompiledOciError::Invalid("unsupported network mode")),
         },
         memory_bytes: plan.runtime.placement.reserved_memory_bytes,
-        // The role's declared memory: the tmpfs is allocated lazily, so a
-        // workload that does not fill /dev/shm pays nothing, and one that
-        // maps a large table there (vLLM PLE) is not refused.
-        shared_memory_bytes: plan
-            .runtime
-            .placement
-            .reserved_memory_bytes
-            .max(64 * 1024 * 1024),
+        shared_memory_bytes: (plan.runtime.placement.reserved_memory_bytes / 8)
+            .clamp(64 * 1024 * 1024, 16 * 1024 * 1024 * 1024),
         pids_limit: PID_LIMIT,
         tmpfs: TMPFS_SPEC.to_owned(),
     };
