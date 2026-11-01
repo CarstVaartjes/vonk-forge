@@ -230,6 +230,7 @@ class CatalogRevisionCollector:
         cutoff = now - GRACE
         with self._sessions() as session:
             candidates = self._candidates(session, cutoff)
+            depended: frozenset[str] = frozenset()
             if any(item.kind == RunSwitchReasonScopeName.MODEL for item in candidates):
                 cached = self._cached_model_digests(session)
                 if cached is not None:
@@ -242,21 +243,18 @@ class CatalogRevisionCollector:
                         if item.kind != RunSwitchReasonScopeName.MODEL
                         or item.content_digest not in cached
                     ]
+                # A Model another Model still declares as a dependency stays; it
+                # follows once nothing depending on it is left. Decided once per
+                # pass in the inventory; the fence only adds newer revisions.
+                depended = _model_dependencies(session)
+                candidates = [
+                    item
+                    for item in candidates
+                    if item.kind != RunSwitchReasonScopeName.MODEL
+                    or item.content_digest not in depended
+                ]
         # The budget starts after the inventory so every pass reaches a candidate.
         deadline = time.monotonic() + self._budget_seconds
-        depended: frozenset[str] = frozenset()
-        if any(item.kind == RunSwitchReasonScopeName.MODEL for item in candidates):
-            # A Model another Model still declares as a dependency stays; it
-            # follows once nothing depending on it is left. Decided once per
-            # pass outside the fence; the fence only adds newer revisions.
-            with self._sessions() as session:
-                depended = _model_dependencies(session)
-            candidates = [
-                item
-                for item in candidates
-                if item.kind != RunSwitchReasonScopeName.MODEL
-                or item.content_digest not in depended
-            ]
         removed = 0
         kept: Counter[str] = Counter()
         for candidate in candidates:
@@ -368,7 +366,7 @@ class CatalogRevisionCollector:
     ) -> None:
         """Delete one revision and what only it owned, or raise ``_Kept``.
 
-        ``depended`` is the pass's Model dependency inventory, taken at ``now``.
+        ``depended`` is the pass's Model dependency inventory.
         """
 
         head = session.execute(
@@ -410,7 +408,7 @@ class CatalogRevisionCollector:
             heads=tuple(value for value in (head or ()) if value is not None),
         )
         self._delete_dead_rows(session, revision, installations, runs, now)
-        self._require_no_remaining_reference(session, revision, depended, now)
+        self._require_no_remaining_reference(session, revision, depended, cutoff)
         session.execute(
             delete(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.id == revision.id
@@ -589,13 +587,14 @@ class CatalogRevisionCollector:
         session: Session,
         revision: _Candidate,
         depended: frozenset[str],
-        inventory_started: datetime,
+        cutoff: datetime,
     ) -> None:
         """The database's own foreign keys, checked first-hand before the delete.
 
-        Revisions are immutable, so a dependent imported since the pass's
-        inventory is the only thing the inventory can have missed: only those
-        rows are read under the fence.
+        Revisions are immutable, so a dependent imported during the pass is the
+        only thing the inventory can have missed. An importer stamps
+        ``created_at`` before it commits, so the rows read under the fence are
+        those created since ``cutoff`` (the grace window), not since the pass.
         """
 
         if revision.kind == RunSwitchReasonScopeName.MODEL:
@@ -614,7 +613,7 @@ class CatalogRevisionCollector:
                 ):
                     raise _Kept(WaitOwnerKind.MODEL_CACHE.value)
             if revision.content_digest in depended | _model_dependencies(
-                session, since=inventory_started
+                session, since=cutoff
             ):
                 raise _Kept("model dependency")
         for name, reference in (

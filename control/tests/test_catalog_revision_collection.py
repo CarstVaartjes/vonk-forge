@@ -1125,7 +1125,8 @@ def test_a_dependent_imported_after_the_inventory_is_kept_by_the_fence_recheck(
                     "vision",
                     1,
                     kind="model",
-                    created=NOW,
+                    # An importer stamps created_at before it commits.
+                    created=NOW - timedelta(seconds=1),
                     head="active",
                     document=_model_depending_on(_digest("encoder/1")),
                 )
