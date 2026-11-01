@@ -196,7 +196,7 @@ pub(super) fn validate_docker_run_with_archive(
                 shm_size = arguments
                     .get(index)
                     .and_then(|value| value.parse::<u64>().ok())
-                    .filter(|value| (64 * 1024 * 1024..=16 * 1024 * 1024 * 1024).contains(value));
+                    .filter(|value| *value >= 64 * 1024 * 1024);
             }
             "--user" if user.is_none() => {
                 index += 1;
