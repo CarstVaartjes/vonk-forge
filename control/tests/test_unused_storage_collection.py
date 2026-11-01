@@ -45,6 +45,7 @@ from vonk_control.models import (
     Job,
     ModelCacheOperation,
     ModelCacheSet,
+    ModelCacheSetArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -2256,6 +2257,110 @@ def test_model_no_recipe_needs_is_removed_when_disk_is_short_through_the_fenced_
     assert _scope(waiting, "nas")["outcome"] == "paused"
     _settle(service)
     assert not _set_exists(world, set_digest)
+
+
+def _two_cached_sets(tmp_path: Path, service: ModelCacheService) -> tuple[str, str]:
+    """Two cached sets that keep one identical file: A = shared + own, B = shared."""
+
+    sets = []
+    for model, files in (
+        ("1" * 64, (("shared", b"shared-bytes"), ("own", b"a-own-bytes!!"))),
+        ("2" * 64, (("shared", b"shared-bytes"),)),
+    ):
+        artifacts = [
+            _artifact(
+                tmp_path / model[:1],
+                data,
+                artifact_id=name,
+                path=f"{name}.bin",
+                model_content_sha256=model,
+            )
+            for name, data in files
+        ]
+        (tmp_path / model[:1]).mkdir(exist_ok=True)
+        done = _download(
+            service,
+            artifacts,
+            model_content_sha256=model,
+            request_key=str(uuid.uuid4()),
+        )
+        assert done.state == "succeeded"
+        sets.append(str(done.artifact_set_sha256))
+    return sets[0], sets[1]
+
+
+def test_unused_set_bytes_exclude_a_file_another_cached_set_keeps(
+    tmp_path: Path, world: Catalog, cached
+) -> None:
+    """Catches counting a shared object as freed while another set still keeps it."""
+
+    service, _first = cached
+    (tmp_path / "1").mkdir()
+    (tmp_path / "2").mkdir()
+    a, b = _two_cached_sets(tmp_path, service)
+
+    assert service.unused_set_bytes(a) == len(b"a-own-bytes!!")
+    assert service.unused_set_bytes(b) == 0
+    with world.sessions.begin() as session:
+        for member in session.scalars(
+            select(ModelCacheSetArtifact).where(
+                ModelCacheSetArtifact.artifact_set_sha256 == b
+            )
+        ):
+            session.delete(member)
+        row = session.get(ModelCacheSet, b)
+        assert row is not None
+        session.delete(row)
+    assert service.unused_set_bytes(a) == len(b"a-own-bytes!!") + len(b"shared-bytes")
+
+
+def test_model_items_under_pressure_read_no_model_object(
+    world: Catalog, cached, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches the sweep measuring each set on the NAS (receipt, open, fstat, lstat)
+    inside its database transaction: stored facts answer, storage is not touched."""
+
+    service, _set_digest = cached
+    _head_recipe_naming(world, "b" * 64)
+    objects = service._root / "objects"
+    real_lstat = Path.lstat
+
+    def refuse_object(*_args, **_kwargs):
+        raise AssertionError("model object touched while collecting")
+
+    def guarded_lstat(path: Path, *args, **kwargs):
+        if objects in path.parents:
+            raise AssertionError(f"lstat of {path}")
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(ModelCacheService, "_stored_object", refuse_object)
+    monkeypatch.setattr(Path, "lstat", guarded_lstat)
+
+    result = _models(world, service, disk_usage=lambda _p: (TOTAL, 0)).collect()
+
+    assert result.models == 1, result.kept
+    with world.sessions() as session:
+        removal = session.scalar(
+            select(ModelCacheOperation).where(ModelCacheOperation.kind == "remove")
+        )
+        assert removal is not None and removal.actor == ACTOR
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_unused_set_bytes_unknown_when_the_cached_manifest_is_unreadable(
+    world: Catalog, cached
+) -> None:
+    """Catches a guessed size for a set whose manifest nothing can re-derive."""
+
+    service, set_digest = cached
+    with world.sessions.begin() as session:
+        row = session.get(ModelCacheSet, set_digest)
+        assert row is not None
+        row.manifest = {"schema_version": 2, "artifacts": "damaged"}
+        row.model_content_sha256 = None
+        row.recipe_revision_sha256 = None
+
+    assert service.unused_set_bytes(set_digest) is None
 
 
 def test_model_is_kept_while_disk_is_not_short(world: Catalog, cached) -> None:

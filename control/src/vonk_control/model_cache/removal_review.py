@@ -31,6 +31,7 @@ from ..models import (
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
+from .artifacts import _unique_artifacts
 from .catalog_helpers import _recipe_model_content_digests
 from .errors import (
     ModelCacheRemovalOwnerInvalid,
@@ -217,9 +218,29 @@ class RemovalReviewMixin:
         return cache.get_operation(operation_id)
 
     def unused_set_bytes(self, set_digest: str) -> int | None:
-        """Measured complete and partial bytes; unknown size defers eviction."""
+        """Bytes removing this set frees, shared objects excluded; unknown defers.
+
+        A ``cached`` set is answered from stored facts alone (manifest sizes and
+        set membership): receipts were verified at ingress, so this pass does no
+        storage I/O.  Any other set is measured on storage.
+        """
         cache = cast("ModelCacheService", self)
         with cache._session() as session:
+            row = session.get(ModelCacheSet, set_digest)
+            if row is not None and row.state == "cached":
+                manifest = cache._stored_manifest(row)
+                if manifest is None:
+                    return None
+                deleted = set(
+                    cache._model_removal_scope_for_sets(
+                        session, (set_digest,)
+                    ).delete_objects
+                )
+                return sum(
+                    spec.expected_bytes
+                    for digest, spec in _unique_artifacts(manifest.artifacts).items()
+                    if digest in deleted
+                )
             scope = cache._model_removal_scope_for_sets(session, (set_digest,))
         assets = cache.removal_asset_status(scope)
         available = [
