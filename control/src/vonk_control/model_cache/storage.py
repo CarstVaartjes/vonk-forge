@@ -18,6 +18,7 @@ from vonk_agent_protocol import LifecycleState, ModelCacheBlockerCode
 from .. import model_cache_states
 from ..model_cache_contract import (
     CacheOperationKind,
+    ModelCacheDownloadPayload,
     ModelCacheObjectReceipt,
     ModelCacheTransfer,
 )
@@ -211,7 +212,15 @@ class StorageMixin:
         """
         cache = cast("ModelCacheService", self)
 
-        running: RunningTransfers = {}
+        return cache._running_needs(cache._running_payloads(session))
+
+    def _running_payloads(
+        self, session: Session
+    ) -> list[tuple[str, str, ModelCacheDownloadPayload]]:
+        """The readable document of every running download and repair."""
+        cache = cast("ModelCacheService", self)
+
+        found: list[tuple[str, str, ModelCacheDownloadPayload]] = []
         for operation in session.scalars(
             select(ModelCacheOperation).where(
                 ModelCacheOperation.kind.in_(
@@ -223,19 +232,28 @@ class StorageMixin:
             )
         ):
             payload = cache._transfer_or_none(operation)
-            if payload is None:
-                continue  # unreadable: the claim loop rebuilds or retires it
+            if payload is not None:  # unreadable: the claim loop rebuilds or retires it
+                found.append((operation.id, operation.kind, payload))
+        return found
+
+    def _running_needs(
+        self, running: list[tuple[str, str, ModelCacheDownloadPayload]]
+    ) -> RunningTransfers:
+        """What the running transfers still write: file reads, no session."""
+        cache = cast("ModelCacheService", self)
+
+        needs: RunningTransfers = {}
+        for operation_id, kind, payload in running:
             try:
                 manifest = _manifest_of(payload)
             except (TypeError, ValueError, ModelCacheError):
                 continue
-            running[operation.id] = cache._transfer_need(
+            needs[operation_id] = cache._transfer_need(
                 manifest,
                 payload.transfer,
-                replaces=operation.kind == CacheOperationKind.REPAIR
-                or payload.force_refresh,
+                replaces=kind == CacheOperationKind.REPAIR or payload.force_refresh,
             )
-        return running
+        return needs
 
     def _committed_bytes(
         self,
@@ -348,7 +366,7 @@ class StorageMixin:
         manifest = cache._stored_manifest(row)
         if manifest is None:
             return  # unknown set: left as it is until it is re-derived
-        row.verified_bytes = cache._verified_bytes(session, set_digest)
+        row.verified_bytes = cache._verified_bytes(set_digest)
         if row.state not in {"downloading", "verifying"}:
             row.state = (
                 "cached"
