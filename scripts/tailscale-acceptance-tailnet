@@ -338,6 +338,10 @@ def _child_token_factory(
 def _delete_tailnet(tailnet_id: str, access_token_factory: Callable[[], str]) -> None:
     """Delete exactly one tailnet, with one owner for the DELETE request.
 
+    This is the one remaining retry loop outside `_with_retries`: it must keep
+    retrying with no time budget (it runs on failure paths) and treats 404 as
+    success.  It shares `_retryable` and `_backoff`.
+
     The token is minted per attempt so a retry cannot present an expired
     credential; `delete(state=...)` supplies the child's own lifecycle token and
     `cleanup` supplies a factory-minted token for the child.
@@ -366,8 +370,12 @@ def _retryable(error: ApiRequestError) -> bool:
     return error.status_code is None or error.status_code in TRANSIENT_STATUSES
 
 
+def _backoff_delay(attempt: int) -> float:
+    return min(2**attempt, 4)
+
+
 def _backoff(attempt: int) -> None:
-    time.sleep(min(2**attempt, 4))
+    time.sleep(_backoff_delay(attempt))
 
 
 class RetryBudget:
@@ -396,7 +404,7 @@ def _with_retries(
         try:
             return operation()
         except ApiRequestError as error:
-            delay = min(2**attempt, 4)
+            delay = _backoff_delay(attempt)
             if (
                 not _retryable(error)
                 or attempt == MAX_ATTEMPTS - 1
@@ -589,11 +597,15 @@ def _create_child_tailnet(
         )
 
     def refuse_if_created() -> None:
-        for tailnet in _list_organization_tailnets(access_token):
+        listing = _with_retries(
+            budget, lambda: _list_organization_tailnets(access_token)
+        )
+        for tailnet in listing:
             if tailnet.get("displayName") == display_name:
                 raise LifecycleError(
                     f"Tailscale created the child tailnet {display_name!r} but "
-                    "the response was lost; it is left for stale cleanup"
+                    "the response was lost; it is left in place and stale-child cleanup "
+                    "needs the cleanup credential"
                 )
 
     return _with_retries(budget, create_once, before_retry=refuse_if_created)
@@ -773,7 +785,7 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
     token = _with_retries(
         budget, lambda: _oauth_token(factory_id, factory_secret, scope="tailnets")
     )
-    _assert_no_stale_children(token)
+    _with_retries(budget, lambda: _assert_no_stale_children(token))
     response = _create_child_tailnet(token, display_name, budget)
     document = response.document
     tailnet_id = document.get("id")

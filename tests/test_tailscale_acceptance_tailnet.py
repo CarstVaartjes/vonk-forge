@@ -1719,7 +1719,7 @@ def test_create_timeout_after_server_created_child_refuses_without_second_post(
             state=tmp_path / "state.json",
         )
 
-    assert "response was lost; it is left for stale cleanup" in str(caught.value)
+    assert "response was lost; it is left in place" in str(caught.value)
     assert len(_post_creates(urlopen)) == 1
     assert _deleted_ids(urlopen) == []
     assert not (tmp_path / "state.json").exists()
@@ -1762,10 +1762,7 @@ def test_create_persistent_timeout_is_bounded_and_keeps_the_error(
     assert not (tmp_path / "state.json").exists()
 
 
-@pytest.mark.parametrize(
-    "phase",
-    ("child_oauth", "create_svc:vonk-forge", "service_readback", "policy_readback"),
-)
+@pytest.mark.parametrize("phase", list(_success_create_responses().phases))
 def test_configure_transient_failure_is_retried_in_place(
     lifecycle: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -1774,7 +1771,18 @@ def test_configure_transient_failure_is_retried_in_place(
 ) -> None:
     plan = _success_create_responses()
     at = plan.phases[phase]
-    scripted: list[object] = [*plan[:at], TimeoutError("timed out"), *plan[at:]]
+    # A failed attempt makes the code observe state again before repeating:
+    # the create lists children, the policy unit re-reads the policy.
+    observe: dict[str, list[object]] = {
+        "tailnet_create": [_listing_response()],
+        "policy_write": [plan[plan.phases["policy_etag"]]],
+    }
+    scripted: list[object] = [
+        *plan[:at],
+        TimeoutError("timed out"),
+        *observe.get(phase, []),
+        *plan[at:],
+    ]
     _factory_environment(monkeypatch)
     _install_urlopen(lifecycle, monkeypatch, scripted)
     monkeypatch.setattr(lifecycle.time, "sleep", lambda _delay: None)
@@ -1843,3 +1851,30 @@ def test_retries_stop_when_the_time_budget_is_spent(
         )
 
     assert len(_post_creates(urlopen)) == 1
+
+
+def test_listing_timeout_between_create_attempts_is_retried(
+    lifecycle: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plan = _success_create_responses()
+    urlopen, _ = _create_with_prefix(
+        lifecycle,
+        monkeypatch,
+        tmp_path,
+        [
+            TimeoutError("create timed out"),
+            TimeoutError("listing timed out"),
+            _listing_response(),
+            *plan[plan.phases["tailnet_create"] :],
+        ],
+    )
+
+    lifecycle.create(
+        display_name="Vonk Forge CI 123 attempt 1",
+        github_env=tmp_path / "github.env",
+        state=tmp_path / "state.json",
+    )
+
+    assert len(_post_creates(urlopen)) == 2
