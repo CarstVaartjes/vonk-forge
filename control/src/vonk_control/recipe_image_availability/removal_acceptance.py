@@ -152,7 +152,6 @@ def remove_selector(
                 schema_version=SCHEMA_VERSION,
                 scope_pending=True,
                 image_index=0,
-                image_pending_bytes=None,
                 image_reclaimed_bytes=0,
                 model_index=0,
                 model_reclaimed_bytes=0,

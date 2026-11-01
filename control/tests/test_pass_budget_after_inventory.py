@@ -81,7 +81,9 @@ CLASSIFIED = {
     ),
     "vonk_control.fleet_profile_adapter_conversion": "deadline bounds the scan itself",
     "vonk_control.recipe_image_availability.removal_acceptance": "bounds the checks",
-    "vonk_control.recipe_image_availability.removal_execution": "bounds the removals",
+    "vonk_control.recipe_image_availability.removal_execution": (
+        "step deadline bounds the archive batch; one always runs"
+    ),
     "vonk_control.model_cache.removal_execution": "bounds object deletes; one always runs",
     "vonk_control.model_cache.removal_reconcile": "step deadline set before the removals",
     "vonk_control.library_projection.views": "request budget, not a collector",

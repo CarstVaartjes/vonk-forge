@@ -6,7 +6,6 @@ import multiprocessing
 import os
 import sqlite3
 import threading
-import time
 import uuid
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -19,10 +18,14 @@ from typing import Any, cast
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, select, text, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_control.artifact_lifecycle import (
+    ArtifactIdentity,
+    check_removal_fence_nowait,
+)
 from vonk_control.artifact_reference_scan import (
     runtime_image_reference_findings,
     runtime_image_reference_reasons,
@@ -1747,96 +1750,369 @@ def test_active_recipe_removal_admits_independent_request_and_replays_accepted_k
         )
 
 
-def test_postgres_recipe_removal_persists_owner_before_first_unlink(
-    tmp_path: Path, postgres_engine, monkeypatch
-) -> None:
-    """The committed checkpoint and fence precede each managed image unlink."""
+def _seed_archives(
+    sessions: sessionmaker[Session],
+    storage: FilesystemRuntimeImageStorage,
+    revision_id: str,
+    recipe: RecipeDefinition,
+    count: int,
+) -> tuple[list[str], list[Path]]:
+    """One revision with ``count`` built images, each placed with its receipt."""
 
+    archives = [ARCHIVE] + [ARCHIVE + b" %d" % number for number in range(1, count)]
+    with sessions.begin() as session:
+        revision = _add_revision(session, revision_id, recipe)
+        _add_head(session, revision)
+        for number, archive in enumerate(archives[1:], start=1):
+            session.add(
+                RecipeBuild(
+                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{revision_id}:{number}")),
+                    recipe_revision_id=revision_id,
+                    builder_node_id="spark-builder",
+                    source_bundle_sha256="b" * 64,
+                    build_input_sha256=f"{number:x}" * 64,
+                    state="succeeded",
+                    policy_report={},
+                    plan={},
+                    image_digest=IMAGE_DIGEST,
+                    oci_layout_sha256=hashlib.sha256(archive).hexdigest(),
+                    image_bytes=len(archive),
+                    error=None,
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                )
+            )
+    digests: list[str] = []
+    receipts: list[Path] = []
+    for number, archive in enumerate(archives):
+        digest = hashlib.sha256(archive).hexdigest()
+        build_id = (
+            _build_id(revision_id)
+            if number == 0
+            else str(uuid.uuid5(uuid.NAMESPACE_URL, f"{revision_id}:{number}"))
+        )
+        receipt = _reference_receipt(build_id).model_copy(
+            update={"oci_archive_sha256": digest, "image_bytes": len(archive)}
+        )
+        place_test_image(storage, digest, len(archive))
+        receipt_file = storage.root / f"{digest}.receipt.json"
+        receipt_file.write_text(json.dumps(receipt.model_dump(mode="json")))
+        digests.append(digest)
+        receipts.append(receipt_file)
+    return sorted(digests), receipts
+
+
+def _removal_owner(
+    sessions: sessionmaker[Session], request_id: str
+) -> RecipeCacheRemovalOwner:
+    with sessions() as session:
+        row = session.scalar(select(Job).where(Job.request_id == request_id))
+        assert row is not None
+        return RecipeCacheRemovalOwner.model_validate_json(json.dumps(row.payload))
+
+
+def _renamed(recipe: RecipeDefinition, slug: str) -> RecipeDefinition:
+    document = recipe.model_dump(mode="json")
+    document["identity"]["slug"] = slug
+    return RecipeDefinition.model_validate(document)
+
+
+def _archive_removal_service(
+    postgres_engine, tmp_path: Path, recipes: list[RecipeDefinition], clock
+) -> tuple[
+    RecipeImageAvailabilityService,
+    sessionmaker[Session],
+    FilesystemRuntimeImageStorage,
+]:
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
-    recipe = _recipe("recipe-source-build.json")
-    receipt = _reference_receipt(_build_id("revision-removal-pre-effect"))
-    now = datetime.now(UTC)
-    with sessions.begin() as session:
-        revision = _add_revision(session, "revision-removal-pre-effect", recipe)
-        _add_head(session, revision)
-
     storage = FilesystemRuntimeImageStorage(tmp_path / "controller-artifacts")
-    receipt_file = storage.root / f"{ARCHIVE_SHA}.receipt.json"
-    place_test_image(storage, ARCHIVE_SHA, len(ARCHIVE))
-    receipt_document = json.dumps(receipt.model_dump(mode="json"))
-    receipt_file.write_text(receipt_document)
-    request_id = str(uuid.uuid4())
-    actor = "operator"
+    by_slug = {recipe.identity.slug: recipe for recipe in recipes}
     service = _service(
         sessions,
         storage=storage,
-        authority=lambda *_args, **_kwargs: (recipe, _runtime()),
-        clock=lambda: now,
+        authority=lambda selector, *_args, **_kwargs: (
+            by_slug.get(selector, recipes[0]),
+            _runtime(),
+        ),
+        clock=clock,
     )
+    return service, sessions, storage
+
+
+def test_postgres_recipe_removal_fence_is_committed_before_first_unlink(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    """The removal fence is committed before each managed image unlink."""
+
+    now = datetime.now(UTC)
+    recipe = _recipe("recipe-source-build.json")
+    service, sessions, storage = _archive_removal_service(
+        postgres_engine, tmp_path, [recipe], lambda: now
+    )
+    digests, receipts = _seed_archives(sessions, storage, "revision-fence", recipe, 1)
+    request_id = str(uuid.uuid4())
     original_remove = storage.remove_published
     removal_calls: list[str] = []
 
-    def require_committed_checkpoint_before_unlink(archive_digest: str) -> int:
-        with sessions() as observer:
-            owner_row = observer.scalar(select(Job).where(Job.request_id == request_id))
-            assert owner_row is not None
-            owner = RecipeCacheRemovalOwner.model_validate_json(
-                json.dumps(owner_row.payload)
+    def require_committed_fence_before_unlink(archive_digest: str) -> int:
+        owner = _removal_owner(sessions, request_id)
+        with sessions.begin() as observer:
+            assert check_removal_fence_nowait(
+                observer,
+                ArtifactIdentity("runtime-image", archive_digest),
+                owner_kind="recipe-image-job",
+                owner_id=str(
+                    observer.scalar(select(Job.id).where(Job.request_id == request_id))
+                ),
+                fence=owner.plan.intent.removal_fence,
             )
-            intent = owner.plan.intent
-            assert owner_row.kind == intent.kind
-            assert owner_row.actor == intent.actor == actor
-            assert intent.request_key == request_id
-            assert intent.action == "remove"
-            assert intent.selector == recipe.identity.slug
-            assert intent.recipe_revision_id == "revision-removal-pre-effect"
-            assert owner_row.state == "running"
-            assert owner.plan.image_archives == [archive_digest]
-            assert owner.checkpoint.image_pending_bytes == len(ARCHIVE)
         removal_calls.append(archive_digest)
         return original_remove(archive_digest)
 
     monkeypatch.setattr(
-        storage, "remove_published", require_committed_checkpoint_before_unlink
+        storage, "remove_published", require_committed_fence_before_unlink
     )
-    try:
-        accepted = remove_after_review(
+    accepted = remove_after_review(
+        service,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+    assert accepted["state"] == "queued"
+    assert all(path.exists() for path in receipts)
+    for _ in range(5):
+        service.advance_removals(limit=1)
+    assert removal_calls == digests
+    assert not any(path.exists() for path in receipts)
+    ended = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(ended, RecipeCacheRemovalStatus)
+    assert ended.state == LifecycleState.SUCCEEDED
+
+
+def test_postgres_recipe_removal_retires_all_archives_in_one_step(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    """N archives take one worker step and one checkpoint write, not N."""
+
+    now = datetime.now(UTC)
+    recipe = _recipe("recipe-source-build.json")
+    service, sessions, storage = _archive_removal_service(
+        postgres_engine, tmp_path, [recipe], lambda: now
+    )
+    digests, receipts = _seed_archives(sessions, storage, "revision-batch", recipe, 3)
+    request_id = str(uuid.uuid4())
+    persists: list[int] = []
+    original_complete = service._complete_recipe_image_removal
+
+    def counted(*args: Any, **kwargs: Any) -> bool:
+        persists.append(kwargs["completed"])
+        return original_complete(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_complete_recipe_image_removal", counted)
+    remove_after_review(
+        service,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+    assert _removal_owner(sessions, request_id).plan.image_archives == digests
+    seen: list[int] = []
+    for _ in range(5):
+        service.advance_removals(limit=1)
+        seen.append(_removal_owner(sessions, request_id).checkpoint.image_index)
+    assert set(seen) <= {0, 3} and 3 in seen
+    assert persists == [3]
+    assert not any(path.exists() for path in receipts)
+    ended = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(ended, RecipeCacheRemovalStatus)
+    assert ended.state == LifecycleState.SUCCEEDED
+
+
+def test_postgres_recipe_removal_batch_budget_is_shared_and_one_always_runs(
+    tmp_path: Path, postgres_engine, monkeypatch, frozen_pass_budgets
+) -> None:
+    """A spent step deadline still retires one archive per removal."""
+
+    now = datetime.now(UTC)
+    first = _recipe("recipe-source-build.json")
+    second = _renamed(first, "second-recipe")
+    service, sessions, storage = _archive_removal_service(
+        postgres_engine, tmp_path, [first, second], lambda: now
+    )
+    _seed_archives(sessions, storage, "revision-budget-1", first, 3)
+    # The second recipe's images are distinct archives of its own revision.
+    with sessions.begin() as session:
+        revision = _add_revision(
+            session, "revision-budget-2", second, archive=b"second recipe image"
+        )
+        _add_head(session, revision)
+    second_digest = hashlib.sha256(b"second recipe image").hexdigest()
+    place_test_image(storage, second_digest, len(b"second recipe image"))
+    second_receipt = storage.root / f"{second_digest}.receipt.json"
+    second_receipt.write_text(
+        json.dumps(
+            _reference_receipt(_build_id("revision-budget-2"))
+            .model_copy(
+                update={
+                    "oci_archive_sha256": second_digest,
+                    "image_bytes": len(b"second recipe image"),
+                }
+            )
+            .model_dump(mode="json")
+        )
+    )
+    original_remove = storage.remove_published
+
+    def slow_remove(archive_digest: str) -> int:
+        result = original_remove(archive_digest)
+        frozen_pass_budgets.advance(10.0)  # the 5 s budget is spent
+        return result
+
+    monkeypatch.setattr(storage, "remove_published", slow_remove)
+    ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    for request_id, recipe in zip(ids, (first, second), strict=True):
+        remove_after_review(
             service,
             recipe.identity.slug,
-            actor=actor,
+            actor="operator",
             request_id=request_id,
             with_model=False,
         )
-        assert accepted["state"] == "queued"
-        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
-        assert receipt_file.read_text() == receipt_document
-        assert service.advance_removals(limit=1) == 1
-    except AssertionError:
-        assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
-        assert receipt_file.read_text() == receipt_document
-        raise
-    assert removal_calls == [ARCHIVE_SHA]
-    # Only the receipt is retired; the blobs wait for garbage collection.
-    assert storage.existing_archive(ARCHIVE_SHA, len(ARCHIVE)).is_file()
-    assert not receipt_file.exists()
-    # Each worker tick has a wall-clock budget; resume its durable checkpoint
-    # when PostgreSQL observation consumed the first tick's budget.
-    deadline = time.monotonic() + 10
-    while time.monotonic() < deadline:
-        with sessions() as session:
-            ended = session.scalar(select(Job).where(Job.request_id == request_id))
-            assert ended is not None
-            if ended.state == "succeeded":
-                break
+    service.reconcile_requested_removals()
+    service.advance_removals(limit=2)
+    # Each removal retired exactly one archive: the spent deadline is shared.
+    assert _removal_owner(sessions, ids[0]).checkpoint.image_index == 1
+    assert _removal_owner(sessions, ids[1]).checkpoint.image_index == 1
+    assert not second_receipt.exists()
+    for _ in range(8):
+        service.advance_removals(limit=2)
+    for request_id in ids:
+        ended = service.get_operator_request(request_id, actor="operator")
+        assert isinstance(ended, RecipeCacheRemovalStatus)
+        assert ended.state == LifecycleState.SUCCEEDED
+
+
+def test_postgres_recipe_removal_contended_archive_ends_the_batch_and_resumes(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A held publication lock stops the batch after the archives done so far."""
+
+    current = [datetime.now(UTC)]
+    recipe = _recipe("recipe-source-build.json")
+    service, sessions, storage = _archive_removal_service(
+        postgres_engine, tmp_path, [recipe], lambda: current[0]
+    )
+    digests, receipts = _seed_archives(
+        sessions, storage, "revision-contended", recipe, 3
+    )
+    request_id = str(uuid.uuid4())
+    remove_after_review(
+        service,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+    with sessions() as session:
+        operation_id = session.scalar(
+            select(Job.id).where(Job.request_id == request_id)
+        )
+    assert operation_id is not None
+    # The scope and its fences are committed before any archive is touched.
+    assert service._observe_recipe_removal(operation_id)
+    with storage.publication_lock(digests[2]):
         service.advance_removals(limit=1)
-    assert ended is not None and ended.state == "succeeded"
+        owner = _removal_owner(sessions, request_id)
+        # The first two archives are checkpointed together; the third waits.
+        assert owner.checkpoint.image_index == 2
+        assert owner.checkpoint.failure is not None
+        assert not (storage.root / f"{digests[1]}.receipt.json").exists()
+        assert (storage.root / f"{digests[2]}.receipt.json").exists()
+    current[0] += timedelta(minutes=1)
+    for _ in range(5):
+        service.advance_removals(limit=1)
+    assert _removal_owner(sessions, request_id).checkpoint.image_index == 3
+    assert not any(path.exists() for path in receipts)
+    ended = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(ended, RecipeCacheRemovalStatus)
+    assert ended.state == LifecycleState.SUCCEEDED
     assert_ended_without_blocking(
         SimpleNamespace(sessions=sessions),
-        cast(Job | RecipeImageAvailabilityView, ended),
+        cast(RecipeCacheRemovalStatus | RecipeImageAvailabilityView, ended),
         end=lambda receipt: receipt,
         fresh=lambda _: service.start(
-            "revision-removal-pre-effect",
+            "revision-contended",
+            actor="operator",
+            request_id=str(uuid.uuid4()),
+        ),
+    )
+
+
+def test_startup_strips_the_retired_image_checkpoint_key_from_every_removal_state(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """Strict owner parsing needs the retired key gone, queued or terminal."""
+
+    from vonk_control.db.startup import strip_retired_removal_key
+
+    now = datetime.now(UTC)
+    recipe = _recipe("recipe-source-build.json")
+    service, sessions, storage = _archive_removal_service(
+        postgres_engine, tmp_path, [recipe], lambda: now
+    )
+    _seed_archives(sessions, storage, "revision-strip", recipe, 1)
+    request_id = str(uuid.uuid4())
+    remove_after_review(
+        service,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=request_id,
+        with_model=False,
+    )
+
+    def inject_and_strip(expected_state: str) -> None:
+        with postgres_engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE jobs SET payload = jsonb_set(payload::jsonb, "
+                    "'{checkpoint,image_pending_bytes}', 'null')::json "
+                    "WHERE request_id = :request_id"
+                ),
+                {"request_id": request_id},
+            )
+        with sessions() as session:
+            row = session.scalar(select(Job).where(Job.request_id == request_id))
+            assert row is not None and row.state == expected_state
+            assert (
+                "image_pending_bytes" in cast(dict[str, Any], row.payload)["checkpoint"]
+            )
+        with postgres_engine.begin() as connection:
+            strip_retired_removal_key(connection)
+        owner = _removal_owner(sessions, request_id)
+        with sessions() as session:
+            row = session.scalar(select(Job).where(Job.request_id == request_id))
+            assert row is not None
+            assert (
+                "image_pending_bytes"
+                not in cast(dict[str, Any], row.payload)["checkpoint"]
+            )
+        assert owner.checkpoint.image_index in {0, 1}
+
+    inject_and_strip("queued")
+    for _ in range(5):
+        service.advance_removals(limit=1)
+    inject_and_strip("succeeded")
+    ended = service.get_operator_request(request_id, actor="operator")
+    assert isinstance(ended, RecipeCacheRemovalStatus)
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        cast(RecipeCacheRemovalStatus | RecipeImageAvailabilityView, ended),
+        end=lambda receipt: receipt,
+        fresh=lambda _: service.start(
+            "revision-strip",
             actor="operator",
             request_id=str(uuid.uuid4()),
         ),
@@ -1846,7 +2122,7 @@ def test_postgres_recipe_removal_persists_owner_before_first_unlink(
 def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and_checkpoint(
     tmp_path: Path, postgres_engine
 ) -> None:
-    """A committed byte checkpoint reconciles an unlink lost to process death."""
+    """An unlink lost to process death before its checkpoint is redone idempotently."""
 
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
@@ -1904,10 +2180,9 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
         owner = RecipeCacheRemovalOwner.model_validate_json(
             json.dumps(owner_row.payload)
         )
-        assert owner_row.state == "running"
+        assert owner_row.state == "queued"
         assert owner_row.result is None
         assert owner.checkpoint.image_index == 0
-        assert owner.checkpoint.image_pending_bytes == len(ARCHIVE)
         assert owner.checkpoint.image_reclaimed_bytes == 0
 
     restarted = _service(
@@ -1922,7 +2197,6 @@ def test_postgres_recipe_removal_recovers_after_process_death_between_unlink_and
     assert isinstance(recovered, RecipeCacheRemovalStatus)
     recovered = recovered.model_dump(mode="json", exclude_none=True)
     assert recovered["state"] == "succeeded"
-    assert recovered["reclaimed_bytes"] == len(ARCHIVE)
 
 
 def test_postgres_recipe_removal_retries_finalization_after_gate_contention(

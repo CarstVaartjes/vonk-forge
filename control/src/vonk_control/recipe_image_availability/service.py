@@ -327,37 +327,23 @@ class RecipeImageAvailabilityService:
     def advance_removals(self, *, limit: int = 1) -> int:
         return removal_execution.advance_removals(self, limit=limit)
 
-    def _advance_recipe_removal(self, operation_id: str) -> bool:
-        return removal_execution._advance_recipe_removal(self, operation_id)
+    def _advance_recipe_removal(
+        self, operation_id: str, deadline: float | None = None
+    ) -> bool:
+        return removal_execution._advance_recipe_removal(
+            self, operation_id, deadline=deadline
+        )
 
     def _advance_recipe_image_removal(
         self,
         operation_id: str,
         observed_owner: RecipeCacheRemovalOwner,
-        archive_sha256: str,
         *,
         now: datetime,
+        deadline: float | None,
     ) -> bool:
         return removal_execution._advance_recipe_image_removal(
-            self, operation_id, observed_owner, archive_sha256, now=now
-        )
-
-    def _checkpoint_recipe_image_removal(
-        self,
-        operation_id: str,
-        observed_owner: RecipeCacheRemovalOwner,
-        *,
-        identity: ArtifactIdentity,
-        observed_bytes: int,
-        now: datetime,
-    ) -> int | None:
-        return removal_execution._checkpoint_recipe_image_removal(
-            self,
-            operation_id,
-            observed_owner,
-            identity=identity,
-            observed_bytes=observed_bytes,
-            now=now,
+            self, operation_id, observed_owner, now=now, deadline=deadline
         )
 
     def _complete_recipe_image_removal(
@@ -365,16 +351,16 @@ class RecipeImageAvailabilityService:
         operation_id: str,
         observed_owner: RecipeCacheRemovalOwner,
         *,
-        identity: ArtifactIdentity,
-        pending_bytes: int,
+        completed: int,
+        reclaimed: int,
         now: datetime,
     ) -> bool:
         return removal_execution._complete_recipe_image_removal(
             self,
             operation_id,
             observed_owner,
-            identity=identity,
-            pending_bytes=pending_bytes,
+            completed=completed,
+            reclaimed=reclaimed,
             now=now,
         )
 

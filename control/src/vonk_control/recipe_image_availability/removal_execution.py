@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     ModelCacheCode,
     RecipeImageCode,
-    RuntimeImageCode,
     SecurityRefusalError,
     UnknownOutcomeError,
     WaitReason,
@@ -56,7 +55,6 @@ from ..recipe_image_removal_contract import (
 )
 from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
-    RuntimeImagePreparationUnknown,
 )
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
@@ -72,6 +70,8 @@ from .contracts import (
 )
 
 REMOVAL_PASS_BUDGET_SECONDS = 0.25
+# One worker step's budget for the removals it advances; each makes progress.
+REMOVAL_BATCH_SECONDS = 5.0
 
 
 if TYPE_CHECKING:
@@ -147,7 +147,7 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
     self.reconcile_removal_gates()
     advanced = 0
     boundary: tuple[datetime, str] | None = None
-    deadline = time.monotonic() + REMOVAL_PASS_BUDGET_SECONDS
+    deadline = time.monotonic() + REMOVAL_BATCH_SECONDS
     while advanced < limit and time.monotonic() < deadline:
         with self._sessions() as session:
             statement = (
@@ -181,7 +181,9 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
             break
         for operation_id, _updated_at in rows:
             try:
-                advanced += int(self._advance_recipe_removal(operation_id))
+                advanced += int(
+                    self._advance_recipe_removal(operation_id, deadline=deadline)
+                )
             except RecipeImageAvailabilityError as error:
                 if error.code == RecipeImageCode.OPERATION_INVALID:
                     # Preserve damaged intent and fence the executor by ending
@@ -239,7 +241,9 @@ def advance_removals(self: RecipeImageAvailabilityService, *, limit: int = 1) ->
 
 
 def _advance_recipe_removal(
-    self: RecipeImageAvailabilityService, operation_id: str
+    self: RecipeImageAvailabilityService,
+    operation_id: str,
+    deadline: float | None = None,
 ) -> bool:
     now = self._clock()
     now = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
@@ -266,7 +270,7 @@ def _advance_recipe_removal(
         changed = self._observe_recipe_removal(operation_id)
         if changed:
             # Reload the committed scope before entering the byte-effect step.
-            return self._advance_recipe_removal(operation_id)
+            return self._advance_recipe_removal(operation_id, deadline=deadline)
         return self._record_recipe_removal_failure(
             operation_id,
             code=RecipeImageCode.REMOVAL_EVIDENCE_UNAVAILABLE,
@@ -274,9 +278,8 @@ def _advance_recipe_removal(
             cause=Disposition.OBSERVE,
         )
     if owner.checkpoint.image_index < len(owner.plan.image_archives):
-        archive_sha256 = owner.plan.image_archives[owner.checkpoint.image_index]
         return self._advance_recipe_image_removal(
-            operation_id, owner, archive_sha256, now=now
+            operation_id, owner, now=now, deadline=deadline
         )
     if owner.checkpoint.model_index < len(owner.plan.model_children):
         return self._advance_recipe_model_child(
@@ -292,36 +295,73 @@ def _advance_recipe_image_removal(
     self: RecipeImageAvailabilityService,
     operation_id: str,
     observed_owner: RecipeCacheRemovalOwner,
-    archive_sha256: str,
     *,
     now: datetime,
+    deadline: float | None,
 ) -> bool:
-    identity = ArtifactIdentity("runtime-image", archive_sha256)
+    """Retire the remaining image receipts in a time-bounded batch.
+
+    One checkpoint per batch. A crash before it only undercounts reclaimed
+    bytes; the receipt unlinks are idempotent. The worker step shares one
+    deadline; each removal still retires at least one archive.
+    """
+
+    intent = observed_owner.plan.intent
+    remaining = tuple(
+        observed_owner.plan.image_archives[observed_owner.checkpoint.image_index :]
+    )
+    completed = 0
+    reclaimed = 0
+    failure: Exception | None = None
     try:
-        with self._storage.publication_lock(archive_sha256):
-            observed_bytes = self._storage.published_archive_bytes(archive_sha256)
-            pending_bytes = self._checkpoint_recipe_image_removal(
-                operation_id,
-                observed_owner,
-                identity=identity,
-                observed_bytes=observed_bytes,
-                now=now,
-            )
-            if pending_bytes is None:
-                return False
-            reclaimed_now = self._storage.remove_published(archive_sha256)
-            if reclaimed_now not in {0, pending_bytes}:
-                raise RuntimeImagePreparationUnknown(
-                    RuntimeImageCode.ARCHIVE_MISMATCH,
-                    "published image length changed during the fenced removal",
+        try:
+            with self._sessions() as session:
+                references = runtime_image_reference_reasons(session, remaining)
+            if any(references[digest] for digest in remaining):
+                raise RecipeImageAvailabilityUnknown(
+                    ArtifactLifecycleCode.REFERENCE_CHANGED,
+                    "runtime image acquired an active reference while removal was reserved",
+                    retryable=True,
+                    recovery_actions=("retry",),
+                    reason=WaitReason.SCOPE_CHANGED,
                 )
-            return self._complete_recipe_image_removal(
-                operation_id,
-                observed_owner,
-                identity=identity,
-                pending_bytes=pending_bytes,
-                now=self._clock(),
-            )
+            if deadline is None:
+                deadline = time.monotonic() + REMOVAL_BATCH_SECONDS
+            for archive_sha256 in remaining:
+                with self._storage.publication_lock(archive_sha256):
+                    with self._sessions() as session:
+                        if not check_removal_fence_nowait(
+                            session,
+                            ArtifactIdentity("runtime-image", archive_sha256),
+                            owner_kind="recipe-image-job",
+                            owner_id=operation_id,
+                            fence=intent.removal_fence,
+                        ):
+                            break
+                    size = self._storage.published_archive_bytes(archive_sha256)
+                    self._storage.remove_published(archive_sha256)
+                completed += 1
+                reclaimed += size
+                if time.monotonic() >= deadline:
+                    break
+        except (
+            RuntimeImagePreparationError,
+            ArtifactLifecycleError,
+            RecipeImageAvailabilityError,
+            DBAPIError,
+        ) as error:
+            failure = error
+        if completed and not self._complete_recipe_image_removal(
+            operation_id,
+            observed_owner,
+            completed=completed,
+            reclaimed=reclaimed,
+            now=self._clock(),
+        ):
+            return False
+        if failure is not None:
+            raise failure
+        return bool(completed)
     except RuntimeImagePreparationError as error:
         return self._record_recipe_removal_failure(
             operation_id,
@@ -363,85 +403,16 @@ def _advance_recipe_image_removal(
         )
 
 
-def _checkpoint_recipe_image_removal(
-    self: RecipeImageAvailabilityService,
-    operation_id: str,
-    observed_owner: RecipeCacheRemovalOwner,
-    *,
-    identity: ArtifactIdentity,
-    observed_bytes: int,
-    now: datetime,
-) -> int | None:
-    intent = observed_owner.plan.intent
-    with self._sessions.begin() as session:
-        if not check_removal_fence_nowait(
-            session,
-            identity,
-            owner_kind="recipe-image-job",
-            owner_id=operation_id,
-            fence=intent.removal_fence,
-        ):
-            return None
-        operation = session.scalar(
-            select(Job)
-            .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
-            .execution_options(populate_existing=True)
-            .with_for_update(nowait=True)
-        )
-        if operation is None or operation.state not in job_states.words(
-            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.BACKOFF
-        ):
-            return None
-        owner = self._read_removal_owner(operation)
-        checkpoint = owner.checkpoint
-        if (
-            owner.plan.intent != intent
-            or checkpoint.image_index != observed_owner.checkpoint.image_index
-        ):
-            return None
-        references = runtime_image_reference_reasons(session, (identity.sha256,))
-        if references[identity.sha256]:
-            raise RecipeImageAvailabilityUnknown(
-                ArtifactLifecycleCode.REFERENCE_CHANGED,
-                "runtime image acquired an active reference while removal was reserved",
-                retryable=True,
-                recovery_actions=("retry",),
-                reason=WaitReason.SCOPE_CHANGED,
-            )
-        pending_bytes = checkpoint.image_pending_bytes
-        if pending_bytes is None:
-            pending_bytes = observed_bytes
-        elif observed_bytes not in {0, pending_bytes}:
-            # Our own checkpoint is stale; remove what is stored now.
-            pending_bytes = observed_bytes
-        updated_checkpoint = checkpoint.model_copy(
-            update={"image_pending_bytes": pending_bytes, "failure": None}
-        )
-        updated_owner = owner.model_copy(update={"checkpoint": updated_checkpoint})
-        operation.payload = serialize_json_value(updated_owner)
-        self._lifecycle.advance_removal(operation, now)
-        return pending_bytes
-
-
 def _complete_recipe_image_removal(
     self: RecipeImageAvailabilityService,
     operation_id: str,
     observed_owner: RecipeCacheRemovalOwner,
     *,
-    identity: ArtifactIdentity,
-    pending_bytes: int,
+    completed: int,
+    reclaimed: int,
     now: datetime,
 ) -> bool:
-    intent = observed_owner.plan.intent
     with self._sessions.begin() as session:
-        if not check_removal_fence_nowait(
-            session,
-            identity,
-            owner_kind="recipe-image-job",
-            owner_id=operation_id,
-            fence=intent.removal_fence,
-        ):
-            return False
         operation = session.scalar(
             select(Job)
             .where(Job.id == operation_id, Job.kind == REMOVE_OPERATION_KIND)
@@ -455,17 +426,14 @@ def _complete_recipe_image_removal(
         owner = self._read_removal_owner(operation)
         checkpoint = owner.checkpoint
         if (
-            owner.plan.intent != intent
+            owner.plan.intent != observed_owner.plan.intent
             or checkpoint.image_index != observed_owner.checkpoint.image_index
-            or checkpoint.image_pending_bytes != pending_bytes
         ):
             return False
         updated_checkpoint = checkpoint.model_copy(
             update={
-                "image_index": checkpoint.image_index + 1,
-                "image_pending_bytes": None,
-                "image_reclaimed_bytes": checkpoint.image_reclaimed_bytes
-                + pending_bytes,
+                "image_index": checkpoint.image_index + completed,
+                "image_reclaimed_bytes": checkpoint.image_reclaimed_bytes + reclaimed,
                 "failure": None,
             }
         )

@@ -56,17 +56,20 @@ def adopt_legacy_rows(connection: Connection) -> None:
 
 
 def strip_retired_removal_key(connection: Connection) -> None:
-    """Drop the retired ``object_pending_bytes`` key from stored removal rows.
+    """Drop the retired ``image_pending_bytes`` key from recipe removal jobs.
 
-    Payload models forbid extra keys. The worker is the only writer of removal
-    checkpoints, so it strips at its own start, after the previous worker is
-    gone. Delete this function after the next deploy.
+    Payload models forbid extra keys, so a stored key must go. The API writes
+    the first checkpoint and the worker the later ones: the worker strips at
+    its own start. A row accepted by an older API afterwards fails strict
+    parse, ends failed and is re-requested; the next worker start strips it.
+    Delete this function after the next deploy.
     """
     connection.execute(
         text(
-            "UPDATE model_cache_operations "
-            "SET payload = (payload::jsonb - 'object_pending_bytes')::json "
-            "WHERE kind = 'remove' AND payload::jsonb ? 'object_pending_bytes'"
+            "UPDATE jobs "
+            "SET payload = (payload::jsonb #- '{checkpoint,image_pending_bytes}')::json "
+            "WHERE kind = 'recipe.cache.remove.v2' "
+            "AND payload::jsonb -> 'checkpoint' ? 'image_pending_bytes'"
         )
     )
 

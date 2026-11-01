@@ -456,9 +456,6 @@ def test_removal_deletes_all_exclusive_objects_in_one_batch(
     assert not any(path.exists() for path in paths)
     payload = _removal_payload(sessions, accepted.id)
     assert payload.object_index == len(payload.delete_objects) == 90
-    with sessions() as session:
-        stored = session.get(ModelCacheOperation, accepted.id)
-        assert stored is not None and "object_pending_bytes" not in stored.payload
     service.close()
 
 
@@ -492,39 +489,6 @@ def test_contended_object_ends_the_batch_and_resumes_after_release(
     assert settled.state == "succeeded"
     assert not any(path.exists() for path in paths)
     assert _removal_payload(sessions, accepted.id).object_index == 12
-    service.close()
-
-
-def test_startup_strips_the_retired_byte_checkpoint_key(
-    postgres_engine, tmp_path: Path
-) -> None:
-    from sqlalchemy import text
-    from vonk_control.db.startup import strip_retired_removal_key
-
-    service, sessions = _removal_service(postgres_engine, tmp_path)
-    accepted, _model_digest, _object_path = _seed_removal(
-        service, sessions, tmp_path, slug="legacy-pending", data=b"legacy bytes"
-    )
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE model_cache_operations SET payload = "
-                "(payload::jsonb || '{\"object_pending_bytes\": null}'::jsonb)::json "
-                "WHERE id = :id"
-            ),
-            {"id": accepted.id},
-        )
-    with sessions() as session:
-        operation = session.get(ModelCacheOperation, accepted.id)
-        assert operation is not None and "object_pending_bytes" in operation.payload
-
-    with postgres_engine.begin() as connection:
-        strip_retired_removal_key(connection)
-
-    with sessions() as session:
-        operation = session.get(ModelCacheOperation, accepted.id)
-        assert operation is not None and "object_pending_bytes" not in operation.payload
-    assert _removal_payload(sessions, accepted.id).object_index == 0
     service.close()
 
 
