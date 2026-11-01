@@ -359,7 +359,7 @@ def test_a_retracted_recipe_still_holds_its_set_and_only_its_set(sessions) -> No
         profile(s, "recipe-used")
     CatalogService(
         sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
-    ).retract_recipes_absent_from([])
+    ).retract_absent_from([("recipe", "vonk-forge", "not-in-this-fixture")])
     with sessions() as s:
         heads = s.scalars(
             select(CatalogDocumentHead).where(CatalogDocumentHead.kind == "recipe")

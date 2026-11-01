@@ -1489,3 +1489,99 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
         )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
+
+
+def test_sync_retracts_every_document_kind_absent_from_the_published_library(
+    tmp_path: Path,
+) -> None:
+    """No kind keeps a head the published library no longer lists.
+
+    Wrong implementation caught: retraction filtered to one kind (recipes), so
+    a dropped Model keeps its head forever and the model-cache binding scan
+    resolves it on every pass. The head query below has no kind filter: a new
+    document kind is covered without editing this test.
+    """
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    library = LibraryProjection(
+        sessions, cursors=catalog._cursors, clock=catalog._clock
+    )
+    other_document = deepcopy(original.document)
+    _document_section(other_document, "identity")["slug"] = "deleted-upstream"
+    other = replace(
+        _item_with_document(original, other_document), slug="deleted-upstream"
+    )
+
+    def apply(items, commit):
+        items = tuple(replace(item, library_commit=commit) for item in items)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
+        return sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
+        )
+
+    def active_heads() -> set[tuple[str, str, str]]:
+        with sessions() as session:
+            return set(
+                session.execute(
+                    select(
+                        CatalogDocumentHead.kind,
+                        CatalogDocumentHead.publisher,
+                        CatalogDocumentHead.slug,
+                    ).where(CatalogDocumentHead.active_revision_id.is_not(None))
+                ).all()
+            )
+
+    def current_model_digests() -> set[str]:
+        # Exactly the set the model-cache binding scan resolves every pass.
+        with sessions() as session:
+            return set(
+                session.scalars(
+                    select(CatalogDocumentRevision.content_digest).where(
+                        CatalogDocumentRevision.kind == "model",
+                        active_head_revision(),
+                    )
+                )
+            )
+
+    assert apply((original, other), "1" * 40).imported_count == 2
+    # A Model an earlier library published, then dropped (no recipe uses it).
+    dropped = deepcopy(reader.snapshot.catalog_entities[0].document)
+    _document_section(dropped, "identity")["slug"] = "dropped-upstream-model"
+    catalog.import_catalog_models("test", [dropped])
+    dropped_digest = document_sha256(dropped)
+    assert dropped_digest in current_model_digests()
+
+    result = apply((original,), "2" * 40)
+    assert result.state == "current"
+    published = {
+        ("recipe", item.publisher, item.slug) for item in reader.snapshot.items
+    }
+    published |= {
+        ("model", model.identity.publisher, model.identity.slug)
+        for model in (
+            ModelDefinition.model_validate(entry.document)
+            for entry in reader.snapshot.catalog_entities
+        )
+    }
+    # Exactly the published documents keep a head: nothing listed is lost.
+    assert active_heads() == published
+    assert dropped_digest not in current_model_digests()
+    # Head state only: the immutable revision stays and still resolves by
+    # digest, so a cached set or an installed recipe that pins it keeps working.
+    with sessions() as session:
+        assert (
+            ModelCacheService._resolve_model_selector_in_session(
+                session, dropped_digest
+            )
+            == dropped_digest
+        )
+    # And the Library stops offering it, as it does a dropped recipe.
+    library.refresh_catalog()
+    assert "dropped-upstream-model" not in {
+        model.identity.slug for model in library.models(limit=100).models
+    }
