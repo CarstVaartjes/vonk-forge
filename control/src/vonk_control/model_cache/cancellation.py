@@ -15,6 +15,7 @@ from ..agent_operation_facts import aware as _aware
 from ..lifecycle import CancelRequested, State, Tick
 from ..lifecycle.evidence import Residue
 from ..model_cache_contract import (
+    CacheOperationKind,
     ModelCacheCancellation,
     ModelCacheCancellationRequest,
     ModelCacheOperationPayload,
@@ -220,11 +221,11 @@ class CancellationMixin:
                     "cancellation target was not found",
                 )
             return False  # gone: a parent waits for nothing
-        if operation.kind != "download":
+        if operation.kind != CacheOperationKind.DOWNLOAD:
             # Only downloads cancel; never let this path retire a removal row.
             raise ModelCacheConflictInvalid(
                 ModelCacheCode.NOT_CANCELLABLE,
-                "model download is not active or cancellation key conflicts",
+                "only a model download can be cancelled",
             )
         payload = cache._payload_or_retire(operation)
         if payload is None:
@@ -249,8 +250,7 @@ class CancellationMixin:
                 )
             return False
         if (
-            operation.kind != "download"
-            or operation.state not in model_cache_states.LIVE
+            operation.state not in model_cache_states.LIVE
             or operation.request_key == cancellation.request_key
         ):
             raise ModelCacheConflictInvalid(
