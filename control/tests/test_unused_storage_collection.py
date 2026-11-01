@@ -5,6 +5,7 @@ Model files retain pressure-only LRU. Every removal rechecks live references.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import threading
@@ -14,6 +15,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from sqlalchemy import Engine, create_engine, event, func, select, update
@@ -75,6 +77,8 @@ from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
 from .test_catalog_revision_collection import NODE, NOW, OLD, Catalog
 from .test_model_cache import _artifact, _download
+from .test_model_removal_decided_by_evidence import _installation
+from .test_run_switch_build_fencing import _direct_parent
 
 A_MODEL = "a" * 64
 AN_IMAGE = "d" * 64
@@ -3788,11 +3792,11 @@ def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
     assert path.exists() and result.images == 0
 
 
-def _world_none(world: Catalog, set_digest: str) -> None:
+def _world_none(world: Catalog, set_digest: str, tmp_path: Path) -> None:
     del world, set_digest
 
 
-def _world_saved_profile(world: Catalog, set_digest: str) -> None:
+def _world_saved_profile(world: Catalog, set_digest: str, tmp_path: Path) -> None:
     del set_digest
     recipe = _head_recipe_naming(world, A_MODEL)
     # The catalog binds an active recipe revision to the model revisions it
@@ -3819,33 +3823,59 @@ def _world_saved_profile(world: Catalog, set_digest: str) -> None:
     _profile(world, "vonk-forge/glm")
 
 
-def _world_active_installation(world: Catalog, set_digest: str) -> None:
-    del set_digest
-    old = world.revision("old", 1)
-    world.revision("old", 2, head="active")
-    installation, _ = world.workload(old, run="running")
+_OTHER_IMAGE = "sha256:" + "e" * 64
+
+
+def _world_active_installation(world: Catalog, set_digest: str, tmp_path: Path) -> None:
+    """A readable installation plan that runs the cached set, with a run live."""
+
+    del tmp_path
+    installation = _installation(world, set_digest)
     with world.sessions.begin() as session:
         row = session.get(RecipeInstallation, installation)
         assert row is not None
-        row.plan = {"model": A_MODEL}
+        # Catalog.workload's image digest equals A_MODEL's hex: keep them apart.
+        plan = dict(row.plan)
+        plan["image_digest"] = _OTHER_IMAGE
+        row.image_digest = _OTHER_IMAGE
+        row.plan = plan
+        run = session.scalar(
+            select(RecipeRun).where(RecipeRun.installation_id == installation)
+        )
+        assert run is not None
+        run.state = "running"
 
 
-def _world_live_job(world: Catalog, set_digest: str) -> None:
-    del set_digest
-    # A Run/Switch job the review cannot read defers the removal; the collector
-    # reads the same job's tokens: both refuse.
+def _switch_job(world: Catalog, set_digest: str, tmp_path: Path, *, state: str) -> None:
+    """The accepted Run/Switch job a real planner stores, naming the cached set."""
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'planner.sqlite'}")
+
+    @event.listens_for(engine, "connect")
+    def _enforce_foreign_keys(connection, _record) -> None:
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    sessions, _planner, parent, _request, _selected = _direct_parent(tmp_path, engine)
+    with sessions() as session:
+        source = session.get(Job, parent.operation_id)
+        assert source is not None
+        payload: dict[str, Any] = copy.deepcopy(source.payload)  # type: ignore[assignment]
+        kind, targets = source.kind, list(source.targets)
+        authority, digest = source.authority_revision, source.payload_digest
+    payload["plan"]["storage"]["artifact_set_sha256"] = set_digest
     stamp = datetime.now(UTC)
     with world.sessions.begin() as session:
         session.add(
             Job(
                 request_id=str(uuid.uuid4()),
-                kind="recipe.run-switch.v2",
-                state="running",
+                kind=kind,
+                state=state,
                 actor="test",
-                authority_revision="r",
-                targets=[],
-                payload_digest="0" * 64,
-                payload={"plan": {"model": A_MODEL}},
+                authority_revision=authority,
+                targets=targets,
+                payload_digest=digest,
+                payload=payload,
                 current_attempt=0,
                 created_at=stamp,
                 updated_at=stamp,
@@ -3853,14 +3883,17 @@ def _world_live_job(world: Catalog, set_digest: str) -> None:
         )
 
 
-def _world_job_ended_an_hour_ago(world: Catalog, set_digest: str) -> None:
-    del set_digest
-    world.job(
-        {"plan": {"model": A_MODEL}}, state="succeeded", updated=datetime.now(UTC)
-    )
+def _world_live_job(world: Catalog, set_digest: str, tmp_path: Path) -> None:
+    _switch_job(world, set_digest, tmp_path, state="running")
 
 
-def _world_held_assignment(world: Catalog, set_digest: str) -> None:
+def _world_job_ended_an_hour_ago(
+    world: Catalog, set_digest: str, tmp_path: Path
+) -> None:
+    _switch_job(world, set_digest, tmp_path, state="succeeded")
+
+
+def _world_held_assignment(world: Catalog, set_digest: str, tmp_path: Path) -> None:
     stamp = datetime.now(UTC)
     with world.sessions.begin() as session:
         session.add(
@@ -3881,14 +3914,13 @@ def _world_held_assignment(world: Catalog, set_digest: str) -> None:
         )
 
 
-def _world_live_download(world: Catalog, set_digest: str) -> None:
+def _world_live_download(world: Catalog, set_digest: str, tmp_path: Path) -> None:
     del set_digest
     with world.sessions.begin() as session:
         for row in session.scalars(select(ModelCacheOperation)):
             row.state = "running"
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
 @pytest.mark.parametrize(
     "build",
     [
@@ -3901,16 +3933,76 @@ def _world_live_download(world: Catalog, set_digest: str) -> None:
         _world_live_download,
     ],
 )
-def test_under_pressure_the_collector_removes_a_model_iff_the_review_shows_no_blockers(
-    world: Catalog, cached, build: Callable[[Catalog, str], None]
+def test_under_pressure_the_collector_never_keeps_a_model_the_review_shows_clear(
+    world: Catalog,
+    cached,
+    tmp_path: Path,
+    build: Callable[[Catalog, str, Path], None],
 ) -> None:
-    """One rule: what eviction keeps is what the removal review blocks. Catches
-    either side growing a reason the other lacks (recency was one), both ways."""
+    """Catches the collector keeping a model while the removal review shows no
+    blockers (recency was one such reason). The other direction, removing what
+    the review blocks, is stopped by the removal's own verify, which runs the
+    review; here it shows as nothing removed."""
 
     service, set_digest = cached
-    build(world, set_digest)
+    build(world, set_digest, tmp_path)
     blocked = bool(service.review_model_removal(A_MODEL).blockers)
 
     result = _inside_window(world, service).collect()
 
     assert (result.models == 0) == blocked, (result.kept, blocked)
+
+
+def test_a_pass_scans_operations_once_for_what_is_live_and_once_for_ordering(
+    world: Catalog, cached, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches the 24 hour operation scan, or the live scan, repeating per
+    removal or per consumer: the pass reads live operations once, the last day
+    once (ordering only), and a removal's verify re-reads live operations once
+    and never the last day."""
+
+    from vonk_control.unused_storage_collection import evidence as collector_evidence
+
+    calls: list[bool] = []
+    original = collector_evidence.operation_tokens
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("recent", True))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(collector_evidence, "operation_tokens", counted)
+    service, _ = cached
+
+    result = _inside_window(world, service).collect()
+
+    assert result.models == 1, result.kept
+    # One live and one last-day scan for the pass, one live scan for the verify.
+    assert calls.count(True) == 1, calls
+    assert calls.count(False) == 2, calls
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_an_image_a_run_that_ended_an_hour_ago_named_is_evicted_last_under_pressure(
+    world: Catalog, tmp_path: Path
+) -> None:
+    """Catches recent use keeping an image, or not ordering it: short by a byte
+    the idle receipt goes and the recently used one stays; short by more and the
+    recently used one goes too."""
+
+    recent = _receipt(tmp_path, "1" * 64)
+    idle = _receipt(tmp_path, "7" * 64)
+    world.job(
+        {"plan": {"image": "1" * 64}},
+        state="succeeded",
+        updated=NOW - timedelta(hours=1),
+    )
+    exact = {"reserve_floor_bytes": 0, "reserve_fraction": 0.0}
+
+    result = _collector(
+        world, image_cache_root=tmp_path, free=100 * GIB - 1, **exact
+    ).collect()
+    assert recent.exists() and not idle.exists() and result.images == 1
+    assert _kept(result, "live operation") == 0
+
+    result = _collector(world, image_cache_root=tmp_path, free=GIB, **exact).collect()
+    assert not recent.exists() and result.images == 1

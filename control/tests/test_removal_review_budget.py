@@ -553,7 +553,7 @@ def _measure(
         raise AssertionError("a removal replayed the 24 hour live scan")
 
     monkeypatch.setattr(catalog_revision_collection, "live_tokens", forbid)
-    monkeypatch.setattr(collector_evidence, "live_tokens", forbid)
+    monkeypatch.setattr(collector_evidence._CollectorEvidence, "read", forbid)
     for name, module in list(sys.modules.items()):
         if name.startswith("vonk_control") and hasattr(
             module, "parse_stored_installation_plan"
