@@ -150,29 +150,40 @@ def watch_worker(
     exit_process: Callable[[int], object] = os._exit,
     interval_seconds: float = 5.0,
     record_step: Callable[[str, datetime], None] | None = None,
-    record_after_seconds: float = WORKER_READINESS_WINDOW_SECONDS / 3,
+    record_after_seconds: float = _READINESS_BEAT_SECONDS,
+    spawn: Callable[[Callable[[], None]], object] | None = None,
 ) -> None:
     """Restart the worker (exit 70) when one step hangs past the timeout.
 
-    A step that outlives ``record_after_seconds`` is also published once, so
-    the platform view names the slow step while the readiness heartbeat waits.
+    A step that outlives ``record_after_seconds`` is also published, so the
+    platform view names the slow step while the readiness heartbeat waits. The
+    verdict is decided first and the write runs on its own daemon thread, so a
+    blocked database never delays the restart. A failed write is retried on
+    the next poll; one write is in flight at a time.
     """
-    recorded = 0
+    recorded = [0]
+    inflight: list[threading.Thread] = []
+
+    def start(work: Callable[[], None]) -> object:
+        thread = threading.Thread(target=work, name="worker-step-record", daemon=True)
+        inflight.append(thread)
+        thread.start()
+        return thread
+
+    launch = spawn or start
     while not stop.wait(interval_seconds):
+        stalled = watchdog.verdict() is Verdict.STALLED
         slow = watchdog.running_longer_than(record_after_seconds)
-        if record_step is not None and slow is not None and slow[0] != recorded:
-            recorded = slow[0]
-            try:
-                record_step(slow[1], slow[2])
-            except Exception as error:  # noqa: BLE001 - reporting must not stop the watchdog
-                log_event(
-                    _LOGGER,
-                    "worker.step_record_failed",
-                    service="control-worker",
-                    step=slow[1],
-                    error=type(error).__name__,
-                )
-        if watchdog.verdict() is not Verdict.STALLED:
+        inflight[:] = [thread for thread in inflight if thread.is_alive()]
+        if (
+            record_step is not None
+            and not stalled
+            and slow is not None
+            and slow[0] != recorded[0]
+            and not inflight
+        ):
+            launch(_publisher(record_step, recorded, *slow))
+        if not stalled:
             continue
         log_event(
             _LOGGER,
@@ -186,6 +197,30 @@ def watch_worker(
         )
         exit_process(70)
         return
+
+
+def _publisher(
+    record_step: Callable[[str, datetime], None],
+    recorded: list[int],
+    serial: int,
+    step: str,
+    started_at: datetime,
+) -> Callable[[], None]:
+    def publish() -> None:
+        try:
+            record_step(step, started_at)
+        except Exception as error:  # noqa: BLE001 - reporting must not stop the watchdog
+            log_event(
+                _LOGGER,
+                "worker.step_record_failed",
+                service="control-worker",
+                step=step,
+                error=type(error).__name__,
+            )
+            return
+        recorded[0] = serial
+
+    return publish
 
 
 def current_worker_instance_id(proc_root: Path = Path("/proc"), pid: int = 1) -> str:
@@ -255,11 +290,18 @@ class WorkerHeartbeatRecorder:
 
     def record_running_step(self, step: str, started_at: datetime) -> None:
         """Publish the step that is still running, so a slow one is named."""
-        from sqlalchemy import update
+        from sqlalchemy import text, update
 
         from .models import ControlProcessHeartbeat
 
         with self._sessions.begin() as session:
+            if session.get_bind().dialect.name == "postgresql":
+                # Reporting never waits long on a lock or a silent peer.
+                for setting in ("statement_timeout", "lock_timeout"):
+                    session.execute(
+                        text("SELECT set_config(:name, '2000ms', true)"),
+                        {"name": setting},
+                    )
             session.execute(
                 update(ControlProcessHeartbeat)
                 .where(ControlProcessHeartbeat.process_kind == "worker")

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, ValidationError
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -129,11 +129,15 @@ class PlatformObserver:
                     .where(
                         ControlProcessHeartbeat.process_kind == "worker",
                         ControlProcessHeartbeat.loop_sequence >= 1,
-                        or_(
-                            ControlProcessHeartbeat.completed_at
-                            >= now - timedelta(seconds=WORKER_READINESS_WINDOW_SECONDS),
-                            ControlProcessHeartbeat.step_started_at
-                            >= now - timedelta(seconds=WORKER_STEP_WINDOW_SECONDS),
+                        # Only the indexed column filters in SQL: the table keeps
+                        # one row per worker process ever started. A step starts
+                        # at most one readiness beat after the last completion,
+                        # so a slow step's row is inside this window too.
+                        ControlProcessHeartbeat.completed_at
+                        >= now
+                        - timedelta(
+                            seconds=WORKER_STEP_WINDOW_SECONDS
+                            + WORKER_READINESS_WINDOW_SECONDS
                         ),
                     )
                     .order_by(ControlProcessHeartbeat.process_instance_id)
@@ -162,7 +166,7 @@ class PlatformObserver:
                 ),
             )
             for row in rows
-            if row.completed_at is not None
+            if row.completed_at is not None and _listed(row, now)
         ]
         observation = PlatformObservation(
             capabilities=self._capabilities.statuses() if self._capabilities else [],
@@ -193,6 +197,19 @@ class PlatformObserver:
 
 def _utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _listed(row: ControlProcessHeartbeat, now: datetime) -> bool:
+    """A fresh heartbeat, or a stale one whose named step started recently."""
+    if row.completed_at is None:
+        return False
+    if _utc(row.completed_at) >= now - timedelta(
+        seconds=WORKER_READINESS_WINDOW_SECONDS
+    ):
+        return True
+    return row.step_started_at is not None and _utc(row.step_started_at) >= now - (
+        timedelta(seconds=WORKER_STEP_WINDOW_SECONDS)
+    )
 
 
 def _is_slow(worker: WorkerRuntimeObservation, now: datetime) -> bool:

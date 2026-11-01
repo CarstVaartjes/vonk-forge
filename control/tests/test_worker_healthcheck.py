@@ -183,7 +183,11 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
 
     now[0] = 9
     watch_worker(
-        watchdog, stop, record_step=recorder.record_running_step, exit_process=print
+        watchdog,
+        stop,
+        record_step=recorder.record_running_step,
+        exit_process=print,
+        spawn=lambda work: work(),
     )
     assert read() == (None, None)
 
@@ -191,7 +195,11 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     waits2 = iter([False, True])
     now[0] = 11
     watch_worker(
-        watchdog, stop, record_step=recorder.record_running_step, exit_process=print
+        watchdog,
+        stop,
+        record_step=recorder.record_running_step,
+        exit_process=print,
+        spawn=lambda work: work(),
     )
     running, started = read()
     assert running == "slow-step"
@@ -200,3 +208,68 @@ def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
     recorder.completed_loop()
     assert read() == (None, None)
     engine.dispose()
+
+
+def _watched(watchdog, polls, **kwargs):
+    import threading
+
+    from vonk_control.worker import watch_worker
+
+    stop = threading.Event()
+    remaining = iter(polls)
+    stop.wait = lambda _interval: next(remaining)  # type: ignore[method-assign]
+    watch_worker(watchdog, stop, **kwargs)
+
+
+def test_failed_step_record_is_retried_on_the_next_poll() -> None:
+    from vonk_control.worker import WorkerWatchdog
+
+    now = [0.0]
+    wall = datetime(2026, 11, 1, tzinfo=UTC)
+    watchdog = WorkerWatchdog(
+        timeout_seconds=180, clock=lambda: now[0], wall_clock=lambda: wall
+    )
+    watchdog.beat("slow-step")
+    now[0] = 11
+    calls: list[str] = []
+
+    def record(step: str, _started: datetime) -> None:
+        calls.append(step)
+        if len(calls) == 1:
+            raise RuntimeError("transient")
+
+    _watched(
+        watchdog,
+        [False, False, False, True],
+        record_step=record,
+        exit_process=print,
+        spawn=lambda work: work(),
+    )
+    assert calls == ["slow-step", "slow-step"]
+
+
+def test_blocked_step_record_never_delays_the_hung_step_restart() -> None:
+    import threading
+
+    from vonk_control.worker import WorkerWatchdog
+
+    now = [0.0]
+    watchdog = WorkerWatchdog(timeout_seconds=180, clock=lambda: now[0])
+    watchdog.beat("hung-step")
+    now[0] = 181
+    release = threading.Event()
+    exits: list[int] = []
+    unblocked_by_exit: list[bool] = []
+
+    def blocked(_step: str, _started: datetime) -> None:
+        # A database that never answers: only the restart ends the wait.
+        unblocked_by_exit.append(release.wait(8))
+
+    def exit_process(code: int) -> None:
+        exits.append(code)
+        release.set()
+
+    _watched(watchdog, [False, True], record_step=blocked, exit_process=exit_process)
+    assert exits == [70]
+    # The restart happened while the write was still blocked.
+    assert unblocked_by_exit in ([True], [])

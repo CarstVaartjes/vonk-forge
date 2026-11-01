@@ -178,3 +178,29 @@ def test_platform_names_the_slow_step_while_the_heartbeat_is_stale(
     assert gone.workers is None
     assert gone.worker_issue == "worker-observation-unavailable"
     engine.dispose()
+
+
+def test_worker_observation_filters_only_on_the_indexed_completed_at(
+    tmp_path, monkeypatch
+) -> None:
+    """The heartbeat table grows per process; step_started_at has no index."""
+    from sqlalchemy import event
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'sql.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    statements: list[str] = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _c, _cur, statement, *_rest: statements.append(statement),
+    )
+    clock = datetime(2026, 11, 1, tzinfo=UTC)
+    PlatformObserver(sessions, clock=lambda: clock).read()
+    heartbeat_selects = [
+        s for s in statements if "FROM control_process_heartbeats" in s
+    ]
+    assert heartbeat_selects
+    assert all("step_started_at >=" not in s for s in heartbeat_selects)
+    assert all("completed_at >=" in s for s in heartbeat_selects)
+    engine.dispose()
