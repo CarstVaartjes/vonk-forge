@@ -76,6 +76,7 @@ MODES = (
     "event-loops",
     "trap-waits",
     "plan-digests",
+    "background-retries",
 )
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
@@ -1571,6 +1572,18 @@ def check_source(
             (line, "plan digest read from the pre-admission plan (use run.plan_digest)")
             for line in replanned_digest_reads(source)
         )
+    if python and path in BACKGROUND_OWNERS and "background-retries" in modes:
+        hits.extend(
+            (
+                line,
+                (
+                    "in-request retry helper in a background owner (resolve once "
+                    "and re-observe on its schedule; residue: core.py "
+                    "_stored_manifest.rebuild)"
+                ),
+            )
+            for line in background_retry_calls(source)
+        )
     if (
         python
         and not is_test
@@ -1765,6 +1778,30 @@ def check_source(
         set(noexit_hits)
         | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
     )
+
+
+# Background owners keep their own re-observation schedule; the in-request retry
+# helpers sleep inside the caller. Known residue, not an allowlist:
+# core.py `_stored_manifest.rebuild` still calls resolve_artifact_set.
+BACKGROUND_OWNERS = frozenset(
+    f"control/src/vonk_control/model_cache/{name}.py"
+    for name in ("revisions", "inventory", "observation", "storage", "repair")
+)
+BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
+
+
+def background_retry_calls(source: str) -> list[int]:
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in BACKGROUND_RETRY_CALLS
+            or isinstance(node.func, ast.Name)
+            and node.func.id in BACKGROUND_RETRY_CALLS
+        )
+    ]
 
 
 def planner_defect_waits(source: str) -> list[int]:

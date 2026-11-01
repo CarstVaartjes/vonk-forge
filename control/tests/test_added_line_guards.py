@@ -1841,3 +1841,22 @@ def test_a_foreground_sleep_under_a_termination_trap_fails(source):
 def test_interruptible_or_untrapped_sleeps_pass(source):
     lines = set(range(1, len(source.splitlines()) + 1))
     assert not check_source(TRAP_PATH, source, lines, modes=("trap-waits",))
+
+
+def test_background_owners_may_not_add_request_retry_calls():
+    source = "def scan(cache):\n    return cache.resolve_artifact_set(model_content_sha256=d)\n"
+    modes = ("background-retries",)
+    owner = "control/src/vonk_control/model_cache/revisions.py"
+    request = "control/src/vonk_control/model_cache/download_admission.py"
+    assert check_source(owner, source, {2}, modes=modes)
+    assert check_source(
+        owner, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
+    assert not check_source(owner, source, {1}, modes=modes)  # not an added line
+    assert not check_source(request, source, {2}, modes=modes)
+    assert not check_source(
+        owner,
+        "cache._resolve_artifact_set_once(model_content_sha256=d)\n",
+        {1},
+        modes=modes,
+    )

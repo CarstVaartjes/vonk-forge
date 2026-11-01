@@ -41,9 +41,10 @@ _REVISION_SCAN_INTERVAL = timedelta(seconds=30)
 
 #: Each set's row and stored manifest (None: damaged and not re-derived), by digest.
 type _StoredSets = dict[str, tuple[ModelCacheSet, ArtifactSetManifest | None]]
-#: Re-observation backoffs, in revision scans: an outcome that may clear soon
-#: (an unreadable row, a missing dependency) and a settled one (a resolved set
-#: that is not held, invalid content) that only an in-place repair can change.
+#: Re-observation backoffs, in revision scans: a stored manifest that does not
+#: read and is not re-derived (retried soon), and a settled binding outcome (an
+#: unreadable row, a missing dependency, a resolved set that is not held) that
+#: only an in-place repair or a later catalog sync can change.
 _OBSERVE_RECHECK_SCANS = (2.0, 3.0)
 _SETTLED_RECHECK_SCANS = (20.0, 40.0)
 
@@ -296,9 +297,11 @@ class RevisionsMixin:
 
         Each unbound model digest is resolved once per pass on a jittered
         re-observation schedule, not with the in-request retry loop: catalogue
-        revision content is immutable, so every outcome is re-observed on the
+        revision content is immutable, so a failed resolve is re-observed on the
         settled schedule (the catalog can repair a row in place), at once when
-        its set becomes held, and on request.
+        its set becomes held, and on request. A missing dependency can resolve
+        after a later catalog-sync commit: it is then picked up on that
+        schedule or at once on a request or download (bounded, typed reason).
         """
         cache = cast("ModelCacheService", self)
         held = {
