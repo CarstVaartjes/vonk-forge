@@ -994,6 +994,35 @@ def test_platform_presents_current_response_contract(workers_available, capsys):
         assert contract.worker_issue in output
 
 
+def test_platform_names_the_slow_worker_step(capsys):
+    from cluster_profiles.generated_control.models.platform_observation import (
+        PlatformObservation,
+    )
+
+    contract = PlatformObservation.from_dict(
+        {
+            "observed_at": "2026-11-01T12:00:00Z",
+            "api": {"source_sha": "a" * 40, "control_contract_sha256": "b" * 64},
+            "workers": [
+                {
+                    "process_instance_id": "c" * 64,
+                    "source_sha": "d" * 40,
+                    "worker_contract_sha256": "e" * 64,
+                    "loop_sequence": 3,
+                    "completed_at": "2026-11-01T11:59:00Z",
+                    "running_step": "catalog-sync",
+                    "step_started_at": "2026-11-01T11:59:30Z",
+                }
+            ],
+            "worker_issue": "worker-step-slow",
+        }
+    )
+    render_payload(contract.to_dict(), "platform")
+    output = capsys.readouterr().out
+    assert "step catalog-sync running since" in output
+    assert "worker-step-slow" in output
+
+
 def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
     # Catches discarding temperature when utilisation is unsupported.
     from vonk_agent_protocol.telemetry import GpuUnavailableReason

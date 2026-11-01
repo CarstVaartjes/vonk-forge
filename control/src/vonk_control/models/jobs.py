@@ -122,3 +122,9 @@ class ControlProcessHeartbeat(Base):
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    #: The step the worker has been running for longer than a few seconds, and
+    #: when it started; cleared by the next completed loop. Names the slow owner.
+    running_step: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    step_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
