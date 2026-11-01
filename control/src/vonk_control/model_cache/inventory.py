@@ -111,7 +111,7 @@ class InventoryMixin:
             # than after every object, so a partially completed operation
             # still reports exact stored bytes without making publication
             # quadratic in the set's own membership.
-            row.verified_bytes = cache._verified_bytes(session, row.artifact_set_sha256)
+            row.verified_bytes = cache._verified_bytes(row.artifact_set_sha256)
             # A manifest that does not read (and cannot be re-derived) lists no
             # artifacts: the entry still reports, and a repair or a new request
             # for the set restores its description.
@@ -215,7 +215,7 @@ class InventoryMixin:
                     manifest = cache._stored_manifest(row)
                     if manifest is None:
                         continue  # unknown set: skipped, the rest reconcile
-                    verified = cache._verified_bytes(session, row.artifact_set_sha256)
+                    verified = cache._verified_bytes(row.artifact_set_sha256)
                     row.verified_bytes = verified
                     if row.state not in {"downloading", "verifying"}:
                         row.state = (

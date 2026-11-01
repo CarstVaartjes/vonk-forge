@@ -227,3 +227,57 @@ def test_the_disk_is_read_for_no_more_candidates_than_the_pass_can_claim(
     finally:
         service.close()
     assert len(due) == 6
+
+
+def test_a_download_with_nothing_to_transfer_is_reached_behind_a_full_pool(
+    postgres_engine, tmp_path: Path, monkeypatch
+) -> None:
+    """Catches the limit spent on queued byte-movers that cannot claim with no slot."""
+    service, sessions, _running, movers = _setup(
+        postgres_engine, tmp_path, monkeypatch, due=5
+    )
+    stored = _admit(service, tmp_path / "stored", f"{99:064x}", b"s" * 4096)
+    with sessions.begin() as session:
+        operation = session.get(ModelCacheOperation, stored)
+        assert operation is not None
+        payload = service._transfer_or_none(operation)
+        assert payload is not None
+        _store_operation_payload(
+            operation,
+            operation.kind,
+            _updated(
+                payload,
+                transfer=payload.transfer.model_copy(update={"total_bytes": 0}),
+            ),
+        )
+    monkeypatch.setattr(service, "_object_is_stored", lambda _spec: True)
+    try:
+        assert service._claim_operations(
+            limit=4, respect_backoff=False, transfer_slots=0
+        ) == [(stored, "download")]
+    finally:
+        service.close()
+    assert len(movers) == 5
+
+
+def test_an_operation_whose_manifest_does_not_read_is_retired(
+    postgres_engine, tmp_path: Path, monkeypatch
+) -> None:
+    """Catches a candidate skipped on every tick instead of ended with a typed reason."""
+    service, sessions, _running, (damaged,) = _setup(
+        postgres_engine, tmp_path, monkeypatch
+    )
+
+    def unreadable(_payload):
+        raise ValueError("manifest does not read")
+
+    monkeypatch.setattr("vonk_control.model_cache.scheduler._manifest_of", unreadable)
+    try:
+        assert service._claim_operations(limit=1, respect_backoff=False) == []
+    finally:
+        service.close()
+    with sessions() as session:
+        operation = session.get(ModelCacheOperation, damaged)
+        assert operation is not None
+        assert operation.state == "failed"
+        assert "persisted-state-damaged" in (operation.last_error or "")

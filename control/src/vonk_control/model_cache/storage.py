@@ -366,7 +366,7 @@ class StorageMixin:
         manifest = cache._stored_manifest(row)
         if manifest is None:
             return  # unknown set: left as it is until it is re-derived
-        row.verified_bytes = cache._verified_bytes(session, set_digest)
+        row.verified_bytes = cache._verified_bytes(set_digest)
         if row.state not in {"downloading", "verifying"}:
             row.state = (
                 "cached"

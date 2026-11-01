@@ -682,15 +682,15 @@ class SchedulerMixin:
 
         No lock and no transaction is held while the files are read: a row that
         cannot be claimed now (live lease, backoff, a cancel being settled) is
-        passed over without a read, the reads cover ``limit`` due candidates (and any lapsed running ones), a
+        passed over without a read, the reads cover ``limit`` candidates this pass can claim (and any lapsed running ones; a transfer with no slot left is neither read nor counted), a
         candidate with no transfer slot left to move bytes gets no need read,
         and what the running transfers still write is read once, for the first
         candidate that would move bytes.
         """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
-        snapshots: list[tuple[str, str, ModelCacheDownloadPayload | None]] = []
-        queued = 0
+        snapshots: list[tuple[str, str, ModelCacheDownloadPayload | None, bool]] = []
+        queued = moving = 0
         with cache._session() as session:
             for operation in session.scalars(
                 select(ModelCacheOperation)
@@ -704,30 +704,46 @@ class SchedulerMixin:
                 .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
             ):
                 row = cache._lifecycle.lifecycle(operation, now)
-                # A running row here has a lapsed lease: the claim lapses it
-                # (bounded by the transfer pool), so it never uses up the limit.
-                if row.state is not State.RUNNING and queued >= limit:
-                    continue
+                running = row.state is State.RUNNING
                 # A running row's backoff is decided after the claim lapses it.
                 if _claim_held(row, now) or (
-                    row.state is not State.RUNNING
-                    and _claim_backing_off(row, now, respect_backoff)
+                    not running and _claim_backing_off(row, now, respect_backoff)
                 ):
                     continue
-                queued += row.state is not State.RUNNING
-                snapshots.append(
-                    (operation.id, operation.kind, cache._transfer_or_none(operation))
+                payload = cache._transfer_or_none(operation)
+                # The payload alone says a transfer moves bytes (no disk read).
+                moves = (
+                    payload is not None
+                    and payload.cancellation is None
+                    and (
+                        operation.kind == CacheOperationKind.REPAIR
+                        or payload.force_refresh
+                        or payload.transfer.total_bytes > 0
+                    )
                 )
+                # With no slot left the claim passes it by, so it neither uses
+                # up the limit nor is read: a download that moves no bytes
+                # behind it is still reached.
+                idle = moves and transfer_slots is not None and moving >= transfer_slots
+                if not idle and not running:
+                    # A running row here has a lapsed lease: the claim lapses it
+                    # (bounded by the transfer pool), so it never uses the limit.
+                    if queued >= limit:
+                        continue
+                    queued += 1
+                    moving += int(moves)
+                snapshots.append((operation.id, operation.kind, payload, idle))
         facts = _ClaimFacts()
-        moving = 0
-        for operation_id, kind, payload in snapshots:
-            fact = _ClaimFact(payload)
+        moved = 0
+        for operation_id, kind, payload, idle in snapshots:
+            fact = _ClaimFact(payload, moves_bytes=idle)
             try:
                 manifest = None if payload is None else _manifest_of(payload)
             except (TypeError, ValueError, ModelCacheError):
                 manifest = None  # the claim retires it
             if (
-                payload is not None
+                not idle
+                and payload is not None
                 and manifest is not None
                 and payload.cancellation is None
             ):
@@ -748,14 +764,14 @@ class SchedulerMixin:
                         transfer = replanned
                 need = None
                 moves = replanned is not None or replaces or transfer.total_bytes > 0
-                if moves and (transfer_slots is None or moving < transfer_slots):
+                if moves and (transfer_slots is None or moved < transfer_slots):
                     if not facts.running_read:
                         with cache._session() as session:
                             rows = cache._running_payloads(session)
                         facts.running = cache._running_needs(rows)
                         facts.running_read = True
                     need = cache._transfer_need(manifest, transfer, replaces=replaces)
-                moving += int(moves)
+                moved += int(moves)
                 fact = _ClaimFact(payload, replanned, moves, need)
             facts.candidates[operation_id] = fact
         return facts

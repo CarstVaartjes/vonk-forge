@@ -92,7 +92,7 @@ class FailureMixin:
         source_status = getattr(error, "source_status", None)
         # The receipts are read before the transaction takes its row locks.
         all_valid = all(cache._object_is_stored(spec) for spec in manifest.artifacts)
-        verified_bytes = cache._verified_bytes_before(set_digest)
+        verified_bytes = cache._verified_bytes(set_digest)
         with cache._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
