@@ -84,6 +84,15 @@ MODES = (
 FIXED_RESERVE = re.compile(
     r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
 )
+# A display title feeding a normalised name builds identity from display text;
+# a title edit then changes behaviour with no new revision (#2009).
+TITLE_IDENTITY = re.compile(
+    r"(?:\b\w+_title|\.title)\b(?!\()\s*\.(?:lower|casefold|replace)\(|slugify\([^)]*title"
+)
+# Search filters compare a title with the query; they name nothing.
+TITLE_IDENTITY_VERDICTS: dict[str, str] = {
+    "control/src/vonk_control/library_projection/views.py": "wanted_search in",
+}
 # Fixed reserves that guard something other than NAS volume space.
 FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
     (
@@ -1649,6 +1658,18 @@ def check_source(
             for line, text in enumerate(source.splitlines(), 1)
             if (match := FIXED_RESERVE.search(text))
             and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "identity" in modes
+        and path.startswith("control/src/")
+    ):
+        marker = TITLE_IDENTITY_VERDICTS.get(path)
+        hits.extend(
+            (line, "name built from a display title; derive it from identity")
+            for line, text in enumerate(source.splitlines(), 1)
+            if TITLE_IDENTITY.search(text) and not (marker and marker in text)
         )
     if (
         python

@@ -1918,3 +1918,28 @@ def test_facts_read_before_the_transaction_pass(call):
         {1, 2, 3, 4},
         modes=("locked-io",),
     )
+
+
+_TITLE_IDENTITY = (
+    "alias = assignment.recipe_title.lower().replace(' ', '-')\n"
+    "slug = slugify(recipe.title)\n"
+    "key = item.identity.title.casefold()\n"
+    "shown = recipe.title.title()\n"
+    "label = f'{assignment.recipe_title} {version}'\n"
+)
+
+
+def test_a_name_built_from_a_display_title_is_flagged() -> None:
+    path = "control/src/vonk_control/fleet_profiles/example.py"
+    for line in (1, 2, 3):
+        assert check_source(path, _TITLE_IDENTITY, {line}, modes=("identity",)), line
+    assert not check_source(path, _TITLE_IDENTITY, {4, 5}, modes=("identity",))
+
+
+def test_a_title_search_filter_is_allowed() -> None:
+    path = "control/src/vonk_control/library_projection/views.py"
+    source = "ok = wanted_search in item.identity.title.casefold()\n"
+    assert not check_source(path, source, {1}, modes=("identity",))
+    assert check_source(
+        path, "x = item.identity.title.casefold()\n", {1}, modes=("identity",)
+    )
