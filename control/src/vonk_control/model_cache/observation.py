@@ -246,7 +246,7 @@ class StorageObserver:
                 }
             with self._cache._session() as session:
                 manifests = [
-                    manifest
+                    (manifest, row.artifact_set_sha256)
                     for row in session.scalars(
                         select(ModelCacheSet).where(
                             ModelCacheSet.artifact_set_sha256.in_(unknown)
@@ -254,10 +254,10 @@ class StorageObserver:
                     )
                     if (manifest := self._cache._stored_manifest(row)) is not None
                 ]
-            for manifest in manifests:
+            for manifest, row_digest in manifests:
                 self.schedule(
                     manifest,
-                    refresh=states[manifest.digest] != ModelCacheSetState.CACHED,
+                    refresh=states[row_digest] != ModelCacheSetState.CACHED,
                 )
         except Exception:  # noqa: BLE001 -- next worker tick retries discovery
             _LOGGER.exception("cache observation discovery failed")

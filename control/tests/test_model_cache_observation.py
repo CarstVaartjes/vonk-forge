@@ -16,12 +16,16 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import RunSwitchCode, WaitReason
+from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control import profile_read_observation
 from vonk_control.categorized_errors import BookkeepingUnknown
 from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.model_cache_contract import CacheManifest, ModelCacheSetState
+from vonk_control.model_cache_contract import (
+    CacheManifest,
+    CacheOperationKind,
+    ModelCacheSetState,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -745,15 +749,22 @@ def test_discovery_corrects_a_row_that_disagrees_with_a_settled_snapshot(
     assert _row_state(sessions, manifest) == expected
 
 
-def test_discovery_marks_a_cached_row_needing_repair_after_flip(observed_cache):
-    """Catches a row flipped to needs-repair staying so while objects are fine."""
+def test_discovery_observes_a_lost_object_under_a_flipped_row(
+    observed_cache, object_touches
+):
+    """Catches a flipped row whose settled snapshot hides a vanished object."""
     cache, sessions, manifest, now = observed_cache
     cache._storage_observer.schedule(manifest)
     _finish(cache, manifest)
+    lost = manifest.artifacts[0].sha256
     _set_row_state(sessions, manifest, ModelCacheSetState.NEEDS_REPAIR)
-    cache._object_path(manifest.artifacts[0].sha256).unlink()
+    cache._object_path(lost).unlink()
+    object_touches.clear()
     now[0] += timedelta(seconds=31)
     _discover_and_join(cache)
+    assert object_touches
+    snapshot = cache._storage_observer._snapshots[manifest.digest]
+    assert not snapshot.objects[lost].available
     assert _row_state(sessions, manifest) == ModelCacheSetState.NEEDS_REPAIR
 
 
@@ -797,4 +808,5 @@ def test_a_lost_object_is_healed_by_reads_and_a_download_is_admitted(observed_ca
         plan_digest=str(preview["plan_digest"]),
         artifact_set_sha256=manifest.digest,
     )
-    assert admitted.state is not None
+    assert admitted.state == LifecycleState.QUEUED
+    assert admitted.kind == CacheOperationKind.DOWNLOAD
