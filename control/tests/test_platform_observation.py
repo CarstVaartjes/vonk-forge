@@ -139,3 +139,37 @@ def test_platform_keeps_controller_heartbeat_ahead_of_capture_clock(tmp_path) ->
     assert observation.workers is not None
     assert observation.workers[0].completed_at == now + timedelta(seconds=2)
     assert observation.workers[0].process_instance_id == "f" * 64
+
+
+def test_platform_names_the_slow_step_while_the_heartbeat_is_stale(
+    tmp_path, monkeypatch
+) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'slow.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    clock = [datetime(2026, 11, 1, tzinfo=UTC)]
+    identity = RuntimeBuildIdentity("b" * 40, "c" * 64, "e" * 64)
+    monkeypatch.setattr(
+        platform_observation, "packaged_runtime_identity", lambda: identity
+    )
+    monkeypatch.setattr(runtime_identity, "packaged_runtime_identity", lambda: identity)
+    recorder = WorkerHeartbeatRecorder(
+        sessions, process_instance_id="f" * 64, clock=lambda: clock[0]
+    )
+    recorder.completed_loop()
+    observer = PlatformObserver(sessions, clock=lambda: clock[0])
+    started = clock[0] + timedelta(seconds=5)
+    recorder.record_running_step("catalog-sync", started)
+    clock[0] += timedelta(seconds=45)
+
+    observation = observer.read()
+    assert observation.worker_issue == "worker-step-slow"
+    assert observation.workers is not None
+    assert observation.workers[0].running_step == "catalog-sync"
+    assert observation.workers[0].step_started_at == started
+
+    clock[0] += timedelta(seconds=200)
+    gone = observer.read()
+    assert gone.workers is None
+    assert gone.worker_issue == "worker-observation-unavailable"
+    engine.dispose()

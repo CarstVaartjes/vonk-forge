@@ -148,3 +148,55 @@ def test_worker_readiness_accepts_controller_heartbeat_ahead_of_clock(tmp_path) 
     with sessions.begin() as session:
         session.add(_heartbeat(completed_at=NOW + timedelta(seconds=2)))
     verify_worker_ready(sessions, process_instance_id=INSTANCE_A, now=NOW)
+
+
+def test_slow_step_is_published_by_the_watchdog_and_cleared_by_the_next_loop(
+    tmp_path,
+) -> None:
+    """A step running past a third of the readiness window is named once."""
+    import threading
+
+    from vonk_control.worker import WorkerWatchdog, watch_worker
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'step.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = [0.0]
+    wall = datetime(2026, 11, 1, tzinfo=UTC)
+    recorder = WorkerHeartbeatRecorder(
+        sessions, process_instance_id="a" * 64, clock=lambda: wall
+    )
+    recorder.completed_loop()
+    watchdog = WorkerWatchdog(
+        timeout_seconds=180, clock=lambda: now[0], wall_clock=lambda: wall
+    )
+    watchdog.beat("slow-step")
+    stop = threading.Event()
+    waits = iter([False, True])
+    stop.wait = lambda _interval: next(waits)  # type: ignore[method-assign]
+
+    def read() -> tuple[str | None, datetime | None]:
+        with sessions() as session:
+            row = session.scalar(select(ControlProcessHeartbeat))
+            assert row is not None
+            return row.running_step, row.step_started_at
+
+    now[0] = 9
+    watch_worker(
+        watchdog, stop, record_step=recorder.record_running_step, exit_process=print
+    )
+    assert read() == (None, None)
+
+    stop.wait = lambda _interval: next(waits2)  # type: ignore[method-assign]
+    waits2 = iter([False, True])
+    now[0] = 11
+    watch_worker(
+        watchdog, stop, record_step=recorder.record_running_step, exit_process=print
+    )
+    running, started = read()
+    assert running == "slow-step"
+    assert started is not None and started.replace(tzinfo=UTC) == wall
+
+    recorder.completed_loop()
+    assert read() == (None, None)
+    engine.dispose()

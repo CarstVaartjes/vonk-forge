@@ -11,6 +11,10 @@ from .models import ControlProcessHeartbeat
 #: How recent the worker's readiness heartbeat must be to count as live.
 WORKER_READINESS_WINDOW_SECONDS = 30
 
+#: One step may run this long before the watchdog restarts the worker; a step
+#: that started within it is still the worker's live work, not a stale record.
+WORKER_STEP_WINDOW_SECONDS = 180
+
 
 def verify_worker_ready(
     sessions,

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter, ValidationError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -26,7 +26,10 @@ from .persisted_waits import read_wait
 from .platform_observation_errors import ObservationCaptureUnavailable
 from .progress_stall import WAITING_STATES, is_stalled, read_stall
 from .strict_json import StrictModel
-from .worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
+from .worker_healthcheck import (
+    WORKER_READINESS_WINDOW_SECONDS,
+    WORKER_STEP_WINDOW_SECONDS,
+)
 
 Source = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -43,6 +46,10 @@ class WorkerRuntimeObservation(StrictModel):
     worker_contract_sha256: Digest | None
     loop_sequence: int = Field(ge=1)
     completed_at: datetime
+    #: A step this worker has been running for more than a few seconds, when it
+    #: started. Set while the step runs; cleared by the next completed loop.
+    running_step: str | None = None
+    step_started_at: datetime | None = None
 
 
 class StalledApplication(StrictModel):
@@ -71,7 +78,11 @@ class PlatformObservation(StrictModel):
     api_source_tree: Source | None = None
     workers: list[WorkerRuntimeObservation] | None
     worker_issue: (
-        Literal["worker-observation-unavailable", "worker-provenance-unavailable"]
+        Literal[
+            "worker-observation-unavailable",
+            "worker-provenance-unavailable",
+            "worker-step-slow",
+        ]
         | None
     )
 
@@ -118,8 +129,12 @@ class PlatformObserver:
                     .where(
                         ControlProcessHeartbeat.process_kind == "worker",
                         ControlProcessHeartbeat.loop_sequence >= 1,
-                        ControlProcessHeartbeat.completed_at
-                        >= now - timedelta(seconds=WORKER_READINESS_WINDOW_SECONDS),
+                        or_(
+                            ControlProcessHeartbeat.completed_at
+                            >= now - timedelta(seconds=WORKER_READINESS_WINDOW_SECONDS),
+                            ControlProcessHeartbeat.step_started_at
+                            >= now - timedelta(seconds=WORKER_STEP_WINDOW_SECONDS),
+                        ),
                     )
                     .order_by(ControlProcessHeartbeat.process_instance_id)
                 )
@@ -140,10 +155,10 @@ class PlatformObserver:
                 source_sha=_readable_source(row.source_sha),
                 worker_contract_sha256=_readable_digest(row.worker_contract_sha256),
                 loop_sequence=row.loop_sequence,
-                completed_at=(
-                    row.completed_at.replace(tzinfo=UTC)
-                    if row.completed_at.tzinfo is None
-                    else row.completed_at.astimezone(UTC)
+                completed_at=_utc(row.completed_at),
+                running_step=row.running_step,
+                step_started_at=(
+                    _utc(row.step_started_at) if row.step_started_at else None
                 ),
             )
             for row in rows
@@ -163,6 +178,8 @@ class PlatformObserver:
             worker_issue=(
                 "worker-observation-unavailable"
                 if not workers
+                else "worker-step-slow"
+                if any(_is_slow(w, now) for w in workers)
                 else "worker-provenance-unavailable"
                 if any(
                     w.source_sha is None or w.worker_contract_sha256 is None
@@ -172,6 +189,17 @@ class PlatformObserver:
             ),
         )
         return CapturedPlatformObservation(identity, observation)
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _is_slow(worker: WorkerRuntimeObservation, now: datetime) -> bool:
+    """Its readiness heartbeat is stale while a named step is still running."""
+    return worker.completed_at < now - timedelta(
+        seconds=WORKER_READINESS_WINDOW_SECONDS
+    )
 
 
 def _stalled_applications(session: Session, now: datetime) -> list[StalledApplication]:

@@ -36,7 +36,10 @@ from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
 from .resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
 from .stall_window import Verdict
-from .worker_healthcheck import WORKER_READINESS_WINDOW_SECONDS
+from .worker_healthcheck import (
+    WORKER_READINESS_WINDOW_SECONDS,
+    WORKER_STEP_WINDOW_SECONDS,
+)
 from .worker_memory_contract import WorkerMemoryComponent
 
 if TYPE_CHECKING:
@@ -48,7 +51,7 @@ _PROCESS_INSTANCE = re.compile(r"[0-9a-f]{64}\Z")
 _LOGGER = logging.getLogger("vonk-control-worker")
 #: The longest one step may run (the pass beats before every step) before the
 #: worker restarts: a hang, not a slow pass.
-_WORKER_WATCHDOG_TIMEOUT_SECONDS = 180
+_WORKER_WATCHDOG_TIMEOUT_SECONDS = WORKER_STEP_WINDOW_SECONDS
 #: A step that takes longer is named by the over-budget alarm.
 _STEP_BUDGET_SECONDS = 10.0
 #: How often the readiness heartbeat is written between the steps of a long
@@ -89,13 +92,19 @@ class WorkerWatchdog:
         *,
         timeout_seconds: float,
         clock: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         if timeout_seconds <= 0:
             raise ValueError("worker watchdog timeout must be positive")
         self._timeout_seconds = timeout_seconds
         self._clock = clock
         self._last_completed = clock()
+        self._wall_clock = wall_clock
         self._step: str | None = None
+        self._step_serial = 0
+        #: (serial, step, monotonic start, wall start): one tuple, so the
+        #: watcher thread never sees a step paired with another's start.
+        self._running: tuple[int, str, float, datetime] | None = None
 
     def beat(self, step: str | None = None) -> None:
         """The pass is turning; ``step`` is the step it starts now, if any."""
@@ -103,6 +112,19 @@ class WorkerWatchdog:
         # Sampling the clock cannot hold the watchdog's observation hostage.
         self._last_completed = self._clock()
         self._step = step
+        self._step_serial += 1
+        self._running = (
+            (self._step_serial, step, self._last_completed, self._wall_clock())
+            if step is not None
+            else None
+        )
+
+    def running_longer_than(self, seconds: float) -> tuple[int, str, datetime] | None:
+        """The step instance running for more than ``seconds``: (id, name, start)."""
+        running = self._running
+        if running is None or self._clock() - running[2] <= seconds:
+            return None
+        return running[0], running[1], running[3]
 
     @property
     def timeout_seconds(self) -> float:
@@ -127,9 +149,29 @@ def watch_worker(
     *,
     exit_process: Callable[[int], object] = os._exit,
     interval_seconds: float = 5.0,
+    record_step: Callable[[str, datetime], None] | None = None,
+    record_after_seconds: float = WORKER_READINESS_WINDOW_SECONDS / 3,
 ) -> None:
-    """Restart the worker (exit 70) when one step hangs past the timeout."""
+    """Restart the worker (exit 70) when one step hangs past the timeout.
+
+    A step that outlives ``record_after_seconds`` is also published once, so
+    the platform view names the slow step while the readiness heartbeat waits.
+    """
+    recorded = 0
     while not stop.wait(interval_seconds):
+        slow = watchdog.running_longer_than(record_after_seconds)
+        if record_step is not None and slow is not None and slow[0] != recorded:
+            recorded = slow[0]
+            try:
+                record_step(slow[1], slow[2])
+            except Exception as error:  # noqa: BLE001 - reporting must not stop the watchdog
+                log_event(
+                    _LOGGER,
+                    "worker.step_record_failed",
+                    service="control-worker",
+                    step=slow[1],
+                    error=type(error).__name__,
+                )
         if watchdog.verdict() is not Verdict.STALLED:
             continue
         log_event(
@@ -208,6 +250,25 @@ class WorkerHeartbeatRecorder:
             heartbeat.worker_contract_sha256 = identity.worker_contract_sha256
             heartbeat.loop_sequence = 0
             heartbeat.completed_at = None
+            heartbeat.running_step = None
+            heartbeat.step_started_at = None
+
+    def record_running_step(self, step: str, started_at: datetime) -> None:
+        """Publish the step that is still running, so a slow one is named."""
+        from sqlalchemy import update
+
+        from .models import ControlProcessHeartbeat
+
+        with self._sessions.begin() as session:
+            session.execute(
+                update(ControlProcessHeartbeat)
+                .where(ControlProcessHeartbeat.process_kind == "worker")
+                .where(
+                    ControlProcessHeartbeat.process_instance_id
+                    == self._process_instance_id
+                )
+                .values(running_step=step[:256], step_started_at=started_at)
+            )
 
     def completed_loop(self) -> None:
         from sqlalchemy import select
@@ -235,6 +296,8 @@ class WorkerHeartbeatRecorder:
             if heartbeat is not None:
                 heartbeat.loop_sequence += 1
                 heartbeat.completed_at = completed_at.astimezone(UTC)
+                heartbeat.running_step = None
+                heartbeat.step_started_at = None
         if missing:
             # A lost readiness projection is repaired after releasing SQL.
             # The next completed loop supplies fresh observation evidence.
@@ -1147,6 +1210,11 @@ if __name__ == "__main__":
         ),
     )
     watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
+    heartbeat_recorder = WorkerHeartbeatRecorder(
+        sessions,
+        process_instance_id=current_worker_instance_id(),
+        clock=clock,
+    )
     worker = assemble_production_worker(
         catalog_sync=catalog_sync,
         enrollment=enrollment,
@@ -1172,11 +1240,7 @@ if __name__ == "__main__":
         recipe_image_parallel_preparations=RECIPE_IMAGE_PARALLEL_PREPARATIONS,
         compiled_plan_provider=execution_plans.compile_installation,
         runtime_image_preparer=prepare_runtime_image_receipt,
-        loop_heartbeat=WorkerHeartbeatRecorder(
-            sessions,
-            process_instance_id=current_worker_instance_id(),
-            clock=clock,
-        ).completed_loop,
+        loop_heartbeat=heartbeat_recorder.completed_loop,
         step_heartbeat=watchdog.beat,
     )
     watchdog_stop = threading.Event()
@@ -1200,6 +1264,7 @@ if __name__ == "__main__":
     watchdog_thread = threading.Thread(
         target=watch_worker,
         args=(watchdog, watchdog_stop),
+        kwargs={"record_step": heartbeat_recorder.record_running_step},
         name="worker-watchdog",
         daemon=True,
     )

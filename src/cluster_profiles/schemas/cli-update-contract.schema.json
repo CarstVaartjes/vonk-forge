@@ -95,6 +95,7 @@
           "enum": [
             "worker-observation-unavailable",
             "worker-provenance-unavailable",
+            "worker-step-slow",
             "worker-source-mixed",
             "worker-contract-mixed",
             "api-worker-contract-unavailable",

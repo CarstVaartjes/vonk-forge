@@ -41,6 +41,7 @@ class CliUpdateContract(StrictModel):
         Literal[
             "worker-observation-unavailable",
             "worker-provenance-unavailable",
+            "worker-step-slow",
             "worker-source-mixed",
             "worker-contract-mixed",
             "api-worker-contract-unavailable",
@@ -76,6 +77,7 @@ def summarize_cli_update_contract(
         Literal[
             "worker-observation-unavailable",
             "worker-provenance-unavailable",
+            "worker-step-slow",
             "worker-source-mixed",
             "worker-contract-mixed",
             "api-worker-contract-unavailable",
@@ -85,6 +87,8 @@ def summarize_cli_update_contract(
     ) = None
     if not workers or observation.worker_issue == "worker-observation-unavailable":
         issue = "worker-observation-unavailable"
+    elif observation.worker_issue == "worker-step-slow":
+        issue = "worker-step-slow"
     elif observation.worker_issue is not None or None in sources or None in contracts:
         issue = "worker-provenance-unavailable"
     elif len(sources) != 1:
