@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState, ProgressPhase
+from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
@@ -40,6 +40,10 @@ from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
     _retry_after_seconds,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheNotFoundInvalid,
+    ModelCacheSelectorAmbiguous,
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
@@ -4540,3 +4544,126 @@ def _admit_fresh_download(service, model_digest, artifact):
 def _finish_cache_removal(service, receipt):
     advance_until_ended(service, receipt.id, rounds=10)
     return service.get_operation(receipt.id)
+
+
+def _cached_model_revision(service, sessions, tmp_path, catalog, *, slug, weight):
+    """Activate one model revision and cache it, then return its revision."""
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug=slug,
+        file_id="weights",
+        file_digest=hashlib.sha256(weight).hexdigest(),
+    )
+    draft = catalog.create_draft(model.model_dump(mode="json"), actor="operator")
+    row = catalog.resolve(draft.id, actor="operator")
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                weight,
+                path="weights.safetensors",
+                model_content_sha256=row.content_digest,
+            )
+        ],
+        model_content_sha256=row.content_digest,
+        request_key=str(uuid.uuid4()),
+    )
+    return row
+
+
+def _drop_heads(sessions, slug):
+    with sessions.begin() as session:
+        for head in session.scalars(
+            select(CatalogDocumentHead).where(CatalogDocumentHead.slug == slug)
+        ):
+            session.delete(head)
+
+
+def test_publisher_slug_selector_without_a_head_resolves_the_cached_revision(
+    cache, tmp_path
+):
+    service, sessions = cache
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    row = _cached_model_revision(
+        service, sessions, tmp_path, catalog, slug="retracted", weight=b"aaa"
+    )
+    _drop_heads(sessions, "retracted")
+    assert service._resolve_model_selector("vonk-forge/retracted") == row.content_digest
+
+
+def test_publisher_slug_selector_without_a_head_and_two_cached_is_ambiguous(
+    cache, tmp_path
+):
+    service, sessions = cache
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    first = _cached_model_revision(
+        service, sessions, tmp_path, catalog, slug="retracted", weight=b"aaa"
+    )
+    updated = _canonical_model(
+        publisher="vonk-forge",
+        slug="retracted",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    second = catalog.revise(
+        first.document_id, updated.model_dump(mode="json"), actor="operator"
+    )
+    catalog.resolve(second.id, actor="operator")
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                b"bbb",
+                path="weights.safetensors",
+                model_content_sha256=second.content_digest,
+            )
+        ],
+        model_content_sha256=second.content_digest,
+        request_key=str(uuid.uuid4()),
+    )
+    _drop_heads(sessions, "retracted")
+    with pytest.raises(ModelCacheSelectorAmbiguous) as caught:
+        service._resolve_model_selector("vonk-forge/retracted")
+    assert sorted(caught.value.candidates) == sorted(
+        [first.content_digest, second.content_digest]
+    )
+
+
+def test_publisher_slug_selector_without_a_head_or_cache_is_missing(cache):
+    service, sessions = cache
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="uncached",
+        file_id="weights",
+        file_digest="c" * 64,
+    )
+    catalog.resolve(
+        catalog.create_draft(model.model_dump(mode="json"), actor="operator").id,
+        actor="operator",
+    )
+    _drop_heads(sessions, "uncached")
+    with pytest.raises(ModelCacheNotFoundInvalid) as caught:
+        service._resolve_model_selector("vonk-forge/uncached")
+    assert caught.value.code == ModelCacheCode.SELECTOR_MISSING
+
+
+def test_publisher_slug_selector_with_a_head_still_follows_the_head(cache, tmp_path):
+    service, sessions = cache
+    catalog = CatalogEntityService(sessions, clock=lambda: NOW)
+    old = _cached_model_revision(
+        service, sessions, tmp_path, catalog, slug="headed", weight=b"aaa"
+    )
+    updated = _canonical_model(
+        publisher="vonk-forge",
+        slug="headed",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    new = catalog.revise(
+        old.document_id, updated.model_dump(mode="json"), actor="operator"
+    )
+    catalog.resolve(new.id, actor="operator")
+    assert service._resolve_model_selector("vonk-forge/headed") == new.content_digest

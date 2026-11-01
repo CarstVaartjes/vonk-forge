@@ -58,6 +58,19 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
+def _is_cached(session: Session, digest: str) -> bool:
+    """Whether a cache set holds this model content digest."""
+
+    return (
+        session.scalar(
+            select(ModelCacheSet.model_content_sha256)
+            .where(ModelCacheSet.model_content_sha256 == digest)
+            .limit(1)
+        )
+        is not None
+    )
+
+
 class ResolutionMixin:
     """Resolution behavior of the cache service."""
 
@@ -257,16 +270,8 @@ class ResolutionMixin:
                     )
                 )
             )
-            if not rows:
-                cached_digests = list(
-                    session.scalars(
-                        select(ModelCacheSet.model_content_sha256).where(
-                            ModelCacheSet.model_content_sha256 == selector
-                        )
-                    )
-                )
-                if cached_digests:
-                    return selector
+            if not rows and _is_cached(session, selector):
+                return selector
             if rows:
                 return selector
         elif re.fullmatch(UUID_PATTERN, selector):
@@ -290,7 +295,6 @@ class ResolutionMixin:
             conditions = [
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.state == "active",
-                active_head_revision(),
             ]
             if publisher is not None:
                 conditions.append(CatalogDocumentRevision.publisher == publisher)
@@ -298,8 +302,21 @@ class ResolutionMixin:
             else:
                 conditions.append(CatalogDocumentRevision.slug == selector)
             rows = list(
-                session.scalars(select(CatalogDocumentRevision).where(*conditions))
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        *conditions, active_head_revision()
+                    )
+                )
             )
+            if not rows:
+                # No head (retracted): the identity's cached revisions still answer.
+                rows = [
+                    row
+                    for row in session.scalars(
+                        select(CatalogDocumentRevision).where(*conditions)
+                    )
+                    if _is_cached(session, row.content_digest)
+                ]
         # A catalog row whose identity digest is damaged cannot be pinned: it is
         # skipped like any row the catalog does not hold, and the rest carry on.
         rows = [row for row in rows if _is_digest(row.content_digest)]
