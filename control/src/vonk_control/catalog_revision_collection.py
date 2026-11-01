@@ -850,6 +850,7 @@ def live_tokens(
     session: Session,
     now: datetime,
     *,
+    recent: bool = True,
     require_complete: bool = False,
     include_removals: bool = True,
     deadline: float | None = None,
@@ -867,6 +868,7 @@ def live_tokens(
         operation_tokens(
             session,
             now,
+            recent=recent,
             require_complete=require_complete,
             deadline=deadline,
             include_removals=include_removals,

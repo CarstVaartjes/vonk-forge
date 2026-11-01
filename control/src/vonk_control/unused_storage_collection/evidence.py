@@ -202,7 +202,7 @@ class _CollectorEvidence:
         pointed_ids = reference.pointed_ids
         return cls(
             reference=reference,
-            live=live_tokens(session, now, include_removals=False),
+            live=live_tokens(session, now, recent=False, include_removals=False),
             # What a pointed recipe can run is every image its document built,
             # including a predecessor's build that a successor reuses.
             pointed_archives=revision_archives(session, pointed_ids)
@@ -241,7 +241,10 @@ class _CollectorEvidence:
                     )
                 )
                 if value is not None
-            ),
+            )
+            # An archive an operation of the last day named was just used: it is
+            # removed last, but it no longer keeps the image from expiring.
+            | operation_tokens(session, now, include_removals=False),
         )
 
 

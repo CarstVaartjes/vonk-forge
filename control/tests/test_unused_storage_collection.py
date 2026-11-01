@@ -16,7 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import Engine, create_engine, event, func, select
+from sqlalchemy import Engine, create_engine, event, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallationState,
@@ -38,6 +38,7 @@ from vonk_control.models import (
     ArtifactDistributionAssignment,
     Base,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
@@ -3735,3 +3736,181 @@ def test_an_unmet_spark_demand_uninstalls_only_as_far_as_the_line(
         NODE, 900 * GIB, source="profile-load", subject="p", reason="x"
     )
     assert relief is not None and relief.code == STORAGE_INSUFFICIENT
+
+
+def _inside_window(world: Catalog, service: ModelCacheService, **kwargs):
+    """A collector whose clock is an hour after the cached model was written, so
+    the last-day window is in play (``_models`` sits past it and hides it)."""
+
+    return _collector(
+        world,
+        model_cache=service,
+        model_cache_root=service._root,
+        now=datetime.now(UTC) + timedelta(hours=1),
+        **kwargs,
+    )
+
+
+def test_a_model_a_finished_operation_named_an_hour_ago_is_evicted_under_pressure(
+    world: Catalog, cached
+) -> None:
+    """Catches a finished download, load or job in the last day keeping a model
+    as 'live operation' while the removal review reports no blockers."""
+
+    service, _ = cached
+    assert not service.review_model_removal(A_MODEL).blockers
+
+    result = _inside_window(world, service).collect()
+
+    assert result.models == 1, result.kept
+    assert _kept(result, "live operation") == 0
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_an_image_a_run_that_ended_an_hour_ago_named_is_not_expired(
+    world: Catalog, tmp_path: Path
+) -> None:
+    """An old receipt whose archive a finished run named an hour ago has no
+    reference but its recency: the expiry pass must not remove it."""
+
+    path = _receipt(tmp_path, AN_IMAGE)
+    free = TOTAL // 2
+    result = _collector(world, image_cache_root=tmp_path, free=free).collect()
+    assert not path.exists() and result.images == 1
+
+    path = _receipt(tmp_path, AN_IMAGE)
+    world.job(
+        {"plan": {"image": AN_IMAGE}},
+        state="succeeded",
+        updated=NOW - timedelta(hours=1),
+    )
+    result = _collector(world, image_cache_root=tmp_path, free=free).collect()
+    assert path.exists() and result.images == 0
+
+
+def _world_none(world: Catalog, set_digest: str) -> None:
+    del world, set_digest
+
+
+def _world_saved_profile(world: Catalog, set_digest: str) -> None:
+    del set_digest
+    recipe = _head_recipe_naming(world, A_MODEL)
+    # The catalog binds an active recipe revision to the model revisions it
+    # names by relational rows; the removal review reads those, not the JSON.
+    model = world.revision("glm-weights", 1, kind="model")
+    with world.sessions.begin() as session:
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == model)
+            .values(content_digest=A_MODEL)
+        )
+        session.add(
+            CatalogRecipeModelReference(
+                recipe_revision_id=recipe,
+                recipe_kind="recipe",
+                selection_id="weights",
+                model_revision_id=model,
+                model_kind="model",
+                model_publisher="vonk-forge",
+                model_slug="glm-weights",
+                model_content_digest=A_MODEL,
+            )
+        )
+    _profile(world, "vonk-forge/glm")
+
+
+def _world_active_installation(world: Catalog, set_digest: str) -> None:
+    del set_digest
+    old = world.revision("old", 1)
+    world.revision("old", 2, head="active")
+    installation, _ = world.workload(old, run="running")
+    with world.sessions.begin() as session:
+        row = session.get(RecipeInstallation, installation)
+        assert row is not None
+        row.plan = {"model": A_MODEL}
+
+
+def _world_live_job(world: Catalog, set_digest: str) -> None:
+    del set_digest
+    # A Run/Switch job the review cannot read defers the removal; the collector
+    # reads the same job's tokens: both refuse.
+    stamp = datetime.now(UTC)
+    with world.sessions.begin() as session:
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="recipe.run-switch.v2",
+                state="running",
+                actor="test",
+                authority_revision="r",
+                targets=[],
+                payload_digest="0" * 64,
+                payload={"plan": {"model": A_MODEL}},
+                current_attempt=0,
+                created_at=stamp,
+                updated_at=stamp,
+            )
+        )
+
+
+def _world_job_ended_an_hour_ago(world: Catalog, set_digest: str) -> None:
+    del set_digest
+    world.job(
+        {"plan": {"model": A_MODEL}}, state="succeeded", updated=datetime.now(UTC)
+    )
+
+
+def _world_held_assignment(world: Catalog, set_digest: str) -> None:
+    stamp = datetime.now(UTC)
+    with world.sessions.begin() as session:
+        session.add(
+            ArtifactDistributionAssignment(
+                plan_digest="3" * 64,
+                node_id=NODE,
+                generation=1,
+                expires_at=stamp + timedelta(hours=6),
+                model_artifact_set_sha256=set_digest,
+                objects=[],
+                oci_image_digest="sha256:" + "5" * 64,
+                oci_image_config_digest="sha256:" + "6" * 64,
+                oci_archive_sha256="2" * 64,
+                state="active",
+                created_at=stamp,
+                updated_at=stamp,
+            )
+        )
+
+
+def _world_live_download(world: Catalog, set_digest: str) -> None:
+    del set_digest
+    with world.sessions.begin() as session:
+        for row in session.scalars(select(ModelCacheOperation)):
+            row.state = "running"
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    "build",
+    [
+        _world_none,
+        _world_saved_profile,
+        _world_active_installation,
+        _world_live_job,
+        _world_job_ended_an_hour_ago,
+        _world_held_assignment,
+        _world_live_download,
+    ],
+)
+def test_under_pressure_the_collector_removes_a_model_iff_the_review_shows_no_blockers(
+    world: Catalog, cached, build: Callable[[Catalog, str], None]
+) -> None:
+    """One rule: what eviction keeps is what the removal review blocks. Catches
+    either side growing a reason the other lacks (recency was one), both ways."""
+
+    service, set_digest = cached
+    build(world, set_digest)
+    blocked = bool(service.review_model_removal(A_MODEL).blockers)
+
+    result = _inside_window(world, service).collect()
+
+    assert (result.models == 0) == blocked, (result.kept, blocked)
