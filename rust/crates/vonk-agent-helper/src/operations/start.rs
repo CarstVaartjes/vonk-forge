@@ -31,6 +31,26 @@ fn omit_container_memory_limit(arguments: &mut Vec<String>, image_index: usize) 
     image_index - 2 * limits.len()
 }
 
+/// The workload shares the host IPC namespace in some creator recipes, so
+/// `/dev/shm` must hold what the role declared (vLLM maps a ~27 GiB table
+/// there). The launch sets `--shm-size` to the memory value; the signed argv
+/// keeps the projected value, which is part of the run identity digest, so a
+/// run started before this change is still adopted as is. Validation already
+/// proved `--memory` and `--shm-size` carry numeric values before the image.
+fn launch_shared_memory_as_declared(arguments: &mut [String], image_index: usize) {
+    let value_of = |arguments: &[String], flag: &str| {
+        arguments[..image_index]
+            .iter()
+            .position(|argument| argument == flag)
+    };
+    if let (Some(memory), Some(shm)) = (
+        value_of(arguments, "--memory"),
+        value_of(arguments, "--shm-size"),
+    ) {
+        arguments[shm + 1] = arguments[memory + 1].clone();
+    }
+}
+
 /// The exit a job reports when the helper itself ended it -- at its deadline or
 /// on the Controller's cancellation (the `timeout(1)` convention). Never a
 /// stand-in for an exit that was not observed.
@@ -209,6 +229,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // The signed wire shape includes the executable once after the image
         // as a validation marker; Docker already receives it via --entrypoint.
         let mut compiled = validated.docker_arguments()?;
+        launch_shared_memory_as_declared(&mut compiled, validated.image_index);
         let image_index = omit_container_memory_limit(&mut compiled, validated.image_index);
         compiled[image_index] = operational_image;
         // Helper-owned launch policy also covers accepted images built before
