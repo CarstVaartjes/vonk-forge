@@ -27,6 +27,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 API_BASE = "https://api.tailscale.com/api/v2"
+FACTORY_CLIENT_ID_VARIABLE = "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID"
+FACTORY_CLIENT_SECRET_VARIABLE = "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET"
+CLEANUP_CLIENT_ID_VARIABLE = "VONK_ACCEPTANCE_TAILNET_CLEANUP_OAUTH_CLIENT_ID"
+CLEANUP_CLIENT_SECRET_VARIABLE = "VONK_ACCEPTANCE_TAILNET_CLEANUP_OAUTH_CLIENT_SECRET"
 ISOLATED_TAILNET_KIND = "isolated-disposable-test"
 SAFE_DNS_NAME = re.compile(r"tail[a-z0-9-]+\.ts\.net\Z")
 SAFE_ID = re.compile(r"[A-Za-z0-9_-]{3,128}\Z")
@@ -185,7 +189,9 @@ def _request(
     return ApiResponse(document=document, etag=etag)
 
 
-def _delete_token_refusal(error: ApiRequestError, request_path: str) -> ApiRequestError:
+def _delete_token_refusal(
+    error: ApiRequestError, request_path: str, client_variable: str
+) -> ApiRequestError:
     """Explain a refused `all`-scoped token exchange for a child deletion.
 
     The API answers a scope refusal on this exchange with the same 403 and the
@@ -203,7 +209,7 @@ def _delete_token_refusal(error: ApiRequestError, request_path: str) -> ApiReque
         "`tailnets` scope, which is why `cleanup` lists the children but cannot "
         "delete them. The 403 body does not distinguish a scope refusal from "
         "any other 403, so verify in the Tailscale admin console (Trust "
-        "credentials) which scopes `VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID` "
+        f"credentials) which scopes `{client_variable}` "
         "actually holds before retrying. An API-only child does not appear in "
         "the admin console, so this API path is its only cleanup route.",
         method=error.method,
@@ -218,6 +224,7 @@ def _oauth_token(
     *,
     scope: str,
     tailnet: str | None = None,
+    client_variable: str = FACTORY_CLIENT_ID_VARIABLE,
 ) -> str:
     """Exchange an OAuth client for an access token.
 
@@ -246,7 +253,7 @@ def _oauth_token(
         )
     except ApiRequestError as error:
         if tailnet is not None and error.status_code == 403:
-            raise _delete_token_refusal(error, request_path) from error
+            raise _delete_token_refusal(error, request_path, client_variable) from error
         raise
     token = response.document.get("access_token")
     if not isinstance(token, str) or not token or any(c in token for c in "\0\r\n"):
@@ -318,6 +325,7 @@ def _child_token_factory(
     client_secret: str,
     *,
     tailnet_id: str | None = None,
+    client_variable: str = FACTORY_CLIENT_ID_VARIABLE,
 ) -> Callable[[], str]:
     """Mint `all`-scoped access tokens for one child tailnet.
 
@@ -330,12 +338,22 @@ def _child_token_factory(
     """
 
     def token() -> str:
-        return _oauth_token(client_id, client_secret, scope="all", tailnet=tailnet_id)
+        return _oauth_token(
+            client_id,
+            client_secret,
+            scope="all",
+            tailnet=tailnet_id,
+            client_variable=client_variable,
+        )
 
     return token
 
 
-def _delete_tailnet(tailnet_id: str, access_token_factory: Callable[[], str]) -> None:
+def _delete_tailnet(
+    tailnet_id: str,
+    access_token_factory: Callable[[], str],
+    budget: RetryBudget | None = None,
+) -> None:
     """Delete exactly one tailnet, with one owner for the DELETE request.
 
     This is the one remaining retry loop outside `_with_retries`: it must keep
@@ -345,6 +363,10 @@ def _delete_tailnet(tailnet_id: str, access_token_factory: Callable[[], str]) ->
     The token is minted per attempt so a retry cannot present an expired
     credential; `delete(state=...)` supplies the child's own lifecycle token and
     `cleanup` supplies a factory-minted token for the child.
+
+    Failure-path callers pass no budget.  The create path passes its shared
+    `RetryBudget`, and the delete then stops with a typed error once another
+    backoff would overrun it, so a slow delete cannot outlast the step.
     """
     if SAFE_ID.fullmatch(tailnet_id) is None:
         raise LifecycleError("disposable tailnet ID is invalid")
@@ -362,6 +384,11 @@ def _delete_tailnet(tailnet_id: str, access_token_factory: Callable[[], str]) ->
                 return
             if not _retryable(error) or attempt == MAX_ATTEMPTS - 1:
                 raise
+            if budget is not None and not budget.allows(_backoff_delay(attempt)):
+                raise LifecycleError(
+                    f"retry budget spent while deleting tailnet {tailnet_id}; "
+                    "it is left in place for the next run"
+                ) from error
             _backoff(attempt)
     raise AssertionError("unreachable")
 
@@ -436,15 +463,61 @@ def _list_organization_tailnets(access_token: str) -> list[dict[str, Any]]:
     return tailnets
 
 
-def _assert_no_stale_children(access_token: str) -> None:
+def _cleanup_credentials() -> tuple[str, str] | None:
+    """Read the optional cleanup client, the only credential allowed `all`.
+
+    The factory client stays create-and-list only.  Unset (or empty) means
+    unconfigured and every caller keeps its refusal; one half set is a
+    misconfiguration and fails closed rather than silently running without it.
+    """
+    client_id = os.environ.get(CLEANUP_CLIENT_ID_VARIABLE, "")
+    client_secret = os.environ.get(CLEANUP_CLIENT_SECRET_VARIABLE, "")
+    if not client_id and not client_secret:
+        return None
+    return (
+        _required_environment(CLEANUP_CLIENT_ID_VARIABLE),
+        _required_environment(CLEANUP_CLIENT_SECRET_VARIABLE),
+    )
+
+
+def _delete_with_cleanup_client(
+    tailnet_id: str, cleanup: tuple[str, str], budget: RetryBudget | None = None
+) -> None:
+    """Delete one child with an `all` token the cleanup client mints for it."""
+    _delete_tailnet(
+        tailnet_id,
+        _child_token_factory(
+            *cleanup,
+            tailnet_id=tailnet_id,
+            client_variable=CLEANUP_CLIENT_ID_VARIABLE,
+        ),
+        budget,
+    )
+
+
+def _assert_no_stale_children(
+    access_token: str,
+    cleanup: tuple[str, str] | None = None,
+    budget: RetryBudget | None = None,
+) -> None:
     """Fail closed while a live run still owns its child tailnet.
 
-    Selection -- not this function -- decides staleness.  Creation never
-    deletes: the child's own state file is the only child-authorized cleanup
-    path, and `create` does not have it.  `cleanup` is the sanctioned
-    child-authorized path for a child whose state file died with its runner.
+    Selection -- not this function -- decides staleness.  Without the cleanup
+    client creation never deletes: the factory credential cannot, and the
+    child's own state file is the only other child-authorized path.  With it,
+    the first selected stale child (name pattern and age gate unchanged) is
+    deleted within the shared budget so a leaked child cannot wedge every
+    release.  One dead run leaves one child, so one deletion per run drains the
+    backlog over later runs and keeps `create` inside its step limit.
     """
     stale = _select_stale_ci_children(_list_organization_tailnets(access_token))
+    if stale and cleanup is not None:
+        tailnet_id, display_name = stale[0]
+        _delete_with_cleanup_client(tailnet_id, cleanup, budget)
+        print(f"Deleted stale disposable CI tailnet {tailnet_id} ({display_name})")
+        if len(stale) > 1:
+            print(f"{len(stale) - 1} more stale CI tailnets remain for later runs")
+        return
     if stale:
         children = ", ".join(f"{tailnet_id} ({name})" for tailnet_id, name in stale)
         raise LifecycleError(
@@ -532,8 +605,8 @@ def _describe_age(age: timedelta) -> str:
 def _factory_credentials() -> tuple[str, str]:
     """Read the repository-secret factory credential pair, or fail closed."""
     return (
-        _required_environment("VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID"),
-        _required_environment("VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET"),
+        _required_environment(FACTORY_CLIENT_ID_VARIABLE),
+        _required_environment(FACTORY_CLIENT_SECRET_VARIABLE),
     )
 
 
@@ -547,6 +620,15 @@ def cleanup(*, child_id: str | None = None) -> None:
     if child_id is not None and SAFE_ID.fullmatch(child_id) is None:
         raise LifecycleError("disposable tailnet ID is invalid")
     factory_id, factory_secret = _factory_credentials()
+    # The cleanup client, when configured, holds the `all` scope the factory
+    # client lacks; otherwise the factory client is tried and refused as before.
+    cleanup_credentials = _cleanup_credentials()
+    delete_id, delete_secret = cleanup_credentials or (factory_id, factory_secret)
+    delete_variable = (
+        CLEANUP_CLIENT_ID_VARIABLE
+        if cleanup_credentials
+        else FACTORY_CLIENT_ID_VARIABLE
+    )
     stale = _select_stale_ci_children(
         _list_organization_tailnets(
             _oauth_token(factory_id, factory_secret, scope="tailnets")
@@ -563,7 +645,12 @@ def cleanup(*, child_id: str | None = None) -> None:
         for tailnet_id, display_name in stale:
             _delete_tailnet(
                 tailnet_id,
-                _child_token_factory(factory_id, factory_secret, tailnet_id=tailnet_id),
+                _child_token_factory(
+                    delete_id,
+                    delete_secret,
+                    tailnet_id=tailnet_id,
+                    client_variable=delete_variable,
+                ),
             )
             deleted += 1
             print(f"Deleted stale disposable CI tailnet {tailnet_id} ({display_name})")
@@ -575,7 +662,10 @@ def cleanup(*, child_id: str | None = None) -> None:
 
 
 def _create_child_tailnet(
-    access_token: str, display_name: str, budget: RetryBudget
+    access_token: str,
+    display_name: str,
+    budget: RetryBudget,
+    cleanup: tuple[str, str] | None = None,
 ) -> ApiResponse:
     """Create the child, surviving a timeout when nothing was created.
 
@@ -583,10 +673,13 @@ def _create_child_tailnet(
     exists server-side while its deletion credentials went to a response we
     never read.  Before every retry the organization listing is observed for
     this run's exact display name (unique per run and attempt).  If the child
-    is there it is left alone and the run stops: creation never deletes, the
-    factory credential cannot delete it (no `all` scope), and a second POST
-    would risk `alreadyExists` or a second child.  Stale cleanup owns it.
+    is there and no cleanup client is configured it is left alone and the run
+    stops: the factory credential cannot delete it (no `all` scope), and a
+    second POST would risk `alreadyExists` or a second child.  Stale cleanup
+    owns it.  With the cleanup client the orphan is deleted once and the create
+    retried, still inside the shared budget.
     """
+    reclaimed = False
 
     def create_once() -> ApiResponse:
         return _request(
@@ -597,16 +690,34 @@ def _create_child_tailnet(
         )
 
     def refuse_if_created() -> None:
+        nonlocal reclaimed
         listing = _with_retries(
             budget, lambda: _list_organization_tailnets(access_token)
         )
         for tailnet in listing:
-            if tailnet.get("displayName") == display_name:
-                raise LifecycleError(
-                    f"Tailscale created the child tailnet {display_name!r} but "
-                    "the response was lost; it is left in place and stale-child cleanup "
-                    "needs the cleanup credential"
-                )
+            if tailnet.get("displayName") != display_name:
+                continue
+            orphan_id = tailnet.get("id")
+            if (
+                cleanup is not None
+                and not reclaimed
+                and isinstance(orphan_id, str)
+                and display_name.startswith(CI_CHILD_DISPLAY_PREFIX)
+            ):
+                reclaimed = True
+                _delete_with_cleanup_client(orphan_id, cleanup, budget)
+                print(f"Deleted orphaned disposable CI tailnet {orphan_id}")
+                if not budget.allows(0):
+                    raise LifecycleError(
+                        "retry budget spent after deleting the orphaned tailnet "
+                        f"{orphan_id}; the create is not retried"
+                    )
+                return
+            raise LifecycleError(
+                f"Tailscale created the child tailnet {display_name!r} but "
+                "the response was lost; it is left in place and stale-child cleanup "
+                f"needs the cleanup credential ({CLEANUP_CLIENT_ID_VARIABLE})"
+            )
 
     return _with_retries(budget, create_once, before_retry=refuse_if_created)
 
@@ -775,18 +886,16 @@ def create(*, display_name: str, github_env: Path, state: Path) -> None:
         raise LifecycleError("disposable tailnet display name is invalid")
     if state.exists() or state.is_symlink():
         raise LifecycleError("disposable tailnet state already exists")
-    factory_id = _required_environment(
-        "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_ID"
-    )
-    factory_secret = _required_environment(
-        "VONK_ACCEPTANCE_TAILNET_FACTORY_OAUTH_CLIENT_SECRET"
-    )
+    factory_id, factory_secret = _factory_credentials()
+    cleanup = _cleanup_credentials()
     budget = RetryBudget()
     token = _with_retries(
         budget, lambda: _oauth_token(factory_id, factory_secret, scope="tailnets")
     )
-    _with_retries(budget, lambda: _assert_no_stale_children(token))
-    response = _create_child_tailnet(token, display_name, budget)
+    _with_retries(
+        budget, lambda: _assert_no_stale_children(token, cleanup, budget)
+    )
+    response = _create_child_tailnet(token, display_name, budget, cleanup)
     document = response.document
     tailnet_id = document.get("id")
     dns_name = document.get("dnsName")
