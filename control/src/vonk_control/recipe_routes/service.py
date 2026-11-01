@@ -685,19 +685,18 @@ class RecipeRouteService:
         )
 
     def maintain(self) -> bool:
-        for _attempt in bounded_attempts():
-            try:
-                return self._maintain_once()
-            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
-                raise
-            except RecipeRouteNotReady:
-                continue
-            except Exception as error:  # noqa: BLE001 - local observation ends within this budget
-                _LOGGER.warning(
-                    "route reconciliation observation is unavailable: %s", error
-                )
-                continue
-        return False
+        # One pass: the durable owner backoff in _maintain_once is the retry.
+        try:
+            return self._maintain_once()
+        except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
+            raise
+        except RecipeRouteNotReady:
+            return False
+        except Exception as error:  # noqa: BLE001 - local observation ends within this pass
+            _LOGGER.warning(
+                "route reconciliation observation is unavailable: %s", error
+            )
+            return False
 
     def _maintain_once(self) -> bool:
         now = _aware(self._clock())

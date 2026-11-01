@@ -13,13 +13,11 @@ from vonk_agent_protocol import (
     AgentOperation,
     RoutePublicationState,
     RunState,
-    SecurityRefusalError,
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
-from ..bounded_retry import bounded_attempts
 from ..litellm import (
     LiteLlmGeneration,
 )
@@ -46,12 +44,10 @@ from .shared import (
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
     RecipeRouteError,
-    RecipeRouteNotReady,
     RecipeRouteSuperseded,
     _aware,
     _Publication,
     _RecipeCandidate,
-    _RecipeRunContended,
     _RecipeWithdrawal,
 )
 
@@ -331,27 +327,11 @@ def maintain(self) -> bool:
     with none open, and records the result conditionally.
     """
 
-    last: Exception | None = None
-    for _attempt in bounded_attempts():
-        try:
-
-            def decide(session: Session) -> bool | _Publication:
-                step = self._maintenance_step_in_session(session)
-                return step
-
-            step = self.decide_publication(decide)
-            if isinstance(step, bool):
-                return step
-            self._execute(step)
-            return True
-        except (SecurityRefusalError, _RecipeRunContended):
-            raise
-        except RecipeRouteNotReady as error:
-            last = error
-        except Exception as error:  # noqa: BLE001
-            last = error
-    assert last is not None
-    raise last
+    step = self.decide_publication(self._maintenance_step_in_session)
+    if isinstance(step, bool):
+        return step
+    self._execute(step)
+    return True
 
 
 def _restore_abandoned_stop_withdrawals(

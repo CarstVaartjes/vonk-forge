@@ -1854,6 +1854,10 @@ def test_background_owners_may_not_add_request_retry_calls():
     )
     assert not check_source(owner, source, {1}, modes=modes)  # not an added line
     assert not check_source(request, source, {2}, modes=modes)
+    routes = "control/src/vonk_control/recipe_routes/withdrawal.py"
+    assert check_source(
+        routes, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
     assert not check_source(
         owner,
         "cache._resolve_artifact_set_once(model_content_sha256=d)\n",

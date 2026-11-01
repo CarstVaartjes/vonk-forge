@@ -2440,3 +2440,41 @@ def test_maintenance_contention_uses_the_typed_wait_schedule(
     assert worker._advance(worker._maintain_routes) is True
     assert len(calls) == 2
     assert worker._route_owner_due is None
+
+
+def _count_maintenance_decisions(service, monkeypatch) -> list[int]:
+    calls = [0]
+
+    def not_ready(_session: Session) -> object:
+        calls[0] += 1
+        raise RecipeRouteNotReady("evidence is not there yet")
+
+    monkeypatch.setattr(service, "_maintenance_step_in_session", not_ready)
+    return calls
+
+
+def test_route_maintenance_decides_once_per_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches in-request retries nested inside the background owner's pass.
+
+    One pass decides once; the durable owner backoff is the only retry.
+    """
+    service, _publisher, _applied, _run_id = setup(tmp_path)
+    calls = _count_maintenance_decisions(service, monkeypatch)
+    assert service.maintain() is False
+    assert calls[0] == 1
+    with service.sessions() as session:
+        assert _publication_owner(session).next_action_at is not None
+
+
+def test_withdrawal_maintenance_raises_after_one_decision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.recipe_routes import withdrawal as withdrawal_steps
+
+    service, _publisher, _applied, _run_id = setup(tmp_path)
+    calls = _count_maintenance_decisions(service, monkeypatch)
+    with pytest.raises(RecipeRouteNotReady):
+        withdrawal_steps.maintain(service)
+    assert calls[0] == 1

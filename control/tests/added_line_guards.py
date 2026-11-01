@@ -1786,7 +1786,7 @@ def check_source(
 BACKGROUND_OWNERS = frozenset(
     f"control/src/vonk_control/model_cache/{name}.py"
     for name in ("revisions", "inventory", "observation", "storage", "repair")
-)
+) | {"control/src/vonk_control/recipe_routes/withdrawal.py"}
 BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
 
 
