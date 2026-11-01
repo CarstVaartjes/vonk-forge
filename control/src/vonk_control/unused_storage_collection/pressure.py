@@ -195,7 +195,6 @@ def _relieve(
     self: UnusedStorageCollector,
     pressure: _Pressure,
     evidence: _CollectorEvidence,
-    deadline: float,
     kept: Counter[str],
     attempted: dict[tuple[str, str], bool],
 ) -> _Outcome:
@@ -232,6 +231,7 @@ def _relieve(
     target = pressure.line_need if unmet else pressure.need
     ordered = _eviction_order(items)
     queued = 0
+    reached = False
     measured_removal = 0
     for item in ordered:
         if queued >= target or outcome.stopping:
@@ -239,12 +239,12 @@ def _relieve(
             break
         done = attempted.get((item.kind, item.key))
         if done is None:
-            if time.monotonic() > deadline:
-                kept[f"{item.kind}: sweep budget"] += 1
-                continue
-            done = attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome.removed, attempted
+            done = self._remove_within_budget(
+                item, kept, outcome.removed, attempted, reached
             )
+            if done is None:
+                continue
+            reached = True
         if done:
             queued += item.freeable
             # Shared objects stay in the model store until the agent's LRU
@@ -267,6 +267,34 @@ def _relieve(
     elif not outcome.stopping:  # else evicting: removal follows the Stop
         outcome.outcome = "nothing_removable"
     return outcome
+
+
+def _remove_within_budget(
+    self: UnusedStorageCollector,
+    item: _Item,
+    kept: Counter[str],
+    removed: Counter[str],
+    attempted: dict[tuple[str, str], bool],
+    reached: bool,
+) -> bool | None:
+    """Remove ``item`` and record it; None when the pass's attempt budget is spent.
+
+    One budget serves the whole pass and counts only time spent in removal
+    attempts, never an inventory: a scope's first attempt always runs, later
+    ones get what remains.
+    """
+
+    if reached and self._removal_seconds > self._budget_seconds:
+        kept[f"{item.kind}: sweep budget"] += 1
+        return None
+    started = time.monotonic()
+    try:
+        done = attempted[(item.kind, item.key)] = self._remove(
+            item, kept, removed, attempted
+        )
+    finally:
+        self._removal_seconds += time.monotonic() - started
+    return done
 
 
 def _check_round(

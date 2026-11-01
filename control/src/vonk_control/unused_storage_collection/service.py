@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
@@ -58,6 +57,7 @@ from .pressure import (
     _reclaim_blobs,
     _relieve,
     _remove,
+    _remove_within_budget,
 )
 from .references import (
     _installation_kept,
@@ -130,6 +130,7 @@ class UnusedStorageCollector:
         self._scan_interval = scan_interval
         self._cooldown = cooldown
         self._due_at: datetime | None = None
+        self._removal_seconds = 0.0
         self._rounds: dict[str, _Round] = {}
         self._paused_until: dict[str, datetime] = {}
         self._last_outcome: dict[str, str] = {}
@@ -200,19 +201,17 @@ class UnusedStorageCollector:
         now = self._clock()
         self._stopping.clear()
         self._refused.clear()
+        self._removal_seconds = 0.0
         pressures = self._pressures(now)
         with self._sessions() as session:
             evidence = _CollectorEvidence.read(session, now)
-        # The budget starts after the inventory so every pass reaches an item.
-        deadline = time.monotonic() + self._budget_seconds
         kept: Counter[str] = Counter()
         # An installation on two Sparks is one removal for both of them.
         attempted: dict[tuple[str, str], bool] = {}
         outcomes = [
-            self._relieve(pressure, evidence, deadline, kept, attempted)
-            for pressure in pressures
+            self._relieve(pressure, evidence, kept, attempted) for pressure in pressures
         ]
-        expired = self._expire(evidence, deadline, kept, attempted)
+        expired = self._expire(evidence, kept, attempted)
         if expired.removed.total():
             outcomes.append(expired)
         if any("sweep budget" in reason for reason in kept):
@@ -248,7 +247,6 @@ class UnusedStorageCollector:
     def _expire(
         self,
         evidence: _CollectorEvidence,
-        deadline: float,
         kept: Counter[str],
         attempted: dict[tuple[str, str], bool],
     ) -> _Outcome:
@@ -291,15 +289,18 @@ class UnusedStorageCollector:
                 for item in self._image_items(evidence, Counter())
                 if not item.recent and item.last_used < evidence.reference.cutoff
             )
+        reached = False
         for item in items:
             if (item.kind, item.key) in attempted:
                 continue
-            if time.monotonic() > deadline:
-                kept[f"{item.kind}: sweep budget"] += 1
+            if (
+                self._remove_within_budget(
+                    item, kept, outcome.removed, attempted, reached
+                )
+                is None
+            ):
                 continue
-            attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome.removed, attempted
-            )
+            reached = True
         if outcome.removed["image"]:
             self._reclaim_blobs()
         return outcome
@@ -511,6 +512,7 @@ class UnusedStorageCollector:
     _pressure = _pressure
     _nas_filesystems = _nas_filesystems
     _relieve = _relieve
+    _remove_within_budget = _remove_within_budget
     _check_round = _check_round
     _remove = _remove
     _reclaim_blobs = _reclaim_blobs

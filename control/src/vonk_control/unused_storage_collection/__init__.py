@@ -146,5 +146,4 @@ from .service import log_event as log_event
 from .service import select as select
 from .service import sessionmaker as sessionmaker
 from .service import spark_scope as spark_scope
-from .service import time as time
 from .service import timedelta as timedelta
