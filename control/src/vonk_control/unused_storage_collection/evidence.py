@@ -12,7 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from ..artifact_reference_scan import _selectors_revisions
-from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
+from ..catalog_revision_collection import GRACE, operation_tokens, plan_tokens, tokens
 from ..content_identity import catalog_selector_membership
 from ..models import (
     ArtifactDistributionAssignment,
@@ -184,9 +184,11 @@ class _Evidence:
 class _CollectorEvidence:
     """The reference core plus what only the background collector may scan.
 
-    ``live`` replays 24 hours of jobs, profile applications and model
-    operations; no request path may build this (guarded in
-    ``test_principle_guards``).
+    ``live`` is the reference core's live operations plus what installations,
+    runs and builds still name. The ordering sets (``recent_sets``,
+    ``recent_archives``) replay the last 24 hours and exist only for the sweep's
+    ordering; a verify under the gate reads ``ordering=False`` and leaves them
+    empty. No request path may build this (guarded in ``test_principle_guards``).
     """
 
     reference: _Evidence
@@ -196,13 +198,49 @@ class _CollectorEvidence:
     recent_archives: frozenset[str]
 
     @classmethod
-    def read(cls, session: Session, now: datetime) -> _CollectorEvidence:
+    def read(
+        cls, session: Session, now: datetime, *, ordering: bool = True
+    ) -> _CollectorEvidence:
         reference = _Evidence.read(session, now)
         cutoff = reference.cutoff
         pointed_ids = reference.pointed_ids
+        recent_sets: frozenset[str] = frozenset()
+        recent_archives: frozenset[str] = frozenset()
+        if ordering:
+            recent_sets = frozenset(
+                session.scalars(
+                    select(ArtifactDistributionAssignment.model_artifact_set_sha256)
+                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
+                    .distinct()
+                )
+            )
+            recent_archives = (
+                frozenset(
+                    session.scalars(
+                        select(ArtifactDistributionAssignment.oci_archive_sha256)
+                        .where(ArtifactDistributionAssignment.updated_at > cutoff)
+                        .distinct()
+                    )
+                )
+                | frozenset(
+                    value
+                    for value in session.scalars(
+                        select(RecipeBuild.oci_layout_sha256).where(
+                            or_(
+                                RecipeBuild.updated_at > cutoff,
+                                builds_in_flight(now),
+                            )
+                        )
+                    )
+                    if value is not None
+                )
+                # An archive an operation of the last day named was just used:
+                # removed last, but it no longer keeps the image from expiring.
+                | operation_tokens(session, now, include_removals=False)
+            )
         return cls(
             reference=reference,
-            live=live_tokens(session, now, include_removals=False),
+            live=reference.operations | plan_tokens(session, now),
             # What a pointed recipe can run is every image its document built,
             # including a predecessor's build that a successor reuses.
             pointed_archives=revision_archives(session, pointed_ids)
@@ -216,32 +254,8 @@ class _CollectorEvidence:
                 if value is not None
             )
             | reference.pinned,
-            recent_sets=frozenset(
-                session.scalars(
-                    select(ArtifactDistributionAssignment.model_artifact_set_sha256)
-                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
-                    .distinct()
-                )
-            ),
-            recent_archives=frozenset(
-                session.scalars(
-                    select(ArtifactDistributionAssignment.oci_archive_sha256)
-                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
-                    .distinct()
-                )
-            )
-            | frozenset(
-                value
-                for value in session.scalars(
-                    select(RecipeBuild.oci_layout_sha256).where(
-                        or_(
-                            RecipeBuild.updated_at > cutoff,
-                            builds_in_flight(now),
-                        )
-                    )
-                )
-                if value is not None
-            ),
+            recent_sets=recent_sets,
+            recent_archives=recent_archives,
         )
 
 

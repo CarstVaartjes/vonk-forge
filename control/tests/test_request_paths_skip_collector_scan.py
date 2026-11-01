@@ -45,7 +45,7 @@ def test_fleet_review_accept_inventory_and_load_review_skip_the_24_hour_scan(
         obj = ModelStoreObject(sha256=path.name, bytes=path.stat().st_size)
         inventory(world.sessions, NODE, now, [obj])
         monkeypatch.setattr(catalog_revision_collection, "live_tokens", scan)
-        monkeypatch.setattr(collector_evidence, "live_tokens", scan)
+        monkeypatch.setattr(collector_evidence._CollectorEvidence, "read", scan)
         review = cache.review_fleet_model_removal(selector)
         assert review.fleet is not None and review.fleet.nas_remove
         accepted = cache.remove_fleet_model_selector(

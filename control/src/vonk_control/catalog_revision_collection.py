@@ -856,13 +856,6 @@ def live_tokens(
 ) -> frozenset[str]:
     """Operation tokens plus what every installation, run and build still names."""
 
-    sources = (
-        select(RecipeInstallation.plan).where(
-            RecipeInstallation.state != InstallationState.UNINSTALLED
-        ),
-        select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
-        select(RecipeBuild.plan).where(builds_in_flight(now)),
-    )
     found: set[str] = set(
         operation_tokens(
             session,
@@ -872,6 +865,29 @@ def live_tokens(
             include_removals=include_removals,
         )
     )
+    found |= plan_tokens(
+        session, now, require_complete=require_complete, deadline=deadline
+    )
+    return frozenset(found)
+
+
+def plan_tokens(
+    session: Session,
+    now: datetime,
+    *,
+    require_complete: bool = False,
+    deadline: float | None = None,
+) -> frozenset[str]:
+    """What every installation, run and build still names (no operations)."""
+
+    sources = (
+        select(RecipeInstallation.plan).where(
+            RecipeInstallation.state != InstallationState.UNINSTALLED
+        ),
+        select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
+        select(RecipeBuild.plan).where(builds_in_flight(now)),
+    )
+    found: set[str] = set()
     for statement in sources:
         found |= streamed_tokens(
             session, statement, require_complete=require_complete, deadline=deadline
@@ -1028,6 +1044,7 @@ __all__ = [
     "live_tokens",
     "operation_tokens",
     "pinned_by_heads",
+    "plan_tokens",
     "streamed_tokens",
     "tokens",
 ]
