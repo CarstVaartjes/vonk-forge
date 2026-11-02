@@ -15,10 +15,13 @@ from dataclasses import replace
 
 import pytest
 from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
-from vonk_agent_protocol.swap import GIB, SWAP_POLICY
+from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.resource_planning import (
     PLATFORM_MEMORY_FLOOR_BYTES,
+    MemoryReservationTotals,
     PlannedStopRelease,
+    SwapCapacity,
+    memory_capacity_snapshot,
     plan_capacity,
 )
 
@@ -129,3 +132,43 @@ def test_a_declared_swap_minimum_beyond_the_largest_setting_waits_for_swap() -> 
     (swap,) = (r for r in plan.reasons if r.swap is not None)
     assert swap.swap is not None
     assert swap.swap.needed_setting_bytes == SWAP_POLICY.maximum_gib * GIB
+
+
+def _with_swap(swap: SwapCapacity):
+    return memory_capacity_snapshot(
+        "rank-0",
+        "unified",
+        host=(_SPARK_POOL, _FREE),
+        accelerator=(_SPARK_POOL, _FREE),
+        reservations=MemoryReservationTotals({}, {}, {}),
+        memory_pool="shared",
+        evidence_state="fresh",
+        swap=swap,
+    )
+
+
+@pytest.mark.parametrize(
+    "swap",
+    [
+        # Swap in use stays non-zero on a real Spark.
+        SwapCapacity(total_bytes=SWAP_POLICY.maximum_gib * GIB, used_bytes=5 * GIB),
+        # SwapTotal a page short of the setting (the kernel leaves out a header).
+        SwapCapacity(total_bytes=SWAP_POLICY.maximum_gib * GIB - 4096),
+    ],
+    ids=["swap-in-use", "page-short"],
+)
+def test_a_cut_swap_rise_is_admitted_once_the_setting_is_reached(swap) -> None:
+    rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
+    declared = replace(_declared_demand(10 * GIB), load_overshoot_bytes=rise)
+    plan = _plan(declared, _with_swap(swap))
+    assert plan.allowed, [r.detail for r in plan.reasons]
+    assert _blocker_codes(plan) == []
+
+
+def test_a_cut_swap_rise_waits_until_the_setting_is_reached() -> None:
+    rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
+    declared = replace(_declared_demand(10 * GIB), load_overshoot_bytes=rise)
+    plan = _plan(
+        declared, _with_swap(SwapCapacity(total_bytes=64 * GIB, used_bytes=GIB))
+    )
+    assert _blocker_codes(plan) == [ResourceBlockerCode.INSUFFICIENT_SWAP]

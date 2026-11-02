@@ -170,6 +170,24 @@ def _tried_swap_need(demand: ResourceDemand) -> tuple[int, int, bool]:
     return rise, minimum, clamped
 
 
+def _swap_carries(demand: ResourceDemand, swap: SwapCapacity, *, in_use: bool) -> bool:
+    """Whether the Spark's active swap carries the load a try needs.
+
+    A rise cut to the largest setting is an estimate: it asks only that the
+    swap has reached that setting (the same ``swap_reaches`` rule), because
+    swap in use or a page short of the setting would otherwise never clear.
+    The guard decides the rest. An uncut rise must fit the usable swap beside
+    what other loads hold (and, before a stop, what is in use).
+    """
+
+    rise, minimum, _clamped = _tried_swap_need(demand)
+    if rise < demand.load_overshoot_bytes:
+        return swap_reaches(swap.total_bytes, SWAP_POLICY.maximum_gib * GIB)
+    return rise + swap.held_bytes + (
+        swap.used_bytes if in_use else 0
+    ) <= usable_swap_bytes(swap.total_bytes) and swap_reaches(swap.total_bytes, minimum)
+
+
 def _load_swap_reason(
     node_id: str, demand: ResourceDemand, capacity: CapacitySnapshot | None
 ) -> tuple[ResourceReason, ...]:
@@ -202,9 +220,7 @@ def _load_swap_reason(
         return tuple(reasons)
     swap = capacity.swap
     usable = usable_swap_bytes(swap.total_bytes)
-    if rise + swap.held_bytes + swap.used_bytes <= usable and swap_reaches(
-        swap.total_bytes, minimum
-    ):
+    if _swap_carries(demand, swap, in_use=True):
         return tuple(reasons)
     setting = min(
         SWAP_POLICY.maximum_gib * GIB,
@@ -268,10 +284,7 @@ def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
     before the stop, and the run that would be stopped keeps serving.
     """
 
-    rise, minimum, _clamped = _tried_swap_need(demand)
-    return rise + swap.held_bytes <= usable_swap_bytes(
-        swap.total_bytes
-    ) and swap_reaches(swap.total_bytes, minimum)
+    return _swap_carries(demand, swap, in_use=False)
 
 
 def plan_capacity(
@@ -298,14 +311,20 @@ def plan_capacity(
             node = replace(
                 node,
                 allowed=node.allowed
-                and not any(reason.severity == "blocker" for reason in found),
+                and not any(
+                    reason.severity == ProfileReasonSeverity.BLOCKER.value
+                    for reason in found
+                ),
                 reasons=(*node.reasons, *found),
             )
         nodes.append(node)
     return CapacityPlan(
         tuple(nodes),
         memory.allowed
-        and not any(reason.severity == "blocker" for reason in swap_reasons),
+        and not any(
+            reason.severity == ProfileReasonSeverity.BLOCKER.value
+            for reason in swap_reasons
+        ),
         memory.stop_before_prepare,
         (*memory.reasons, *swap_reasons),
     )
@@ -523,7 +542,8 @@ def _plan_memory_capacity(
             and available - occupied - memory_floor_bytes > 0
         )
         allowed = (tried or (after_fit if release else current_fit)) and not any(
-            reason.severity == "blocker" for reason in node_reasons
+            reason.severity == ProfileReasonSeverity.BLOCKER.value
+            for reason in node_reasons
         )
         if tried:
             node_reasons.append(

@@ -4595,7 +4595,8 @@ def test_switch_tries_an_estimate_above_an_idle_spark_as_its_only_claim(
     plan = service.preview(request, actor="admin")
     assert plan.allowed
     node = plan.fit_current.nodes[0]
-    # The try claims all free memory above the floor and keeps the floor.
+    # The try claims the Spark less its floor (total - floor): the estimate cut
+    # to what the Spark can hold, leaving the floor.
     assert node.memory_required_bytes == total - floor
     assert node.memory_free_after_bytes == floor
 

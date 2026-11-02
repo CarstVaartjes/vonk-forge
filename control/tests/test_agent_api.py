@@ -2855,31 +2855,11 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
             json={"observed_at": observed_at.isoformat(), "runs": list(runs)},
         )
 
-    from vonk_agent_protocol.failure_evidence import (
-        FailureDiagnostics,
-        FailureLogTail,
-        FailureProperty,
-    )
+    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
-    empty = FailureLogTail(
-        text="", truncated=False, dropped_bytes=None, dropped_lines=None
-    )
-    diagnostics = FailureDiagnostics(
-        collected_at=clock.now.isoformat(),
-        phase="workload.host_memory_guard",
-        category="capacity",
-        stdout=empty,
-        stderr=empty,
-        versions=[],
-        sandbox=[],
-        storage=[],
-        collector_errors=[],
-        preflight=[
-            FailureProperty(name="reason", value="workload.host_memory_exhausted"),
-            FailureProperty(name="exit_cause", value="host_memory_exhausted"),
-            FailureProperty(name="mem_available_bytes", value="1"),
-        ],
-    )
+    from .host_memory_guard_support import guard_diagnostics
+
+    diagnostics = guard_diagnostics(clock.now.isoformat())
     run: dict[str, object] = {
         "run_id": run_id,
         "run_generation": 2,

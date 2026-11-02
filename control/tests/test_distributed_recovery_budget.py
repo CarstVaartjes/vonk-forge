@@ -14,6 +14,7 @@ from vonk_control.distributed_recovery import (
 )
 from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 
+from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
@@ -481,30 +482,7 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
 
 
 def _guard_diagnostics() -> dict:
-    from vonk_agent_protocol.failure_evidence import (
-        FailureDiagnostics,
-        FailureLogTail,
-        FailureProperty,
-    )
-
-    empty = FailureLogTail(
-        text="", truncated=False, dropped_bytes=None, dropped_lines=None
-    )
-    return FailureDiagnostics(
-        collected_at=NOW.isoformat(),
-        phase="workload.host_memory_guard",
-        category="capacity",
-        stdout=empty,
-        stderr=empty,
-        versions=[],
-        sandbox=[],
-        storage=[],
-        collector_errors=[],
-        preflight=[
-            FailureProperty(name="reason", value="workload.host_memory_exhausted"),
-            FailureProperty(name="exit_cause", value="host_memory_exhausted"),
-        ],
-    ).model_dump(mode="json")
+    return guard_diagnostics(NOW.isoformat()).model_dump(mode="json")
 
 
 @pytest.mark.parametrize("guard_stopped", [True, False])

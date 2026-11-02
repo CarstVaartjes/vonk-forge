@@ -1,15 +1,24 @@
 """Current bounded failure diagnostics shared by agent and Controller."""
 
+import json
 from datetime import datetime
+from importlib.resources import files
 from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from .lifecycle_vocabulary import FailureCode
 from .page_cache import PageCacheDropEvidence
 from .wire_model import WireModel
 
 MAX_DROPPED_COUNT = 2**64 - 1
+
+#: The key of a process-exit fact naming the cause (Rust ``EXIT_CAUSE_FIELD``).
+EXIT_CAUSE_FIELD = "exit_cause"
+#: The Rust ``ExitCause::HostMemoryExhausted.token()``, from the shared vector
+#: the Rust tests prove equal to it.
+HOST_MEMORY_EXHAUSTED_TOKEN: str = json.loads(
+    files(__package__).joinpath("vectors/exit-causes-v1.json").read_text("utf-8")
+)["tokens"]["HostMemoryExhausted"]
 
 
 def add_known_dropped_bytes(prior: int | None, additional: int) -> int | None:
@@ -71,10 +80,14 @@ class FailureDiagnostics(WireModel):
 
     @property
     def host_memory_exhausted(self) -> bool:
-        """Whether the host memory guard stopped the workload (R1-R5)."""
+        """Whether the host memory guard stopped the workload (R1-R5).
+
+        The guard writes the exit-cause fact (and no ``reason``) as a preflight
+        property; its token is the Rust ``ExitCause::HostMemoryExhausted`` one,
+        read from the shared vector.
+        """
         return any(
-            item.name == "reason"
-            and item.value == FailureCode.WORKLOAD_HOST_MEMORY_EXHAUSTED
+            item.name == EXIT_CAUSE_FIELD and item.value == HOST_MEMORY_EXHAUSTED_TOKEN
             for item in self.preflight
         )
 
