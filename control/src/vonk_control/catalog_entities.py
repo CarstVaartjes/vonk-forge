@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -188,7 +189,63 @@ class CatalogEntityService:
                 )
                 if row.id in heads:
                     problems.append(_build_policy_problem(row, error))
+        self._refresh_model_projections()
         return tuple(problems)
+
+    def _refresh_model_projections(self) -> None:
+        """Re-derive an active Model projection written under an earlier contract.
+
+        Same discipline as the recipe pass: every row is checked without a lock;
+        only a row that does not read as a current projection is locked and
+        written, in its own short transaction. An unreadable row is left alone.
+        """
+        with self._read() as session:
+            rows = list(
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                        CatalogDocumentRevision.state == "active",
+                    )
+                )
+            )
+        for observed in rows:
+            try:
+                ModelRevisionProjection.model_validate_json(
+                    canonical_message(observed.projected)
+                )
+                continue
+            except (CatalogRevisionContractError, TypeError, ValueError):
+                pass
+            try:
+                with self._write() as session:
+                    row = session.scalar(
+                        select(CatalogDocumentRevision)
+                        .where(
+                            CatalogDocumentRevision.id == observed.id,
+                            CatalogDocumentRevision.state == "active",
+                        )
+                        .with_for_update(skip_locked=True)
+                        .execution_options(populate_existing=True)
+                    )
+                    if row is None:
+                        continue  # gone, superseded or busy: the next sync observes it
+                    projected = rederive_projection(
+                        row.projected, read_catalog_document(row)
+                    )
+                    session.execute(
+                        update(CatalogDocumentRevision)
+                        .where(CatalogDocumentRevision.id == row.id)
+                        .values(
+                            projected=write_catalog_projection(projected, kind=row.kind)
+                        )
+                    )
+                    session.expire(row, ["projected"])
+            except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
+                _LOGGER.warning(
+                    "model projection refresh deferred for revision %s: %s",
+                    observed.id,
+                    error,
+                )
 
     def _write_build_policy(self, observed: CatalogDocumentRevision) -> None:
         """Lock one revision, re-check it and store its current build policy."""

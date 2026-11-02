@@ -1733,8 +1733,9 @@ class SparkLifecycle:
             responses=responses,
         )
         self._reapply_controller_site()
-        library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
-        self.synthetic_canary_fixture = _canonical_canary_fixture(Path(library_root))
+        self.synthetic_canary_fixture = _canonical_canary_fixture(
+            self._canary_library_root()
+        )
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
         try:
@@ -3169,6 +3170,10 @@ class SparkLifecycle:
             "implementation": "rust",
             "transport": "direct",
         }
+
+    def _canary_library_root(self) -> Path:
+        """The recipe library the installed Controller was accepted with."""
+        return Path(self._required_environment("VONK_RECIPE_LIBRARY_ROOT"))
 
     def _import_canary_catalog(
         self,

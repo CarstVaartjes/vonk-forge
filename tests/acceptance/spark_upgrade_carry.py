@@ -72,6 +72,7 @@ from tests.acceptance.test_spark_lifecycle import (
     SparkLifecycle,
     _atomic_write,
     _canonical,
+    _canonical_canary_fixture,
     _editorial_successor,
     _run_spark_bootstrap,
     _sibling_recipes,
@@ -405,6 +406,75 @@ def resolve_release(
     )
 
 
+RECIPE_LIBRARY_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+LIBRARY_REVISION_FILE = "tests/acceptance/recipe-library-revision.txt"
+
+
+def _git(*command: str, cwd: Path) -> str:
+    result = subprocess.run(
+        ["git", *command],
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if result.returncode:
+        raise LifecycleError(f"git {command[0]} failed: {result.stderr.strip()[-300:]}")
+    return result.stdout
+
+
+def release_library_root(source_sha: str, workspace: Path) -> Path:
+    """The recipe library a release was accepted with, built beside the lane.
+
+    Each release names its library in its own source tree, so the phase that
+    runs a release's Controller imports the canary that release could read.
+    """
+    repository = Path(__file__).resolve().parents[2]
+    # The release's own tree names its library; read it through the API so the
+    # lane needs no history in its checkout.
+    reply = subprocess.run(
+        [
+            "gh",
+            "api",
+            "-H",
+            "Accept: application/vnd.github.raw",
+            (
+                f"repos/CarstVaartjes/vonk-forge/contents/{LIBRARY_REVISION_FILE}"
+                f"?ref={source_sha}"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if reply.returncode:
+        raise LifecycleError("the release's recipe library revision is unavailable")
+    revision = reply.stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise LifecycleError("the release names no exact recipe library revision")
+    root = workspace / f"recipe-library-{revision}"
+    if not (root / "catalog-index.json").is_file():
+        root.mkdir(parents=True, exist_ok=True)
+        _git("init", "--quiet", cwd=root)
+        _git(
+            "fetch",
+            "--no-tags",
+            "--depth=1",
+            RECIPE_LIBRARY_REPOSITORY,
+            revision,
+            cwd=root,
+        )
+        _git("checkout", "--quiet", "FETCH_HEAD", cwd=root)
+        subprocess.run(
+            [str(repository / "scripts/build-recipe-library"), str(root)],
+            check=True,
+            timeout=1800,
+        )
+    return root
+
+
 class UpgradeCarryLifecycle(SparkLifecycle):
     """The Spark lifecycle, started on the previous release and upgraded live."""
 
@@ -423,6 +493,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         os.environ[OVERLAY_VARIABLE] = os.fspath(baseline.overlay)
         self.evidence = CarryEvidence()
         self.failure_evidence: dict[str, object] | None = None
+        self._library_workspace = Path(os.environ.get("VONK_ACCEPTANCE_WORKSPACE", "."))
         self._phase = "baseline-install"
         self._successor_identity: tuple[str, str] = ("", "")
         self._probing = threading.Event()
@@ -672,7 +743,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
         self._after_canary(node_id)
         refused = self._require_no_result_refusals()
+        if self.baseline.generation == self.candidate.generation and not test_mode():
+            raise LifecycleError("the carry baseline is the candidate itself")
         return {
+            "generations_differ": self.baseline.generation != self.candidate.generation,
             "baseline": {
                 "generation": self.baseline.generation,
                 "version": self.baseline.version,
@@ -687,6 +761,16 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "result_refusals": refused,
         }
 
+    def _canary_library_root(self) -> Path:
+        """The baseline Controller imports the canary of its own release's library."""
+        return release_library_root(self.baseline.source_sha, self._library_workspace)
+
+    def _adopt_candidate_library(self) -> None:
+        """After the redeploy the candidate imports the library it was accepted with."""
+        self.synthetic_canary_fixture = _canonical_canary_fixture(
+            release_library_root(self.candidate.source_sha, self._library_workspace)
+        )
+
     # -- the carry ---------------------------------------------------------
 
     def _carry(self) -> tuple[str, str] | None:
@@ -700,6 +784,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 "baseline-serving", BASELINE_SERVING_BOUND_SECONDS, reported=False
             )
             self._run_phase("controller-redeploy", self._redeploy_controller)
+            self._adopt_candidate_library()
             self._settle(
                 "controller-settled", CONTROLLER_SETTLE_BOUND_SECONDS, reported=True
             )

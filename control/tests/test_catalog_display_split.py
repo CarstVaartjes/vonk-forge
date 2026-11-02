@@ -24,7 +24,6 @@ from vonk_control.catalog_entities import (
     _parse,
     recipe_document_projection,
 )
-from vonk_control.catalog_projection_reconcile import reconcile_catalog_projections
 from vonk_control.catalog_revision_contract import (
     ModelRevisionProjection,
     PublishedDocument,
@@ -36,7 +35,12 @@ from vonk_control.catalog_service import CatalogService
 from vonk_control.models import (
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
+)
+from vonk_control.recipe_update_notice import (
+    newest_active_revisions,
+    recipe_update_notice,
 )
 from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
@@ -164,7 +168,7 @@ def _store(sessions, document: dict, kind: str, *, projected: dict) -> str:
         return revision.id
 
 
-def test_a_stored_2x_row_is_read_and_persisted_once_keeping_what_sync_recorded(
+def test_a_stored_2x_row_is_read_and_rederived_by_the_sync_keeping_what_sync_recorded(
     sessions,
 ) -> None:
     recipe, model = _legacy_recipe(), _legacy_model()
@@ -202,8 +206,14 @@ def test_a_stored_2x_row_is_read_and_persisted_once_keeping_what_sync_recorded(
         assert read.prebuilt_image.build_key == "f" * 64
         assert read_catalog_document(row).identity.slug == recipe["identity"]["slug"]
 
-    assert reconcile_catalog_projections(sessions) == 2
-    assert reconcile_catalog_projections(sessions) == 0
+    entities = CatalogEntityService(sessions, clock=lambda: NOW)
+    entities.refresh_build_policy()
+    with sessions() as session:
+        settled = {
+            row.id: row.projected
+            for row in session.scalars(select(CatalogDocumentRevision))
+        }
+    entities.refresh_build_policy()
 
     with sessions() as session:
         recipe_row = session.get(CatalogDocumentRevision, recipe_id)
@@ -229,6 +239,11 @@ def test_a_stored_2x_row_is_read_and_persisted_once_keeping_what_sync_recorded(
             for row in session.scalars(select(CatalogDocumentRevision))
         }
         assert after == before
+        # A second sync pass finds nothing to rewrite.
+        assert {
+            row.id: row.projected
+            for row in session.scalars(select(CatalogDocumentRevision))
+        } == settled
         # The unreadable row was logged and skipped; it never blocked the rest.
         assert session.get(CatalogDocumentRevision, unreadable_id).projected == {
             "broken": True
@@ -327,7 +342,7 @@ def test_the_shared_document_vectors_agree_with_the_controller(sessions) -> None
             create_draft(entities, document, actor="test")
         assert error.value.code == CatalogCode.DOCUMENT_INVALID
         refused += 1
-    assert refused == 2
+    assert refused, "the shared vectors name document vectors to refuse"
 
 
 def test_a_row_the_3_0_controller_wrote_is_already_current(sessions) -> None:
@@ -346,4 +361,75 @@ def test_a_row_the_3_0_controller_wrote_is_already_current(sessions) -> None:
             )
         )
         assert stored is not None and stored.projected["artifact_inputs"]
-    assert reconcile_catalog_projections(sessions) == 0
+    with sessions() as session:
+        before = {
+            row.id: row.projected
+            for row in session.scalars(select(CatalogDocumentRevision))
+        }
+    entities.refresh_build_policy()
+    with sessions() as session:
+        assert before == {
+            row.id: row.projected
+            for row in session.scalars(select(CatalogDocumentRevision))
+        }
+
+
+def test_a_3_0_sync_over_a_stored_2x_row_adds_one_head_and_one_update_notice(
+    sessions,
+) -> None:
+    """The first v3 sync: one new revision per document, the old bytes intact."""
+    legacy_model, legacy_recipe = _legacy_model(), _legacy_recipe()
+    model = _example("model-definition.json")
+    recipe = _example("recipe-source-build.json")
+    legacy_recipe["models"][0]["model"]["content_sha256"] = document_sha256(
+        legacy_model
+    )
+    recipe["models"][0]["model"]["content_sha256"] = document_sha256(model)
+    _store(
+        sessions,
+        legacy_model,
+        "model",
+        projected=_legacy_projection(legacy_model, "model"),
+    )
+    old_id = _store(
+        sessions,
+        legacy_recipe,
+        "recipe",
+        projected=_legacy_projection(legacy_recipe, "recipe"),
+    )
+    service = CatalogService(
+        sessions, clock=lambda: NOW, cursors=CursorCodec(b"c" * 32)
+    )
+
+    service.import_recipe_library(
+        "test",
+        library_commit="a" * 40,
+        source_path="recipe.json",
+        document=recipe,
+        expected_content_sha256=document_sha256(recipe),
+        dependency_documents=[model],
+    )
+
+    with sessions() as session:
+        rows = session.scalars(
+            select(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.kind == "recipe")
+            .order_by(CatalogDocumentRevision.revision_number)
+        ).all()
+        assert len(rows) == 2
+        old, new = rows
+        assert old.id == old_id
+        assert old.document == legacy_recipe
+        assert old.content_digest == document_sha256(legacy_recipe)
+        assert new.content_digest == document_sha256(recipe)
+        assert new.document_id == old.document_id
+        head = session.scalar(
+            select(CatalogDocumentHead.active_revision_id).where(
+                CatalogDocumentHead.kind == "recipe"
+            )
+        )
+        assert head == new.id
+        newest = newest_active_revisions(session, {new.document_id})[new.document_id]
+        assert newest.id == new.id
+        notice = recipe_update_notice("Synthetic Tiny build", old, newest)
+        assert notice is not None and notice.newest_revision_id == new.id

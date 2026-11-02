@@ -194,7 +194,7 @@ def test_a_3_0_model_resolves_the_cache_downloaded_under_its_2_x_revision(
     The cache was bound to the 2.x digest; the first 3.0 sync makes the same
     files a new head. Removal reviews by the new digest and finds the cached
     set through the publisher/slug lineage; the shared file key is what makes
-    the new revision the same bytes. Nothing is downloaded again.
+    the new revision the same bytes.
     """
     service, sessions = _removal_service(postgres_engine, tmp_path)
     _content_keys(service, monkeypatch)
