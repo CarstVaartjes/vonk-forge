@@ -390,8 +390,9 @@ def test_e_a_rise_beyond_the_largest_swap_setting_is_tried_with_the_largest(
     _inventory(sessions, beyond, node, swap=_swap(SWAP_POLICY.maximum_gib))
     plan = service.plan_run(installation, alias="qwen", now=beyond)
     assert plan.allowed, _codes(plan)
-    _inventory(sessions, beyond, node, swap=_swap(64))
-    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=beyond))
+    later = beyond + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(64))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=later))
     assert (
         f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
         in detail
@@ -730,8 +731,9 @@ def test_l_a_declared_minimum_swap_beyond_the_largest_setting_is_tried(
     assert plan.allowed, _codes(plan)
 
     # Without the swap the largest setting gives, it is a wait for swap.
-    _inventory(sessions, at, node, swap=_swap(0))
-    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(0))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=later))
     assert (
         f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
         in detail
@@ -752,8 +754,9 @@ def test_m_a_declared_load_rise_beyond_the_largest_setting_is_tried(
     plan = service.plan_run(installation, alias="qwen", now=at)
     assert plan.allowed, _codes(plan)
 
-    _inventory(sessions, at, node, swap=_swap(0))
-    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    later = at + timedelta(seconds=1)
+    _inventory(sessions, later, node, swap=_swap(0))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=later))
     assert (
         f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
         in detail
