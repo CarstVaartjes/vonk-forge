@@ -489,11 +489,8 @@ class RemovalExecutionMixin:
         # stranded by deleting that set's rows: rewind, so the next step runs
         # the batch again with the current owners and unlinks it.
         released = [str(item) for item in selected if item not in owned]
-        stranded = [
-            item
-            for item in stored
-            if item not in _externally_listed(session, stored, released)
-        ]
+        listed = _externally_listed(session, stored, released) if stored else set()
+        stranded = [item for item in stored if item not in listed]
         if stranded:
             _store_operation_payload(
                 operation,
