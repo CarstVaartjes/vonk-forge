@@ -31,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.error
@@ -406,22 +407,29 @@ def resolve_release(
     )
 
 
-RECIPE_LIBRARY_REPOSITORY = "https://github.com/CarstVaartjes/vonk-forge-recipes.git"
+RECIPE_LIBRARY_ARCHIVE = (
+    "https://codeload.github.com/CarstVaartjes/vonk-forge-recipes/tar.gz"
+)
 LIBRARY_REVISION_FILE = "tests/acceptance/recipe-library-revision.txt"
 
 
-def _git(*command: str, cwd: Path) -> str:
-    result = subprocess.run(
-        ["git", *command],
-        cwd=cwd,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-    if result.returncode:
-        raise LifecycleError(f"git {command[0]} failed: {result.stderr.strip()[-300:]}")
-    return result.stdout
+def _download_library(revision: str, destination: Path) -> None:
+    """The recipes source at ``revision``, unpacked into ``destination``."""
+    url = f"{RECIPE_LIBRARY_ARCHIVE}/{revision}"
+    try:
+        with (
+            urllib.request.urlopen(url, timeout=300) as reply,
+            tarfile.open(fileobj=reply, mode="r|gz") as archive,
+        ):
+            for member in archive:
+                # Drop the archive's top directory so the library root is flat.
+                member.name = member.name.partition("/")[2]
+                if member.name:
+                    archive.extract(member, destination, filter="data")
+    except (OSError, tarfile.TarError) as error:
+        raise LifecycleError(
+            f"recipe library {revision} is unavailable: {error}"
+        ) from error
 
 
 def _revision_through_api(source_sha: str) -> str:
@@ -455,7 +463,7 @@ def release_library_root(
     workspace: Path,
     *,
     read_revision: Callable[[str], str] = _revision_through_api,
-    repository: str = RECIPE_LIBRARY_REPOSITORY,
+    fetch_library: Callable[[str, Path], None] = _download_library,
 ) -> Path:
     """The recipe library a release was accepted with, built beside the lane.
 
@@ -468,15 +476,14 @@ def release_library_root(
     root = workspace / f"recipe-library-{revision}"
     if not (root / "catalog-index.json").is_file():
         root.mkdir(parents=True, exist_ok=True)
-        _git("init", "--quiet", cwd=root)
-        _git("fetch", "--no-tags", "--depth=1", repository, revision, cwd=root)
-        _git("checkout", "--quiet", "FETCH_HEAD", cwd=root)
+        fetch_library(revision, root)
         subprocess.run(
             [
                 str(
                     Path(__file__).resolve().parents[2] / "scripts/build-recipe-library"
                 ),
                 str(root),
+                revision,
             ],
             check=True,
             timeout=1800,
