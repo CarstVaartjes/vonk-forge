@@ -43,6 +43,10 @@ def _download_set(service, tmp_path, name, blobs, model_digest, key):
     return op.artifact_set_sha256
 
 
+def _request_download(service, tmp_path, name, blobs, model_digest, key):
+    return _download_set(service, tmp_path, name, blobs, model_digest, key)
+
+
 def _key(tag: str, number: int) -> str:
     return f"00000000-0000-4000-8000-{tag}{number:09d}"
 
@@ -157,5 +161,14 @@ def test_removal_does_not_park_behind_a_cancelled_newer_set(
                     ModelCacheSetArtifact.artifact_set_sha256 == set_a
                 )
             ).all()
+        # A fresh request for the same bytes admits and succeeds afterwards.
+        assert _request_download(
+            service,
+            tmp_path,
+            "again",
+            [b"abc"],
+            download_b.model_content_sha256,
+            _key("c01", 5),
+        )
     finally:
         service.close()
