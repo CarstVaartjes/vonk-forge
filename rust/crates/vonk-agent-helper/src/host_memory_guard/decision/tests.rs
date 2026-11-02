@@ -472,6 +472,7 @@ fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
         counters: Some(Counters::default()),
     };
     let free_low = Sample {
+        available_bytes: Some(PRESSURE_AVAILABLE_BYTES - 1),
         free_bytes: Some(DRIVER_FAILURE_FREE_BYTES - 1),
         ..roomy
     };
@@ -1019,6 +1020,48 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
     };
     assert_eq!(
         run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
+        Some(Trigger::DriverAllocationFailure)
+    );
+}
+
+/// The DeepSeek V4.1 Flash EXL3 Mia dual load killed at 18:49:40Z on 2026-11-02
+/// (spark-3542, NVRM line present): MemFree 0.96 GiB, MemAvailable 17.4 GiB,
+/// 3.7 GiB swap used, swap-out 0/s, PSI full avg10 33%. Page-cache reclaim.
+fn dsv41_mia_dual_readings() -> Host {
+    Host {
+        available: 17 * GIB + 410 * 1024 * 1024,
+        free: 983 * 1024 * 1024,
+        swap_total: 64 * GIB,
+        swap_free: 64 * GIB - 3 * GIB - 700 * 1024 * 1024,
+        avg10: 33.0,
+        avg60: 33.0,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn r5_ignores_low_memfree_while_mem_available_is_plentiful() {
+    // Break caught: R5 killed a healthy load (it passed on 2026-10-24) on one
+    // NVRM line plus page-cache MemFree, with 17.4 GiB still available.
+    let mut host = dsv41_mia_dual_readings();
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), Instant::now(), 0..400),
+        None
+    );
+    // Real pinned growth: the same MemFree with MemAvailable under the floor.
+    let bound = ticks(DRIVER_FAILURE_SUSTAIN);
+    let mut host = Host {
+        available: PRESSURE_AVAILABLE_BYTES - 1,
+        ..dsv41_mia_dual_readings()
+    };
+    assert_eq!(
+        run_with_line(
+            &mut host,
+            &mut Decision::default(),
+            Instant::now(),
+            0..bound + 2
+        )
+        .map(|k| k.1),
         Some(Trigger::DriverAllocationFailure)
     );
 }

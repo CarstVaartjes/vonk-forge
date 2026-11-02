@@ -238,7 +238,10 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
         pressure,
         // With swap, low MemFree while pages are swapping out is reclaim
         // absorbing the load; it counts only once swap-out has stopped.
+        // Low MemFree alone is page cache; real pressure also leaves
+        // MemAvailable under the same floor R4 uses.
         driver_free_low: below(sample.free_bytes, DRIVER_FAILURE_FREE_BYTES)
+            && below(available, PRESSURE_AVAILABLE_BYTES)
             && (!swap
                 || rates
                     .is_some_and(|rates| rates.swap_out < DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND)),
