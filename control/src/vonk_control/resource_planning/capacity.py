@@ -174,15 +174,18 @@ def _swap_carries(demand: ResourceDemand, swap: SwapCapacity, *, in_use: bool) -
     """Whether the Spark's active swap carries the load a try needs.
 
     A rise cut to the largest setting is an estimate: it asks only that the
-    swap has reached that setting (the same ``swap_reaches`` rule), because
-    swap in use or a page short of the setting would otherwise never clear.
-    The guard decides the rest. An uncut rise must fit the usable swap beside
+    swap has reached that setting (the same ``swap_reaches`` rule) and that no
+    other load still holds swap, because swap in use or a page short of the
+    setting would otherwise never clear. The guard decides the rest. An uncut rise must fit the usable swap beside
     what other loads hold (and, before a stop, what is in use).
     """
 
     rise, minimum, _clamped = _tried_swap_need(demand)
     if rise < demand.load_overshoot_bytes:
-        return swap_reaches(swap.total_bytes, SWAP_POLICY.maximum_gib * GIB)
+        # What other ranks still loading hold is theirs; the rest is the guard's.
+        return not swap.held_bytes and swap_reaches(
+            swap.total_bytes, SWAP_POLICY.maximum_gib * GIB
+        )
     return rise + swap.held_bytes + (
         swap.used_bytes if in_use else 0
     ) <= usable_swap_bytes(swap.total_bytes) and swap_reaches(swap.total_bytes, minimum)

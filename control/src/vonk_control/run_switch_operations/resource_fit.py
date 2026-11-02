@@ -511,7 +511,7 @@ class ResourceFitMixin:
                     ):
                         node_blockers.append(
                             _as_reason(
-                                RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,
+                                RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,  # capacity-refusal: disk
                                 f"The disk allocation needs {required_disk} bytes, "
                                 f"exceeding this Spark's entire {snapshot.disk_total_bytes}-byte device; "
                                 "eviction cannot make it fit.",

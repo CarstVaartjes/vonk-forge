@@ -2933,6 +2933,95 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_guard_stop_of_a_serving_co_tenant_is_not_the_runs_failure(
+    agent_system,
+) -> None:
+    """The guard stops every container on the Spark, innocent ones included.
+
+    Two runs share NODE_A. The run that was serving (seen alive at its current
+    generation) is a co-tenant: its stop is kept as exit evidence only, so
+    recovery relaunches it as it would any lost rank. The run never seen alive
+    keeps the guard stop as its failure. Catches settling the co-tenant for good.
+    """
+    from .host_memory_guard_support import guard_diagnostics
+
+    client, services, _, clock = agent_system
+    serving, tried = (
+        "70000000-0000-4000-8000-0000000000a1",
+        "70000000-0000-4000-8000-0000000000a2",
+    )
+    with services.sessions.begin() as session:
+        for run_id in (serving, tried):
+            session.add(
+                RecipeRun(
+                    id=run_id,
+                    installation_id="80000000-0000-4000-8000-00000000000a",
+                    mapping_id="90000000-0000-4000-8000-00000000000a",
+                    mapping_generation=1,
+                    run_generation=1,
+                    alias=f"co-tenant-{run_id[-1]}",
+                    plan_digest="1" * 64,
+                    plan={"schema_version": 1, "observation_schema_version": 2},
+                    state="running",
+                    route_state="withdrawn",
+                    actor="admin",
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                )
+            )
+            session.add(
+                RunNode(
+                    run_id=run_id,
+                    node_id=NODE_A,
+                    rank=0,
+                    role="worker",
+                    state="running",
+                    port=8888 if run_id == serving else 8889,
+                    reserved_memory_bytes=1,
+                    updated_at=clock.now - timedelta(seconds=1),
+                )
+            )
+
+    def report(run_id: str, *, running: bool, at: datetime):
+        item: dict[str, object] = {
+            "run_id": run_id,
+            "run_generation": 1,
+            "process_running": running,
+            "endpoint_ready": None,
+            "failure_diagnostics": None
+            if running
+            else json.loads(canonical_message(guard_diagnostics(at.isoformat()))),
+        }
+        return client.post(
+            "/agent/recipe-runs/observations",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json={"observed_at": at.isoformat(), "runs": [item]},
+        )
+
+    assert report(serving, running=True, at=clock.now).status_code == 204
+    stop = clock.now + timedelta(seconds=5)
+    for run_id in (serving, tried):
+        assert report(run_id, running=False, at=stop).status_code == 204
+    # A replay of the same stop changes nothing.
+    again = stop + timedelta(seconds=5)
+    for run_id in (serving, tried):
+        assert report(run_id, running=False, at=again).status_code == 204
+    with services.sessions() as session:
+        kept = {
+            run_id: session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+            for run_id in (serving, tried)
+        }
+    assert all(
+        node is not None and node.state != RunState.RUNNING for node in kept.values()
+    )
+    co_tenant, own = kept[serving], kept[tried]
+    assert co_tenant is not None and own is not None
+    assert co_tenant.observation_failure_diagnostics is None
+    assert co_tenant.last_exit_diagnostics is not None
+    assert own.observation_failure_diagnostics is not None
+
+
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:

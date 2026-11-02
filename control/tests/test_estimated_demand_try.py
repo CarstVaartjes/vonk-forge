@@ -172,3 +172,18 @@ def test_a_cut_swap_rise_waits_until_the_setting_is_reached() -> None:
         declared, _with_swap(SwapCapacity(total_bytes=64 * GIB, used_bytes=GIB))
     )
     assert _blocker_codes(plan) == [ResourceBlockerCode.INSUFFICIENT_SWAP]
+
+
+def test_a_cut_swap_rise_waits_on_swap_other_loads_hold() -> None:
+    from vonk_control.resource_planning import SwapHolder
+
+    rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
+    declared = replace(_declared_demand(10 * GIB), load_overshoot_bytes=rise)
+    total = SWAP_POLICY.maximum_gib * GIB
+    held = SwapCapacity(total_bytes=total, holders=(SwapHolder("loading", GIB),))
+    waiting = _plan(declared, _with_swap(held))
+    assert _blocker_codes(waiting) == [ResourceBlockerCode.INSUFFICIENT_SWAP]
+    (reason,) = (r for r in waiting.reasons if r.swap is not None)
+    assert "other loads here finish loading" in reason.detail
+    # Once the other load has finished loading, the try is admitted.
+    assert _plan(declared, _with_swap(SwapCapacity(total_bytes=total))).allowed

@@ -457,18 +457,37 @@ def install_observations_routes(
                         and evidence.endpoint_ready is not True
                         else None
                     )
-                    node.observed_run_generation = run.run_generation
-                    node.observation_process_running = evidence.process_running
-                    node.observation_failure_diagnostics = (
+                    # The guard stops every managed container on a Spark: a rank
+                    # that was serving is a co-tenant of the run that exhausted
+                    # memory, and recovers as any lost rank. Only a rank never
+                    # seen running at this generation keeps the guard stop as
+                    # its failure (the recovery coordinator settles that run).
+                    served_before_guard_stop = (
+                        not evidence.process_running
+                        and evidence.failure_diagnostics is not None
+                        and evidence.failure_diagnostics.host_memory_exhausted
+                        and node.observed_run_generation == run.run_generation
+                        and (
+                            node.observation_process_running is True
+                            or (
+                                node.observation_process_running is False
+                                and node.observation_failure_diagnostics is None
+                            )
+                        )
+                    )
+                    exit_diagnostics = (
                         json.loads(canonical_message(evidence.failure_diagnostics))
                         if not evidence.process_running and evidence.failure_diagnostics
                         else None
                     )
-                    if node.observation_failure_diagnostics is not None:
+                    node.observed_run_generation = run.run_generation
+                    node.observation_process_running = evidence.process_running
+                    node.observation_failure_diagnostics = (
+                        None if served_before_guard_stop else exit_diagnostics
+                    )
+                    if exit_diagnostics is not None:
                         # Kept past the recovery that clears the observation.
-                        node.last_exit_diagnostics = (
-                            node.observation_failure_diagnostics
-                        )
+                        node.last_exit_diagnostics = exit_diagnostics
                     node.observation_observed_at = observed_at
                     node.observation_endpoint_ready = (
                         evidence.endpoint_ready if owner else None
