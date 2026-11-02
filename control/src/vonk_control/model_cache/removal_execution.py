@@ -53,6 +53,7 @@ from .persistence import (
     _operation_progress,
     _operation_removal,
     _store_operation_payload,
+    _updated,
 )
 
 if TYPE_CHECKING:
@@ -465,6 +466,27 @@ class RemovalExecutionMixin:
         )
         # A set outside this removal that lists a target keeps that object: the
         # removal yields per object (see the executor) and still completes.
+        # An object kept for a set that was owned then but is not now would be
+        # stranded by deleting that set's rows: rewind, so the next step runs
+        # the batch again with the current owners and unlinks it.
+        released = [str(item) for item in selected if item not in owned]
+        stranded = [
+            str(item)
+            for item in delete_objects
+            if cache._model_object_size(str(item)) > 0
+        ]
+        stranded = [
+            item
+            for item in stranded
+            if item not in _externally_listed(session, tuple(stranded), released)
+        ]
+        if stranded:
+            _store_operation_payload(
+                operation,
+                operation.kind,
+                _updated(checkpoint, object_index=0, set_index=0),
+            )
+            return "a set released by its newer owner still has stored objects"
         for set_digest in selected:
             row = session.get(ModelCacheSet, set_digest)
             if set_digest in owned:
@@ -491,7 +513,7 @@ class RemovalExecutionMixin:
         )
         result = ModelCacheRemovalResult(
             schema_version=SCHEMA_VERSION,
-            removed_entries=list(selected),
+            removed_entries=[item for item in selected if item not in owned],
             reclaimed_bytes=checkpoint.reclaimed_bytes,
             cancelled_operations=[],
         )
@@ -566,19 +588,29 @@ def _newer_owners(
 
     reason: str | None = None
     owned: set[str] = set()
-    for digest, entries in findings.items():
-        newer = []
+    ids: dict[str, set[str]] = {}
+    for entries in findings.values():
         for finding in entries:
-            model = _OWNER_ROWS.get(finding.owner_kind)
-            row = (
-                session.get(model, finding.owner_id)
-                if finding.classification == "active-work" and model is not None
-                else None
-            )
-            newer.append(
-                row is not None and _aware(row.created_at) > _aware(accepted_at)
-            )
-        if any(newer):
-            reason = reason or entries[newer.index(True)].reason
-            owned.add(digest)
+            if (
+                finding.classification == "active-work"
+                and finding.owner_kind in _OWNER_ROWS
+            ):
+                ids.setdefault(finding.owner_kind, set()).add(finding.owner_id)
+    created = {}
+    for kind, owner_ids in ids.items():
+        model = _OWNER_ROWS[kind]
+        for owner_id, created_at in session.execute(
+            select(model.id, model.created_at).where(model.id.in_(owner_ids))
+        ):
+            created[(kind, owner_id)] = _aware(created_at)
+    for digest, entries in findings.items():
+        for finding in entries:
+            made = created.get((finding.owner_kind, finding.owner_id))
+            if (
+                finding.classification == "active-work"
+                and made is not None
+                and made > _aware(accepted_at)
+            ):
+                reason = reason or finding.reason
+                owned.add(digest)
     return reason, frozenset(owned)

@@ -8,7 +8,11 @@ from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.engine import Engine
-from vonk_control.models import ModelCacheSet, ModelCacheSetArtifact
+from vonk_control.models import (
+    ModelCacheOperation,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
+)
 from vonk_forge_contracts import document_sha256
 
 from .removal_settle import advance_until_ended
@@ -306,6 +310,74 @@ def test_yielded_set_whose_request_is_cancelled_is_still_reclaimable(
         # And the same bytes can be requested again.
         fresh = _request_set(
             service, selector, tmp_path, "s1", set_one, digest, _key("d02", 7)
+        )
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == "succeeded"
+    finally:
+        service.close()
+
+
+def test_object_kept_for_an_owner_that_is_then_cancelled_is_not_stranded(
+    postgres_engine: Engine, tmp_path: Path, monkeypatch
+) -> None:
+    from vonk_control.model_cache import removal_execution
+
+    monkeypatch.setattr(removal_execution, "REMOVAL_BATCH_SECONDS", 0)
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    model = _one_model(tmp_path, "stranded")
+    selector = _register_model(sessions, model)
+    digest = document_sha256(model.model_dump(mode="json"))
+    shared, p_only, q_only = b"abc", b"only-p", b"only-q"
+    set_one = [shared, p_only]
+    _download_set(service, tmp_path, "s1", set_one, digest, _key("d03", 1))
+    _download_set(service, tmp_path, "s2", [shared, q_only], digest, _key("d03", 2))
+    everything = (shared, p_only, q_only)
+    try:
+        removal = _remove_model(
+            service,
+            selector,
+            actor="operator",
+            request_key=_key("d03", 3),
+            model_content_sha256=digest,
+        )
+        assert service._observe_model_removal_scope(removal.id)
+        service._advance_model_removal(removal.id)  # one object; now touched
+        newer = _request_set(
+            service, selector, tmp_path, "s1", set_one, digest, _key("d03", 4)
+        )
+        cancelled = False
+        for _ in range(40):
+            current = service.get_operation(removal.id)
+            if current.state == "succeeded":
+                break
+            with sessions() as session:
+                row = session.get(ModelCacheOperation, removal.id)
+                assert row is not None
+                payload = dict(row.payload)
+            targets = payload["delete_objects"]
+            assert isinstance(targets, list)
+            if not cancelled and payload["object_index"] == len(targets):
+                # Every object was visited while the owner held its set.
+                service.cancel_operation(
+                    newer.id,
+                    actor="operator",
+                    request_key=_key("d03", 5),
+                    reason="operator changed their mind",
+                )
+                cancelled = True
+                break
+            advance_until_ended(service, removal.id, rounds=1)
+        assert cancelled
+        advance_until_ended(service, removal.id)
+        assert service.get_operation(removal.id).state == "succeeded"
+        with sessions() as session:
+            listed = set(session.scalars(select(ModelCacheSetArtifact.artifact_sha256)))
+        for data in everything:
+            if _path(service, data).exists():
+                assert hashlib.sha256(data).hexdigest() in listed  # not stranded
+        # The released set is reclaimable by the next removal as well.
+        fresh = _request_set(
+            service, selector, tmp_path, "s1", set_one, digest, _key("d03", 6)
         )
         service.run_pending()
         assert service.get_operation(fresh.id).state == "succeeded"

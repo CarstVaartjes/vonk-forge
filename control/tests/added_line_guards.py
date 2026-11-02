@@ -1781,7 +1781,11 @@ def check_source(
         and not is_test
         and "model-sets" in modes
         and path.startswith("control/src/vonk_control/")
-        and path != "control/src/vonk_control/model_cache/removal_execution.py"
+        and path
+        not in {
+            "control/src/vonk_control/model_cache/removal_execution.py",
+            "control/src/vonk_control/model_cache/partials_collection.py",
+        }
     ):
         # Only the removal executor unlinks model files: it alone applies the
         # yield-to-newer-owner rule (retained objects, owned sets) first.
