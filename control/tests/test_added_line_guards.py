@@ -1550,6 +1550,66 @@ def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
         assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
 
 
+_WHOLE_MEMBERSHIP = (
+    "def read(session, sets):\n"
+    "    every = session.scalars(select(ModelCacheSetArtifact.artifact_sha256))\n"
+    "    named = session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "        )\n"
+    "    )\n"
+    "    return every, named\n"
+)
+
+
+_DELETED_ACCEPTANCE_READ = (
+    "def read(session, selected):\n"
+    "    return session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)\n"
+    "        )\n"
+    "    )\n"
+)
+_QUERY_ALL = (
+    "def read(session):\n    return session.query(ModelCacheSetArtifact).all()\n"
+)
+_TARGETED_FILTER = (
+    "def read(session, sets):\n"
+    "    return session.query(ModelCacheSetArtifact).filter(\n"
+    "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "    ).all()\n"
+)
+_MEMBERSHIP_PATHS = (
+    "control/src/vonk_control/model_cache/removal_acceptance.py",
+    "control/src/vonk_control/artifact_reference_scan/model_sets.py",
+    "control/src/vonk_control/unused_storage_collection/service.py",
+)
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_whole_membership_table_read_is_flagged(path: str) -> None:
+    whole = "def r(s):\n    return s.scalars(select(ModelCacheSetArtifact))\n"
+    assert check_source(path, _DELETED_ACCEPTANCE_READ, {3}, modes=("model-sets",))
+    assert check_source(path, _QUERY_ALL, {2}, modes=("model-sets",))
+    assert check_source(path, whole, {2}, modes=("model-sets",))
+    assert not check_source(path, _DELETED_ACCEPTANCE_READ, {1}, modes=("model-sets",))
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_membership_read_that_names_rows_passes(path: str) -> None:
+    named = (
+        "def r(s, sets):\n"
+        "    return s.scalars(select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+        "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)))\n"
+    )
+    limited = "def r(s):\n    return s.scalar(select(ModelCacheSetArtifact).limit(1))\n"
+    for source in (_TARGETED_FILTER, named, limited):
+        assert not check_source(path, source, {2, 3}, modes=("model-sets",))
+    assert not check_source(
+        "control/tests/test_x.py", _QUERY_ALL, {2}, modes=("model-sets",)
+    )
+
+
 _DIRECT_OPENER = (
     "def check(cache, client):\n    return cache._open_http_response(client, URL, {})\n"
 )
