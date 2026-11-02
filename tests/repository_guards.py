@@ -565,6 +565,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "spark lifecycle runner: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/test_baseline_canary_import.py",
+        "baseline canary import: fixed fixture behavior.",
+    ),
+    (
         "tests/test_release_library_root.py",
         "release library checkout and build: fixed entrypoint/fixture behavior.",
     ),
