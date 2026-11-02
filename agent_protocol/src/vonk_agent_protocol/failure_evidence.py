@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
 
+from .lifecycle_vocabulary import FailureCode
 from .page_cache import PageCacheDropEvidence
 from .wire_model import WireModel
 
@@ -67,6 +68,15 @@ class FailureDiagnostics(WireModel):
     storage: list[FailureProperty] = Field(max_length=8)
     preflight: list[FailureProperty] = Field(max_length=8)
     collector_errors: list[Annotated[str, Field(max_length=256)]] = Field(max_length=8)
+
+    @property
+    def host_memory_exhausted(self) -> bool:
+        """Whether the host memory guard stopped the workload (R1-R5)."""
+        return any(
+            item.name == "reason"
+            and item.value == FailureCode.WORKLOAD_HOST_MEMORY_EXHAUSTED
+            for item in self.preflight
+        )
 
     @field_validator("collected_at")
     @classmethod

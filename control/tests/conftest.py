@@ -97,19 +97,6 @@ def damaged_json_rows() -> Iterator[None]:
         yield
 
 
-@pytest.fixture
-def measured_demands(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Treat every recipe demand as a measured peak: the exact capacity rule.
-
-    Recipes carry only declared peaks, which are estimates and are tried
-    (``test_estimated_demand_try``); a test of the exact boundary says so.
-    """
-
-    from vonk_control.resource_planning.types import ResourceDemand
-
-    monkeypatch.setattr(ResourceDemand, "measured", property(lambda _self: True))
-
-
 _load_tools_plugin("generated_contracts").prepare_generated_contracts()
 
 

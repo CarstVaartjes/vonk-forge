@@ -101,7 +101,6 @@ def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
 
 
 @pytest.mark.parametrize("headroom", [0, -1])
-@pytest.mark.usefixtures("measured_demands")
 def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     tmp_path, postgres_engine, headroom: int
 ) -> None:
@@ -134,8 +133,14 @@ def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     runtime = lifecycle.preview_run(installed.owner_id, "memory-boundary")
     review = api.post(f"/api/profile/{profile.number}/preview", headers=headers)
     assert review.status_code == 200, review.text
-    # Both views preserve the platform floor, even with no existing claim.
-    assert review.json()["allowed"] is runtime.allowed is (headroom == 0)
+    # A declared peak is an estimate: a byte short of the platform floor is
+    # tried, in both views, with the same claim (the estimate, as the Spark
+    # holds it less the floor). At the exact boundary it is a normal fit.
+    assert review.json()["allowed"] is runtime.allowed is True
+    assert runtime.nodes[0].required_memory_bytes == demand
+    assert any("only claim" in item.detail for item in runtime.nodes[0].warnings) == (
+        headroom != 0
+    )
     fit = review.json()["assessments"][0]["assessment"]["fit_current"]["nodes"][0]
     assert fit["memory_free_after_bytes"] == runtime.nodes[0].free_after_bytes
     assert fit["memory_required_bytes"] == runtime.nodes[0].required_memory_bytes

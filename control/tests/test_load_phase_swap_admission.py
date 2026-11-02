@@ -361,10 +361,14 @@ def test_d_a_rise_past_the_guard_margin_waits_with_the_setting_to_raise(
     assert "Raise the Spark swap setting to at least 71 GiB" in detail
 
 
-def test_e_only_a_rise_beyond_the_largest_swap_setting_never_fits(
+def test_e_a_rise_beyond_the_largest_swap_setting_is_tried_with_the_largest(
     tmp_path, postgres_engine
 ) -> None:
-    """Catches a large rise ending the load although a bigger setting holds it."""
+    """Catches a large rise ending the load although a bigger setting holds it.
+
+    A rise beyond every setting is the estimator's model, not a host fact: an
+    earlier run held that memory. The load needs at most the largest setting.
+    """
     steady = GIB
     largest = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB)
     sessions, now, node, installation, service = _world(
@@ -385,8 +389,13 @@ def test_e_only_a_rise_beyond_the_largest_swap_setting_never_fits(
     )
     _inventory(sessions, beyond, node, swap=_swap(SWAP_POLICY.maximum_gib))
     plan = service.plan_run(installation, alias="qwen", now=beyond)
-    assert _codes(plan) == {ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY}
-    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY in ENDING_BLOCKER_CODES
+    assert plan.allowed, _codes(plan)
+    _inventory(sessions, beyond, node, swap=_swap(64))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=beyond))
+    assert (
+        f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
+        in detail
+    )
     assert ResourceBlockerCode.INSUFFICIENT_SWAP not in ENDING_BLOCKER_CODES
 
 
@@ -720,6 +729,36 @@ def test_l_a_declared_minimum_swap_beyond_the_largest_setting_is_tried(
     plan = service.plan_run(installation, alias="qwen", now=at)
     assert plan.allowed, _codes(plan)
 
+    # Without the swap the largest setting gives, it is a wait for swap.
+    _inventory(sessions, at, node, swap=_swap(0))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    assert (
+        f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
+        in detail
+    )
+
+
+def test_m_a_declared_load_rise_beyond_the_largest_setting_is_tried(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches refusing a recipe for a load rise it only declares."""
+    steady = 30 * GIB
+    rise = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + GIB
+    sessions, now, node, installation, service = _world(
+        tmp_path, postgres_engine, steady, load_peak_bytes=steady + rise
+    )
+    at = now + timedelta(seconds=1)
+    _inventory(sessions, at, node, swap=_swap(SWAP_POLICY.maximum_gib))
+    plan = service.plan_run(installation, alias="qwen", now=at)
+    assert plan.allowed, _codes(plan)
+
+    _inventory(sessions, at, node, swap=_swap(0))
+    detail = _swap_wait(service.plan_run(installation, alias="qwen", now=at))
+    assert (
+        f"Raise the Spark swap setting to at least {SWAP_POLICY.maximum_gib} GiB"
+        in detail
+    )
+
 
 def _swap_reason(plan):
     (reason,) = [
@@ -785,26 +824,6 @@ def test_n_a_rise_past_the_guard_margin_names_the_setting_to_raise(
     )
     assert swap.desired_bytes is not None
     assert swap.needed_setting_bytes > swap.desired_bytes
-
-
-def test_o_a_load_that_never_fits_carries_no_swap_evidence(
-    tmp_path, postgres_engine
-) -> None:
-    """Catches the never-fits reason claiming a shortfall a setting could fix."""
-    beyond = usable_swap_bytes(SWAP_POLICY.maximum_gib * GIB) + 1
-    _, _, _, _, plan = _switch_world(
-        tmp_path,
-        postgres_engine,
-        rise=beyond,
-        total_gib=SWAP_POLICY.maximum_gib,
-        used=0,
-    )
-    ending = [
-        reason
-        for reason in plan.blockers
-        if reason.code == RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY
-    ]
-    assert ending and all(reason.swap is None for reason in ending)
 
 
 def test_p_the_wait_a_profile_load_stores_keeps_the_swap_evidence(

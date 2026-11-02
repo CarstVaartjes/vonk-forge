@@ -446,11 +446,7 @@ def install_observations_routes(
                                 reason=(
                                     "workload.host_memory_exhausted: ran out of memory on hardware"
                                     if evidence.failure_diagnostics
-                                    and any(
-                                        item.name == "exit_cause"
-                                        and item.value == "host_memory_exhausted"
-                                        for item in evidence.failure_diagnostics.preflight
-                                    )
+                                    and evidence.failure_diagnostics.host_memory_exhausted
                                     else "workload process is not running"
                                 ),
                             )

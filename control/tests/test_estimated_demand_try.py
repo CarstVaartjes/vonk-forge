@@ -2,15 +2,18 @@
 
 Owner 2026-11-02: assume the creator made a working recipe, use all its
 settings, measure the real usage, and do not block until it is known whether
-it works. An estimate above what an idle Spark admits is therefore tried as the
-only claim on an empty Spark and waits (a typed wait, never "never fits") while
-anything else holds memory there. A measured demand keeps the exact rule.
+it works. An estimate above what an idle Spark admits is tried as the only
+claim on an empty Spark and waits (a typed wait, never "never fits") while
+anything else holds memory there. The claim is ``min(estimate, pool - floor)``,
+a pure function of the recipe and the node total, so it never moves with the
+free-memory sample.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
 from vonk_agent_protocol.swap import GIB, SWAP_POLICY
 from vonk_control.resource_planning import (
@@ -22,18 +25,16 @@ from vonk_control.resource_planning import (
 from .test_resource_planning import (
     _SPARK_POOL,
     _blocker_codes,
+    _codes,
     _declared_demand,
     _idle_capacity,
+    _tried,
 )
 
 _FLOOR = PLATFORM_MEMORY_FLOOR_BYTES
 _FREE = 125_650_657_280
-#: Above the most an idle Spark admits, below the physical pool.
+#: Above the most an idle Spark admits, below the pool less the floor.
 _OVER_MAX = _FREE - _FLOOR + 1_000_000_000
-
-
-def _measured(total: int):
-    return replace(_declared_demand(total), evidence_state="measured")
 
 
 def _plan(demand, capacity, stops=()):
@@ -42,29 +43,40 @@ def _plan(demand, capacity, stops=()):
     )
 
 
-def test_a_declared_peak_is_an_estimate() -> None:
-    assert not _declared_demand(_OVER_MAX).measured
-    assert _measured(_OVER_MAX).measured
-
-
 def test_an_estimate_above_the_idle_maximum_is_tried_on_an_empty_spark() -> None:
     plan = _plan(_declared_demand(_OVER_MAX), _idle_capacity(_SPARK_POOL, _FREE))
     assert plan.allowed
     assert _blocker_codes(plan) == []
     (node,) = plan.nodes
-    # The try claims all free memory above the floor, so nothing co-locates.
-    assert node.exclusive
-    assert node.required_bytes == _FREE - _FLOOR
-    assert node.selected_free_after_bytes == _FLOOR
-    assert ResourcePlanningCode.ESTIMATE_UNCERTAIN in {r.code for r in plan.reasons}
+    # The claim is the estimate; the Spark is left below its floor, as the
+    # estimate asked for.
+    assert node.required_bytes == _OVER_MAX
+    assert node.selected_free_after_bytes == _FREE - _OVER_MAX
+    assert len(_tried(plan)) == 1
 
 
-def test_an_estimate_above_the_physical_pool_is_tried_too() -> None:
+def test_an_estimate_above_the_physical_pool_is_tried_with_the_pool_less_the_floor() -> (
+    None
+):
     plan = _plan(
         _declared_demand(_SPARK_POOL + 1_000_000_000),
         _idle_capacity(_SPARK_POOL, _FREE),
     )
-    assert plan.allowed and plan.nodes[0].exclusive
+    assert plan.allowed
+    assert plan.nodes[0].required_bytes == _SPARK_POOL - _FLOOR
+
+
+@pytest.mark.parametrize("estimate", [_OVER_MAX, _SPARK_POOL + 1_000_000_000])
+def test_the_claim_does_not_depend_on_free_memory(estimate: int) -> None:
+    # Review, start and recovery each re-plan against a newer sample; a claim
+    # that followed the sample would make every plan stale.
+    claims = {
+        _plan(_declared_demand(estimate), _idle_capacity(_SPARK_POOL, free))
+        .nodes[0]
+        .required_bytes
+        for free in (_FREE, _FREE - 1_500_000_000, _FREE - 10)
+    }
+    assert claims == {min(estimate, _SPARK_POOL - _FLOOR)}
 
 
 def test_an_estimate_waits_while_the_spark_holds_anything() -> None:
@@ -73,8 +85,8 @@ def test_an_estimate_waits_while_the_spark_holds_anything() -> None:
         _idle_capacity(_SPARK_POOL, _FREE - 1_000_000_000, claimed=1_000_000_000),
     )
     assert not held.allowed
-    assert _blocker_codes(held) == [ResourceBlockerCode.INSUFFICIENT_CAPACITY]
-    assert not held.nodes[0].exclusive
+    assert _blocker_codes(held)
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(held)
 
     stopping = _plan(
         _declared_demand(_OVER_MAX),
@@ -87,33 +99,33 @@ def test_an_estimate_waits_while_the_spark_holds_anything() -> None:
     ]
 
 
-def test_an_estimate_still_waits_when_the_host_leaves_nothing_free() -> None:
+def test_an_estimate_waits_when_the_host_leaves_nothing_free() -> None:
     # A real host fact: nothing above the floor is left to claim.
     plan = _plan(_declared_demand(_OVER_MAX), _idle_capacity(_SPARK_POOL, _FLOOR - 1))
     assert not plan.allowed
     assert _blocker_codes(plan) == [ResourceBlockerCode.INSUFFICIENT_CAPACITY]
 
 
-def test_a_measured_demand_keeps_the_never_fits_rule() -> None:
-    idle = _plan(_measured(_OVER_MAX), _idle_capacity(_SPARK_POOL, _FREE))
-    assert not idle.allowed
-    assert _blocker_codes(idle) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
-    beyond_pool = _plan(
-        _measured(_SPARK_POOL), _idle_capacity(_SPARK_POOL, _FREE, claimed=GIB)
+def test_a_pool_not_above_the_floor_is_a_typed_wait() -> None:
+    plan = plan_capacity(
+        {"rank-0": _declared_demand(100)},
+        [_idle_capacity(5, 5)],
+        memory_floor_bytes=5,
     )
-    assert _blocker_codes(beyond_pool) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    assert not plan.allowed
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(plan)
 
 
-def test_a_swap_declaration_is_an_estimate_too() -> None:
+def test_a_declared_swap_minimum_beyond_the_largest_setting_waits_for_swap() -> None:
     declared = replace(
         _declared_demand(10 * GIB),
         minimum_swap_bytes=(SWAP_POLICY.maximum_gib + 1) * GIB,
     )
-    capacity = _idle_capacity(_SPARK_POOL, _FREE)
-    tried = _plan(declared, capacity)
-    assert tried.allowed
-    assert ResourcePlanningCode.ESTIMATE_UNCERTAIN in {r.code for r in tried.reasons}
-
-    measured = _plan(replace(declared, evidence_state="measured"), capacity)
-    assert not measured.allowed
-    assert _blocker_codes(measured) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    # No swap yet: a wait for swap that names the largest setting.
+    plan = _plan(declared, _idle_capacity(_SPARK_POOL, _FREE))
+    assert not plan.allowed
+    assert _blocker_codes(plan) == [ResourceBlockerCode.INSUFFICIENT_SWAP]
+    assert ResourcePlanningCode.ESTIMATE_UNCERTAIN in _codes(plan)
+    (swap,) = (r for r in plan.reasons if r.swap is not None)
+    assert swap.swap is not None
+    assert swap.swap.needed_setting_bytes == SWAP_POLICY.maximum_gib * GIB

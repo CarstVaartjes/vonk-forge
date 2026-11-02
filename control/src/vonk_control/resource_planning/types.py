@@ -166,15 +166,6 @@ class ResourceDemand:
             reason.severity == "blocker" for reason in self.reasons
         )
 
-    @property
-    def measured(self) -> bool:
-        """Whether this demand is a measured peak, not an estimate.
-
-        A recipe's declared peak is an estimate until a hardware try measures
-        it: it never refuses a try, it only decides how the try is admitted.
-        """
-        return self.evidence_state == "measured"
-
 
 @dataclass(frozen=True, slots=True)
 class UnknownRunMemoryResidual:
@@ -232,11 +223,6 @@ class MemoryRequirement:
     @property
     def reservation_kind(self) -> str:
         return memory_reservation_kind(self.kind)
-
-    @property
-    def measured(self) -> bool:
-        """A measured demand keeps the exact rule; an estimate may be tried."""
-        return self.demand.measured
 
 
 @dataclass(frozen=True, slots=True)
@@ -323,9 +309,6 @@ class NodeCapacityPlan:
     reasons: tuple[ResourceReason, ...] = ()
     insufficient_components: tuple[str, ...] = ()
     unknown_run_residuals: tuple[UnknownRunMemoryResidual, ...] = ()
-    #: An estimated demand above the idle maximum is tried as the only claim
-    #: on the Spark; ``required_bytes`` is then the whole claim.
-    exclusive: bool = False
 
 
 @dataclass(frozen=True, slots=True)

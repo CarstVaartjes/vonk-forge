@@ -371,9 +371,9 @@ class ResourceFitMixin:
                             memory_floor_bytes=memory_need.floor_bytes,
                         )
                         fit_node = fit_capacity.nodes[0]
-                        if fit_node.exclusive and fit_node.required_bytes is not None:
-                            # An estimate above the idle maximum claims the
-                            # whole Spark.
+                        if fit_node.required_bytes is not None:
+                            # What the planner charges: an estimate claims at
+                            # most the Spark less the floor.
                             required_memory = fit_node.required_bytes
                         memory_free_after = (
                             fit_node.selected_free_after_bytes

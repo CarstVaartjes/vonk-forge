@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     RouteState,
     RunState,
 )
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from ..distributed_lifecycle import DistributedLifecycleError
 from ..failure_classification import is_definite
@@ -58,6 +59,26 @@ from .common import (
 from .singleton import _singleton_recovery_authority
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _guard_stopped_rank(failed: tuple[RunNode, ...]) -> RunNode | None:
+    """The first failed rank the host memory guard stopped, if any.
+
+    Diagnostics that do not parse are absent: the ordinary recovery runs.
+    """
+
+    for node in failed:
+        if node.observation_failure_diagnostics is None:
+            continue
+        try:
+            diagnostics = FailureDiagnostics.model_validate(
+                node.observation_failure_diagnostics
+            )
+        except ValueError:
+            continue
+        if diagnostics.host_memory_exhausted:
+            return node
+    return None
 
 
 class DistributedRecoveryCoordinator:
@@ -177,6 +198,22 @@ class DistributedRecoveryCoordinator:
                         "automatic recovery stopped because a one-shot job may "
                         "have completed external effects before its result was "
                         "lost; verify those effects, then submit a new authorized run",
+                        now,
+                    )
+                    worked = True
+                    continue
+                guarded = _guard_stopped_rank(failed)
+                if guarded is not None:
+                    # The host memory guard stopped this run on hardware: an
+                    # observed failure of this recipe at these settings, not a
+                    # fault to relaunch into again. A new request or recipe
+                    # revision is a new run and is tried afresh.
+                    _settle_unrecoverable(
+                        run,
+                        run_nodes,
+                        f"the host memory guard stopped rank {guarded.rank}: it "
+                        "ran out of memory on hardware; it is not relaunched "
+                        "until its request or recipe changes",
                         now,
                     )
                     worked = True

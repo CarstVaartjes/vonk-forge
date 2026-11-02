@@ -4219,8 +4219,10 @@ def test_exact_stop_reservation_budget_needs_a_fresh_post_stop_check(
         snapshot.gpu_memory_total_bytes = impossible_total
         snapshot.gpu_memory_free_bytes = impossible_total
     physically_impossible = service.preview(request, actor="admin")
-    assert physically_impossible.post_stop_memory_check is None
-    assert not physically_impossible.allowed
+    # An estimate above the Spark is tried after the stop, with the claim cut
+    # to the Spark less its floor; the stop is covered by the check.
+    assert physically_impossible.post_stop_memory_check is not None
+    assert physically_impossible.allowed
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
@@ -4519,7 +4521,6 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     assert uncertainty.inventory_observed_at == sample.observed_at
 
 
-@pytest.mark.usefixtures("measured_demands")
 def test_switch_preserves_the_memory_floor_on_an_idle_spark(
     tmp_path: Path,
 ) -> None:
@@ -4551,8 +4552,15 @@ def test_switch_preserves_the_memory_floor_on_an_idle_spark(
             snapshot.gpu_memory_total_bytes = total
             snapshot.gpu_memory_free_bytes = total
         plan = service.preview(request, actor="admin")
-        assert plan.fit_current.allowed is (headroom == 0)
-        assert plan.allowed is (headroom == 0)
+        # A declared peak is an estimate: one byte short of the floor is
+        # tried, claiming the Spark less its floor, with a warning.
+        assert plan.fit_current.allowed
+        assert plan.allowed
+        node = plan.fit_current.nodes[0]
+        assert node.memory_required_bytes == min(required, total - floor)
+        assert any("only claim" in warning.detail for warning in plan.warnings) == (
+            headroom != 0
+        )
 
 
 def test_switch_tries_an_estimate_above_an_idle_spark_as_its_only_claim(
@@ -4660,6 +4668,75 @@ def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
     assert "run-switch.run_admission_blocked" not in codes
     assert plan.allowed is True
     assert [stop.run_id for stop in plan.stops] == [run_id]
+
+
+def test_switch_replaces_a_running_model_with_an_estimate_above_the_idle_maximum(
+    tmp_path: Path,
+) -> None:
+    """A switch to an over-max estimate stops the old run first, then tries.
+
+    Catches the replaced run counting as a holder that keeps the new estimate
+    waiting, while the post-stop check says no stop can ever fit it: the switch
+    then waited on its own stop for ever.
+    """
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installation_operation = installed_recipe(
+        lifecycle,
+        mapping_id,
+        build_id,
+        nodes,
+        request_id=str(uuid.uuid4()),
+    )
+    installation_id = installation_operation.owner_id
+    run_plan = lifecycle._run_admission.plan_run(
+        installation_id, "old", now=lifecycle._clock()
+    )
+    estimate = run_plan.nodes[0].required_memory_bytes
+    floor = run_plan.nodes[0].memory_floor_bytes
+    total = estimate + floor - 1
+    run_id = lifecycle._run_admission.accept_run(
+        run_plan, actor="admin", now=lifecycle._clock()
+    )
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.state = "running"
+        run.route_state = "published"
+        for item in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
+            item.state = "running"
+            item.reserved_memory_bytes = total - floor
+        for reservation in session.scalars(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_kind == "run",
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        ):
+            reservation.amount_bytes = total - floor
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        # The old run uses all but the floor; the Spark is one byte short of
+        # what the estimate and the floor ask.
+        snapshot.host_memory_total_bytes = total
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = floor
+        snapshot.gpu_memory_free_bytes = floor
+
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    plan = service.preview(request, actor="admin")
+
+    assert plan.allowed is True, plan.blockers
+    assert plan.post_stop_memory_check is not None
+    assert [stop.run_id for stop in plan.stops] == [run_id]
+    assert plan.fit_current.nodes[0].memory_required_bytes == total - floor
 
 
 def test_artifact_child_checkpoint_advances_to_verify(
@@ -7392,7 +7469,6 @@ def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
         ("stopped", False, False),
     ],
 )
-@pytest.mark.usefixtures("measured_demands")
 def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
     tmp_path: Path, run_state: str, released_after_sample: bool, admitted: bool
 ) -> None:
@@ -7463,10 +7539,16 @@ def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
         snapshot.gpu_memory_free_bytes = free
     plan = service.preview(request, actor="admin")
 
-    assert plan.allowed is admitted
+    # The released claim is credited exactly when the sample predates the
+    # Stop; without the credit the estimate is tried, with a warning, as the
+    # only claim on the Spark.
+    assert plan.allowed
     available = plan.fit_current.nodes[0].memory_available_bytes
     assert available is not None
     assert (available >= required + floor) is admitted
+    assert any("only claim" in warning.detail for warning in plan.warnings) is (
+        not admitted
+    )
 
     # A refused preview must not poison admission when fresh inventory fits.
     with sessions.begin() as session:
