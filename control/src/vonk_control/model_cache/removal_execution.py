@@ -49,6 +49,7 @@ from .persistence import (
     _operation_progress,
     _operation_removal,
     _store_operation_payload,
+    _updated,
 )
 
 if TYPE_CHECKING:
@@ -195,7 +196,7 @@ class RemovalExecutionMixin:
                     operation.created_at,
                     model_set_reference_findings(session, tuple(in_use)),
                 )
-                if in_use and _untouched(checkpoint)
+                if in_use
                 else None
             )
         if pending_scope:
@@ -206,14 +207,17 @@ class RemovalExecutionMixin:
             return cache._advance_model_removal_step(
                 operation_id, now=now, deadline=deadline
             )
-        if newer is not None:
-            # Newer intent wins: a removal that has removed nothing yet ends
-            # and releases its fences instead of blocking the newer consumer.
+        # Newer intent wins. A removal that has removed nothing yet ends; one that
+        # already removed something yields: it keeps what is left, drops its set
+        # rows and finishes, so it neither blocks the newer consumer nor is
+        # cancelled half-done.
+        yielding = newer is not None
+        if newer is not None and _untouched(checkpoint):
             cache._supersede_waiting_removal(
                 operation_id, reason=f"Removal superseded by newer {newer}", now=now
             )
             return True
-        if in_use:
+        if in_use and not yielding:
             first_digest = min(in_use)
             cache._defer_model_removal(
                 operation_id,
@@ -223,7 +227,7 @@ class RemovalExecutionMixin:
                 cause=Disposition.WAIT,
             )
             return False
-        if object_index < len(delete_objects):
+        if object_index < len(delete_objects) and not yielding:
             # A model is a set of files: delete this removal's exclusive objects
             # in a time-bounded batch, one checkpoint per batch. A crash before
             # the checkpoint only undercounts bytes; the unlinks are idempotent.
@@ -308,7 +312,7 @@ class RemovalExecutionMixin:
                 )
                 return False
             return bool(completed)
-        if set_index < len(selected_sets):
+        if set_index < len(selected_sets) and not yielding:
             set_digest = str(selected_sets[set_index])
             identity = ArtifactIdentity("model-set", set_digest)
             try:
@@ -375,7 +379,19 @@ class RemovalExecutionMixin:
                 return False
             if operation.state not in model_cache_states.LIVE:
                 return False
-            wait = cache._finish_model_removal_in_session(session, operation, now=now)
+            if yielding and isinstance(payload, ModelCacheRemovalPayload):
+                _store_operation_payload(
+                    operation,
+                    "remove",
+                    _updated(
+                        payload,
+                        object_index=len(payload.delete_objects),
+                        set_index=len(payload.selected),
+                    ),
+                )
+            wait = cache._finish_model_removal_in_session(
+                session, operation, now=now, yielding=yielding
+            )
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
             cache._defer_model_removal(
@@ -413,7 +429,12 @@ class RemovalExecutionMixin:
         cache.reconcile_removal_gates()
 
     def _finish_model_removal_in_session(
-        self, session: Session, operation: ModelCacheOperation, *, now: datetime
+        self,
+        session: Session,
+        operation: ModelCacheOperation,
+        *,
+        now: datetime,
+        yielding: bool = False,
     ) -> str | None:
         """Finish a fully reconciled removal; else say what it waits for.
 
@@ -451,11 +472,31 @@ class RemovalExecutionMixin:
         )
         # A set outside this removal that lists a target keeps that object: the
         # removal yields per object (see the executor) and still completes.
+        wanted = (
+            set(
+                session.scalars(
+                    select(ModelCacheOperation.artifact_set_sha256).where(
+                        ModelCacheOperation.artifact_set_sha256.in_(selected),
+                        ModelCacheOperation.id != operation.id,
+                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
+                    )
+                )
+            )
+            if yielding
+            else set()
+        )
         for set_digest in selected:
+            row = session.get(ModelCacheSet, set_digest)
+            if set_digest in wanted:
+                # A newer request owns this set: keep its row but no longer
+                # call it verified, so it is repaired, never served half-gone.
+                if row is not None:
+                    row.verified_bytes = 0
+                    row.verified_at = None
+                continue
             session.query(ModelCacheSetArtifact).filter(
                 ModelCacheSetArtifact.artifact_set_sha256 == set_digest
             ).delete(synchronize_session=False)
-            row = session.get(ModelCacheSet, set_digest)
             if row is not None:
                 session.delete(row)
         clear_removal(
