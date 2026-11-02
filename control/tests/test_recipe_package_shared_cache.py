@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import os
+import time
 from pathlib import Path
 
 import httpx2
@@ -111,3 +112,26 @@ def test_a_failed_commit_names_its_cause_and_heals_on_the_next_prepare(
     assert snapshot_path.is_file()
     assert _scratch_files(cache) == []
     client.close()
+
+
+def test_a_killed_writers_old_private_files_are_removed_at_start(
+    tmp_path: Path,
+) -> None:
+    cache = tmp_path / "packages"
+    (cache / "ab").mkdir(parents=True)
+    old = [
+        cache / ".recipe-library.tar.k1ll3d.part",
+        cache / ".snapshot.k1ll3d.tmp",
+        cache / "ab" / ".abcdef.k1ll3d.tmp",
+    ]
+    live = [cache / ".snapshot.writing.tmp", cache / "snapshot.json"]
+    two_days_ago = time.time() - 2 * 24 * 60 * 60
+    for path in old + live:
+        path.write_bytes(b"x")
+    for path in old + [live[1]]:
+        os.utime(path, (two_days_ago, two_days_ago))
+
+    RecipePackageClient(api_url="http://127.0.0.1", cache_root=cache).close()
+
+    assert [path for path in old if path.exists()] == []
+    assert all(path.exists() for path in live)

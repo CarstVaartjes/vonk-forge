@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
 import tarfile
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -90,6 +92,10 @@ MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_LIBRARY_BYTES = 4 * 1024 * 1024 * 1024
 MAX_LIBRARY_MEMBERS = 8192
 _COPY_CHUNK = 1024 * 1024
+# A private temporary file this old belongs to a process that was killed while
+# writing it; a live download or commit touches its file far more often.
+_ORPHAN_AGE_SECONDS = 24 * 60 * 60
+_LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -262,6 +268,7 @@ class RecipePackageClient:
         self._listing_unchanged = False
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
+        self._remove_orphans()
         self._client = httpx2.Client(
             base_url=self._download_origin,
             timeout=httpx2.Timeout(timeout_seconds),
@@ -283,6 +290,22 @@ class RecipePackageClient:
 
     def close(self) -> None:
         self._client.close()
+
+    def _remove_orphans(self) -> None:
+        """Remove private temporary files a killed process left behind."""
+        cutoff = time.time() - _ORPHAN_AGE_SECONDS
+        for pattern in (f".{RELEASE_LIBRARY}.*.part", ".snapshot.*.tmp", "??/.*.tmp"):
+            for path in self._cache_root.glob(pattern):
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                except OSError as error:
+                    # The next start tries again; nothing reads these files.
+                    _LOGGER.warning(
+                        "recipe package cache orphan %s was not removed: %s",
+                        path.name,
+                        error.strerror or error.errno,
+                    )
 
     def list(self) -> RecipeLibrarySnapshot:
         try:

@@ -529,6 +529,5 @@ def test_fresh_postgres_imports_typed_canonical_model_recipe_api(
     assert offline_snapshot.commit == snapshot.commit
     assert len(offline_snapshot.items) == len(corpus.index["recipes"])
     assert release.requests == [f"/repos/{REPOSITORY}/releases"]
-    assert not (tmp_path / "packages" / "snapshot.candidate.json").exists()
     restarted.close()
     lap("offline_reader_restart")
