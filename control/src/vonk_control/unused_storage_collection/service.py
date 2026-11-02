@@ -24,8 +24,11 @@ from ..settings import (
     STORAGE_SCAN_INTERVAL_SECONDS,
 )
 from ..storage_demands import (
+    NAS_IMAGES,
+    NAS_MODELS,
     STORAGE_EVICTING,
     STORAGE_INSUFFICIENT,
+    StorageDemand,
     StorageDemands,
     StorageRelief,
     spark_scope,
@@ -121,6 +124,8 @@ class UnusedStorageCollector:
         self._model_cache = model_cache
         self._image_blobs = image_blobs
         self._demands = demands
+        if demands is not None:
+            demands.on_new(self._wake_for)
         self._budget_seconds = budget_seconds
         self._disk_usage = disk_usage
         self._low_free_fraction = low_free_fraction
@@ -139,6 +144,12 @@ class UnusedStorageCollector:
         self._refused: dict[tuple[str, str], str] = {}
         #: Items whose failed run's Stop this sweep queued.
         self._stopping: set[tuple[str, str]] = set()
+
+    def _wake_for(self, demand: StorageDemand) -> None:
+        """A refused NAS demand is looked at on the next tick, not the next scan."""
+
+        if demand.scope in (NAS_IMAGES, NAS_MODELS):
+            self._due_at = self._clock()
 
     def memory_footprint(self) -> dict[WorkerMemoryComponent, int]:
         return {WorkerMemoryComponent.STORAGE_COLLECTION_ROUNDS: len(self._rounds)}

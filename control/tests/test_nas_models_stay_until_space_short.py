@@ -165,6 +165,7 @@ def test_a_refused_download_is_admitted_after_the_collector_made_room(
             reserve_fraction=0.0,
             reserve_floor_bytes=0,
         )
+        collector.tick()  # a scan that found nothing short: the next is 30 s away
         data = b"c" * size
         later = _canonical_model(
             publisher="test",
@@ -188,8 +189,9 @@ def test_a_refused_download_is_admitted_after_the_collector_made_room(
 
         # The refusal asked for room: the collector evicts the superseded
         # revision (and nothing the successor or the loaded model uses).
-        freed = collector.collect()
-        assert freed.models == 1, (freed.kept, freed.scopes)
+        # The refusal itself wakes the collector: this is the next tick, not
+        # the next scan.
+        assert collector.tick(), "a refused NAS download did not wake the collector"
         _settle(service)
         assert _alive(sessions, sets) == {"a": False, "n": True, "l": True}
         free[0] = size + 1
