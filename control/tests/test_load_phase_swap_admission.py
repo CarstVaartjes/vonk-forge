@@ -699,10 +699,14 @@ def test_k_a_load_waits_until_the_spark_has_its_minimum_swap(
     assert plan.allowed, _codes(plan)
 
 
-def test_l_only_a_minimum_swap_beyond_the_largest_setting_never_fits(
+def test_l_a_declared_minimum_swap_beyond_the_largest_setting_is_tried(
     tmp_path, postgres_engine
 ) -> None:
-    """Catches a requirement no swap setting can meet waiting forever."""
+    """Catches refusing a recipe for a swap declaration nothing has measured.
+
+    The declaration is an estimate: the try measures it and the host memory
+    guard stops the run if swap really runs out.
+    """
     steady = 30 * GIB
     sessions, now, node, installation, service = _world(
         tmp_path,
@@ -714,7 +718,7 @@ def test_l_only_a_minimum_swap_beyond_the_largest_setting_never_fits(
     at = now + timedelta(seconds=1)
     _inventory(sessions, at, node, swap=_swap(SWAP_POLICY.maximum_gib))
     plan = service.plan_run(installation, alias="qwen", now=at)
-    assert _codes(plan) == {ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY}
+    assert plan.allowed, _codes(plan)
 
 
 def _swap_reason(plan):

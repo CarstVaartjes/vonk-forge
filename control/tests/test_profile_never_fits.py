@@ -56,9 +56,11 @@ def _two_starts_on_one_spark(sim: Simulation, peak_bytes: int) -> str:
 
 
 @pytest.mark.slow(30)
-def test_a_peak_no_held_memory_can_make_room_for_ends_the_load(
+def test_an_estimated_peak_no_held_memory_can_make_room_for_is_tried(
     tmp_path, postgres_engine
 ) -> None:
+    # A recipe's declared peak is an estimate until a try measures it: it is
+    # not refused as never fitting, it starts as the only claim on its Spark.
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
@@ -73,17 +75,16 @@ def test_a_peak_no_held_memory_can_make_room_for_ends_the_load(
         )
 
         review = world.controller.profiles.preview(profile_id)
-        assert not review.allowed
-        assert _NEVER_FITS in {
+        assert review.allowed
+        assert _NEVER_FITS not in {
             reason.code
             for item in review.assessments
             for reason in item.assessment.blockers
         }
 
         load = _load(world, profile_id)
-        assert sim.settle(load) == "failed"
-        assert _NEVER_FITS in _ending_codes(world, load)
-        assert not spark.serving
+        sim.settle(load)
+        assert _NEVER_FITS not in _ending_codes(world, load)
     finally:
         world.close()
 

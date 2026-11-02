@@ -2953,6 +2953,114 @@ def test_recipe_run_observation_report_applies_process_state_per_run(
         assert node.observation_observed_at.replace(tzinfo=UTC) == recovered_at
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_an_over_max_estimate_that_runs_out_of_memory_is_stopped_and_recorded(
+    agent_system,
+) -> None:
+    """Fault: the exclusive try of an over-max estimate hits the host memory guard.
+
+    The guard (R1-R5) is the runtime safety; the Controller records its stop as
+    a failed rank with the guard's diagnostics, and a fresh over-max estimate is
+    admitted again on the emptied Spark.
+    """
+    from vonk_agent_protocol.failure_evidence import (
+        FailureDiagnostics,
+        FailureLogTail,
+        FailureProperty,
+    )
+    from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+
+    from .test_estimated_demand_try import _FREE, _OVER_MAX, _plan
+    from .test_resource_planning import _SPARK_POOL, _declared_demand, _idle_capacity
+
+    client, services, _, clock = agent_system
+    idle = _plan(_declared_demand(_OVER_MAX), _idle_capacity(_SPARK_POOL, _FREE))
+    (tried,) = idle.nodes
+    assert idle.allowed and tried.exclusive and tried.required_bytes is not None
+
+    run_id = "70000000-0000-4000-8000-000000000017"
+    with services.sessions.begin() as session:
+        session.add(
+            RecipeRun(
+                id=run_id,
+                installation_id="80000000-0000-4000-8000-000000000018",
+                mapping_id="90000000-0000-4000-8000-000000000019",
+                mapping_generation=1,
+                run_generation=1,
+                alias="over-max",
+                plan_digest="1" * 64,
+                plan={"schema_version": 1, "observation_schema_version": 2},
+                state="running",
+                route_state="withdrawn",
+                actor="admin",
+                created_at=clock.now,
+                updated_at=clock.now,
+            )
+        )
+        session.add(
+            RunNode(
+                run_id=run_id,
+                node_id=NODE_A,
+                rank=0,
+                role="worker",
+                state="running",
+                port=8888,
+                reserved_memory_bytes=tried.required_bytes,
+                updated_at=clock.now - timedelta(seconds=1),
+            )
+        )
+    empty = FailureLogTail(
+        text="", truncated=False, dropped_bytes=None, dropped_lines=None
+    )
+    diagnostics = FailureDiagnostics(
+        collected_at=clock.now.isoformat(),
+        phase="workload.host_memory_guard",
+        category="capacity",
+        stdout=empty,
+        stderr=empty,
+        versions=[],
+        sandbox=[],
+        storage=[],
+        collector_errors=[],
+        preflight=[
+            FailureProperty(name="reason", value="workload.host_memory_exhausted"),
+            FailureProperty(name="exit_cause", value="host_memory_exhausted"),
+            FailureProperty(name="mem_available_bytes", value="1"),
+        ],
+    )
+    response = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={
+            "observed_at": clock.now.isoformat(),
+            "runs": [
+                {
+                    "run_id": run_id,
+                    "run_generation": 1,
+                    "process_running": False,
+                    "endpoint_ready": None,
+                    "failure_diagnostics": json.loads(canonical_message(diagnostics)),
+                }
+            ],
+        },
+    )
+    assert response.status_code == 204
+    with services.sessions() as session:
+        node = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert node is not None and node.state == "failed"
+        assert (
+            FailureDiagnostics.model_validate_json(
+                json.dumps(node.last_exit_diagnostics)
+            )
+            == diagnostics
+        )
+
+    # Nothing stays stuck: the emptied Spark admits a fresh try.
+    again = _plan(_declared_demand(_OVER_MAX), _idle_capacity(_SPARK_POOL, _FREE))
+    assert again.allowed and again.nodes[0].exclusive
+    assert PLATFORM_MEMORY_FLOOR_BYTES == again.nodes[0].selected_free_after_bytes
+
+
 def test_rust_agent_enrollment_shape_remains_controller_compatible(
     agent_system,
 ) -> None:
