@@ -59,6 +59,7 @@ from vonk_control.recipe_action_plans import StopPlan, UninstallPlan
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import ModelDefinition
 
+from .display_fixtures import create_draft
 from .test_catalog_entities import _model
 from .test_model_cache import _artifact
 
@@ -147,9 +148,13 @@ def _historical_draft(
     engine: Engine, document: dict[str, object]
 ) -> CatalogDocumentRevision:
     with _historical_mapper(engine) as historical:
-        return CatalogEntityService(
-            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
-        ).create_draft(document, actor="operator")
+        return create_draft(
+            CatalogEntityService(
+                sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
+            ),
+            document,
+            actor="operator",
+        )
 
 
 def _document(size: int, slug: str) -> dict[str, object]:
@@ -331,8 +336,8 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
             )
             baseline = CatalogEntityService(baseline_sessions, clock=lambda: NOW)
             with pytest.raises(Exception) as _ending:
-                row = baseline.create_draft(
-                    _document(2**63, "baseline-large"), actor="operator"
+                row = create_draft(
+                    baseline, _document(2**63, "baseline-large"), actor="operator"
                 )
                 with baseline_sessions() as session:
                     reread = session.get(CatalogDocumentRevision, row.id)
@@ -350,8 +355,8 @@ def test_actual_bigint_counterexample_then_native_adoption_and_same_ids(
         retained = session.get(CatalogDocumentRevision, existing.id)
         assert retained is not None and retained.download_bytes == 9
     for value in (2**63, VALUES[-1]):
-        row = owner.create_draft(
-            _document(value, f"adopted-{len(str(value))}"), actor="operator"
+        row = create_draft(
+            owner, _document(value, f"adopted-{len(str(value))}"), actor="operator"
         )
         with sessions() as session:
             retained = session.get(CatalogDocumentRevision, row.id)
@@ -470,9 +475,13 @@ def test_legacy_adoption_preserves_keys_extensions_and_checked_restart(
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
     with _historical_mapper(engine) as historical:
-        revision = CatalogEntityService(
-            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
-        ).create_draft(_document(9, "preserved-nine"), actor="operator")
+        revision = create_draft(
+            CatalogEntityService(
+                sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
+            ),
+            _document(9, "preserved-nine"),
+            actor="operator",
+        )
         digest = _seed_cache(historical, tmp_path / "cache", 9)
     with engine.begin() as connection:
         connection.exec_driver_sql(
@@ -806,7 +815,7 @@ def test_native_catalog_and_cache_preserve_complete_integer_domain_across_restar
             first.pop("parts", None)
             document["files"] = [first]
             native = ModelDefinition.model_validate_json(json.dumps(document))
-            draft = catalog.create_draft(document, actor="operator")
+            draft = create_draft(catalog, document, actor="operator")
             assert draft.download_bytes == native.download_bytes == expected
             assert draft.installed_bytes == native.installed_bytes == expected
 
@@ -1081,9 +1090,13 @@ def test_adoption_execution_deadline_rolls_back_partial_ddl_then_same_identity_r
     engine = legacy_engine
     sessions = sessionmaker(engine, expire_on_commit=False)
     with _historical_mapper(engine) as historical:
-        revision = CatalogEntityService(
-            sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
-        ).create_draft(_document(9, "deadline-retained"), actor="operator")
+        revision = create_draft(
+            CatalogEntityService(
+                sessionmaker(historical, expire_on_commit=False), clock=lambda: NOW
+            ),
+            _document(9, "deadline-retained"),
+            actor="operator",
+        )
         digest = _seed_cache(historical, tmp_path / "deadline-cache", 9)
     monkeypatch.setattr(
         adoption_module,

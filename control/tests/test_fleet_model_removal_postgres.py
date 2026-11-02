@@ -33,6 +33,7 @@ from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
 
+from .display_fixtures import reworded
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_model_cache import _artifact, _download
 from .test_model_removal_reference_lifecycle import _one_model, _register_model
@@ -308,13 +309,7 @@ def _refreshed_model(sessions, document_id: str, stored: object, digest: str) ->
     from vonk_forge_contracts import ModelDefinition, document_sha256
 
     definition = ModelDefinition.model_validate(stored)
-    document = definition.model_copy(
-        update={
-            "metadata": definition.metadata.model_copy(
-                update={"description": "refreshed"}
-            )
-        }
-    ).model_dump(mode="json")
+    document = reworded(definition, "refreshed").model_dump(mode="json")
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     revised = catalog.revise(document_id, document, actor="admin")
     catalog.resolve(revised.id, actor="admin")

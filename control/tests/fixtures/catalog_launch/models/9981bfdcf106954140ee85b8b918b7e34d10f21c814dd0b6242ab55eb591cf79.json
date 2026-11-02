@@ -1,0 +1,94 @@
+{
+ "capabilities": [],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "gitattributes",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+   "size_bytes": 1519
+  },
+  {
+   "id": "license",
+   "path": "LICENSE.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "25d122eb8f5b880fd23c736fb6ea8018ee45c12237e00b8a86d14c653904999e",
+   "size_bytes": 7503
+  },
+  {
+   "id": "readme",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "5395522a8a611d0578b6036f47e60445381ee4b2c7508f0e93d9e4c1e876fa63",
+   "size_bytes": 14520
+  },
+  {
+   "id": "config",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "135ecd23e34a70b6fbed8b083fdecb319b7e3a54e3d849258bbe4ddcf1783bb5",
+   "size_bytes": 745
+  },
+  {
+   "id": "weights",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "dcb2e45127cccbf1601e5f42fef165eea275c8e5213197e8dcf3f48822718179",
+   "size_bytes": 1212559808
+  },
+  {
+   "id": "preprocessor",
+   "path": "preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "960c41d1f3a7778b936365769a2d90550b318a6c0a53a0296957adacfe5e0dd7",
+   "size_bytes": 585
+  }
+ ],
+ "format": {
+  "precision": "fp32",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "facebook",
+   "slug": "dinov3"
+  },
+  "model": {
+   "publisher": "facebook",
+   "slug": "dinov3-vitl16-pretrain-lvd1689m"
+  },
+  "publisher": "facebook",
+  "slug": "dinov3-vitl16-pretrain-lvd1689m",
+  "variant": "ViT-L/16 LVD-1689M",
+  "version": "ea8dc286"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "facebook"
+  ],
+  "spdx": "LicenseRef-DINOv3",
+  "url": "https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m/blob/ea8dc2863c51be0a264bab82070e3e8836b02d51/LICENSE.md"
+ },
+ "modalities": [
+  "image"
+ ],
+ "requires_token": true,
+ "source": {
+  "repository": "https://huggingface.co/facebook/dinov3-vitl16-pretrain-lvd1689m",
+  "revision": "ea8dc2863c51be0a264bab82070e3e8836b02d51"
+ }
+}

@@ -24,6 +24,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
 from vonk_control.models import Base, CatalogDocumentRevision, ModelCacheOperation
 
+from .display_fixtures import create_draft, reword
 from .removal_settle import advance_until_ended
 from .test_find_prepare_installed_cli import _PAYLOAD, _model_document
 from .test_model_cache_cancel_recovery import _artifact
@@ -52,7 +53,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
         sessions, clock=lambda: _NOW, cursors=codec.cursor_codec()
     )
     document = _model_document("exact-removal-target")
-    draft = catalog.create_draft(document, actor="catalog-test")
+    draft = create_draft(catalog, document, actor="catalog-test")
     original = catalog.resolve(draft.id, actor="catalog-test")
     original_digest = original.content_digest
     assert isinstance(original_digest, str)
@@ -178,9 +179,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             try:
                 assert peer.response_accepted.wait(timeout=25), peer.calls
                 candidate = _model_document("exact-removal-target")
-                metadata = candidate["metadata"]
-                assert isinstance(metadata, dict)
-                metadata["description"] = "Catalog head changed after acceptance"
+                reword(candidate, "Catalog head changed after acceptance")
                 next_revision = catalog.revise(
                     original.document_id,
                     candidate,

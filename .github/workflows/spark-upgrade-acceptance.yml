@@ -188,6 +188,7 @@ jobs:
           VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY: ${{ inputs.premerge && 'ephemeral-synthetic-upstream' || secrets.VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY }}
           VONK_ACCEPTANCE_SPARK_CONTROLLER_BOUNDARY: loopback
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
+          GH_TOKEN: ${{ github.token }}
           CANDIDATE: ${{ steps.releases.outputs.candidate }}
           BASELINE: ${{ steps.releases.outputs.baseline }}
         run: |

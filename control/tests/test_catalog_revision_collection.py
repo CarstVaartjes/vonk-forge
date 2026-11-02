@@ -141,7 +141,6 @@ class Catalog:
                 model = ModelDefinition.model_validate(document)
                 projected = ModelRevisionProjection(
                     identity=model.identity,
-                    metadata=model.metadata,
                     format=model.format,
                     capabilities=model.capabilities,
                     modalities=model.modalities,

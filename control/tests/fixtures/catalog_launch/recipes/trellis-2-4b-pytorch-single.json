@@ -88,30 +88,222 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Installable single-DGX Spark image-to-3D Candidate using the pinned official TRELLIS.2 source, exact companion sparse decoder, local DINOv3 encoder, ARM64-native extensions, and deterministic GLB adapter. Its pinned nvdiffrast runtime dependency is limited to non-commercial research or evaluation; operator acceptance and physical Spark quality, memory, and latency evidence are still required.",
-  "tags": [
-   "candidate",
-   "three-d",
-   "image-to-3d",
-   "glb",
-   "pytorch-pipeline",
-   "single",
-   "spark",
-   "executable",
-   "offline",
-   "source-bundled",
-   "non-commercial-runtime"
-  ],
-  "title": "TRELLIS.2 4B native single Spark"
- },
  "models": [
   {
    "files": [
     {
-     "file_id": "snapshot",
-     "id": "primary-snapshot",
+     "file_id": "metadata-11ad7efa2497-618cd5b83d",
+     "id": "primary-metadata-11ad7efa2497-618cd5b83d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-ab08bd7f5553-b335630551",
+     "id": "primary-readme-ab08bd7f5553-b335630551",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "shape-dec-next-dc-f16c32-fp16-5f1b856dffce-029dc2e8a3",
+     "id": "primary-shape-dec-next-dc-f16c32-fp16-5f1b856dffce-029dc2e8a3",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "shape-dec-next-dc-f16c32-fp16-e3b718d3e43e-46baaa46a5",
+     "id": "primary-shape-dec-next-dc-f16c32-fp16-e3b718d3e43e-46baaa46a5",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "shape-enc-next-dc-f16c32-fp16-5a960a5c419d-72523a8afd",
+     "id": "primary-shape-enc-next-dc-f16c32-fp16-5a960a5c419d-72523a8afd",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "shape-enc-next-dc-f16c32-fp16-f37c5ff5b983-f74fee68e9",
+     "id": "primary-shape-enc-next-dc-f16c32-fp16-f37c5ff5b983-f74fee68e9",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-img2shape-dit-1-3b-1024-bf16-7ebd6d367393-d5787cb1da",
+     "id": "slat-flow-img2shape-dit-1-3b-1024-bf16-7ebd6d367393-d5787cb1da",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-img2shape-dit-1-3b-1024-bf16-07cd0596f634-7c824f297d",
+     "id": "slat-flow-img2shape-dit-1-3b-1024-bf16-07cd0596f634-7c824f297d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-img2shape-dit-1-3b-512-bf16-ddbd7a1d34ce-6deb30dc48",
+     "id": "slat-flow-img2shape-dit-1-3b-512-bf16-ddbd7a1d34ce-6deb30dc48",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-img2shape-dit-1-3b-512-bf16-ec5e0917ef9b-08687ad538",
+     "id": "slat-flow-img2shape-dit-1-3b-512-bf16-ec5e0917ef9b-08687ad538",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-31f4fdad9974-8e04077f04",
+     "id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-31f4fdad9974-8e04077f04",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-580401269059-0635b411df",
+     "id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-580401269059-0635b411df",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-3093796257a6-2fa70dda8e",
+     "id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-3093796257a6-2fa70dda8e",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-8371aa1c5d13-b7c0b81f5f",
+     "id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-8371aa1c5d13-b7c0b81f5f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "ss-flow-img-dit-1-3b-64-bf16-6cdfb636854f-cfcec5a523",
+     "id": "primary-ss-flow-img-dit-1-3b-64-bf16-6cdfb636854f-cfcec5a523",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "ss-flow-img-dit-1-3b-64-bf16-ca01377c485b-92d4da3434",
+     "id": "primary-ss-flow-img-dit-1-3b-64-bf16-ca01377c485b-92d4da3434",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tex-dec-next-dc-f16c32-fp16-22074e4ab5b2-90e5f1233b",
+     "id": "primary-tex-dec-next-dc-f16c32-fp16-22074e4ab5b2-90e5f1233b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tex-dec-next-dc-f16c32-fp16-97ea69addea2-5e554c0085",
+     "id": "primary-tex-dec-next-dc-f16c32-fp16-97ea69addea2-5e554c0085",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tex-enc-next-dc-f16c32-fp16-22d78e219c9d-29ab06ee6a",
+     "id": "primary-tex-enc-next-dc-f16c32-fp16-22d78e219c9d-29ab06ee6a",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tex-enc-next-dc-f16c32-fp16-dd109f75f84b-65ffe37f13",
+     "id": "primary-tex-enc-next-dc-f16c32-fp16-dd109f75f84b-65ffe37f13",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "pipeline-222c359ab1ed-a1130aae5d",
+     "id": "primary-pipeline-222c359ab1ed-a1130aae5d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "texturing-pipeline-64009974a391-704c70b5f9",
+     "id": "primary-texturing-pipeline-64009974a391-704c70b5f9",
      "mount": {
       "target": "/models/target"
      },
@@ -122,10 +314,112 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "5c13691df9a719b52ab3ea091a814fdd19b67f4ab880744ee1775f2c50b99647",
+    "content_sha256": "54219b8ffcef0267f307d4c342333dc061932f916a9f1a14c82d653d6214c9b8",
     "kind": "model",
     "publisher": "microsoft",
     "slug": "trellis-2-4b"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "ss-dec-conv3d-16l8-fp16-646781293f1c-85f0b62954",
+     "id": "sparse-decoder-config-ss-dec-conv3d-16l8-fp16-646781293f1c-85f",
+     "mount": {
+      "target": "/models/sparse-decoder-config"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "ss-dec-conv3d-16l8-fp16-1c76d4a40519-f445c876e9",
+     "id": "sparse-decoder-weights-ss-dec-conv3d-16l8-fp16-1c76d4a40519-f44",
+     "mount": {
+      "target": "/models/sparse-decoder-weights"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "sparse-decoder",
+   "model": {
+    "content_sha256": "44e8d1b703b401330c228b10875cde474aa54ad79f327057cc95650bf3b2b129",
+    "kind": "model",
+    "publisher": "microsoft",
+    "slug": "trellis-sparse-decoder"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "gitattributes",
+     "id": "dino-gitattributes",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license",
+     "id": "dino-license",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme",
+     "id": "dino-readme",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config",
+     "id": "dino-config",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "weights",
+     "id": "dino-weights",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "preprocessor",
+     "id": "dino-preprocessor",
+     "mount": {
+      "target": "/models/dino"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "dino",
+   "model": {
+    "content_sha256": "9981bfdcf106954140ee85b8b918b7e34d10f21c814dd0b6242ab55eb591cf79",
+    "kind": "model",
+    "publisher": "facebook",
+    "slug": "dinov3-vitl16-pretrain-lvd1689m"
    }
   }
  ],
@@ -138,8 +432,8 @@
   "source_reference": "https://github.com/microsoft/TRELLIS.2/tree/75fbf0183001ed9876c8dbb35de6b68552ee08bd"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "2.0.10"
+  "released_at": "2026-10-06",
+  "version": "2.0.12"
  },
  "runtime": {
   "arguments": [

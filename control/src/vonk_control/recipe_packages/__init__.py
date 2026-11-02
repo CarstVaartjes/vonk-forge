@@ -1183,7 +1183,6 @@ class RecipePackageClient:
                 RecipePackageCode.PACKAGE_INVALID,
                 "recipe package identity or contents are invalid",
             ) from error
-        metadata = recipe.metadata
         package_digest = (
             package.package_sha256 if package is not None else _sha256(archive)
         )
@@ -1237,9 +1236,6 @@ class RecipePackageClient:
         )
         return replace(
             item,
-            title=metadata.title,
-            description=metadata.description,
-            tags=tuple(metadata.tags),
             document=recipe_document,
             release=RecipeLibraryRelease(
                 recipe.release.version, recipe.release.released_at

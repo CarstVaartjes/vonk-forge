@@ -68,6 +68,9 @@ class _Catalog:
     def refresh_build_policy(self):
         return ()
 
+    def refresh_model_projections(self) -> None:
+        return None
+
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 

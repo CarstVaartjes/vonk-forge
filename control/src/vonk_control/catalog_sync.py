@@ -673,6 +673,9 @@ class ManagedRecipeCatalogSyncService:
 
         result = _empty_result(reviewed_content)
         policy_problems = self._catalog.refresh_build_policy()
+        # A sync that applies a library is where a Model projection written
+        # under an earlier contract is re-derived; an unchanged tick never gets here.
+        self._catalog.refresh_model_projections()
         # Index documents the reader could not validate were already skipped;
         # report each one without holding up the rest of the snapshot.
         for problem in snapshot.problems:

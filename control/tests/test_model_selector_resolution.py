@@ -20,6 +20,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.errors import ModelCacheError
 from vonk_control.models import Base, CatalogDocumentRevision
 
+from .display_fixtures import create_draft
 from .test_model_cache import _artifact, _canonical_model, _download
 
 NOW = datetime(2026, 10, 18, tzinfo=UTC)
@@ -54,7 +55,7 @@ def _activate(catalog: CatalogEntityService, *, publisher: str, weight: str):
         file_id="weights",
         file_digest=hashlib.sha256(weight.encode() * 3).hexdigest(),
     )
-    row = catalog.create_draft(model.model_dump(mode="json"), actor="test")
+    row = create_draft(catalog, model.model_dump(mode="json"), actor="test")
     return catalog.resolve(row.id, actor="test")
 
 

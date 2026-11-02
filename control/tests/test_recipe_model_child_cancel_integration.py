@@ -271,7 +271,7 @@ def test_recipe_parent_waits_for_model_child_effect_after_controller_restart(
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="test",
                 created_at=now,
                 updated_at=now,

@@ -48,6 +48,7 @@ from vonk_control.models import (
 from vonk_control.settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .display_fixtures import reword
 from .pass_budget_clocks import PassClock
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_library_assessment import (  # noqa: F401 - the shared fixture
@@ -141,7 +142,7 @@ def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
             session.flush()
             for old in range(history):
                 older = json.loads(json.dumps(revision.document))
-                older["metadata"]["description"] += f" (revision {old})"
+                reword(older, f" (revision {old})")
                 older = RecipeDefinition.model_validate(older).model_dump(mode="json")
                 owner = CatalogDocumentRevision(
                     document_id=revision.document_id,
@@ -486,7 +487,7 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
         ):
             build.source_bundle_sha256 = "b" * 64
         document = json.loads(json.dumps(built.document))
-        document["metadata"]["description"] += " (editorial successor)"
+        reword(document, " (editorial successor)")
         document = RecipeDefinition.model_validate(document).model_dump(mode="json")
         successor = CatalogDocumentRevision(
             document_id=built.document_id,
