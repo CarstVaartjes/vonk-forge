@@ -125,7 +125,7 @@ class UnusedStorageCollector:
         self._image_blobs = image_blobs
         self._demands = demands
         if demands is not None:
-            demands.on_request(self._wake_for)
+            demands.on_new(self._wake_for)
         self._budget_seconds = budget_seconds
         self._disk_usage = disk_usage
         self._low_free_fraction = low_free_fraction

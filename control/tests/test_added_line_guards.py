@@ -1550,6 +1550,29 @@ def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
         assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
 
 
+_WHOLE_MEMBERSHIP = (
+    "def read(session, sets):\n"
+    "    every = session.scalars(select(ModelCacheSetArtifact.artifact_sha256))\n"
+    "    named = session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "        )\n"
+    "    )\n"
+    "    return every, named\n"
+)
+
+
+def test_a_whole_membership_table_read_is_flagged_but_a_scoped_one_is_not() -> None:
+    path = "control/src/vonk_control/model_cache/removal_acceptance.py"
+    assert check_source(path, _WHOLE_MEMBERSHIP, {2}, modes=("model-sets",))
+    assert not check_source(
+        path, _WHOLE_MEMBERSHIP, {1, 3, 4, 5, 6}, modes=("model-sets",)
+    )
+    assert not check_source(
+        "control/tests/test_x.py", _WHOLE_MEMBERSHIP, {2}, modes=("model-sets",)
+    )
+
+
 _DIRECT_OPENER = (
     "def check(cache, client):\n    return cache._open_http_response(client, URL, {})\n"
 )

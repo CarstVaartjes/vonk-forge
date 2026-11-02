@@ -976,6 +976,44 @@ _ANONYMOUS_SEND_MODULES = frozenset(
 )
 
 
+def unfiltered_membership_selects(source: str) -> list[int]:
+    """Lines selecting ``ModelCacheSetArtifact`` with no ``where`` or ``limit``.
+
+    A request or removal path pays for the sets it names, not for every
+    membership row of the cache (a Seq Scan of ~31k rows per acceptance).
+    """
+
+    tree = ast.parse(source)
+    filtered: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"where", "filter_by", "limit"}
+        ):
+            receiver: ast.AST = node.func.value
+            while isinstance(receiver, ast.Call):
+                filtered.add(id(receiver))
+                receiver = (
+                    receiver.func.value
+                    if isinstance(receiver.func, ast.Attribute)
+                    else ast.Constant(None)
+                )
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "select"
+        and id(node) not in filtered
+        and any(
+            isinstance(inner, ast.Name) and inner.id == "ModelCacheSetArtifact"
+            for arg in node.args
+            for inner in ast.walk(arg)
+        )
+    )
+
+
 def provider_opener_calls(source: str) -> list[tuple[int, str | None]]:
     """Calls of a provider opener or ``provider_for(...).open(``, with the
     enclosing function's name (None at module level)."""
@@ -1688,6 +1726,16 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/model_cache/")
+    ):
+        hits.extend(
+            (line, "whole-table membership read; select only the named sets")
+            for line in unfiltered_membership_selects(source)
         )
     if (
         python

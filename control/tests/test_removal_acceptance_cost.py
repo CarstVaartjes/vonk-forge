@@ -6,8 +6,9 @@ import hashlib
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
-from sqlalchemy import event, insert
+from sqlalchemy import event, insert, select
 from sqlalchemy.engine import Engine
 from vonk_control.model_cache.artifacts import ArtifactSetManifest
 from vonk_control.models import ModelCacheSet, ModelCacheSetArtifact
@@ -125,16 +126,21 @@ def test_accepting_a_removal_does_not_read_other_sets_memberships(
             )
         finally:
             event.remove(postgres_engine, "after_cursor_execute", watch)
-        assert largest < UNRELATED_SETS * FILES_PER_SET // 2, largest
+        with sessions() as session:
+            own = len(
+                session.scalars(
+                    select(ModelCacheSetArtifact).where(
+                        ModelCacheSetArtifact.artifact_set_sha256 == set_digest
+                    )
+                ).all()
+            )
+        assert 0 < own < UNRELATED_SETS * FILES_PER_SET
+        assert largest <= own, (largest, own)
     finally:
         service.close()
 
 
-def test_a_nas_demand_makes_the_collector_due_now() -> None:
-    """Catches a refused NAS download waiting out the scan interval."""
-
-    clock = [datetime(2026, 11, 2, tzinfo=UTC)]
-    demands = StorageDemands(lambda: clock[0])
+def _collector(clock: list[datetime], demands: StorageDemands):
     collector = UnusedStorageCollector(
         None,  # type: ignore[arg-type]
         clock=lambda: clock[0],
@@ -142,9 +148,42 @@ def test_a_nas_demand_makes_the_collector_due_now() -> None:
         demands=demands,
         scan_interval=timedelta(seconds=30),
     )
-    collector._due_at = clock[0] + timedelta(seconds=30)
+    collects: list[datetime] = []
+
+    def collect() -> SimpleNamespace:
+        collects.append(clock[0])
+        return SimpleNamespace(installations=0, images=0, models=0)
+
+    collector.collect = collect  # type: ignore[method-assign]
+    return collector, collects
+
+
+def test_a_new_nas_demand_makes_the_collector_due_now() -> None:
+    """Catches a refused NAS download waiting out the scan interval."""
+
+    clock = [datetime(2026, 11, 2, tzinfo=UTC)]
+    demands = StorageDemands(lambda: clock[0])
+    collector, collects = _collector(clock, demands)
+    collector.tick()
     clock[0] += timedelta(seconds=1)
     demands.request("spark:node-1", 10, source="load", reason="x")
-    assert collector._due_at > clock[0]
+    collector.tick()
+    assert len(collects) == 1
     demands.request(NAS_MODELS, 10, source="model-download", reason="x")
-    assert collector._due_at == clock[0]
+    collector.tick()
+    assert len(collects) == 2
+
+
+def test_a_demand_refiled_every_few_seconds_collects_once_per_scan() -> None:
+    """Catches a blocked download refiling its demand every 5 s and so spinning
+    the collector at that rate instead of the scan interval."""
+
+    clock = [datetime(2026, 11, 2, tzinfo=UTC)]
+    demands = StorageDemands(lambda: clock[0])
+    collector, collects = _collector(clock, demands)
+    collector.tick()
+    for _ in range(5):  # 25 s of refiles, inside one scan interval
+        clock[0] += timedelta(seconds=5)
+        demands.request(NAS_MODELS, 10, source="model-download", reason="x")
+        collector.tick()
+    assert len(collects) == 2  # the first scan and the one the new demand woke
