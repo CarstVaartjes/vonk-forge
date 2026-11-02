@@ -36,7 +36,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -424,15 +424,11 @@ def _git(*command: str, cwd: Path) -> str:
     return result.stdout
 
 
-def release_library_root(source_sha: str, workspace: Path) -> Path:
-    """The recipe library a release was accepted with, built beside the lane.
+def _revision_through_api(source_sha: str) -> str:
+    """The library revision a release's own source tree names, read through the API.
 
-    Each release names its library in its own source tree, so the phase that
-    runs a release's Controller imports the canary that release could read.
+    The lane needs no history in its checkout this way.
     """
-    repository = Path(__file__).resolve().parents[2]
-    # The release's own tree names its library; read it through the API so the
-    # lane needs no history in its checkout.
     reply = subprocess.run(
         [
             "gh",
@@ -451,24 +447,37 @@ def release_library_root(source_sha: str, workspace: Path) -> Path:
     )
     if reply.returncode:
         raise LifecycleError("the release's recipe library revision is unavailable")
-    revision = reply.stdout.strip()
+    return reply.stdout
+
+
+def release_library_root(
+    source_sha: str,
+    workspace: Path,
+    *,
+    read_revision: Callable[[str], str] = _revision_through_api,
+    repository: str = RECIPE_LIBRARY_REPOSITORY,
+) -> Path:
+    """The recipe library a release was accepted with, built beside the lane.
+
+    Each release names its library in its own source tree, so the phase that
+    runs a release's Controller imports the canary that release could read.
+    """
+    revision = read_revision(source_sha).strip()
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
         raise LifecycleError("the release names no exact recipe library revision")
     root = workspace / f"recipe-library-{revision}"
     if not (root / "catalog-index.json").is_file():
         root.mkdir(parents=True, exist_ok=True)
         _git("init", "--quiet", cwd=root)
-        _git(
-            "fetch",
-            "--no-tags",
-            "--depth=1",
-            RECIPE_LIBRARY_REPOSITORY,
-            revision,
-            cwd=root,
-        )
+        _git("fetch", "--no-tags", "--depth=1", repository, revision, cwd=root)
         _git("checkout", "--quiet", "FETCH_HEAD", cwd=root)
         subprocess.run(
-            [str(repository / "scripts/build-recipe-library"), str(root)],
+            [
+                str(
+                    Path(__file__).resolve().parents[2] / "scripts/build-recipe-library"
+                ),
+                str(root),
+            ],
             check=True,
             timeout=1800,
         )
