@@ -172,3 +172,136 @@ def test_removal_does_not_park_behind_a_cancelled_newer_set(
         )
     finally:
         service.close()
+
+
+def _artifacts(tmp_path, name, blobs, model_digest):
+    root = tmp_path / f"src-{name}"
+    root.mkdir(exist_ok=True)
+    items = [
+        _artifact(
+            root,
+            data,
+            artifact_id=f"f{index}",
+            path=f"f{index}.bin",
+            model_content_sha256=model_digest,
+        )
+        for index, data in enumerate(blobs)
+    ]
+    for item in items:
+        item["roles"] = ["model"]
+    return items
+
+
+def _request_set(service, selector, tmp_path, name, blobs, model_digest, key):
+    artifacts = _artifacts(tmp_path, name, blobs, model_digest)
+    preview = service.download_preview(
+        model_content_sha256=model_digest, artifacts=artifacts
+    )
+    return service.start_download(
+        actor="operator",
+        request_key=key,
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=model_digest,
+        artifacts=artifacts,
+        force=True,
+        selector=selector,
+    )
+
+
+def test_touched_removal_yields_its_set_to_a_newer_download_of_it(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    model = _one_model(tmp_path, "same-a")
+    selector = _register_model(sessions, model)
+    digest = document_sha256(model.model_dump(mode="json"))
+    blobs = [b"abc", b"exclusive-p"]
+    set_a = _download_set(service, tmp_path, "a", blobs, digest, _key("d01", 1))
+    try:
+        removal = _remove_model(
+            service,
+            selector,
+            actor="operator",
+            request_key=_key("d01", 2),
+            model_content_sha256=digest,
+        )
+        assert service._observe_model_removal_scope(removal.id)
+        service._advance_model_removal(removal.id)  # deletes every object
+        assert not _path(service, b"abc").exists()
+        newer = _request_set(
+            service, selector, tmp_path, "a", blobs, digest, _key("d01", 3)
+        )
+        advance_until_ended(service, removal.id)
+        assert service.get_operation(removal.id).state == "succeeded"
+        with sessions() as session:
+            row = session.get(ModelCacheSet, set_a)
+            assert row is not None and row.state != "cached"
+        service.run_pending()
+        service.run_pending()
+        assert service.get_operation(newer.id).state == "succeeded"
+        assert all(_path(service, data).exists() for data in blobs)
+        with sessions() as session:
+            final = session.get(ModelCacheSet, set_a)
+            assert final is not None and final.state == "cached"
+    finally:
+        service.close()
+
+
+def test_yielded_set_whose_request_is_cancelled_is_still_reclaimable(
+    postgres_engine: Engine, tmp_path: Path, monkeypatch
+) -> None:
+    from vonk_control.model_cache import removal_execution
+
+    monkeypatch.setattr(
+        removal_execution, "REMOVAL_BATCH_SECONDS", 0
+    )  # one object per step
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    model = _one_model(tmp_path, "two-sets")
+    selector = _register_model(sessions, model)
+    digest = document_sha256(model.model_dump(mode="json"))
+    shared, p_only, q_only = b"abc", b"only-p", b"only-q"
+    set_one = [shared, p_only]
+    _download_set(service, tmp_path, "s1", set_one, digest, _key("d02", 1))
+    _download_set(service, tmp_path, "s2", [shared, q_only], digest, _key("d02", 2))
+    everything = (shared, p_only, q_only)
+    try:
+        removal = _remove_model(
+            service,
+            selector,
+            actor="operator",
+            request_key=_key("d02", 3),
+            model_content_sha256=digest,
+        )
+        assert service._observe_model_removal_scope(removal.id)
+        service._advance_model_removal(removal.id)  # one object; now touched
+        newer = _request_set(
+            service, selector, tmp_path, "s1", set_one, digest, _key("d02", 4)
+        )
+        advance_until_ended(service, removal.id)
+        assert service.get_operation(removal.id).state == "succeeded"
+        service.cancel_operation(
+            newer.id,
+            actor="operator",
+            request_key=_key("d02", 5),
+            reason="operator changed their mind",
+        )
+        with sessions() as session:
+            listed = set(session.scalars(select(ModelCacheSetArtifact.artifact_sha256)))
+        for data in everything:
+            if _path(service, data).exists():
+                assert hashlib.sha256(data).hexdigest() in listed  # not stranded
+        # A fresh removal reclaims whatever is left.
+        again = _remove_model(
+            service,
+            selector,
+            actor="operator",
+            request_key=_key("d02", 6),
+            model_content_sha256=digest,
+        )
+        advance_until_ended(service, again.id)
+        assert service.get_operation(again.id).state == "succeeded"
+        assert not any(_path(service, data).exists() for data in everything)
+        with sessions() as session:
+            assert not session.scalars(select(ModelCacheSet)).all()
+    finally:
+        service.close()

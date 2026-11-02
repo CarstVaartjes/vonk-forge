@@ -1781,6 +1781,21 @@ def check_source(
         and not is_test
         and "model-sets" in modes
         and path.startswith("control/src/vonk_control/")
+        and path != "control/src/vonk_control/model_cache/removal_execution.py"
+    ):
+        # Only the removal executor unlinks model files: it alone applies the
+        # yield-to-newer-owner rule (retained objects, owned sets) first.
+        hits.extend(
+            (line, "model file removal outside removal_execution.py")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\b_remove_model_(?:object_files|partial_set)\(", text)
+            and not re.match(r"\s*def ", text)
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/")
     ):
         hits.extend(
             (line, "whole-table membership read; select only the named sets")
