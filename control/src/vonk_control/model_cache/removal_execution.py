@@ -382,7 +382,7 @@ class RemovalExecutionMixin:
             if yielding and isinstance(payload, ModelCacheRemovalPayload):
                 _store_operation_payload(
                     operation,
-                    "remove",
+                    operation.kind,
                     _updated(
                         payload,
                         object_index=len(payload.delete_objects),
