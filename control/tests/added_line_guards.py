@@ -19,7 +19,7 @@ from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
-from . import locked_io, request_path_scans, shell_trap_waits
+from . import locked_io, request_path_scans, scratch_names, shell_trap_waits
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
@@ -79,6 +79,7 @@ MODES = (
     "plan-digests",
     "background-retries",
     "locked-io",
+    "scratch-names",
 )
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
@@ -1893,6 +1894,11 @@ def check_source(
         )
     if python and path.startswith("control/src/") and "locked-io" in modes:
         hits.extend((line, locked_io.KIND) for line in locked_io.scan_source(source))
+    if python and not is_test and "scratch-names" in modes:
+        hits.extend(
+            (line, scratch_names.KIND)
+            for line in scratch_names.scan_source(source, path)
+        )
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)

@@ -2012,3 +2012,50 @@ def test_model_file_removal_belongs_to_the_removal_executor():
     assert check_source(other, source, {2}, modes=("model-sets",))
     assert not check_source(executor, source, {2}, modes=("model-sets",))
     assert not check_source(other, source, {1}, modes=("model-sets",))
+
+
+_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/__init__.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'temporary = target.with_suffix(".tmp")\n',
+        'partial = root / f".{RELEASE_LIBRARY}.part"\n',
+        'temporary = report.with_name(f".{report.name}.part")\n',
+        'candidate = root / "snapshot.candidate.tmp"\n',
+        'partial = target.parent / (target.name + ".part")\n',
+    ],
+)
+def test_a_shared_scratch_name_is_flagged(source: str) -> None:
+    assert check_source(_SCRATCH_PATH, source, {1}, modes=("scratch-names",))
+    assert not check_source(_SCRATCH_PATH, source, set(), modes=("scratch-names",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            _SCRATCH_PATH,
+            (
+                "fd, name = tempfile.mkstemp(\n"
+                '    prefix=".snapshot.", suffix=".tmp", dir=root\n'
+                ")\n"
+            ),
+        ),
+        (
+            _SCRATCH_PATH,
+            'temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")\n',
+        ),
+        (_SCRATCH_PATH, 'orphans = root.glob(".snapshot.*.tmp")\n'),
+        (_SCRATCH_PATH, 'staging = root / ".tmp"\n'),
+        (
+            "control/src/vonk_control/model_cache/storage.py",
+            'return root / "partials" / set_digest / f"{digest}.part"\n',
+        ),
+        ("control/tests/test_x.py", 'path = tmp_path / "model.part"\n'),
+    ],
+)
+def test_private_or_classified_scratch_names_pass(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("scratch-names",))
