@@ -303,5 +303,11 @@ def test_yielded_set_whose_request_is_cancelled_is_still_reclaimable(
         assert not any(_path(service, data).exists() for data in everything)
         with sessions() as session:
             assert not session.scalars(select(ModelCacheSet)).all()
+        # And the same bytes can be requested again.
+        fresh = _request_set(
+            service, selector, tmp_path, "s1", set_one, digest, _key("d02", 7)
+        )
+        service.run_pending()
+        assert service.get_operation(fresh.id).state == "succeeded"
     finally:
         service.close()
