@@ -35,25 +35,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Candidate single-Spark recipe from MiaAI-Lab's public Qwen3.8-27B-DFlash2-EXL3-5.0bpw deployment kit at 1242187 (MIT, no release or tag): the exact 19441ac8 Mia-AiLab Qwen3.8-27B EXL3 3.5 bpw checkpoint (14.2 GB, text only, with its built-in MTP head) and the exact 4f043626 DFlash2 EXL3 5.0 bpw draft (1.4 GB), served by the kit's own tools/serve_openai.py on the MiaAI-Lab exllamav3 fork pinned at 63b32f0 (the kit installs the fork from unpinned git HEAD; this recipe pins the fork commit). The kit ships no container: the image installs the fork the way start.sh does, on the digest-pinned official vLLM v0.30.0 arm64 image used only as a torch and CUDA 13 toolchain base, compiling the extension for sm_120/sm_121; the engine's Python dependencies (marisa_trie, llguidance, flash-linear-attention and others) resolve from PyPI at build time and are not version-pinned, exactly as in upstream's launcher. Defaults follow upstream: MTP drafting, NVFP4 KV cache, 262,144-token context; the DFlash2 draft is mounted in every run and selected with the speculative decoding option. Both checkpoints are Apache-2.0 and the kit source is MIT. The server generates one request at a time (batch-1 speculative decoding, upstream states concurrent requests queue) and always reasons: reasoning and answer share max_tokens, so a small limit can return empty content. Upstream claims (not measured here): about 30 tok/s with MTP and about 34.5 to 47.5 tok/s with DFlash2 on GB10, DFlash2 about 15 percent faster than MTP. Memory figures are estimates from upstream's memory math (weights plus about 18 KB per token of NVFP4 KV plus draft KV), not measurements. Not exposed: the 1M-token YaRN config switch (it rewrites the checkpoint's config.json, and models mount read-only), the CPU cache tier (upstream says it is not yet active), the GPU memory budget auto-detection (fixed at upstream's documented 110 GB for a Spark), and the engine-source override. Physical Spark acceptance is pending.",
-  "tags": [
-   "candidate",
-   "dflash2",
-   "exl3",
-   "executable",
-   "mia",
-   "mtp",
-   "pending",
-   "reasoning",
-   "single",
-   "spark",
-   "tool-use",
-   "qwen3-8"
-  ],
-  "title": "Qwen3.8 27B EXL3 3.5bpw MTP and DFlash2 single Spark (Mia)"
- },
  "models": [
   {
    "files": [
@@ -230,7 +211,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "86984bebd7a4f0cd6832946042461e725cc607ad358e2a8fb13d3e4873e46733",
+    "content_sha256": "81afeefcbe2e88da2b61f489419e6e43f108c475dcec258e96999e6e970c77d7",
     "kind": "model",
     "publisher": "mia-ai-lab",
     "slug": "qwen3-8-27b-exl3-3-5bpw-19441ac8"
@@ -301,7 +282,7 @@
    ],
    "id": "draft",
    "model": {
-    "content_sha256": "5fb2ae4be3c84b4201dcd187a5d40b03e9f95e9198b49ec3cbeafcead72bd6cd",
+    "content_sha256": "971f56fb8146ca1ada93d9b158d1cf97662a45700d30469724bbf295e2d7d292",
     "kind": "model",
     "publisher": "mia-ai-lab",
     "slug": "qwen3-8-27b-dflash2-exl3-5-0bpw-4f043626"
@@ -457,7 +438,7 @@
   ],
   "engine": "exllamav3",
   "entrypoint": [
-   "/opt/vonk/bin/exl3-serve"
+   "/opt/vonk/bin/exllamav3-serve"
   ],
   "environment": [
    {

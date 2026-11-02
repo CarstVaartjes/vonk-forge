@@ -502,7 +502,6 @@ test("record titles and the alignment filter follow the published display", () =
     tags: [],
     alignment: "abliterated",
   };
-  recipe.recipe_document.metadata = { ...recipe.recipe_document.metadata, alignment: undefined };
   const records = buildLibraryRecipeRecords(snapshot);
   const own = records.filter((record) => record.recipe?.recipe_id === recipe.recipe_id);
   expect(own[0]!.modelTitle).toBe("Model from display");

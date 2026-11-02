@@ -23,6 +23,7 @@ from ..bounded_retry import REQUEST_PAUSES
 from ..browser_auth import BrowserAuthService
 from ..capabilities import CapabilityRegistry, CapabilityUnavailableError
 from ..capability_contract import ControllerCapability
+from ..catalog_projection_reconcile import keep_catalog_projections
 from ..catalog_service import CatalogService
 from ..catalog_sync import ManagedRecipeCatalogSyncService, run_automatic_sync
 from ..cluster_mappings import ClusterMappingService
@@ -566,12 +567,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         default_key_task = asyncio.create_task(
             keep_default_key(gateway_keys, automatic_sync_stop)
         )
+        projection_task = asyncio.create_task(keep_catalog_projections(sessions))
         try:
             yield
         finally:
             automatic_sync_stop.set()
             await capabilities.stop_recovery()
-            tasks = [default_key_task, route_task]
+            tasks = [default_key_task, route_task, projection_task]
             if automatic_sync_task is not None:
                 tasks.append(automatic_sync_task)
             for task in tasks:

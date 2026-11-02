@@ -25,6 +25,7 @@ from vonk_control.models import Base, RecipeBuild
 from vonk_forge_contracts import document_sha256
 
 from .catalog_launch_fixtures import load_inputs
+from .display_fixtures import create_draft
 
 RECIPE_SLUG = "trellis-2-4b-pytorch-single"
 INSTALLED_PLAN = (
@@ -51,9 +52,9 @@ def installation(tmp_path):
     for selection in document["models"]:
         reference = selection["model"]
         model_document = models[reference["content_sha256"]]
-        draft = catalog.create_draft(model_document, actor="test")
+        draft = create_draft(catalog, model_document, actor="test")
         catalog.resolve(draft.id, actor="test")
-    recipe_draft = catalog.create_draft(document, actor="test")
+    recipe_draft = create_draft(catalog, document, actor="test")
     revision = catalog.resolve(recipe_draft.id, actor="test")
     installed = CompiledExecutionPlan.model_validate_json(
         INSTALLED_PLAN.read_text(encoding="utf-8")

@@ -45,6 +45,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import read_model
 
+from .display_fixtures import reword
 from .preflight_fixtures import record_passing_preflight
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_builds import (
@@ -95,7 +96,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         now=now,
     )
     document = deepcopy(original.document)
-    _json_object(document["metadata"])["description"] = "Current operational notes"
+    reword(document, "Current operational notes")
     if change == "runtime":
         _json_object(_json_object(document["settings"])["knobs"])["max_model_len"] = {
             "value": 16384,

@@ -11,9 +11,7 @@
    "dockerfile": "adapters/qwen/mia-gguf-27b-single/Dockerfile",
    "network": {
     "hosts": [
-     "archive.ubuntu.com",
-     "ports.ubuntu.com",
-     "security.ubuntu.com",
+     "snapshot.ubuntu.com",
      "codeload.github.com"
     ]
    },
@@ -35,26 +33,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Candidate one-DGX Spark Qwen3.6 27B (dense, text only) on llama.cpp llama-server: Unsloth's UD-Q8_K_XL GGUF with MTP heads, 262,144-token context and MTP speculative decoding (draft-mtp, up to 6 draft tokens), as in MiaAI-Lab's start script (MIT). The script expects a host-built llama-server; this recipe builds llama.cpp release b11261 (MIT, commit b5cf8ce0) with CUDA for sm_121a from source in its own image, without the web UI. The upstream script names only the GGUF file; the Hugging Face repository (unsloth/Qwen3.6-27B-MTP-GGUF, the MTP build needed for draft-mtp) is inferred, and the upstream script loads no vision projector. Model weights are Apache-2.0 (Qwen); the upstream repository has no licence file (its README says MIT). Memory figures are estimates, not measurements; physical Spark acceptance is still required.",
-  "tags": [
-   "candidate",
-   "executable",
-   "qwen",
-   "qwen3-6",
-   "llama-cpp",
-   "gguf",
-   "mtp",
-   "speculative-decoding",
-   "openai",
-   "chat",
-   "reasoning",
-   "single",
-   "spark"
-  ],
-  "title": "Qwen3.6 27B UD-Q8_K_XL llama.cpp single Spark (Mia)"
- },
  "models": [
   {
    "files": [
@@ -71,7 +49,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "fb72986e678a518daf0e51f8f43d1c3d800d4fcc655f2a7ac75f47ac465a17da",
+    "content_sha256": "f157a3ed9a92d94451e802410029dfca5d6eedea76e40cceda020aa0b80909a5",
     "kind": "model",
     "publisher": "unsloth",
     "slug": "qwen3-6-27b-mtp-ud-q8-k-xl-gguf-5cb35eb3"
@@ -114,8 +92,8 @@
   "source_reference": "https://github.com/MiaAI-Lab/DGX_Spark_Qwen_3.6_27b_35b_GGUF_start_script/tree/78897c9a4d729c3def5c86230f14e56c9800c516"
  },
  "release": {
-  "released_at": "2026-06-28",
-  "version": "1.0.0"
+  "released_at": "2026-09-30",
+  "version": "1.0.1"
  },
  "runtime": {
   "arguments": [

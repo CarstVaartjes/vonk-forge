@@ -35,6 +35,8 @@ from vonk_forge_contracts import document_sha256, read_recipe_display
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
+from .display_fixtures import reword
+
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
 
@@ -161,7 +163,7 @@ def _changed_package(package: bytes) -> tuple[bytes, dict[str, object]]:
             assert stream is not None
             files[member.name] = stream.read()
     recipe = json.loads(files["recipe.json"])
-    recipe["metadata"]["description"] += " (package sync fixture revision)"
+    reword(recipe, " (package sync fixture revision)")
     digest = document_sha256(recipe)
     files["recipe.json"] = _canonical(recipe) + b"\n"
     manifest = json.loads(files["manifest.json"])
@@ -329,9 +331,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         fixture / Path(changed_row["package"]["path"]).name
     ).read_bytes()
     changed_bytes, changed_descriptor = _changed_package(original_package)
-    changed_row["document"]["metadata"]["description"] += (
-        " (package sync fixture revision)"
-    )
+    reword(changed_row["document"], " (package sync fixture revision)")
     changed_row["content_sha256"] = changed_descriptor["recipe_content_sha256"]
     changed_row["package"].update(changed_descriptor)
     package_overrides[Path(changed_row["package"]["path"]).name] = changed_bytes
@@ -402,9 +402,7 @@ def test_publisher_packages_sync_as_one_active_generation_and_survive_failures(
         fixture / Path(failing_row["package"]["path"]).name
     ).read_bytes()
     failing_bytes, failing_descriptor = _changed_package(failing_original)
-    failing_row["document"]["metadata"]["description"] += (
-        " (package sync fixture revision)"
-    )
+    reword(failing_row["document"], " (package sync fixture revision)")
     failing_row["content_sha256"] = failing_descriptor["recipe_content_sha256"]
     failing_row["package"].update(failing_descriptor)
     package_overrides[Path(failing_row["package"]["path"]).name] = failing_bytes

@@ -30,25 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "r0b0tlab's four-GB10 SGLang serve of the official DeepSeek V4.1 Flash checkpoint: TP=4 with EP=4, vision retained, a local file-backed Engram lookup, static DSpark K=5 and the overlay-v4 adapter on SGLang da64c5cb. Upstream's production profile is the exclusive C1 512K retrieval envelope (one running request, chunked prefill 256, 0.80 memory fraction, advertised 524,288 tokens); its 8-request candidate profile and K=3 variant are options, the 1M profile is deferred upstream. Upstream reports Q200v2 189/200, 512K needle retrieval passed and about 31 tok/s short single-stream; these are upstream claims, not measured here. Package code MIT; the model is MIT (information only).",
-  "tags": [
-   "candidate",
-   "deepseek",
-   "distributed",
-   "dspark",
-   "engram",
-   "executable",
-   "multimodal",
-   "openai",
-   "r0b0tlab",
-   "sglang",
-   "spark",
-   "vision"
-  ],
-  "title": "DeepSeek V4.1 Flash SGLang TP4 four Sparks (r0b0tlab)"
- },
  "models": [
   {
    "files": [
@@ -119,6 +100,17 @@
      ]
     },
     {
+     "file_id": "chat-template-d959d804d510-00824420d1",
+     "id": "primary-chat-template-d959d804d510-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
      "file_id": "config-8be45ce04760-587cb980af",
      "id": "primary-config-8be45ce04760-587cb980af",
      "mount": {
@@ -130,8 +122,8 @@
      ]
     },
     {
-     "file_id": "readme-a2f0fc3baea3-5728b2733a",
-     "id": "primary-readme-a2f0fc3baea3-5728b2733a",
+     "file_id": "readme-a34a5ca98c65-5728b2733a",
+     "id": "primary-readme-a34a5ca98c65-5728b2733a",
      "mount": {
       "target": "/models"
      },
@@ -141,8 +133,8 @@
      ]
     },
     {
-     "file_id": "encoding-502bdaec8a3f-498d5dc375",
-     "id": "primary-encoding-502bdaec8a3f-498d5dc375",
+     "file_id": "encoding-13231c592e95-498d5dc375",
+     "id": "primary-encoding-13231c592e95-498d5dc375",
      "mount": {
       "target": "/models"
      },
@@ -152,8 +144,8 @@
      ]
     },
     {
-     "file_id": "test-encoding-4a470892dad8-d3add5cc1f",
-     "id": "primary-test-encoding-4a470892dad8-d3add5cc1f",
+     "file_id": "test-encoding-288b79c9ea7d-d3add5cc1f",
+     "id": "primary-test-encoding-288b79c9ea7d-d3add5cc1f",
      "mount": {
       "target": "/models"
      },
@@ -416,8 +408,8 @@
      ]
     },
     {
-     "file_id": "model-4e9ae23620ed-8aa37e8d7b",
-     "id": "primary-model-4e9ae23620ed-8aa37e8d7b",
+     "file_id": "model-e5decd76fe70-8aa37e8d7b",
+     "id": "primary-model-e5decd76fe70-8aa37e8d7b",
      "mount": {
       "target": "/models"
      },
@@ -427,8 +419,8 @@
      ]
     },
     {
-     "file_id": "requirements-171eebfbfb7a-95abf76140",
-     "id": "primary-requirements-171eebfbfb7a-95abf76140",
+     "file_id": "requirements-be82bcd5775c-95abf76140",
+     "id": "primary-requirements-be82bcd5775c-95abf76140",
      "mount": {
       "target": "/models"
      },
@@ -1023,10 +1015,10 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "3557980356ff5a14cd62aaf3bebeddc3b002409a3192e7daef4b49168ade1771",
+    "content_sha256": "6295d50a6968267a3ae2bb91897a2a54dc860e6a4c4fe40c0b6f7fb4039bf6ad",
     "kind": "model",
     "publisher": "deepseek-ai",
-    "slug": "deepseek-v4-1-flash-dba1be0a"
+    "slug": "deepseek-v4-1-flash-314113f8"
    }
   }
  ],
@@ -1096,8 +1088,8 @@
   "source_reference": "https://github.com/r0b0tlab/dsv41-flash-tp4-sglang-sm121/tree/430c812cf5e69b69e740756ea72fecdc1944db29"
  },
  "release": {
-  "released_at": "2026-09-16",
-  "version": "1.0.0"
+  "released_at": "2026-10-16",
+  "version": "1.0.2"
  },
  "runtime": {
   "arguments": [
@@ -1200,6 +1192,11 @@
     "name": "enable-metrics",
     "setting": null,
     "value": true
+   },
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "deepseek-v4-1-flash"
    }
   ],
   "engine": "sglang",
@@ -1321,7 +1318,7 @@
     "name": "entrypoint",
     "resources": {
      "disk": {
-      "artifact_bytes": 510313353565,
+      "artifact_bytes": 510313372802,
       "image_bytes": 40000000000,
       "safety_margin_bytes": 50000000000,
       "working_bytes": 60000000000
@@ -1338,7 +1335,7 @@
     "name": "worker",
     "resources": {
      "disk": {
-      "artifact_bytes": 510313353565,
+      "artifact_bytes": 510313372802,
       "image_bytes": 40000000000,
       "safety_margin_bytes": 50000000000,
       "working_bytes": 60000000000

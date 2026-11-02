@@ -388,7 +388,7 @@ def _index(kind: str, document: dict, display: object) -> bytes:
     envelope = {
         "schema_version": 2,
         "kind": "recipe-library-index",
-        "contract_version": "2.0.0",
+        "contract_version": "3.0.0",
         "updated_at": "2026-09-28T12:00:00Z",
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,

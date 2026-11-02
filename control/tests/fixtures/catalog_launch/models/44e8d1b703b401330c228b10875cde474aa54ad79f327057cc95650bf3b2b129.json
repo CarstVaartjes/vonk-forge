@@ -1,0 +1,58 @@
+{
+ "capabilities": [],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "ss-dec-conv3d-16l8-fp16-646781293f1c-85f0b62954",
+   "path": "ckpts/ss_dec_conv3d_16l8_fp16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "646781293f1cda74720de85d1cef50a957fb4aebd9a4bd014e454e32f2330ac5",
+   "size_bytes": 245
+  },
+  {
+   "id": "ss-dec-conv3d-16l8-fp16-1c76d4a40519-f445c876e9",
+   "path": "ckpts/ss_dec_conv3d_16l8_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "1c76d4a40519aa2d711cc263a8404105231ac26db31d946bed48b84fee79009a",
+   "size_bytes": 147591972
+  }
+ ],
+ "format": {
+  "precision": "fp16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "microsoft",
+   "slug": "trellis"
+  },
+  "model": {
+   "publisher": "microsoft",
+   "slug": "trellis-sparse-decoder"
+  },
+  "publisher": "microsoft",
+  "slug": "trellis-sparse-decoder",
+  "variant": "FP16 sparse structure decoder",
+  "version": "25e0d31f"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "microsoft"
+  ],
+  "spdx": "MIT",
+  "url": "https://huggingface.co/microsoft/TRELLIS-image-large/blob/25e0d31ffbebe4b5a97464dd851910efc3002d96/README.md"
+ },
+ "modalities": [
+  "3d"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/microsoft/TRELLIS-image-large",
+  "revision": "25e0d31ffbebe4b5a97464dd851910efc3002d96"
+ }
+}

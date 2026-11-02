@@ -2,7 +2,7 @@
  "execution": {
   "build": {
    "base_image": {
-    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "digest": "5dc1bca23d05bd37b011be68ec470c03b403a5da07ec3a86e41af9470e9d0cc6",
     "repository": "nvcr.io/nvidia/cuda"
    },
    "context": {
@@ -80,27 +80,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Still-deployable historical disk-offload Candidate using the exact official native LTX 1.3.0 two-stage pipeline, FP4 checkpoint, distilled refinement LoRA, spatial upscaler, Gemma 3 companion closure, and ARM64 CUDA 13.2 wheels. The 89 GB startup and 75 GB steady declarations conservatively apply only the pinned upstream's documented 31 GB disk-versus-CPU offload reduction, with 8 GB growth and 8 GB system reserve for a 97 GB admission total; container build and physical Spark acceptance remain required. LTX-2.5 BF16 is the current fidelity baseline and LTX-2.5 FP8-cast is the current lower-memory canary; this immutable execution contract remains available for reproducibility.",
-  "tags": [
-   "executable",
-   "candidate",
-   "build-unvalidated",
-   "historical",
-   "superseded",
-   "disk-offload",
-   "lightricks",
-   "ltx",
-   "video",
-   "audio",
-   "fp4",
-   "pytorch",
-   "single",
-   "spark"
-  ],
-  "title": "LTX-2 19B dev FP4 native pipeline single Spark (superseded)"
- },
  "models": [
   {
    "files": [
@@ -387,7 +366,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "9253bb344fb0bab7f19db2aed480e1e27649848b478a4b5064b7ba99de828e47",
+    "content_sha256": "712b5a5f0777591fec47f743659a1dcc17bca28be246b6a792dcadf371ddf618",
     "kind": "model",
     "publisher": "lightricks",
     "slug": "ltx-2-19b-dev-fp4-dfcc2108"
@@ -401,8 +380,8 @@
   "source_reference": "https://huggingface.co/Lightricks/LTX-2/tree/dfcc2108383fe1aaa0584bdf55d368a4bdadd90c"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "2.3.7"
+  "released_at": "2026-10-02",
+  "version": "1.4.2"
  },
  "runtime": {
   "arguments": [
@@ -425,6 +404,16 @@
     "name": "seed",
     "setting": null,
     "value": 0
+   },
+   {
+    "name": "num-frames",
+    "setting": "num-frames",
+    "value": null
+   },
+   {
+    "name": "num-inference-steps",
+    "setting": "num-inference-steps",
+    "value": null
    }
   ],
   "engine": "pytorch-pipeline",
@@ -444,7 +433,16 @@
  "settings": {
   "concurrency": null,
   "kind": "job",
-  "knobs": {}
+  "knobs": {
+   "num-frames": {
+    "change_effect": "none",
+    "value": 97
+   },
+   "num-inference-steps": {
+    "change_effect": "none",
+    "value": 40
+   }
+  }
  },
  "topology": {
   "name": "solo",
@@ -463,7 +461,7 @@
     "resources": {
      "disk": {
       "artifact_bytes": 77447526016,
-      "image_bytes": 8000000000,
+      "image_bytes": 20000000000,
       "safety_margin_bytes": 12000000000,
       "working_bytes": 162895052032
      },

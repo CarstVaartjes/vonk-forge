@@ -30,23 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "standard",
-  "description": "tonyd2wild's regular Inkling Small profile on two Sparks: thinkingmachines/Inkling-Small-NVFP4 on vLLM tensor parallel 2 (mp, as eugr's launcher does by default) with Inkling's native one-token MTP drafter, InstantTensor loading, a 262,144-token context, BF16 KV cache (upstream: FP8 and NVFP4 KV are hardware-capable but the Inkling relative-attention kernel cannot consume them yet) and CUDA graphs. Image: eugr's published spark-vllm image (digest-pinned, built from eugr/spark-vllm-docker 60dee5b4), with upstream's mods applied at build time: eugr's inkling-sm12-paged-kv (vendored FA4 SM120 kernel) and instanttensor-hybrid-draft-loader, and tonyd2wild's inkling-agent-parser-fix (filters a leaked terminal end-of-message marker after tool results). Same-creator alternative for this model and Spark count: the DSpark recipe with the RadixArk draft. Licences (information only): model Apache-2.0; eugr's runtime and mods MIT with a bundled FA4 package under its own licence; tonyd2wild's repository states that no licence has been selected. Upstream measurements are in its results document and are claims until measured here; Vonk physical two-Spark acceptance is pending.",
-  "tags": [
-   "distributed",
-   "inkling",
-   "instanttensor",
-   "mtp",
-   "multimodal",
-   "nvfp4",
-   "reasoning",
-   "spark",
-   "tool-use",
-   "vllm"
-  ],
-  "title": "Inkling Small NVFP4 MTP vLLM two Sparks (tonyd2wild)"
- },
  "models": [
   {
    "files": [
@@ -284,7 +267,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "90ffed7245a29ca1a0cb69bee73cf893bc0c4ca037489bc6f1757858e1e8ebfe",
+    "content_sha256": "cd3e585d66309580758c5ade2a7fa70648f24eeb9193917a274b94edf2cddc91",
     "kind": "model",
     "publisher": "thinkingmachines",
     "slug": "inkling-small-nvfp4"
@@ -332,8 +315,8 @@
   "source_reference": "https://github.com/tonyd2wild/Inkling-Small-NVFP4-MTP-262K-2x-DGX-Spark/tree/7913395c4f1bacfc8a97c90efe096a62f3010178"
  },
  "release": {
-  "released_at": "2026-07-31",
-  "version": "1.0.0"
+  "released_at": "2026-10-13",
+  "version": "prebuilt-vllm-current"
  },
  "runtime": {
   "arguments": [
@@ -451,6 +434,14 @@
     "value": "auto"
    },
    {
+    "name": "NCCL_IGNORE_CPU_AFFINITY",
+    "value": "1"
+   },
+   {
+    "name": "PYTORCH_CUDA_ALLOC_CONF",
+    "value": "expandable_segments:True"
+   },
+   {
     "name": "NCCL_DEBUG",
     "value": "WARN"
    }
@@ -494,7 +485,7 @@
       "working_bytes": 60000000000
      },
      "memory": {
-      "peak_bytes": 110000000000,
+      "peak_bytes": 118521274368,
       "reserve_bytes": 8000000000
      }
     }
@@ -511,7 +502,7 @@
       "working_bytes": 60000000000
      },
      "memory": {
-      "peak_bytes": 110000000000,
+      "peak_bytes": 116912201728,
       "reserve_bytes": 8000000000
      }
     }

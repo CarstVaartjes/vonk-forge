@@ -27,6 +27,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
+from .display_fixtures import create_draft
 from .removal_settle import advance_until_ended
 from .test_model_cache import _artifact, _canonical_model, _download, _remove_model
 
@@ -49,7 +50,7 @@ def _register_model(sessions: sessionmaker[Session], model: ModelDefinition) -> 
     now = datetime.now(UTC)
     identity = model.identity
     catalog = CatalogEntityService(sessions, clock=lambda: now)
-    draft = catalog.create_draft(model.model_dump(mode="json"), actor="operator")
+    draft = create_draft(catalog, model.model_dump(mode="json"), actor="operator")
     catalog.resolve(draft.id, actor="operator")
     return f"{identity.publisher}/{identity.slug}"
 

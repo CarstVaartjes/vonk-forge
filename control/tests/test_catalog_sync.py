@@ -61,6 +61,8 @@ from vonk_forge_contracts import (
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
+from .display_fixtures import reword
+
 ROOT = recipe_library_root()
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
@@ -118,7 +120,6 @@ def _item_with_document(
         content_sha256=digest,
         uri=f"vonk://catalog/{item.publisher}/{item.slug}@sha256:{digest}",
         document=recipe.model_dump(mode="json"),
-        tags=tuple(recipe.metadata.tags),
         release=None,
         package_handle=None,
         package_sha256=None,
@@ -379,7 +380,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     first = library.recipe_library().recipes[0]
 
     changed = deepcopy(original.document)
-    _document_section(changed, "metadata")["title"] = "Accepted recipe successor"
+    reword(changed, "Accepted recipe successor")
     replacement = _item_with_document(original, changed)
     second_result = apply(replacement, "2" * 40)
     assert second_result.state == "current"
@@ -404,12 +405,12 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     reference = RecipeDefinition.model_validate(original.document).models[0].model
     old_model = catalog.entities.resolve_reference(reference)
     newer_model = deepcopy(old_model.document)
-    _document_section(newer_model, "metadata")["description"] = "New Model metadata"
+    reword(newer_model, "New Model metadata")
     draft = catalog.entities.revise(old_model.document_id, newer_model, actor="test")
     model_head = catalog.entities.resolve(draft.id, actor="test")
 
     pending_document = deepcopy(changed)
-    _document_section(pending_document, "metadata")["title"] = "Pending local candidate"
+    reword(pending_document, "Pending local candidate")
     pending = catalog.entities.revise(
         first.identity.recipe_id, pending_document, actor="test"
     )

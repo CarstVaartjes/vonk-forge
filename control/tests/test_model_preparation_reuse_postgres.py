@@ -49,7 +49,7 @@ def test_older_active_operation_is_reused_behind_many_newer_unrelated_ones(
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="operator",
                 created_at=now,
                 updated_at=now,

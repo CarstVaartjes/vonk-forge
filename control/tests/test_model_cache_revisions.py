@@ -26,6 +26,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .display_fixtures import reworded
 from .removal_settle import advance_until_ended
 from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model, _removal_service
@@ -47,9 +48,7 @@ def _revision(
         file_id="weights",
         file_digest=hashlib.sha256(data).hexdigest(),
     )
-    model = model.model_copy(
-        update={"metadata": model.metadata.model_copy(update={"description": note})}
-    )
+    model = reworded(model, note)
     with sessions() as session:
         existing = session.scalar(
             select(CatalogDocument.id).where(

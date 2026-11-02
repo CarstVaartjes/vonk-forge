@@ -33,23 +33,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Single-DGX-Spark NVIDIA Nemotron 3.5 Lightning 30B-A3B (Mamba-2, attention and MoE hybrid) on Ash Hart's TensorFold engine v0.4.0 (exact decoding, custom CUDA kernels JIT-compiled on first start, stock upstream source) with Vontra's MLX 4-bit (group 64) checkpoint, which includes the model's MTP draft head. One rank only: TensorFold's two-rank mode is not available here. Requests are served one at a time (upstream CUDA behaviour for Nemotron) in TensorFold's default 16,384-token window; raise the context setting for longer prompts, up to the model's 262,144 tokens, subject to TensorFold's startup memory check. Upstream measured about 123 to 146 tok/s with MTP and a 42.2 GiB peak at 262,144 tokens on a 64 GB M5 Pro, an MLX run with TensorFold 0.3.5.1; no DGX Spark figure is published, and none is measured here. Licence, for information: NVIDIA Nemotron 3.5 Lightning weights are under the OpenMDW License Agreement 1.1 (text in the model repository); TensorFold is MIT.",
-  "tags": [
-   "engine",
-   "kernel-jit",
-   "mamba",
-   "mlx-checkpoint",
-   "moe",
-   "mtp",
-   "nemotron",
-   "reasoning",
-   "spark",
-   "tensorfold"
-  ],
-  "title": "Nemotron 3.5 Lightning 30B A3B TensorFold single Spark"
- },
  "models": [
   {
    "files": [
@@ -196,7 +179,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "20ef4f4ab34b2c1da7df40dad0ee63e0be4f7d9e31dcf00819242fd5a0adbb26",
+    "content_sha256": "7adadef076681ad2457f1b42bcddd00ac7c9be62016e5fe08497b84f979648a4",
     "kind": "model",
     "publisher": "vontra",
     "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp-8bbcb5b6"
@@ -208,35 +191,18 @@
    "choices": [
     {
      "default": true,
-     "help": "Open a think block by default (upstream default: --thinking).",
-     "label": "Think first",
-     "value": "thinking"
+     "help": "Up to 15 MTP drafts a round, each chain stopping where the next verify row would cost more than its draft saves; window and level costs are measured at startup on this GPU (upstream default on CUDA since 0.6.5).",
+     "label": "MTP, cost-chosen depth",
+     "value": "mtp-auto"
     },
     {
      "args": [
       {
-       "name": "thinking",
-       "value": false
-      },
-      {
-       "name": "no-thinking",
-       "value": true
+       "name": "mtp-drafts",
+       "value": 3
       }
      ],
-     "help": "Answer without a think block unless a request asks for one.",
-     "label": "Answer directly",
-     "value": "direct"
-    }
-   ],
-   "help": "Whether the chat template opens a think block by default. A request can still set chat_template_kwargs.enable_thinking; reasoning comes back separately from the answer.",
-   "label": "Thinking",
-   "name": "thinking"
-  },
-  {
-   "choices": [
-    {
-     "default": true,
-     "help": "At most 3 MTP drafts a round (upstream default).",
+     "help": "At most 3 MTP drafts a round (--mtp-drafts 3; TensorFold's CUDA default before 0.6.5); speed unmeasured.",
      "label": "MTP, 3 drafts",
      "value": "mtp-3"
     },
@@ -274,7 +240,7 @@
      "value": "serial"
     }
    ],
-   "help": "The model's own MTP head drafts tokens and the target verifies each against its serial sample, so outputs are unchanged by drafting (upstream claim). On CUDA drafts continue while the running head confidence stays at or above 20 percent (the first draft is always kept); --mtp-drafts takes 0 to 8.",
+   "help": "The model's own MTP head drafts tokens and the target verifies each against its serial sample, so outputs are unchanged by drafting (upstream claim). On CUDA the default chain depth comes from measured row costs; --mtp-drafts caps it at 0 to 15.",
    "label": "MTP drafting",
    "name": "drafting"
   }
@@ -285,11 +251,11 @@
    "Vontra",
    "NVIDIA Corporation"
   ],
-  "source_reference": "https://github.com/ashhart/TensorFold/tree/7a00336b2f6d1a1a3e0ba49d1ef5b4b82e927759"
+  "source_reference": "https://github.com/ashhart/TensorFold/tree/cb2ebf0540f42604e2759b2ddef497861e928248"
  },
  "release": {
-  "released_at": "2026-09-29",
-  "version": "0.4.0"
+  "released_at": "2026-10-06",
+  "version": "0.6.6"
  },
  "runtime": {
   "arguments": [

@@ -33,6 +33,8 @@ export type SwapShortfallEvidence = components["schemas"]["SwapShortfallEvidence
 export type OperationBlocker = components["schemas"]["OperationBlocker"];
 export type ModelDefinition = components["schemas"]["ModelDefinition"];
 export type RecipeDefinition = components["schemas"]["RecipeDefinition"];
+export type ModelDisplay = components["schemas"]["ModelDisplay"];
+export type RecipeDisplay = components["schemas"]["RecipeDisplay"];
 export type ModelLibrary = components["schemas"]["ModelLibraryResponse"];
 export type RecipeLibrary = components["schemas"]["RecipeLibraryResponse"];
 export type RecipeDetail = components["schemas"]["RecipeDetailResponse"];
@@ -67,10 +69,7 @@ export type LibraryViewRecipe = {
   capabilities: string[];
   content_sha256: string;
   description: string;
-  recipe_document: Pick<
-    RecipeDefinition,
-    "identity" | "metadata" | "provenance" | "topology" | "release"
-  > & {
+  recipe_document: Pick<RecipeDefinition, "identity" | "provenance" | "topology" | "release"> & {
     runtime: Pick<RecipeDefinition["runtime"], "engine">;
     models: { model: RecipeDefinition["models"][number]["model"] }[];
   };
@@ -107,7 +106,7 @@ export type LibraryViewModel = {
   // The published library text; null until the first sync that carries it.
   model_display: components["schemas"]["ModelDisplay"] | null;
   model: { kind: "model"; publisher: string; slug: string; content_sha256: string };
-  model_document: Pick<ModelDefinition, "identity" | "metadata" | "format" | "capabilities">;
+  model_document: Pick<ModelDefinition, "identity" | "format" | "capabilities">;
   model_file_count: WireNumber;
   model_bytes: WireNumber | null;
   cache_usage?: components["schemas"]["ModelCacheUsage"] | null;

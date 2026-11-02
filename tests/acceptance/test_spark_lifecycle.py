@@ -547,6 +547,8 @@ def _rebuilt_recipe_entry(
     entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
     recipe = entry["document"]
     edit(recipe)
+    # The entry's display names the document it travels with, even if renamed.
+    entry["display"]["identity"] = dict(recipe["identity"])
     digest = document_sha256(recipe)
     recipe_bytes = json.dumps(recipe, sort_keys=True, indent=2).encode() + b"\n"
     with tarfile.open(fileobj=io.BytesIO(fixture.package_bytes), mode="r:gz") as source:
@@ -620,8 +622,11 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
     """
 
     def reword(recipe: dict[str, object]) -> None:
-        metadata = recipe["metadata"]
-        metadata["description"] = f"{metadata['description']} Editorially revised."  # type: ignore[index]
+        provenance = recipe["provenance"]
+        provenance["attribution"] = [  # type: ignore[index]
+            *provenance["attribution"],  # type: ignore[index]
+            "Editorially revised.",
+        ]
 
     return _derived_fixture(fixture, reword)
 
@@ -671,7 +676,6 @@ def _sibling_recipes(
         def rename(recipe: dict[str, object]) -> None:
             slug = f"{recipe['identity']['slug']}-{name}"  # type: ignore[index]
             recipe["identity"]["slug"] = slug  # type: ignore[index]
-            recipe["metadata"]["title"] = f"{recipe['metadata']['title']} ({name})"  # type: ignore[index]
 
         return rename
 

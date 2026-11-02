@@ -192,7 +192,7 @@ def setup(
             .read_text(encoding="utf-8")
         )
         recipe_document["identity"]["slug"] = "qwen"
-        recipe_document["metadata"]["title"] = "Qwen"
+        reword(recipe_document, "Qwen")
         recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
             model_document
         )
@@ -259,7 +259,7 @@ def setup(
                     kind="recipe",
                     publisher=recipe.identity.publisher,
                     slug=recipe.identity.slug,
-                    title=recipe.metadata.title,
+                    title=recipe.identity.slug,
                     created_by="admin",
                     created_at=NOW,
                     updated_at=NOW,
@@ -269,7 +269,7 @@ def setup(
                     kind="model",
                     publisher=model.identity.publisher,
                     slug=model.identity.slug,
-                    title=model.identity.model.title,
+                    title=model.identity.slug,
                     created_by="admin",
                     created_at=NOW,
                     updated_at=NOW,
@@ -2347,6 +2347,7 @@ def test_unverified_active_bundle_cannot_supply_a_fallback_endpoint(
     assert _live_models(root) == ["second"]
 
 
+from .display_fixtures import reword
 from .test_route_runtime import _inspected
 
 

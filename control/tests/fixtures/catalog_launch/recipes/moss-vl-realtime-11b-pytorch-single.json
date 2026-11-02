@@ -116,28 +116,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Single-Spark MOSS-VL-Realtime 11B session-replay job using the exact d1f71a58 BF16 snapshot. It preserves the bounded MP4-plus-JSONL contract and adopts upstream cached-vision RoPE, preprocessing, system-prompt, and per-sample batched-vision fixes. It does not expose the upstream interactive WebSocket, camera, or screen-capture service. Physical Spark acceptance remains pending.",
-  "tags": [
-   "executable",
-   "pending",
-   "candidate",
-   "openmoss",
-   "moss-vl",
-   "video-understanding",
-   "realtime",
-   "streaming",
-   "session-replay",
-   "batch-job",
-   "not-interactive-service",
-   "multimodal",
-   "pytorch",
-   "single",
-   "spark"
-  ],
-  "title": "MOSS-VL-Realtime 11B BF16 native single Spark"
- },
  "models": [
   {
    "files": [
@@ -374,7 +352,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "191f3e9452d1a36e627380782b590d64575a9a4b7ee369d7236b866999bc9450",
+    "content_sha256": "ef2977463bbb7854d80b7bb8b72c3ebca9e6ad5e2d5029abac441ee3f8556a84",
     "kind": "model",
     "publisher": "openmoss",
     "slug": "moss-vl-realtime-11b-bf16-d1f71a58"
@@ -388,8 +366,8 @@
   "source_reference": "https://huggingface.co/OpenMOSS-Team/MOSS-VL-Realtime/tree/d1f71a588deaf2b9b9cea7c6fff66cb10847cc86"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "1.2.5"
+  "released_at": "2026-10-12",
+  "version": "1.2.8"
  },
  "runtime": {
   "arguments": [

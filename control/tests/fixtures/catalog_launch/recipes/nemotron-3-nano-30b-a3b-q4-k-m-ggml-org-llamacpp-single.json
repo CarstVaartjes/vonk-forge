@@ -30,23 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Executable Candidate llama.cpp recipe based on the ggml-org GGUF repository: the official ggml-org llama.cpp 0.5.0 CUDA 13 server image (arm64, pinned by digest; its default CUDA architectures include GB10 sm_121a) serving the exact GGUF revision through llama-server. NVIDIA's llama.cpp playbook compiles the same upstream source with -DCMAKE_CUDA_ARCHITECTURES=121a-real; this recipe uses the project's published binary instead. Resource envelopes are estimates, not measurements; physical Spark acceptance is pending.",
-  "tags": [
-   "executable",
-   "candidate",
-   "llama-cpp",
-   "openai",
-   "single",
-   "spark",
-   "nemotron",
-   "gguf",
-   "q4_k_m",
-   "reasoning"
-  ],
-  "title": "Nemotron 3 Nano 30B-A3B Q4_K_M llama.cpp single Spark (ggml-org)"
- },
  "models": [
   {
    "files": [
@@ -71,8 +54,8 @@
      ]
     },
     {
-     "file_id": "readme-1ea6f4e1a69d-b335630551",
-     "id": "readme-1ea6f4e1a69d-b335630551",
+     "file_id": "readme-ccbb285de440-b335630551",
+     "id": "readme-ccbb285de440-b335630551",
      "mount": {
       "target": "/models"
      },
@@ -83,10 +66,10 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "ad19ddb0d5f8202e4c260f55b20ec3613a4d67e9aa9cd68d04ebbfd1a8c29ae0",
+    "content_sha256": "8c8e83e379b047f06b1b1c01e000874c1e829ef842fee7b01e9d990b2368306e",
     "kind": "model",
     "publisher": "ggml-org",
-    "slug": "nemotron-3-nano-30b-a3b-q4-k-m-f9d9b441"
+    "slug": "nemotron-3-nano-30b-a3b-q4-k-m-fe801509"
    }
   }
  ],
@@ -97,11 +80,11 @@
    "NVIDIA Corporation",
    "ggml-org"
   ],
-  "source_reference": "https://huggingface.co/ggml-org/NVIDIA-Nemotron-3-Nano-30B-A3B-GGUF/tree/f9d9b441a049bf27473c3cdd9cec220f5657b862"
+  "source_reference": "https://huggingface.co/ggml-org/NVIDIA-Nemotron-3-Nano-30B-A3B-GGUF/tree/fe801509a580ff84a5728d4a9104e3f6f7e9b0dd"
  },
  "release": {
-  "released_at": "2026-09-23",
-  "version": "0.5.0"
+  "released_at": "2026-10-19",
+  "version": "0.6.1"
  },
  "runtime": {
   "arguments": [
@@ -166,7 +149,7 @@
     "name": "entrypoint",
     "resources": {
      "disk": {
-      "artifact_bytes": 22421829729,
+      "artifact_bytes": 22421829768,
       "image_bytes": 8000000000,
       "safety_margin_bytes": 12000000000,
       "working_bytes": 16000000000

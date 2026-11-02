@@ -22,10 +22,14 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import (
     ModelDefinition,
+    ModelDisplay,
     RecipeDefinition,
+    RecipeDisplay,
     document_sha256,
+    published_json,
     read_model,
     read_recipe,
+    require_display_of,
 )
 from vonk_forge_contracts.resolver import validate_recipe_models
 
@@ -33,10 +37,14 @@ from .admission_locking import ConstraintReplay, admitting
 from .auth import CursorCodec
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
+    ModelRevisionProjection,
     PrebuiltImage,
+    PublishedDocument,
+    PublishedValue,
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    rederive_projection,
     write_catalog_projection,
 )
 from .identity_insert import insert_identity
@@ -247,9 +255,19 @@ class CatalogEntityService:
                 )
 
     def create_draft(
-        self, document: Mapping[str, object], *, actor: str
+        self,
+        document: PublishedDocument,
+        display: RecipeDisplay | ModelDisplay,
+        *,
+        actor: str,
     ) -> CatalogDocumentRevision:
-        parsed, clean, kind, publisher, slug, title = _parse(document)
+        parsed, clean, kind, publisher, slug = _parse(document)
+        try:
+            require_display_of(display, parsed.identity)
+        except ValueError as error:
+            raise CatalogValidationError(
+                CatalogCode.DOCUMENT_INVALID, "display does not describe the document"
+            ) from error
         now, actor = self._clock(), _actor(actor)
         try:
             with admitting(), self._write() as session:
@@ -257,7 +275,8 @@ class CatalogEntityService:
                     kind=kind,
                     publisher=publisher,
                     slug=slug,
-                    title=title,
+                    title=display_title(display),
+                    display=published_json(display),
                     created_by=actor,
                     created_at=now,
                     updated_at=now,
@@ -292,7 +311,7 @@ class CatalogEntityService:
         actor: str,
         expected_revision: int | None = None,
     ) -> CatalogDocumentRevision:
-        parsed, clean, kind, publisher, slug, title = _parse(document)
+        parsed, clean, kind, publisher, slug = _parse(document)
         now, actor = self._clock(), _actor(actor)
         with self._write() as session:
             root = session.scalar(
@@ -337,11 +356,7 @@ class CatalogEntityService:
             )
             if not created:
                 return revision
-            head.candidate_revision_id, root.title, root.updated_at = (
-                revision.id,
-                title,
-                now,
-            )
+            head.candidate_revision_id, root.updated_at = revision.id, now
             session.flush()
             return revision
 
@@ -596,9 +611,38 @@ class CatalogEntityService:
         session.add_all(bindings)
 
 
+# Display moved out of the documents in contracts 3.0. The readers ignore these
+# keys (one tolerant reader serves stored 2.x rows), so every write refuses them
+# here instead: a 2.x shape is never written.
+_RETIRED_DISPLAY_PATHS = (("metadata",), ("identity", "*", "title"))
+
+
+def _refuse_retired_display_fields(document: PublishedDocument) -> None:
+    """Refuse a document that still carries display (``*`` is any one key)."""
+    for path in _RETIRED_DISPLAY_PATHS:
+        nodes: list[PublishedValue] = [document]
+        for key in path:
+            nodes = [
+                child
+                for node in nodes
+                if isinstance(node, dict)
+                for name, child in node.items()
+                if key in {"*", name}
+            ]
+        if nodes:
+            raise CatalogValidationError(
+                CatalogCode.DOCUMENT_INVALID, "document carries retired display fields"
+            )
+
+
+def display_title(display: RecipeDisplay | ModelDisplay) -> str:
+    """The root title a display gives its document."""
+    return display.model_title if isinstance(display, ModelDisplay) else display.title
+
+
 def _parse(
     document: Mapping[str, object],
-) -> tuple[ModelDefinition | RecipeDefinition, dict[str, object], str, str, str, str]:
+) -> tuple[ModelDefinition | RecipeDefinition, PublishedDocument, str, str, str]:
     try:
         # Keep the published document exactly as received: its digest is the
         # document identity recipes reference.
@@ -611,25 +655,20 @@ def _parse(
             CatalogCode.DOCUMENT_INVALID,
             "document does not satisfy the public recipe contract",
         ) from error
-    title = (
-        parsed.identity.model.title
-        if isinstance(parsed, ModelDefinition)
-        else parsed.metadata.title
-    )
+    _refuse_retired_display_fields(clean)
     return (
         parsed,
         clean,
         str(parsed.kind),
         parsed.identity.publisher,
         parsed.identity.slug,
-        title,
     )
 
 
 def _revision(
     root: CatalogDocument,
     parsed: ModelDefinition | RecipeDefinition,
-    clean: dict[str, object],
+    clean: PublishedDocument,
     number: int,
     actor: str,
     now: datetime,
@@ -641,16 +680,7 @@ def _revision(
             {"files": files, "format": parsed.format.model_dump(mode="json")}
         )
         download, installed = parsed.download_bytes, parsed.installed_bytes
-        projected = {
-            "identity": parsed.identity.model_dump(mode="json"),
-            "metadata": parsed.metadata.model_dump(mode="json"),
-            "format": parsed.format.model_dump(mode="json"),
-            "capabilities": parsed.capabilities,
-            "modalities": parsed.modalities,
-            "artifact_count": len(parsed.files),
-            "download_bytes": download,
-            "installed_bytes": installed,
-        }
+        projected = model_document_projection(parsed)
     else:
         projected = recipe_document_projection(parsed)
     return CatalogDocumentRevision(
@@ -673,11 +703,23 @@ def _revision(
     )
 
 
+def model_document_projection(model: ModelDefinition) -> ModelRevisionProjection:
+    """Every projection field the immutable Model document alone determines."""
+    return ModelRevisionProjection(
+        identity=model.identity,
+        format=model.format,
+        capabilities=model.capabilities,
+        modalities=model.modalities,
+        artifact_count=len(model.files),
+        download_bytes=model.download_bytes,
+        installed_bytes=model.installed_bytes,
+    )
+
+
 def recipe_document_projection(recipe: RecipeDefinition) -> dict[str, object]:
     """Every projection field the immutable recipe document alone determines."""
     return {
         "identity": recipe.identity.model_dump(mode="json"),
-        "metadata": recipe.metadata.model_dump(mode="json"),
         "provenance": recipe.provenance.model_dump(mode="json"),
         "release": recipe.release.model_dump(mode="json"),
         "models": [
@@ -689,27 +731,10 @@ def recipe_document_projection(recipe: RecipeDefinition) -> dict[str, object]:
         "validation": recipe.validation.model_dump(mode="json"),
         "base_image_digest": recipe.execution.build.base_image.digest,
         "options": [option.model_dump(mode="json") for option in recipe.options],
-        "title": recipe.metadata.title,
-        "description": recipe.metadata.description,
-        "tags": recipe.metadata.tags,
         "runtime_engine": recipe.runtime.engine,
         "topology": recipe.topology.model_dump(mode="json"),
         **build_policy_projection(recipe),
     }
-
-
-# Fields the catalog sync records beside the document; the document cannot
-# supply them, so a re-derived projection keeps each one that is still valid.
-_SYNC_RECORDED_FIELDS = (
-    "publication_commit",
-    "source_path",
-    "package_sha256",
-    "source_bundle_sha256",
-    "package_handle",
-    "release_version",
-    "release_released_at",
-    "prebuilt_image",
-)
 
 
 def _active_recipe_revisions(session: Session) -> list[CatalogDocumentRevision]:
@@ -795,21 +820,10 @@ def _rederive_projection(
 
     Only a document that parsed and still matches its stored content digest is
     trusted; anything else is corruption and is left for the caller to report
-    rather than repaired into a valid-looking projection.
+    rather than repaired into a valid-looking projection. Sync-recorded fields
+    are kept by :func:`rederive_projection`.
     """
-    projected = recipe_document_projection(recipe)
-    stored = revision.projected if isinstance(revision.projected, Mapping) else {}
-    for key in _SYNC_RECORDED_FIELDS:
-        if stored.get(key) is None:
-            continue
-        try:
-            write_catalog_projection(
-                {**projected, key: stored[key]},
-                kind="recipe",
-            )
-        except CatalogRevisionContractError:
-            continue  # the next sync records it again from the signed catalog
-        projected[key] = stored[key]
+    projected = rederive_projection(revision.projected, recipe).model_dump(mode="json")
     selections = {selection.id for selection in recipe.models}
     bindings = {
         row.selection_id: artifact_key

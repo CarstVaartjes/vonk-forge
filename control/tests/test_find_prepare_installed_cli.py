@@ -26,6 +26,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition
 
+from .display_fixtures import create_draft
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
@@ -95,7 +96,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
     revisions: dict[str, CatalogDocumentRevision] = {}
     for index in range(3):
         slug = f"candidate-{index:04d}"
-        draft = catalog.create_draft(_model_document(slug), actor="catalog-test")
+        draft = create_draft(catalog, _model_document(slug), actor="catalog-test")
         revisions[slug] = catalog.resolve(draft.id, actor="catalog-test")
 
     cache = ModelCacheService(

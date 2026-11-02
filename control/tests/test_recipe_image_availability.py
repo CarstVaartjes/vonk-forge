@@ -99,6 +99,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .display_fixtures import reworded
 from .non_blocking import assert_ended_without_blocking
 from .recipe_removal_review_support import remove_after_review
 from .runtime_image_fixtures import place_test_image, remove_test_image
@@ -664,22 +665,14 @@ def _set_active_head(session: Session, revision_id: str) -> None:
 
 
 def _successor(recipe: RecipeDefinition, title: str) -> RecipeDefinition:
-    return recipe.model_copy(
-        update={"metadata": recipe.metadata.model_copy(update={"title": title})}
-    )
+    return reworded(recipe, title)
 
 
 def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions(
     tmp_path,
 ):
     recipe = _recipe("recipe-source-build.json")
-    old_recipe = recipe.model_copy(
-        update={
-            "metadata": recipe.metadata.model_copy(
-                update={"description": "Previous accepted recipe"}
-            )
-        }
-    )
+    old_recipe = reworded(recipe, "Previous accepted recipe")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
@@ -744,11 +737,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
 
 def test_selector_replay_keeps_original_revision_and_issuer(tmp_path: Path) -> None:
     recipe = _recipe("recipe-source-build.json")
-    newer = recipe.model_copy(
-        update={
-            "metadata": recipe.metadata.model_copy(update={"description": "New head"})
-        }
-    )
+    newer = reworded(recipe, "New head")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)

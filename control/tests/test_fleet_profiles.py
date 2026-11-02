@@ -646,7 +646,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     kind="recipe",
                     publisher=recipe.identity.publisher,
                     slug=recipe.identity.slug,
-                    title=recipe.metadata.title,
+                    title=recipe.identity.slug,
                     created_by="admin",
                     created_at=NOW,
                     updated_at=NOW,
@@ -656,7 +656,7 @@ def _seed(sessions: sessionmaker[Session]) -> tuple[str, str]:
                     kind="model",
                     publisher=model.identity.publisher,
                     slug=model.identity.slug,
-                    title=model.identity.model.title,
+                    title=model.identity.slug,
                     created_by="admin",
                     created_at=NOW,
                     updated_at=NOW,
@@ -781,7 +781,6 @@ def _seed_dual_solo_without_runtime_state(
             )
         )
         _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
-        _nested_object(solo_document, "metadata")["title"] = "Synthetic Tiny Solo"
         solo = RecipeDefinition.model_validate(solo_document)
         solo_root_id = _uuid(4)
         session.add(
@@ -790,7 +789,7 @@ def _seed_dual_solo_without_runtime_state(
                 kind="recipe",
                 publisher=solo.identity.publisher,
                 slug=solo.identity.slug,
-                title=solo.metadata.title,
+                title=solo.identity.slug,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,
@@ -3347,7 +3346,6 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
         )
         solo_document = _recipe_document()
         _nested_object(solo_document, "identity")["slug"] = "synthetic-tiny-solo"
-        _nested_object(solo_document, "metadata")["title"] = "Synthetic Tiny Solo"
         solo_recipe = RecipeDefinition.model_validate(solo_document)
         solo_root_id = _uuid(4)
         session.add(
@@ -3356,7 +3354,7 @@ def test_profile_scope_reconciles_idle_member_and_retains_reusable_installation(
                 kind="recipe",
                 publisher=solo_recipe.identity.publisher,
                 slug=solo_recipe.identity.slug,
-                title=solo_recipe.metadata.title,
+                title=solo_recipe.identity.slug,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,

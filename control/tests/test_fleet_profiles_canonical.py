@@ -40,6 +40,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import create_draft, reworded
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -140,7 +141,7 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                     kind="model",
                     publisher=model.identity.publisher,
                     slug=model.identity.slug,
-                    title=model.identity.model.title,
+                    title=model.identity.slug,
                     created_by="test",
                     created_at=NOW,
                     updated_at=NOW,
@@ -150,7 +151,7 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                     kind="recipe",
                     publisher=recipe.identity.publisher,
                     slug=recipe.identity.slug,
-                    title=recipe.metadata.title,
+                    title=recipe.identity.slug,
                     created_by="test",
                     created_at=NOW,
                     updated_at=NOW,
@@ -527,13 +528,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -620,13 +615,7 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -691,13 +680,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -1143,7 +1126,7 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     for index in range(1, selector_count):
         document = json.loads(json.dumps(template))
         document["identity"]["slug"] = f"synthetic-{index}"
-        revision = catalog.create_draft(document, actor="test")
+        revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/synthetic-{index}")
 
@@ -1329,7 +1312,7 @@ def test_profile_read_observes_distinct_content_once(
     for index in range(1, selector_count):
         document = json.loads(json.dumps(template))
         document["identity"]["slug"] = f"latency-{index}"
-        revision = catalog.create_draft(document, actor="test")
+        revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/latency-{index}")
     from vonk_control.model_cache import ModelCacheService

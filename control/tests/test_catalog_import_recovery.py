@@ -26,9 +26,9 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .display_fixtures import reword
 from .test_catalog_entities import (
     _example,
-    _metadata,
     _model,
     _model_reference,
     _recipe,
@@ -82,7 +82,7 @@ def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
 ):
     first = _request_import(catalog, _recipe(_model()))
     changed = _recipe(_model())
-    _metadata(changed)["description"] = "older pending content"
+    reword(changed, "older pending content")
     pending = catalog.entities.revise(first.recipe_id, changed, actor="test")
     with catalog._sessions.begin() as session:
         session.execute(
@@ -96,7 +96,7 @@ def test_poisoned_candidate_releases_head_and_accepts_two_fresh_imports(
             )
     for description in ("new accepted content", "newer accepted content"):
         document = _recipe(_model())
-        _metadata(document)["description"] = description
+        reword(document, description)
         imported = _request_import(catalog, document)
         with catalog._sessions() as session:
             head = session.scalar(
@@ -122,7 +122,7 @@ def test_history_projection_failure_cannot_hold_candidate_ownership(
 ):
     first = _request_import(catalog, _recipe(_model()))
     changed = _recipe(_model())
-    _metadata(changed)["description"] = "pending"
+    reword(changed, "pending")
     catalog.entities.revise(first.recipe_id, changed, actor="test")
     if missing_root:
         with catalog._sessions.begin() as session:

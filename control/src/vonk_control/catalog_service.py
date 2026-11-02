@@ -37,6 +37,7 @@ from .catalog_entities import (
     CatalogValidationError,
     _head,
     _rederive_projection,
+    display_title,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -46,6 +47,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    rederive_projection,
     write_catalog_projection,
 )
 from .identity_insert import insert_identity
@@ -100,8 +102,6 @@ class RecipeRevisionView:
     id: str
     recipe_id: str
     slug: str
-    title: str
-    description: str
     source_kind: str
     revision_number: int
     lifecycle: str
@@ -419,11 +419,7 @@ class CatalogService:
             )
             if display is None:
                 continue
-            title = (
-                display.model_title
-                if isinstance(display, ModelDisplay)
-                else display.title
-            )
+            title = display_title(display)
             published = published_json(display)
             if row.title == title and row.display == published:
                 continue
@@ -573,7 +569,7 @@ class CatalogService:
                 kind=revision.kind,
                 publisher=revision.publisher,
                 slug=revision.slug,
-                title=recipe.metadata.title,
+                title=revision.slug,
                 created_by=revision.created_by,
                 created_at=revision.created_at,
                 updated_at=self._clock(),
@@ -590,7 +586,6 @@ class CatalogService:
             )
         head.active_revision_id = revision.id
         head.generation += 1
-        root.title = recipe.metadata.title
         root.updated_at = self._clock()
 
     def _upsert_canonical_document(
@@ -615,11 +610,9 @@ class CatalogService:
             kind=kind,
             publisher=identity.publisher,
             slug=identity.slug,
-            title=(
-                parsed.identity.model.title
-                if isinstance(parsed, ModelDefinition)
-                else parsed.metadata.title
-            ),
+            # The display pass of the same sync gives a new root its title; an
+            # existing root keeps the one it has.
+            title=identity.slug,
             created_by=actor,
             created_at=self._clock(),
             updated_at=self._clock(),
@@ -659,16 +652,7 @@ class CatalogService:
                 # Repair only from the validated incoming content, preserving
                 # verified generations on ordinary cache hits.
                 projection = (
-                    ModelRevisionProjection(
-                        identity=parsed.identity,
-                        metadata=parsed.metadata,
-                        format=parsed.format,
-                        capabilities=parsed.capabilities,
-                        modalities=parsed.modalities,
-                        artifact_count=len(parsed.files),
-                        download_bytes=parsed.download_bytes,
-                        installed_bytes=parsed.installed_bytes,
-                    )
+                    rederive_projection(existing.projected, parsed)
                     if isinstance(parsed, ModelDefinition)
                     else _rederive_projection(session, existing, parsed)
                 )
@@ -782,8 +766,6 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         id=revision.id,
         recipe_id=revision.document_id,
         slug=revision.slug,
-        title=recipe.metadata.title,
-        description=recipe.metadata.description,
         source_kind="recipe_library",
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,
