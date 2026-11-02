@@ -774,11 +774,25 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         """The baseline Controller imports the canary of its own release's library."""
         return release_library_root(self.baseline.source_sha, self._library_workspace)
 
-    def _adopt_candidate_library(self) -> None:
-        """After the redeploy the candidate imports the library it was accepted with."""
-        self.synthetic_canary_fixture = _canonical_canary_fixture(
+    def _import_candidate_library(self) -> None:
+        """The candidate Controller imports the canary of the library it was accepted with.
+
+        The workload keeps running on its old revision: the import adds the
+        candidate's revision as the new head (an update notice, no restart, no
+        route withdrawal), which the settle and route phases that follow prove.
+        """
+        self.synthetic_canary_fixture = fixture = _canonical_canary_fixture(
             release_library_root(self.candidate.source_sha, self._library_workspace)
         )
+        sync = self._import_canary_catalog(
+            fixture,
+            self._canary_request_key(fixture, "upgrade-carry", "candidate-library"),
+        )
+        if sync.get("state") != "current" or sync.get("problems") != []:
+            raise LifecycleError(
+                "the candidate Controller did not apply its own canary library: "
+                f"{sync.get('state')}, {sync.get('problems')}"
+            )
 
     # -- the carry ---------------------------------------------------------
 
@@ -793,10 +807,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
                 "baseline-serving", BASELINE_SERVING_BOUND_SECONDS, reported=False
             )
             self._run_phase("controller-redeploy", self._redeploy_controller)
-            self._adopt_candidate_library()
             self._settle(
                 "controller-settled", CONTROLLER_SETTLE_BOUND_SECONDS, reported=True
             )
+            self._run_phase("candidate-library-import", self._import_candidate_library)
             self._run_phase("agent-upgrade", self._upgrade_agent)
             self._settle("agent-settled", AGENT_SETTLE_BOUND_SECONDS, reported=True)
             self._run_phase("route-still-published", self._require_published)

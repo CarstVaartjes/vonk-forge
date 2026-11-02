@@ -441,6 +441,11 @@ class CatalogService:
             self._sessions, clock=self._clock
         ).refresh_build_policy()
 
+    def refresh_model_projections(self) -> None:
+        CatalogEntityService(
+            self._sessions, clock=self._clock
+        ).refresh_model_projections()
+
     def record_prebuilt_images(
         self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
     ) -> None:

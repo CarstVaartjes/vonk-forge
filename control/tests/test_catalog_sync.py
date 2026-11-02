@@ -662,6 +662,26 @@ def test_recipe_attribution_does_not_change_execution_identity(tmp_path: Path) -
         assert revisions[0].execution_key == revisions[1].execution_key
 
 
+def test_an_unchanged_commit_tick_does_no_per_row_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A converged catalog is not re-scanned for old-contract Model rows each tick."""
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    first = sync.automatic()
+    scans: list[str] = []
+    original = CatalogService.refresh_model_projections
+
+    def counting(self: CatalogService) -> None:
+        scans.append("scan")
+        original(self)
+
+    monkeypatch.setattr(CatalogService, "refresh_model_projections", counting)
+    repeated = sync.automatic()
+    assert repeated.id == first.id
+    assert scans == []
+
+
 def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> None:
     sessions, service, reader, _item_value = _fixture(tmp_path)
     sync = _sync(sessions, service, reader)

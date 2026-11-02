@@ -20,7 +20,6 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
@@ -83,6 +82,10 @@ class CatalogReferenceInvalid(InvalidRequestError, CatalogValidationError):
         CatalogValidationError.__init__(self, code, detail)
         self.typed_reason = InvalidRequestReason.NOT_FOUND
         self.typed_field = "models"
+
+
+# The catalog kind of a Model row is the contract's own kind word.
+_MODEL_KIND = ModelDefinition.model_fields["kind"].default
 
 
 class CatalogEntityService:
@@ -189,29 +192,30 @@ class CatalogEntityService:
                 )
                 if row.id in heads:
                     problems.append(_build_policy_problem(row, error))
-        self._refresh_model_projections()
         return tuple(problems)
 
-    def _refresh_model_projections(self) -> None:
-        """Re-derive an active Model projection written under an earlier contract.
+    def refresh_model_projections(self) -> None:
+        """Re-derive active Model projections written under an earlier contract.
 
-        Same discipline as the recipe pass: every row is checked without a lock;
-        only a row that does not read as a current projection is locked and
-        written, in its own short transaction. An unreadable row is left alone.
+        Run by a sync that applies a library (a new commit or Controller), never
+        on an unchanged tick. Only ``id`` and ``projected`` are read to find the
+        rows that need it; a row that does not read as a current projection is
+        then locked and its document loaded, in its own short transaction. An
+        unreadable row is left alone.
         """
         with self._read() as session:
-            rows = list(
-                session.scalars(
-                    select(CatalogDocumentRevision).where(
-                        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-                        CatalogDocumentRevision.state == "active",
-                    )
+            rows = session.execute(
+                select(
+                    CatalogDocumentRevision.id, CatalogDocumentRevision.projected
+                ).where(
+                    CatalogDocumentRevision.kind == _MODEL_KIND,
+                    CatalogDocumentRevision.state == "active",
                 )
-            )
-        for observed in rows:
+            ).all()
+        for revision_id, projected in rows:
             try:
                 ModelRevisionProjection.model_validate_json(
-                    canonical_message(observed.projected)
+                    canonical_message(projected)
                 )
                 continue
             except (CatalogRevisionContractError, TypeError, ValueError):
@@ -221,7 +225,7 @@ class CatalogEntityService:
                     row = session.scalar(
                         select(CatalogDocumentRevision)
                         .where(
-                            CatalogDocumentRevision.id == observed.id,
+                            CatalogDocumentRevision.id == revision_id,
                             CatalogDocumentRevision.state == "active",
                         )
                         .with_for_update(skip_locked=True)
@@ -229,21 +233,21 @@ class CatalogEntityService:
                     )
                     if row is None:
                         continue  # gone, superseded or busy: the next sync observes it
-                    projected = rederive_projection(
+                    rederived = rederive_projection(
                         row.projected, read_catalog_document(row)
                     )
                     session.execute(
                         update(CatalogDocumentRevision)
                         .where(CatalogDocumentRevision.id == row.id)
                         .values(
-                            projected=write_catalog_projection(projected, kind=row.kind)
+                            projected=write_catalog_projection(rederived, kind=row.kind)
                         )
                     )
                     session.expire(row, ["projected"])
             except Exception as error:  # noqa: BLE001 - one derived row cannot abort imports
                 _LOGGER.warning(
                     "model projection refresh deferred for revision %s: %s",
-                    observed.id,
+                    revision_id,
                     error,
                 )
 

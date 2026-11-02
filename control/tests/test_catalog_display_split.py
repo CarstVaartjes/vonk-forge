@@ -208,6 +208,7 @@ def test_a_stored_2x_row_is_read_and_rederived_by_the_sync_keeping_what_sync_rec
 
     entities = CatalogEntityService(sessions, clock=lambda: NOW)
     entities.refresh_build_policy()
+    entities.refresh_model_projections()
     with sessions() as session:
         settled = {
             row.id: row.projected
