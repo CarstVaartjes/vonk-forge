@@ -1,6 +1,6 @@
 ## F1b: the Controller consumes public contracts 3.0.0
 
-Display-split switch-over, Controller side (design delta 2026-11-01 section 5 step 2). Paired with vonk-forge-recipes draft PR #1987 (`feat/display-split-r3`, contracts 3.0.0). The recipes and contracts pin is the exact commit `3e6578f531f9f937e31259ca64c9e6b64e1045c8` (wheel built from it); it is re-pinned to the merge commit `R` of #1987 before this lands.
+Display-split switch-over, Controller side (design delta 2026-11-01 section 5 step 2). Paired with vonk-forge-recipes draft PR #1987 (`feat/display-split-r3`, contracts 3.0.0). The recipes and contracts pin is the exact commit `cb4fcdf020d6d4c56a74851c8c886543ae420d57` (wheel built from it); it is re-pinned to the merge commit `R` of #1987 before this lands.
 
 ## Principles
 

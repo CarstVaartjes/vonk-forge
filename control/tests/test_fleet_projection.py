@@ -62,7 +62,6 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 
 from tests.observation_transfer_peer import observation_document
 
-from .display_fixtures import reword
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -103,7 +102,6 @@ def _canonical_catalog_documents(
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = slug
-    reword(recipe_document, title)
     recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
         model.model_dump(mode="json")
     )
@@ -119,7 +117,7 @@ def _canonical_catalog_documents(
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.identity.slug,
+                title=title,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,

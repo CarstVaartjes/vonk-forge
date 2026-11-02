@@ -531,9 +531,8 @@ def test_execution_digest_ignores_notes_but_tracks_bound_launch_changes(
     base = _example("recipe-source-build.json")
 
     notes = deepcopy(base)
-    metadata = _raw_object(notes["metadata"], "example metadata is not an object")
-    description = _text(metadata["description"], "example description")
-    metadata["description"] = description + " Editorial note."
+    provenance = _raw_object(notes["provenance"], "example provenance is not an object")
+    provenance["attribution"] = ["Editorial note."]
     first_spec = _compile(base, model)
     noted_spec = _compile(notes, model)
     first_identity = _identity(first_spec)
