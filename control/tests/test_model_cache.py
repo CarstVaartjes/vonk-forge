@@ -3764,17 +3764,19 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     assert downloaded.state == "succeeded"
     set_digest = str(downloaded.artifact_set_sha256)
     owners = {set_digest: ("installation 1",)}
-    real_reasons = model_cache_module.model_set_reference_reasons
+    from vonk_control.model_cache import removal_execution as _removal_execution
 
-    def reasons(session, digests):
-        found = real_reasons(session, digests)
+    real_reasons = _removal_execution._reason_projection
+
+    def reasons(findings):
+        found = real_reasons(findings)
         return {
             digest: tuple(found.get(digest, ())) + owners.get(digest, ())
-            for digest in digests
+            for digest in findings
         }
 
     monkeypatch.setattr(
-        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
+        "vonk_control.model_cache.removal_execution._reason_projection",
         reasons,
     )
     removal = service.remove_model_selector(
@@ -3843,13 +3845,15 @@ def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
         service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
     )
     owners = {set_digest: ("installation 1",)}
-    real_reasons = model_cache_module.model_set_reference_reasons
+    from vonk_control.model_cache import removal_execution as _removal_execution
+
+    real_reasons = _removal_execution._reason_projection
     monkeypatch.setattr(
-        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
-        lambda session, digests: {
-            digest: tuple(real_reasons(session, digests).get(digest, ()))
+        "vonk_control.model_cache.removal_execution._reason_projection",
+        lambda findings: {
+            digest: tuple(real_reasons(findings).get(digest, ()))
             + owners.get(digest, ())
-            for digest in digests
+            for digest in findings
         },
     )
     removal = service.remove_model_selector(

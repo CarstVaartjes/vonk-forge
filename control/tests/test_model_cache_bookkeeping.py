@@ -19,7 +19,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from vonk_agent_protocol import LifecycleState
 from vonk_control.model_cache import (
     _validate_source,
 )
@@ -84,8 +83,10 @@ def test_a_missing_set_column_is_rederived_from_the_manifest(cache, tmp_path: Pa
     assert finished.artifact_set_sha256 == expected
 
 
-def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
-    """A set that references a removal target after the plan was made defers."""
+def test_a_stale_removal_scope_completes_and_retains_the_shared_object(
+    cache, tmp_path: Path
+):
+    """A set that references a removal target after the plan was made is retained."""
 
     service, sessions = cache
     downloaded = _download(
@@ -121,12 +122,15 @@ def test_a_stale_removal_scope_waits_instead_of_raising(cache, tmp_path: Path):
                 path="late.bin",
             )
         )
-    assert service._advance_model_removal(accepted.id) is False  # no raise
-    waiting = service.get_operation(accepted.id)
-    assert waiting.state in {"queued", LifecycleState.BACKOFF}
-    assert waiting.failure is not None and waiting.failure["retryable"] is True
+    service._advance_model_removal(accepted.id)  # no raise
+    assert service.get_operation(accepted.id).state == "succeeded"
     with sessions() as session:
-        assert session.get(ModelCacheSet, set_digest) is not None  # still fenced
+        assert session.get(ModelCacheSet, set_digest) is None  # the request's set goes
+        assert (
+            session.query(ModelCacheSetArtifact)
+            .filter_by(artifact_set_sha256="b" * 64)
+            .count()
+        )  # the newer set keeps its membership
 
 
 # ------------------------------- 2. damaged persisted state rebuilds or retires

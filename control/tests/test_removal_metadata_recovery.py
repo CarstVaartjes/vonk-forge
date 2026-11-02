@@ -170,7 +170,7 @@ def test_unavailable_scan_recovers_same_removal_after_repeated_failures(
             ArtifactLifecycleCode.REFERENCE_SCAN_FAILED, "observation unavailable"
         )
 
-    monkeypatch.setattr(removal_execution, "model_set_reference_reasons", unavailable)
+    monkeypatch.setattr(removal_execution, "model_set_reference_findings", unavailable)
     now = [datetime.now(UTC)]
     service._clock = lambda: now[0]
     for _ in range(8):
