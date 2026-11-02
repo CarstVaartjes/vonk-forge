@@ -43,7 +43,6 @@ from ..model_cache_progress import cache_progress, progress_document
 from ..models import (
     ArtifactLifecycleGate,
     ModelCacheOperation,
-    ModelCacheSetArtifact,
 )
 from ..operation_contract import AvailabilityRecoveryAction
 from ..strict_json import serialize_json_value
@@ -277,28 +276,8 @@ class RemovalAcceptanceMixin:
                 # An unattended removal re-proves the sets unused with every gate
                 # held; raising rolls the reservation back with this transaction.
                 verify(session, scope.selected_sets)
-
-            external_memberships = set(
-                session.scalars(
-                    select(ModelCacheSetArtifact.artifact_sha256).where(
-                        ModelCacheSetArtifact.artifact_set_sha256.not_in(
-                            scope.selected_sets
-                        )
-                        if scope.selected_sets
-                        else ModelCacheSetArtifact.artifact_set_sha256.is_not(None)
-                    )
-                )
-            )
-            delete_objects = tuple(
-                digest
-                for digest in scope.selected_objects
-                if digest not in external_memberships
-            )
-            if delete_objects != scope.delete_objects:
-                raise ModelCacheConflictInvalid(
-                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                    "model object sharing changed while removal ownership was reserved",
-                )
+        # The locked scope matched above, so its sharing is current.
+        delete_objects = scope.delete_objects
         if fleet is not None:
             delete_objects = tuple(
                 digest for digest in delete_objects if digest not in shared

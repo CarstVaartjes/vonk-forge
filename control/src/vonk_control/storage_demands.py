@@ -75,6 +75,12 @@ class StorageDemands:
         self._ttl = ttl or timedelta(seconds=STORAGE_DEMAND_TTL_SECONDS)
         self._lock = threading.Lock()
         self._items: dict[tuple[str, str, str], StorageDemand] = {}
+        self._on_request: list[Callable[[StorageDemand], None]] = []
+
+    def on_request(self, listener: Callable[[StorageDemand], None]) -> None:
+        """Call ``listener`` with each demand as it is registered."""
+
+        self._on_request.append(listener)
 
     def request(
         self,
@@ -100,6 +106,8 @@ class StorageDemands:
             )
             with self._lock:
                 self._items[(scope, source, subject)] = demand
+            for listener in self._on_request:
+                listener(demand)
         except Exception:  # asking for space is best effort
             _LOGGER.warning("could not record a storage demand", exc_info=True)
 
