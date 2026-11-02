@@ -4519,6 +4519,7 @@ def test_recheck_binds_the_inventory_sample_it_reads_not_the_reviewed_one(
     assert uncertainty.inventory_observed_at == sample.observed_at
 
 
+@pytest.mark.usefixtures("measured_demands")
 def test_switch_preserves_the_memory_floor_on_an_idle_spark(
     tmp_path: Path,
 ) -> None:
@@ -4552,6 +4553,43 @@ def test_switch_preserves_the_memory_floor_on_an_idle_spark(
         plan = service.preview(request, actor="admin")
         assert plan.fit_current.allowed is (headroom == 0)
         assert plan.allowed is (headroom == 0)
+
+
+def test_switch_tries_an_estimate_above_an_idle_spark_as_its_only_claim(
+    tmp_path: Path,
+) -> None:
+    """A declared peak is an estimate: one byte over the idle maximum is tried."""
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    node_id = nodes[0]
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    request = _request(sessions, node_id, action="switch")
+    service = _service(
+        sessions,
+        lifecycle._clock(),
+        lifecycle,
+        RecordingArtifactExecutor(),
+        phase_executor=SynchronousPhaseExecutor(),
+    )
+    baseline = service.preview(request, actor="admin")
+    required = baseline.fit_current.nodes[0].memory_required_bytes
+    floor = baseline.fit_current.nodes[0].memory_floor_bytes
+    assert required is not None and floor is not None
+    total = required + floor - 1
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_total_bytes = total
+        snapshot.host_memory_free_bytes = total
+        snapshot.gpu_memory_total_bytes = total
+        snapshot.gpu_memory_free_bytes = total
+    plan = service.preview(request, actor="admin")
+    assert plan.allowed
+    node = plan.fit_current.nodes[0]
+    # The try claims all free memory above the floor and keeps the floor.
+    assert node.memory_required_bytes == total - floor
+    assert node.memory_free_after_bytes == floor
 
 
 def test_switch_replaces_the_run_that_holds_the_nodes_capacity(
@@ -7354,6 +7392,7 @@ def test_installation_verification_refuses_a_lost_run_that_still_has_residue(
         ("stopped", False, False),
     ],
 )
+@pytest.mark.usefixtures("measured_demands")
 def test_memory_freed_by_a_confirmed_stop_after_the_sample_is_not_charged_again(
     tmp_path: Path, run_state: str, released_after_sample: bool, admitted: bool
 ) -> None:

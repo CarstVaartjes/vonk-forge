@@ -101,6 +101,7 @@ def _capacity_profile(tmp_path, engine, *, node_count: int = 1):
 
 
 @pytest.mark.parametrize("headroom", [0, -1])
+@pytest.mark.usefixtures("measured_demands")
 def test_unified_memory_review_and_runtime_share_the_same_capacity_boundary(
     tmp_path, postgres_engine, headroom: int
 ) -> None:
