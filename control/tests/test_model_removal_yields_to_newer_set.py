@@ -383,3 +383,25 @@ def test_object_kept_for_an_owner_that_is_then_cancelled_is_not_stranded(
         assert service.get_operation(fresh.id).state == "succeeded"
     finally:
         service.close()
+
+
+def test_unsafe_retained_object_defers_the_finish_instead_of_raising(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    service, _sessions, _sel, removal, _download_b, _set_a = _setup(
+        postgres_engine, tmp_path, [b"abc"], "e01"
+    )
+    try:
+        service._advance_model_removal(removal.id)  # retains the shared object
+        target = _path(service, b"abc")
+        target.unlink()
+        target.symlink_to(tmp_path / "elsewhere")  # not a regular file
+        for _ in range(4):
+            service._advance_model_removal(removal.id)  # must not raise
+        current = service.get_operation(removal.id)
+        assert current.state != "succeeded"
+        assert current.failure is not None
+        assert current.failure["code"] == "model_cache.removal_wait"
+        assert "not a regular file" in str(current.failure["detail"])
+    finally:
+        service.close()

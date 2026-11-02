@@ -353,6 +353,22 @@ class RemovalExecutionMixin:
                     operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
+        try:
+            # Stat outside the finish transaction (it holds the row and the
+            # fences): which targets are still stored decides a rewind.
+            stored = tuple(
+                str(item)
+                for item in delete_objects
+                if cache._model_object_size(str(item)) > 0
+            )
+        except ModelCacheStorageRefused as error:
+            cache._defer_model_removal(operation_id, detail=error.detail, cause=error)
+            return False
+        except OSError as error:
+            cache._defer_model_removal(
+                operation_id, detail=f"{type(error).__name__}: {error}", cause=error
+            )
+            return False
         with cache._session(write=True) as session:
             identities = (
                 *(ArtifactIdentity("model-set", str(item)) for item in selected_sets),
@@ -384,8 +400,10 @@ class RemovalExecutionMixin:
             if operation.state not in model_cache_states.LIVE:
                 return False
             wait = cache._finish_model_removal_in_session(
-                session, operation, now=now, owned=owned
+                session, operation, now=now, owned=owned, stored=stored
             )
+        if wait == _REWOUND:
+            return True  # progress, not a wait: the next step re-runs the batch
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
             cache._defer_model_removal(
@@ -429,6 +447,7 @@ class RemovalExecutionMixin:
         *,
         now: datetime,
         owned: frozenset[str] = frozenset(),
+        stored: tuple[str, ...] = (),
     ) -> str | None:
         """Finish a fully reconciled removal; else say what it waits for.
 
@@ -471,14 +490,9 @@ class RemovalExecutionMixin:
         # the batch again with the current owners and unlinks it.
         released = [str(item) for item in selected if item not in owned]
         stranded = [
-            str(item)
-            for item in delete_objects
-            if cache._model_object_size(str(item)) > 0
-        ]
-        stranded = [
             item
-            for item in stranded
-            if item not in _externally_listed(session, tuple(stranded), released)
+            for item in stored
+            if item not in _externally_listed(session, stored, released)
         ]
         if stranded:
             _store_operation_payload(
@@ -486,7 +500,7 @@ class RemovalExecutionMixin:
                 operation.kind,
                 _updated(checkpoint, object_index=0, set_index=0),
             )
-            return "a set released by its newer owner still has stored objects"
+            return _REWOUND
         for set_digest in selected:
             row = session.get(ModelCacheSet, set_digest)
             if set_digest in owned:
@@ -566,6 +580,7 @@ def _externally_listed(
 
 
 _OBJECT_BATCH_LIMIT = 64
+_REWOUND = "rewound: a released set still has stored objects"
 
 
 def _untouched(checkpoint: ModelCacheRemovalPayload) -> bool:
