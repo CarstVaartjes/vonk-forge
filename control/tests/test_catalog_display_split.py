@@ -54,6 +54,8 @@ _PACKAGE_HANDLE = {
     "archive_path": "/cache/synthetic.tar.gz",
     "closure_path": "/cache/synthetic/closure",
 }
+_ARTIFACT_INPUTS = [{"selection_id": "primary", "artifact_key": "9" * 64}]
+_MODEL_ARTIFACTS = [{"path": "model/weights.bin", "sha256": "8" * 64, "size_bytes": 3}]
 _PREBUILT = {
     "reference": "registry.example/vonk/recipe@sha256:" + "e" * 64,
     "build_key": "f" * 64,
@@ -110,6 +112,8 @@ def _legacy_projection(document: dict, kind: str) -> dict:
         "prebuilt_image": _PREBUILT,
         "release_version": "1.0.0",
         "publication_commit": "a" * 40,
+        "artifact_inputs": _ARTIFACT_INPUTS,
+        "build_model_artifacts": _MODEL_ARTIFACTS,
     }
 
 
@@ -210,6 +214,8 @@ def test_a_stored_2x_row_is_read_and_persisted_once_keeping_what_sync_recorded(
         assert recipe_row.projected["package_handle"] == _PACKAGE_HANDLE
         assert recipe_row.projected["prebuilt_image"] == _PREBUILT
         assert recipe_row.projected["release_version"] == "1.0.0"
+        assert recipe_row.projected["artifact_inputs"] == _ARTIFACT_INPUTS
+        assert recipe_row.projected["build_model_artifacts"] == _MODEL_ARTIFACTS
         assert isinstance(read_catalog_projection(model_row), ModelRevisionProjection)
         # Identity, build keys and bytes of every row are untouched: nothing
         # rebuilds, redownloads or re-keys.
@@ -322,3 +328,22 @@ def test_the_shared_document_vectors_agree_with_the_controller(sessions) -> None
         assert error.value.code == CatalogCode.DOCUMENT_INVALID
         refused += 1
     assert refused == 2
+
+
+def test_a_row_the_3_0_controller_wrote_is_already_current(sessions) -> None:
+    """A resolved recipe keeps its bindings: the reconcile has nothing to rewrite."""
+    entities = CatalogEntityService(sessions, clock=lambda: NOW)
+    model = _example("model-definition.json")
+    recipe = _example("recipe-source-build.json")
+    recipe["models"][0]["model"]["content_sha256"] = document_sha256(model)
+    for document in (model, recipe):
+        draft = create_draft(entities, document, actor="test")
+        entities.resolve(draft.id, actor="test")
+    with sessions() as session:
+        stored = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        assert stored is not None and stored.projected["artifact_inputs"]
+    assert reconcile_catalog_projections(sessions) == 0

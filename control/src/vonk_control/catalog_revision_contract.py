@@ -234,20 +234,16 @@ def read_catalog_projection(
         return rederive_projection(revision.projected, parsed)
 
 
-# What the catalog sync records beside a document; the document cannot supply
-# it, so a re-derived projection keeps each stored value that is still valid.
-_SYNC_RECORDED_FIELDS = (*_CatalogRevisionProjection.model_fields, "prebuilt_image")
-
-
 def rederive_projection(
     stored: object, parsed: ModelDefinition | RecipeDefinition
 ) -> ModelRevisionProjection | RecipeRevisionProjection:
-    """The current projection of ``parsed``, keeping what sync recorded beside it.
+    """The current projection of ``parsed``, keeping what is recorded beside it.
 
     Two sources, one rule: every field the document determines comes from the
-    document; each sync-recorded field comes from the stored projection, read one
-    key at a time, so a row written under an earlier contract loses no valid sync
-    state and a stored value that is itself invalid is dropped, not carried over.
+    document; every other field (what the catalog sync and the model bindings
+    recorded) comes from the stored projection, read one key at a time, so a row
+    written under an earlier contract loses no valid recorded state and a stored
+    value that is itself invalid is dropped, not carried over.
     """
     from .catalog_entities import model_document_projection, recipe_document_projection
 
@@ -260,7 +256,7 @@ def rederive_projection(
         projection_type = RecipeRevisionProjection
         projected = recipe_document_projection(parsed)
     recorded = stored if isinstance(stored, Mapping) else {}
-    for key in _SYNC_RECORDED_FIELDS:
+    for key in projection_type.model_fields.keys() - projected.keys():
         if recorded.get(key) is None:
             continue
         try:
