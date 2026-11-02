@@ -267,7 +267,14 @@ def _canonical_package_fixture(
         "source_path": "recipes/tiny-recipe.json",
         "source_bundle_sha256": source_digest,
         "document": recipe_document,
-        "display": published_json(display_of_recipe(recipe_document)),
+        "display": published_json(
+            display_of_recipe(
+                recipe_document,
+                title="Tiny Recipe",
+                description="A deterministic package fixture.",
+                tags=["fixture"],
+            )
+        ),
         "content_sha256": recipe_digest,
         "package": {
             "path": "packages/tiny-recipe.tar.gz",
@@ -291,7 +298,15 @@ def _canonical_package_fixture(
             {
                 "source_path": "models/tiny-model.json",
                 "document": model_document,
-                "display": published_json(display_of_model(model_document)),
+                "display": published_json(
+                    display_of_model(
+                        model_document,
+                        family_title="Tiny Model",
+                        model_title="Tiny Model",
+                        description="A deterministic package fixture.",
+                        tags=["fixture"],
+                    )
+                ),
                 "content_sha256": model_digest,
             }
         ],

@@ -557,9 +557,7 @@ def test_local_revision_lookup_accepts_more_than_256_identities(tmp_path: Path) 
 
 def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) -> None:
     sessions, service, reader, item = _fixture(tmp_path)
-    document = deepcopy(item.document)
-    document["metadata"]["tags"] = []  # type: ignore[index]
-    replacement = _item_with_document(item, document)
+    replacement = replace(_item_with_document(item, deepcopy(item.document)), tags=())
     reader.snapshot = RecipeLibrarySnapshot(
         reader.snapshot.commit,
         (replacement,),
@@ -631,7 +629,7 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
     )
 
 
-def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -> None:
+def test_recipe_attribution_does_not_change_execution_identity(tmp_path: Path) -> None:
     sessions, service, _reader, item = _fixture(tmp_path)
     service.import_recipe_library(
         "test",
@@ -642,7 +640,7 @@ def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -
         dependency_documents=item.dependencies,
     )
     document = deepcopy(item.document)
-    document["metadata"]["tags"] = ["editorial-only"]  # type: ignore[index]
+    reword(document, "editorial-only")
     replacement = _item_with_document(item, document)
     service.import_recipe_library(
         "test",
@@ -1034,7 +1032,7 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     # one this Controller still requires is skipped on its own.
     models[1]["document"]["future_field"] = "added by a newer contract"
     del models[0]["document"]["files"]
-    del recipes[0]["document"]["metadata"]
+    del recipes[0]["document"]["provenance"]
     skipped_model = models[0]["document"]["identity"]
     skipped_recipe = recipes[0]["document"]["identity"]
 

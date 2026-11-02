@@ -52,7 +52,6 @@ from vonk_forge_contracts import (
     read_recipe_display,
 )
 
-from .display_fixtures import publish_displays
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_package_transport import _canonical_package_fixture
 
@@ -149,7 +148,6 @@ class World:
 @pytest.fixture
 def world(postgres_engine: Engine, tmp_path: Path) -> World:
     built = World(postgres_engine, tmp_path)
-    built.index = publish_displays(built.index)
     built.release.publish(built.index, built.packages)
     return built
 

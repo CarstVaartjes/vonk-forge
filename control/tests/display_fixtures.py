@@ -28,20 +28,22 @@ def _identity(document: Mapping[str, object]) -> Mapping[str, str]:
     return {"publisher": identity["publisher"], "slug": identity["slug"]}
 
 
-def _shared_display(name: str, document: Mapping[str, object]) -> dict[str, object]:
-    """The shared example display, naming this document."""
+def _shared_display(
+    name: str, document: Mapping[str, object], text: Mapping[str, object]
+) -> dict[str, object]:
+    """The shared example display, naming this document, with its text overridden."""
     shared = json.loads((_EXAMPLES / name).read_text(encoding="utf-8"))
-    return {**shared, "identity": _identity(document)}
+    return {**shared, "identity": _identity(document), **text}
 
 
-def display_of_recipe(document: Mapping[str, object]) -> RecipeDisplay:
+def display_of_recipe(document: Mapping[str, object], **text: object) -> RecipeDisplay:
     return read_recipe_display(
-        _shared_display("recipe-display-source-build.json", document)
+        _shared_display("recipe-display-source-build.json", document, text)
     )
 
 
-def display_of_model(document: Mapping[str, object]) -> ModelDisplay:
-    return read_model_display(_shared_display("model-display.json", document))
+def display_of_model(document: Mapping[str, object], **text: object) -> ModelDisplay:
+    return read_model_display(_shared_display("model-display.json", document, text))
 
 
 def display_of(document: Mapping[str, object]) -> RecipeDisplay | ModelDisplay:
