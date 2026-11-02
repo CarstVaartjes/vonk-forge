@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from itertools import pairwise
 from pathlib import Path
+from typing import TypeGuard
 
 from . import claim_registry as claims
 from . import collection_continuation as collections
@@ -976,41 +977,89 @@ _ANONYMOUS_SEND_MODULES = frozenset(
 )
 
 
+_MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
+
+
+def _targets_membership_rows(node: ast.AST) -> bool:
+    """Whether a condition names specific rows: ``key.in_(...)`` or ``key == x``.
+
+    ``not_in`` and ``is_not(None)`` still read every other set's rows.
+    """
+
+    def key(value: ast.AST) -> bool:
+        return isinstance(value, ast.Attribute) and value.attr in _MEMBERSHIP_KEYS
+
+    return any(
+        (
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Attribute)
+            and inner.func.attr == "in_"
+            and key(inner.func.value)
+        )
+        or (
+            isinstance(inner, ast.Compare)
+            and all(isinstance(op, ast.Eq) for op in inner.ops)
+            and (key(inner.left) or any(key(item) for item in inner.comparators))
+        )
+        for inner in ast.walk(node)
+    )
+
+
 def unfiltered_membership_selects(source: str) -> list[int]:
-    """Lines selecting ``ModelCacheSetArtifact`` with no ``where`` or ``limit``.
+    """Lines reading ``ModelCacheSetArtifact`` without naming rows or a limit.
 
     A request or removal path pays for the sets it names, not for every
     membership row of the cache (a Seq Scan of ~31k rows per acceptance).
+    Covers ``select(...)``, ``sa.select(...)`` and ``session.query(...)``; the
+    read is scoped only by a chained ``.where``/``.filter``/``.filter_by`` that
+    targets ``artifact_set_sha256`` or ``artifact_sha256`` rows, or a ``.limit``.
     """
 
     tree = ast.parse(source)
-    filtered: set[int] = set()
-    for node in ast.walk(tree):
-        if (
+
+    def is_root(node: ast.AST) -> TypeGuard[ast.Call]:
+        return (
             isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr in {"where", "filter_by", "limit"}
-        ):
-            receiver: ast.AST = node.func.value
-            while isinstance(receiver, ast.Call):
-                filtered.add(id(receiver))
-                receiver = (
-                    receiver.func.value
-                    if isinstance(receiver.func, ast.Attribute)
-                    else ast.Constant(None)
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id == "select")
+                or (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"select", "query"}
                 )
+            )
+            and any(
+                isinstance(inner, ast.Name) and inner.id == "ModelCacheSetArtifact"
+                for arg in node.args
+                for inner in ast.walk(arg)
+            )
+        )
+
+    scoped: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        if attr == "limit":
+            targeted = True
+        elif attr in {"where", "filter"}:
+            targeted = any(_targets_membership_rows(arg) for arg in node.args)
+        elif attr == "filter_by":
+            targeted = any(item.arg in _MEMBERSHIP_KEYS for item in node.keywords)
+        else:
+            continue
+        receiver: ast.AST = node.func.value
+        while isinstance(receiver, ast.Call):
+            if targeted and is_root(receiver):
+                scoped.add(id(receiver))
+            receiver = (
+                receiver.func.value
+                if isinstance(receiver.func, ast.Attribute)
+                else ast.Constant(None)
+            )
     return sorted(
         node.lineno
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "select"
-        and id(node) not in filtered
-        and any(
-            isinstance(inner, ast.Name) and inner.id == "ModelCacheSetArtifact"
-            for arg in node.args
-            for inner in ast.walk(arg)
-        )
+        if is_root(node) and id(node) not in scoped
     )
 
 
@@ -1731,7 +1780,7 @@ def check_source(
         python
         and not is_test
         and "model-sets" in modes
-        and path.startswith("control/src/vonk_control/model_cache/")
+        and path.startswith("control/src/vonk_control/")
     ):
         hits.extend(
             (line, "whole-table membership read; select only the named sets")

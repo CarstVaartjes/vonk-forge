@@ -1562,14 +1562,51 @@ _WHOLE_MEMBERSHIP = (
 )
 
 
-def test_a_whole_membership_table_read_is_flagged_but_a_scoped_one_is_not() -> None:
-    path = "control/src/vonk_control/model_cache/removal_acceptance.py"
-    assert check_source(path, _WHOLE_MEMBERSHIP, {2}, modes=("model-sets",))
-    assert not check_source(
-        path, _WHOLE_MEMBERSHIP, {1, 3, 4, 5, 6}, modes=("model-sets",)
+_DELETED_ACCEPTANCE_READ = (
+    "def read(session, selected):\n"
+    "    return session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)\n"
+    "        )\n"
+    "    )\n"
+)
+_QUERY_ALL = (
+    "def read(session):\n    return session.query(ModelCacheSetArtifact).all()\n"
+)
+_TARGETED_FILTER = (
+    "def read(session, sets):\n"
+    "    return session.query(ModelCacheSetArtifact).filter(\n"
+    "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "    ).all()\n"
+)
+_MEMBERSHIP_PATHS = (
+    "control/src/vonk_control/model_cache/removal_acceptance.py",
+    "control/src/vonk_control/artifact_reference_scan/model_sets.py",
+    "control/src/vonk_control/unused_storage_collection/service.py",
+)
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_whole_membership_table_read_is_flagged(path: str) -> None:
+    whole = "def r(s):\n    return s.scalars(select(ModelCacheSetArtifact))\n"
+    assert check_source(path, _DELETED_ACCEPTANCE_READ, {3}, modes=("model-sets",))
+    assert check_source(path, _QUERY_ALL, {2}, modes=("model-sets",))
+    assert check_source(path, whole, {2}, modes=("model-sets",))
+    assert not check_source(path, _DELETED_ACCEPTANCE_READ, {1}, modes=("model-sets",))
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_membership_read_that_names_rows_passes(path: str) -> None:
+    named = (
+        "def r(s, sets):\n"
+        "    return s.scalars(select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+        "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)))\n"
     )
+    limited = "def r(s):\n    return s.scalar(select(ModelCacheSetArtifact).limit(1))\n"
+    for source in (_TARGETED_FILTER, named, limited):
+        assert not check_source(path, source, {2, 3}, modes=("model-sets",))
     assert not check_source(
-        "control/tests/test_x.py", _WHOLE_MEMBERSHIP, {2}, modes=("model-sets",)
+        "control/tests/test_x.py", _QUERY_ALL, {2}, modes=("model-sets",)
     )
 
 
