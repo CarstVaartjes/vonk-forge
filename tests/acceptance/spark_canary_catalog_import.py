@@ -48,7 +48,12 @@ from vonk_control.recipe_library_types import (
 from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
-from vonk_forge_contracts import read_model_display, read_recipe_display
+from vonk_forge_contracts import (
+    read_model,
+    read_model_display,
+    read_recipe,
+    read_recipe_display,
+)
 
 SYNC_ACTOR = "system:spark-lifecycle-canary"
 # The Controller's own automatic sync may hold the single sync slot.
@@ -74,10 +79,29 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
     return target
 
 
+def _display(entry: dict[str, Any], read: Callable[..., Any], derive: str) -> Any:
+    """The display an index entry carries, else the installed contracts' own.
+
+    This program runs inside whichever Controller the lane installed. A canary
+    index published before the per-entry display (a 2.x library, read by a 2.x
+    Controller) carries none; that Controller's contracts derive it from the
+    document, as its release did. A 3.0 index always carries it, and 3.0
+    contracts have no derivation, so a display-less index there fails loudly.
+    """
+    if "display" in entry:
+        return read(entry["display"])
+    import vonk_forge_contracts
+
+    return getattr(vonk_forge_contracts, derive)(
+        (read_model if derive == "model_display_of" else read_recipe)(entry["document"])
+    )
+
+
 def _model_entry(entry: dict[str, Any]) -> CatalogModelEntry:
-    """One index Model with the display its entry carries."""
+    """One index Model with its display."""
     return CatalogModelEntry(
-        dict(entry["document"]), read_model_display(entry["display"])
+        dict(entry["document"]),
+        _display(entry, read_model_display, "model_display_of"),
     )
 
 
@@ -93,10 +117,8 @@ class FixtureReader:
         items = []
         for entry in index["recipes"]:
             document = entry["document"]
-            identity, display = (
-                document["identity"],
-                read_recipe_display(entry["display"]),
-            )
+            identity = document["identity"]
+            display = _display(entry, read_recipe_display, "recipe_display_of")
             digest = str(entry["content_sha256"])
             item = RecipeLibraryItem(
                 library_commit=commit,
