@@ -51,6 +51,7 @@ from .persistence import (
     _store_operation_payload,
     _updated,
 )
+from .removal_execution import _untouched
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -675,7 +676,14 @@ class RemovalReconcileMixin:
                         else removal.fleet.removal_objects
                     )
                 )
-                return wanted and covered and removal.removal_fence == fence
+                return (
+                    wanted
+                    and covered
+                    and removal.removal_fence == fence
+                    # A removal that already deleted something yields at its
+                    # finish instead of being cancelled half-done.
+                    and _untouched(removal)
+                )
 
             def cancel(remover: ModelCacheOperation | Job, accepted_id: str) -> None:
                 assert isinstance(remover, ModelCacheOperation)

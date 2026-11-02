@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -233,11 +234,23 @@ class RemovalExecutionMixin:
             completed = 0
             reclaimed = 0
             failure: Exception | None = None
-            for digest in (str(item) for item in delete_objects[object_index:]):
+            batch = tuple(str(item) for item in delete_objects[object_index:])
+            retained: set[str] | None = None
+            for digest in batch:
                 identity = ArtifactIdentity("model-object", digest)
                 try:
                     with cache._model_storage_lock(digest):
                         with cache._session() as session:
+                            if retained is None:
+                                # One indexed query per batch: the newer request
+                                # wins, so an object a set outside this removal
+                                # now lists is yielded, not deleted.
+                                retained = _externally_listed(
+                                    session, batch, selected_sets
+                                )
+                            if digest in retained:
+                                completed += 1
+                                continue
                             if not check_removal_fence_nowait(
                                 session,
                                 identity,
@@ -436,21 +449,8 @@ class RemovalExecutionMixin:
                 )
             ),
         )
-        for digest in delete_objects:
-            external = session.scalar(
-                select(ModelCacheSetArtifact.artifact_set_sha256)
-                .where(
-                    ModelCacheSetArtifact.artifact_sha256 == digest,
-                    ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)
-                    if selected
-                    else ModelCacheSetArtifact.artifact_set_sha256.is_not(None),
-                )
-                .limit(1)
-            )
-            if external is not None:
-                # A new set references a target: the removal stays fenced and
-                # waits (nothing was deleted yet in this transaction).
-                return "a new model set references a removal target; removal remains fenced"
+        # A set outside this removal that lists a target keeps that object: the
+        # removal yields per object (see the executor) and still completes.
         for set_digest in selected:
             session.query(ModelCacheSetArtifact).filter(
                 ModelCacheSetArtifact.artifact_set_sha256 == set_digest
@@ -501,6 +501,23 @@ _OWNER_ROWS: dict[
     "recipe-installation": RecipeInstallation,
     "run-switch-operation": Job,
 }
+
+
+def _externally_listed(
+    session: Session, digests: tuple[str, ...], selected: Sequence[str]
+) -> set[str]:
+    """Objects among ``digests`` that a set outside ``selected`` lists."""
+
+    return set(
+        session.scalars(
+            select(ModelCacheSetArtifact.artifact_sha256)
+            .where(
+                ModelCacheSetArtifact.artifact_sha256.in_(digests),
+                ModelCacheSetArtifact.artifact_set_sha256.not_in(tuple(selected)),
+            )
+            .distinct()
+        )
+    )
 
 
 def _untouched(checkpoint: ModelCacheRemovalPayload) -> bool:
