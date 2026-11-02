@@ -129,7 +129,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     original_advance = service._advance_model_removal
     from vonk_control.model_cache import removal_execution
 
-    original_scan = removal_execution.model_set_reference_reasons
+    original_scan = removal_execution.model_set_reference_findings
     scans_while_locked = []
 
     def observe_scan(*args, **kwargs):
@@ -137,7 +137,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
             scans_while_locked.append(True)
         return original_scan(*args, **kwargs)
 
-    monkeypatch.setattr(removal_execution, "model_set_reference_reasons", observe_scan)
+    monkeypatch.setattr(removal_execution, "model_set_reference_findings", observe_scan)
 
     def contend_after_candidate_select(
         operation_id: str, *, now: datetime | None = None, deadline: float | None = None

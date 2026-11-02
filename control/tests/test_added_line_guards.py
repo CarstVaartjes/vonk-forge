@@ -2003,3 +2003,12 @@ def test_a_title_search_filter_is_allowed() -> None:
     assert check_source(
         path, "x = item.identity.title.casefold()\n", {1}, modes=("identity",)
     )
+
+
+def test_model_file_removal_belongs_to_the_removal_executor():
+    source = "def go(cache):\n    cache._remove_model_object_files(digest)\n"
+    other = "control/src/vonk_control/model_cache/other.py"
+    executor = "control/src/vonk_control/model_cache/removal_execution.py"
+    assert check_source(other, source, {2}, modes=("model-sets",))
+    assert not check_source(executor, source, {2}, modes=("model-sets",))
+    assert not check_source(other, source, {1}, modes=("model-sets",))
