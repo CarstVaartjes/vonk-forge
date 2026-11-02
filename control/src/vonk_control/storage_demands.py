@@ -75,6 +75,16 @@ class StorageDemands:
         self._ttl = ttl or timedelta(seconds=STORAGE_DEMAND_TTL_SECONDS)
         self._lock = threading.Lock()
         self._items: dict[tuple[str, str, str], StorageDemand] = {}
+        self._on_new: Callable[[StorageDemand], None] | None = None
+
+    def on_new(self, callback: Callable[[StorageDemand], None]) -> None:
+        """Call ``callback`` when a demand arrives under a key not held yet.
+
+        A refusal that asks again every few seconds replaces its held demand and
+        does not call it again, so a retrying load cannot spin the collector.
+        """
+
+        self._on_new = callback
 
     def request(
         self,
@@ -99,7 +109,11 @@ class StorageDemands:
                 self._clock(),
             )
             with self._lock:
-                self._items[(scope, source, subject)] = demand
+                key = (scope, source, subject)
+                is_new = key not in self._items
+                self._items[key] = demand
+            if is_new and self._on_new is not None:
+                self._on_new(demand)
         except Exception:  # asking for space is best effort
             _LOGGER.warning("could not record a storage demand", exc_info=True)
 
