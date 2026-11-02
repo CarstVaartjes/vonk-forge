@@ -30,6 +30,8 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import create_draft, reword
+
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
@@ -58,12 +60,6 @@ def _recipe(
     _model_reference(recipe)["content_sha256"] = document_sha256(model)
     RecipeDefinition.model_validate(recipe)
     return recipe
-
-
-def _metadata(document: dict[str, object]) -> dict[str, object]:
-    metadata = document["metadata"]
-    assert isinstance(metadata, dict)
-    return metadata
 
 
 def _license(document: dict[str, object]) -> dict[str, object]:
@@ -98,7 +94,7 @@ def service(session: Session) -> CatalogEntityService:
 def _resolve(
     service: CatalogEntityService, document: dict[str, object]
 ) -> CatalogDocumentRevision:
-    draft = service.create_draft(document, actor="operator")
+    draft = create_draft(service, document, actor="operator")
     return service.resolve(draft.id, actor="operator")
 
 
@@ -112,13 +108,11 @@ def test_active_canonical_revision_is_immutable(
     original_id = active.id
     document_id = active.document_id
 
-    metadata = active.document["metadata"]
-    assert isinstance(metadata, dict)
     if scalar_type_change:
         assert active.document["requires_token"] is False
         active.document["requires_token"] = 0
     else:
-        metadata["description"] = "tampered"
+        reword(active.document, "tampered")
     # Refreshing unrelated metadata must not bless an in-place document edit.
     session.refresh(active, attribute_names=["projected"])
 
@@ -129,7 +123,7 @@ def test_active_canonical_revision_is_immutable(
     assert stored is not None
     assert document_sha256(stored.document) == original_digest
     changed = _model()
-    _metadata(changed)["description"] = "accepted capability update"
+    reword(changed, "accepted capability update")
     successor = service.revise(document_id, changed, actor="operator")
     accepted = service.resolve(successor.id, actor="operator")
     assert accepted.content_digest == document_sha256(changed)
@@ -141,7 +135,7 @@ def test_exact_model_reference_does_not_fall_back_to_a_newer_digest(
     original = _model()
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
-    _metadata(changed)["description"] = "updated capability documentation"
+    reword(changed, "updated capability documentation")
     successor = service.revise(first.document_id, changed, actor="operator")
     successor = service.resolve(successor.id, actor="operator")
 
@@ -168,7 +162,7 @@ def test_exact_model_reference_does_not_fall_back_to_a_newer_digest(
 def test_resolving_the_same_canonical_draft_is_idempotent(
     service: CatalogEntityService,
 ) -> None:
-    draft = service.create_draft(_model(), actor="operator")
+    draft = create_draft(service, _model(), actor="operator")
 
     active = service.resolve(draft.id, actor="operator")
     repeated = service.resolve(draft.id, actor="operator")
@@ -189,7 +183,7 @@ def test_recipe_resolution_requires_an_exact_active_model_revision(
         reference["content_sha256"] = "f" * 64
     else:
         reference["slug"] = "missing-model"
-    candidate = service.create_draft(recipe, actor="operator")
+    candidate = create_draft(service, recipe, actor="operator")
 
     try:
         service.resolve(candidate.id, actor="operator")
@@ -247,7 +241,7 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     first = _resolve(service, recipe)
 
     bad = copy.deepcopy(recipe)
-    _metadata(bad)["title"] = "candidate that fails"
+    reword(bad, "candidate that fails")
     _model_reference(bad)["content_sha256"] = "f" * 64
     failed = service.revise(
         first.document_id, bad, actor="operator", expected_revision=1
@@ -261,7 +255,7 @@ def test_failed_recipe_candidate_preserves_the_prior_active_revision(
     assert service.get_entity(first.document_id).id == first.id
 
     good = copy.deepcopy(recipe)
-    _metadata(good)["title"] = "accepted successor"
+    reword(good, "accepted successor")
     successor = service.revise(
         first.document_id, good, actor="operator", expected_revision=2
     )
@@ -284,7 +278,7 @@ def test_model_capability_revision_reuses_its_artifact_projection(
     original = _model()
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
-    _metadata(changed)["description"] = "updated capability documentation"
+    reword(changed, "updated capability documentation")
     _license(changed)["attribution"] = ["updated attribution"]
     successor = service.revise(
         first.document_id, changed, actor="operator", expected_revision=1
@@ -304,7 +298,7 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
     first_recipe = _resolve(service, _recipe(original))
 
     changed_model = copy.deepcopy(original)
-    _metadata(changed_model)["description"] = "updated capability documentation"
+    reword(changed_model, "updated capability documentation")
     _license(changed_model)["attribution"] = ["updated attribution"]
     changed_model_revision = service.revise(
         model_revision.document_id,
@@ -317,7 +311,7 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
     )
 
     changed_recipe = _recipe(changed_model, slug="synthetic-tiny-successor")
-    _metadata(changed_recipe)["title"] = "successor recipe"
+    reword(changed_recipe, "successor recipe")
     successor = _resolve(service, changed_recipe)
 
     assert first_recipe.artifact_key == successor.artifact_key
@@ -335,7 +329,7 @@ def test_database_foreign_key_restricts_bulk_canonical_parent_deletion() -> None
     Base.metadata.create_all(engine)
     with Session(engine, expire_on_commit=False) as session:
         service = CatalogEntityService(session, clock=lambda: NOW)
-        draft = service.create_draft(_model(), actor="operator")
+        draft = create_draft(service, _model(), actor="operator")
         session.commit()
 
         with pytest.raises(IntegrityError):
@@ -347,10 +341,10 @@ def test_database_foreign_key_restricts_bulk_canonical_parent_deletion() -> None
 def test_resolve_checks_the_expected_canonical_revision_number(
     service: CatalogEntityService,
 ) -> None:
-    draft = service.create_draft(_model(), actor="operator")
+    draft = create_draft(service, _model(), actor="operator")
     service.resolve(draft.id, actor="operator")
     changed = copy.deepcopy(draft.document)
-    _metadata(changed)["description"] = "updated capability documentation"
+    reword(changed, "updated capability documentation")
     successor = service.revise(
         draft.document_id,
         changed,
@@ -438,7 +432,7 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     _store_projection(session, revision, _pre_contract_projection(valid))
     readable = read_catalog_projection(revision)
     assert isinstance(readable, RecipeRevisionProjection)
-    assert readable.title == valid["title"]
+    assert readable.runtime_engine == valid["runtime_engine"]
 
     service.refresh_build_policy()
 
@@ -528,7 +522,7 @@ def test_refresh_leaves_a_superseded_old_contract_revision_alone_and_quiet(
     )
     session.expire(first)
     changed = _recipe(_model())
-    _metadata(changed)["description"] = "a newer revision"
+    reword(changed, "a newer revision")
     successor = service.revise(first.document_id, changed, actor="operator")
     service.resolve(successor.id, actor="operator")
 
@@ -547,12 +541,12 @@ def test_new_authorized_revision_supersedes_pending_candidate(
     document = _model()
     active = _resolve(service, document)
     pending_document = copy.deepcopy(document)
-    _metadata(pending_document)["description"] = "older pending change"
+    reword(pending_document, "older pending change")
     pending = service.revise(
         active.document_id, pending_document, actor="operator", expected_revision=1
     )
     latest_document = copy.deepcopy(document)
-    _metadata(latest_document)["description"] = "new authorized change"
+    reword(latest_document, "new authorized change")
     latest = service.revise(
         active.document_id, latest_document, actor="operator", expected_revision=2
     )
@@ -566,11 +560,11 @@ def test_new_revision_repairs_a_missing_head_without_guessing_history(
     session: Session,
     service: CatalogEntityService,
 ) -> None:
-    draft = service.create_draft(_model(), actor="operator")
+    draft = create_draft(service, _model(), actor="operator")
     session.execute(delete(CatalogDocumentHead))
     session.flush()
     changed = copy.deepcopy(draft.document)
-    _metadata(changed)["description"] = "fresh accepted candidate"
+    reword(changed, "fresh accepted candidate")
     successor = service.revise(draft.document_id, changed, actor="operator")
     head = session.scalar(select(CatalogDocumentHead))
     assert head is not None

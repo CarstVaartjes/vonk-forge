@@ -28,6 +28,7 @@ from vonk_control.recipe_runtime_specs import compile_runtime_spec
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import reword
 from .test_recipe_image_availability import _runtime, _service
 
 
@@ -276,7 +277,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     successor_models = []
     for model in models:
         document = model.model_dump(mode="json")
-        document["metadata"]["description"] += " Editorial successor."
+        reword(document, " Editorial successor.")
         successor_models.append(ModelDefinition.model_validate(document))
     successor_recipe = recipe.model_dump(mode="json")
     for selection, model in zip(

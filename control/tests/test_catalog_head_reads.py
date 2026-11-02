@@ -21,6 +21,7 @@ from vonk_control.models import Base, CatalogDocumentHead, CatalogDocumentRevisi
 from vonk_control.recipe_update_notice import newest_active_revisions
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import create_draft, reword
 from .test_catalog_entities import _model, _recipe
 
 NOW = datetime(2026, 9, 9, tzinfo=UTC)
@@ -62,7 +63,7 @@ def catalog(tmp_path, request):
 
 
 def _publish(catalog, document):
-    draft = catalog.entities.create_draft(document, actor="test")
+    draft = create_draft(catalog.entities, document, actor="test")
     return catalog.entities.resolve(draft.id, actor="test")
 
 
@@ -118,7 +119,7 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
     _assert_current(catalog, first, first)
 
     changed = copy.deepcopy(first.document)
-    changed["metadata"]["title"] = "Accepted successor"
+    reword(changed, "Accepted successor")
     candidate = catalog.entities.revise(first.document_id, changed, actor="test")
     _assert_current(catalog, first, first)
     second = catalog.entities.resolve(candidate.id, actor="test")
@@ -145,7 +146,7 @@ def test_stable_recipe_reads_follow_promotion_and_ignore_failed_successor(catalo
     with catalog._sessions() as session:
         assert session.get(CatalogDocumentRevision, first.id).state == "active"
     fresh_document = copy.deepcopy(second.document)
-    _document_section(fresh_document, "metadata")["description"] = "Fresh after failure"
+    reword(fresh_document, "Fresh after failure")
     fresh = catalog.entities.revise(first.document_id, fresh_document, actor="test")
     accepted = catalog.entities.resolve(fresh.id, actor="test")
     _assert_current(catalog, first, accepted)
@@ -175,7 +176,7 @@ def test_recipe_api_reads_successor_before_catalog_index_refresh(catalog, qualif
     assert initial_detail.identity.recipe_revision_id == first.id
 
     changed = copy.deepcopy(first.document)
-    _document_section(changed, "metadata")["description"] = "Editorial successor"
+    reword(changed, "Editorial successor")
     candidate = catalog.entities.revise(first.document_id, changed, actor="test")
     second = catalog.entities.resolve(candidate.id, actor="test")
     # Keep the disposable index at rev1, as between background refreshes.
@@ -195,7 +196,7 @@ def test_recipe_detail_keeps_its_exact_model_when_model_head_advances(catalog):
     first_model = _publish(catalog, model)
     recipe = _publish(catalog, _recipe(model))
     changed = copy.deepcopy(model)
-    _document_section(changed, "metadata")["description"] = "New model metadata"
+    reword(changed, "New model metadata")
     candidate = catalog.entities.revise(first_model.document_id, changed, actor="test")
     catalog.entities.resolve(candidate.id, actor="test")
 
@@ -244,9 +245,7 @@ def test_stable_recipe_reads_do_not_guess_when_active_head_is_missing(catalog):
     assert restored.id == first.id
     _assert_current(catalog, first, first)
     successor_document = copy.deepcopy(first.document)
-    _document_section(successor_document, "metadata")["description"] = (
-        "Fresh after repair"
-    )
+    reword(successor_document, "Fresh after repair")
     successor = catalog.entities.revise(
         first.document_id, successor_document, actor="test"
     )
@@ -272,7 +271,7 @@ def test_a_reverted_recipe_is_current_everywhere_by_its_head(catalog):
     a_document = _recipe(model)
     a = _import(a_document)
     b_document = copy.deepcopy(a_document)
-    _document_section(b_document, "metadata")["description"] = "Changed bytes"
+    reword(b_document, "Changed bytes")
     b = _import(b_document)
     assert b.id != a.id
     reverted = _import(a_document)

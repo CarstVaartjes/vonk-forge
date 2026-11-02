@@ -124,7 +124,6 @@ function canonicalDefinition(interfaces: unknown[]): RecipeDefinition {
     schema_version: 2,
     kind: "recipe",
     identity: { publisher: "local", slug: "qwen-chat" },
-    metadata: { title: "Qwen Chat", description: "Fast distributed chat model.", tags: ["chat"] },
     models: [],
     execution: {
       mode: "image",

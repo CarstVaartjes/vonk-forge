@@ -138,11 +138,11 @@ def test_invalid_operator_choices_fall_back_to_safe_defaults(
     secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VONK_INSTALL_CHANNEL", "dev")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v2.1.0")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v3.1.0")
     settings = Settings.from_env_and_secrets()
     assert (settings.install_channel, settings.recipe_library_release) == (
         "dev",
-        "v2.1.0",
+        "v3.1.0",
     )
 
     monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")

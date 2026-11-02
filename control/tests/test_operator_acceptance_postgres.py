@@ -271,7 +271,7 @@ def test_recipe_cancellation_receipt_survives_restart(tmp_path, postgres_engine)
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="operator",
                 created_at=now,
                 updated_at=now,

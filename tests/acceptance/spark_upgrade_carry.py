@@ -31,12 +31,13 @@ import os
 import re
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -72,6 +73,7 @@ from tests.acceptance.test_spark_lifecycle import (
     SparkLifecycle,
     _atomic_write,
     _canonical,
+    _canonical_canary_fixture,
     _editorial_successor,
     _run_spark_bootstrap,
     _sibling_recipes,
@@ -405,6 +407,90 @@ def resolve_release(
     )
 
 
+RECIPE_LIBRARY_ARCHIVE = (
+    "https://codeload.github.com/CarstVaartjes/vonk-forge-recipes/tar.gz"
+)
+LIBRARY_REVISION_FILE = "tests/acceptance/recipe-library-revision.txt"
+
+
+def _download_library(revision: str, destination: Path) -> None:
+    """The recipes source at ``revision``, unpacked into ``destination``."""
+    url = f"{RECIPE_LIBRARY_ARCHIVE}/{revision}"
+    try:
+        with (
+            urllib.request.urlopen(url, timeout=300) as reply,
+            tarfile.open(fileobj=reply, mode="r|gz") as archive,
+        ):
+            for member in archive:
+                # Drop the archive's top directory so the library root is flat.
+                member.name = member.name.partition("/")[2]
+                if member.name:
+                    archive.extract(member, destination, filter="data")
+    except (OSError, tarfile.TarError) as error:
+        raise LifecycleError(
+            f"recipe library {revision} is unavailable: {error}"
+        ) from error
+
+
+def _revision_through_api(source_sha: str) -> str:
+    """The library revision a release's own source tree names, read through the API.
+
+    The lane needs no history in its checkout this way.
+    """
+    reply = subprocess.run(
+        [
+            "gh",
+            "api",
+            "-H",
+            "Accept: application/vnd.github.raw",
+            (
+                f"repos/CarstVaartjes/vonk-forge/contents/{LIBRARY_REVISION_FILE}"
+                f"?ref={source_sha}"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if reply.returncode:
+        raise LifecycleError("the release's recipe library revision is unavailable")
+    return reply.stdout
+
+
+def release_library_root(
+    source_sha: str,
+    workspace: Path,
+    *,
+    read_revision: Callable[[str], str] = _revision_through_api,
+    fetch_library: Callable[[str, Path], None] = _download_library,
+) -> Path:
+    """The recipe library a release was accepted with, built beside the lane.
+
+    Each release names its library in its own source tree, so the phase that
+    runs a release's Controller imports the canary that release could read.
+    """
+    revision = read_revision(source_sha).strip()
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        raise LifecycleError("the release names no exact recipe library revision")
+    root = workspace / f"recipe-library-{revision}"
+    if not (root / "catalog-index.json").is_file():
+        root.mkdir(parents=True, exist_ok=True)
+        fetch_library(revision, root)
+        subprocess.run(
+            [
+                str(
+                    Path(__file__).resolve().parents[2] / "scripts/build-recipe-library"
+                ),
+                str(root),
+                revision,
+            ],
+            check=True,
+            timeout=1800,
+        )
+    return root
+
+
 class UpgradeCarryLifecycle(SparkLifecycle):
     """The Spark lifecycle, started on the previous release and upgraded live."""
 
@@ -423,6 +509,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         os.environ[OVERLAY_VARIABLE] = os.fspath(baseline.overlay)
         self.evidence = CarryEvidence()
         self.failure_evidence: dict[str, object] | None = None
+        self._library_workspace = Path(os.environ.get("VONK_ACCEPTANCE_WORKSPACE", "."))
         self._phase = "baseline-install"
         self._successor_identity: tuple[str, str] = ("", "")
         self._probing = threading.Event()
@@ -672,7 +759,10 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
         self._after_canary(node_id)
         refused = self._require_no_result_refusals()
+        if self.baseline.generation == self.candidate.generation and not test_mode():
+            raise LifecycleError("the carry baseline is the candidate itself")
         return {
+            "generations_differ": self.baseline.generation != self.candidate.generation,
             "baseline": {
                 "generation": self.baseline.generation,
                 "version": self.baseline.version,
@@ -686,6 +776,30 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             "probe_summary": self._probe_summary(),
             "result_refusals": refused,
         }
+
+    def _canary_library_root(self) -> Path:
+        """The baseline Controller imports the canary of its own release's library."""
+        return release_library_root(self.baseline.source_sha, self._library_workspace)
+
+    def _import_candidate_library(self) -> None:
+        """The candidate Controller imports the canary of the library it was accepted with.
+
+        The workload keeps running on its old revision: the import adds the
+        candidate's revision as the new head (an update notice, no restart, no
+        route withdrawal), which the settle and route phases that follow prove.
+        """
+        self.synthetic_canary_fixture = fixture = _canonical_canary_fixture(
+            release_library_root(self.candidate.source_sha, self._library_workspace)
+        )
+        sync = self._import_canary_catalog(
+            fixture,
+            self._canary_request_key(fixture, "upgrade-carry", "candidate-library"),
+        )
+        if sync.get("state") != "current" or sync.get("problems") != []:
+            raise LifecycleError(
+                "the candidate Controller did not apply its own canary library: "
+                f"{sync.get('state')}, {sync.get('problems')}"
+            )
 
     # -- the carry ---------------------------------------------------------
 
@@ -703,6 +817,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             self._settle(
                 "controller-settled", CONTROLLER_SETTLE_BOUND_SECONDS, reported=True
             )
+            self._run_phase("candidate-library-import", self._import_candidate_library)
             self._run_phase("agent-upgrade", self._upgrade_agent)
             self._settle("agent-settled", AGENT_SETTLE_BOUND_SECONDS, reported=True)
             self._run_phase("route-still-published", self._require_published)

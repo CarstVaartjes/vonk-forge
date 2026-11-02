@@ -22,6 +22,8 @@ from vonk_control.recipe_builds import (
 from vonk_control.runtime_adapters import resolve_runtime_adapter
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import reword
+
 NOW = datetime(2026, 9, 5, 12, tzinfo=UTC)
 
 
@@ -114,7 +116,6 @@ def _add_active(
         parsed = ModelDefinition.model_validate(document)
         projected: dict[str, object] = {
             "identity": parsed.identity.model_dump(mode="json"),
-            "metadata": parsed.metadata.model_dump(mode="json"),
             "format": parsed.format.model_dump(mode="json"),
             "capabilities": parsed.capabilities,
             "modalities": parsed.modalities,
@@ -195,7 +196,7 @@ def test_canonical_recipe_resolution_uses_selected_file_identity_and_provenance(
     assert first.artifacts[0].expected_bytes == 12
 
     editorial = json.loads(json.dumps(recipe_document))
-    editorial["metadata"]["description"] = "Updated release description."
+    reword(editorial, "Updated release description.")
     with sessions.begin() as session:
         edited = _add_active(
             session,
@@ -384,7 +385,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
         path="weights/model.safetensors", file_digest=file_digest, roles=["weights"]
     )
     second_model = json.loads(json.dumps(first_model))
-    second_model["metadata"]["description"] = "Revised model card."
+    reword(second_model, "Revised model card.")
     first_digest, second_digest = _digest(first_model), _digest(second_model)
     assert first_digest != second_digest
     with sessions.begin() as session:

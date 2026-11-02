@@ -22,6 +22,8 @@ from vonk_control.operation_api.contracts import OperationListPage, OperationPro
 from vonk_control.operation_api.providers import merge_operation_providers
 from vonk_control.operation_item_contract import OperationItem
 
+from .display_fixtures import create_draft
+
 
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_verified_catalog_reingestion_repairs_local_bytes_without_a_new_revision():
@@ -107,9 +109,11 @@ def test_verified_import_supersedes_an_unreadable_pending_candidate(changed_cont
         .joinpath("examples", "model-definition.json")
         .read_text()
     )
-    candidate = CatalogEntityService(
-        sessions, clock=lambda: datetime.now(UTC)
-    ).create_draft(document, actor="test")
+    candidate = create_draft(
+        CatalogEntityService(sessions, clock=lambda: datetime.now(UTC)),
+        document,
+        actor="test",
+    )
     with engine.begin() as connection:
         connection.execute(
             update(CatalogDocumentRevision)
@@ -120,7 +124,7 @@ def test_verified_import_supersedes_an_unreadable_pending_candidate(changed_cont
         sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
     )
     if changed_content:
-        document["metadata"]["description"] = "fresh verified content"
+        document["license"]["attribution"] = ["fresh verified content"]
     service.import_catalog_models("test", [document])
     service.import_catalog_models("test", [document])
     with sessions() as session:

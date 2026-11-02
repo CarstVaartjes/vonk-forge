@@ -75,6 +75,7 @@ from vonk_control.worker import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
 
+from .display_fixtures import create_draft, reword, reworded
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
 from .test_model_cache_recovery_support import observe_unknown
@@ -707,13 +708,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         assert recovered.id == completed.id
         assert recovered.progress == completed.progress
     with sessions.begin() as session:
-        newer = model.model_copy(
-            update={
-                "metadata": model.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        )
+        newer = reworded(model, "New revision")
         session.add(
             CatalogDocumentRevision(
                 document_id=document_id,
@@ -924,7 +919,7 @@ def test_resolve_latest_cached_returns_the_head_even_when_an_older_revision_is_c
     old_recipe = RecipeDefinition.model_validate(old_document)
     new_document = json.loads(json.dumps(old_document))
     new_document["models"][0]["model"]["content_sha256"] = newer_model_digest
-    new_document["metadata"]["description"] += " newer"
+    reword(new_document, " newer")
     new_recipe = RecipeDefinition.model_validate(new_document)
     model_root = CatalogDocument(
         id="00000000-0000-0000-0000-000000000101",
@@ -4036,7 +4031,7 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
     )
     digest_a = document_sha256(model_a.model_dump(mode="json"))
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
-    draft = catalog.create_draft(model_a.model_dump(mode="json"), actor="operator")
+    draft = create_draft(catalog, model_a.model_dump(mode="json"), actor="operator")
     original = catalog.resolve(draft.id, actor="operator")
 
     request_key = "00000000-0000-4000-8000-000000001052"
@@ -4587,7 +4582,7 @@ def _cache_model_revision(
         file_digest=hashlib.sha256(weight).hexdigest(),
     )
     if document is None:
-        draft = catalog.create_draft(model.model_dump(mode="json"), actor="operator")
+        draft = create_draft(catalog, model.model_dump(mode="json"), actor="operator")
         row = catalog.resolve(draft.id, actor="operator")
     else:
         revised = catalog.revise(
@@ -4743,7 +4738,7 @@ def test_retracted_selector_without_any_set_is_missing(cache):
         file_digest="c" * 64,
     )
     catalog.resolve(
-        catalog.create_draft(model.model_dump(mode="json"), actor="operator").id,
+        create_draft(catalog, model.model_dump(mode="json"), actor="operator").id,
         actor="operator",
     )
     _retract_heads(sessions, "uncached")

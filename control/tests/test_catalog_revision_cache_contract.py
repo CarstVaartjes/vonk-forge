@@ -20,6 +20,7 @@ from vonk_control.model_cache_contract import (
 from vonk_control.models import CatalogDocumentRevision, ModelCacheOperation
 from vonk_forge_contracts import ModelDefinition
 
+from .display_fixtures import create_draft, reword
 from .test_model_cache_availability_regressions import _artifact, _database, _start
 
 
@@ -32,9 +33,11 @@ def test_catalog_revision_projection_is_persisted_and_read_as_canonical_model(
         .joinpath("examples", "model-definition.json")
         .read_text(encoding="utf-8")
     )
-    revision = CatalogEntityService(
-        sessions, clock=lambda: datetime.now(UTC)
-    ).create_draft(raw, actor="test")
+    revision = create_draft(
+        CatalogEntityService(sessions, clock=lambda: datetime.now(UTC)),
+        raw,
+        actor="test",
+    )
 
     with sessions() as session:
         stored = session.get(CatalogDocumentRevision, revision.id)
@@ -144,21 +147,22 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
             assert _stored_recipe(row) == parsed
     assert len(calls) == 1
     # A caller cannot poison another reader of this immutable content identity.
-    parsed.metadata.description = "caller-local edit"
+    section = "license" if kind == "model" else "provenance"
+    getattr(parsed, section).attribution = ["caller-local edit"]
     assert (
-        read_catalog_document(row).metadata.description
-        == raw["metadata"]["description"]
+        getattr(read_catalog_document(row), section).attribution
+        == raw[section]["attribution"]
     )
     assert len(calls) == 1
     # A second identity cannot borrow the first identity's parsed document.
     changed = deepcopy(raw)
-    changed["metadata"]["description"] += " changed"
+    reword(changed, " changed")
     other = CatalogDocumentRevision(
         id="other", kind=kind, content_digest="a" * 64, document=changed
     )
     assert (
-        read_catalog_document(other).metadata.description
-        == changed["metadata"]["description"]
+        getattr(read_catalog_document(other), section).attribution
+        == changed[section]["attribution"]
     )
     assert len(calls) == 2
 

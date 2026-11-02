@@ -43,6 +43,8 @@ from vonk_control.stored_json import write_guard_mode
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from tests.display_fixtures import reword
+
 from ..test_recipe_operations import ConcurrentPublisher, setup_services
 from ..test_run_switch_operations import (
     CompleteArtifactInspector,
@@ -263,9 +265,7 @@ class World:
             )
             assert latest is not None and build is not None
             document = _editable(self.readable[recipe])
-            document["metadata"]["description"] = (
-                f"Revision {latest.revision_number + 1}"
-            )
+            reword(document, f"Revision {latest.revision_number + 1}")
             if peak_bytes is not None:
                 for role in document["topology"]["roles"]:
                     role["resources"]["memory"]["peak_bytes"] = peak_bytes
@@ -309,7 +309,7 @@ def build_world(
                 kind="recipe",
                 publisher=pair.publisher,
                 slug=slug,
-                title=document["metadata"]["title"],
+                title=document["identity"]["slug"],
                 created_by="admin",
                 created_at=now[0],
                 updated_at=now[0],
@@ -346,7 +346,7 @@ def _single_spark_document(pair: object, slug: str) -> dict[str, Any]:
 
     document = _editable(pair)
     document["identity"]["slug"] = slug
-    document["metadata"]["title"] = f"{slug} on one Spark"
+    reword(document, f"{slug} on one Spark")
     topology = document["topology"]
     (entrypoint,) = (role for role in topology["roles"] if role["endpoint_owner"])
     entrypoint = {**entrypoint, "count": 1}

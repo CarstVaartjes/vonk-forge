@@ -18,6 +18,7 @@ from vonk_control.models import (
     FleetProfileSelection,
 )
 
+from .display_fixtures import reword
 from .test_fleet_profiles import NOW, _database, _node_id, _seed, _SwitchAdapter, _uuid
 
 
@@ -305,7 +306,7 @@ def test_running_application_keeps_its_stored_recipe_after_catalog_head_changes(
         old_definition = _stored_recipe(old)
         assert isinstance(old_definition, RecipeDefinition)
         changed = old_definition.model_dump(mode="json")
-    changed["metadata"]["description"] += " current head"
+    reword(changed, " current head")
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     successor = catalog.revise(old.document_id, changed, actor="admin")
     catalog.resolve(successor.id, actor="admin")

@@ -55,6 +55,7 @@ from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
 
 from .consumer_outcomes import not_adopted
+from .display_fixtures import reworded
 from .lock_wait_support import backend_pid, lock_waits_behind
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
@@ -608,13 +609,7 @@ def test_recipe_head_changed_during_admission_is_followed_within_reviewed_scope(
             document = RecipeDefinition.model_validate_json(
                 json.dumps(previous.document)
             )
-            document = document.model_copy(
-                update={
-                    "metadata": document.metadata.model_copy(
-                        update={"title": "Updated recipe head"}
-                    )
-                }
-            )
+            document = reworded(document, "Updated recipe head")
             session.add(
                 CatalogDocumentRevision(
                     id=changed_revision_id,

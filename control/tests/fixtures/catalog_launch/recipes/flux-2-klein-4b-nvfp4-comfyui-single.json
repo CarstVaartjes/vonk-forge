@@ -79,23 +79,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Candidate four-step single-Spark core-node ComfyUI text-to-image recipe using Black Forest Labs' official NVFP4 transformer for lower artifact storage and native Blackwell execution.",
-  "tags": [
-   "executable",
-   "candidate",
-   "flux",
-   "image",
-   "text-to-image",
-   "comfyui",
-   "nvfp4",
-   "distilled",
-   "single",
-   "spark"
-  ],
-  "title": "FLUX.2 Klein 4B NVFP4 ComfyUI single Spark"
- },
  "models": [
   {
    "files": [
@@ -112,7 +95,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "7891311a55af883f641899fe8ac9c8eb769b4a7b5e0a7bd210c006e48531ffc7",
+    "content_sha256": "a4573b0bd4762627e928033b56c243170158caaf062e19a3e04a080f2bab3b10",
     "kind": "model",
     "publisher": "black-forest-labs",
     "slug": "flux-2-klein-4b-nvfp4-1db2b2f7"
@@ -143,7 +126,7 @@
    ],
    "id": "dependency-flux-2-klein-4b-comfyui-5f526678",
    "model": {
-    "content_sha256": "5a5fc6767322da0ec006518a91d88825ba7d70e57d5d25e896fe6f66e8daa618",
+    "content_sha256": "598c5b0ea7d17c80bb999961bd6be38a64f575a7fbfc0e958291ad605980d8a2",
     "kind": "model",
     "publisher": "black-forest-labs",
     "slug": "flux-2-klein-4b-comfyui-5f526678"
@@ -158,8 +141,8 @@
   "source_reference": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4b-nvfp4/tree/1db2b2f776c24b76f1122e5f69ab1949fc620068"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "1.1.1"
+  "released_at": "2026-10-16",
+  "version": "1.1.4"
  },
  "runtime": {
   "arguments": [

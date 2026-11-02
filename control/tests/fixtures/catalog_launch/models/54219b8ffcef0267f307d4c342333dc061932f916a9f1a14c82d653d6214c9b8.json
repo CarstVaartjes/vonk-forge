@@ -1,0 +1,240 @@
+{
+ "capabilities": [
+  "3d-generation"
+ ],
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-11ad7efa2497-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+   "size_bytes": 1519
+  },
+  {
+   "id": "readme-ab08bd7f5553-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "ab08bd7f555372317d166220dbd2c17c73b5a238d45da018ef301c1e32aec8a8",
+   "size_bytes": 6417
+  },
+  {
+   "id": "shape-dec-next-dc-f16c32-fp16-5f1b856dffce-029dc2e8a3",
+   "path": "ckpts/shape_dec_next_dc_f16c32_fp16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "5f1b856dffce79466fb18f5f0eefc08f08c673b24b3c05b20359c0b6d318a209",
+   "size_bytes": 678
+  },
+  {
+   "id": "shape-dec-next-dc-f16c32-fp16-e3b718d3e43e-46baaa46a5",
+   "path": "ckpts/shape_dec_next_dc_f16c32_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "e3b718d3e43e4f8780e9a24ac6fff231811a67e3b058e336e10fe654c911d581",
+   "size_bytes": 948490494
+  },
+  {
+   "id": "shape-enc-next-dc-f16c32-fp16-5a960a5c419d-72523a8afd",
+   "path": "ckpts/shape_enc_next_dc_f16c32_fp16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "5a960a5c419d70f8d4a7a6b6e52ae689cd948c88bd7ed92346adfbf82cd12007",
+   "size_bytes": 653
+  },
+  {
+   "id": "shape-enc-next-dc-f16c32-fp16-f37c5ff5b983-f74fee68e9",
+   "path": "ckpts/shape_enc_next_dc_f16c32_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "f37c5ff5b983b68e9946060000f09bc131f3e84318a2c8b7430a81e4b4636c41",
+   "size_bytes": 708797208
+  },
+  {
+   "id": "slat-flow-img2shape-dit-1-3b-1024-bf16-7ebd6d367393-d5787cb1da",
+   "path": "ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "7ebd6d367393f52fee9e92c2b3d727a9026a338549c6a6fa84c7ea122140ffdd",
+   "size_bytes": 458
+  },
+  {
+   "id": "slat-flow-img2shape-dit-1-3b-1024-bf16-07cd0596f634-7c824f297d",
+   "path": "ckpts/slat_flow_img2shape_dit_1_3B_1024_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "07cd0596f634c5adc1890023d16023afc5eed02fb84b22bb23aff5bf0030fbbd",
+   "size_bytes": 2584574424
+  },
+  {
+   "id": "slat-flow-img2shape-dit-1-3b-512-bf16-ddbd7a1d34ce-6deb30dc48",
+   "path": "ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "ddbd7a1d34ce9a8e7af2f6ef9ae686d9ab49f69e62dacb98d8409b511cdbd5e2",
+   "size_bytes": 458
+  },
+  {
+   "id": "slat-flow-img2shape-dit-1-3b-512-bf16-ec5e0917ef9b-08687ad538",
+   "path": "ckpts/slat_flow_img2shape_dit_1_3B_512_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "ec5e0917ef9b7e25ad51dffc7d19687a42019871f94239f2fa7f86264c55b70f",
+   "size_bytes": 2584574424
+  },
+  {
+   "id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-31f4fdad9974-8e04077f04",
+   "path": "ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "31f4fdad9974930e5e9324ac9dfb6ef7de6b30cea51854ba515ef827a8d353b2",
+   "size_bytes": 458
+  },
+  {
+   "id": "slat-flow-imgshape2tex-dit-1-3b-1024-bf-580401269059-0635b411df",
+   "path": "ckpts/slat_flow_imgshape2tex_dit_1_3B_1024_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "580401269059a339b8318ab9ced459a13ba63391721c83a6c383198c29e77686",
+   "size_bytes": 2584672728
+  },
+  {
+   "id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-3093796257a6-2fa70dda8e",
+   "path": "ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "3093796257a62f838d2e5578ac4580ca3b7d88d10b87d348065d3fdfcc4c2077",
+   "size_bytes": 458
+  },
+  {
+   "id": "slat-flow-imgshape2tex-dit-1-3b-512-bf1-8371aa1c5d13-b7c0b81f5f",
+   "path": "ckpts/slat_flow_imgshape2tex_dit_1_3B_512_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "8371aa1c5d13be79dcd5ddfd2cf3835e902e204dc34427169a1c702828e1a94d",
+   "size_bytes": 2584672728
+  },
+  {
+   "id": "ss-flow-img-dit-1-3b-64-bf16-6cdfb636854f-cfcec5a523",
+   "path": "ckpts/ss_flow_img_dit_1_3B_64_bf16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "6cdfb636854f60ffcadd8c49244169cd449f34c5ccdb55b5ff7c04678f9c399e",
+   "size_bytes": 467
+  },
+  {
+   "id": "ss-flow-img-dit-1-3b-64-bf16-ca01377c485b-92d4da3434",
+   "path": "ckpts/ss_flow_img_dit_1_3B_64_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "ca01377c485bec418076d38ee80166d32dc776d744f2553b835cba1e97a7abf6",
+   "size_bytes": 2584426920
+  },
+  {
+   "id": "tex-dec-next-dc-f16c32-fp16-22074e4ab5b2-90e5f1233b",
+   "path": "ckpts/tex_dec_next_dc_f16c32_fp16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "22074e4ab5b28e2b72d33a3fe61bf416134b89e12d0fc5c729f37da75da0c4d1",
+   "size_bytes": 705
+  },
+  {
+   "id": "tex-dec-next-dc-f16c32-fp16-97ea69addea2-5e554c0085",
+   "path": "ckpts/tex_dec_next_dc_f16c32_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "97ea69addea2ecd9312910f5f548234665eef51c088386180b7cd5b258645e3c",
+   "size_bytes": 948458812
+  },
+  {
+   "id": "tex-enc-next-dc-f16c32-fp16-22d78e219c9d-29ab06ee6a",
+   "path": "ckpts/tex_enc_next_dc_f16c32_fp16.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "22d78e219c9df19b00f7f97db5889bafdf18ee57fedf853cd888e5afbfa0ad6c",
+   "size_bytes": 676
+  },
+  {
+   "id": "tex-enc-next-dc-f16c32-fp16-dd109f75f84b-65ffe37f13",
+   "path": "ckpts/tex_enc_next_dc_f16c32_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "dd109f75f84b90fa411554ed6b0e4a87f430841163156fc0ebda2ebdc4752493",
+   "size_bytes": 708797208
+  },
+  {
+   "id": "pipeline-222c359ab1ed-a1130aae5d",
+   "path": "pipeline.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "222c359ab1ed9bc6735a640a34f95d47f8681b9bc4aaa101bfb80274676253c6",
+   "size_bytes": 4186
+  },
+  {
+   "id": "texturing-pipeline-64009974a391-704c70b5f9",
+   "path": "texturing_pipeline.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "64009974a391fe9c948b2943fd2846dc4526bc569c1d56dafb8f9e5c181fcac3",
+   "size_bytes": 2965
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "microsoft",
+   "slug": "trellis"
+  },
+  "model": {
+   "publisher": "microsoft",
+   "slug": "trellis-2-4b"
+  },
+  "publisher": "microsoft",
+  "slug": "trellis-2-4b",
+  "variant": "TRELLIS.2 4B",
+  "version": "TRELLIS.2 4B"
+ },
+ "kind": "model",
+ "license": {
+  "attribution": [
+   "microsoft"
+  ],
+  "spdx": "MIT",
+  "url": "https://github.com/microsoft/TRELLIS.2/blob/75fbf0183001ed9876c8dbb35de6b68552ee08bd/LICENSE"
+ },
+ "modalities": [
+  "3d"
+ ],
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/microsoft/TRELLIS.2-4B",
+  "revision": "af44b45f2e35a493886929c6d786e563ec68364d"
+ }
+}

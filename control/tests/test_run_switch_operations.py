@@ -163,6 +163,7 @@ from .runtime_identity_support import (
 from .runtime_image_fixtures import install_another_image, place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
+from .display_fixtures import reword
 from .test_lifecycle_preflight import _clear, _finish
 from .test_recipe_operations import (
     NOW,
@@ -3154,9 +3155,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
                 )
             )
         document = copy.deepcopy(revision.document)
-        metadata = document["metadata"]
-        assert isinstance(metadata, dict)
-        metadata["title"] = "Editorially renamed recipe"
+        reword(document, "Editorially renamed recipe")
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),

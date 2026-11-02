@@ -79,26 +79,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Memory-tight Candidate single-Spark text-to-video recipe using Wan 2.2's scaled-FP8 high/low-noise experts. Its declared 118 GB startup peak plus 8 GB system reserve leaves only 2 GB on a 128 GB Spark, so it is not the default and must pass a physical OOM canary before recommendation.",
-  "tags": [
-   "executable",
-   "candidate",
-   "wan",
-   "video",
-   "text-to-video",
-   "comfyui",
-   "fp8",
-   "14b",
-   "single",
-   "spark",
-   "memory-tight",
-   "physical-oom-gated",
-   "not-default"
-  ],
-  "title": "Wan 2.2 T2V 14B ComfyUI single Spark"
- },
  "models": [
   {
    "files": [
@@ -145,7 +125,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "b5aa262784f8355d891b64090c4f264478c1a749c4681daa0d9ad64e74df4b04",
+    "content_sha256": "ac79230d0647b87982d3d5562346e4554c023bf2be9074a54aef11ce031da624",
     "kind": "model",
     "publisher": "wan-ai",
     "slug": "wan-2-2-t2v-14b-comfyui-ee6f4a40"
@@ -160,8 +140,8 @@
   "source_reference": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/tree/ee6f4a40737a995bf5818954cfce6d59443b0f04"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "1.1.0"
+  "released_at": "2026-10-16",
+  "version": "1.1.3"
  },
  "runtime": {
   "arguments": [

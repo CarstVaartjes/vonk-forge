@@ -11,6 +11,7 @@ from sqlalchemy import update
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import CatalogDocumentRevision
 
+from .display_fixtures import reword
 from .test_canonical_cache_build_identity import (
     _add_active,
     _digest,
@@ -67,7 +68,7 @@ def test_unreadable_recipe_revision_recovers_only_identical_content(
         )
         edited = json.loads(json.dumps(recipe_document))
         if different_content:
-            edited["metadata"]["description"] = "different accepted content"
+            reword(edited, "different accepted content")
         current_digest = _digest(edited)
         if different_content:
             _add_active(
@@ -203,7 +204,7 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
             document=recipe_document,
         )
         edited = json.loads(json.dumps(recipe_document))
-        edited["metadata"]["description"] = "new accepted recipe with the same model"
+        reword(edited, "new accepted recipe with the same model")
         current = _add_active(
             session,
             root_id=DOCUMENT,

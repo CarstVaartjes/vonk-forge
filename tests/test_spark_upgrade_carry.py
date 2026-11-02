@@ -370,6 +370,12 @@ def test_the_carry_proves_only_the_upgrade_and_refresh_proves_the_recipes(
         ):
             monkeypatch.setattr(lane, name, lambda: None, raising=False)
         monkeypatch.setattr(lane, "_upgrade_agent", lambda: ran.append("upgrade"))
+        monkeypatch.setattr(
+            lane,
+            "_import_candidate_library",
+            lambda: ran.append("import"),
+            raising=False,
+        )
         monkeypatch.setattr(lane, "_settle", lambda *a, **k: None)
         monkeypatch.setattr(
             lane, "_load_editorial_successor", lambda: ran.append("editorial")
@@ -380,7 +386,8 @@ def test_the_carry_proves_only_the_upgrade_and_refresh_proves_the_recipes(
         lane._carry()
         lane._after_canary("spk_1")
         ran.append("|")
-    assert ran == ["upgrade", "|", "editorial", "siblings:spk_1", "|"]
+    # The candidate imports its own library before the agent upgrades.
+    assert ran == ["import", "upgrade", "|", "editorial", "siblings:spk_1", "|"]
     assert carry.SCENARIOS == ("upgrade-carry", "recipe-refresh")
 
 

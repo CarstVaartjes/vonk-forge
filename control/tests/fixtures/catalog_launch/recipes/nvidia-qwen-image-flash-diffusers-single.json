@@ -79,19 +79,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Candidate four-step NVIDIA Qwen Image Flash binding using the model card's tested scheduler, CFG, and 1024px profile; physical Spark acceptance is required.",
-  "tags": [
-   "executable",
-   "candidate",
-   "image",
-   "diffusers",
-   "single",
-   "spark"
-  ],
-  "title": "NVIDIA Qwen Image Flash diffusers single Spark"
- },
  "models": [
   {
    "files": [
@@ -338,7 +325,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "4a1ded083517d700ee074abcfd4cfc97102fb954d0688006841bd0d2676ccdaa",
+    "content_sha256": "b5bf14a5f9e68d84e59ccd15fea00c9e8515cdfdf650ff5084071797525ffe52",
     "kind": "model",
     "publisher": "nvidia",
     "slug": "nvidia-qwen-image-flash"

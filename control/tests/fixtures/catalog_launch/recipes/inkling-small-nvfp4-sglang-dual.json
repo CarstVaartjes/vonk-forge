@@ -30,27 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Executable Candidate thin adaptation of SGLang's verified two-DGX-Spark Inkling Small NVFP4 TP2 profile, rebased from its dedicated dev image onto the stable SGLang v0.5.20 release image. It serves text, image, and 16 kHz audio inputs through an offline OpenAI-compatible API with bounded 64K context; Candidate status is retained only for Vonk's physical canary.",
-  "tags": [
-   "executable",
-   "candidate",
-   "thinkingmachines",
-   "inkling",
-   "multimodal",
-   "text",
-   "vision",
-   "audio",
-   "reasoning",
-   "tool-use",
-   "nvfp4",
-   "sglang",
-   "distributed",
-   "spark"
-  ],
-  "title": "Inkling Small NVFP4 SGLang two Sparks"
- },
  "models": [
   {
    "files": [
@@ -288,7 +267,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "90ffed7245a29ca1a0cb69bee73cf893bc0c4ca037489bc6f1757858e1e8ebfe",
+    "content_sha256": "cd3e585d66309580758c5ade2a7fa70648f24eeb9193917a274b94edf2cddc91",
     "kind": "model",
     "publisher": "thinkingmachines",
     "slug": "inkling-small-nvfp4"
@@ -361,7 +340,22 @@
    {
     "name": "mem-fraction-static",
     "setting": null,
-    "value": "0.85"
+    "value": "0.826"
+   },
+   {
+    "name": "max-running-requests",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "max-total-tokens",
+    "setting": null,
+    "value": 262144
+   },
+   {
+    "name": "max-mamba-cache-size",
+    "setting": null,
+    "value": 20
    },
    {
     "name": "swa-full-tokens-ratio",
@@ -422,7 +416,10 @@
   }
  },
  "settings": {
-  "concurrency": null,
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 4
+  },
   "context_tokens": {
    "change_effect": "restart",
    "value": 65536
@@ -453,7 +450,7 @@
       "working_bytes": 52000000000
      },
      "memory": {
-      "peak_bytes": 120000000000,
+      "peak_bytes": 115927829210,
       "reserve_bytes": 8000000000
      }
     }
@@ -470,7 +467,7 @@
       "working_bytes": 52000000000
      },
      "memory": {
-      "peak_bytes": 120000000000,
+      "peak_bytes": 115927829210,
       "reserve_bytes": 8000000000
      }
     }

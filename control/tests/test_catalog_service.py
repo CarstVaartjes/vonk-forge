@@ -18,6 +18,8 @@ from vonk_forge_contracts import document_sha256
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
+from .display_fixtures import reword
+
 ROOT = recipe_library_root()
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
@@ -79,9 +81,9 @@ def test_import_binds_captured_published_documents_before_sql(
     dependencies = [copy.deepcopy(dict(value)) for value in item.dependencies]
     # An explicitly present canonical null belongs to the published digest;
     # normalizing through a model must not erase its source presence.
-    metadata = recipe["metadata"]
-    assert isinstance(metadata, dict)
-    metadata["alignment"] = None
+    provenance = recipe["provenance"]
+    assert isinstance(provenance, dict)
+    provenance["source_reference"] = None
     captured_recipe = copy.deepcopy(recipe)
     captured_dependencies = copy.deepcopy(dependencies)
     expected_digest = document_sha256(captured_recipe)
@@ -101,10 +103,9 @@ def test_import_binds_captured_published_documents_before_sql(
         nonlocal mutated
         if not mutated and "catalog_document_revisions" in statement.lower():
             mutated = True
-            metadata = recipe["metadata"]
             identity = dependencies[0]["identity"]
-            assert isinstance(metadata, dict) and isinstance(identity, dict)
-            metadata["description"] = "Caller replaced this after validation"
+            assert isinstance(identity, dict)
+            reword(recipe, "Caller replaced this after validation")
             identity["slug"] = "caller-replaced-after-validation"
 
     event.listen(engine, "before_cursor_execute", mutate_caller)
@@ -216,9 +217,7 @@ def test_reimport_selects_retained_recipe_head_without_rebinding_models(
     client, item = _item(tmp_path)
     original = copy.deepcopy(dict(item.document))
     changed = copy.deepcopy(original)
-    metadata = changed["metadata"]
-    assert isinstance(metadata, dict)
-    metadata["description"] = "A later accepted recipe revision"
+    reword(changed, "A later accepted recipe revision")
 
     def import_document(document: dict[str, object]):
         return service.import_recipe_library(
@@ -284,9 +283,7 @@ def test_import_rejects_changed_recipe_digest(
 ) -> None:
     client, item = _item(tmp_path)
     changed = copy.deepcopy(item.document)
-    metadata = changed["metadata"]
-    assert isinstance(metadata, dict)
-    metadata["description"] += " changed"
+    reword(changed, " changed")
     with pytest.raises(Exception) as _ending:
         service.import_recipe_library(
             "test",

@@ -42,7 +42,7 @@ from vonk_control.source_policy import inspect_build_source_policy
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
-from .display_fixtures import publish_displays
+from .display_fixtures import publish_displays, reword
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 
 ROOT = recipe_library_root()
@@ -273,7 +273,7 @@ def test_candidate_package_rejects_model_snapshot_digest_mismatch(
         path for path in files if path.startswith("models/") and path.endswith(".json")
     )
     model = json.loads(files[model_path])
-    model["metadata"]["description"] += " tampered"
+    reword(model, " tampered")
     files[model_path] = json.dumps(
         model, sort_keys=True, separators=(",", ":")
     ).encode()

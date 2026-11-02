@@ -204,7 +204,7 @@ def test_pending_recipe_child_cancellation_fences_model_removal_and_preserves_pe
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="operator",
                 created_at=now,
                 updated_at=now,

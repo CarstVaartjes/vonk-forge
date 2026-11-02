@@ -36,7 +36,7 @@ from vonk_control.recipe_release import (
     RecipeReleaseError,
 )
 
-RELEASE_TAG = "v2.0.0"
+RELEASE_TAG = "v3.0.0"
 _SIGNATURE_KIND = "vonk-forge-test-recipe-release-signature"
 _RELEASES = f"/repos/{PACKAGE_REPOSITORY}/releases"
 _DOWNLOAD = f"/{PACKAGE_REPOSITORY}/releases/download/{RELEASE_TAG}/"

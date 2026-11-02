@@ -25,6 +25,8 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .display_fixtures import create_draft, reword
+
 NOW = datetime(2026, 9, 5, tzinfo=UTC)
 
 
@@ -118,7 +120,7 @@ def test_fresh_postgres_migration_builds_canonical_schema(postgres_engine) -> No
 
 
 def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> None:
-    revision = catalog.create_draft(_model(), actor="operator")
+    revision = create_draft(catalog, _model(), actor="operator")
     active = catalog.resolve(revision.id, actor="operator", expected_revision=1)
     assert active.content_digest == document_sha256(_model())
     assert active.download_bytes == 1024
@@ -143,9 +145,9 @@ def test_valid_model_write_read_and_projection_is_postgres_backed(catalog) -> No
 
 def test_catalog_identity_is_unique_in_postgres(catalog) -> None:
     document = _model()
-    catalog.create_draft(document, actor="operator")
+    create_draft(catalog, document, actor="operator")
     with pytest.raises(CatalogConflict):
-        catalog.create_draft(document, actor="operator")
+        create_draft(catalog, document, actor="operator")
 
 
 def test_postgres_schema_has_no_per_object_availability_table(
@@ -169,12 +171,12 @@ def test_postgres_schema_has_no_per_object_availability_table(
 
 
 def test_active_canonical_json_cannot_be_mutated(catalog) -> None:
-    draft = catalog.create_draft(_model(), actor="operator")
+    draft = create_draft(catalog, _model(), actor="operator")
     active = catalog.resolve(draft.id, actor="operator")
     with catalog._sessions() as session:
         stored = session.get(CatalogDocumentRevision, active.id)
         assert stored is not None
-        stored.document["metadata"]["description"] = "tampered"
+        reword(stored.document, "tampered")
         with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
             session.commit()
 
@@ -184,14 +186,14 @@ def test_recipe_resolution_rejects_wrong_or_missing_exact_model_fk(
     catalog, mutation: str
 ) -> None:
     model = _model()
-    model_revision = catalog.create_draft(model, actor="operator")
+    model_revision = create_draft(catalog, model, actor="operator")
     catalog.resolve(model_revision.id, actor="operator")
     recipe = _recipe(model)
     if mutation == "wrong_digest":
         _selected_model_reference(recipe)["content_sha256"] = "f" * 64
     else:
         _selected_model_reference(recipe)["slug"] = "missing-model"
-    candidate = catalog.create_draft(recipe, actor="operator")
+    candidate = create_draft(catalog, recipe, actor="operator")
     try:
         catalog.resolve(candidate.id, actor="operator")
     except Exception:  # noqa: BLE001 - no binding and fresh admission are the assertions
@@ -214,9 +216,9 @@ def test_database_rejects_recipe_reference_without_exact_model_revision(
     catalog,
 ) -> None:
     model = _model()
-    model_revision = catalog.create_draft(model, actor="operator")
+    model_revision = create_draft(catalog, model, actor="operator")
     catalog.resolve(model_revision.id, actor="operator")
-    candidate = catalog.create_draft(_recipe(model), actor="operator")
+    candidate = create_draft(catalog, _recipe(model), actor="operator")
     with catalog._sessions() as session:
         session.add(
             CatalogRecipeModelReference(
@@ -238,14 +240,14 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(
     catalog,
 ) -> None:
     model = _model()
-    model_revision = catalog.create_draft(model, actor="operator")
+    model_revision = create_draft(catalog, model, actor="operator")
     catalog.resolve(model_revision.id, actor="operator")
     recipe = _recipe(model)
-    first = catalog.create_draft(recipe, actor="operator")
+    first = create_draft(catalog, recipe, actor="operator")
     catalog.resolve(first.id, actor="operator")
 
     bad = copy.deepcopy(recipe)
-    _document_section(bad, "metadata")["title"] = "candidate that fails"
+    reword(bad, "candidate that fails")
     _selected_model_reference(bad)["content_sha256"] = "f" * 64
     failed = catalog.revise(
         first.document_id, bad, actor="operator", expected_revision=1
@@ -259,7 +261,7 @@ def test_candidate_switch_is_atomic_and_failed_candidate_preserves_prior_good(
     assert catalog.get_entity(first.document_id).id == first.id
 
     good = copy.deepcopy(recipe)
-    _document_section(good, "metadata")["title"] = "accepted successor"
+    reword(good, "accepted successor")
     successor = catalog.revise(
         first.document_id, good, actor="operator", expected_revision=2
     )
@@ -281,12 +283,10 @@ def test_description_only_model_revision_reuses_artifact_key(
     catalog,
 ) -> None:
     original = _model()
-    first = catalog.create_draft(original, actor="operator")
+    first = create_draft(catalog, original, actor="operator")
     catalog.resolve(first.id, actor="operator")
     changed = copy.deepcopy(original)
-    _document_section(changed, "metadata")["description"] = (
-        "updated capability documentation"
-    )
+    reword(changed, "updated capability documentation")
     successor = catalog.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -300,22 +300,20 @@ def test_recipe_reuse_keys_follow_effective_execution_and_model_artifacts(
     catalog,
 ) -> None:
     original = _model()
-    model_revision = catalog.create_draft(original, actor="operator")
+    model_revision = create_draft(catalog, original, actor="operator")
     catalog.resolve(model_revision.id, actor="operator")
-    first_recipe = catalog.create_draft(_recipe(original), actor="operator")
+    first_recipe = create_draft(catalog, _recipe(original), actor="operator")
     catalog.resolve(first_recipe.id, actor="operator")
 
     changed_model = copy.deepcopy(original)
-    _document_section(changed_model, "metadata")["description"] = (
-        "updated capability documentation"
-    )
+    reword(changed_model, "updated capability documentation")
     changed_model_revision = catalog.revise(
         model_revision.document_id, changed_model, actor="operator", expected_revision=1
     )
     catalog.resolve(changed_model_revision.id, actor="operator", expected_revision=2)
 
     changed_recipe = copy.deepcopy(_recipe(original))
-    _document_section(changed_recipe, "metadata")["title"] = "successor recipe"
+    reword(changed_recipe, "successor recipe")
     _selected_model_reference(changed_recipe)["content_sha256"] = (
         changed_model_revision.content_digest
     )

@@ -672,7 +672,7 @@ def runtime_service(
                     kind="recipe",
                     publisher="vonk-forge",
                     slug="authority-test",
-                    title=recipe.metadata.title,
+                    title=recipe.identity.slug,
                     created_by="test",
                     created_at=NOW,
                     updated_at=NOW,

@@ -102,7 +102,6 @@ def _canonical_catalog_documents(
         .read_text(encoding="utf-8")
     )
     recipe_document["identity"]["slug"] = slug
-    recipe_document["metadata"]["title"] = title
     recipe_document["models"][0]["model"]["content_sha256"] = document_sha256(
         model.model_dump(mode="json")
     )
@@ -118,7 +117,7 @@ def _canonical_catalog_documents(
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=title,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,
@@ -128,7 +127,7 @@ def _canonical_catalog_documents(
                 kind="model",
                 publisher=model.identity.publisher,
                 slug=model.identity.slug,
-                title=model.identity.model.title,
+                title=model.identity.slug,
                 created_by="admin",
                 created_at=NOW,
                 updated_at=NOW,

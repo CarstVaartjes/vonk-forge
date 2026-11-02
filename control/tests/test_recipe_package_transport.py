@@ -88,22 +88,10 @@ def _canonical_package_fixture(
             "identity": {
                 "publisher": "fixture",
                 "slug": "tiny-model",
-                "family": {
-                    "publisher": "fixture",
-                    "slug": "tiny-model",
-                    "title": "Tiny Model",
-                },
-                "model": {
-                    "publisher": "fixture",
-                    "slug": "tiny-model",
-                    "title": "Tiny Model",
-                },
+                "family": {"publisher": "fixture", "slug": "tiny-model"},
+                "model": {"publisher": "fixture", "slug": "tiny-model"},
                 "version": "1.0.0",
                 "variant": "default",
-            },
-            "metadata": {
-                "description": "A deterministic package fixture.",
-                "tags": ["fixture"],
             },
             "requires_token": False,
             "dependencies": [],
@@ -138,11 +126,6 @@ def _canonical_package_fixture(
     recipe = RecipeDefinition.model_validate(
         {
             "identity": {"publisher": "fixture", "slug": "tiny-recipe"},
-            "metadata": {
-                "title": "Tiny Recipe",
-                "description": "A deterministic package fixture.",
-                "tags": ["fixture"],
-            },
             "models": [
                 {
                     "id": "primary",
@@ -284,7 +267,14 @@ def _canonical_package_fixture(
         "source_path": "recipes/tiny-recipe.json",
         "source_bundle_sha256": source_digest,
         "document": recipe_document,
-        "display": published_json(display_of_recipe(recipe_document)),
+        "display": published_json(
+            display_of_recipe(
+                recipe_document,
+                title="Tiny Recipe",
+                description="A deterministic package fixture.",
+                tags=["fixture"],
+            )
+        ),
         "content_sha256": recipe_digest,
         "package": {
             "path": "packages/tiny-recipe.tar.gz",
@@ -299,7 +289,7 @@ def _canonical_package_fixture(
     index = {
         "schema_version": 2,
         "kind": "recipe-library-index",
-        "contract_version": "2.0.0",
+        "contract_version": "3.0.0",
         "updated_at": "2026-09-28T12:00:00Z",
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,
@@ -308,7 +298,15 @@ def _canonical_package_fixture(
             {
                 "source_path": "models/tiny-model.json",
                 "document": model_document,
-                "display": published_json(display_of_model(model_document)),
+                "display": published_json(
+                    display_of_model(
+                        model_document,
+                        family_title="Tiny Model",
+                        model_title="Tiny Model",
+                        description="A deterministic package fixture.",
+                        tags=["fixture"],
+                    )
+                ),
                 "content_sha256": model_digest,
             }
         ],
@@ -408,10 +406,10 @@ class _Release:
             return httpx2.Response(
                 200,
                 json=[
-                    {"tag_name": "v3.0.0", "draft": False, "assets": []},
-                    {"tag_name": "v2.9.0", "draft": True, "assets": []},
+                    {"tag_name": "v4.0.0", "draft": False, "assets": []},
+                    {"tag_name": "v3.9.0", "draft": True, "assets": []},
                     release,
-                    {"tag_name": "v2.0.5", "draft": False, "assets": []},
+                    {"tag_name": "v3.0.5", "draft": False, "assets": []},
                 ],
             )
         if path == f"{RELEASES}/tags/{self.tag}":
@@ -455,7 +453,7 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     return verified
 
 
-def _release_for(index: bytes, package: bytes, *, tag: str = "v2.1.0") -> _Release:
+def _release_for(index: bytes, package: bytes, *, tag: str = "v3.1.0") -> _Release:
     return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
 
 
@@ -489,7 +487,7 @@ def test_production_reader_downloads_one_signed_bundle(
         f"http://127.0.0.1:8083{RELEASES}?per_page=100",
         (
             "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v2.1.0/recipe-library.tar"
+            "v3.1.0/recipe-library.tar"
         ),
         (
             "http://127.0.0.1:8085/github-production-release-asset/1336002555/"
@@ -500,7 +498,7 @@ def test_production_reader_downloads_one_signed_bundle(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
-    assert snapshot.version == "2.0.0"
+    assert snapshot.version == "3.0.0"
     assert snapshot.updated_at is not None
     assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
@@ -514,16 +512,16 @@ def test_production_reader_can_hold_an_exact_release_tag(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    release = _release_for(index, package, tag="v2.0.0")
-    client = _client(release, tmp_path / "packages", release="v2.0.0")
+    release = _release_for(index, package, tag="v3.0.0")
+    client = _client(release, tmp_path / "packages", release="v3.0.0")
     assert client.list().commit == SIGNED_COMMIT
     # Without a relay the reader downloads from github.com and follows only
     # the redirect to GitHub's release asset origin.
     assert release.requests == [
-        f"http://127.0.0.1{RELEASES}/tags/v2.0.0",
+        f"http://127.0.0.1{RELEASES}/tags/v3.0.0",
         (
             "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v2.0.0/recipe-library.tar"
+            "v3.0.0/recipe-library.tar"
         ),
         (
             "https://release-assets.githubusercontent.com/github-production-release-"
@@ -665,7 +663,7 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
         RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
         packages,
         recipe_packages._VerifiedRelease(
-            tag="v2.1.0",
+            tag="v3.1.0",
             commit=SIGNED_COMMIT,
             assets=frozenset({"recipe-2.tar.gz", "unlisted.tar.gz"}),
             checksums={"recipe-2.tar.gz": "a" * 64},
@@ -868,11 +866,11 @@ def test_unchanged_release_is_noticed_cheaply_and_a_new_one_is_fetched(
     first = client.list()
     downloads = len(release.requests)
     assert client.list() == first
-    assert conditional == [None, '"v2.1.0"']
+    assert conditional == [None, '"v3.1.0"']
     assert len(release.requests) == downloads + 1  # only the conditional check
 
     # A new release changes the listing: the check no longer answers 304.
-    release.tag = "v2.1.1"
+    release.tag = "v3.1.1"
     client.list()
     assert len(release.requests) > downloads + 2
     client.close()
