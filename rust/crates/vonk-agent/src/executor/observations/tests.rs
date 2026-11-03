@@ -927,16 +927,16 @@ async fn lost_observation_ack_replays_identical_content_after_restart() {
         .report_recipe_observation_envelope(&pending)
         .await
         .unwrap();
-    // Death here replays again; only the exact acknowledged content is removed.
+    // Death here replays again; the delivered page is then released.
     let mut different = pending.clone();
     different.runs[0].process_running = !different.runs[0].process_running;
-    assert!(state.acknowledge_recipe_observation(&different).is_err());
+    // Newer content never overwrites a page still in custody.
     assert!(state.retain_recipe_observation(&different).is_err());
     assert_eq!(
         state.pending_recipe_observation().unwrap().unwrap(),
         pending
     );
-    state.acknowledge_recipe_observation(&pending).unwrap();
+    state.release_pending_recipe_observation().unwrap();
     assert!(state.pending_recipe_observation().unwrap().is_none());
     assert_eq!(recovered.finish(), attempted);
 }

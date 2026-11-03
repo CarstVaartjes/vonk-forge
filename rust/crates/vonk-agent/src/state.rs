@@ -267,9 +267,10 @@ impl StateStore {
         }
     }
 
-    /// One page in custody until its exact canonical content is acknowledged.
+    /// One page in custody until it is delivered or refused for its own bytes.
     /// Reopening the journal after a restart must replay it before collecting
     /// newer evidence (including output which a stop may already have removed).
+    /// A row this agent cannot read again is discarded here.
     pub fn pending_recipe_observation(
         &self,
     ) -> Result<Option<vonk_agent_protocol::RecipeRunObservationsWire>, StateError> {
@@ -322,29 +323,14 @@ impl StateStore {
         Ok(())
     }
 
-    /// Settle the page just read from custody, by its key: delivered or
-    /// refused for good. Matching re-serialized content could miss a row an
-    /// older agent stored in another (still parseable) shape.
+    /// Settle the page in custody by its key: delivered or refused for good.
+    /// Matching re-serialized content could miss a row an older agent stored
+    /// in another (still parseable) shape.
     pub fn release_pending_recipe_observation(&mut self) -> Result<(), StateError> {
         self.connection.execute(
             "DELETE FROM metadata WHERE key='pending_recipe_observation'",
             [],
         )?;
-        Ok(())
-    }
-
-    pub fn acknowledge_recipe_observation(
-        &mut self,
-        report: &vonk_agent_protocol::RecipeRunObservationsWire,
-    ) -> Result<(), StateError> {
-        let body = vonk_agent_protocol::canonical_generated_json(report)?;
-        if self.connection.execute(
-            "DELETE FROM metadata WHERE key='pending_recipe_observation' AND value=?1",
-            [String::from_utf8(body).map_err(|_| StateError::Identity)?],
-        )? != 1
-        {
-            return Err(StateError::Identity);
-        }
         Ok(())
     }
 

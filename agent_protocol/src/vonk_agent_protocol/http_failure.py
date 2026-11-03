@@ -15,6 +15,7 @@ class TransientReason(StrEnum):
     RATE_LIMITED = "rate_limited"
     LOCAL_STATE_UNAVAILABLE = "local_state_unavailable"
     STORAGE_UNAVAILABLE = "storage_unavailable"
+    CLOCK_SKEW = "clock_skew"
 
 
 class HttpTransient(WireModel):

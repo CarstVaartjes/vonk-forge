@@ -7,6 +7,7 @@ changes nothing.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import timedelta
 
@@ -172,37 +173,99 @@ def test_ended_run_without_an_exact_stop_is_not_reopened(
     assert _state(services, run_id) == before
 
 
-def test_clock_skew_is_a_wait_not_a_verdict_on_the_report(
+def _body(clock, run_id: str, *, ahead: int = 0, running: bool = True) -> dict:
+    return {
+        "observed_at": (clock.now + timedelta(seconds=ahead)).isoformat(),
+        "runs": [
+            {
+                "run_id": run_id,
+                "run_generation": 3,
+                "process_running": running,
+                "endpoint_ready": None,
+            }
+        ],
+    }
+
+
+def _post(client, path: str, body: dict):
+    return client.post(path, headers=agent_headers(NODE_A, "serial-a"), json=body)
+
+
+def test_clock_skew_is_a_wait_and_the_same_bytes_land_once_it_clears(
     agent_system,  # noqa: F811
 ) -> None:
     client, services, _, clock = agent_system
-    run_id = _ended_run(services, clock, state="failed")
+    run_id = _ended_run(services, clock, state="lost")
+    body = _body(clock, run_id, ahead=60)
 
-    response = _report(client, clock, run_id, running=True, observed_ahead=60)
+    # Wrong implementation: 422 tells the Spark these bytes can never be
+    # accepted, though they are fine once this clock catches up.
+    waiting = _post(client, "/agent/recipe-runs/observations", body)
+    assert waiting.status_code == 503
+    assert json.loads(waiting.headers["retry-after"]) >= 1
+    assert waiting.json()["reason"] == "clock_skew"
 
-    # The Spark's clock is ahead of the Controller's: the same bytes are
-    # accepted once the skew clears, so the agent must keep the page.
-    assert response.status_code == 503
-    assert "retry-after" in response.headers
+    clock.now += timedelta(seconds=31)
+    assert _post(client, "/agent/recipe-runs/observations", body).status_code == 204
 
 
-def test_run_leaving_the_stoppable_states_mid_report_is_a_wait(
+def test_inventory_from_a_clock_ahead_is_a_wait_and_lands_once_it_clears(
+    agent_system,  # noqa: F811
+) -> None:
+    client, _, _, clock = agent_system
+    body = {
+        "schema_version": 1,
+        "observed_at": (clock.now + timedelta(seconds=60)).isoformat(),
+        "disk_total_bytes": 1000,
+        "disk_free_bytes": 700,
+        "host_memory_total_bytes": 2000,
+        "host_memory_free_bytes": 1500,
+        "gpu_memory_total_bytes": 1000,
+        "gpu_memory_free_bytes": 800,
+        "gpu_count": 1,
+        "memory_pool": "separate",
+        "artifact_store_read_only": False,
+        "capabilities": [],
+        "nvidia_driver_version": "580.65.06",
+        "container_runtime_version": "28.3.3",
+    }
+    waiting = _post(client, "/agent/inventory", body)
+    assert waiting.status_code == 503
+    assert waiting.json()["reason"] == "clock_skew"
+
+    clock.now += timedelta(seconds=31)
+    assert _post(client, "/agent/inventory", body).status_code == 204
+
+
+def test_run_leaving_the_stoppable_states_between_the_reads_is_a_wait(
     agent_system,  # noqa: F811
     monkeypatch,
 ) -> None:
     from vonk_control.agent_api import observations
-    from vonk_control.recipe_operations.observation_helpers import RunNotAssigned
 
     client, services, _, clock = agent_system
     run_id = _ended_run(services, clock, state="lost")
+    real = observations.prepare_exact_recipe_run_observation_nodes
+    raced = {"once": True}
 
-    def raced(*_args, **_kwargs):
-        raise RunNotAssigned("recipe run observation is not assigned")
+    def stop_first(session, *args, **kwargs):
+        # A stop commits between the unlocked read and the locked read.
+        if raced.pop("once", False):
+            run = session.get(RecipeRun, run_id)
+            assert run is not None
+            run.state = "stopped"
+            session.flush()
+        return real(session, *args, **kwargs)
 
     monkeypatch.setattr(
-        observations, "prepare_exact_recipe_run_observation_nodes", raced
+        observations, "prepare_exact_recipe_run_observation_nodes", stop_first
     )
+    body = _body(clock, run_id, running=False)
 
     # Wrong implementation: 422 tells the Spark these bytes can never be
     # accepted, though a stop merely crossed the report.
-    assert _report(client, clock, run_id, running=False).status_code == 503
+    waiting = _post(client, "/agent/recipe-runs/observations", body)
+    assert waiting.status_code == 503
+    assert waiting.headers["x-vonk-error-code"]
+    # The same bytes now find the run ended and are consumed.
+    assert _post(client, "/agent/recipe-runs/observations", body).status_code == 204

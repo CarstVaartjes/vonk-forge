@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import uuid
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
@@ -56,7 +57,6 @@ from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
-from ..recipe_operations.observation_helpers import RunNotAssigned
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository
@@ -83,6 +83,21 @@ from .common import (
     _validated_authenticated_source,
 )
 from .ended_runs import reopen_ended_runs_still_running
+
+
+def _wait_out_clock_skew(observed_at: datetime, now: datetime) -> None:
+    """Answer a report stamped ahead of this clock as a wait, never a 422.
+
+    The bytes are fine: they are accepted once this clock catches up, so the
+    Spark keeps and replays them after the remaining skew.
+    """
+
+    excess = observed_at - (now + MAX_INVENTORY_FUTURE_SKEW)
+    if excess > timedelta(0):
+        temporary_http_answer(
+            TransientReason.CLOCK_SKEW,
+            retry_after=min(max(1, math.ceil(excess.total_seconds())), 300),
+        )
 
 
 def install_observations_routes(
@@ -154,10 +169,8 @@ def install_observations_routes(
             )
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
-        if (
-            observed_at > now + MAX_INVENTORY_FUTURE_SKEW
-            or now - observed_at > timedelta(hours=24)
-        ):
+        _wait_out_clock_skew(observed_at, now)
+        if now - observed_at > timedelta(hours=24):
             raise HTTPException(
                 status_code=422, detail="inventory time is outside the accepted window"
             )
@@ -280,10 +293,7 @@ def install_observations_routes(
         # Old content may be a durable replay after a lost acknowledgement.
         # Per-rank generation and observed_at comparisons below fence it from
         # newer intent/evidence. Its original time must never be refreshed.
-        if observed_at > now + timedelta(seconds=30):
-            # Clock skew heals itself: the same bytes are accepted once the
-            # Controller's clock catches up, so this is a wait, not a verdict.
-            temporary_http_answer(TransientReason.ADMISSION_BUSY)
+        _wait_out_clock_skew(observed_at, now)
         # One stale or no-longer-assigned run must not discard the evidence
         # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
@@ -514,9 +524,6 @@ def install_observations_routes(
             # A durable replay must not become a permanent rejection after
             # newer authorized intent supersedes it; the next page replans.
 
-        except RunNotAssigned:
-            # A stop crossed this report between the two reads: re-observe.
-            temporary_http_answer(TransientReason.ADMISSION_BUSY)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         request.state.observation_acceptance = ObservationAcceptance(

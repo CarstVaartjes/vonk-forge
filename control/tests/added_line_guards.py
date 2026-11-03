@@ -81,7 +81,13 @@ MODES = (
     "locked-io",
     "scratch-names",
     "capacity-refusals",
+    "agent-422",
 )
+# An agent-facing 422 tells the Spark these exact bytes can never be accepted
+# and drops them (the observation outbox discards on it). Only a verdict on
+# the request's own bytes may say it; a clock, a race or an owner still
+# settling is a wait (temporary_http_answer or UnknownOutcomeError).
+AGENT_422_VERDICT_MARKER = "422-verdict:"
 # The only code that may name DEMAND_EXCEEDS_CAPACITY: sibling starts that
 # cannot share one Spark, and the mapping between the resource and run-switch
 # vocabularies. A disk allocation larger than its device is the one other site,
@@ -1760,6 +1766,18 @@ def check_source(
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\b(?:RESOURCE_)?DEMAND_EXCEEDS_CAPACITY\b", text)
             and CAPACITY_REFUSAL_MARKER not in text
+        )
+    if (
+        python
+        and not is_test
+        and "agent-422" in modes
+        and path.startswith("control/src/vonk_control/agent_api/")
+    ):
+        hits.extend(
+            (line, "agent-facing 422 outside body validation; answer a wait")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", text)
+            and AGENT_422_VERDICT_MARKER not in text
         )
     if (
         python

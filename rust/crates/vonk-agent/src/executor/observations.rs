@@ -81,7 +81,7 @@ async fn deliver_recipe_observation(
     let report = crate::client::build_exact_recipe_run_observations(observed_at, runs)?;
     outbox.retain_recipe_observation(&report)?;
     client.report_recipe_observation_envelope(&report).await?;
-    outbox.acknowledge_recipe_observation(&report)?;
+    outbox.release_pending_recipe_observation()?;
     Ok(())
 }
 
