@@ -6,6 +6,7 @@ import json
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -711,3 +712,79 @@ def test_only_results_refused_as_invalid_count_as_refusals():
     )
     assert len(carry.result_refusals(logs)) == 2
     assert carry.result_refusals("") == []
+
+
+def _observing_lane(monkeypatch, cls, generation: str):
+    """A lane whose heavy steps are replaced, so only observe() itself runs."""
+    lane = _scenario_lane(cls)
+    release = types.SimpleNamespace(
+        generation=generation, version="v", package_version="p"
+    )
+    for name, value in {
+        "baseline": release,
+        "candidate": release,
+        "control": object(),
+        "bundle": object(),
+        "temporary_root": object(),
+        "_create_grant": lambda: ("g", "url", "ca", "token"),
+        "_spark_bootstrap_url": lambda release: "url",
+        "_release_environment": lambda release: {},
+        "_prepare_podman_apparmor_profile": lambda: None,
+        "_wait_for_agent_identity": lambda **k: {"node_id": "spk_1"},
+        "_run_synthetic_canary": lambda node, carry: {},
+        "_after_canary": lambda node: None,
+        "_require_no_result_refusals": list,
+        "_probe_summary": dict,
+    }.items():
+        monkeypatch.setattr(lane, name, value, raising=False)
+    monkeypatch.setattr(carry, "_run_spark_bootstrap", lambda *a, **k: None)
+    return lane
+
+
+@pytest.mark.parametrize(
+    "cls", [carry.UpgradeCarryLifecycle, carry.RecipeRefreshLifecycle]
+)
+def test_observe_outside_test_mode_accepts_a_baseline_equal_to_the_candidate(
+    monkeypatch, cls
+):
+    # Recipe refresh installs the candidate as its own baseline; PR CI always
+    # sets the test mode, so this branch only ran in the Release workflow.
+    monkeypatch.delenv("VONK_ACCEPTANCE_TEST_MODE", raising=False)
+    lane = _observing_lane(monkeypatch, cls, "g1")
+    assert lane.observe()["generations_differ"] is False
+
+
+def _reset_then_succeed(monkeypatch, failures: int) -> list[int]:
+    calls: list[int] = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, limit):
+            calls.append(1)
+            if len(calls) <= failures:
+                raise ConnectionResetError("reset by peer")
+            return b"payload"
+
+    monkeypatch.setattr(carry.urllib.request, "urlopen", lambda *a, **k: Reply())
+    monkeypatch.setattr(carry.time, "sleep", lambda seconds: None)
+    return calls
+
+
+def test_fetch_survives_a_connection_reset(monkeypatch, tmp_path):
+    calls = _reset_then_succeed(monkeypatch, failures=1)
+    destination = tmp_path / "input"
+    carry._fetch("https://example.invalid/x", destination)
+    assert destination.read_bytes() == b"payload"
+    assert len(calls) == 2
+
+
+def test_fetch_that_keeps_failing_ends_in_a_lifecycle_error(monkeypatch, tmp_path):
+    calls = _reset_then_succeed(monkeypatch, failures=99)
+    with pytest.raises(LifecycleError, match="https://example.invalid/x"):
+        carry._fetch("https://example.invalid/x", tmp_path / "input")
+    assert len(calls) == carry.FETCH_ATTEMPTS

@@ -51,6 +51,7 @@ from cluster_profiles.serving_execution import (
     evaluate_http_response,
 )
 from scripts.development_slice_client import SliceError, require_object
+from scripts.retry_dependency_fetch import backoff
 from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.ephemeral import (
     release_public_key,
@@ -178,16 +179,34 @@ def result_refusals(log_text: str) -> list[dict[str, object]]:
     return refused
 
 
+FETCH_ATTEMPTS = 5
+
+
+def _retry_transient(label: str, fetch: Callable[[], None]) -> None:
+    """Run ``fetch`` up to FETCH_ATTEMPTS times with capped, jittered backoff.
+
+    Every input is digest-checked after it is fetched, so repeating is safe.
+    """
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            return fetch()
+        except (OSError, tarfile.TarError) as error:
+            if attempt == FETCH_ATTEMPTS:
+                raise LifecycleError(f"{label} is unavailable: {error}") from error
+            time.sleep(backoff(attempt))
+
+
 def _fetch(url: str, destination: Path) -> None:
     # The public origin refuses anonymous library user agents.
     request = urllib.request.Request(
         url, headers={"User-Agent": "vonk-forge-acceptance/1"}
     )
-    try:
+
+    def attempt() -> None:
         with urllib.request.urlopen(request, timeout=60) as response:
             destination.write_bytes(response.read(16 * 1024 * 1024))
-    except urllib.error.URLError as error:
-        raise LifecycleError(f"release input {url} is unavailable: {error}") from error
+
+    _retry_transient(f"release input {url}", attempt)
 
 
 def resolve_release(
@@ -416,7 +435,8 @@ LIBRARY_REVISION_FILE = "tests/acceptance/recipe-library-revision.txt"
 def _download_library(revision: str, destination: Path) -> None:
     """The recipes source at ``revision``, unpacked into ``destination``."""
     url = f"{RECIPE_LIBRARY_ARCHIVE}/{revision}"
-    try:
+
+    def attempt() -> None:
         with (
             urllib.request.urlopen(url, timeout=300) as reply,
             tarfile.open(fileobj=reply, mode="r|gz") as archive,
@@ -426,10 +446,8 @@ def _download_library(revision: str, destination: Path) -> None:
                 member.name = member.name.partition("/")[2]
                 if member.name:
                     archive.extract(member, destination, filter="data")
-    except (OSError, tarfile.TarError) as error:
-        raise LifecycleError(
-            f"recipe library {revision} is unavailable: {error}"
-        ) from error
+
+    _retry_transient(f"recipe library {revision} ({url})", attempt)
 
 
 def _revision_through_api(source_sha: str) -> str:
@@ -759,8 +777,6 @@ class UpgradeCarryLifecycle(SparkLifecycle):
         canary = self._run_synthetic_canary(node_id, carry=self._carry)
         self._after_canary(node_id)
         refused = self._require_no_result_refusals()
-        if self.baseline.generation == self.candidate.generation and not test_mode():
-            raise LifecycleError("the carry baseline is the candidate itself")
         return {
             "generations_differ": self.baseline.generation != self.candidate.generation,
             "baseline": {
