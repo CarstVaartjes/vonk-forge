@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 
-from .request_path_scans import TABLES
+from .request_path_scans import TABLES, is_background, is_limit, statement_nodes
 
 _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 # Files that only a collector pass runs. The directory also holds request entry
@@ -105,8 +105,10 @@ def _reader_call(call: ast.Call) -> bool:
     )
 
 
-def _unfiltered_select(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> bool:
-    """``select(Model)`` of a growing table with nothing narrowing it."""
+def _unfiltered_select(
+    call: ast.Call, parents: dict[ast.AST, ast.AST], scope: ast.AST
+) -> bool:
+    """``select(Model)`` of a growing table with nothing narrowing its statement."""
     if not (
         _tail(call.func) == "select"
         and call.args
@@ -119,30 +121,26 @@ def _unfiltered_select(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> bool:
         )
     ):
         return False
-    chain: ast.AST = call
-    while isinstance(parents.get(chain), ast.Attribute) and isinstance(
-        parents.get(parents[chain]), ast.Call
-    ):
-        chain = parents[parents[chain]]
-        if _tail(getattr(chain, "func", chain)) in NARROWING:
-            return False
-    # ``statement = select(Model)`` narrowed by a later ``statement.where(...)``.
-    assignment = parents.get(chain)
-    if isinstance(assignment, ast.Assign):
-        names = {_tail(target) for target in assignment.targets}
-        function = chain
-        while function in parents and not isinstance(
-            function, ast.FunctionDef | ast.AsyncFunctionDef | ast.Module
-        ):
-            function = parents[function]
-        return not any(
-            isinstance(other, ast.Call)
-            and _tail(other.func) in NARROWING
-            and isinstance(other.func, ast.Attribute)
-            and _tail(other.func.value) in names
-            for other in ast.walk(function)
+    return not any(
+        isinstance(part, ast.Call)
+        and (
+            is_limit(part)
+            or (
+                isinstance(part.func, ast.Attribute)
+                and part.func.attr in NARROWING - {"limit"}
+            )
         )
-    return True
+        for node in statement_nodes(call, parents, scope)
+        for part in ast.walk(node)
+    )
+
+
+def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST:
+    while node in parents and not isinstance(
+        node, ast.FunctionDef | ast.AsyncFunctionDef
+    ):
+        node = parents[node]
+    return node
 
 
 def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
@@ -154,7 +152,10 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
         (function.lineno, function.end_lineno or function.lineno)
         for function in ast.walk(tree)
         if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
-        and function.name in COLLECTOR_FUNCTIONS.get(path, frozenset())
+        and (
+            function.name in COLLECTOR_FUNCTIONS.get(path, frozenset())
+            or is_background(function, path)
+        )
     ]
     parents = {
         child: parent
@@ -169,6 +170,6 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
             continue
         if _reader_call(node):
             hits.append((node.lineno, "whole-collection reader outside a collector"))
-        elif _unfiltered_select(node, parents):
+        elif _unfiltered_select(node, parents, _scope(node, parents)):
             hits.append((node.lineno, "select of every row of a growing table"))
     return hits

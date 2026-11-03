@@ -2651,3 +2651,49 @@ def test_selecting_every_row_of_a_growing_table_is_flagged_outside_api_modules(
 )
 def test_narrowed_other_table_and_collector_selects_pass(path, source):
     assert not check_source(path, source, {2, 3, 4}, modes=("collection-readers",))
+
+
+CATALOG_PATH = "control/src/vonk_control/library_projection/catalog.py"
+_KEYED_SEMI_JOIN = (
+    "def rows(s, d):\n"
+    "    return s.scalars(\n"
+    "        select(CatalogDocumentRevision).where(\n"
+    "            CatalogDocumentRevision.slug == d,\n"
+    "            CatalogDocumentRevision.content_digest.in_(\n"
+    "                select(ModelCacheSet.model_content_sha256)\n"
+    "            ),\n"
+    "        )\n"
+    "    )\n"
+)
+
+
+def test_a_select_inside_a_keyed_outer_query_is_judged_with_the_outer_query():
+    """The target-keyed semi-join principle 17 prescribes is not a whole read."""
+    inner = {6}
+    assert not check_source(
+        PATH, _KEYED_SEMI_JOIN, inner, modes=("collection-readers",)
+    )
+    bare = "def rows(s):\n    return s.scalars(\n        select(A.x).where(A.y.in_(select(Job.id)))\n    )\n"
+    # The outer where narrows the statement; a bare subquery with no outer one does not.
+    assert not check_source(PATH, bare, {3}, modes=("collection-readers",))
+    unnarrowed = (
+        "def rows(s):\n    return s.scalars(select(A.x).join(select(Job.id)))\n"
+    )
+    assert check_source(PATH, unnarrowed, {2}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize("mode", ["collection-readers", "request-scans"])
+def test_the_startup_index_build_is_exempt_from_both_select_rules(mode):
+    source = "def refresh_catalog(s):\n    return s.scalars(select(CatalogDocumentRevision))\n"
+    assert not check_source(CATALOG_PATH, source, {2}, modes=(mode,))
+    other = source.replace("refresh_catalog", "view")
+    assert check_source(CATALOG_PATH, other, {2}, modes=(mode,))
+
+
+@pytest.mark.parametrize("mode", ["collection-readers", "request-scans"])
+def test_limit_none_is_unbounded_for_both_select_rules(mode):
+    path = CATALOG_PATH
+    none = "def view(s):\n    return s.scalars(select(Job).limit(None))\n"
+    bounded = "def view(s):\n    return s.scalars(select(Job).limit(5))\n"
+    assert check_source(path, none, {2}, modes=(mode,))
+    assert not check_source(path, bounded, {2}, modes=(mode,))
