@@ -8,6 +8,7 @@ syntax guard complements SQL capture and producer/consumer behavior tests.
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 
 TABLES = frozenset(
     {
@@ -67,75 +68,166 @@ def is_limit(node: ast.AST) -> bool:
     )
 
 
-# Methods whose arguments are conditions of the statement they extend.
-_CONDITION_METHODS = frozenset({"where", "filter", "filter_by", "having"})
-_COMBINATORS = frozenset({"and_", "or_"})
+# The only calls that narrow a select: chained on it, never the builtin filter().
+NARROWING_METHODS = frozenset({"where", "filter", "filter_by", "having"})
 
 
-def statement_nodes(
-    call: ast.Call, parents: dict[ast.AST, ast.AST], scope: ast.AST
-) -> list[ast.AST]:
-    """What scopes the select ``call``: its own statement, nothing beside it.
-
-    Counted: a ``where``/``filter``/``limit`` chained on the select or on a
-    chain that holds it, the other conditions next to a subquery inside a
-    ``where``/``and_``/``or_``, and later uses of the variable it is assigned
-    to. Not counted: sibling arguments of an unrelated call (``merge(a, b)``),
-    a set operation's other operand, or a ``where`` whose only condition is the
-    subquery itself (a semi-join with the whole table is not target-keyed).
-    """
-    nodes: list[ast.AST] = []
-    # A condition beside the subquery inside the same ``and_``/``&``.
-    beside = False
-    current: ast.AST = call
-    parent = parents.get(current)
-    while parent is not None and not isinstance(parent, ast.stmt):
-        if isinstance(parent, ast.Attribute) and parent.value is current:
-            grand = parents.get(parent)
-            if isinstance(grand, ast.Call) and grand.func is parent:
-                if parent.attr in _CONDITION_METHODS or is_limit(grand):
-                    nodes.append(grand)
-                current = grand
-            else:
-                current = parent
-        elif isinstance(parent, ast.Call) and current is not parent.func:
-            siblings = [
-                item
-                for item in (*parent.args, *(word.value for word in parent.keywords))
-                if item is not current and item is not _child_value(current)
-            ]
-            method = _tail(parent.func)
-            if (siblings or beside) and method in _CONDITION_METHODS | _COMBINATORS:
-                nodes.append(ast.Call(func=parent.func, args=siblings, keywords=[]))
-            beside = beside or bool(siblings and method in _COMBINATORS)
-            current = parent
-        elif isinstance(parent, ast.BoolOp | ast.BinOp):
-            operands = (
-                parent.values
-                if isinstance(parent, ast.BoolOp)
-                else [parent.left, parent.right]
-            )
-            others = [item for item in operands if item is not current]
-            nodes.extend(others)
-            beside = beside or bool(others)
-            current = parent
-        else:
-            current = parent
-        parent = parents.get(current)
-    if isinstance(parent, ast.Assign):
-        names = {_tail(target) for target in parent.targets}
-        nodes.extend(
-            part
-            for part in ast.walk(scope)
-            if isinstance(part, ast.Call)
-            and isinstance(part.func, ast.Attribute)
-            and _tail(part.func.value) in names
+def is_narrowing(node: ast.AST) -> bool:
+    return isinstance(node, ast.Call) and (
+        is_limit(node)
+        or (
+            isinstance(node.func, ast.Attribute) and node.func.attr in NARROWING_METHODS
         )
-    return nodes
+    )
 
 
-def _child_value(node: ast.AST) -> ast.AST | None:
-    return node.value if isinstance(node, ast.keyword) else None
+def _chain(
+    expression: ast.AST, parents: dict[ast.AST, ast.AST]
+) -> tuple[list[ast.Call], ast.AST]:
+    """Narrowing calls chained directly on ``expression``, and the chain's top."""
+    found: list[ast.Call] = []
+    current = expression
+    while True:
+        attribute = parents.get(current)
+        outer = parents.get(attribute) if attribute is not None else None
+        if not (
+            isinstance(attribute, ast.Attribute)
+            and attribute.value is current
+            and isinstance(outer, ast.Call)
+            and outer.func is attribute
+        ):
+            return found, current
+        # EXISTS answers a boolean in the database; it reads no rows back.
+        if is_narrowing(outer) or _tail(outer.func) == "exists":
+            found.append(outer)
+        current = outer
+
+
+def _equalities(items: list[ast.expr], subquery: ast.AST) -> list[ast.expr]:
+    """``==`` conditions next to the subquery, positional or inside ``and_``/``&``."""
+    found: list[ast.expr] = []
+    for item in items:
+        if isinstance(item, ast.Call) and _tail(item.func) == "and_":
+            found.extend(_equalities([*item.args], subquery))
+        elif isinstance(item, ast.BinOp) and isinstance(item.op, ast.BitAnd):
+            found.extend(_equalities([item.left, item.right], subquery))
+        elif (
+            isinstance(item, ast.Compare)
+            and all(isinstance(op, ast.Eq) for op in item.ops)
+            and not any(part is subquery for part in ast.walk(item))
+        ):
+            found.append(item)
+    return found
+
+
+def _semi_join(subquery: ast.AST, parents: dict[ast.AST, ast.AST]) -> list[ast.Call]:
+    """A subquery in a where/filter/having that also has an ``==`` condition.
+
+    The target-keyed semi-join: ``where(slug == d, digest.in_(select(...)))``.
+    The subquery must reach that call through calls, comparisons and ``and_``/
+    ``&`` only; ``or_``, ``|``, ``+`` and every other operator give no credit.
+    """
+    current = subquery
+    while True:
+        parent = parents.get(current)
+        if parent is None or isinstance(parent, ast.stmt):
+            return []
+        if (
+            isinstance(parent, ast.Call)
+            and current is not parent.func
+            and is_narrowing(parent)
+        ):
+            keyed = _equalities(
+                [*parent.args, *(word.value for word in parent.keywords)], subquery
+            )
+            return (
+                [ast.Call(func=parent.func, args=keyed, keywords=[])] if keyed else []
+            )
+        if not (
+            isinstance(parent, ast.keyword | ast.Compare | ast.Attribute)
+            or (isinstance(parent, ast.Call) and _tail(parent.func) != "or_")
+            or (isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.BitAnd))
+        ):
+            return []
+        current = parent
+
+
+def _rebinds(statement: ast.AST, name: str, parents: dict[ast.AST, ast.AST]) -> bool:
+    """``q = q.where(...)``, or an ``if`` that does it in both branches."""
+    if isinstance(statement, ast.Assign):
+        return (
+            [t.id for t in statement.targets if isinstance(t, ast.Name)] == [name]
+            and len(statement.targets) == 1
+            and any(
+                isinstance(load, ast.Name)
+                and load.id == name
+                and _chain(load, parents)[0]
+                for load in ast.walk(statement.value)
+            )
+        )
+    if isinstance(statement, ast.If):
+        return any(_rebinds(item, name, parents) for item in statement.body) and any(
+            _rebinds(item, name, parents) for item in statement.orelse
+        )
+    return False
+
+
+def _rebound_after(
+    assignment: ast.Assign, name: str, parents: dict[ast.AST, ast.AST]
+) -> int | None:
+    """The line after which ``name`` is narrowed on every path, from this block."""
+    owner = parents.get(assignment)
+    for field in ("body", "orelse", "finalbody"):
+        block = getattr(owner, field, None)
+        if isinstance(block, list) and assignment in block:
+            for statement in block[block.index(assignment) + 1 :]:
+                if _rebinds(statement, name, parents):
+                    return statement.end_lineno
+    return None
+
+
+def is_narrowed(
+    call: ast.Call,
+    parents: dict[ast.AST, ast.AST],
+    scope: ast.AST,
+    judge: Callable[[list[ast.AST]], bool],
+) -> bool:
+    """Fail closed: is ``call`` narrowed by something ``judge`` accepts?
+
+    Credit comes only from a narrowing call chained directly on the select, the
+    keyed semi-join above, or, for ``q = select(...)``, every load of ``q``
+    being narrowed that way (a later ``q = q.where(...)`` in the same block
+    narrows the loads after it). Nothing beside it counts: sibling arguments, set
+    operations, other operators, outer statements.
+    """
+
+    def narrowed(expression: ast.AST) -> bool:
+        chained, top = _chain(expression, parents)
+        nodes: list[ast.AST] = [*chained, *_semi_join(top, parents)]
+        return judge(nodes)
+
+    if narrowed(call):
+        return True
+    assignment = parents.get(_chain(call, parents)[1])
+    if not (
+        isinstance(assignment, ast.Assign)
+        and len(assignment.targets) == 1
+        and isinstance(assignment.targets[0], ast.Name)
+    ):
+        return False
+    name = assignment.targets[0].id
+    loads = [
+        part
+        for part in ast.walk(scope)
+        if isinstance(part, ast.Name)
+        and part.id == name
+        and isinstance(part.ctx, ast.Load)
+    ]
+    narrowed_after = _rebound_after(assignment, name, parents)
+    return bool(loads) and all(
+        narrowed(load) or (narrowed_after is not None and load.lineno > narrowed_after)
+        for load in loads
+    )
 
 
 def _key(node: ast.AST) -> bool:
@@ -154,7 +246,7 @@ def _scoped(nodes: list[ast.AST]) -> bool:
             ):
                 return True
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if is_limit(node):
+                if is_limit(node) or node.func.attr == "exists":
                     return True
                 if node.func.attr in {"in_"} and _key(node.func.value):
                     return True
@@ -219,7 +311,6 @@ def scan_tree(tree: ast.Module, *, path: str) -> list[int]:
                 for part in ast.walk(argument)
             ):
                 continue
-            nodes = statement_nodes(call, parents, function)
-            if not _scoped(nodes):
+            if not is_narrowed(call, parents, function, _scoped):
                 sites.append(call.lineno)
     return sorted(set(sites))

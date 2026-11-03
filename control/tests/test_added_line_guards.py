@@ -2642,7 +2642,7 @@ def test_selecting_every_row_of_a_growing_table_is_flagged_outside_api_modules(
         ),
         (
             AGENT_API_PATH,
-            "def rows(s, n):\n    q = select(InstallationNode)\n    q = q.where(InstallationNode.node_id == n)\n    return s.scalars(q)\n",
+            "def rows(s, n):\n    q = select(InstallationNode)\n    return s.scalars(q.where(InstallationNode.node_id == n))\n",
         ),
         (AGENT_API_PATH, "def rows(s):\n    return s.scalars(select(AgentNode))\n"),
         # A collector decides over every row; that is its job.
@@ -2729,3 +2729,58 @@ def test_limit_none_is_unbounded_for_both_select_rules(mode):
     bounded = "def view(s):\n    return s.scalars(select(Job).limit(5))\n"
     assert check_source(path, none, {2}, modes=(mode,))
     assert not check_source(path, bounded, {2}, modes=(mode,))
+
+
+_SELECT_PATHS = [
+    ("collection-readers", MODEL_CACHE_PATH),
+    ("request-scans", "control/src/vonk_control/api/example.py"),
+]
+_SELECT_LINES = {2, 3, 4, 5, 6}
+# Everything the reviews proved a whole-table select can hide behind. The rule
+# errs toward false positives: only a narrowing call chained on the select, or a
+# keyed semi-join, gives credit.
+_MUST_FIRE = [
+    "return merge(s.scalars(select(Job)).all(), s.scalars(select(RecipeRun).where(RecipeRun.id == x)).all())",
+    "return s.execute(select(Job.id).union(select(RecipeRun.id).where(RecipeRun.id == x)))",
+    "return s.scalars(select(ModelCacheSet).where(ModelCacheSet.digest.in_(select(Job.digest))))",
+    "return s.scalars(select(A.x).where(A.y.in_(select(Job.id))))",
+    "return s.scalars(select(Job)) + s.scalars(select(RecipeRun).where(RecipeRun.id == x))",
+    "return s.scalars(select(Job)) or s.scalars(select(RecipeRun).where(RecipeRun.id == x))",
+    "return set(s.scalars(select(Job))) | set(s.scalars(select(RecipeRun).where(RecipeRun.id == x)))",
+    "return s.scalars(select(A.x).where((A.k == d) | A.y.in_(select(Job.id))))",
+    "return s.scalars(select(A.x).where(or_(A.k == d, A.y.in_(select(Job.id)))))",
+    "q = select(Job)\n    a = s.scalars(q.where(Job.id == x))\n    return a, s.scalars(q)",
+    "q = select(Job)\n    return s.scalars(other.q.where(Job.id == x))",
+    "return filter(lambda r: r.id == x, s.scalars(select(Job)))",
+    "return s.scalars(select(Job).limit(None))",
+    "q = select(Job)\n    return s.scalars(q)",
+    "q = select(Job)\n    if x:\n        q = q.where(Job.id == x)\n    return s.scalars(q)",
+]
+_MUST_PASS = [
+    "return s.scalars(select(Job).where(Job.id == x))",
+    "return s.scalars(select(Job).filter(Job.id == x))",
+    "return s.scalars(select(Job).limit(5))",
+    "q = select(Job)\n    return s.scalars(q.where(Job.id == x))",
+    "return s.scalars(select(CDR).where(CDR.slug == d, CDR.content_digest.in_(select(MCS.model_content_sha256))))",
+    "return s.scalars(select(CDR).where(and_(CDR.slug == d, CDR.content_digest.in_(select(MCS.model_content_sha256)))))",
+    "return s.scalars(select(CDR).where((CDR.slug == d) & CDR.content_digest.in_(select(MCS.model_content_sha256))))",
+    "q = select(Job)\n    q = q.where(Job.id == x)\n    return s.scalars(q)",
+    "q = select(Job)\n    if x:\n        q = q.where(Job.id == x)\n    else:\n        q = q.where(Job.id == d)\n    return s.scalars(q)",
+    "return s.scalars(select(Job).where(Job.id == x, select(MCS.k).where(MCS.k == Job.k).exists()))",
+]
+
+
+@pytest.mark.parametrize("mode,path", _SELECT_PATHS)
+@pytest.mark.parametrize("body", _MUST_FIRE)
+def test_a_whole_table_select_is_not_rescued_by_anything_but_its_own_narrowing(
+    body, mode, path
+):
+    source = "def f(s, x, d):\n    " + body + "\n"
+    assert check_source(path, source, _SELECT_LINES, modes=(mode,)), body
+
+
+@pytest.mark.parametrize("mode,path", _SELECT_PATHS)
+@pytest.mark.parametrize("body", _MUST_PASS)
+def test_chained_narrowing_limits_and_the_keyed_semi_join_pass(body, mode, path):
+    source = "def f(s, x, d):\n    " + body + "\n"
+    assert not check_source(path, source, _SELECT_LINES, modes=(mode,)), body

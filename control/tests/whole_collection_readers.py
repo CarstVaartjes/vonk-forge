@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import ast
 
-from .request_path_scans import TABLES, is_background, is_limit, statement_nodes
+from .request_path_scans import TABLES, is_background, is_narrowed
 
 _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 # Files that only a collector pass runs. The directory also holds request entry
@@ -63,11 +63,6 @@ WHOLE_COLLECTION_READERS = frozenset(
 )
 # ``read`` is only a whole-collection reader on the evidence classes.
 EVIDENCE_CLASSES = frozenset({"_Evidence", "_CollectorEvidence"})
-
-
-# A join relates tables; it does not pick the target rows. Any ``where`` counts,
-# so a state-set filter such as ``.state.in_(LIVE)`` passes.
-NARROWING = frozenset({"where", "filter", "filter_by", "limit"})
 
 
 def _tail(node: ast.AST) -> str:
@@ -121,18 +116,7 @@ def _unfiltered_select(
         )
     ):
         return False
-    return not any(
-        isinstance(part, ast.Call)
-        and (
-            is_limit(part)
-            or (
-                isinstance(part.func, ast.Attribute)
-                and part.func.attr in NARROWING - {"limit"}
-            )
-        )
-        for node in statement_nodes(call, parents, scope)
-        for part in ast.walk(node)
-    )
+    return not is_narrowed(call, parents, scope, bool)
 
 
 def _scope(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> ast.AST:
