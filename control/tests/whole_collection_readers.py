@@ -4,14 +4,18 @@ P17, "ask the target, not the world": a check about one item answers with
 lookups keyed by that item. These readers walk every profile, installation,
 plan or day of jobs, which is right for a collector that decides over all of
 them and wrong for a request or per-event handler that wants one answer. Added
-lines outside the collector modules may not call them. Selecting every row of a
-growing table is ``request_path_scans``' rule, with its one table set and one
-scoping rule. The runtime half is ``test_target_budget.py``.
+lines outside the collector modules may not call them, and may not select every
+row of a growing table anywhere in the Controller. The table set is
+``request_path_scans.TABLES`` (one owner); ``request-scans`` keeps its stricter
+rule for API and projection modules. The runtime half is
+``test_target_budget.py``.
 """
 
 from __future__ import annotations
 
 import ast
+
+from .request_path_scans import TABLES
 
 _STORAGE = "control/src/vonk_control/unused_storage_collection/"
 # Files that only a collector pass runs. The directory also holds request entry
@@ -61,6 +65,11 @@ WHOLE_COLLECTION_READERS = frozenset(
 EVIDENCE_CLASSES = frozenset({"_Evidence", "_CollectorEvidence"})
 
 
+# A join relates tables; it does not pick the target rows. Any ``where`` counts,
+# so a state-set filter such as ``.state.in_(LIVE)`` passes.
+NARROWING = frozenset({"where", "filter", "filter_by", "limit"})
+
+
 def _tail(node: ast.AST) -> str:
     return (
         node.attr
@@ -96,6 +105,46 @@ def _reader_call(call: ast.Call) -> bool:
     )
 
 
+def _unfiltered_select(call: ast.Call, parents: dict[ast.AST, ast.AST]) -> bool:
+    """``select(Model)`` of a growing table with nothing narrowing it."""
+    if not (
+        _tail(call.func) == "select"
+        and call.args
+        and not call.keywords
+        # ``select(Job)`` and column selects such as ``select(Job.payload)``.
+        and any(
+            _tail(argument.value if isinstance(argument, ast.Attribute) else argument)
+            in TABLES
+            for argument in call.args
+        )
+    ):
+        return False
+    chain: ast.AST = call
+    while isinstance(parents.get(chain), ast.Attribute) and isinstance(
+        parents.get(parents[chain]), ast.Call
+    ):
+        chain = parents[parents[chain]]
+        if _tail(getattr(chain, "func", chain)) in NARROWING:
+            return False
+    # ``statement = select(Model)`` narrowed by a later ``statement.where(...)``.
+    assignment = parents.get(chain)
+    if isinstance(assignment, ast.Assign):
+        names = {_tail(target) for target in assignment.targets}
+        function = chain
+        while function in parents and not isinstance(
+            function, ast.FunctionDef | ast.AsyncFunctionDef | ast.Module
+        ):
+            function = parents[function]
+        return not any(
+            isinstance(other, ast.Call)
+            and _tail(other.func) in NARROWING
+            and isinstance(other.func, ast.Attribute)
+            and _tail(other.func.value) in names
+            for other in ast.walk(function)
+        )
+    return True
+
+
 def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
     """Lines that read a whole collection outside a collector."""
     if is_collector(path):
@@ -107,6 +156,11 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
         if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
         and function.name in COLLECTOR_FUNCTIONS.get(path, frozenset())
     ]
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
     hits: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or any(
@@ -115,4 +169,6 @@ def scan_source(source: str, *, path: str) -> list[tuple[int, str]]:
             continue
         if _reader_call(node):
             hits.append((node.lineno, "whole-collection reader outside a collector"))
+        elif _unfiltered_select(node, parents):
+            hits.append((node.lineno, "select of every row of a growing table"))
     return hits

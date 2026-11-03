@@ -2592,12 +2592,19 @@ def test_the_collector_functions_of_the_evidence_modules_stay_exempt():
 
 
 API_PATH = "control/src/vonk_control/example_api.py"
+MODEL_CACHE_PATH = "control/src/vonk_control/model_cache/example.py"
+AGENT_API_PATH = "control/src/vonk_control/agent_api/example.py"
+COLLECTOR_PATH = "control/src/vonk_control/terminal_history_collection.py"
+GROWING = [
+    "Job",
+    "JobAttempt",
+    "FleetProfile",
+    "InstallationNode",
+    "NodeTelemetrySample",
+]
 
 
-@pytest.mark.parametrize(
-    "table",
-    ["Job", "JobAttempt", "FleetProfile", "InstallationNode", "NodeTelemetrySample"],
-)
+@pytest.mark.parametrize("table", GROWING)
 def test_the_request_scan_guard_covers_the_tables_that_grow_with_the_fleet(table):
     """One table set: the tables the old collection rule named are the scan rule's."""
     unnarrowed = f"def rows(s):\n    return s.scalars(select({table}))\n"
@@ -2608,3 +2615,39 @@ def test_the_request_scan_guard_covers_the_tables_that_grow_with_the_fleet(table
     assert check_source(API_PATH, column, {2}, modes=("request-scans",))
     assert not check_source(API_PATH, keyed, {2}, modes=("request-scans",))
     assert not check_source(API_PATH, paged, {2}, modes=("request-scans",))
+
+
+@pytest.mark.parametrize("path", [MODEL_CACHE_PATH, AGENT_API_PATH, PATH])
+@pytest.mark.parametrize("table", GROWING)
+def test_selecting_every_row_of_a_growing_table_is_flagged_outside_api_modules(
+    path, table
+):
+    """The audit sites (model_cache, agent_api, worker ticks) are not API-scoped."""
+    unnarrowed = f"def rows(s):\n    return s.scalars(select({table}))\n"
+    column = f"def rows(s):\n    return s.execute(select({table}.id))\n"
+    assert check_source(path, unnarrowed, {2}, modes=("collection-readers",))
+    assert check_source(path, column, {2}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "path,source",
+    [
+        (
+            MODEL_CACHE_PATH,
+            "def rows(s):\n    return s.scalars(select(Job).where(Job.state.in_(LIVE)))\n",
+        ),
+        (
+            MODEL_CACHE_PATH,
+            "def rows(s):\n    return s.scalars(select(Job).limit(10))\n",
+        ),
+        (
+            AGENT_API_PATH,
+            "def rows(s, n):\n    q = select(InstallationNode)\n    q = q.where(InstallationNode.node_id == n)\n    return s.scalars(q)\n",
+        ),
+        (AGENT_API_PATH, "def rows(s):\n    return s.scalars(select(AgentNode))\n"),
+        # A collector decides over every row; that is its job.
+        (COLLECTOR_PATH, "def run(s):\n    return s.scalars(select(Job))\n"),
+    ],
+)
+def test_narrowed_other_table_and_collector_selects_pass(path, source):
+    assert not check_source(path, source, {2, 3, 4}, modes=("collection-readers",))
