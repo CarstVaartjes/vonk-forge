@@ -129,7 +129,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
     original_advance = service._advance_model_removal
     from vonk_control.model_cache import removal_execution
 
-    original_scan = removal_execution.model_set_reference_reasons
+    original_scan = removal_execution.model_set_reference_findings
     scans_while_locked = []
 
     def observe_scan(*args, **kwargs):
@@ -137,13 +137,13 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
             scans_while_locked.append(True)
         return original_scan(*args, **kwargs)
 
-    monkeypatch.setattr(removal_execution, "model_set_reference_reasons", observe_scan)
+    monkeypatch.setattr(removal_execution, "model_set_reference_findings", observe_scan)
 
     def contend_after_candidate_select(
-        operation_id: str, *, now: datetime | None = None
+        operation_id: str, *, now: datetime | None = None, deadline: float | None = None
     ) -> bool:
         if operation_id != accepted.id:
-            return original_advance(operation_id, now=now)
+            return original_advance(operation_id, now=now, deadline=deadline)
         with sessions() as holder:
             holder.begin()
             locked = holder.scalar(
@@ -155,7 +155,7 @@ def test_locked_removal_row_is_bounded_and_same_owner_retries_after_release(
             key_acquired.set()
             try:
                 try:
-                    outcome = original_advance(operation_id, now=now)
+                    outcome = original_advance(operation_id, now=now, deadline=deadline)
                 except Exception as error:
                     step_errors.append(error)
                     result_observed.set()
@@ -292,7 +292,7 @@ def test_held_and_not_due_first_removals_do_not_starve_unrelated_due_owner(
     service.close()
 
 
-def test_model_removal_process_death_after_unlink_reuses_pending_byte_checkpoint(
+def test_model_removal_process_death_before_batch_checkpoint_restarts_same_removal(
     postgres_engine, tmp_path: Path
 ) -> None:
     service, sessions = _removal_service(postgres_engine, tmp_path)
@@ -332,16 +332,16 @@ engine = create_engine(config["database"])
 service = ModelCacheService(
     sessionmaker(engine, expire_on_commit=False),
     Path(config["root"]),
-    reserve_bytes=0,
+    free_fraction=0,
 )
 persist = service._persist_model_removal_checkpoint
-def exit_before_completion(*args, **kwargs):
-    if kwargs.get("object_step") is True and kwargs.get("complete_step") is True:
+def exit_before_checkpoint(*args, **kwargs):
+    if kwargs.get("object_step") is True:
         os._exit(47)
     return persist(*args, **kwargs)
-service._persist_model_removal_checkpoint = exit_before_completion
+service._persist_model_removal_checkpoint = exit_before_checkpoint
 service.advance_removals(limit=1)
-raise AssertionError("removal worker did not reach the post-unlink checkpoint")
+raise AssertionError("removal worker did not reach the batch checkpoint")
 """
 
     try:
@@ -358,19 +358,18 @@ raise AssertionError("removal worker did not reach the post-unlink checkpoint")
         assert not receipt_path.exists()
         with sessions() as session:
             row = session.get(ModelCacheOperation, accepted.id)
-            assert row is not None and row.state == "running"
+            assert row is not None and row.state in {"queued", "running"}
             assert row.request_key == accepted.request_key
             crashed_payload = parse_model_cache_payload("remove", row.payload)
         assert isinstance(crashed_payload, ModelCacheRemovalPayload)
         assert crashed_payload.removal_fence == initial.removal_fence
         assert crashed_payload.object_index == 0
-        assert crashed_payload.object_pending_bytes == len(data)
         assert crashed_payload.reclaimed_bytes == 0
 
         restarted = ModelCacheService(
             sessions,
             service.root,
-            reserve_bytes=0,
+            free_fraction=0,
         )
         settled = _settle_removal(restarted, accepted)
         assert settled.id == accepted.id
@@ -379,9 +378,8 @@ raise AssertionError("removal worker did not reach the post-unlink checkpoint")
         payload = _removal_payload(sessions, accepted.id)
         assert payload.removal_fence == initial.removal_fence
         assert payload.object_index == len(payload.delete_objects) == 1
-        assert payload.object_pending_bytes is None
         assert isinstance(payload.result, ModelCacheRemovalResult)
-        assert payload.result.reclaimed_bytes == len(data)
+        assert payload.result.reclaimed_bytes <= len(data)
         assert restarted.advance_removals(limit=1) == 0
         with sessions() as session:
             count = session.scalar(
@@ -394,3 +392,137 @@ raise AssertionError("removal worker did not reach the post-unlink checkpoint")
         restarted.close()
     finally:
         service.close()
+
+
+def _many_object_removal(
+    service: ModelCacheService,
+    sessions: sessionmaker[Session],
+    tmp_path: Path,
+    count: int,
+    slug: str = "many-objects",
+) -> tuple[CacheOperationView, list[str], list[Path]]:
+    base = _one_model(tmp_path, slug, b"x")
+    document = base.model_dump(mode="json")
+    blobs = [f"{slug}-{index}".encode() for index in range(count)]
+    document["files"] = [
+        {
+            "id": f"w{index}",
+            "path": f"w{index}.safetensors",
+            "sha256": hashlib.sha256(blob).hexdigest(),
+            "size_bytes": len(blob),
+            "roles": ["weights"],
+        }
+        for index, blob in enumerate(blobs)
+    ]
+    model = type(base).model_validate(document)
+    selector = _register_model(sessions, model)
+    model_digest = document_sha256(model.model_dump(mode="json"))
+    source_root = tmp_path / f"source-{slug}"
+    source_root.mkdir()
+    artifacts = [
+        _artifact(
+            source_root,
+            blob,
+            artifact_id=f"w{index}",
+            path=f"w{index}.safetensors",
+            model_content_sha256=model_digest,
+        )
+        for index, blob in enumerate(blobs)
+    ]
+    prepared = _download(
+        service,
+        artifacts,
+        model_content_sha256=model_digest,
+        request_key=str(uuid4()),
+    )
+    assert prepared.state == "succeeded", prepared.last_error
+    digests = [hashlib.sha256(blob).hexdigest() for blob in blobs]
+    paths = [service._object_path(digest) for digest in digests]
+    assert all(path.is_file() for path in paths)
+    return _accept_removal(service, selector, model_digest), digests, paths
+
+
+# Seeding 90 downloaded objects dominates the time.
+@pytest.mark.slow(30)
+def test_removal_deletes_all_exclusive_objects_in_one_batch(
+    postgres_engine, tmp_path: Path
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    accepted, _digests, paths = _many_object_removal(service, sessions, tmp_path, 90)
+
+    for _ in range(3):
+        service.advance_removals(limit=1)
+    assert service.get_operation(accepted.id).state == "succeeded"
+    assert not any(path.exists() for path in paths)
+    payload = _removal_payload(sessions, accepted.id)
+    assert payload.object_index == len(payload.delete_objects) == 90
+    service.close()
+
+
+def test_contended_object_ends_the_batch_and_resumes_after_release(
+    postgres_engine, tmp_path: Path
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    accepted, _digests, paths = _many_object_removal(service, sessions, tmp_path, 12)
+    assert service._observe_model_removal_scope(accepted.id)
+    initial = _removal_payload(sessions, accepted.id)
+    held = 5
+    held_digest = initial.delete_objects[held]
+
+    with service._model_storage_lock(held_digest):
+        service.advance_removals(limit=1)
+        payload = _removal_payload(sessions, accepted.id)
+        assert payload.object_index == held
+        assert payload.removal_fence == initial.removal_fence
+        deleted = {
+            service._object_path(str(item)) for item in initial.delete_objects[:held]
+        }
+        assert not any(path.exists() for path in deleted)
+        assert service._object_path(held_digest).exists()
+        row = service.get_operation(accepted.id)
+        assert row.state != "succeeded"
+        with sessions() as session:
+            operation = session.get(ModelCacheOperation, accepted.id)
+            assert operation is not None and operation.next_action_at is not None
+
+    settled = _settle_removal(service, accepted)
+    assert settled.state == "succeeded"
+    assert not any(path.exists() for path in paths)
+    assert _removal_payload(sessions, accepted.id).object_index == 12
+    service.close()
+
+
+def test_batch_budget_is_shared_and_each_removal_makes_progress(
+    postgres_engine, tmp_path: Path, frozen_pass_budgets
+) -> None:
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    accepted, _digests, paths = _many_object_removal(service, sessions, tmp_path, 6)
+    original = service._remove_model_object_files
+
+    def slow_unlink(digest: str) -> None:
+        original(digest)
+        frozen_pass_budgets.advance(10.0)  # the 5 s budget is spent
+
+    service._remove_model_object_files = slow_unlink
+    service.advance_removals(limit=1)  # scope observation and first batch
+    first = _removal_payload(sessions, accepted.id).object_index
+    service.advance_removals(limit=1)
+    second = _removal_payload(sessions, accepted.id).object_index
+    assert first == 1 and second == 2
+    assert sum(path.exists() for path in paths) == 4
+
+    # Two removals in one worker step share the spent budget: each still
+    # deletes exactly one object.
+    other, _other_digests, other_paths = _many_object_removal(
+        service, sessions, tmp_path, 6, slug="other-objects"
+    )
+    before = _removal_payload(sessions, accepted.id).object_index
+    service.advance_removals(limit=2)
+    assert _removal_payload(sessions, accepted.id).object_index == before + 1
+    assert _removal_payload(sessions, other.id).object_index == 1
+    assert sum(path.exists() for path in other_paths) == 5
+
+    service._remove_model_object_files = original
+    assert _settle_removal(service, accepted).state == "succeeded"
+    assert _settle_removal(service, other).state == "succeeded"
+    service.close()

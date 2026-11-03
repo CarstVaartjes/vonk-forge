@@ -20,13 +20,11 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    WaitReason,
     canonical_message,
 )
 
 from .. import job_states
-from ..categorized_errors import (
-    InvalidValue,
-)
 from ..job_documents import (
     RecipeBuildCleanupParent,
     RecipeBuildParent,
@@ -295,7 +293,12 @@ def prepare_exact_recipe_run_observation_nodes(
         )
     )
     if included_run_ids - {node.run_id for node, _ in assigned}:
-        raise InvalidValue("recipe run observation is not assigned")
+        # A stop crossed this report between the unlocked and locked reads: a
+        # fact about a moment, so the caller re-observes (never a 422).
+        raise RecipeRetryLater(
+            "recipe run observation is not assigned yet",
+            reason=WaitReason.SCOPE_CHANGED,
+        )
     if not included_run_ids:
         for node, run in assigned:
             if _aware(node.updated_at) >= observed_at:

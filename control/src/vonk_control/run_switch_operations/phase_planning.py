@@ -81,8 +81,6 @@ class PhasePlanningMixin:
                 reclaimable_bytes=0,
                 nas_coverage="unknown",
                 spark_coverage="unknown",
-                artifact_digests=(),
-                reclaimable_digests=(),
                 blockers=(
                     _as_reason(
                         RunSwitchCode.ARTIFACT_IDENTITY_UNKNOWN,
@@ -105,9 +103,7 @@ class PhasePlanningMixin:
         if (
             inspection.required_bytes is None
             or inspection.required_bytes < 1
-            or not inspection.artifact_digests
             or not _is_hex_digest(inspection.artifact_set_sha256)
-            or any(not _is_hex_digest(value) for value in inspection.artifact_digests)
         ):
             inspection = replace(
                 inspection,
@@ -148,8 +144,6 @@ class PhasePlanningMixin:
             nas_coverage=inspection.nas_coverage,
             spark_coverage=inspection.spark_coverage,
             retention=retention,
-            artifact_digests=list(inspection.artifact_digests),
-            reclaimable_digests=list(inspection.reclaimable_digests),
         )
 
     def _phases(

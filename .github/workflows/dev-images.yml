@@ -67,6 +67,7 @@ jobs:
           python-version: "3.14"
           enable-cache: true
           cache-dependency-glob: agent_protocol/pyproject.toml
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Build protocol wheel and verify Controller lock hash
         run: scripts/build-control-wheel
 

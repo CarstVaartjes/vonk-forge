@@ -88,11 +88,7 @@ def _insert_synthetic_corpus(
             if kind == "model"
             else RecipeDefinition.model_validate(document)
         )
-        title = (
-            canonical.identity.model.title
-            if isinstance(canonical, ModelDefinition)
-            else canonical.metadata.title
-        )
+        title = canonical.identity.slug
         clean = canonical.model_dump(mode="json")
         document_id = str(uuid.uuid4())
         revision_id = str(uuid.uuid4())

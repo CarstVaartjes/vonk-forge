@@ -122,6 +122,7 @@ runs:
         shared-key: ${{ inputs.architecture }}-${{ inputs.binary_set }}
         add-job-id-key: "false"
         cache-workspace-crates: "false"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Compile exact package binary set
       shell: bash

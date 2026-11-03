@@ -885,7 +885,11 @@ def test_deferred_target_builder_review_refreshes_inventory_before_admission(
     from .test_profile_build_memory import _accepted_build_profile
 
     sessions, profiles, planner, node_id, _application, build = _accepted_build_profile(
-        tmp_path, postgres_engine, accept_profile=False
+        tmp_path,
+        postgres_engine,
+        accept_profile=False,
+        initially_installed=True,
+        installation_is_other_image=False,
     )
     lifecycle = planner._lifecycle
     assert lifecycle is not None

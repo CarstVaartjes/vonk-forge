@@ -128,7 +128,6 @@ class CacheArtifactExecutor:
                 phase,
                 result={
                     "verified": True,
-                    "verified_digests": list(plan.storage.artifact_digests),
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": plan.image_digest,
                     "verified_oci_layout_sha256": plan.build.oci_layout_sha256,
@@ -236,7 +235,7 @@ class ReachWorld(World):
         cache = ModelCacheService(
             self.sessions,
             self.root / "nas-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             clock=clock,
             http_client=httpx2.Client(
                 transport=httpx2.MockTransport(self.provider.handle),

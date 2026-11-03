@@ -154,7 +154,7 @@ def _service(sessions, root: Path, client: httpx2.Client) -> ModelCacheService:
     return ModelCacheService(
         sessions,
         root,
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=client,
         fixture_sources=False,
         clock=lambda: NOW,

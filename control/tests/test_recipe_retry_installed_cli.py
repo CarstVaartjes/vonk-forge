@@ -26,6 +26,7 @@ from vonk_control.recipe_image_availability import (
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_forge_contracts import RecipeDefinition
 
+from .display_fixtures import reworded
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 from .test_recipe_image_availability import _add_revision, _recipe, _runtime
 
@@ -53,7 +54,7 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="test",
                 created_at=now,
                 updated_at=now,
@@ -104,13 +105,7 @@ def test_installed_retry_preserves_frozen_intent_after_catalog_change_and_lost_r
     assert failed.state == "failed"
     assert failed.failure_evidence is not None
     with sessions.begin() as session:
-        changed = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"title": "Changed catalog choice"}
-                )
-            }
-        )
+        changed = reworded(recipe, "Changed catalog choice")
         newer = _add_revision(
             session,
             "retry-newer-recipe-revision",

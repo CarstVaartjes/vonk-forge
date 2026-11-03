@@ -40,10 +40,20 @@ from vonk_control.catalog_sync import (
     SyncTrigger,
 )
 from vonk_control.db import build_engine, session_factory
-from vonk_control.recipe_library_types import RecipeLibraryItem, RecipeLibrarySnapshot
+from vonk_control.recipe_library_types import (
+    CatalogModelEntry,
+    RecipeLibraryItem,
+    RecipeLibrarySnapshot,
+)
 from vonk_control.recipe_packages import load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
+from vonk_forge_contracts import (
+    read_model,
+    read_model_display,
+    read_recipe,
+    read_recipe_display,
+)
 
 SYNC_ACTOR = "system:spark-lifecycle-canary"
 # The Controller's own automatic sync may hold the single sync slot.
@@ -69,40 +79,36 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
     return target
 
 
-def _installed_display() -> bool:
-    """Whether the installed Controller carries the per-entry display.
+def _display(entry: dict[str, Any], read: Callable[..., Any], derive: str) -> Any:
+    """The display an index entry carries, else the installed contracts' own.
 
-    The lane runs this program in the previous promoted release's Controller
-    before the upgrade, whose types predate the display. The installed types
-    are authoritative, discovered before any effect like the sync signature.
+    This program runs inside whichever Controller the lane installed. A canary
+    index published before the per-entry display (a 2.x library, read by a 2.x
+    Controller) carries none; that Controller's contracts derive it from the
+    document, as its release did. A 3.0 index always carries it, and 3.0
+    contracts have no derivation, so a display-less index there fails loudly.
     """
-    return "display" in {field.name for field in dataclasses.fields(RecipeLibraryItem)}
+    if "display" in entry:
+        return read(entry["display"])
+    import vonk_forge_contracts
+
+    return getattr(vonk_forge_contracts, derive)(
+        (read_model if derive == "model_display_of" else read_recipe)(entry["document"])
+    )
 
 
-def _recipe_display(document: dict[str, Any]) -> dict[str, Any]:
-    """The item's display as the installed contracts derive it; none before it existed."""
-    if not _installed_display():
-        return {}
-    from vonk_forge_contracts import read_recipe, recipe_display_of
-
-    return {"display": recipe_display_of(read_recipe(document))}
-
-
-def _model_entry(document: dict[str, Any]) -> Any:
-    """One index Model in the installed snapshot shape."""
-    if not _installed_display():
-        return dict(document)
-    from vonk_control.recipe_library_types import CatalogModelEntry
-    from vonk_forge_contracts import model_display_of, read_model
-
-    return CatalogModelEntry(dict(document), model_display_of(read_model(document)))
+def _model_entry(entry: dict[str, Any]) -> CatalogModelEntry:
+    """One index Model with its display."""
+    return CatalogModelEntry(
+        dict(entry["document"]),
+        _display(entry, read_model_display, "model_display_of"),
+    )
 
 
 class FixtureReader:
     """The snapshot of the producer's canary index: one Recipe, or siblings.
 
-    The canary index predates the per-entry display, so each display is the one
-    the installed contracts derive from its own document.
+    Each entry carries its own display, which the installed contracts read.
     """
 
     def __init__(self, index: dict[str, Any], archives: dict[str, Path]) -> None:
@@ -111,17 +117,18 @@ class FixtureReader:
         items = []
         for entry in index["recipes"]:
             document = entry["document"]
-            identity, metadata = document["identity"], document["metadata"]
+            identity = document["identity"]
+            display = _display(entry, read_recipe_display, "recipe_display_of")
             digest = str(entry["content_sha256"])
             item = RecipeLibraryItem(
                 library_commit=commit,
                 source_path=str(entry["source_path"]),
                 publisher=str(identity["publisher"]),
                 slug=str(identity["slug"]),
-                title=str(metadata["title"]),
-                description=str(metadata["description"]),
-                tags=tuple(str(tag) for tag in metadata.get("tags", [])),
-                **_recipe_display(document),
+                title=display.title,
+                description=display.description,
+                tags=tuple(display.tags),
+                display=display,
                 content_sha256=digest,
                 source_bundle_sha256=str(entry["source_bundle_sha256"]),
                 package_sha256=str(entry["package"]["sha256"]),
@@ -139,7 +146,7 @@ class FixtureReader:
             items=tuple(items),
             repository=str(index["repository"]),
             catalog_entities=tuple(
-                _model_entry(value["document"]) for value in index["catalog_entities"]
+                _model_entry(value) for value in index["catalog_entities"]
             ),
         )
 
@@ -159,7 +166,7 @@ class FixtureReader:
             recipe_content_sha256=item.content_sha256,
             library_commit=item.library_commit,
             source_path=item.source_path,
-            **({"display": item.display} if _installed_display() else {}),
+            display=item.display,
         )
 
 

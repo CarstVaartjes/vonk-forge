@@ -35,6 +35,16 @@ impl ObservationServer {
         status: Option<u16>,
         disposition: Option<&'static str>,
     ) -> Self {
+        Self::spawn(vec![status], disposition)
+    }
+
+    /// Answer successive observation posts with these statuses in order; the
+    /// last one repeats. A Controller that refuses once and then recovers.
+    pub(in crate::executor) fn scripted(statuses: &[u16]) -> Self {
+        Self::spawn(statuses.iter().copied().map(Some).collect(), None)
+    }
+
+    fn spawn(statuses: Vec<Option<u16>>, disposition: Option<&'static str>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -42,6 +52,7 @@ impl ObservationServer {
         let stopped = stop.clone();
         let worker = thread::spawn(move || {
             let mut reports = Vec::new();
+            let mut posts = 0_usize;
             while !stopped.load(Ordering::SeqCst) {
                 let (mut stream, _) = match listener.accept() {
                     Ok(connection) => connection,
@@ -104,6 +115,8 @@ impl ObservationServer {
                     request.extend_from_slice(&buffer[..size]);
                 }
                 reports.push(serde_json::from_slice(&request[header_end..]).unwrap());
+                let status = statuses[posts.min(statuses.len() - 1)];
+                posts += 1;
                 if let Some(status) = status {
                     write!(stream, "HTTP/1.1 {status} Response\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
                 }

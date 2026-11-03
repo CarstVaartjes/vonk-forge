@@ -8,7 +8,9 @@ import sys
 from collections.abc import Sequence
 from difflib import SequenceMatcher
 from functools import cache
+from itertools import pairwise
 from pathlib import Path
+from typing import TypeGuard
 
 from . import claim_registry as claims
 from . import collection_continuation as collections
@@ -17,10 +19,10 @@ from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
 from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
+from . import locked_io, request_path_scans, scratch_names, shell_trap_waits
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
 from . import progress_attempt_boundaries as progress_attempts
-from . import request_path_scans
 from . import short_wall_clocks as wall_clocks
 from . import untyped_mapping_boundaries as mappings
 from . import vocabulary_literals as vocabulary
@@ -67,10 +69,69 @@ MODES = (
     "movement",
     "exit-causes",
     "nas-space",
+    "fixed-reserves",
     "model-sets",
     "openers",
     "follow-validators",
+    "item-counts",
+    "event-loops",
+    "trap-waits",
+    "plan-digests",
+    "background-retries",
+    "locked-io",
+    "scratch-names",
+    "capacity-refusals",
+    "agent-422",
 )
+# An agent-facing 422 tells the Spark these exact bytes can never be accepted
+# and drops them (the observation outbox discards on it). Only a verdict on
+# the request's own bytes may say it; a clock, a race or an owner still
+# settling is a wait (temporary_http_answer or UnknownOutcomeError).
+AGENT_422_VERDICT_MARKER = "422-verdict:"
+# The only code that may name DEMAND_EXCEEDS_CAPACITY: sibling starts that
+# cannot share one Spark, and the mapping between the resource and run-switch
+# vocabularies. A disk allocation larger than its device is the one other site,
+# marked on its own line.
+CAPACITY_REFUSAL_SITES = frozenset(
+    {
+        "control/src/vonk_control/fleet_profiles/colocation.py",
+        "control/src/vonk_control/fleet_profiles/dependencies.py",
+    }
+)
+CAPACITY_REFUSAL_MARKER = "capacity-refusal: disk"
+# A name that reserves volume space (not "reserved": space a run holds) bound to
+# a number or a constant, anywhere on the line, annotated or not.
+FIXED_RESERVE = re.compile(
+    r"(?i)\b(_?\w*reserve(?!d)\w*_bytes)\b\s*(?::[^=]+)?=\s*(?!Field\()(?-i:[\dA-Z(])"
+)
+# A display title feeding a normalised name builds identity from display text;
+# a title edit then changes behaviour with no new revision (#2009).
+TITLE_IDENTITY = re.compile(
+    r"(?:\b\w+_title|\.title)\b(?!\()\s*\.(?:lower|casefold|replace)\(|slugify\([^)]*title"
+)
+# Search filters compare a title with the query; they name nothing.
+TITLE_IDENTITY_VERDICTS: dict[str, str] = {
+    "control/src/vonk_control/library_projection/views.py": "wanted_search in",
+}
+# Fixed reserves that guard something other than NAS volume space.
+FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MINIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk floor",
+    (
+        "control/src/vonk_control/recipe_builds/common.py",
+        "MAXIMUM_BUILD_DISK_RESERVE_BYTES",
+    ): "Spark build disk cap",
+    (
+        "control/src/vonk_control/settings.py",
+        "STORAGE_EVICTION_RESERVE_FLOOR_BYTES",
+    ): "headroom the collector evicts beyond a shortfall, not a gate",
+    (
+        "control/src/vonk_control/unused_storage_collection/service.py",
+        "reserve_floor_bytes",
+    ): "the collector's headroom floor, defaulted from that setting",
+}
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
@@ -90,6 +151,14 @@ SECURITY_EDGES = frozenset(
     }
 )
 
+
+# The files that allocate the next revision_number; no other source names it.
+REVISION_NUMBER_ALLOCATORS = frozenset(
+    {
+        "control/src/vonk_control/catalog_entities.py",
+        "control/src/vonk_control/catalog_service.py",
+    }
+)
 
 # The one owner of how a container's exit cause is spelled and read.
 EXIT_CAUSE_OWNER = "rust/crates/vonk-agent-protocol/src/failure_evidence.rs"
@@ -200,6 +269,155 @@ def security_refusals() -> frozenset[str]:
         if names == previous:
             break
     return frozenset(names)
+
+
+# Sizes the model or recipe sets (files, digests, artifacts, objects, shards)
+# are bounded by bytes (the document or wire budget), never by an item count:
+# a 286-file model failed planning on a 256-digest cap.
+_MODEL_SIZED_TOKENS = frozenset(
+    {
+        "file",
+        "files",
+        "digest",
+        "digests",
+        "artifact",
+        "artifacts",
+        "object",
+        "objects",
+        "shard",
+        "shards",
+        "path",
+        "paths",
+    }
+)
+# Database-range and fleet-size constants are not item counts.
+_RANGE_CONSTANTS = frozenset(
+    {"MAX_DATABASE_INTEGER", "_MAX_SIGNED_BIGINT", "_MAX_FLEET_NODES"}
+)
+# A real protocol limit states why on the line: ``# item-count-limit: <why>``.
+ITEM_COUNT_PRAGMA = "# item-count-limit:"
+
+
+def model_sized_count_caps(source: str) -> list[int]:
+    """Lines capping a model-sized list (``max_length``) or count (``le``)."""
+    lines = source.splitlines()
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        tokens = node.target.id.split("_")
+        # A byte size is the bound the owner wants; only counts are refused.
+        if "bytes" in tokens:
+            continue
+        sized = any(token in _MODEL_SIZED_TOKENS for token in tokens)
+        counted = (
+            len(tokens) > 1
+            and tokens[-1] == "count"
+            and tokens[-2] in _MODEL_SIZED_TOKENS
+        )
+        if not (sized or counted):
+            continue
+        annotation = ast.unparse(node.annotation)
+        is_list = bool(re.search(r"\b(?:list|tuple|Sequence)\[", annotation))
+        is_int = bool(re.search(r"\bint\b", annotation))
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            for keyword in call.keywords:
+                capped = (
+                    (is_list and keyword.arg == "max_length")
+                    or (
+                        is_int
+                        and not is_list
+                        and counted
+                        and keyword.arg in {"le", "lt"}
+                    )
+                ) and (
+                    # A number or a named constant: both are an item count.
+                    (
+                        isinstance(keyword.value, ast.Name)
+                        and keyword.value.id not in _RANGE_CONSTANTS
+                    )
+                    or (
+                        isinstance(keyword.value, ast.Constant)
+                        and isinstance(keyword.value.value, int)
+                    )
+                )
+                if capped and ITEM_COUNT_PRAGMA not in lines[keyword.value.lineno - 1]:
+                    found.add(keyword.value.lineno)
+    return sorted(found)
+
+
+_MODEL_SIZED_PLURALS = frozenset(
+    token for token in _MODEL_SIZED_TOKENS if token.endswith("s")
+)
+_MAX_CONSTANT = re.compile(r"^_?MAX_[A-Z0-9_]+$")
+
+
+def _words(text: str) -> set[str]:
+    return {
+        part for token in re.split(r"\W+", text.lower()) for part in token.split("_")
+    }
+
+
+def runtime_count_caps(source: str) -> list[int]:
+    """Lines comparing ``len(...)`` with a count constant for model-sized things.
+
+    ``len(artifacts) > _MAX_ARTIFACTS`` is the runtime form of a ``max_length``
+    cap and refuses a model for its file count; a byte bound is the one to use.
+    A cap is a ``MAX_*`` name or a number of 64 or more, and the collection is
+    model-sized when its own name says so (``len(files)``) or the ``MAX_*`` name
+    does (``len(result) > _MAX_ARTIFACTS``). Small literals (``len(x) < 2``) are
+    shape checks, and ``len(path)`` measures a string.
+    """
+
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Compare):
+            continue
+        if not any(
+            isinstance(op, ast.Gt | ast.GtE | ast.Lt | ast.LtE) for op in node.ops
+        ):
+            continue
+        sides = [node.left, *node.comparators]
+        for left, right in pairwise(sides):
+            for call, other in ((left, right), (right, left)):
+                if not (
+                    isinstance(call, ast.Call)
+                    and isinstance(call.func, ast.Name)
+                    and call.func.id == "len"
+                    and call.args
+                ):
+                    continue
+                if (
+                    isinstance(other, ast.Name)
+                    and _MAX_CONSTANT.match(other.id)
+                    and other.id not in _RANGE_CONSTANTS
+                ):
+                    cap = True
+                    named = bool(_words(other.id) & _MODEL_SIZED_TOKENS)
+                elif isinstance(other, ast.Attribute) and re.match(
+                    r"(?i)^_?max_", other.attr
+                ):
+                    # ``len(files) >= limits.max_files``
+                    cap = True
+                    named = bool(_words(other.attr) & _MODEL_SIZED_TOKENS)
+                elif (
+                    isinstance(other, ast.Constant)
+                    and isinstance(other.value, int)
+                    and not isinstance(other.value, bool)
+                    and other.value >= 64
+                ):
+                    cap = True
+                    named = False
+                else:
+                    continue
+                collection = bool(
+                    _words(ast.unparse(call.args[0])) & _MODEL_SIZED_PLURALS
+                )
+                if cap and (named or collection):
+                    found.add(node.lineno)
+    return sorted(found)
 
 
 def added_lines(patch: str) -> dict[str, set[int]]:
@@ -716,6 +934,44 @@ def start_budget_derivations(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+def replanned_digest_reads(source: str) -> list[int]:
+    """``<x>.plan_digest`` read after ``accept_run_in_session`` in one function.
+
+    Admission re-plans and saves the run with the fresh digest, so the plan the
+    caller held is stale from that call on: the saved ``run.plan_digest`` is the
+    one reader of what the run carries (the 2026-10-31 superseded Start).
+    """
+    found: set[int] = set()
+    for scope in ast.walk(ast.parse(source)):
+        if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        accepts = [
+            node.lineno
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Call)
+            and (
+                node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else node.func.id
+                if isinstance(node.func, ast.Name)
+                else ""
+            )
+            == "accept_run_in_session"
+        ]
+        if not accepts:
+            continue
+        found.update(
+            node.lineno
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Attribute)
+            and node.attr == "plan_digest"
+            and isinstance(node.ctx, ast.Load)
+            and not (isinstance(node.value, ast.Name) and node.value.id == "run")
+            and node.lineno > min(accepts)
+        )
+    return sorted(found)
+
+
 # A provider is contacted only through ``download.py:_open_provider``, which
 # holds back a provider under its cooldown and narrows the parallel streams on
 # its rate limit. A direct opener call bypassed both (the Hugging Face
@@ -738,6 +994,92 @@ _ANONYMOUS_SEND_MODULES = frozenset(
         "control/src/vonk_control/model_cache/github_lfs.py",
     }
 )
+
+
+_MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
+
+
+def _targets_membership_rows(node: ast.AST) -> bool:
+    """Whether a condition names specific rows: ``key.in_(...)`` or ``key == x``.
+
+    ``not_in`` and ``is_not(None)`` still read every other set's rows.
+    """
+
+    def key(value: ast.AST) -> bool:
+        return isinstance(value, ast.Attribute) and value.attr in _MEMBERSHIP_KEYS
+
+    return any(
+        (
+            isinstance(inner, ast.Call)
+            and isinstance(inner.func, ast.Attribute)
+            and inner.func.attr == "in_"
+            and key(inner.func.value)
+        )
+        or (
+            isinstance(inner, ast.Compare)
+            and all(isinstance(op, ast.Eq) for op in inner.ops)
+            and (key(inner.left) or any(key(item) for item in inner.comparators))
+        )
+        for inner in ast.walk(node)
+    )
+
+
+def unfiltered_membership_selects(source: str) -> list[int]:
+    """Lines reading ``ModelCacheSetArtifact`` without naming rows or a limit.
+
+    A request or removal path pays for the sets it names, not for every
+    membership row of the cache (a Seq Scan of ~31k rows per acceptance).
+    Covers ``select(...)``, ``sa.select(...)`` and ``session.query(...)``; the
+    read is scoped only by a chained ``.where``/``.filter``/``.filter_by`` that
+    targets ``artifact_set_sha256`` or ``artifact_sha256`` rows, or a ``.limit``.
+    """
+
+    tree = ast.parse(source)
+
+    def is_root(node: ast.AST) -> TypeGuard[ast.Call]:
+        return (
+            isinstance(node, ast.Call)
+            and (
+                (isinstance(node.func, ast.Name) and node.func.id == "select")
+                or (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"select", "query"}
+                )
+            )
+            and any(
+                isinstance(inner, ast.Name) and inner.id == "ModelCacheSetArtifact"
+                for arg in node.args
+                for inner in ast.walk(arg)
+            )
+        )
+
+    scoped: set[int] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        attr = node.func.attr
+        if attr == "limit":
+            targeted = True
+        elif attr in {"where", "filter"}:
+            targeted = any(_targets_membership_rows(arg) for arg in node.args)
+        elif attr == "filter_by":
+            targeted = any(item.arg in _MEMBERSHIP_KEYS for item in node.keywords)
+        else:
+            continue
+        receiver: ast.AST = node.func.value
+        while isinstance(receiver, ast.Call):
+            if targeted and is_root(receiver):
+                scoped.add(id(receiver))
+            receiver = (
+                receiver.func.value
+                if isinstance(receiver.func, ast.Attribute)
+                else ast.Constant(None)
+            )
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if is_root(node) and id(node) not in scoped
+    )
 
 
 def provider_opener_calls(source: str) -> list[tuple[int, str | None]]:
@@ -1147,6 +1489,21 @@ def check_source(
                         )
                     )
                 )
+            # One definition of a recipe's current revision: the catalog head
+            # (catalog_queries.active_head_revision). Any use of revision_number
+            # (ordering, max, comparison, sorting) can pick a reverted revision
+            # over the head. Only the revision-number allocators and the column
+            # definition may name it.
+            if (
+                path.startswith("control/src/vonk_control/")
+                and path not in REVISION_NUMBER_ALLOCATORS
+                and not path.startswith("control/src/vonk_control/models/")
+            ):
+                hits.extend(
+                    (line, "revision_number: current is the catalog head")
+                    for line, text in enumerate(source.splitlines(), 1)
+                    if line in added and re.search(r"\brevision_number\b", text)
+                )
             hits.extend(
                 (site.line, "provenance comparison")
                 for site in identity.scan_source(source, path=path)
@@ -1347,6 +1704,29 @@ def check_source(
     if (
         python
         and not is_test
+        and "plan-digests" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, "plan digest read from the pre-admission plan (use run.plan_digest)")
+            for line in replanned_digest_reads(source)
+        )
+    if python and path in BACKGROUND_OWNERS and "background-retries" in modes:
+        hits.extend(
+            (
+                line,
+                (
+                    "in-request retry helper in a background owner (resolve once "
+                    "and re-observe on its schedule; residue: core.py "
+                    "_stored_manifest.rebuild, recipe_routes service "
+                    "decide_publication/_execute and withdrawal.py's hand-rolled loop)"
+                ),
+            )
+            for line in background_retry_calls(source)
+        )
+    if (
+        python
+        and not is_test
         and "movement" in modes
         and path.startswith("control/src/")
     ):
@@ -1362,13 +1742,69 @@ def check_source(
         and path.startswith("control/src/vonk_control/model_cache/")
         and path != "control/src/vonk_control/model_cache/storage.py"
     ):
-        # NAS space is decided once, in storage.py's _storage_fits, next to what
+        # NAS space is decided once, in storage.py's _storage_shortfall, next to what
         # the running transfers still write. A comparison with the free disk
         # alone let parallel downloads overcommit the volume (#1910).
         hits.extend(
-            (line, "NAS space read outside storage.py; use _storage_fits")
+            (line, "NAS space read outside storage.py; use _storage_shortfall")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "capacity-refusals" in modes
+        and path.startswith("control/src/")
+        and path not in CAPACITY_REFUSAL_SITES
+    ):
+        # A recipe's declared peak and swap are estimates, tried on hardware and
+        # judged by the host memory guard (owner 2026-11-02). "Demand exceeds
+        # capacity" ends a request for good, so only the classified sites may
+        # emit it; a memory or swap estimate waits or is tried, never ends.
+        hits.extend(
+            (line, "demand-exceeds-capacity outside its classified sites")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\b(?:RESOURCE_)?DEMAND_EXCEEDS_CAPACITY\b", text)
+            and CAPACITY_REFUSAL_MARKER not in text
+        )
+    if (
+        python
+        and not is_test
+        and "agent-422" in modes
+        and path.startswith("control/src/vonk_control/agent_api/")
+    ):
+        hits.extend(
+            (line, "agent-facing 422 outside body validation; answer a wait")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", text)
+            and AGENT_422_VERDICT_MARKER not in text
+        )
+    if (
+        python
+        and not is_test
+        and "fixed-reserves" in modes
+        and path.startswith("control/src/")
+    ):
+        # A reserve of volume space is a share of the volume (#1962): a fixed
+        # byte count was 0.1 % of the NAS volume PostgreSQL shares with the
+        # model cache, and a full volume stopped the database.
+        hits.extend(
+            (line, "fixed byte reserve; derive it from the volume's total")
+            for line, text in enumerate(source.splitlines(), 1)
+            if (match := FIXED_RESERVE.search(text))
+            and (path, match.group(1)) not in FIXED_RESERVE_VERDICTS
+        )
+    if (
+        python
+        and not is_test
+        and "identity" in modes
+        and path.startswith("control/src/")
+    ):
+        marker = TITLE_IDENTITY_VERDICTS.get(path)
+        hits.extend(
+            (line, "name built from a display title; derive it from identity")
+            for line, text in enumerate(source.splitlines(), 1)
+            if TITLE_IDENTITY.search(text) and not (marker and marker in text)
         )
     if (
         python
@@ -1387,6 +1823,47 @@ def check_source(
             (line, "model sets chosen by first-requester digest; use lineage.py")
             for line, text in enumerate(source.splitlines(), 1)
             if "ModelCacheSet.model_content_sha256" in text
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/")
+        and path
+        not in {
+            "control/src/vonk_control/model_cache/removal_execution.py",
+            "control/src/vonk_control/model_cache/partials_collection.py",
+        }
+    ):
+        # Only the removal executor unlinks model files: it alone applies the
+        # yield-to-newer-owner rule (retained objects, owned sets) first.
+        hits.extend(
+            (line, "model file removal outside removal_execution.py")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\b_remove_model_(?:object_files|partial_set)\(", text)
+            and not re.match(r"\s*def ", text)
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/")
+    ):
+        hits.extend(
+            (line, "whole-table membership read; select only the named sets")
+            for line in unfiltered_membership_selects(source)
+        )
+    if (
+        python
+        and not is_test
+        and "item-counts" in modes
+        and path.startswith(("control/src/", "agent_protocol/src/"))
+    ):
+        hits.extend(
+            (line, "item-count cap on a model-sized list; bound by bytes instead")
+            for line in sorted(
+                {*model_sized_count_caps(source), *runtime_count_caps(source)}
+            )
         )
     if (
         python
@@ -1434,6 +1911,40 @@ def check_source(
                 r"|\[[\"']running[\"']\]\s*(?:>|>=)\s*\d",
                 text,
             )
+        )
+    if (
+        python
+        and not is_test
+        and "event-loops" in modes
+        and path.startswith("src/cluster_profiles/")
+        and path != "src/cluster_profiles/control_transport.py"
+    ):
+        # Every event-loop entry goes through HTTPSResponse._run, which keeps
+        # a Ctrl-C a Ctrl-C (exit 130) however the runner's SIGINT race lands.
+        hits.extend(
+            (line, "event loop entered outside control_transport.py:HTTPSResponse._run")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\b(?:asyncio\.run|asyncio\.Runner|uvloop\.run|anyio\.run)\(|\.run_until_complete\(",
+                text.split("#", 1)[0],
+            )
+        )
+    if (
+        path.startswith("deploy/compose/")
+        and path.endswith(".sh")
+        and not is_test
+        and "trap-waits" in modes
+    ):
+        hits.extend(
+            (line, shell_trap_waits.KIND)
+            for line in shell_trap_waits.scan_source(source)
+        )
+    if python and path.startswith("control/src/") and "locked-io" in modes:
+        hits.extend((line, locked_io.KIND) for line in locked_io.scan_source(source))
+    if python and not is_test and "scratch-names" in modes:
+        hits.extend(
+            (line, scratch_names.KIND)
+            for line in scratch_names.scan_source(source, path)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(
@@ -1484,6 +1995,33 @@ def check_source(
         set(noexit_hits)
         | {f"{path}:{line}: {kind}" for line, kind in hits if line in added}
     )
+
+
+# Background owners keep their own re-observation schedule; the in-request retry
+# helpers sleep inside the caller. Known residue, not an allowlist:
+# core.py `_stored_manifest.rebuild` still calls resolve_artifact_set.
+BACKGROUND_OWNERS = frozenset(
+    f"control/src/vonk_control/model_cache/{name}.py"
+    for name in ("revisions", "inventory", "observation", "storage", "repair")
+) | {
+    f"control/src/vonk_control/recipe_routes/{name}.py"
+    for name in ("withdrawal", "service")
+}
+BACKGROUND_RETRY_CALLS = frozenset({"resolve_artifact_set", "bounded_attempts"})
+
+
+def background_retry_calls(source: str) -> list[int]:
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in BACKGROUND_RETRY_CALLS
+            or isinstance(node.func, ast.Name)
+            and node.func.id in BACKGROUND_RETRY_CALLS
+        )
+    ]
 
 
 def planner_defect_waits(source: str) -> list[int]:

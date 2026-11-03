@@ -55,8 +55,8 @@ class ArtifactInspection:
     reclaimable_bytes: int
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
-    artifact_digests: tuple[str, ...] = ()
-    reclaimable_digests: tuple[str, ...] = ()
+    # How many files the set holds; the plan never lists them (a model is a set).
+    artifact_count: int = 0
     freshness: tuple[FreshnessEvidence, ...] = ()
     blockers: tuple[RunSwitchReason, ...] = ()
     warnings: tuple[RunSwitchReason, ...] = ()

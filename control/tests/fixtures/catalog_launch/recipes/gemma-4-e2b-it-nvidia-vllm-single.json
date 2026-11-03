@@ -30,22 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Executable Candidate recipe of NVIDIA's DGX Spark playbook (vllm) for Gemma 4 E2B IT: vllm/vllm-openai:gemma4-cu130 (Gemma 4 custom container named by the playbook), pinned by arm64 digest, serving the exact model revision through `vllm serve` with the playbook's flags (vLLM defaults where the playbook passes none). Resource envelopes are estimates from vLLM's default 0.9 GPU memory utilization, not measurements; physical Spark acceptance is pending.",
-  "tags": [
-   "executable",
-   "candidate",
-   "nvidia",
-   "vllm",
-   "openai",
-   "single",
-   "spark",
-   "gemma",
-   "bf16"
-  ],
-  "title": "Gemma 4 E2B IT vLLM single Spark (NVIDIA playbook)"
- },
  "models": [
   {
    "files": [
@@ -142,7 +126,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "24524aaa082a2a681962a94367bede0aab18651b01c1d68114df4fbaf419a51a",
+    "content_sha256": "f4bb913140447a15cc5c67ee58958e21f8343cefdad8949614d7b8946551c370",
     "kind": "model",
     "publisher": "google",
     "slug": "gemma-4-e2b-it-3e22461f"
@@ -155,11 +139,11 @@
    "vLLM contributors",
    "Google DeepMind"
   ],
-  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/b3bc0813e1864e54ce5ed9a0cc74e0b03745c027/nvidia/vllm/README.md"
+  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/98b3a473f30916ec05eef3e7a01b781aaf4daa8a/nvidia/vllm/README.md"
  },
  "release": {
-  "released_at": "2026-04-10",
-  "version": "1.0.0"
+  "released_at": "2026-10-12",
+  "version": "1.0.5"
  },
  "runtime": {
   "arguments": [
@@ -172,6 +156,10 @@
     "name": "max-model-len",
     "setting": "context_tokens",
     "value": null
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "value": "0.85"
    }
   ],
   "engine": "vllm",
@@ -226,7 +214,7 @@
       "working_bytes": 16000000000
      },
      "memory": {
-      "peak_bytes": 112000000000,
+      "peak_bytes": 119063746765,
       "reserve_bytes": 8000000000
      }
     }

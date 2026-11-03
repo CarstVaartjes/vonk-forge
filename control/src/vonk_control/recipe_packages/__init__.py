@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import os
 import re
 import shutil
 import tarfile
 import tempfile
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -90,6 +92,10 @@ MAX_PACKAGE_TOTAL_BYTES = 256 * 1024 * 1024
 MAX_LIBRARY_BYTES = 4 * 1024 * 1024 * 1024
 MAX_LIBRARY_MEMBERS = 8192
 _COPY_CHUNK = 1024 * 1024
+# A private temporary file this old belongs to a process that was killed while
+# writing it; a live download or commit touches its file far more often.
+_ORPHAN_AGE_SECONDS = 24 * 60 * 60
+_LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
@@ -262,6 +268,7 @@ class RecipePackageClient:
         self._listing_unchanged = False
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
+        self._remove_orphans()
         self._client = httpx2.Client(
             base_url=self._download_origin,
             timeout=httpx2.Timeout(timeout_seconds),
@@ -276,11 +283,29 @@ class RecipePackageClient:
         self._packages: dict[str, RecipePackageEntry] = {}
         self._prepared: dict[str, RecipeLibraryItem] = {}
         self._snapshot_path = self._cache_root / "snapshot.json"
-        self._candidate_path = self._cache_root / "snapshot.candidate.json"
-        self._candidate_active = False
+        # The verified generation that ``prepare`` commits to ``snapshot.json``.
+        # It stays in this process: the API and the worker share the cache
+        # root, so a shared candidate file is one the other process can consume.
+        self._candidate: bytes | None = None
 
     def close(self) -> None:
         self._client.close()
+
+    def _remove_orphans(self) -> None:
+        """Remove private temporary files a killed process left behind."""
+        cutoff = time.time() - _ORPHAN_AGE_SECONDS
+        for pattern in (f".{RELEASE_LIBRARY}.*.part", ".snapshot.*.tmp", "??/.*.tmp"):
+            for path in self._cache_root.glob(pattern):
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink(missing_ok=True)
+                except OSError as error:
+                    # The next start tries again; nothing reads these files.
+                    _LOGGER.warning(
+                        "recipe package cache orphan %s was not removed: %s",
+                        path.name,
+                        error.strerror or error.errno,
+                    )
 
     def list(self) -> RecipeLibrarySnapshot:
         try:
@@ -323,14 +348,13 @@ class RecipePackageClient:
             raise
         snapshot, packages = self._parse_index(raw, publication_commit=publication)
         snapshot, packages = _bind_release(snapshot, packages, release)
-        self._persist_index(
+        self._candidate = _persisted_payload(
             raw,
             publication_commit=publication,
             release=release,
             library_digest=resolved[2],
         )
         self._library_digest = resolved[2]
-        self._candidate_active = True
         self._release = release
         self._packages = packages
         self._snapshot = snapshot
@@ -349,7 +373,13 @@ class RecipePackageClient:
                 RecipePackageCode.UNAVAILABLE,
                 f"recipe release {tag} does not contain {RELEASE_LIBRARY}",
             )
-        partial = self._cache_root / f".{RELEASE_LIBRARY}.part"
+        # Each download owns its partial file; another process's download
+        # never truncates or removes it.
+        fd, name = tempfile.mkstemp(
+            prefix=f".{RELEASE_LIBRARY}.", suffix=".part", dir=self._cache_root
+        )
+        os.close(fd)
+        partial = Path(name)
         try:
             self._download_library(tag, partial)
             return self._ingest_library(tag, partial)
@@ -833,56 +863,40 @@ class RecipePackageClient:
             problems=tuple(problems),
         ), packages
 
-    def _persist_index(
-        self,
-        raw: bytes,
-        *,
-        publication_commit: str,
-        release: _VerifiedRelease,
-        library_digest: str | None,
-    ) -> None:
-        # Keep the signature material so a restart re-verifies the previous
-        # generation instead of trusting local state.
-        payload: dict[str, object] = {
-            "index": raw.decode("utf-8"),
-            "publication_commit": publication_commit,
-            "library_digest": library_digest,
-            "release": {
-                "tag": release.tag,
-                "assets": sorted(release.assets),
-                "checksums": release.checksums_raw.decode("ascii"),
-                "bundle": release.bundle_raw.decode("utf-8"),
-            },
-        }
-        temporary = self._candidate_path.with_suffix(".tmp")
-        try:
-            temporary.write_text(
-                json.dumps(payload, separators=(",", ":")), encoding="utf-8"
-            )
-            os.replace(temporary, self._candidate_path)
-        except OSError:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
-
     def _promote_candidate(self) -> None:
-        if not self._candidate_active:
+        candidate = self._candidate
+        if candidate is None:
             return
+        # A private temporary file, then one atomic rename: concurrent
+        # readers on this cache root each commit a whole generation.
+        temporary: Path | None = None
         try:
-            os.replace(self._candidate_path, self._snapshot_path)
+            fd, name = tempfile.mkstemp(
+                prefix=".snapshot.", suffix=".tmp", dir=self._cache_root
+            )
+            temporary = Path(name)
+            with os.fdopen(fd, "wb") as output:
+                output.write(candidate)
+            os.replace(temporary, self._snapshot_path)
+            temporary = None
         except OSError as error:
+            # The candidate stays in memory, so the next prepare writes it
+            # again once the cause clears.
             raise RecipePackageUnsettled(
                 RecipePackageCode.CACHE_UNAVAILABLE,
-                "recipe package snapshot could not be committed",
+                "recipe package snapshot could not be committed: "
+                f"{type(error).__name__} {error.strerror or error.errno}",
             ) from error
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
         # The candidate becomes the only previous-good generation after every
         # package has been fetched and decoded.  A second list() in the same
         # process must still compare against this generation, rather than the
         # unvalidated candidate it replaced.
         self._previous_snapshot = self._snapshot
         self._previous_packages = dict(self._packages)
-        self._candidate_active = False
+        self._candidate = None
 
     def _persisted_library_digest(self) -> str | None:
         """The GitHub digest of the bundle the persisted generation came from."""
@@ -902,13 +916,7 @@ class RecipePackageClient:
         fresh data, so this is not the corruption-becomes-absent case.
         """
 
-        self._candidate_active = False
-        try:
-            # A candidate left by an interrupted process is never eligible for
-            # promotion by an offline prepare.
-            self._candidate_path.unlink()
-        except OSError:
-            pass
+        self._candidate = None
         try:
             payload = _json(self._snapshot_path.read_bytes())
             if not isinstance(payload, Mapping) or not isinstance(
@@ -1183,7 +1191,6 @@ class RecipePackageClient:
                 RecipePackageCode.PACKAGE_INVALID,
                 "recipe package identity or contents are invalid",
             ) from error
-        metadata = recipe.metadata
         package_digest = (
             package.package_sha256 if package is not None else _sha256(archive)
         )
@@ -1237,9 +1244,6 @@ class RecipePackageClient:
         )
         return replace(
             item,
-            title=metadata.title,
-            description=metadata.description,
-            tags=tuple(metadata.tags),
             document=recipe_document,
             release=RecipeLibraryRelease(
                 recipe.release.version, recipe.release.released_at
@@ -1458,6 +1462,32 @@ def _bind_release(
 def _asset_label(name: str) -> str:
     """Return a release asset name that is safe to show, or a placeholder."""
     return name if _ASSET_NAME.fullmatch(name) else "<invalid asset name>"
+
+
+def _persisted_payload(
+    raw: bytes,
+    *,
+    publication_commit: str,
+    release: _VerifiedRelease,
+    library_digest: str | None,
+) -> bytes:
+    """The offline cache record for one verified generation.
+
+    It keeps the signature material so a restart re-verifies the previous
+    generation instead of trusting local state.
+    """
+    payload: dict[str, object] = {
+        "index": raw.decode("utf-8"),
+        "publication_commit": publication_commit,
+        "library_digest": library_digest,
+        "release": {
+            "tag": release.tag,
+            "assets": sorted(release.assets),
+            "checksums": release.checksums_raw.decode("ascii"),
+            "bundle": release.bundle_raw.decode("utf-8"),
+        },
+    }
+    return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
 def _persisted_release(value: object, index: bytes) -> _VerifiedRelease | None:

@@ -13,7 +13,9 @@ from vonk_agent_protocol.installer_setup import NasInstallTemplate
 from vonk_agent_protocol.lifecycle_vocabulary import SecurityRefusalReason, WaitReason
 
 from . import publication
+from .compose import resolve_compose
 from .environment import (
+    SELECTION_ENV,
     configure_hermes,
     profiles,
     recover_environment,
@@ -83,7 +85,7 @@ def fresh(
         environment = {item.env: item.value for item in payload.internal_values}
         if payload.install_modes:
             modes = payload.install_modes
-            environment["COMPOSE_PROFILES"] = "" if lab else modes.secure_remote_value
+            environment[SELECTION_ENV] = "" if lab else modes.secure_remote_value
             if lab:
                 environment.update((item.env, item.value) for item in modes.lab_values)
         for required in payload.required_values:
@@ -116,7 +118,9 @@ def fresh(
         for name in ("backups", "backups-offhost"):
             ensure_directory(staging / name)
         atomic_replace(
-            staging / "docker-compose.yaml", payload.docker_compose_yaml.encode(), 0o644
+            staging / "docker-compose.yaml",
+            resolve_compose(payload.docker_compose_yaml, environment),
+            0o644,
         )
         atomic_replace(staging / ".env", render_environment(environment))
         for name, value in members.items():
@@ -151,12 +155,12 @@ def upgrade_credentials(
     else:
         real_directory(gateway)
     environment = recover_environment(payload, bundle)
-    if payload.install_modes and "COMPOSE_PROFILES" not in environment:
+    if payload.install_modes and SELECTION_ENV not in environment:
         raise ObservationUnavailable()
     lab = (
         payload.install_modes is not None
         and payload.install_modes.secure_remote_value
-        not in profiles(environment.get("COMPOSE_PROFILES", ""))
+        not in profiles(environment.get(SELECTION_ENV, ""))
     )
     if payload.install_modes and lab:
         for item in payload.install_modes.lab_values:
@@ -172,6 +176,12 @@ def upgrade_credentials(
         environment[required.env] = value
     hermes_enabled = configure_hermes(payload, environment, requested_hermes)
     dropped = retain_known(payload, environment)
+    # The Compose file follows the same selection as .env: no profile flags.
+    atomic_replace(
+        bundle / "docker-compose.yaml",
+        resolve_compose(payload.docker_compose_yaml, environment),
+        0o644,
+    )
     # Compose and environment are independently repairable projections. A PKI
     # custody failure below never rolls them back or fabricates signing authority.
     atomic_replace(bundle / ".env", render_environment(environment))
@@ -247,9 +257,6 @@ def prepare(
         if not upgrade and metadata(bundle) is None:
             return fresh(payload, bundle, prompt, hermes_enabled)
         real_directory(bundle)
-        atomic_replace(
-            bundle / "docker-compose.yaml", payload.docker_compose_yaml.encode(), 0o644
-        )
         return retry(
             lambda: upgrade_credentials(payload, bundle, prompt, hermes_enabled)
         )

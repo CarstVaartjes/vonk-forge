@@ -25,7 +25,7 @@ def test_fleet_review_and_receipt_are_owned_by_the_same_durable_removal(
     with sessions.begin() as session:
         session.add(User(subject="operator", role="operator"))
     root = tmp_path / "cache"
-    service = ModelCacheService(sessions, root, reserve_bytes=0, fixture_sources=True)
+    service = ModelCacheService(sessions, root, free_fraction=0, fixture_sources=True)
     try:
         selector, model_digest, path = _prepare_removal_target(
             service, sessions, tmp_path, slug="fleet-api", data=b"finished"
@@ -54,7 +54,7 @@ def test_fleet_review_and_receipt_are_owned_by_the_same_durable_removal(
                 )
         service.close()
         service = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True
+            sessions, root, free_fraction=0, fixture_sources=True
         )
         client, headers = _api(sessions, model_cache=service)
         with client:

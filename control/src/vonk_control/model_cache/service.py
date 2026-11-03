@@ -17,6 +17,7 @@ from ..lifecycle import Reconciler
 from ..lifecycle.model_cache import ModelCacheAdapter, ModelCacheStore
 from ..model_cache_streams import StreamGovernor
 from ..recipe_operations.service import RecipeOperationService
+from ..settings import FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION
 from ..storage_demands import StorageDemands
 from .availability import AvailabilityMixin
 from .cancellation import CancellationMixin
@@ -95,7 +96,7 @@ class ModelCacheService(
         sessions: sessionmaker[Session],
         root: Path,
         *,
-        reserve_bytes: int = 10 * 1024**3,
+        free_fraction: float = FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION,
         max_parallel_downloads: int = _DEFAULT_MAX_PARALLEL_DOWNLOADS,
         max_download_streams: int = _DEFAULT_MAX_DOWNLOAD_STREAMS,
         clock: Callable[[], datetime] | None = None,
@@ -114,11 +115,11 @@ class ModelCacheService(
         if root.is_symlink():
             raise InvalidValue("model cache root must not be a symlink")
         if (
-            not isinstance(reserve_bytes, int)
-            or isinstance(reserve_bytes, bool)
-            or reserve_bytes < 0
+            not isinstance(free_fraction, float | int)
+            or isinstance(free_fraction, bool)
+            or not 0 <= free_fraction <= 1
         ):
-            raise InvalidValue("model cache reserve must be a non-negative integer")
+            raise InvalidValue("model cache free fraction must be between 0 and 1")
         if (
             not isinstance(max_parallel_downloads, int)
             or isinstance(max_parallel_downloads, bool)
@@ -151,7 +152,7 @@ class ModelCacheService(
         self._fleet_lifecycle: RecipeOperationService | None = None
         self._sessions = sessions
         self._root = root
-        self._reserve_bytes = reserve_bytes
+        self._free_fraction = float(free_fraction)
         self._storage_demands: StorageDemands | None = None
         self._max_parallel_downloads = max_parallel_downloads
         self._streams = StreamGovernor(max_download_streams)

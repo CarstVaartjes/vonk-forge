@@ -24,32 +24,12 @@
    "adapter": "openai",
    "health_path": "/v1/models",
    "model_aliases": [
-    "/models/Step-3.7-Flash-NVFP4"
+    "Step-3.7-Flash-NVFP4"
    ],
    "port": 8888
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "r0b0tlab's plug-and-play dual-GB10 vLLM serve of StepFun Step 3.7 Flash NVFP4 (198B sparse MoE vision-language model, ModelOpt NVFP4, fp8 KV): a vLLM dev build (0.1.dev16944) with Ray 2.55.1 and FlashInfer 0.6.11, tensor parallel 2 over Ray, native FlashInfer-CUTLASS NVFP4 (no Marlin or emulation), step3p5 reasoning and tool parsers, eager execution. Upstream README profile: 65,536 token context, 4 sequences, 0.90 memory utilization; it validated 32K context and reports about 16.5 tok/s single-stream decode (upstream claims, not measured here). Licences: Apache-2.0 for the model and the package (information only). The image serves the model under the name /models/Step-3.7-Flash-NVFP4, as upstream's examples do.",
-  "tags": [
-   "candidate",
-   "distributed",
-   "executable",
-   "nvfp4",
-   "openai",
-   "r0b0tlab",
-   "ray",
-   "reasoning",
-   "spark",
-   "step-3-7-flash",
-   "tool-use",
-   "vision-language",
-   "vllm"
-  ],
-  "title": "Step 3.7 Flash NVFP4 vLLM dual Spark (r0b0tlab)"
- },
  "models": [
   {
    "files": [
@@ -375,7 +355,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "f052976a156b7aaf66bc238cb72c889489f337e17be8d0b3311347c44f1911af",
+    "content_sha256": "70fce94ed17df64bc817b9ebb052a57e76c67d3e62122db625e533fca1e03045",
     "kind": "model",
     "publisher": "stepfun-ai",
     "slug": "step-3-7-flash-nvfp4-42755324"
@@ -399,7 +379,7 @@
    {
     "name": "served-model-name",
     "setting": null,
-    "value": "/models/Step-3.7-Flash-NVFP4"
+    "value": "Step-3.7-Flash-NVFP4"
    },
    {
     "name": "trust-remote-code",
@@ -437,11 +417,6 @@
     "value": true
    },
    {
-    "name": "gpu-memory-utilization",
-    "setting": null,
-    "value": "0.90"
-   },
-   {
     "name": "max-model-len",
     "setting": "context_tokens",
     "value": null
@@ -475,6 +450,16 @@
     "name": "enforce-eager",
     "setting": null,
     "value": true
+   },
+   {
+    "name": "kv-cache-memory-bytes",
+    "setting": null,
+    "value": 3019898880
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.517672"
    }
   ],
   "engine": "vllm",
@@ -544,7 +529,7 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 115000000000,
+      "peak_bytes": 75640700996,
       "reserve_bytes": 8000000000
      }
     }
@@ -561,7 +546,7 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 115000000000,
+      "peak_bytes": 75640700996,
       "reserve_bytes": 8000000000
      }
     }
@@ -604,7 +589,7 @@
          "role": "user"
         }
        ],
-       "model": "/models/Step-3.7-Flash-NVFP4"
+       "model": "Step-3.7-Flash-NVFP4"
       },
       "method": "POST",
       "path": "/v1/chat/completions",

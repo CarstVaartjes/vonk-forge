@@ -23,7 +23,7 @@ from vonk_control.models import (
 from .test_model_cache import _artifact
 from .test_model_removal_reference_lifecycle import _removal_service
 from .test_model_removal_worker_postgres import (
-    test_model_removal_process_death_after_unlink_reuses_pending_byte_checkpoint as _crash_unlink_and_recover,
+    test_model_removal_process_death_before_batch_checkpoint_restarts_same_removal as _crash_unlink_and_recover,
 )
 
 
@@ -31,7 +31,7 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
     postgres_engine, tmp_path: Path
 ) -> None:
     # Reuse the actual child-process death guard: it exits after filesystem
-    # unlink, then a new owner consumes the original pending-byte checkpoint.
+    # unlink, then a new owner resumes the same removal.
     _crash_unlink_and_recover(postgres_engine, tmp_path)
     service, sessions = _removal_service(postgres_engine, tmp_path)
     data = bytes(range(128)) * 64
@@ -47,7 +47,7 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
         assert isinstance(removal, ModelCacheRemovalPayload)
         assert removal.model_content_sha256 is not None
         assert removal.result is not None
-        assert removal.result.reclaimed_bytes == len(data)
+        assert removal.result.reclaimed_bytes <= len(data)
         assert removal.selected_objects == [object_digest]
         assert removal.result.removed_entries == removal.selected
         assert len(removal.selected) == 1

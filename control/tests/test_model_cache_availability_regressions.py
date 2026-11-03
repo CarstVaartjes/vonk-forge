@@ -72,7 +72,7 @@ def _service(tmp_path: Path, sessions, *, maximum: int = 4, handler=None, clock=
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=maximum,
         fixture_sources=True,
         http_client=client,
@@ -378,7 +378,11 @@ def test_postgres_concurrent_claims_are_distinct(
             first_claim = first._claim_operations(limit=1, respect_backoff=True)
         finally:
             first_committed.set()
-        claims = [first_claim, pending.result(timeout=10)]
+        raced = pending.result(timeout=10)
+    # The second worker read the facts of one candidate (its limit) and lost it
+    # to the first: it claims nothing this pass, and the other next pass.
+    assert raced == []
+    claims = [first_claim, second._claim_operations(limit=1, respect_backoff=True)]
     claimed = {claim[0][0] for claim in claims}
     assert claimed == {operation_a.id, operation_b.id}
     first.close()
@@ -724,7 +728,7 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=1,
         fixture_sources=True,
         http_client=client,
@@ -914,7 +918,7 @@ def test_hf_access_failure_resumes_automatically_after_token_change(
     service = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         max_parallel_downloads=1,
         fixture_sources=True,
         http_client=client,

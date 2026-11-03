@@ -63,11 +63,9 @@ def job_recipe(recipe: dict[str, object]) -> None:
     """Turn the canary Recipe into an artifact job Recipe of the same build."""
 
     identity: dict[str, object] = recipe["identity"]  # type: ignore[assignment]
-    metadata: dict[str, object] = recipe["metadata"]  # type: ignore[assignment]
     runtime: dict[str, object] = recipe["runtime"]  # type: ignore[assignment]
     build = recipe["execution"]["build"]  # type: ignore[index]
     identity["slug"] = f"{identity['slug']}-artifact-job"
-    metadata["title"] = f"{metadata['title']} (artifact job)"
     runtime["engine"] = "diffusers"
     runtime["entrypoint"] = [JOB_EXECUTABLE]
     # A Recipe knob is a parameter each job may set: the stub's exit code.

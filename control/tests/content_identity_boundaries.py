@@ -136,6 +136,18 @@ def _only_literals_beside(operands: Sequence[ast.expr]) -> bool:
     return len(variable) <= 1
 
 
+def _is_primary_key_lookup(operands: Sequence[ast.expr]) -> bool:
+    """``Model.id == value``: the row lookup by its own key, not a sameness decision."""
+
+    return len(operands) == 2 and any(
+        isinstance(operand, ast.Attribute)
+        and operand.attr == "id"
+        and isinstance(operand.value, ast.Name)
+        and operand.value.id[:1].isupper()
+        for operand in operands
+    )
+
+
 @dataclass(frozen=True)
 class Site:
     """One comparison on a provenance field."""
@@ -196,7 +208,11 @@ class _Collector(ast.NodeVisitor):
         operands = [node.left, *node.comparators]
         # A literal beside the only variable side makes this an existence or a
         # selector check, not a comparison of two things.
-        if not _only_literals_beside(operands) and _provenance_terms(operands):
+        if (
+            not _only_literals_beside(operands)
+            and not _is_primary_key_lookup(operands)
+            and _provenance_terms(operands)
+        ):
             self._add(node, PROVENANCE_COMPARISON)
         self.generic_visit(node)
 

@@ -927,16 +927,16 @@ async fn lost_observation_ack_replays_identical_content_after_restart() {
         .report_recipe_observation_envelope(&pending)
         .await
         .unwrap();
-    // Death here replays again; only the exact acknowledged content is removed.
+    // Death here replays again; the delivered page is then released.
     let mut different = pending.clone();
     different.runs[0].process_running = !different.runs[0].process_running;
-    assert!(state.acknowledge_recipe_observation(&different).is_err());
+    // Newer content never overwrites a page still in custody.
     assert!(state.retain_recipe_observation(&different).is_err());
     assert_eq!(
         state.pending_recipe_observation().unwrap().unwrap(),
         pending
     );
-    state.acknowledge_recipe_observation(&pending).unwrap();
+    state.release_pending_recipe_observation().unwrap();
     assert!(state.pending_recipe_observation().unwrap().is_none());
     assert_eq!(recovered.finish(), attempted);
 }
@@ -979,4 +979,144 @@ fn largest_inspection_wave_fits_the_edge_document_limit() {
         "observation wave exceeds edge/Controller bound: {}",
         bytes.len()
     );
+}
+
+/// One observation cycle against a node with no runs: it reports the empty
+/// snapshot as fresh evidence after dealing with the pending page.
+async fn pending_cycle(
+    server: &ObservationServer,
+    database_root: &std::path::Path,
+) -> Result<usize, RecipeObservationError> {
+    let runtime = tempdir().unwrap();
+    let runner = NoProcess;
+    let executor = RecipeExecutor {
+        client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        runtime: OciRuntime {
+            runner: &runner,
+            data_root: database_root,
+        },
+        runtime_root: runtime.path(),
+    };
+    executor
+        .report_recipe_run_observation_page(None)
+        .await
+        .map(|page| page.reported)
+}
+
+fn retain_pending(database_root: &std::path::Path, run_id: Uuid) -> Value {
+    let report = crate::client::build_exact_recipe_run_observations(
+        Utc::now(),
+        &[exact_observation(run_id)],
+    )
+    .unwrap();
+    let mut state = StateStore::open(&database_root.join("state.sqlite"), NODE_ID).unwrap();
+    state.retain_recipe_observation(&report).unwrap();
+    serde_json::to_value(&report).unwrap()
+}
+
+#[tokio::test]
+async fn refused_pending_observation_does_not_block_fresh_evidence() {
+    // Wrong implementation: a deterministic 422 for the pending page returns
+    // early every cycle, so no newer observation is ever collected or sent.
+    let root = tempdir().unwrap();
+    let pending = retain_pending(root.path(), Uuid::new_v4());
+    let server = ObservationServer::scripted(&[422, 204]);
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 2, "pending page, then fresh evidence");
+    assert_eq!(reports[0], pending);
+    assert_eq!(reports[1]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn transient_failure_keeps_the_pending_observation_until_delivered() {
+    // Wrong implementation: discarding on any error loses evidence a 5xx only
+    // delayed (a stop may already have removed its output).
+    let root = tempdir().unwrap();
+    let pending = retain_pending(root.path(), Uuid::new_v4());
+    let server = ObservationServer::scripted(&[503, 204]);
+    assert!(pending_cycle(&server, root.path()).await.is_err());
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_some());
+    drop(state);
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 3);
+    assert_eq!(reports[0], pending);
+    assert_eq!(reports[1], pending, "the same page is delivered again");
+    assert_eq!(reports[2]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn unreadable_pending_observation_is_discarded_and_the_cycle_proceeds() {
+    // Wrong implementation: a row written under an older schema fails the
+    // read with `?` and aborts every cycle after an agent upgrade.
+    let root = tempdir().unwrap();
+    {
+        let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        drop(state);
+        let connection = rusqlite::Connection::open(root.path().join("state.sqlite")).unwrap();
+        connection
+            .execute(
+                "INSERT INTO metadata(key,value) VALUES ('pending_recipe_observation', '{\"old\":1}')",
+                [],
+            )
+            .unwrap();
+    }
+    let server = ObservationServer::new(Some(204));
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn unjudged_refusals_keep_the_pending_observation() {
+    // Wrong implementation: dropping the page on any 4xx loses evidence when
+    // an edge (404/421) or an owner still settling (409) answers, not a verdict
+    // on the bytes.
+    for status in [404, 409, 421] {
+        let root = tempdir().unwrap();
+        retain_pending(root.path(), Uuid::new_v4());
+        let server = ObservationServer::scripted(&[status]);
+        assert!(pending_cycle(&server, root.path()).await.is_err());
+        let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        assert!(
+            state.pending_recipe_observation().unwrap().is_some(),
+            "HTTP {status} must keep the page"
+        );
+        server.finish();
+    }
+}
+
+#[tokio::test]
+async fn pending_row_stored_in_another_shape_is_settled_by_key() {
+    // Wrong implementation: settling by re-serialized content misses a row an
+    // older agent stored in a different (still parseable) byte shape, and the
+    // resulting error blocks every cycle again.
+    for statuses in [[422_u16, 204], [204, 204]] {
+        let root = tempdir().unwrap();
+        let pending = retain_pending(root.path(), Uuid::new_v4());
+        let database = root.path().join("state.sqlite");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE metadata SET value=?1 WHERE key='pending_recipe_observation'",
+                [serde_json::to_string_pretty(&pending).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+        let server = ObservationServer::scripted(&statuses);
+        pending_cycle(&server, root.path()).await.unwrap();
+        assert_eq!(server.finish().len(), 2);
+        let state = StateStore::open(&database, NODE_ID).unwrap();
+        assert!(state.pending_recipe_observation().unwrap().is_none());
+    }
 }

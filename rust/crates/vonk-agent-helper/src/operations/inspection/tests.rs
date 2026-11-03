@@ -47,6 +47,229 @@ fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
     }
 }
 
+/// One container's streams through the helper's real `docker logs` capture
+/// (`package_command::run_quiet`, kept as `commands.rs` hands it on), so a
+/// test sees exactly the bytes `process_exited` is given.
+fn through_docker_logs_capture(stdout: &[u8], stderr: &[u8]) -> CommandOutput {
+    let directory = tempfile::tempdir().unwrap();
+    let (out, err) = (directory.path().join("out"), directory.path().join("err"));
+    std::fs::write(&out, stdout).unwrap();
+    std::fs::write(&err, stderr).unwrap();
+    let mut command = std::process::Command::new("/bin/sh");
+    command
+        .args(["-c", "cat \"$1\"; cat \"$2\" >&2", "sh"])
+        .arg(&out)
+        .arg(&err);
+    let result =
+        crate::package_command::run_quiet(&mut command, std::time::Duration::from_secs(30))
+            .unwrap();
+    CommandOutput {
+        success: result.status.success() && !result.timed_out,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exit_code: result.status.code(),
+    }
+}
+
+fn exited(code: i32) -> crate::runtime_logs::ContainerExit {
+    crate::runtime_logs::ContainerExit {
+        exit_code: Some(code),
+        oom_killed: Some(false),
+        error: String::new(),
+        host_memory: None,
+    }
+}
+
+fn summary_of(
+    log: CommandOutput,
+    code: i32,
+) -> (
+    vonk_agent_protocol::generated::HostHelperProcessLogs,
+    String,
+) {
+    let OperationError::RuntimeProcessExited {
+        logs, exit_summary, ..
+    } = super::process_exited(Ok(log), Ok(exited(code)))
+    else {
+        panic!("a process exit must stay a process exit");
+    };
+    (*logs.expect("captured logs are carried"), exit_summary)
+}
+
+#[test]
+fn a_cause_the_retained_window_dropped_still_classifies_the_exit() {
+    // Shape of the two-Spark vLLM start on GB10 (qwen3-8-flash-next tonyd2wild
+    // dual, operation 05f6227e, 11-02, vLLM 8a728663).  stdout: the worker's
+    // `logger.exception("WorkerProc hit an exception.")` record
+    // (multiproc_executor.py:1055) with hundreds of C++ frames, then the
+    // engine's `logger.exception("EngineCore failed to start.")` record
+    // (core.py:1385) closing in `RuntimeError: Worker failed with error
+    // '<str(e)>', please check ...`, then the executor's "died unexpectedly"
+    // error (multiproc_executor.py:314).  The capture keeps stdout's last
+    // 32 KiB, which cuts the worker's record but keeps the engine's whole.
+    // stderr is what the evidence shows of it: warnings, frames, the pointer.
+    let worker = "(Worker_TP0 pid=250) ERROR 11-02 23:40:35 [multiproc_executor.py:1055] ";
+    let engine = "(EngineCore pid=176) ERROR 11-02 23:40:35 [core.py:1385] ";
+    let cuda = [
+        "CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.",
+        "For debugging consider passing CUDA_LAUNCH_BLOCKING=1",
+        "Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.",
+        "",
+        "Exception raised from c10_cuda_check_implementation at /pytorch/c10/cuda/CUDAException.cpp:44 (most recent call first):",
+    ];
+    let mut stdout = String::new();
+    for line in [
+        "WorkerProc hit an exception.",
+        "Traceback (most recent call last):",
+        "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/workspace.py\", line 207, in _ensure_workspace_size",
+        "    self._current_workspaces[workspace_id] = torch.empty(",
+        "torch.AcceleratorError: CUDA error: no kernel image is available for execution on the device",
+    ]
+    .into_iter()
+    .chain(cuda)
+    {
+        stdout.push_str(&format!("{worker}{line}\n"));
+    }
+    for frame in 0..300 {
+        stdout.push_str(&format!(
+            "{worker}frame #{frame}: <unknown function> + 0x1357680 (0xf07b08327680 in /usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cpu.so)\n"
+        ));
+    }
+    for line in [
+        "EngineCore failed to start.",
+        "Traceback (most recent call last):",
+        "  File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/executor/multiproc_executor.py\", line 436, in get_response",
+        "    raise RuntimeError(",
+        "RuntimeError: Worker failed with error 'CUDA error: no kernel image is available for execution on the device",
+    ]
+    .into_iter()
+    .chain(cuda)
+    {
+        stdout.push_str(&format!("{engine}{line}\n"));
+    }
+    for frame in 0..63 {
+        stdout.push_str(&format!(
+            "{engine}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)\n"
+        ));
+    }
+    stdout.push_str(&format!(
+        "{engine}', please check the stack trace above for the root cause\n\
+NCCL version 2.30.7+cuda12.9\n\
+(EngineCore pid=176) ERROR 11-02 23:40:39 [multiproc_executor.py:314] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n"
+    ));
+    let raw = "(EngineCore pid=176) ";
+    let mut stderr = format!(
+        "{raw}/usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated.\n"
+    )
+    .repeat(110);
+    for frame in 0..63 {
+        stderr.push_str(&format!(
+            "{raw}frame #{frame}: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)\n"
+        ));
+    }
+    stderr.push_str(&format!(
+        "{raw}', please check the stack trace above for the root cause\n"
+    ));
+    let log = through_docker_logs_capture(stdout.as_bytes(), stderr.as_bytes());
+    // Preconditions: the real bounds, the worker's record cut by the capture,
+    // the engine's kept whole, and windows that hold no cause.
+    let bound = crate::package_command::STREAM_RETAINED_BYTES;
+    let captured = String::from_utf8_lossy(&log.stdout).into_owned();
+    assert_eq!(
+        log.stdout.len(),
+        bound,
+        "stdout is cut to the capture's tail"
+    );
+    assert!(!captured.contains("WorkerProc hit an exception"));
+    assert!(!captured.contains("torch.AcceleratorError"));
+    assert!(captured.contains("EngineCore failed to start."));
+    assert!(log.stderr.len() <= bound, "stderr is captured whole");
+    let (retained, summary) = summary_of(log, 1);
+    assert!(retained.stdout.truncated);
+    // As retained on hardware: the engine's opening line ahead of the
+    // omission marker, the tail of its frames and the executor's last word.
+    assert!(retained.stdout.text.contains("EngineCore failed to start."));
+    assert!(retained.stdout.text.contains("bytes omitted]"));
+    assert!(retained.stdout.text.ends_with("shutting down executor.\n"));
+    for window in [&retained.stdout.text, &retained.stderr.text] {
+        assert!(!window.contains("no kernel image"), "{window}");
+    }
+    assert!(
+        summary.contains("exit_cause=unsupported_gpu_arch"),
+        "{summary}"
+    );
+    assert!(
+        summary.contains(
+            "exception=\"RuntimeError: Worker failed with error 'CUDA error: no kernel image is available"
+        ),
+        "{summary}"
+    );
+}
+
+#[test]
+fn an_incidental_line_far_above_never_names_the_exit() {
+    // Wrong implementation this catches: matching the whole capture, so a
+    // benign warning far above the failure outranked the closing traceback.
+    let mut stderr = String::from(
+        "WARNING 11-02 23:40:01 [nvme.py:41] could not read /sys/class/nvme/nvme0/serial: No such file or directory\n\
+WARNING 11-02 23:40:01 [numa.py:12] set_mempolicy: invalid argument, keeping the default policy\n",
+    );
+    stderr.push_str(
+        &"INFO 11-02 23:40:02 [loader.py:88] Loading safetensors checkpoint shard\n".repeat(150),
+    );
+    let mut traceback = stderr.clone();
+    traceback.push_str(
+        "Traceback (most recent call last):\n  File \"/app/serve.py\", line 9, in main\n    check(config)\nValueError: max_model_len 999999 exceeds the model's maximum of 262144\n",
+    );
+    let log = through_docker_logs_capture(b"", traceback.as_bytes());
+    assert!(log.stderr.len() <= crate::package_command::STREAM_RETAINED_BYTES);
+    let (retained, summary) = summary_of(log, 1);
+    assert!(
+        !retained.stderr.text.contains("No such file"),
+        "precondition"
+    );
+    assert!(summary.contains("exit_cause=python_exception"), "{summary}");
+    // With no traceback at all the warnings still name nothing.
+    let (_, summary) = summary_of(through_docker_logs_capture(b"", stderr.as_bytes()), 1);
+    assert!(summary.contains("exit_cause=unclassified"), "{summary}");
+}
+
+#[test]
+fn a_recovered_traceback_far_above_never_names_the_exit() {
+    // Wrong implementation this catches: reading the last traceback anywhere
+    // in the capture.  A workload logs tracebacks it recovers from (a refused
+    // rendezvous, a missing optional file), runs on, and later exits on a
+    // one-line message with no traceback -- a partition, not the recipe.
+    // With no pointer above in the window, the capture is never consulted.
+    let mut stderr = String::new();
+    for (opener, exception) in [
+        (
+            "WARNING 11-02 23:30:01 [rendezvous.py:88] connect to 10.0.0.2:29500 failed, retrying",
+            "ConnectionRefusedError: [Errno 111] Connection refused",
+        ),
+        (
+            "WARNING 11-02 23:30:02 [config.py:41] optional tuning file not loaded",
+            "FileNotFoundError: [Errno 2] No such file or directory: '/models/tuning.json'",
+        ),
+    ] {
+        stderr.push_str(&format!(
+            "{opener}\nTraceback (most recent call last):\n  File \"/app/net.py\", line 4, in load\n    open_or_connect()\n{exception}\n"
+        ));
+    }
+    stderr.push_str(
+        &"INFO 11-02 23:31:00 [scheduler.py:120] Running: 0 reqs, Waiting: 0 reqs\n".repeat(300),
+    );
+    stderr.push_str(
+        "ERROR 11-02 23:31:05 [rendezvous.py:120] lost contact with rank 1 (10.0.0.2): network is unreachable\n",
+    );
+    let log = through_docker_logs_capture(b"", stderr.as_bytes());
+    assert!(log.stderr.len() <= crate::package_command::STREAM_RETAINED_BYTES);
+    let (retained, summary) = summary_of(log, 1);
+    assert!(!retained.stderr.text.contains("Traceback"), "precondition");
+    assert!(summary.contains("exit_cause=unclassified"), "{summary}");
+    assert!(!summary.contains("exception="), "{summary}");
+}
+
 #[test]
 fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
     let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";

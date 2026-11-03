@@ -30,22 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "standard",
-  "description": "drowzeys' DSpark-style speculative-decoding port for antirez's ds4 (DwarfStar) engine on one Spark: eight flag-gated C patches on antirez/ds4 80ebbc3 (replay-free row commits, suffix n-gram drafting, confidence stops, MTP-seeded verify rounds, acceptance scheduler, a decode-shaped q8 microbatch kernel, GB10 shared-staged int4 weight loads, batched draft chains and a trained Markov table, both off by default), built from a vendored, hash-checked source archive with the patches applied at image build. Serves antirez's DeepSeek-V4-Flash chat-v2 IQ2XXS/Q2K imatrix GGUF (81 GB) with the Q4K/Q8_0/F32 MTP GGUF, the pre-0731 files that upstream used (the library's other ds4 recipes use the 0731 files). Defaults are upstream's final DSpark configuration: --mtp-draft 5, --dspark-early-margin 3, --dspark-ngram 8, --dspark-row-commit, --dspark-rounds 16, --dspark-adapt, --dspark-mbatch. Upstream reports (not measured here) single-stream 20.0 tok/s on C code and 20.9 on JSON against 14.2 for antirez's published baseline (stock --mtp lost at 13.9 to 14.3), CLI with -c 8192, temperature 0. Licence MIT (ds4 and drowzeys' patches; model files carry DeepSeek's MIT licence). Not gated.",
-  "tags": [
-   "candidate",
-   "ds4",
-   "dspark",
-   "executable",
-   "gguf",
-   "mtp",
-   "single",
-   "spark",
-   "tool-use"
-  ],
-  "title": "DeepSeek V4 Flash ds4 Q2 with DSpark-style speculation (drowzeys) one Spark"
- },
  "models": [
   {
    "files": [
@@ -72,7 +56,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "2e3b451adfeb6725d0729ef933fb799a5f22200f724d712ceb04dbc1750a7239",
+    "content_sha256": "fa4f8840051cf39e428cd24143204b9d723a0ae0989580e6167621254fb354d3",
     "kind": "model",
     "publisher": "antirez",
     "slug": "deepseek-v4-flash-ds4-q2-imatrix-mtp-f71f23d5"

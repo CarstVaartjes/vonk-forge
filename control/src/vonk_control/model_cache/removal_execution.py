@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -16,19 +18,24 @@ from ..agent_operation_facts import aware as _aware
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
+    check_removal_fence_nowait,
     clear_removal,
     lock_removal_fences,
     retryable_artifact_database_error,
 )
 from ..artifact_reference_scan import (
     ArtifactReferenceFinding,
+    _reason_projection,
     model_set_reference_findings,
-    model_set_reference_reasons,
 )
 from ..failure_classification import disposition
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.evidence import Residue
-from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheRemovalResult
+from ..model_cache_contract import (
+    ModelCacheRemovalPayload,
+    ModelCacheRemovalResult,
+    ModelCacheSetState,
+)
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import (
     ArtifactDistributionAssignment,
@@ -40,12 +47,13 @@ from ..models import (
     RecipeInstallation,
 )
 from ..validation_detail import validation_error_detail
-from .constants import _RETRY_BASE_SECONDS, SCHEMA_VERSION
-from .errors import _ArtifactWriterBusy
+from .constants import _RETRY_BASE_SECONDS, REMOVAL_BATCH_SECONDS, SCHEMA_VERSION
+from .errors import ModelCacheStorageRefused, _ArtifactWriterBusy
 from .persistence import (
     _operation_progress,
     _operation_removal,
     _store_operation_payload,
+    _updated,
 )
 
 if TYPE_CHECKING:
@@ -73,14 +81,20 @@ class RemovalExecutionMixin:
                 cache._retire_unreadable(row, residue, now=now)
 
     def _advance_model_removal(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         observed_at = now or cache._clock()
         try:
             if not cache._advance_fleet_removal(operation_id, now=observed_at):
                 return False
-            changed = cache._advance_model_removal_step(operation_id, now=observed_at)
+            changed = cache._advance_model_removal_step(
+                operation_id, now=observed_at, deadline=deadline
+            )
             if changed:
                 return True
             with cache._session() as session:
@@ -128,7 +142,11 @@ class RemovalExecutionMixin:
         return False
 
     def _advance_model_removal_step(
-        self, operation_id: str, *, now: datetime | None = None
+        self,
+        operation_id: str,
+        *,
+        now: datetime | None = None,
+        deadline: float | None = None,
     ) -> bool:
         cache = cast("ModelCacheService", self)
         now = now or cache._clock()
@@ -161,106 +179,142 @@ class RemovalExecutionMixin:
             set_index = checkpoint.set_index
             delete_objects = checkpoint.delete_objects
             selected_sets = checkpoint.selected
-            in_use = (
-                {
-                    digest: owners
-                    for digest, owners in model_set_reference_reasons(
-                        session,
-                        tuple(str(item) for item in selected_sets),
-                    ).items()
-                    if owners
-                }
-                if not pending_scope
-                and (
-                    object_index < len(delete_objects) or set_index < len(selected_sets)
+            findings = (
+                model_set_reference_findings(
+                    session, tuple(str(item) for item in selected_sets)
                 )
+                if not pending_scope
                 else {}
             )
-            newer = (
-                _newer_owner(
-                    session,
-                    operation.created_at,
-                    model_set_reference_findings(session, tuple(in_use)),
-                )
-                if in_use and _untouched(checkpoint)
-                else None
-            )
+            in_use = {
+                digest: owners
+                for digest, owners in _reason_projection(findings).items()
+                if owners
+            }
+            newer, owned = _newer_owners(session, operation.created_at, findings)
         if pending_scope:
             if not cache._observe_model_removal_scope(operation_id):
                 return False
             # The scope and fences are committed before any byte effect.
             # Continue once, through the same executor, with the resolved scope.
-            return cache._advance_model_removal_step(operation_id, now=now)
-        if newer is not None:
-            # Newer intent wins: a removal that has removed nothing yet ends
-            # and releases its fences instead of blocking the newer consumer.
+            return cache._advance_model_removal_step(
+                operation_id, now=now, deadline=deadline
+            )
+        # Newer intent wins. A removal that has removed nothing yet ends. One that
+        # already removed something yields the sets a newer active owner holds
+        # (``owned``): it neither waits on that owner nor removes what it needs,
+        # and it still removes every other target.
+        if newer is not None and _untouched(checkpoint):
             cache._supersede_waiting_removal(
                 operation_id, reason=f"Removal superseded by newer {newer}", now=now
             )
             return True
-        if in_use:
-            first_digest = min(in_use)
+        owned = owned if newer is not None else frozenset()
+        blocking = {
+            digest: owners for digest, owners in in_use.items() if digest not in owned
+        }
+        if blocking:
+            first_digest = min(blocking)
             cache._defer_model_removal(
                 operation_id,
                 detail=f"waiting for model cache set {first_digest} to be released by: "
-                + ", ".join(in_use[first_digest][:4]),
+                + ", ".join(blocking[first_digest][:4]),
                 retry_after_seconds=_RETRY_BASE_SECONDS,
                 cause=Disposition.WAIT,
             )
             return False
         if object_index < len(delete_objects):
-            digest = str(delete_objects[object_index])
-            identity = ArtifactIdentity("model-object", digest)
-            try:
-                with cache._model_storage_lock(digest):
-                    current = cache._model_removal_owner_snapshot(
-                        operation_id, fence=fence, identity=identity
-                    )
-                    if current is None:
-                        return False
-                    if current.object_index != object_index:
-                        return False
-                    pending_bytes = current.object_pending_bytes
-                    if pending_bytes is None:
-                        pending_bytes = cache._model_object_size(digest)
-                    if not cache._persist_model_removal_checkpoint(
-                        operation_id,
-                        fence=fence,
-                        identity=identity,
-                        expected_index=object_index,
-                        object_step=True,
-                        pending_bytes=pending_bytes,
-                        complete_step=False,
-                    ):
-                        return False
-                    cache._remove_model_object_files(digest)
-                    return cache._persist_model_removal_checkpoint(
-                        operation_id,
-                        fence=fence,
-                        identity=identity,
-                        expected_index=object_index,
-                        object_step=True,
-                        pending_bytes=pending_bytes,
-                        complete_step=True,
-                    )
-            except _ArtifactWriterBusy as error:
+            # A model is a set of files: delete this removal's exclusive objects
+            # in a time-bounded batch, one checkpoint per batch. A crash before
+            # the checkpoint only undercounts bytes; the unlinks are idempotent.
+            # The worker step shares one deadline; each removal still deletes
+            # at least one object.
+            if deadline is None:
+                deadline = time.monotonic() + REMOVAL_BATCH_SECONDS
+            completed = 0
+            reclaimed = 0
+            failure: Exception | None = None
+            batch = tuple(str(item) for item in delete_objects[object_index:])
+            retained: set[str] = set()
+            for position, digest in enumerate(batch):
+                identity = ArtifactIdentity("model-object", digest)
+                try:
+                    with cache._model_storage_lock(digest):
+                        with cache._session() as session:
+                            if position % _OBJECT_BATCH_LIMIT == 0:
+                                # One indexed query per slice of the objects
+                                # this step is about to reach: the newer
+                                # request wins, so an object a set outside
+                                # this removal's own sets lists is yielded.
+                                retained = _externally_listed(
+                                    session,
+                                    batch[position : position + _OBJECT_BATCH_LIMIT],
+                                    [
+                                        item
+                                        for item in selected_sets
+                                        if item not in owned
+                                    ],
+                                )
+                            if digest in retained:
+                                completed += 1
+                                continue
+                            if not check_removal_fence_nowait(
+                                session,
+                                identity,
+                                owner_kind="model-cache-operation",
+                                owner_id=operation_id,
+                                fence=fence,
+                            ):
+                                break
+                        size = cache._model_object_size(digest)
+                        cache._remove_model_object_files(digest)
+                except (
+                    _ArtifactWriterBusy,
+                    ArtifactLifecycleError,
+                    ModelCacheStorageRefused,
+                    OSError,
+                ) as error:
+                    failure = error
+                    break
+                completed += 1
+                reclaimed += size
+                if time.monotonic() >= deadline:
+                    break
+            if completed and not cache._persist_model_removal_checkpoint(
+                operation_id,
+                fence=fence,
+                expected_index=object_index,
+                object_step=True,
+                completed=completed,
+                reclaimed_bytes=reclaimed,
+            ):
+                return False
+            if isinstance(failure, _ArtifactWriterBusy):
                 cache._defer_model_removal(
                     operation_id,
-                    detail=error.detail,
-                    retry_after_seconds=error.retry_after_seconds or 5,
+                    detail=failure.detail,
+                    retry_after_seconds=failure.retry_after_seconds or 5,
                     cause=Disposition.WAIT,
                 )
                 return False
-            except ArtifactLifecycleError as error:
+            if isinstance(failure, ArtifactLifecycleError):
                 cache._defer_model_removal(
-                    operation_id, detail=error.detail, retry_after_seconds=5
+                    operation_id, detail=failure.detail, retry_after_seconds=5
                 )
                 return False
-            except OSError as error:
+            if isinstance(failure, ModelCacheStorageRefused):
                 cache._defer_model_removal(
-                    operation_id, detail=f"{type(error).__name__}: {error}", cause=error
+                    operation_id, detail=failure.detail, cause=failure
                 )
                 return False
+            if isinstance(failure, OSError):
+                cache._defer_model_removal(
+                    operation_id,
+                    detail=f"{type(failure).__name__}: {failure}",
+                    cause=failure,
+                )
+                return False
+            return bool(completed)
         if set_index < len(selected_sets):
             set_digest = str(selected_sets[set_index])
             identity = ArtifactIdentity("model-set", set_digest)
@@ -271,15 +325,15 @@ class RemovalExecutionMixin:
                     )
                     if current is None or current.set_index != set_index:
                         return False
-                    cache._remove_model_partial_set(set_digest)
+                    if set_digest not in owned:
+                        cache._remove_model_partial_set(set_digest)
                     return cache._persist_model_removal_checkpoint(
                         operation_id,
                         fence=fence,
-                        identity=identity,
                         expected_index=set_index,
                         object_step=False,
-                        pending_bytes=None,
-                        complete_step=True,
+                        completed=1,
+                        reclaimed_bytes=0,
                     )
             except _ArtifactWriterBusy as error:
                 cache._defer_model_removal(
@@ -299,6 +353,22 @@ class RemovalExecutionMixin:
                     operation_id, detail=f"{type(error).__name__}: {error}", cause=error
                 )
                 return False
+        try:
+            # Stat outside the finish transaction (it holds the row and the
+            # fences): which targets are still stored decides a rewind.
+            stored = tuple(
+                str(item)
+                for item in delete_objects
+                if cache._model_object_size(str(item)) > 0
+            )
+        except ModelCacheStorageRefused as error:
+            cache._defer_model_removal(operation_id, detail=error.detail, cause=error)
+            return False
+        except OSError as error:
+            cache._defer_model_removal(
+                operation_id, detail=f"{type(error).__name__}: {error}", cause=error
+            )
+            return False
         with cache._session(write=True) as session:
             identities = (
                 *(ArtifactIdentity("model-set", str(item)) for item in selected_sets),
@@ -329,7 +399,11 @@ class RemovalExecutionMixin:
                 return False
             if operation.state not in model_cache_states.LIVE:
                 return False
-            wait = cache._finish_model_removal_in_session(session, operation, now=now)
+            wait = cache._finish_model_removal_in_session(
+                session, operation, now=now, owned=owned, stored=stored
+            )
+        if wait == _REWOUND:
+            return True  # progress, not a wait: the next step re-runs the batch
         if wait is not None:
             # The removal stays fenced and is retried: nothing is half finished.
             cache._defer_model_removal(
@@ -367,7 +441,13 @@ class RemovalExecutionMixin:
         cache.reconcile_removal_gates()
 
     def _finish_model_removal_in_session(
-        self, session: Session, operation: ModelCacheOperation, *, now: datetime
+        self,
+        session: Session,
+        operation: ModelCacheOperation,
+        *,
+        now: datetime,
+        owned: frozenset[str] = frozenset(),
+        stored: tuple[str, ...] = (),
     ) -> str | None:
         """Finish a fully reconciled removal; else say what it waits for.
 
@@ -403,26 +483,35 @@ class RemovalExecutionMixin:
                 )
             ),
         )
-        for digest in delete_objects:
-            external = session.scalar(
-                select(ModelCacheSetArtifact.artifact_set_sha256)
-                .where(
-                    ModelCacheSetArtifact.artifact_sha256 == digest,
-                    ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)
-                    if selected
-                    else ModelCacheSetArtifact.artifact_set_sha256.is_not(None),
-                )
-                .limit(1)
+        # A set outside this removal that lists a target keeps that object: the
+        # removal yields per object (see the executor) and still completes.
+        # An object kept for a set that was owned then but is not now would be
+        # stranded by deleting that set's rows: rewind, so the next step runs
+        # the batch again with the current owners and unlinks it.
+        released = [str(item) for item in selected if item not in owned]
+        listed = _externally_listed(session, stored, released) if stored else set()
+        stranded = [item for item in stored if item not in listed]
+        if stranded:
+            _store_operation_payload(
+                operation,
+                operation.kind,
+                _updated(checkpoint, object_index=0, set_index=0),
             )
-            if external is not None:
-                # A new set references a target: the removal stays fenced and
-                # waits (nothing was deleted yet in this transaction).
-                return "a new model set references a removal target; removal remains fenced"
+            return _REWOUND
         for set_digest in selected:
+            row = session.get(ModelCacheSet, set_digest)
+            if set_digest in owned:
+                # A newer live owner writes this set's row into its own
+                # operation; deleting it would break that write. Keep the
+                # row, but never as ``cached``: its objects may be gone.
+                if row is not None:
+                    row.state = ModelCacheSetState.NEEDS_REPAIR
+                    row.last_error = "a removal yielded this set to a newer request"
+                    row.updated_at = now
+                continue
             session.query(ModelCacheSetArtifact).filter(
                 ModelCacheSetArtifact.artifact_set_sha256 == set_digest
             ).delete(synchronize_session=False)
-            row = session.get(ModelCacheSet, set_digest)
             if row is not None:
                 session.delete(row)
         clear_removal(
@@ -435,7 +524,7 @@ class RemovalExecutionMixin:
         )
         result = ModelCacheRemovalResult(
             schema_version=SCHEMA_VERSION,
-            removed_entries=list(selected),
+            removed_entries=[item for item in selected if item not in owned],
             reclaimed_bytes=checkpoint.reclaimed_bytes,
             cancelled_operations=[],
         )
@@ -470,30 +559,70 @@ _OWNER_ROWS: dict[
 }
 
 
+def _externally_listed(
+    session: Session, digests: tuple[str, ...], selected: Sequence[str]
+) -> set[str]:
+    """Objects among ``digests`` that a set outside ``selected`` lists."""
+
+    return set(
+        session.scalars(
+            select(ModelCacheSetArtifact.artifact_sha256)
+            .where(
+                ModelCacheSetArtifact.artifact_sha256.in_(digests),
+                ModelCacheSetArtifact.artifact_set_sha256.not_in(tuple(selected)),
+            )
+            .distinct()
+        )
+    )
+
+
+_OBJECT_BATCH_LIMIT = 64
+_REWOUND = "rewound: a released set still has stored objects"
+
+
 def _untouched(checkpoint: ModelCacheRemovalPayload) -> bool:
     """Whether the removal has not removed (or begun removing) anything yet."""
 
     return (
         checkpoint.object_index == 0
-        and checkpoint.object_pending_bytes is None
         and checkpoint.set_index == 0
         and checkpoint.reclaimed_bytes == 0
     )
 
 
-def _newer_owner(
+def _newer_owners(
     session: Session,
     accepted_at: datetime,
     findings: dict[str, tuple[ArtifactReferenceFinding, ...]],
-) -> str | None:
-    """An active owner accepted after this removal, by its reason; else ``None``."""
+) -> tuple[str | None, frozenset[str]]:
+    """The reason of an active owner accepted after this removal (else ``None``)
+    and the sets such an owner holds."""
 
+    reason: str | None = None
+    owned: set[str] = set()
+    ids: dict[str, set[str]] = {}
     for entries in findings.values():
         for finding in entries:
-            model = _OWNER_ROWS.get(finding.owner_kind)
-            if finding.classification != "active-work" or model is None:
-                continue
-            row = session.get(model, finding.owner_id)
-            if row is not None and _aware(row.created_at) > _aware(accepted_at):
-                return finding.reason
-    return None
+            if (
+                finding.classification == "active-work"
+                and finding.owner_kind in _OWNER_ROWS
+            ):
+                ids.setdefault(finding.owner_kind, set()).add(finding.owner_id)
+    created = {}
+    for kind, owner_ids in ids.items():
+        model = _OWNER_ROWS[kind]
+        for owner_id, created_at in session.execute(
+            select(model.id, model.created_at).where(model.id.in_(owner_ids))
+        ):
+            created[(kind, owner_id)] = _aware(created_at)
+    for digest, entries in findings.items():
+        for finding in entries:
+            made = created.get((finding.owner_kind, finding.owner_id))
+            if (
+                finding.classification == "active-work"
+                and made is not None
+                and made > _aware(accepted_at)
+            ):
+                reason = reason or finding.reason
+                owned.add(digest)
+    return reason, frozenset(owned)

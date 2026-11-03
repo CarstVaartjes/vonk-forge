@@ -22,13 +22,11 @@ from vonk_forge_contracts import (
 from vonk_forge_contracts.model import (
     ModelFormat,
     ModelIdentity,
-    ModelMetadata,
 )
 from vonk_forge_contracts.recipe import (
     ModelReference,
     RecipeIdentity,
     RecipeInterface,
-    RecipeMetadata,
     RecipeOption,
     RecipeProvenance,
     RecipeRelease,
@@ -45,6 +43,14 @@ from .strict_json import (
 
 if TYPE_CHECKING:
     from .models import CatalogDocumentRevision
+
+
+# A published document as JSON, before any contract has read it: the exact bytes
+# a digest names. Typed by what JSON can hold, never by ``object``.
+type PublishedValue = (
+    str | int | float | bool | None | list[PublishedValue] | dict[str, PublishedValue]
+)
+type PublishedDocument = dict[str, PublishedValue]
 
 
 class CatalogRevisionContractError(UnknownOutcomeError, ValueError):
@@ -149,7 +155,6 @@ class ArtifactInputProjection(StrictJSONModel):
 
 class ModelRevisionProjection(_CatalogRevisionProjection):
     identity: ModelIdentity
-    metadata: ModelMetadata
     format: ModelFormat
     capabilities: list[str]
     modalities: ModelModalities
@@ -160,7 +165,6 @@ class ModelRevisionProjection(_CatalogRevisionProjection):
 
 class RecipeRevisionProjection(_CatalogRevisionProjection):
     identity: RecipeIdentity
-    metadata: RecipeMetadata
     provenance: RecipeProvenance
     release: RecipeRelease
     models: list[ModelReference] = Field(min_length=1)
@@ -168,9 +172,6 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     validation: RecipeValidation
     base_image_digest: str
     options: list[RecipeOption]
-    title: str
-    description: str
-    tags: list[str]
     runtime_engine: str
     topology: RecipeTopology
     build_resources: BuildResourcesProjection | None = None
@@ -230,22 +231,42 @@ def read_catalog_projection(
         # whose exact content identity still verifies; damaged source JSON
         # remains unavailable until the normal catalog sync re-ingests it.
         parsed = read_catalog_document(revision)
-        if isinstance(parsed, ModelDefinition):
-            return ModelRevisionProjection(
-                identity=parsed.identity,
-                metadata=parsed.metadata,
-                format=parsed.format,
-                capabilities=parsed.capabilities,
-                modalities=parsed.modalities,
-                artifact_count=len(parsed.files),
-                download_bytes=parsed.download_bytes,
-                installed_bytes=parsed.installed_bytes,
-            )
-        from .catalog_entities import recipe_document_projection
+        return rederive_projection(revision.projected, parsed)
 
-        return RecipeRevisionProjection.model_validate_json(
-            canonical_message(recipe_document_projection(parsed))
+
+def rederive_projection(
+    stored: object, parsed: ModelDefinition | RecipeDefinition
+) -> ModelRevisionProjection | RecipeRevisionProjection:
+    """The current projection of ``parsed``, keeping what is recorded beside it.
+
+    Two sources, one rule: every field the document determines comes from the
+    document; every other field (what the catalog sync and the model bindings
+    recorded) comes from the stored projection, read one key at a time, so a row
+    written under an earlier contract loses no valid recorded state and a stored
+    value that is itself invalid is dropped, not carried over.
+    """
+    from .catalog_entities import model_document_projection, recipe_document_projection
+
+    if isinstance(parsed, ModelDefinition):
+        projection_type: type[ModelRevisionProjection | RecipeRevisionProjection] = (
+            ModelRevisionProjection
         )
+        projected = model_document_projection(parsed).model_dump(mode="json")
+    else:
+        projection_type = RecipeRevisionProjection
+        projected = recipe_document_projection(parsed)
+    recorded = stored if isinstance(stored, Mapping) else {}
+    for key in projection_type.model_fields.keys() - projected.keys():
+        if recorded.get(key) is None:
+            continue
+        try:
+            projection_type.model_validate_json(
+                canonical_message({**projected, key: recorded[key]})
+            )
+        except ValueError:
+            continue  # the next sync records it again from the signed catalog
+        projected[key] = recorded[key]
+    return projection_type.model_validate_json(canonical_message(projected))
 
 
 def read_recipe_projection(
@@ -386,8 +407,11 @@ def read_model_set(value: object) -> dict[str, ModelDefinition]:
 __all__ = [
     "CatalogRevisionContractError",
     "CatalogRevisionProjection",
+    "PublishedDocument",
+    "PublishedValue",
     "read_catalog_document",
     "read_catalog_projection",
     "read_model_set",
+    "rederive_projection",
     "write_catalog_projection",
 ]

@@ -38,7 +38,7 @@ def test_cancelled_selector_replays_only_original_key_after_restart(
     )
     assert cancelled.state == LifecycleState.CANCELLED
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     try:
         bind_selector(restarted)

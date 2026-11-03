@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import hashlib
+import itertools
 import json
 import os
 import uuid
@@ -20,7 +21,7 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_agent_protocol import LifecycleState, ProgressPhase
+from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
@@ -40,6 +41,10 @@ from vonk_control.model_cache import (
     ModelCacheService,
     ModelCacheStorageError,
     _retry_after_seconds,
+)
+from vonk_control.model_cache.errors import (
+    ModelCacheNotFoundInvalid,
+    ModelCacheSelectorAmbiguous,
 )
 from vonk_control.model_cache_api import (
     ModelCacheOperationProvider,
@@ -70,6 +75,7 @@ from vonk_control.worker import Worker
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 from vonk_forge_contracts.model import ModelReference
 
+from .display_fixtures import create_draft, reword, reworded
 from .non_blocking import assert_ended_without_blocking
 from .removal_settle import advance_until_ended, release_ended_gates
 from .test_model_cache_recovery_support import observe_unknown
@@ -162,7 +168,7 @@ def cache(tmp_path: Path):
     service = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         runtime_archive_available=runtime_archive_available,
     )
@@ -228,7 +234,7 @@ def threaded_cache(tmp_path: Path):
     service = ModelCacheService(
         sessions,
         tmp_path / "background-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     try:
@@ -685,7 +691,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         )
     ) as client:
         service = ModelCacheService(
-            sessions, tmp_path / "operator-cache", reserve_bytes=0, http_client=client
+            sessions, tmp_path / "operator-cache", free_fraction=0, http_client=client
         )
         key = "00000000-0000-4000-8000-000000000097"
         accepted = service.download_model_selector(
@@ -702,13 +708,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         assert recovered.id == completed.id
         assert recovered.progress == completed.progress
     with sessions.begin() as session:
-        newer = model.model_copy(
-            update={
-                "metadata": model.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        )
+        newer = reworded(model, "New revision")
         session.add(
             CatalogDocumentRevision(
                 document_id=document_id,
@@ -725,7 +725,7 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
                 created_at=NOW,
             )
         )
-    restarted = ModelCacheService(sessions, service.root, reserve_bytes=10**30)
+    restarted = ModelCacheService(sessions, service.root, free_fraction=1.0)
     assert (
         restarted.download_model_selector(
             selector, actor="operator", request_key=key, force=True
@@ -896,7 +896,7 @@ def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> Non
     ] == [("weights.bin", 3, ("weights",))]
 
 
-def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_revision(
+def test_resolve_latest_cached_returns_the_head_even_when_an_older_revision_is_cached(
     cache, monkeypatch: pytest.MonkeyPatch
 ):
     service, sessions = cache
@@ -919,7 +919,7 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     old_recipe = RecipeDefinition.model_validate(old_document)
     new_document = json.loads(json.dumps(old_document))
     new_document["models"][0]["model"]["content_sha256"] = newer_model_digest
-    new_document["metadata"]["description"] += " newer"
+    reword(new_document, " newer")
     new_recipe = RecipeDefinition.model_validate(new_document)
     model_root = CatalogDocument(
         id="00000000-0000-0000-0000-000000000101",
@@ -1092,18 +1092,26 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
         session.add(model_cache)
     _write_object_receipt(service, artifact.sha256, 3)
 
+    # The catalog head is current: an older cached revision never stands in for
+    # it. The head comes back with its missing cache reported.
     resolved = service.resolve_latest_cached(
         recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
     )
-    assert resolved.recipe.recipe_revision_id == old_revision.id
-    assert resolved.recipe.update_available is True
-    assert resolved.model.content_sha256 == model_digest
-    assert resolved.resources.model_dump() == {
-        "per_spark_memory_bytes": None,
-        "additional_disk_bytes": 20,
-        "model_bytes": 3,
-        "image_bytes": 17,
-    }
+    assert resolved.recipe.recipe_revision_id == new_revision.id
+    assert resolved.recipe.update_available is False
+    assert resolved.recipe.cached is False
+    assert "recipe-not-cached" in resolved.blockers
+
+    # An exact older revision is told apart from the head.
+    older = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
+    )
+    assert older.recipe.recipe_revision_id == old_revision.id
+    assert older.recipe.update_available is True
+    assert older.recipe.cached is True
+    assert older.model.content_sha256 == model_digest
 
     # An explicitly selected exact revision is never silently replaced by an
     # older cached one: the newer head comes back with its missing cache
@@ -1132,11 +1140,15 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     with monkeypatch.context() as scoped:
         scoped.setattr(os, "open", deny_model_object)
         observed = service.resolve_latest_cached(
-            recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+            recipe_identity="vonk-forge/resolver-recipe",
+            model_variant="fp16",
+            exact_revision_id=old_revision.id,
         )
         assert not (observed.model.cached and observed.recipe.cached)
     restored = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
     assert not restored.blockers
     with monkeypatch.context() as scoped:
@@ -1146,13 +1158,17 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
             deny_runtime_archive,
         )
         observed = service.resolve_latest_cached(
-            recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+            recipe_identity="vonk-forge/resolver-recipe",
+            model_variant="fp16",
+            exact_revision_id=old_revision.id,
         )
         assert not (observed.model.cached and observed.recipe.cached)
 
     model_object.unlink()
     missing_model_bytes = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
     assert missing_model_bytes.recipe.cached is True
     assert missing_model_bytes.model.cached is False
@@ -1161,9 +1177,11 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
 
     image_object.unlink()
     missing_image_bytes = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
-    assert missing_image_bytes.recipe.recipe_revision_id == new_revision.id
+    assert missing_image_bytes.recipe.recipe_revision_id == old_revision.id
     assert missing_image_bytes.recipe.cached is False
     assert "recipe-not-cached" in missing_image_bytes.blockers
     image_object.write_bytes(b"x" * build.image_bytes)
@@ -1171,9 +1189,10 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     with sessions.begin() as session:
         session.delete(model_cache)
     image_only = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
-    assert image_only.recipe.recipe_revision_id == old_revision.id
     assert image_only.recipe.cached is True
     assert image_only.model.cached is False
     assert image_only.resources.additional_disk_bytes is None
@@ -1181,9 +1200,11 @@ def test_resolve_latest_cached_uses_cached_source_build_before_newer_uncached_re
     with sessions.begin() as session:
         session.delete(build)
     missing = service.resolve_latest_cached(
-        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+        recipe_identity="vonk-forge/resolver-recipe",
+        model_variant="fp16",
+        exact_revision_id=old_revision.id,
     )
-    assert missing.recipe.recipe_revision_id == new_revision.id
+    assert missing.recipe.recipe_revision_id == old_revision.id
     assert missing.recipe.expected_bytes is None
     assert missing.model.expected_bytes is None
     assert missing.resources.additional_disk_bytes is None
@@ -1315,10 +1336,6 @@ def test_canonical_dependency_closure_reaches_run_switch(
     assert inspection.artifact_set_bytes == (3 if shared_object else 6)
     assert inspection.required_bytes == inspection.artifact_set_bytes
     assert inspection.missing_nas_bytes == inspection.artifact_set_bytes
-    assert set(inspection.artifact_digests) == {
-        item.sha256 for item in manifest.artifacts
-    }
-    assert hashlib.sha256(b"").hexdigest() in inspection.artifact_digests
 
 
 def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
@@ -2063,7 +2080,7 @@ def test_interrupted_download_checkpoint_resumes_after_service_restart(
     restarted = ModelCacheService(
         sessions,
         service.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     assert restarted.resume_operations() == 1
@@ -2170,7 +2187,7 @@ def test_transient_download_failures_wait_on_a_bounded_cadence_until_success(
     assert max(delays) <= 2 * min(delays) + 1
 
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     restarted._open_source = flaky_source
     assert restarted.resume_operations() == 1
@@ -2527,7 +2544,7 @@ def test_empty_http_support_artifact_does_not_issue_an_invalid_zero_range(
     service = ModelCacheService(
         sessions,
         tmp_path / "http-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=http_client,
         fixture_sources=True,
     )
@@ -2621,7 +2638,7 @@ def test_repair_resumes_quarantined_bytes_after_restart(cache, tmp_path, monkeyp
     )
     service.close()
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     offsets = []
     original = restarted._open_source
@@ -2894,7 +2911,7 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
     restarted = ModelCacheService(
         sessions,
         service.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: clock[0],
     )
@@ -3026,7 +3043,7 @@ def _http_cache_service(tmp_path: Path, sessions, handler, *, clock=None):
     service = ModelCacheService(
         sessions,
         tmp_path / "http-nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         http_client=client,
         fixture_sources=True,
         clock=clock,
@@ -3510,7 +3527,7 @@ def test_cancel_queued_download_is_durable_and_idempotent(cache, tmp_path):
     assert cancelled.state == "cancelled"
     assert cancelled.progress["phase"] == "completed"
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     try:
         assert restarted.run_pending() == 0
@@ -3537,7 +3554,7 @@ def test_cancel_running_download_preserves_partial_and_cannot_be_resurrected(
     payload = b"c" * 8192
     operation_id = []
     api = ModelCacheService(
-        sessions, tmp_path / "http-nas-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "http-nas-cache", free_fraction=0, fixture_sources=True
     )
 
     class CancelStream(httpx2.SyncByteStream):
@@ -3747,17 +3764,19 @@ def test_model_removal_waits_for_in_use_sets_then_completes(
     assert downloaded.state == "succeeded"
     set_digest = str(downloaded.artifact_set_sha256)
     owners = {set_digest: ("installation 1",)}
-    real_reasons = model_cache_module.model_set_reference_reasons
+    from vonk_control.model_cache import removal_execution as _removal_execution
 
-    def reasons(session, digests):
-        found = real_reasons(session, digests)
+    real_reasons = _removal_execution._reason_projection
+
+    def reasons(findings):
+        found = real_reasons(findings)
         return {
             digest: tuple(found.get(digest, ())) + owners.get(digest, ())
-            for digest in digests
+            for digest in findings
         }
 
     monkeypatch.setattr(
-        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
+        "vonk_control.model_cache.removal_execution._reason_projection",
         reasons,
     )
     removal = service.remove_model_selector(
@@ -3826,13 +3845,15 @@ def test_removal_waiting_past_the_old_lifetime_cap_still_succeeds(
         service, tmp_path, "f" * 64, "00000000-0000-4000-8000-000000001050"
     )
     owners = {set_digest: ("installation 1",)}
-    real_reasons = model_cache_module.model_set_reference_reasons
+    from vonk_control.model_cache import removal_execution as _removal_execution
+
+    real_reasons = _removal_execution._reason_projection
     monkeypatch.setattr(
-        "vonk_control.model_cache.removal_execution.model_set_reference_reasons",
-        lambda session, digests: {
-            digest: tuple(real_reasons(session, digests).get(digest, ()))
+        "vonk_control.model_cache.removal_execution._reason_projection",
+        lambda findings: {
+            digest: tuple(real_reasons(findings).get(digest, ()))
             + owners.get(digest, ())
-            for digest in digests
+            for digest in findings
         },
     )
     removal = service.remove_model_selector(
@@ -4014,7 +4035,7 @@ def test_model_removal_resolves_the_selector_at_acceptance_and_replays_by_key(
     )
     digest_a = document_sha256(model_a.model_dump(mode="json"))
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
-    draft = catalog.create_draft(model_a.model_dump(mode="json"), actor="operator")
+    draft = create_draft(catalog, model_a.model_dump(mode="json"), actor="operator")
     original = catalog.resolve(draft.id, actor="operator")
 
     request_key = "00000000-0000-4000-8000-000000001052"
@@ -4135,7 +4156,7 @@ def test_cancel_during_verification_does_not_publish(cache, tmp_path, monkeypatc
         artifacts=[artifact],
     )
     api = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     real_verify = service._verify_file
 
@@ -4420,7 +4441,7 @@ def test_missing_source_observations_follow_exact_file_and_survive_restart(
         service = ModelCacheService(
             sessions,
             tmp_path / "http-nas-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             http_client=client,
             fixture_sources=True,
             clock=lambda: NOW,
@@ -4544,3 +4565,220 @@ def _admit_fresh_download(service, model_digest, artifact):
 def _finish_cache_removal(service, receipt):
     advance_until_ended(service, receipt.id, rounds=10)
     return service.get_operation(receipt.id)
+
+
+def _ticking_catalog(sessions):
+    """A catalog whose revisions get strictly increasing creation times."""
+    ticks = itertools.count()
+    return CatalogEntityService(
+        sessions, clock=lambda: NOW + timedelta(seconds=next(ticks))
+    )
+
+
+def _cache_model_revision(
+    service, tmp_path, catalog, *, publisher="vonk-forge", slug, weight, document=None
+):
+    """Activate one model revision (a new document, or a revision of one) and cache it."""
+    model = _canonical_model(
+        publisher=publisher,
+        slug=slug,
+        file_id="weights",
+        file_digest=hashlib.sha256(weight).hexdigest(),
+    )
+    if document is None:
+        draft = create_draft(catalog, model.model_dump(mode="json"), actor="operator")
+        row = catalog.resolve(draft.id, actor="operator")
+    else:
+        revised = catalog.revise(
+            document, model.model_dump(mode="json"), actor="operator"
+        )
+        row = catalog.resolve(revised.id, actor="operator")
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                weight,
+                path="weights.safetensors",
+                model_content_sha256=row.content_digest,
+            )
+        ],
+        model_content_sha256=row.content_digest,
+        request_key=str(uuid.uuid4()),
+    )
+    return row
+
+
+def _retract_heads(sessions, slug):
+    """Retract the way the catalogue sync will: no active revision, generation up."""
+    with sessions.begin() as session:
+        for head in session.scalars(
+            select(CatalogDocumentHead).where(CatalogDocumentHead.slug == slug)
+        ):
+            head.active_revision_id = None
+            head.generation += 1
+
+
+def _retracted_lineage(service, sessions, tmp_path):
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    second = _cache_model_revision(
+        service,
+        tmp_path,
+        catalog,
+        slug="gone",
+        weight=b"bbb",
+        document=first.document_id,
+    )
+    return catalog, first, second
+
+
+def test_retracted_publisher_slug_resolves_to_the_newest_revision_with_a_set(
+    cache, tmp_path
+):
+    service, sessions = cache
+    _catalog, _first, second = _retracted_lineage(service, sessions, tmp_path)
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == second.content_digest
+    assert service._resolve_model_selector("gone") == second.content_digest
+    assert service._resolve_model_selector(second.document_id) == second.content_digest
+
+
+def test_retracted_selector_ignores_a_newer_revision_without_a_set(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    newer = _canonical_model(
+        publisher="vonk-forge",
+        slug="gone",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    catalog.resolve(
+        catalog.revise(
+            first.document_id, newer.model_dump(mode="json"), actor="operator"
+        ).id,
+        actor="operator",
+    )
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == first.content_digest
+
+
+def test_retracted_selector_counts_an_incomplete_set_as_a_set(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="gone", weight=b"aaa"
+    )
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="gone",
+        file_id="weights",
+        file_digest=hashlib.sha256(b"bbb").hexdigest(),
+    )
+    second = catalog.resolve(
+        catalog.revise(
+            first.document_id, model.model_dump(mode="json"), actor="operator"
+        ).id,
+        actor="operator",
+    )
+    _download(
+        service,
+        [
+            _artifact(
+                tmp_path,
+                b"bbb",
+                path="weights.safetensors",
+                model_content_sha256=second.content_digest,
+            )
+        ],
+        model_content_sha256=second.content_digest,
+        request_key=str(uuid.uuid4()),
+        interrupt_after_bytes=1,
+    )
+    with sessions() as session:
+        states = set(
+            session.scalars(
+                select(ModelCacheSet.state).where(
+                    ModelCacheSet.model_content_sha256 == second.content_digest
+                )
+            )
+        )
+    assert states
+    _retract_heads(sessions, "gone")
+    assert service._resolve_model_selector("vonk-forge/gone") == second.content_digest
+
+
+def test_retracted_bare_slug_across_publishers_is_ambiguous(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    rows = [
+        _cache_model_revision(
+            service, tmp_path, catalog, publisher=publisher, slug="gone", weight=weight
+        )
+        for publisher, weight in (("first", b"aaa"), ("second", b"bbb"))
+    ]
+    _retract_heads(sessions, "gone")
+    with pytest.raises(ModelCacheSelectorAmbiguous) as caught:
+        service._resolve_model_selector("gone")
+    assert caught.value.candidates == tuple(sorted(r.content_digest for r in rows))
+    for publisher, row in zip(("first", "second"), rows, strict=True):
+        assert (
+            service._resolve_model_selector(f"{publisher}/gone") == row.content_digest
+        )
+
+
+def test_retracted_selector_without_any_set_is_missing(cache):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    model = _canonical_model(
+        publisher="vonk-forge",
+        slug="uncached",
+        file_id="weights",
+        file_digest="c" * 64,
+    )
+    catalog.resolve(
+        create_draft(catalog, model.model_dump(mode="json"), actor="operator").id,
+        actor="operator",
+    )
+    _retract_heads(sessions, "uncached")
+    with pytest.raises(ModelCacheNotFoundInvalid) as caught:
+        service._resolve_model_selector("vonk-forge/uncached")
+    assert caught.value.code == ModelCacheCode.SELECTOR_MISSING
+
+
+def test_publisher_slug_selector_with_a_head_still_follows_the_head(cache, tmp_path):
+    service, sessions = cache
+    catalog = _ticking_catalog(sessions)
+    first = _cache_model_revision(
+        service, tmp_path, catalog, slug="headed", weight=b"aaa"
+    )
+    second = _cache_model_revision(
+        service,
+        tmp_path,
+        catalog,
+        slug="headed",
+        weight=b"bbb",
+        document=first.document_id,
+    )
+    assert service._resolve_model_selector("vonk-forge/headed") == second.content_digest
+
+
+def test_removal_review_of_a_retracted_model_covers_every_set_of_the_lineage(
+    cache, tmp_path
+):
+    service, sessions = cache
+    _catalog, _first, second = _retracted_lineage(service, sessions, tmp_path)
+    _retract_heads(sessions, "gone")
+    review = service.review_model_removal("vonk-forge/gone")
+    assert review.target_identity == second.content_digest
+    assert not review.blockers
+    assets = {item.sha256 for item in review.assets}
+    assert {
+        hashlib.sha256(b"aaa").hexdigest(),
+        hashlib.sha256(b"bbb").hexdigest(),
+    } <= assets

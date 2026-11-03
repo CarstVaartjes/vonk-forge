@@ -64,8 +64,6 @@ from .constants import _GITHUB_RELEASE_ASSET_HOST as _GITHUB_RELEASE_ASSET_HOST
 from .constants import _GITHUB_USER_AGENT as _GITHUB_USER_AGENT
 from .constants import _HF_CANONICAL_HOST as _HF_CANONICAL_HOST
 from .constants import _LOGGER as _LOGGER
-from .constants import _MAX_ARTIFACT_PARTS as _MAX_ARTIFACT_PARTS
-from .constants import _MAX_ARTIFACTS as _MAX_ARTIFACTS
 from .constants import (
     _MAX_GITHUB_ERROR_METADATA_BYTES as _MAX_GITHUB_ERROR_METADATA_BYTES,
 )

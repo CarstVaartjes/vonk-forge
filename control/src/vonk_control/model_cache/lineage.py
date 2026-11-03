@@ -115,8 +115,12 @@ class ModelSets(NamedTuple):
     shared: tuple[str, ...]
 
 
-def model_sets(session: Session, contents: Collection[str]) -> ModelSets:
+def model_sets(
+    session: Session, contents: Collection[str], *, among: Collection[str] | None = None
+) -> ModelSets:
     """The cached sets bound to any of ``contents``, in digest order.
+
+    ``among`` limits the read to these set digests.
 
     A set's binding is its first requester's content or a verified binding in
     its stored manifest; a manifest that does not read binds only through its
@@ -141,7 +145,12 @@ def model_sets(session: Session, contents: Collection[str]) -> ModelSets:
             or_(
                 ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
                 verifies_model(session, wanted),
-            )
+            ),
+            *(
+                ()
+                if among is None
+                else (ModelCacheSet.artifact_set_sha256.in_(sorted(among)),)
+            ),
         )
     ):
         manifest = read_row_column(row, "manifest")

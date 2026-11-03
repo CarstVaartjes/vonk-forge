@@ -56,15 +56,19 @@ def _two_starts_on_one_spark(sim: Simulation, peak_bytes: int) -> str:
 
 
 @pytest.mark.slow(30)
-def test_a_peak_no_held_memory_can_make_room_for_ends_the_load(
-    tmp_path, postgres_engine
+@pytest.mark.parametrize("peak", [12_480, 13_000])
+def test_an_estimated_peak_no_held_memory_can_make_room_for_is_tried(
+    tmp_path, postgres_engine, peak: int
 ) -> None:
+    # A recipe's declared peak is an estimate until a try measures it: it is
+    # not refused as never fitting, it starts as the only claim on its Spark.
+    # 12_500 idle free less a 12_480 peak leaves 20 of the 50-byte floor (short
+    # by the host's own use); 13_000 is above the whole 12_800 pool. Free memory
+    # then moves, as it does between a review and its load: the claim does not.
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
-        # 12_500 idle free less a 12_480 peak leaves 20 of the 50-byte floor,
-        # though the peak and the floor fit the 12_800 pool.
-        world.publish_successor(SOLO, peak_bytes=12_480)
+        world.publish_successor(SOLO, peak_bytes=peak)
         spark = sim.sparks.by_node[world.nodes[0]]
         spark.memory = _SPARK
         sim.round()
@@ -73,17 +77,46 @@ def test_a_peak_no_held_memory_can_make_room_for_ends_the_load(
         )
 
         review = world.controller.profiles.preview(profile_id)
-        assert not review.allowed
-        assert _NEVER_FITS in {
+        assert review.allowed
+        assert _NEVER_FITS not in {
             reason.code
             for item in review.assessments
             for reason in item.assessment.blockers
         }
 
+        spark.memory = Memory(total=12_800, idle_free=12_400, held_percent=90)
+        sim.round()
         load = _load(world, profile_id)
-        assert sim.settle(load) == "failed"
-        assert _NEVER_FITS in _ending_codes(world, load)
-        assert not spark.serving
+        assert sim.settle(load) == "succeeded"
+        assert spark.serving
+    finally:
+        world.close()
+
+
+@pytest.mark.slow(30)
+def test_a_load_replaces_a_serving_model_with_an_over_max_estimate(
+    tmp_path, postgres_engine
+) -> None:
+    # The replaced run must not keep the new estimate waiting on its own stop.
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        world.publish_successor(SOLO, peak_bytes=2_000)
+        world.publish_successor(SOLO_B, peak_bytes=13_000)
+        spark = sim.sparks.by_node[world.nodes[0]]
+        spark.memory = _SPARK
+        sim.round()
+        first, _number = world.create_profile(
+            "Serves first", [world.assignment(SOLO, world.nodes[:1])]
+        )
+        assert sim.settle(_load(world, first)) == "succeeded"
+        (old,) = spark.serving
+
+        second, _number = world.create_profile(
+            "Replaces it", [world.assignment(SOLO_B, world.nodes[:1])]
+        )
+        assert sim.settle(_load(world, second)) == "succeeded"
+        assert len(spark.serving) == 1 and old not in spark.serving
     finally:
         world.close()
 

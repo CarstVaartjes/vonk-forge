@@ -56,7 +56,7 @@ use vonk_agent_protocol::{
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
     RecipeReconciliationIdentity, RecipeStartPhase, RecipeStartRequest, RecipeStopRequest,
-    canonical_json, hex_sha256,
+    canonical_generated_json, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);

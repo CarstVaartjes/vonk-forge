@@ -84,7 +84,6 @@ class RecipeCacheRemovalCheckpoint(StrictJSONModel):
 
     schema_version: Literal[2]
     image_index: int = Field(ge=0)
-    image_pending_bytes: int | None = Field(ge=0)
     image_reclaimed_bytes: int = Field(ge=0)
     model_index: int = Field(ge=0)
     model_reclaimed_bytes: int = Field(ge=0)
@@ -108,11 +107,6 @@ class RecipeCacheRemovalOwner(StrictJSONModel):
             raise ValueError("image removal checkpoint exceeds its plan")
         if self.checkpoint.model_index > len(self.plan.model_children):
             raise ValueError("model removal checkpoint exceeds its plan")
-        if (
-            self.checkpoint.image_pending_bytes is not None
-            and self.checkpoint.image_index >= len(self.plan.image_archives)
-        ):
-            raise ValueError("image removal bytes have no pending archive")
         return self
 
 

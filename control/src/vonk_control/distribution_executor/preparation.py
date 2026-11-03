@@ -213,17 +213,12 @@ class CompositeDistributionPhaseExecutor(
             if model is not None
             else plan.storage.artifact_set_sha256
         )
-        artifact_count = (
-            model.artifact_count
-            if model is not None
-            else len(plan.storage.artifact_digests)
-        )
         artifact_set_bytes = (
             model.artifact_set_bytes
             if model is not None
             else plan.storage.artifact_set_bytes
         )
-        if not artifact_set_sha256 or not artifact_count or not artifact_set_bytes:
+        if not artifact_set_sha256 or not artifact_set_bytes:
             raise RuntimeError("exact model preparation is unavailable")
         preview_method = getattr(self._model_cache, "download_preview", None)
         start_method = getattr(self._model_cache, "start_download", None)

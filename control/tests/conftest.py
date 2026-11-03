@@ -19,8 +19,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
+from vonk_control.models import Base
 from vonk_control.stored_json import install_write_guard
 
+from . import metadata_type_snapshot
 from .api_response_witness import (
     pytest_addoption as _api_response_addoption,
 )
@@ -37,6 +39,7 @@ from .api_response_witness import (  # noqa: F401 - pytest discovers imported ho
 from .api_response_witness import (
     pytest_sessionfinish as _api_response_sessionfinish,
 )
+from .catalog_head_seed import install_seeded_heads
 from .pass_budget_clocks import (
     frozen_pass_budgets,  # noqa: F401 - inherited autouse fixture
 )
@@ -44,6 +47,7 @@ from .pass_budget_clocks import (
 # A test that writes a JSON column its contract refuses fails where it writes;
 # one that damages a row on purpose says so with ``write_guard_mode(strict=False)``.
 install_write_guard(strict=True)
+install_seeded_heads()
 
 # The same pinned PostgreSQL the Compose deployment runs; scripts/pull-test-images
 # pulls it before the suite, so starting the server never downloads.
@@ -486,3 +490,43 @@ def controller_image() -> str:
 @pytest.fixture(scope="session")
 def worker_image() -> str:
     return _built_image("VONK_TEST_WORKER_IMAGE")
+
+
+@pytest.fixture(autouse=True)
+def shared_metadata_column_types_unchanged() -> Iterator[None]:
+    """A test must not retype shared ``Base.metadata`` columns (#1968)."""
+    before = metadata_type_snapshot.snapshot(Base.metadata)
+    yield
+    changed = metadata_type_snapshot.drift(Base.metadata, before)
+    assert not changed, f"test retyped shared metadata columns: {changed}"
+
+
+@pytest.fixture
+def no_model_object_io(monkeypatch: pytest.MonkeyPatch):
+    """Fail the test when code touches a model-cache object on storage.
+
+    Worker entry points that must answer from stored facts opt in by running
+    under this fixture; ``cache`` is the ``ModelCacheService`` whose objects
+    directory is guarded.
+    """
+    from pathlib import Path
+
+    from vonk_control.model_cache import ModelCacheService
+
+    real_lstat = Path.lstat
+
+    def guard(cache: ModelCacheService) -> None:
+        objects = cache._root / "objects"
+
+        def refuse_object(*_args, **_kwargs):
+            raise AssertionError("model object touched on storage")
+
+        def guarded_lstat(path: Path, *args, **kwargs):
+            if objects in path.parents:
+                raise AssertionError(f"lstat of model object {path}")
+            return real_lstat(path, *args, **kwargs)
+
+        monkeypatch.setattr(ModelCacheService, "_stored_object", refuse_object)
+        monkeypatch.setattr(Path, "lstat", guarded_lstat)
+
+    return guard

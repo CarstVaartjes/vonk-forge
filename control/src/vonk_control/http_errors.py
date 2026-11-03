@@ -8,6 +8,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from vonk_agent_protocol.http_failure import HttpTransient, TransientReason
 
 DEFAULT_RETRY_AFTER = 5
+MAX_RETRY_AFTER_SECONDS = 300
 
 
 class SecurityHTTPError(HTTPException):
@@ -33,7 +34,11 @@ def temporary_http_answer(
     reason: TransientReason, *, retry_after: int = DEFAULT_RETRY_AFTER
 ) -> NoReturn:
     """Raise a typed temporary answer without changing any security decision."""
-    raise TemporaryHTTPError(HttpTransient(reason=reason, retry_after=retry_after))
+    raise TemporaryHTTPError(
+        HttpTransient(
+            reason=reason, retry_after=min(retry_after, MAX_RETRY_AFTER_SECONDS)
+        )
+    )
 
 
 class RetryAfterMiddleware:

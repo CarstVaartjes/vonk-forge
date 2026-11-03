@@ -29,7 +29,7 @@ def _service(postgres_engine, tmp_path: Path, monkeypatch, free: list[int]):
         lambda _: _Usage(10**12, 10**12 - free[0], free[0]),
     )
     service = ModelCacheService(
-        sessions, tmp_path / "nas", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "nas", free_fraction=0, fixture_sources=True
     )
     return service, sessions
 

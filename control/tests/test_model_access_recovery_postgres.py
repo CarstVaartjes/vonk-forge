@@ -72,7 +72,7 @@ def test_gated_model_recovers_through_worker_without_manual_resume(
         return ModelCacheService(
             sessions,
             tmp_path / "cache",
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
             http_client=client,
             huggingface_token_path=token_path,
@@ -225,7 +225,7 @@ def test_manual_access_api_reconciles_replays_and_retains_exact_transfer(
     cache = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         http_client=client,
     )

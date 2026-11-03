@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from .generated_control.models.platform_observation import PlatformObservation
 
 
@@ -31,6 +33,14 @@ def render_platform(observation: PlatformObservation) -> None:
                 for worker in observation.workers
             ],
         )
+    for worker in observation.workers or []:
+        step = worker.running_step
+        started = worker.step_started_at
+        if isinstance(step, str) and isinstance(started, datetime):
+            print(
+                f"Worker {worker.process_instance_id[:12]}: "
+                f"step {step} running since {_time(started.isoformat())}"
+            )
     if observation.worker_issue is not None:
         _field("Worker observation", observation.worker_issue)
     stalled = observation.stalled_applications

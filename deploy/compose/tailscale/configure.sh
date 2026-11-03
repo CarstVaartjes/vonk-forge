@@ -558,7 +558,8 @@ fi
 # this Compose project stays up, a missing or downgraded listener is repaired
 # without an operator having to recreate this container.
 while :; do
-    sleep "${reconcile_interval}"
+    # Interruptible, so the shutdown trap runs at once and not after the sleep.
+    sleep "${reconcile_interval}" & wait $!
     desired_hermes=0
     hermes_is_available && desired_hermes=1
     if ! serve_is_exact "${desired_hermes}"; then
