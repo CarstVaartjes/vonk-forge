@@ -123,6 +123,13 @@ impl ControllerError {
         self.disposition() == Disposition::Fail && matches!(self.status, 400 | 413 | 422)
     }
 
+    /// Whether the Controller refused these exact bytes for good: a definite
+    /// 4xx. Authority (401/403) stays with the security edge, and a timeout, a
+    /// conflict or a too-early answer is observed again.
+    pub(crate) fn refuses_for_good(&self) -> bool {
+        self.disposition() == Disposition::Fail && !matches!(self.status, 408 | 409 | 425)
+    }
+
     /// Whether this refusal asks its owner to re-observe the same request.
     /// Renewal and diagnostic decisions consume this classification too.
     pub(crate) fn retryable(&self) -> bool {

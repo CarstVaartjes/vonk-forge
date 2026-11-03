@@ -980,3 +980,99 @@ fn largest_inspection_wave_fits_the_edge_document_limit() {
         bytes.len()
     );
 }
+
+/// One observation cycle against a node with no runs: it reports the empty
+/// snapshot as fresh evidence after dealing with the pending page.
+async fn pending_cycle(
+    server: &ObservationServer,
+    database_root: &std::path::Path,
+) -> Result<usize, RecipeObservationError> {
+    let runtime = tempdir().unwrap();
+    let runner = NoProcess;
+    let executor = RecipeExecutor {
+        client: &server.client,
+        helper_socket: std::path::Path::new(crate::host_runtime::HELPER_SOCKET),
+        runtime: OciRuntime {
+            runner: &runner,
+            data_root: database_root,
+        },
+        runtime_root: runtime.path(),
+    };
+    executor
+        .report_recipe_run_observation_page(None)
+        .await
+        .map(|page| page.reported)
+}
+
+fn retain_pending(database_root: &std::path::Path, run_id: Uuid) -> Value {
+    let report = crate::client::build_exact_recipe_run_observations(
+        Utc::now(),
+        &[exact_observation(run_id)],
+    )
+    .unwrap();
+    let mut state = StateStore::open(&database_root.join("state.sqlite"), NODE_ID).unwrap();
+    state.retain_recipe_observation(&report).unwrap();
+    serde_json::to_value(&report).unwrap()
+}
+
+#[tokio::test]
+async fn refused_pending_observation_does_not_block_fresh_evidence() {
+    // Wrong implementation: a deterministic 422 for the pending page returns
+    // early every cycle, so no newer observation is ever collected or sent.
+    let root = tempdir().unwrap();
+    let pending = retain_pending(root.path(), Uuid::new_v4());
+    let server = ObservationServer::scripted(&[422, 204]);
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 2, "pending page, then fresh evidence");
+    assert_eq!(reports[0], pending);
+    assert_eq!(reports[1]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn transient_failure_keeps_the_pending_observation_until_delivered() {
+    // Wrong implementation: discarding on any error loses evidence a 5xx only
+    // delayed (a stop may already have removed its output).
+    let root = tempdir().unwrap();
+    let pending = retain_pending(root.path(), Uuid::new_v4());
+    let server = ObservationServer::scripted(&[503, 204]);
+    assert!(pending_cycle(&server, root.path()).await.is_err());
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_some());
+    drop(state);
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 3);
+    assert_eq!(reports[0], pending);
+    assert_eq!(reports[1], pending, "the same page is delivered again");
+    assert_eq!(reports[2]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn unreadable_pending_observation_is_discarded_and_the_cycle_proceeds() {
+    // Wrong implementation: a row written under an older schema fails the
+    // read with `?` and aborts every cycle after an agent upgrade.
+    let root = tempdir().unwrap();
+    {
+        let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        drop(state);
+        let connection = rusqlite::Connection::open(root.path().join("state.sqlite")).unwrap();
+        connection
+            .execute(
+                "INSERT INTO metadata(key,value) VALUES ('pending_recipe_observation', '{\"old\":1}')",
+                [],
+            )
+            .unwrap();
+    }
+    let server = ObservationServer::new(Some(204));
+    pending_cycle(&server, root.path()).await.unwrap();
+    let reports = server.finish();
+    assert_eq!(reports.len(), 1);
+    assert_eq!(reports[0]["runs"], json!([]));
+    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+    assert!(state.pending_recipe_observation().unwrap().is_none());
+}

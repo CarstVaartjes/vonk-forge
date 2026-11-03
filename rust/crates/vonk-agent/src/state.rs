@@ -281,11 +281,29 @@ impl StateStore {
                 |row| row.get(0),
             )
             .optional()?;
-        if body.as_ref().is_some_and(|body| body.len() > 1024 * 1024) {
-            return Err(StateError::Identity);
+        let Some(body) = body else {
+            return Ok(None);
+        };
+        // A page this agent cannot read again (an older shape after an
+        // upgrade, an oversized or damaged row) can never be delivered:
+        // discard it, and the cycle collects fresh evidence instead.
+        match Some(&body)
+            .filter(|body| body.len() <= 1024 * 1024)
+            .and_then(|body| parse_strict(body.as_bytes()).ok())
+        {
+            Some(report) => Ok(Some(report)),
+            None => {
+                eprintln!(
+                    "vonk-agent: discarding unreadable pending recipe observation bytes={}; fresh evidence is collected instead",
+                    body.len()
+                );
+                self.connection.execute(
+                    "DELETE FROM metadata WHERE key='pending_recipe_observation' AND value=?1",
+                    [&body],
+                )?;
+                Ok(None)
+            }
         }
-        body.map(|body| parse_strict(body.as_bytes()).map_err(StateError::from))
-            .transpose()
     }
 
     pub fn retain_recipe_observation(
