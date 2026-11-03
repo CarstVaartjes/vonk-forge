@@ -594,41 +594,71 @@ pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
 /// One failed container's captured output: what `docker logs --tail
 /// CAPTURE_LINES` printed, as the helper's command runner kept it (the last
 /// `package_command::STREAM_RETAINED_BYTES` of each stream).  An exit is
-/// classified from this alone; the windows that cross the protocol are cut
-/// from it by `retained`, so classification can never be handed a window.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// classified from this alone, and everything it needs is derived once, here:
+/// the windows that cross the protocol, their own closing exception, and the
+/// closing exception of the whole capture, admitted only when a window points
+/// above itself.  Classification can never be handed a window.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CapturedOutput {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+    retained: HostHelperProcessLogs,
+    window_exception: Option<String>,
+    /// The cause a window's pointer ("please check the stack trace above")
+    /// sends the reader to, when the window holds no exception of its own:
+    /// the closing exception of the whole capture.  Without a pointer it is
+    /// never read, so a traceback the workload logged and recovered from far
+    /// above an unrelated exit cannot name that exit.
+    dropped_exception: Option<String>,
 }
 
 impl CapturedOutput {
     pub fn new(stdout: &[u8], stderr: &[u8]) -> Self {
+        let retained = retain_container(stdout, stderr);
+        let window_exception = python_exception(&retained);
+        let points_above = [&retained.stdout.text, &retained.stderr.text]
+            .into_iter()
+            .any(|text| {
+                text.as_bytes()
+                    .split_inclusive(|byte| *byte == b'\n')
+                    .any(points_elsewhere)
+            });
+        let dropped_exception = if window_exception.is_none() && points_above {
+            let whole = |stream: &[u8]| FailureLogTail {
+                text: String::from_utf8_lossy(stream).into_owned(),
+                truncated: false,
+                dropped_bytes: Some(0),
+                dropped_lines: Some(0),
+            };
+            python_exception(&HostHelperProcessLogs {
+                exit_code: None,
+                stdout: whole(stdout),
+                stderr: whole(stderr),
+            })
+        } else {
+            None
+        };
         Self {
-            stdout: stdout.to_vec(),
-            stderr: stderr.to_vec(),
+            retained,
+            window_exception,
+            dropped_exception,
         }
     }
 
     /// The bounded windows the protocol carries.
-    pub fn retained(&self) -> HostHelperProcessLogs {
-        retain_container(&self.stdout, &self.stderr)
+    pub fn retained(&self) -> &HostHelperProcessLogs {
+        &self.retained
     }
 
-    /// The closing uncaught exception anywhere in the capture, for an exit
-    /// whose windows dropped it.
-    fn closing_exception(&self) -> Option<String> {
-        let whole = |stream: &[u8]| FailureLogTail {
-            text: String::from_utf8_lossy(stream).into_owned(),
-            truncated: false,
-            dropped_bytes: Some(0),
-            dropped_lines: Some(0),
-        };
-        python_exception(&HostHelperProcessLogs {
-            exit_code: None,
-            stdout: whole(&self.stdout),
-            stderr: whole(&self.stderr),
-        })
+    /// The windows, handed to the protocol once the exit is classified.
+    pub fn into_retained(self) -> HostHelperProcessLogs {
+        self.retained
+    }
+
+    /// The exception the exit summary carries: the windows' own, else the one
+    /// their pointer names.
+    fn exception(&self) -> Option<&str> {
+        self.window_exception
+            .as_deref()
+            .or(self.dropped_exception.as_deref())
     }
 }
 
@@ -747,17 +777,21 @@ fn has(text: &str, needles: &[&str]) -> bool {
 /// container's own words in the retained windows, the text the evidence
 /// carries.  A window can drop the line that names a cause: a two-Spark vLLM
 /// start ends in kilobytes of C++ frames below the engine's `RuntimeError:
-/// Worker failed with error 'CUDA error: no kernel image ...`.  So an exit the
-/// windows leave unclassified is read once more, from the closing exception
-/// of the whole capture and only from it, never from an incidental line far
-/// above the failure.
+/// Worker failed with error 'CUDA error: no kernel image ...`, and the window
+/// keeps only the frames and the pointer to it.  So an exit the windows leave
+/// unclassified is read once more from the closing exception of the whole
+/// capture, admitted only when the window points above; never from an
+/// incidental line, nor from a traceback with no pointer to it.
 pub fn classify(exit: Option<&ContainerExit>, output: Option<&CapturedOutput>) -> ExitCause {
-    let retained = output.map(CapturedOutput::retained);
-    let cause = classify_retained(exit, retained.as_ref());
+    let cause = classify_retained(
+        exit,
+        output.map(CapturedOutput::retained),
+        output.is_some_and(|output| output.window_exception.is_some()),
+    );
     if cause != ExitCause::Unclassified {
         return cause;
     }
-    match output.and_then(CapturedOutput::closing_exception) {
+    match output.and_then(|output| output.dropped_exception.as_deref()) {
         Some(exception) => {
             named_cause(&exception.to_lowercase()).unwrap_or(ExitCause::PythonException)
         }
@@ -806,10 +840,12 @@ fn named_cause(output: &str) -> Option<ExitCause> {
     None
 }
 
-/// `classify` over the retained windows alone.
+/// `classify` over the retained windows alone; `window_exception` says
+/// whether they close on an uncaught exception.
 fn classify_retained(
     exit: Option<&ContainerExit>,
     logs: Option<&HostHelperProcessLogs>,
+    window_exception: bool,
 ) -> ExitCause {
     if exit.is_some_and(|exit| exit.host_memory.is_some()) {
         return ExitCause::HostMemoryExhausted;
@@ -850,7 +886,7 @@ fn classify_retained(
     // carries (`FileNotFoundError: ... No such file or directory`), and above
     // the bare signal, which is how a process that already reported its
     // exception may still end.
-    if logs.and_then(python_exception).is_some() {
+    if window_exception {
         return ExitCause::PythonException;
     }
     if matches!(code, Some(134 | 135 | 137 | 139)) {
@@ -873,8 +909,7 @@ pub fn exit_summary(
         return crate::host_memory_guard::summary(evidence);
     }
     let cause = classify(exit.ok(), output);
-    let retained = output.map(CapturedOutput::retained);
-    let logs = retained.as_ref();
+    let logs = output.map(CapturedOutput::retained);
     let mut parts = Vec::new();
     match exit {
         Ok(state) => {
@@ -904,10 +939,7 @@ pub fn exit_summary(
     // text, so a reader takes the facts before it as tokens.  It is carried for
     // every cause, because a named cause such as `missing_file` still reads
     // better with the path the exception names.
-    if let Some(exception) = logs
-        .and_then(python_exception)
-        .or_else(|| output.and_then(CapturedOutput::closing_exception))
-    {
+    if let Some(exception) = output.and_then(CapturedOutput::exception) {
         summary.push_str(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_EXCEPTION_FIELD);
         summary.push_str(&format!("{exception:?}"));
     }
@@ -1131,7 +1163,7 @@ mod tests {
             let output = capture.retained();
             assert!(output.stderr.text.len() <= RETAINED_BYTES);
             assert!(
-                python_exception(&output).is_some_and(|text| text.contains("AssertionError")),
+                python_exception(output).is_some_and(|text| text.contains("AssertionError")),
                 "{figures}: {}",
                 output.stderr.text
             );
@@ -1913,7 +1945,7 @@ mod tests {
             classify(Some(&state), Some(&output)),
             ExitCause::Unclassified
         );
-        assert!(python_exception(&output.retained()).is_none());
+        assert!(python_exception(output.retained()).is_none());
         assert!(!exit_summary(Ok(&state), Some(&output), None).contains("exception="));
     }
 

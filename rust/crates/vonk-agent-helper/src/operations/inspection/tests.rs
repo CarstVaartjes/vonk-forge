@@ -235,6 +235,42 @@ WARNING 11-02 23:40:01 [numa.py:12] set_mempolicy: invalid argument, keeping the
 }
 
 #[test]
+fn a_recovered_traceback_far_above_never_names_the_exit() {
+    // Wrong implementation this catches: reading the last traceback anywhere
+    // in the capture.  A workload logs tracebacks it recovers from (a refused
+    // rendezvous, a missing optional file), runs on, and later exits on a
+    // one-line message with no traceback -- a partition, not the recipe.
+    // With no pointer above in the window, the capture is never consulted.
+    let mut stderr = String::new();
+    for (opener, exception) in [
+        (
+            "WARNING 11-02 23:30:01 [rendezvous.py:88] connect to 10.0.0.2:29500 failed, retrying",
+            "ConnectionRefusedError: [Errno 111] Connection refused",
+        ),
+        (
+            "WARNING 11-02 23:30:02 [config.py:41] optional tuning file not loaded",
+            "FileNotFoundError: [Errno 2] No such file or directory: '/models/tuning.json'",
+        ),
+    ] {
+        stderr.push_str(&format!(
+            "{opener}\nTraceback (most recent call last):\n  File \"/app/net.py\", line 4, in load\n    open_or_connect()\n{exception}\n"
+        ));
+    }
+    stderr.push_str(
+        &"INFO 11-02 23:31:00 [scheduler.py:120] Running: 0 reqs, Waiting: 0 reqs\n".repeat(300),
+    );
+    stderr.push_str(
+        "ERROR 11-02 23:31:05 [rendezvous.py:120] lost contact with rank 1 (10.0.0.2): network is unreachable\n",
+    );
+    let log = through_docker_logs_capture(b"", stderr.as_bytes());
+    assert!(log.stderr.len() <= crate::package_command::STREAM_RETAINED_BYTES);
+    let (retained, summary) = summary_of(log, 1);
+    assert!(!retained.stderr.text.contains("Traceback"), "precondition");
+    assert!(summary.contains("exit_cause=unclassified"), "{summary}");
+    assert!(!summary.contains("exception="), "{summary}");
+}
+
+#[test]
 fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
     let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
     let id = "a".repeat(64);
