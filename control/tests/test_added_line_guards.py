@@ -2735,7 +2735,7 @@ _SELECT_PATHS = [
     ("collection-readers", MODEL_CACHE_PATH),
     ("request-scans", "control/src/vonk_control/api/example.py"),
 ]
-_SELECT_LINES = {2, 3, 4, 5, 6}
+_SELECT_LINES = set(range(2, 12))
 # Everything the reviews proved a whole-table select can hide behind. The rule
 # errs toward false positives: only a narrowing call chained on the select, or a
 # keyed semi-join, gives credit.
@@ -2755,6 +2755,10 @@ _MUST_FIRE = [
     "return s.scalars(select(Job).limit(None))",
     "q = select(Job)\n    return s.scalars(q)",
     "q = select(Job)\n    if x:\n        q = q.where(Job.id == x)\n    return s.scalars(q)",
+    # A rebind narrows only the loads lexically after it in its own block.
+    "for i in x:\n        q = select(Job)\n        if i:\n            break\n        q = q.where(Job.id == i)\n    return s.scalars(q)",
+    "try:\n        q = select(Job)\n        work()\n        q = q.where(Job.id == x)\n    except E:\n        pass\n    return s.scalars(q)",
+    "with suppress(E):\n        q = select(Job)\n        work()\n        q = q.where(Job.id == x)\n    return s.scalars(q)",
 ]
 _MUST_PASS = [
     "return s.scalars(select(Job).where(Job.id == x))",
@@ -2784,3 +2788,21 @@ def test_a_whole_table_select_is_not_rescued_by_anything_but_its_own_narrowing(
 def test_chained_narrowing_limits_and_the_keyed_semi_join_pass(body, mode, path):
     source = "def f(s, x, d):\n    " + body + "\n"
     assert not check_source(path, source, _SELECT_LINES, modes=(mode,)), body
+
+
+# EXISTS credits only the select it is chained on: the outer select around it
+# is still judged by its own where (no key, no limit). ``collection-readers``
+# counts any chained ``where`` as narrowing, so these are request-scans fixtures.
+@pytest.mark.parametrize(
+    "body",
+    [
+        "return s.scalars(select(Job).where(select(RunNode.id).exists()))",
+        "return s.scalars(select(Job).where(or_(Job.state == 'x', select(RunNode.id).exists())))",
+        "return s.scalars(select(Job).where(select(RunNode.id).where(RunNode.job_id == Job.id).exists()))",
+        "return s.scalars(select(Job).where(~select(RunNode.id).where(RunNode.job_id == Job.id).exists()))",
+    ],
+)
+def test_an_exists_inside_a_where_does_not_scope_the_outer_select(body):
+    source = "def f(s):\n    " + body + "\n"
+    path = "control/src/vonk_control/api/example.py"
+    assert check_source(path, source, {2}, modes=("request-scans",)), body

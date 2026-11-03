@@ -174,16 +174,20 @@ def _rebinds(statement: ast.AST, name: str, parents: dict[ast.AST, ast.AST]) -> 
 
 def _rebound_after(
     assignment: ast.Assign, name: str, parents: dict[ast.AST, ast.AST]
-) -> int | None:
-    """The line after which ``name`` is narrowed on every path, from this block."""
+) -> list[ast.stmt]:
+    """The statements after a rebind in the assignment's own block.
+
+    Only loads lexically inside them are narrowed on every path; a rebind in
+    another block, or a load outside these statements, gets no credit.
+    """
     owner = parents.get(assignment)
     for field in ("body", "orelse", "finalbody"):
         block = getattr(owner, field, None)
         if isinstance(block, list) and assignment in block:
-            for statement in block[block.index(assignment) + 1 :]:
-                if _rebinds(statement, name, parents):
-                    return statement.end_lineno
-    return None
+            for index in range(block.index(assignment) + 1, len(block)):
+                if _rebinds(block[index], name, parents):
+                    return block[index + 1 :]
+    return []
 
 
 def is_narrowed(
@@ -223,11 +227,12 @@ def is_narrowed(
         and part.id == name
         and isinstance(part.ctx, ast.Load)
     ]
-    narrowed_after = _rebound_after(assignment, name, parents)
-    return bool(loads) and all(
-        narrowed(load) or (narrowed_after is not None and load.lineno > narrowed_after)
-        for load in loads
-    )
+    covered = {
+        id(part)
+        for tail in _rebound_after(assignment, name, parents)
+        for part in ast.walk(tail)
+    }
+    return bool(loads) and all(narrowed(load) or id(load) in covered for load in loads)
 
 
 def _key(node: ast.AST) -> bool:
@@ -238,6 +243,11 @@ def _key(node: ast.AST) -> bool:
 
 
 def _scoped(nodes: list[ast.AST]) -> bool:
+    # EXISTS credits only the select it is chained on, never one inside a where.
+    if any(
+        isinstance(node, ast.Call) and _tail(node.func) == "exists" for node in nodes
+    ):
+        return True
     for root in nodes:
         for node in ast.walk(root):
             if (
@@ -246,7 +256,7 @@ def _scoped(nodes: list[ast.AST]) -> bool:
             ):
                 return True
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                if is_limit(node) or node.func.attr == "exists":
+                if is_limit(node):
                     return True
                 if node.func.attr in {"in_"} and _key(node.func.value):
                     return True
