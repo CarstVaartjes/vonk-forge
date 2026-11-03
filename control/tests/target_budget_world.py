@@ -564,7 +564,7 @@ def build_world(tmp_path: Path, name: str, *, scale: int) -> World:
     for node in nodes:
         inventory(sessions, node, now, objects)
     cache = ModelCacheService(
-        sessions, tmp_path / f"nas-{name}", reserve_bytes=0, clock=lambda: now
+        sessions, tmp_path / f"nas-{name}", free_fraction=0, clock=lambda: now
     )
     cache._fleet_lifecycle = operations
     return World(

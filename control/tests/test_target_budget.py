@@ -256,13 +256,13 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     ),
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
-        "#1965",
-        "PR #1965 (fix/removal-review-bounded) bounds it; the finding goes when it does",
+        "removal-review",
+        "the removal review is not yet target-bounded: statements, rows and plan parses grow with unrelated history (55 -> 325 statements, 7 -> 34 plan parses)",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
-        "#1965",
-        "PR #1965 (fix/removal-review-bounded) bounds it; the finding goes when it does",
+        "removal-review",
+        "the fleet removal review is not yet target-bounded: statements and plan parses grow with unrelated history (106 -> 376 statements, 16 -> 70 plan parses)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.
