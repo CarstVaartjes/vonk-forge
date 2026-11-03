@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, RootModel, ValidationError
 from vonk_agent_protocol import UnknownOutcomeError
 from vonk_agent_protocol.wire_model import StrictJSONModel as ProtocolStrictJSONModel
 
+from .http_errors import MAX_RETRY_AFTER_SECONDS
 from .platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
@@ -133,7 +134,7 @@ def serialize_json_value(value: object, *, by_alias: bool = True) -> object:
 
 _CONTROLLER_RESPONSE = "_controller_response"
 _DEFAULT_RETRY_AFTER_SECONDS = 5
-_MAX_RETRY_AFTER_SECONDS = 300
+_MAX_RETRY_AFTER_SECONDS = MAX_RETRY_AFTER_SECONDS
 
 
 def _retry_later_response(error: UnknownOutcomeError) -> Response:

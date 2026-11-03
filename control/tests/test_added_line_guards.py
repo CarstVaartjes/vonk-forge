@@ -2093,3 +2093,32 @@ def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
         {1},
         modes=("capacity-refusals",),
     )
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        "raise HTTPException(status_code=422, detail='time is in the future')\n",
+        "raise HTTPException(\n    status_code=422,\n    detail='x',\n)\n",
+        "return Response(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)\n",
+    ],
+)
+def test_new_agent_facing_422_is_flagged(probe: str) -> None:
+    # Wrong implementation: a clock or race answered 422 makes the Spark drop
+    # bytes that would be accepted a moment later.
+    path = "control/src/vonk_control/agent_api/observations.py"
+    line = next(
+        number for number, text in enumerate(probe.splitlines(), 1) if "422" in text
+    )
+    assert check_source(path, probe, {line}, modes=("agent-422",))
+
+
+def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
+    marked = "raise HTTPException(status_code=422)  # 422-verdict: body validation\n"
+    path = "control/src/vonk_control/agent_api/observations.py"
+    assert not check_source(path, marked, {1}, modes=("agent-422",))
+    other = "raise HTTPException(status_code=422)\n"
+    assert not check_source(
+        "control/src/vonk_control/library_api.py", other, {1}, modes=("agent-422",)
+    )
+    assert not check_source(path, other, set(), modes=("agent-422",))
