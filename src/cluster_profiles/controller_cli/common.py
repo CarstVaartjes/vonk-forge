@@ -94,6 +94,17 @@ def _add_output(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_verbose(parser: argparse.ArgumentParser) -> None:
+    """``--verbose`` is the removal review's name for ``--wide``."""
+    parser.add_argument(
+        "--verbose",
+        dest="wide",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="List every file and owner in the review",
+    )
+
+
 class _ValueList(argparse.Action):
     """A multi-value flag: repeat it, comma-separate values, or mix both.
 

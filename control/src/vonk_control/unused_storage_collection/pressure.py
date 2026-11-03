@@ -164,6 +164,8 @@ def _pressure(
         max(shortfall, line_shortfall) + reserve,
         why,
         demanded,
+        line_shortfall,
+        line_shortfall + reserve if line_shortfall else 0,
     )
 
 
@@ -193,7 +195,6 @@ def _relieve(
     self: UnusedStorageCollector,
     pressure: _Pressure,
     evidence: _CollectorEvidence,
-    deadline: float,
     kept: Counter[str],
     attempted: dict[tuple[str, str], bool],
 ) -> _Outcome:
@@ -218,26 +219,32 @@ def _relieve(
     if paused is not None and now < paused:
         outcome.outcome = "paused"
         return outcome
-    if pressure.demanded and outcome.freeable < pressure.shortfall:
+    unmet = pressure.demanded and outcome.freeable < pressure.shortfall
+    if unmet and not pressure.line_shortfall:
         # Removing part of it would cost cached items and still not admit
-        # the work that asked.
+        # the work that asked, and nothing else is short.
         outcome.outcome = "insufficient_after_eviction"
         return outcome
+    # Below the low-space line, eviction goes on toward the line even when the
+    # refused work cannot be met (the co-located services need the line either
+    # way), and stops there: more would cost cached items and still not admit it.
+    target = pressure.line_need if unmet else pressure.need
     ordered = _eviction_order(items)
     queued = 0
+    reached = False
     measured_removal = 0
     for item in ordered:
-        if queued >= pressure.need or outcome.stopping:
+        if queued >= target or outcome.stopping:
             # A failed run's Stop must land before more is judged needed.
             break
         done = attempted.get((item.kind, item.key))
         if done is None:
-            if time.monotonic() > deadline:
-                kept[f"{item.kind}: sweep budget"] += 1
-                continue
-            done = attempted[(item.kind, item.key)] = self._remove(
-                item, kept, outcome.removed, attempted
+            done = self._remove_within_budget(
+                item, kept, outcome.removed, attempted, reached
             )
+            if done is None:
+                continue
+            reached = True
         if done:
             queued += item.freeable
             # Shared objects stay in the model store until the agent's LRU
@@ -253,11 +260,41 @@ def _relieve(
         self._reclaim_blobs()
     if measured_removal:
         self._rounds[pressure.scope] = _Round(measured_removal, pressure.free)
+        if unmet:
+            outcome.outcome = "insufficient_after_eviction"  # for the remainder
     elif pressure.demanded and not outcome.stopping:
         outcome.outcome = "insufficient_after_eviction"
     elif not outcome.stopping:  # else evicting: removal follows the Stop
         outcome.outcome = "nothing_removable"
     return outcome
+
+
+def _remove_within_budget(
+    self: UnusedStorageCollector,
+    item: _Item,
+    kept: Counter[str],
+    removed: Counter[str],
+    attempted: dict[tuple[str, str], bool],
+    reached: bool,
+) -> bool | None:
+    """Remove ``item`` and record it; None when the pass's attempt budget is spent.
+
+    One budget serves the whole pass and counts only time spent in removal
+    attempts, never an inventory: a scope's first attempt always runs, later
+    ones get what remains.
+    """
+
+    if reached and self._removal_seconds > self._budget_seconds:
+        kept[f"{item.kind}: sweep budget"] += 1
+        return None
+    started = time.monotonic()
+    try:
+        done = attempted[(item.kind, item.key)] = self._remove(
+            item, kept, removed, attempted
+        )
+    finally:
+        self._removal_seconds += time.monotonic() - started
+    return done
 
 
 def _check_round(

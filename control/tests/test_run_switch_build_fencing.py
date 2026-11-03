@@ -26,7 +26,9 @@ from .test_run_switch_operations import _request
 
 def _direct_parent(tmp_path, engine):
     sessions, _profiles, planner, node_id, _application, selected = (
-        _accepted_build_profile(tmp_path, engine, accept_profile=False)
+        _accepted_build_profile(
+            tmp_path, engine, accept_profile=False, initially_installed=True
+        )
     )
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))

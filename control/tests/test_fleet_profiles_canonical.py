@@ -33,12 +33,14 @@ from vonk_control.models import (
     AgentNodeProfile,
     Base,
     CatalogDocument,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     FleetProfileApplication,
     User,
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import create_draft, reworded
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
@@ -139,7 +141,7 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                     kind="model",
                     publisher=model.identity.publisher,
                     slug=model.identity.slug,
-                    title=model.identity.model.title,
+                    title=model.identity.slug,
                     created_by="test",
                     created_at=NOW,
                     updated_at=NOW,
@@ -149,7 +151,7 @@ def _seed(sessions: sessionmaker, *, options: bool = False) -> None:
                     kind="recipe",
                     publisher=recipe.identity.publisher,
                     slug=recipe.identity.slug,
-                    title=recipe.metadata.title,
+                    title=recipe.identity.slug,
                     created_by="test",
                     created_at=NOW,
                     updated_at=NOW,
@@ -526,13 +528,7 @@ def test_profile_read_uses_the_read_only_latest_cache_resolver() -> None:
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -619,13 +615,7 @@ def test_profile_read_ignores_a_resolver_that_substitutes_an_older_revision() ->
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -690,13 +680,7 @@ def test_profile_read_names_a_missing_exact_cache_instead_of_substituting() -> N
         current = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
         assert current is not None
         recipe = RecipeDefinition.model_validate(current.document)
-        newer = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "New revision"}
-                )
-            }
-        ).model_dump(mode="json")
+        newer = reworded(recipe, "New revision").model_dump(mode="json")
         session.add(
             CatalogDocumentRevision(
                 id=newer_revision_id,
@@ -810,6 +794,57 @@ def test_profile_reports_an_unreadable_head_without_substituting_older_content()
     view = service.get_number(profile.number)
     assert view.assignments[0].recipe.state == "Needs attention"
     assert view.assignments[0].spark_ids == [NODE_1]
+
+
+def test_a_retracted_recipe_needs_attention_until_published_again() -> None:
+    """A recipe the library no longer lists has no head: its revisions stay
+    active, but the profile does not load one of them; publishing it again
+    makes it current and admits a fresh load."""
+    sessions = _sessions()
+    _seed(sessions)
+    service = FleetProfileService(sessions, clock=lambda: NOW)
+    profile = service.create(
+        FleetProfileInput(
+            name="Retracted",
+            assignments=[
+                FleetProfileAssignmentInput(
+                    recipe_selector="vonk-forge/synthetic-tiny-build",
+                    spark_ids=[NODE_1],
+                )
+            ],
+        ),
+        actor="test",
+    )
+
+    def set_head(revision_id: str | None) -> None:
+        with sessions.begin() as session:
+            session.execute(
+                update(CatalogDocumentHead)
+                .where(CatalogDocumentHead.kind == "recipe")
+                .values(active_revision_id=revision_id)
+            )
+
+    set_head(None)
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe.state == "Needs attention"
+    assert any("no longer published" in warning for warning in view.warnings)
+    retracted = service.preview(profile.id)
+    assert not retracted.allowed
+    assert any(
+        reason.code == "profile.recipe_unavailable" for reason in retracted.reasons
+    )
+
+    set_head(RECIPE_REVISION_ID)
+    view = service.get_number(profile.number)
+    assert view.assignments[0].recipe.state != "Needs attention"
+    with sessions() as session:
+        assert FleetProfileService._recipe_identity(
+            session, "vonk-forge/synthetic-tiny-build"
+        ) == (RECIPE_DOCUMENT_ID, RECIPE_REVISION_ID)
+    republished = service.preview(profile.id)
+    assert all(
+        reason.code != "profile.recipe_unavailable" for reason in republished.reasons
+    )
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1091,7 +1126,7 @@ def test_profile_save_bounds_document_parses_and_database_round_trips(
     for index in range(1, selector_count):
         document = json.loads(json.dumps(template))
         document["identity"]["slug"] = f"synthetic-{index}"
-        revision = catalog.create_draft(document, actor="test")
+        revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/synthetic-{index}")
 
@@ -1277,7 +1312,7 @@ def test_profile_read_observes_distinct_content_once(
     for index in range(1, selector_count):
         document = json.loads(json.dumps(template))
         document["identity"]["slug"] = f"latency-{index}"
-        revision = catalog.create_draft(document, actor="test")
+        revision = create_draft(catalog, document, actor="test")
         catalog.resolve(revision.id, actor="test")
         selectors.append(f"vonk-forge/latency-{index}")
     from vonk_control.model_cache import ModelCacheService

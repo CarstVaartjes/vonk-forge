@@ -194,6 +194,56 @@ def test_freed_slots_go_to_waiting_downloads_before_a_large_one_refills(
     client.close()
 
 
+def test_a_file_ending_while_the_claim_facts_are_read_still_serves_the_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from vonk_control.model_cache.scheduler import SchedulerMixin
+
+    original = SchedulerMixin._claim_facts
+    stalled: list[bool] = []
+    gates: dict[str, threading.Event] = {}
+
+    def facts_then_a_file_ends(self, **kwargs):
+        facts = original(self, **kwargs)
+        # The pool was full when this pass began; one file of the large
+        # download ends before the pass takes the lock (once).
+        if not stalled and self._available_transfer_slots() == 0 and gates:
+            stalled.append(True)
+            gates[started[0]].set()
+            _wait_for(lambda: self._available_transfer_slots() > 0)
+        return facts
+
+    started: list[str] = []
+    gates.update({f"/weights-h{index}": threading.Event() for index in range(6)})
+    service, client = _service(
+        tmp_path, _database(tmp_path), maximum=2, handler=_serve(gates, started)
+    )
+    hog = _start(
+        service,
+        [_artifact(f"h{index}", f"/weights-h{index}".encode()) for index in range(6)],
+        "00000000-0000-4000-8000-000000002301",
+    )
+    service.tick()
+    _wait_for(lambda: len(started) == 2)
+    waiting = _start(
+        service,
+        [_artifact("n0", b"/weights-n0")],
+        "00000000-0000-4000-8000-000000002310",
+    )
+    monkeypatch.setattr(SchedulerMixin, "_claim_facts", facts_then_a_file_ends)
+
+    _drain(service, waiting.id)
+    assert stalled == [True]
+    assert service.get_operation(waiting.id).state == LifecycleState.SUCCEEDED
+    assert service.get_operation(hog.id).state == LifecycleState.RUNNING
+    for gate in gates.values():
+        gate.set()
+    _drain(service, hog.id)
+    service.close()
+    assert client is not None
+    client.close()
+
+
 def test_an_object_held_by_another_writer_is_a_named_wait_that_resumes(
     tmp_path: Path,
 ) -> None:

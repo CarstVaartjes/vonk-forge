@@ -61,6 +61,8 @@ from vonk_forge_contracts import (
 from tests.recipe_library_source import recipe_library_root
 from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
+from .display_fixtures import reword
+
 ROOT = recipe_library_root()
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
 
@@ -118,7 +120,6 @@ def _item_with_document(
         content_sha256=digest,
         uri=f"vonk://catalog/{item.publisher}/{item.slug}@sha256:{digest}",
         document=recipe.model_dump(mode="json"),
-        tags=tuple(recipe.metadata.tags),
         release=None,
         package_handle=None,
         package_sha256=None,
@@ -379,7 +380,7 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     first = library.recipe_library().recipes[0]
 
     changed = deepcopy(original.document)
-    _document_section(changed, "metadata")["title"] = "Accepted recipe successor"
+    reword(changed, "Accepted recipe successor")
     replacement = _item_with_document(original, changed)
     second_result = apply(replacement, "2" * 40)
     assert second_result.state == "current"
@@ -404,12 +405,12 @@ def test_sync_reactivates_retained_recipe_without_replacing_history_or_model_hea
     reference = RecipeDefinition.model_validate(original.document).models[0].model
     old_model = catalog.entities.resolve_reference(reference)
     newer_model = deepcopy(old_model.document)
-    _document_section(newer_model, "metadata")["description"] = "New Model metadata"
+    reword(newer_model, "New Model metadata")
     draft = catalog.entities.revise(old_model.document_id, newer_model, actor="test")
     model_head = catalog.entities.resolve(draft.id, actor="test")
 
     pending_document = deepcopy(changed)
-    _document_section(pending_document, "metadata")["title"] = "Pending local candidate"
+    reword(pending_document, "Pending local candidate")
     pending = catalog.entities.revise(
         first.identity.recipe_id, pending_document, actor="test"
     )
@@ -556,9 +557,7 @@ def test_local_revision_lookup_accepts_more_than_256_identities(tmp_path: Path) 
 
 def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) -> None:
     sessions, service, reader, item = _fixture(tmp_path)
-    document = deepcopy(item.document)
-    document["metadata"]["tags"] = []  # type: ignore[index]
-    replacement = _item_with_document(item, document)
+    replacement = replace(_item_with_document(item, deepcopy(item.document)), tags=())
     reader.snapshot = RecipeLibrarySnapshot(
         reader.snapshot.commit,
         (replacement,),
@@ -630,7 +629,7 @@ def test_sync_keeps_unresolvable_candidate_out_and_admits_next_verified_import(
     )
 
 
-def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -> None:
+def test_recipe_attribution_does_not_change_execution_identity(tmp_path: Path) -> None:
     sessions, service, _reader, item = _fixture(tmp_path)
     service.import_recipe_library(
         "test",
@@ -641,7 +640,7 @@ def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -
         dependency_documents=item.dependencies,
     )
     document = deepcopy(item.document)
-    document["metadata"]["tags"] = ["editorial-only"]  # type: ignore[index]
+    reword(document, "editorial-only")
     replacement = _item_with_document(item, document)
     service.import_recipe_library(
         "test",
@@ -661,6 +660,26 @@ def test_recipe_metadata_tags_do_not_change_execution_identity(tmp_path: Path) -
         assert len(revisions) == 2
         assert revisions[0].content_digest != revisions[1].content_digest
         assert revisions[0].execution_key == revisions[1].execution_key
+
+
+def test_an_unchanged_commit_tick_does_no_per_row_model_work(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A converged catalog is not re-scanned for old-contract Model rows each tick."""
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    sync = _sync(sessions, service, reader)
+    first = sync.automatic()
+    scans: list[str] = []
+    original = CatalogService.refresh_model_projections
+
+    def counting(self: CatalogService) -> None:
+        scans.append("scan")
+        original(self)
+
+    monkeypatch.setattr(CatalogService, "refresh_model_projections", counting)
+    repeated = sync.automatic()
+    assert repeated.id == first.id
+    assert scans == []
 
 
 def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> None:
@@ -1033,7 +1052,7 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     # one this Controller still requires is skipped on its own.
     models[1]["document"]["future_field"] = "added by a newer contract"
     del models[0]["document"]["files"]
-    del recipes[0]["document"]["metadata"]
+    del recipes[0]["document"]["provenance"]
     skipped_model = models[0]["document"]["identity"]
     skipped_recipe = recipes[0]["document"]["identity"]
 
@@ -1489,3 +1508,99 @@ def test_exact_replay_keeps_request_binding_when_progress_is_damaged(tmp_path):
         )
     )
     assert fresh.completed_at is not None and fresh.unchanged_count == 1
+
+
+def test_sync_retracts_every_document_kind_absent_from_the_published_library(
+    tmp_path: Path,
+) -> None:
+    """No kind keeps a head the published library no longer lists.
+
+    Wrong implementation caught: retraction filtered to one kind (recipes), so
+    a dropped Model keeps its head forever and the model-cache binding scan
+    resolves it on every pass. The head query below has no kind filter: a new
+    document kind is covered without editing this test.
+    """
+    sessions, catalog, reader, original = _fixture(tmp_path)
+    sync = _sync(sessions, catalog, reader)
+    library = LibraryProjection(
+        sessions, cursors=catalog._cursors, clock=catalog._clock
+    )
+    other_document = deepcopy(original.document)
+    _document_section(other_document, "identity")["slug"] = "deleted-upstream"
+    other = replace(
+        _item_with_document(original, other_document), slug="deleted-upstream"
+    )
+
+    def apply(items, commit):
+        items = tuple(replace(item, library_commit=commit) for item in items)
+        reader.snapshot = replace(reader.snapshot, commit=commit, items=items)
+        return sync.sync(
+            ManagedCatalogSyncRequest(
+                request_key=str(uuid.uuid4()),
+                trigger=CatalogSyncTrigger.AUTOMATIC,
+                actor="test",
+                reviewed_content_sha256=reviewed_catalog_content(reader.snapshot),
+            )
+        )
+
+    def active_heads() -> set[tuple[str, str, str]]:
+        with sessions() as session:
+            return set(
+                session.execute(
+                    select(
+                        CatalogDocumentHead.kind,
+                        CatalogDocumentHead.publisher,
+                        CatalogDocumentHead.slug,
+                    ).where(CatalogDocumentHead.active_revision_id.is_not(None))
+                ).all()
+            )
+
+    def current_model_digests() -> set[str]:
+        # Exactly the set the model-cache binding scan resolves every pass.
+        with sessions() as session:
+            return set(
+                session.scalars(
+                    select(CatalogDocumentRevision.content_digest).where(
+                        CatalogDocumentRevision.kind == "model",
+                        active_head_revision(),
+                    )
+                )
+            )
+
+    assert apply((original, other), "1" * 40).imported_count == 2
+    # A Model an earlier library published, then dropped (no recipe uses it).
+    dropped = deepcopy(reader.snapshot.catalog_entities[0].document)
+    _document_section(dropped, "identity")["slug"] = "dropped-upstream-model"
+    catalog.import_catalog_models("test", [dropped])
+    dropped_digest = document_sha256(dropped)
+    assert dropped_digest in current_model_digests()
+
+    result = apply((original,), "2" * 40)
+    assert result.state == "current"
+    published = {
+        ("recipe", item.publisher, item.slug) for item in reader.snapshot.items
+    }
+    published |= {
+        ("model", model.identity.publisher, model.identity.slug)
+        for model in (
+            ModelDefinition.model_validate(entry.document)
+            for entry in reader.snapshot.catalog_entities
+        )
+    }
+    # Exactly the published documents keep a head: nothing listed is lost.
+    assert active_heads() == published
+    assert dropped_digest not in current_model_digests()
+    # Head state only: the immutable revision stays and still resolves by
+    # digest, so a cached set or an installed recipe that pins it keeps working.
+    with sessions() as session:
+        assert (
+            ModelCacheService._resolve_model_selector_in_session(
+                session, dropped_digest
+            )
+            == dropped_digest
+        )
+    # And the Library stops offering it, as it does a dropped recipe.
+    library.refresh_catalog()
+    assert "dropped-upstream-model" not in {
+        model.identity.slug for model in library.models(limit=100).models
+    }

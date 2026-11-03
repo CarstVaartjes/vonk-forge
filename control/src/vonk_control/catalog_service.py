@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import IO, TYPE_CHECKING, Literal
@@ -37,6 +37,7 @@ from .catalog_entities import (
     CatalogValidationError,
     _head,
     _rederive_projection,
+    display_title,
 )
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
@@ -46,6 +47,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    rederive_projection,
     write_catalog_projection,
 )
 from .identity_insert import insert_identity
@@ -100,8 +102,6 @@ class RecipeRevisionView:
     id: str
     recipe_id: str
     slug: str
-    title: str
-    description: str
     source_kind: str
     revision_number: int
     lifecycle: str
@@ -296,29 +296,34 @@ class CatalogService:
                     )
         return result
 
-    def retract_recipes_absent_from(
-        self, published: Sequence[tuple[str, str]]
+    def retract_absent_from(
+        self, published: Collection[tuple[str, str, str]]
     ) -> list[RecipeCatalogLocalRevision]:
-        """Stop offering every recipe the published library no longer lists.
+        """Stop offering every document the published library no longer lists.
 
-        The recipe's head is cleared; its immutable revisions stay, so
-        installations and runs that reference them keep working until they are
-        replaced or retention removes them.  A recipe that is published again
-        becomes current through the normal import.
+        ``published`` names each listed document as ``(kind, publisher,
+        slug)``. A kind the library lists nothing of is left as it is: such a
+        view may be incomplete. Each other head the view leaves out is cleared;
+        its immutable revisions stay, so installations, runs and cached sets
+        that reference them keep working until they are replaced or retention
+        removes them. A document that is published again becomes current
+        through the normal import. Returns the retracted recipes, for the sync
+        report.
         """
         keep = set(published)
+        kinds = {kind for kind, _publisher, _slug in keep}
         retracted: list[RecipeCatalogLocalRevision] = []
         with self._sessions.begin() as session:
             heads = session.scalars(
                 select(CatalogDocumentHead)
                 .where(
-                    CatalogDocumentHead.kind == "recipe",
+                    CatalogDocumentHead.kind.in_(kinds),
                     CatalogDocumentHead.active_revision_id.is_not(None),
                 )
                 .with_for_update()
             ).all()
             for head in heads:
-                identity = (head.publisher, head.slug)
+                identity = (head.kind, head.publisher, head.slug)
                 if identity in keep:
                     continue
                 revision = session.get(CatalogDocumentRevision, head.active_revision_id)
@@ -326,14 +331,17 @@ class CatalogService:
                 head.generation += 1
                 root = session.scalar(
                     select(CatalogDocument).where(
-                        CatalogDocument.kind == "recipe",
+                        CatalogDocument.kind == head.kind,
                         CatalogDocument.publisher == head.publisher,
                         CatalogDocument.slug == head.slug,
                     )
                 )
                 if root is not None:
                     root.updated_at = self._clock()
-                if revision is not None:
+                if (
+                    revision is not None
+                    and revision.kind == RunSwitchReasonScopeName.RECIPE
+                ):
                     retracted.append(
                         RecipeCatalogLocalRevision(
                             recipe_id=revision.document_id,
@@ -411,11 +419,7 @@ class CatalogService:
             )
             if display is None:
                 continue
-            title = (
-                display.model_title
-                if isinstance(display, ModelDisplay)
-                else display.title
-            )
+            title = display_title(display)
             published = published_json(display)
             if row.title == title and row.display == published:
                 continue
@@ -436,6 +440,11 @@ class CatalogService:
         return CatalogEntityService(
             self._sessions, clock=self._clock
         ).refresh_build_policy()
+
+    def refresh_model_projections(self) -> None:
+        CatalogEntityService(
+            self._sessions, clock=self._clock
+        ).refresh_model_projections()
 
     def record_prebuilt_images(
         self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
@@ -565,7 +574,7 @@ class CatalogService:
                 kind=revision.kind,
                 publisher=revision.publisher,
                 slug=revision.slug,
-                title=recipe.metadata.title,
+                title=revision.slug,
                 created_by=revision.created_by,
                 created_at=revision.created_at,
                 updated_at=self._clock(),
@@ -582,7 +591,6 @@ class CatalogService:
             )
         head.active_revision_id = revision.id
         head.generation += 1
-        root.title = recipe.metadata.title
         root.updated_at = self._clock()
 
     def _upsert_canonical_document(
@@ -607,11 +615,9 @@ class CatalogService:
             kind=kind,
             publisher=identity.publisher,
             slug=identity.slug,
-            title=(
-                parsed.identity.model.title
-                if isinstance(parsed, ModelDefinition)
-                else parsed.metadata.title
-            ),
+            # The display pass of the same sync gives a new root its title; an
+            # existing root keeps the one it has.
+            title=identity.slug,
             created_by=actor,
             created_at=self._clock(),
             updated_at=self._clock(),
@@ -651,16 +657,7 @@ class CatalogService:
                 # Repair only from the validated incoming content, preserving
                 # verified generations on ordinary cache hits.
                 projection = (
-                    ModelRevisionProjection(
-                        identity=parsed.identity,
-                        metadata=parsed.metadata,
-                        format=parsed.format,
-                        capabilities=parsed.capabilities,
-                        modalities=parsed.modalities,
-                        artifact_count=len(parsed.files),
-                        download_bytes=parsed.download_bytes,
-                        installed_bytes=parsed.installed_bytes,
-                    )
+                    rederive_projection(existing.projected, parsed)
                     if isinstance(parsed, ModelDefinition)
                     else _rederive_projection(session, existing, parsed)
                 )
@@ -774,8 +771,6 @@ def _view(revision: CatalogDocumentRevision) -> RecipeRevisionView:
         id=revision.id,
         recipe_id=revision.document_id,
         slug=revision.slug,
-        title=recipe.metadata.title,
-        description=recipe.metadata.description,
         source_kind="recipe_library",
         revision_number=revision.revision_number,
         lifecycle="resolved" if revision.state == "active" else revision.state,

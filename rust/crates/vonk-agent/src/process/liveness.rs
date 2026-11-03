@@ -110,11 +110,16 @@ impl Liveness {
 mod tests {
     use super::*;
     use crate::process::{ProcessError, ProcessRunner, Program, SystemProcessRunner};
-    use std::{io::Write, net::TcpListener, thread};
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
 
     const WINDOW: Duration = Duration::from_millis(600);
     const CHUNKS: usize = 16;
     const CHUNK: usize = 16 * 1024;
+    const REQUEST_LIMIT: usize = 8 * 1024;
 
     /// Serve `chunks` body chunks, one per `pause`; zero chunks holds the
     /// response open silently for several windows. The server is detached:
@@ -124,6 +129,20 @@ mod tests {
         let url = format!("http://{}/", listener.local_addr().unwrap());
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            // Read the whole request first: closing a socket that still holds
+            // unread request bytes sends a TCP RST, which can make curl fail
+            // (exit 56) before it reads the body.
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            for _ in 0..REQUEST_LIMIT {
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+                match stream.read(&mut byte) {
+                    Ok(1) => request.push(byte[0]),
+                    _ => return,
+                }
+            }
             let length = chunks.max(1) * CHUNK;
             let _ = write!(
                 stream,

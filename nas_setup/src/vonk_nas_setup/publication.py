@@ -11,7 +11,7 @@ from vonk_agent_protocol.installer_setup import (
     valid_required_value,
 )
 
-from .environment import parse_environment, render_environment
+from .environment import SELECTION_ENV, parse_environment, render_environment
 from .filesystem import (
     MAX_TEMPLATE_BYTES,
     ObservationUnavailable,
@@ -46,7 +46,7 @@ def validate_members(
             environment[required.env], required.validation
         ):
             raise SetupError(f"publication environment value {required.env} is invalid")
-    if payload.install_modes and "COMPOSE_PROFILES" not in environment:
+    if payload.install_modes and SELECTION_ENV not in environment:
         raise SetupError("publication install mode is unavailable")
     requests = generated(payload)
     for request in requests.ed25519_pkcs8_pem:

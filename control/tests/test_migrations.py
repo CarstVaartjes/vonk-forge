@@ -640,3 +640,27 @@ def test_postgres_reconciliation_keeps_equivalent_literal_array_casts(
         )
     with postgres_engine.connect() as connection:
         verify_schema_is_current(connection)
+
+
+def test_postgres_startup_adopts_heartbeat_step_columns(postgres_engine) -> None:
+    """A heartbeat table from before the step columns gains them on startup."""
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE control_process_heartbeats DROP COLUMN running_step")
+        )
+        connection.execute(
+            text("ALTER TABLE control_process_heartbeats DROP COLUMN step_started_at")
+        )
+
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.connect() as connection:
+        verify_schema_is_current(connection)
+        columns = {
+            item["name"]: item
+            for item in inspect(connection).get_columns("control_process_heartbeats")
+        }
+    assert columns["running_step"]["nullable"] is True
+    assert columns["step_started_at"]["nullable"] is True

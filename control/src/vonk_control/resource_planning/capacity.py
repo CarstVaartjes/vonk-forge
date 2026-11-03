@@ -9,6 +9,7 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     ResourcePlanningCode,
 )
+from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 from vonk_agent_protocol.swap import (
     GIB,
     SWAP_POLICY,
@@ -96,20 +97,33 @@ def _charged_claims_detail(capacity: CapacitySnapshot, shortfall_bytes: int) -> 
     return f" Charged claims: {named}."
 
 
-def _never_fits_detail(
+def _holds_nothing(capacity: CapacitySnapshot, *, stopping: bool) -> bool:
+    """Whether no Vonk claim, kept run, releasing run or planned stop is here."""
+    return (
+        not capacity.reserved_bytes
+        and not capacity.unmaterialized_bytes
+        and not capacity.unknown_run_residuals
+        and not capacity.kept_bytes
+        and not capacity.releasing_bytes
+        and not stopping
+    )
+
+
+def _above_idle_maximum(
     capacity: CapacitySnapshot,
     demand_bytes: int,
     *,
     memory_floor_bytes: int,
     stopping: bool,
 ) -> str | None:
-    """Why nothing the platform holds can make this demand fit, if so.
+    """Why an idle Spark admits less than this demand, if so.
 
-    A shortfall is a wait while a Vonk claim, a kept run or a planned stop can
-    still free memory. It is not when the demand and the floor exceed the
-    physical pool itself, or when no such holder is left on the Spark and even
-    the most memory it reported free recently (the host's own use only) falls
-    short: waiting then changes nothing, so the same request fails the same way.
+    The demand is a recipe's declared peak, an estimate until a try measures
+    it. It is above the idle maximum when the demand and the floor exceed the
+    physical pool, or when no Vonk claim, kept run or planned stop is left on
+    the Spark and even the most memory it reported free recently (the host's
+    own use only) falls short. The estimate is then tried as the only claim on
+    an empty Spark; a shortfall while something is held stays a wait.
     """
     pool = capacity.available_bytes
     if pool is None:
@@ -118,18 +132,10 @@ def _never_fits_detail(
         demand_bytes, pool, memory_floor_bytes=memory_floor_bytes
     ).admissible:
         return (
-            f"The selected demand of {demand_bytes} bytes plus the "
+            f"The estimated demand of {demand_bytes} bytes plus the "
             f"{memory_floor_bytes}-byte platform floor exceeds this Spark's "
-            f"{pool}-byte memory pool; it can never fit here."
+            f"{pool}-byte memory pool; an idle Spark admits less"
         )
-    holds_nothing = (
-        not capacity.reserved_bytes
-        and not capacity.unmaterialized_bytes
-        and not capacity.unknown_run_residuals
-        and not capacity.kept_bytes
-        and not capacity.releasing_bytes
-        and not stopping
-    )
     best = evaluate_memory_admission(
         demand_bytes,
         pool,
@@ -138,54 +144,91 @@ def _never_fits_detail(
         ),
         memory_floor_bytes=memory_floor_bytes,
     )
-    if holds_nothing and not best.admissible:
+    if _holds_nothing(capacity, stopping=stopping) and not best.admissible:
         return (
-            f"No Vonk claim, kept run or planned stop holds memory on this Spark: "
-            f"the host itself uses {capacity.occupied_bytes} of its {pool}-byte "
-            f"pool, and the selected demand of {demand_bytes} bytes leaves "
-            f"{best.free_after_bytes} bytes before the required "
+            f"The host itself uses {capacity.occupied_bytes} of this Spark's "
+            f"{pool}-byte pool, and the estimated demand of {demand_bytes} bytes "
+            f"leaves {best.free_after_bytes} bytes before the required "
             f"{memory_floor_bytes}-byte floor even at the most free memory the "
-            "Spark reported recently. Nothing the platform holds can free more, "
-            "so it can never fit here."
+            "Spark reported recently; an idle Spark admits less"
         )
     return None
 
 
+def _tried_swap_need(demand: ResourceDemand) -> tuple[int, int, bool]:
+    """The load rise and minimum swap a try needs, and whether they were cut.
+
+    A declared rise and a declared minimum swap are estimates: a try needs at
+    most the largest swap setting, and the host memory guard stops it if swap
+    really runs out.
+    """
+
+    largest_setting = SWAP_POLICY.maximum_gib * GIB
+    rise = min(demand.load_overshoot_bytes, usable_swap_bytes(largest_setting))
+    minimum = min(demand.minimum_swap_bytes, largest_setting)
+    clamped = rise < demand.load_overshoot_bytes or minimum < demand.minimum_swap_bytes
+    return rise, minimum, clamped
+
+
+def _swap_carries(demand: ResourceDemand, swap: SwapCapacity, *, in_use: bool) -> bool:
+    """Whether the Spark's active swap carries the load a try needs.
+
+    A rise cut to the largest setting is an estimate: it asks only that the
+    swap has reached that setting (the same ``swap_reaches`` rule) and that no
+    other load still holds swap, because swap in use or a page short of the
+    setting would otherwise never clear. The guard decides the rest. An uncut rise must fit the usable swap beside
+    what other loads hold (and, before a stop, what is in use).
+    """
+
+    rise, minimum, _clamped = _tried_swap_need(demand)
+    if rise < demand.load_overshoot_bytes:
+        # What other ranks still loading hold is theirs; the rest is the guard's.
+        return not swap.held_bytes and swap_reaches(
+            swap.total_bytes, SWAP_POLICY.maximum_gib * GIB
+        )
+    return rise + swap.held_bytes + (
+        swap.used_bytes if in_use else 0
+    ) <= usable_swap_bytes(swap.total_bytes) and swap_reaches(swap.total_bytes, minimum)
+
+
 def _load_swap_reason(
     node_id: str, demand: ResourceDemand, capacity: CapacitySnapshot | None
-) -> ResourceReason | None:
+) -> tuple[ResourceReason, ...]:
     """Whether swap can carry this load's rise above its steady demand.
 
     Swap left usable within the host memory guard's margins must hold the
-    rise plus what other ranks still loading on this Spark hold. A rise no
-    swap setting can hold never fits; any other shortfall is a wait.
+    rise plus what other ranks still loading on this Spark hold. The rise and
+    the minimum swap are estimates, cut to the largest swap setting: a
+    shortfall is a wait for swap, never a refusal.
     """
 
-    rise = demand.load_overshoot_bytes
-    minimum = demand.minimum_swap_bytes
+    rise, minimum, clamped = _tried_swap_need(demand)
     if rise <= 0 and minimum <= 0:
-        return None
-    largest_setting = SWAP_POLICY.maximum_gib * GIB
-    largest = usable_swap_bytes(largest_setting)
-    if rise > largest or not swap_reaches(largest_setting, minimum):
-        return _reason(
-            ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
-            f"The load rises {rise} bytes above its steady demand and needs "
-            f"{minimum} bytes of swap; the largest swap setting "
-            f"({SWAP_POLICY.maximum_gib} GiB) holds only {largest} bytes within "
-            "the host memory guard's margins, so it can never fit here.",
-            node_id=node_id,
+        return ()
+    reasons: list[ResourceReason] = []
+    if clamped:
+        reasons.append(
+            _reason(
+                ResourcePlanningCode.ESTIMATE_UNCERTAIN,
+                f"The declared load rise ({demand.load_overshoot_bytes} bytes) or "
+                f"minimum swap ({demand.minimum_swap_bytes} bytes) is above the "
+                f"largest swap setting ({SWAP_POLICY.maximum_gib} GiB); it is "
+                "tried with that and the host memory guard decides.",
+                severity=ProfileReasonSeverity.WARNING.value,
+                node_id=node_id,
+            )
         )
     if capacity is None:
         # Unknown capacity is already the blocker.
-        return None
+        return tuple(reasons)
     swap = capacity.swap
     usable = usable_swap_bytes(swap.total_bytes)
-    if rise + swap.held_bytes + swap.used_bytes <= usable and swap_reaches(
-        swap.total_bytes, minimum
-    ):
-        return None
-    setting = max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB)
+    if _swap_carries(demand, swap, in_use=True):
+        return tuple(reasons)
+    setting = min(
+        SWAP_POLICY.maximum_gib * GIB,
+        max(swap_needed_bytes(rise + swap.used_bytes), -(-minimum // GIB) * GIB),
+    )
     jobs = [holder.run_id for holder in swap.holders if holder.job_run]
     if swap.desired_bytes is not None and setting > swap.desired_bytes:
         remedy = f"Raise the Spark swap setting to at least {setting // GIB} GiB."
@@ -211,25 +254,28 @@ def _load_swap_reason(
         if swap.desired_bytes is None
         else f"setting {swap.desired_bytes} bytes"
     )
-    return _reason(
-        ResourceBlockerCode.INSUFFICIENT_SWAP,
-        f"The load rises {rise} bytes above its steady demand and needs at "
-        f"least {minimum} bytes of swap. Swap: "
-        f"{swap.total_bytes} bytes active ({setting_text}), "
-        f"{swap.used_bytes} in use, {swap.held_bytes} held by loads still "
-        f"starting or job runs; {usable} bytes are usable within the host memory guard's "
-        f"margins. {remedy}",
-        node_id=node_id,
-        swap=SwapShortfallEvidence(
-            active_bytes=swap.total_bytes,
-            desired_bytes=swap.desired_bytes,
-            used_bytes=swap.used_bytes,
-            held_bytes=swap.held_bytes,
-            usable_bytes=usable,
-            rise_bytes=rise,
-            needed_setting_bytes=setting,
-        ),
+    reasons.append(
+        _reason(
+            ResourceBlockerCode.INSUFFICIENT_SWAP,
+            f"The load rises {rise} bytes above its steady demand and needs at "
+            f"least {minimum} bytes of swap. Swap: "
+            f"{swap.total_bytes} bytes active ({setting_text}), "
+            f"{swap.used_bytes} in use, {swap.held_bytes} held by loads still "
+            f"starting or job runs; {usable} bytes are usable within the host memory guard's "
+            f"margins. {remedy}",
+            node_id=node_id,
+            swap=SwapShortfallEvidence(
+                active_bytes=swap.total_bytes,
+                desired_bytes=swap.desired_bytes,
+                used_bytes=swap.used_bytes,
+                held_bytes=swap.held_bytes,
+                usable_bytes=usable,
+                rise_bytes=rise,
+                needed_setting_bytes=setting,
+            ),
+        )
     )
+    return tuple(reasons)
 
 
 def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
@@ -241,9 +287,7 @@ def stop_can_clear_swap(demand: ResourceDemand, swap: SwapCapacity) -> bool:
     before the stop, and the run that would be stopped keeps serving.
     """
 
-    return demand.load_overshoot_bytes + swap.held_bytes <= usable_swap_bytes(
-        swap.total_bytes
-    ) and swap_reaches(swap.total_bytes, demand.minimum_swap_bytes)
+    return _swap_carries(demand, swap, in_use=False)
 
 
 def plan_capacity(
@@ -262,16 +306,28 @@ def plan_capacity(
     nodes: list[NodeCapacityPlan] = []
     swap_reasons: list[ResourceReason] = []
     for node in memory.nodes:
-        reason = _load_swap_reason(
+        found = _load_swap_reason(
             node.node_id, requirements[node.node_id], by_node.get(node.node_id)
         )
-        if reason is not None:
-            swap_reasons.append(reason)
-            node = replace(node, allowed=False, reasons=(*node.reasons, reason))
+        if found:
+            swap_reasons.extend(found)
+            node = replace(
+                node,
+                allowed=node.allowed
+                and not any(
+                    reason.severity == ProfileReasonSeverity.BLOCKER.value
+                    for reason in found
+                ),
+                reasons=(*node.reasons, *found),
+            )
         nodes.append(node)
     return CapacityPlan(
         tuple(nodes),
-        memory.allowed and not swap_reasons,
+        memory.allowed
+        and not any(
+            reason.severity == ProfileReasonSeverity.BLOCKER.value
+            for reason in swap_reasons
+        ),
         memory.stop_before_prepare,
         (*memory.reasons, *swap_reasons),
     )
@@ -341,7 +397,7 @@ def _plan_memory_capacity(
             nodes.append(
                 NodeCapacityPlan(
                     node_id,
-                    demand.total_bytes,
+                    _minimum_known([part.required_bytes for part in parts]),
                     _minimum_known([part.current_free_after_bytes for part in parts]),
                     _minimum_known(
                         [part.after_stop_free_after_bytes for part in parts]
@@ -437,8 +493,15 @@ def _plan_memory_capacity(
                 ),
                 default=0,
             )
+        # An estimate claims at most the Spark less the floor: a pure function
+        # of the recipe and the node total, so review, start and recovery agree.
+        charged = (
+            total_bytes
+            if available <= memory_floor_bytes
+            else min(total_bytes, available - memory_floor_bytes)
+        )
         current_admission = evaluate_memory_admission(
-            total_bytes,
+            charged,
             available,
             occupied_bytes=occupied,
             reserved_bytes=reserved,
@@ -447,7 +510,7 @@ def _plan_memory_capacity(
             memory_floor_bytes=memory_floor_bytes,
         )
         after_admission = evaluate_memory_admission(
-            total_bytes,
+            charged,
             available,
             occupied_bytes=occupied,
             reserved_bytes=reserved,
@@ -464,25 +527,35 @@ def _plan_memory_capacity(
         current_fit = current_admission.admissible
         after_fit = after_admission.admissible
         selected = after_stop if release else current
-        never_fits = _never_fits_detail(
+        # A planned stop frees memory even when its release is unknown.
+        stopping = any(
+            stop.planned and stop.node_id == node_id for stop in planned_stops
+        )
+        above = _above_idle_maximum(
             capacity,
             total_bytes,
             memory_floor_bytes=memory_floor_bytes,
-            # A planned stop frees memory even when its release is unknown.
-            stopping=any(
-                stop.planned and stop.node_id == node_id for stop in planned_stops
-            ),
+            stopping=stopping,
         )
-        allowed = (
-            (after_fit if release else current_fit)
-            and never_fits is None
-            and not any(reason.severity == "blocker" for reason in node_reasons)
+        # An estimate above the idle maximum is tried as the only claim on an
+        # empty Spark; with anything held, or the host using the rest, it waits.
+        tried = (
+            above is not None
+            and _holds_nothing(capacity, stopping=stopping)
+            and available - occupied - memory_floor_bytes > 0
         )
-        if never_fits is not None:
+        allowed = (tried or (after_fit if release else current_fit)) and not any(
+            reason.severity == ProfileReasonSeverity.BLOCKER.value
+            for reason in node_reasons
+        )
+        if tried:
             node_reasons.append(
                 _reason(
-                    ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY,
-                    never_fits,
+                    ResourcePlanningCode.ESTIMATE_UNCERTAIN,
+                    f"{above}; it is tried as the only claim on this Spark (claim "
+                    f"{charged} bytes) and the host memory guard stops it if it "
+                    "runs out.",
+                    severity=ProfileReasonSeverity.WARNING.value,
                     node_id=node_id,
                 )
             )
@@ -550,14 +623,14 @@ def _plan_memory_capacity(
         nodes.append(
             NodeCapacityPlan(
                 node_id,
-                demand.total_bytes,
+                charged,
                 None if unknown_residuals else current,
                 None if unknown_residuals else after_stop,
                 None if unknown_residuals else selected,
                 not current_fit and after_fit and release > 0,
                 allowed,
                 tuple(node_reasons),
-                (capacity.memory_kind,) if not current_fit else (),
+                (capacity.memory_kind,) if not (tried or current_fit) else (),
                 unknown_residuals,
             )
         )

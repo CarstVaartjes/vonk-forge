@@ -31,7 +31,7 @@ def _service(
         ModelCacheService(
             sessionmaker(),
             tmp_path / "cache",
-            reserve_bytes=0,
+            free_fraction=0,
             http_client=client,
             huggingface_token_path=token_path,
         ),

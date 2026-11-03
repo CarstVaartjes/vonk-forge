@@ -16,12 +16,16 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import RunSwitchCode, WaitReason
+from vonk_agent_protocol import LifecycleState, RunSwitchCode, WaitReason
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control import profile_read_observation
 from vonk_control.categorized_errors import BookkeepingUnknown
 from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
-from vonk_control.model_cache_contract import CacheManifest, ModelCacheSetState
+from vonk_control.model_cache_contract import (
+    CacheManifest,
+    CacheOperationKind,
+    ModelCacheSetState,
+)
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -43,7 +47,7 @@ def observed_cache(postgres_engine, tmp_path):
     cache = ModelCacheService(
         sessions,
         tmp_path / "cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -267,7 +271,7 @@ def test_observer_corrects_stale_cached_rows_and_missing_objects(observed_cache)
 def _crash_after_checkpoint(database_url, root, manifest_json, clock):
     sessions = sessionmaker(create_engine(database_url), expire_on_commit=False)
     cache = ModelCacheService(
-        sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: clock
+        sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: clock
     )
     manifest = ArtifactSetManifest.from_contract(
         CacheManifest.model_validate_json(manifest_json)
@@ -314,7 +318,7 @@ def test_restart_resumes_checkpoint_without_reobserving_completed_objects(
     restarted = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -433,7 +437,7 @@ def test_other_observer_reports_live_checkpoint_without_taking_writer_lock(
     other = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -494,7 +498,7 @@ def test_model_only_checkpoint_reloads_required_null_fields(
     other = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -583,7 +587,7 @@ def test_cold_api_preparation_collects_worker_checkpoint_on_first_review(
     api = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -613,7 +617,7 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
     api = ModelCacheService(
         sessions,
         cache.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )
@@ -652,3 +656,157 @@ def test_cold_checkpoint_collection_outlives_a_timed_out_reader(
     finally:
         release.set()
         api.close()
+
+
+@pytest.fixture
+def object_touches(monkeypatch):
+    """Count every model-object availability check, whichever service makes it."""
+    touches: list[str] = []
+    real = ModelCacheService._stored_object
+
+    def counted(self, digest, expected_bytes):
+        touches.append(digest)
+        return real(self, digest, expected_bytes)
+
+    monkeypatch.setattr(ModelCacheService, "_stored_object", counted)
+    return touches
+
+
+def _discover_and_join(cache):
+    observer = cache._storage_observer
+    observer.tick()
+    assert observer._discovery is not None
+    observer._discovery.result(timeout=30)
+    for task in list(observer._pending.values()):
+        task.result(timeout=30)
+
+
+def _set_row_state(sessions, manifest, state):
+    with sessions() as session, session.begin():
+        session.get(ModelCacheSet, manifest.digest).state = state
+
+
+def _row_state(sessions, manifest):
+    with sessions() as session:
+        return session.get(ModelCacheSet, manifest.digest).state
+
+
+def test_discovery_does_not_reobserve_a_cached_set(observed_cache, object_touches):
+    """Catches the 30 s timer re-reading every object of every cached set."""
+    cache, _sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    before = cache._storage_observer._snapshots[manifest.digest]
+    object_touches.clear()
+    now[0] += timedelta(seconds=31)
+    _discover_and_join(cache)
+    assert object_touches == []
+    assert cache._storage_observer._snapshots[manifest.digest] == before
+
+
+def test_restart_publishes_completed_checkpoint_without_object_reads(
+    observed_cache, object_touches
+):
+    """Catches a restart re-reading objects of sets whose checkpoint is complete."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    before = cache._storage_observer._snapshots[manifest.digest]
+    restarted = ModelCacheService(
+        sessions,
+        cache.root,
+        free_fraction=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    try:
+        object_touches.clear()
+        now[0] += timedelta(seconds=31)
+        _discover_and_join(restarted)
+        assert object_touches == []
+        assert restarted._storage_observer.read(manifest) == before
+    finally:
+        restarted.close()
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (ModelCacheSetState.NEEDS_REPAIR, ModelCacheSetState.CACHED),
+        (ModelCacheSetState.INCOMPLETE, ModelCacheSetState.CACHED),
+    ],
+)
+def test_discovery_corrects_a_row_that_disagrees_with_a_settled_snapshot(
+    observed_cache, stored, expected
+):
+    """Catches a settled snapshot hiding a SQL row another path flipped."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    _set_row_state(sessions, manifest, stored)
+    now[0] += timedelta(seconds=31)
+    _discover_and_join(cache)
+    assert _row_state(sessions, manifest) == expected
+
+
+def test_discovery_observes_a_lost_object_under_a_flipped_row(
+    observed_cache, object_touches
+):
+    """Catches a flipped row whose settled snapshot hides a vanished object."""
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    lost = manifest.artifacts[0].sha256
+    _set_row_state(sessions, manifest, ModelCacheSetState.NEEDS_REPAIR)
+    cache._object_path(lost).unlink()
+    object_touches.clear()
+    now[0] += timedelta(seconds=31)
+    _discover_and_join(cache)
+    assert object_touches
+    snapshot = cache._storage_observer._snapshots[manifest.digest]
+    assert not snapshot.objects[lost].available
+    assert _row_state(sessions, manifest) == ModelCacheSetState.NEEDS_REPAIR
+
+
+def test_a_stale_read_refreshes_a_cached_set(observed_cache, object_touches):
+    """Catches a stale request failing to re-check a cached set's objects."""
+    cache, _sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    object_touches.clear()
+    now[0] += timedelta(seconds=31)
+    cache._storage_observer.read(manifest)
+    _finish(cache, manifest)
+    assert len(object_touches) == len({spec.sha256 for spec in manifest.artifacts})
+
+
+def test_a_lost_object_is_healed_by_reads_and_a_download_is_admitted(observed_cache):
+    """Catches a vanished object of a cached set never reaching a request.
+
+    The first stale read returns the old snapshot and schedules the refresh; the
+    next read sees the lost object, the row needs repair and a download is
+    admitted.
+    """
+    cache, sessions, manifest, now = observed_cache
+    cache._storage_observer.schedule(manifest)
+    _finish(cache, manifest)
+    lost = manifest.artifacts[0]
+    cache._object_path(lost.sha256).unlink()
+    now[0] += timedelta(seconds=31)
+    cache._storage_observer.read(manifest)  # old snapshot; refresh scheduled
+    _finish(cache, manifest)
+    value = cache._storage_observer.read(manifest)
+    assert not value.objects[lost.sha256].available
+    assert _row_state(sessions, manifest) == ModelCacheSetState.NEEDS_REPAIR
+    preview = profile_read(
+        lambda: cache.download_preview(artifact_set_sha256=manifest.digest)
+    )()
+    assert preview["new_bytes"] == lost.expected_bytes
+    admitted = cache.start_download(
+        actor="test",
+        request_key=str(uuid.uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        artifact_set_sha256=manifest.digest,
+    )
+    assert admitted.state == LifecycleState.QUEUED
+    assert admitted.kind == CacheOperationKind.DOWNLOAD

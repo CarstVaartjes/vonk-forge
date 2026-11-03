@@ -160,6 +160,24 @@ mod tests {
     use super::{ExitCause, FailureDiagnostics};
 
     #[test]
+    fn the_shared_exit_cause_vector_names_every_cause_and_token() {
+        // The Controller reads its host-memory-guard token from this vector.
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/exit-causes-v1.json"
+        ))
+        .expect("exit-causes vector");
+        let tokens = vector["tokens"].as_object().expect("tokens");
+        assert_eq!(tokens.len(), ExitCause::ALL.len());
+        for cause in ExitCause::ALL {
+            assert_eq!(
+                tokens.get(&format!("{cause:?}")).and_then(|v| v.as_str()),
+                Some(cause.token()),
+                "{cause:?}"
+            );
+        }
+    }
+
+    #[test]
     fn only_an_ending_that_skipped_cleanup_excuses_what_a_process_left() {
         // The helper's summaries for each exit: an OOMKilled=true exit is the OOM
         // killer's SIGKILL, 139 a native SIGSEGV, 143 a SIGTERM the process

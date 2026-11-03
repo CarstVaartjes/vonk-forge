@@ -56,8 +56,9 @@ Nothing is removed while it is
   first queues that run's Stop (which joins the Sparks' current workload
   intent, so it supersedes nothing) and uninstalls on a later pass, once the
   Stop recorded the run stopped;
-* named by a live or recently finished operation (searched in the stored JSON,
-  as the catalog revision collector does).
+* named by a live operation (searched in the stored JSON, as the catalog
+  revision collector does). A recently finished operation does not keep an
+  item: it only makes it recently used, so it is removed last.
 
 A removal queued on a Spark is given time to land and show in a fresh inventory
 before the next one, so the Spark's own free space (not a promise about how much

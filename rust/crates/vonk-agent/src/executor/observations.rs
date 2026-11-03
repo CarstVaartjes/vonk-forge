@@ -81,7 +81,7 @@ async fn deliver_recipe_observation(
     let report = crate::client::build_exact_recipe_run_observations(observed_at, runs)?;
     outbox.retain_recipe_observation(&report)?;
     client.report_recipe_observation_envelope(&report).await?;
-    outbox.acknowledge_recipe_observation(&report)?;
+    outbox.release_pending_recipe_observation()?;
     Ok(())
 }
 
@@ -311,10 +311,27 @@ impl<R> RecipeExecutor<'_, R> {
             self.client.node_id(),
         )?;
         if let Some(report) = outbox.pending_recipe_observation()? {
-            self.client
+            match self
+                .client
                 .report_recipe_observation_envelope(&report)
-                .await?;
-            outbox.acknowledge_recipe_observation(&report)?;
+                .await
+            {
+                Ok(()) => {}
+                // The Controller refused these exact bytes for good: a newer
+                // observation supersedes them, so they must not block it.
+                Err(ClientError::Controller(error)) if error.request_invalid() => {
+                    let digest = canonical_generated_json(&report)
+                        .map(|body| hex_sha256(&body))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "vonk-agent: discarding refused pending recipe observation sha256={digest} HTTP {} ({}); fresh evidence is collected instead",
+                        error.status,
+                        error.rejection_context()
+                    );
+                }
+                Err(error) => return Err(error.into()),
+            }
+            outbox.release_pending_recipe_observation()?;
         }
         let mut page = self.runtime.recipe_run_inspection_page(checkpoint)?;
         let prepared: Vec<_> = page

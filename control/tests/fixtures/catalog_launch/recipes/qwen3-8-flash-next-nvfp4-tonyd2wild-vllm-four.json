@@ -30,23 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "tonyd2wild's four-Spark vLLM TP4 CONTEXT profile for NVIDIA's own nvidia/Qwen3.8-Flash-Next-NVFP4 checkpoint, used byte for byte (124 GB) with expert parallel (which TP4 needs on GB10 because FlashInfer CUTLASS NVFP4 cannot pad the MoE intermediate four ways). The n-gram table stays on each rank's NVMe (disk-backed table patch), with MTP 4, eight sequences, FP8 KV, piecewise CUDA graphs, vLLM's default prefill chunk, memory utilization 0.80 and 262,144 context (upstream defaults; upstream measured a 9.1M-token KV pool). Each rank needs a readable local copy of the checkpoint; the option 'table' moves the table into memory (upstream's later TP4 variant). The adapter bakes upstream's patch files and vLLM overlays into the image at upstream's exact vLLM commit 8a728663. Image note: upstream ran the vllm/vllm-openai nightly-8a728663 tag, which is no longer on Docker Hub; the same commit survives only as the cu129-nightly-8a728663 build, pinned here by digest (CUDA 12.9 runtime instead of upstream's CUDA 13), so a Spark start is unverified. Licences (information only): repository Apache-2.0; vLLM Apache-2.0; checkpoint under the NVIDIA Open Model License and the Qwen licence of the base model. Upstream throughput figures are claims until measured here; Vonk physical acceptance is pending. ",
-  "tags": [
-   "four",
-   "mtp",
-   "multimodal",
-   "nvfp4",
-   "qwen3.8",
-   "reasoning",
-   "spark",
-   "tonyd2wild",
-   "tool-use",
-   "vllm"
-  ],
-  "title": "Qwen3.8 Flash Next NVFP4 vLLM four Sparks (tonyd2wild)"
- },
  "models": [
   {
    "files": [
@@ -328,7 +311,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "a870adf202e8f1241cbeaba904694534d090e9875e4b147a61ade2fa0f601518",
+    "content_sha256": "788c612ba2913fe19f8b4b7f7694998318909d8c0c98162bb3f55055bd9981fb",
     "kind": "model",
     "publisher": "nvidia",
     "slug": "qwen3-8-flash-next-nvfp4-fc694b54"
@@ -636,7 +619,7 @@
   ],
   "engine": "vllm",
   "entrypoint": [
-   "/opt/vonk/bin/qwen38-tonyd2wild-serve"
+   "/opt/vonk/bin/vllm"
   ],
   "environment": [
    {
@@ -767,8 +750,8 @@
       "working_bytes": 30000000000
      },
      "memory": {
-      "peak_bytes": 108000000000,
-      "reserve_bytes": 12000000000
+      "peak_bytes": 112530585191,
+      "reserve_bytes": 8000000000
      }
     }
    },
@@ -784,8 +767,8 @@
       "working_bytes": 30000000000
      },
      "memory": {
-      "peak_bytes": 108000000000,
-      "reserve_bytes": 12000000000
+      "peak_bytes": 112530585191,
+      "reserve_bytes": 8000000000
      }
     }
    }

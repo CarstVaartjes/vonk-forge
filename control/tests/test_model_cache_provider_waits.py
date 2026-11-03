@@ -127,7 +127,7 @@ class _Harness:
         service = ModelCacheService(
             self.sessions,
             self.root,
-            reserve_bytes=0,
+            free_fraction=0,
             http_client=self.client,
             fixture_sources=self.provider.kind == ProviderKind.HUGGINGFACE_FILE,
             clock=lambda: self.now[0],
@@ -389,7 +389,7 @@ def test_every_provider_kind_owns_its_own_cooldown(
         monkeypatch.setitem(PROVIDERS, name, replace(row, open=record))
     engine, sessions = _sqlite_sessions()
     service = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0, clock=lambda: NOW
+        sessions, tmp_path / "cache", free_fraction=0, clock=lambda: NOW
     )
     client = httpx2.Client()
     try:
@@ -428,7 +428,7 @@ def test_a_hinted_rate_limit_holds_its_provider_from_the_answer(
     monkeypatch.setitem(PROVIDERS, kind, replace(PROVIDERS[kind], open=refuse))
     engine, sessions = _sqlite_sessions()
     service = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0, clock=lambda: NOW
+        sessions, tmp_path / "cache", free_fraction=0, clock=lambda: NOW
     )
     client = httpx2.Client()
     try:
@@ -466,7 +466,7 @@ def test_a_cooldown_refusal_inside_the_open_neither_throttles_nor_records(
     )
     engine, sessions = _sqlite_sessions()
     service = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0, clock=lambda: now[0]
+        sessions, tmp_path / "cache", free_fraction=0, clock=lambda: now[0]
     )
     client = httpx2.Client()
     try:

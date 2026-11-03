@@ -154,10 +154,8 @@ def test_a_later_stop_or_failure_never_rewrites_a_recorded_end(ended) -> None:
     job.status_reason = FailureCode.RECIPE_START_FAILED.value
     later = NOW.replace(hour=13)
     ADAPTER.cancelled(job, later, reason=WaitReason.SCOPE_CHANGED, keep=False)
-    ADAPTER.finish(
-        job, later, failed=True, reason=WaitReason.STOP_UNCONFIRMED, keep=False
-    )
-    ADAPTER.finish(job, later, failed=False, keep=False)
+    ADAPTER.finish(job, later, failed=True, reason=WaitReason.STOP_UNCONFIRMED)
+    ADAPTER.finish(job, later, failed=False)
     assert (job.state, job.status_reason, job.updated_at) == (
         ended,
         FailureCode.RECIPE_START_FAILED.value,

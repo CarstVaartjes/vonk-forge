@@ -231,7 +231,7 @@ def _remove_receipt(self: UnusedStorageCollector, archive: str, path: Path) -> N
             rows = lock_reference_gates(session, (identity,), now=now)
             if any(row.removal_owner_id is not None for row in rows):
                 raise _Kept("another removal owns it")
-            evidence = _CollectorEvidence.read(session, now)
+            evidence = _CollectorEvidence.read(session, now, ordering=False)
             reason = _image_kept(archive, evidence, modified)
             if reason is None and runtime_image_reference_findings(
                 session, (archive,)
@@ -376,7 +376,9 @@ def _remove_model(self: UnusedStorageCollector, digest: str) -> None:
 
     def verify(session: Session, sets: tuple[str, ...]) -> None:
         reason = _model_kept(
-            session, digest, _CollectorEvidence.read(session, self._clock())
+            session,
+            digest,
+            _CollectorEvidence.read(session, self._clock(), ordering=False),
         )
         if reason is None and any(model_set_reference_findings(session, sets).values()):
             reason = "referenced"

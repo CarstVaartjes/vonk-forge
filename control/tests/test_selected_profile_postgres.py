@@ -29,6 +29,7 @@ from vonk_control.profile_port_promises import PortPromiseTaken
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .display_fixtures import reworded
 from .node_contacts import contact_row
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import (
@@ -701,13 +702,7 @@ def test_pending_recipe_head_change_is_followed_before_workload_fencing(
         previous = session.get(CatalogDocumentRevision, recipe_revision_id)
         assert previous is not None
         document = RecipeDefinition.model_validate_json(json.dumps(previous.document))
-        document = document.model_copy(
-            update={
-                "metadata": document.metadata.model_copy(
-                    update={"title": "Updated recipe head"}
-                )
-            }
-        )
+        document = reworded(document, "Updated recipe head")
         session.add(
             CatalogDocumentRevision(
                 id=str(uuid4()),

@@ -26,9 +26,10 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import NamedTuple, Protocol, Self
+from typing import Any, NamedTuple, Protocol, Self
 from urllib.parse import urlsplit
 
 import yaml
@@ -312,6 +313,52 @@ class CanonicalCanaryFixture(NamedTuple):
     role: str
     serving_check: dict[str, object]
     recipe: dict[str, object]
+    # The library this fixture came from: its contracts read its documents.
+    library_root: Path | None = None
+
+
+@contextmanager
+def _library_contracts(library_root: Path | None) -> Iterator[Any]:
+    """Import ``vonk_forge_contracts`` as the given library ships it, for one block.
+
+    The carry lane drives two releases whose libraries carry different
+    contracts (a 2.x baseline, a 3.0 candidate). Python caches the first
+    import for the whole process, so each block swaps the cached modules out,
+    imports the library's own, and puts the process's modules back after.
+    ``None`` leaves the process's contracts in place.
+    """
+    if library_root is None:
+        import vonk_forge_contracts
+
+        yield vonk_forge_contracts
+        return
+    source = (library_root / "contracts/src").expanduser().resolve()
+    if not source.is_dir():
+        raise LifecycleError("canonical Recipe/Model contract source is unavailable")
+
+    def contract_modules() -> list[str]:
+        return [
+            name
+            for name in sys.modules
+            if name == "vonk_forge_contracts"
+            or name.startswith("vonk_forge_contracts.")
+        ]
+
+    saved = {name: sys.modules.pop(name) for name in contract_modules()}
+    sys.path.insert(0, os.fspath(source))
+    try:
+        try:
+            import vonk_forge_contracts
+        except ImportError as error:
+            raise LifecycleError(
+                "canonical Recipe/Model contract package is unavailable"
+            ) from error
+        yield vonk_forge_contracts
+    finally:
+        sys.path.remove(os.fspath(source))
+        for name in contract_modules():
+            del sys.modules[name]
+        sys.modules.update(saved)
 
 
 def _canary_index_path(library_root: Path) -> Path:
@@ -356,20 +403,18 @@ def _canonical_canary_fixture(library_root: Path) -> CanonicalCanaryFixture:
     root = library_root.expanduser().resolve()
     if not root.is_dir():
         raise LifecycleError("VONK_RECIPE_LIBRARY_ROOT is not an available directory")
-    contracts_source = root / "contracts/src"
-    if not contracts_source.is_dir():
-        raise LifecycleError("canonical Recipe/Model contract source is unavailable")
-    sys.path.insert(0, os.fspath(contracts_source))
-    try:
-        from vonk_forge_contracts import (
-            ModelDefinition,
-            RecipeDefinition,
-            document_sha256,
-        )
-    except ImportError as error:
-        raise LifecycleError(
-            "canonical Recipe/Model contract package is unavailable"
-        ) from error
+    # The library's own contracts read its own documents.
+    with _library_contracts(root):
+        return _read_canary_fixture(root)._replace(library_root=root)
+
+
+def _read_canary_fixture(root: Path) -> CanonicalCanaryFixture:
+    from vonk_forge_contracts import (
+        ModelDefinition,
+        RecipeDefinition,
+        document_sha256,
+    )
+
     index_path = _canary_index_path(root)
     try:
         index_bytes = index_path.read_bytes()
@@ -541,12 +586,24 @@ def _rebuilt_recipe_entry(
     and the manifest names every member's new digest and size.
     """
 
-    from vonk_control.source_bundles import generate_source_bundle
-    from vonk_forge_contracts import document_sha256, read_recipe
+    with _library_contracts(fixture.library_root) as contracts:
+        return _rebuild_recipe_entry(contracts, fixture, edit, files)
 
+
+def _rebuild_recipe_entry(
+    contracts,
+    fixture: CanonicalCanaryFixture,
+    edit: Callable[[dict[str, object]], None],
+    files: Mapping[str, Callable[[bytes], bytes]] | None,
+) -> tuple[dict[str, object], bytes]:
+    from vonk_control.source_bundles import generate_source_bundle
+
+    document_sha256, read_recipe = contracts.document_sha256, contracts.read_recipe
     entry = copy.deepcopy(json.loads(fixture.index_bytes)["recipes"][0])
     recipe = entry["document"]
     edit(recipe)
+    # The entry's display names the document it travels with, even if renamed.
+    entry["display"]["identity"] = dict(recipe["identity"])
     digest = document_sha256(recipe)
     recipe_bytes = json.dumps(recipe, sort_keys=True, indent=2).encode() + b"\n"
     with tarfile.open(fileobj=io.BytesIO(fixture.package_bytes), mode="r:gz") as source:
@@ -620,8 +677,11 @@ def _editorial_successor(fixture: CanonicalCanaryFixture) -> CanonicalCanaryFixt
     """
 
     def reword(recipe: dict[str, object]) -> None:
-        metadata = recipe["metadata"]
-        metadata["description"] = f"{metadata['description']} Editorially revised."  # type: ignore[index]
+        provenance = recipe["provenance"]
+        provenance["attribution"] = [  # type: ignore[index]
+            *provenance["attribution"],  # type: ignore[index]
+            "Editorially revised.",
+        ]
 
     return _derived_fixture(fixture, reword)
 
@@ -671,7 +731,6 @@ def _sibling_recipes(
         def rename(recipe: dict[str, object]) -> None:
             slug = f"{recipe['identity']['slug']}-{name}"  # type: ignore[index]
             recipe["identity"]["slug"] = slug  # type: ignore[index]
-            recipe["metadata"]["title"] = f"{recipe['metadata']['title']} ({name})"  # type: ignore[index]
 
         return rename
 
@@ -904,15 +963,18 @@ def _semantic_version(package_version: str) -> str:
     return package_version.split("~", 1)[0].split("+", 1)[0]
 
 
-def _canonical_recipe_matches(observed: object, expected: object) -> bool:
-    from vonk_forge_contracts import RecipeDefinition
-
-    try:
-        return RecipeDefinition.model_validate(
-            observed
-        ) == RecipeDefinition.model_validate(expected)
-    except ValueError:
-        return False
+def _canonical_recipe_matches(
+    observed: object, expected: object, library_root: Path | None = None
+) -> bool:
+    """Whether the Controller's recipe document is the fixture's, read with the
+    contracts of the library the fixture came from."""
+    with _library_contracts(library_root) as contracts:
+        try:
+            return contracts.RecipeDefinition.model_validate(
+                observed
+            ) == contracts.RecipeDefinition.model_validate(expected)
+        except ValueError:
+            return False
 
 
 def _validate_canary_cleanup_preview(
@@ -1729,8 +1791,9 @@ class SparkLifecycle:
             responses=responses,
         )
         self._reapply_controller_site()
-        library_root = self._required_environment("VONK_RECIPE_LIBRARY_ROOT")
-        self.synthetic_canary_fixture = _canonical_canary_fixture(Path(library_root))
+        self.synthetic_canary_fixture = _canonical_canary_fixture(
+            self._canary_library_root()
+        )
         self._assert_project_is_empty()
         self._assert_compose_image_graph()
         try:
@@ -3166,6 +3229,10 @@ class SparkLifecycle:
             "transport": "direct",
         }
 
+    def _canary_library_root(self) -> Path:
+        """The recipe library the installed Controller was accepted with."""
+        return Path(self._required_environment("VONK_RECIPE_LIBRARY_ROOT"))
+
     def _import_canary_catalog(
         self,
         fixture: CanonicalCanaryFixture,
@@ -3350,7 +3417,9 @@ class SparkLifecycle:
                 or identity.publisher != fixture.publisher
                 or identity.slug != fixture.slug
                 or identity.content_sha256 != fixture.recipe_content_sha256
-                or not _canonical_recipe_matches(detail.get("document"), fixture.recipe)
+                or not _canonical_recipe_matches(
+                    detail.get("document"), fixture.recipe, fixture.library_root
+                )
                 or not isinstance(model_selectors, list)
                 or len(model_selectors) != 1
                 or not isinstance(model_selectors[0], str)

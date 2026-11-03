@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import AgentResult, canonical_message
+from vonk_agent_protocol import AgentResult, RunState, canonical_message
 from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.distributed_recovery import (
@@ -14,6 +14,7 @@ from vonk_control.distributed_recovery import (
 )
 from vonk_control.models import AgentNode, AgentOperation, Job, RecipeRun, RunNode
 
+from .host_memory_guard_support import guard_diagnostics
 from .node_contacts import contact_row
 from .runtime_identity_support import claim_agent
 from .test_recipe_operations import (
@@ -478,6 +479,76 @@ def test_one_shot_recovery_reports_why_replay_is_unsafe(tmp_path):
             run.route_error or ""
         )
         assert "submit a new authorized run" in (run.route_error or "")
+
+
+def _guard_diagnostics() -> dict:
+    return guard_diagnostics(NOW.isoformat()).model_dump(mode="json")
+
+
+@pytest.mark.parametrize("guard_stopped", [True, False])
+def test_a_guard_stopped_rank_is_settled_not_relaunched(tmp_path, guard_stopped):
+    """Fault: an over-max try is stopped by the host memory guard on hardware.
+
+    The guard stop is an observed failure of this recipe at these settings. The
+    run is settled, claims freed, and never relaunched into the same fault; a
+    rank that merely failed is recovered as before (control case).
+    """
+    sessions, service, queue, mapping, build, nodes = setup_services(
+        tmp_path, nodes=1, distributed_lifecycle=True
+    )
+    installed = installed_recipe(service, mapping, build, nodes, request_id="g" * 36)
+    started = started_recipe(
+        sessions, service, installed.owner_id, nodes, request_id="h" * 36
+    )
+    service, routes = bind_route_publications(sessions, service, ConcurrentPublisher())
+    routes.publish_run(started.owner_id)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        node = session.scalar(select(RunNode).where(RunNode.run_id == started.owner_id))
+        assert run is not None and node is not None
+        node.state = "failed"
+        node.observation_process_running = False
+        node.observed_run_generation = run.run_generation
+        node.observation_observed_at = NOW
+        node.observation_failure_diagnostics = (
+            _guard_diagnostics() if guard_stopped else None
+        )
+        generation = run.run_generation
+        starts = len(
+            tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
+        )
+    recovery = DistributedRecoveryCoordinator(
+        sessions, routes=routes, agent_jobs=queue, clock=lambda: NOW
+    )
+
+    assert recovery.tick() is True
+    with sessions() as session:
+        run = session.get(RecipeRun, started.owner_id)
+        assert run is not None
+        settled_reason = run.route_error or ""
+        if guard_stopped:
+            assert run.state != RunState.RUNNING
+            assert run.run_generation == generation
+            assert run.recovery_attempts == 0
+            assert "host memory guard" in settled_reason
+            assert (
+                len(
+                    tuple(
+                        session.scalars(select(Job).where(Job.kind == "recipe.start"))
+                    )
+                )
+                == starts
+            )
+        else:
+            assert "host memory guard" not in settled_reason
+    if guard_stopped:
+        later = DistributedRecoveryCoordinator(
+            sessions,
+            routes=routes,
+            agent_jobs=queue,
+            clock=lambda: NOW + timedelta(minutes=10),
+        )
+        assert later.tick() is False
 
 
 @pytest.mark.parametrize("invalid", ["missing-job", "wrong-plan"])

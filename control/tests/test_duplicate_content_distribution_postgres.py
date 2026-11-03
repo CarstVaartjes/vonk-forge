@@ -51,7 +51,7 @@ def _world(postgres_engine, tmp_path: Path):
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE_A, state="active"))
     cache = ModelCacheService(
-        sessions, tmp_path / "nas-cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "nas-cache", free_fraction=0, fixture_sources=True
     )
     model_pin, recipe_pin = "1" * 64, "2" * 64
     files = [

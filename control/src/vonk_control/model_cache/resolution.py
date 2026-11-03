@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ModelCacheBlockerCode, ModelCacheCode
+from vonk_agent_protocol.agent_words import (
+    ProfileDocumentState,
+    RunSwitchReasonScopeName,
+)
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 from vonk_forge_contracts.model import ModelReference
 
@@ -36,6 +41,7 @@ from .artifacts import (
     _unique_artifacts,
     _validate_manifest,
 )
+from .catalog import CatalogMixin
 from .catalog_helpers import (
     _canonical_model_artifacts,
     _recipe_model_content_digests,
@@ -55,6 +61,45 @@ from .source_helpers import _model_selector
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+def _has_cache_set(session: Session, digest: str) -> bool:
+    """Whether a cache set row, in any state, holds this model content digest."""
+
+    return (
+        session.scalar(
+            select(ModelCacheSet.model_content_sha256)
+            .where(ModelCacheSet.model_content_sha256 == digest)
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def _newest_cached_per_identity(
+    session: Session, selection: list[ColumnElement[bool]]
+) -> list[str]:
+    """With no head, each identity answers with its newest revision holding a set."""
+
+    newest: dict[tuple[str, str], tuple[datetime, str]] = {}
+    for publisher, slug, created_at, digest in session.execute(
+        select(
+            CatalogDocumentRevision.publisher,
+            CatalogDocumentRevision.slug,
+            CatalogDocumentRevision.created_at,
+            CatalogDocumentRevision.content_digest,
+        ).where(
+            *selection,
+            CatalogDocumentRevision.content_digest.in_(
+                select(ModelCacheSet.model_content_sha256)
+            ),
+        )
+    ):
+        if _is_digest(digest):
+            key = (publisher, slug)
+            if key not in newest or (created_at, digest) > newest[key]:
+                newest[key] = (created_at, digest)
+    return sorted({digest for _created, digest in newest.values()})
 
 
 class ResolutionMixin:
@@ -132,76 +177,88 @@ class ResolutionMixin:
                 "an exact model definition or recipe revision is required",
             )
         with cache._session() as session:
-            recipe_document: RecipeDefinition | None = None
-            recipe_model_digests: list[str] = []
-            if recipe_digest is not None or recipe_revision_id is not None:
-                recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
-                    cache._recipe_document(session, recipe_digest, recipe_revision_id)
+            return cache._manifest_in_session(
+                session,
+                model_digest=model_digest,
+                recipe_digest=recipe_digest,
+                recipe_revision_id=recipe_revision_id,
+            )
+
+    def _manifest_in_session(
+        self,
+        session: Session,
+        *,
+        model_digest: str | None,
+        recipe_digest: str | None,
+        recipe_revision_id: str | None,
+    ) -> ArtifactSetManifest:
+        """The set a model or recipe revision resolves to, from the catalog alone."""
+        cache = cast("ModelCacheService", self)
+        recipe_document: RecipeDefinition | None = None
+        recipe_model_digests: list[str] = []
+        if recipe_digest is not None or recipe_revision_id is not None:
+            recipe_document, _resolved_recipe_id, resolved_recipe_digest = (
+                cache._recipe_document(session, recipe_digest, recipe_revision_id)
+            )
+            if recipe_digest is not None and resolved_recipe_digest != recipe_digest:
+                raise ModelCacheStorageUnknown(
+                    ModelCacheCode.RECIPE_REVISION_MISSING,
+                    "exact recipe revision is not resolved",
                 )
-                if (
-                    recipe_digest is not None
-                    and resolved_recipe_digest != recipe_digest
-                ):
-                    raise ModelCacheStorageUnknown(
-                        ModelCacheCode.RECIPE_REVISION_MISSING,
-                        "exact recipe revision is not resolved",
-                    )
-                recipe_digest = resolved_recipe_digest
-                recipe_model_digests = _recipe_model_content_digests(recipe_document)
-                if not recipe_model_digests:
-                    raise ModelCacheResolutionInvalid(
-                        ModelCacheCode.RECIPE_MODEL_MISSING,
-                        "recipe does not bind an exact model definition",
-                    )
-                if (
-                    model_digest is not None
-                    and model_digest not in recipe_model_digests
-                ):
-                    raise ModelCacheConflictInvalid(
-                        ModelCacheCode.PIN_MISMATCH,
-                        "recipe and requested model definitions do not match",
-                    )
-                model_digest = model_digest or recipe_model_digests[0]
-            if model_digest is None:
+            recipe_digest = resolved_recipe_digest
+            recipe_model_digests = _recipe_model_content_digests(recipe_document)
+            if not recipe_model_digests:
                 raise ModelCacheResolutionInvalid(
-                    ModelCacheCode.PIN_REQUIRED,
-                    "an exact model definition is required after recipe resolution",
+                    ModelCacheCode.RECIPE_MODEL_MISSING,
+                    "recipe does not bind an exact model definition",
                 )
-            model_rows: dict[str, CatalogDocumentRevision] = {}
-            requested_model_digests = (
-                recipe_model_digests if recipe_document is not None else [model_digest]
+            if model_digest is not None and model_digest not in recipe_model_digests:
+                raise ModelCacheConflictInvalid(
+                    ModelCacheCode.PIN_MISMATCH,
+                    "recipe and requested model definitions do not match",
+                )
+            model_digest = model_digest or recipe_model_digests[0]
+        if model_digest is None:
+            raise ModelCacheResolutionInvalid(
+                ModelCacheCode.PIN_REQUIRED,
+                "an exact model definition is required after recipe resolution",
             )
-            for digest in requested_model_digests:
-                cache._collect_model_definitions(session, digest, model_rows)
-            specs: list[ArtifactSpec] = []
-            model_ref: ModelReference | None = None
-            for digest, row in sorted(model_rows.items()):
-                if digest == model_digest:
-                    model_ref = ModelReference(
-                        publisher=row.publisher,
-                        slug=row.slug,
-                        content_sha256=digest,
+        model_rows: dict[str, CatalogDocumentRevision] = {}
+        requested_model_digests = (
+            recipe_model_digests if recipe_document is not None else [model_digest]
+        )
+        for digest in requested_model_digests:
+            cache._collect_model_definitions(session, digest, model_rows)
+        specs: list[ArtifactSpec] = []
+        model_ref: ModelReference | None = None
+        for digest, row in sorted(model_rows.items()):
+            if digest == model_digest:
+                model_ref = ModelReference(
+                    publisher=row.publisher,
+                    slug=row.slug,
+                    content_sha256=digest,
+                )
+            raw_artifacts = _canonical_model_artifacts(row)
+            selected_ids = _recipe_model_file_ids(recipe_document, digest)
+            for raw in raw_artifacts:
+                if selected_ids is not None and raw.id not in selected_ids:
+                    continue
+                specs.append(
+                    cache._artifact_from_catalog(
+                        raw,
+                        model_content_sha256=digest,
                     )
-                raw_artifacts = _canonical_model_artifacts(row)
-                selected_ids = _recipe_model_file_ids(recipe_document, digest)
-                for raw in raw_artifacts:
-                    if selected_ids is not None and raw.id not in selected_ids:
-                        continue
-                    specs.append(
-                        cache._artifact_from_catalog(
-                            raw,
-                            model_content_sha256=digest,
-                        )
-                    )
-            manifest = ArtifactSetManifest(
-                model_content_sha256=model_digest,
-                recipe_revision_sha256=recipe_digest,
-                model_content_digests=tuple(sorted(model_rows)),
-                artifacts=tuple(
-                    sorted(_composed_artifacts(specs), key=lambda item: item.key)
-                ),
-                model_definition_ref=model_ref,
-            )
+                )
+        manifest = ArtifactSetManifest(
+            model_content_sha256=model_digest,
+            recipe_revision_sha256=recipe_digest,
+            model_content_digests=tuple(sorted(model_rows)),
+            artifacts=tuple(
+                sorted(_composed_artifacts(specs), key=lambda item: item.key)
+            ),
+            model_definition_ref=model_ref,
+        )
+
         _validate_manifest(manifest)
         return manifest
 
@@ -234,6 +291,7 @@ class ResolutionMixin:
     def _resolve_model_selector_in_session(session: Session, selector: str) -> str:
         """Resolve one current model selector inside its caller's snapshot."""
 
+        fallback: list[ColumnElement[bool]] | None = None
         if re.fullmatch(_DIGEST_PATTERN, selector):
             rows = list(
                 session.scalars(
@@ -244,19 +302,16 @@ class ResolutionMixin:
                     )
                 )
             )
-            if not rows:
-                cached_digests = list(
-                    session.scalars(
-                        select(ModelCacheSet.model_content_sha256).where(
-                            ModelCacheSet.model_content_sha256 == selector
-                        )
-                    )
-                )
-                if cached_digests:
-                    return selector
+            if not rows and _has_cache_set(session, selector):
+                return selector
             if rows:
                 return selector
         elif re.fullmatch(UUID_PATTERN, selector):
+            fallback = [
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                CatalogDocumentRevision.document_id == selector,
+            ]
             rows = list(
                 session.scalars(
                     select(CatalogDocumentRevision).where(
@@ -277,20 +332,26 @@ class ResolutionMixin:
             conditions = [
                 CatalogDocumentRevision.kind == "model",
                 CatalogDocumentRevision.state == "active",
-                active_head_revision(),
             ]
             if publisher is not None:
                 conditions.append(CatalogDocumentRevision.publisher == publisher)
                 conditions.append(CatalogDocumentRevision.slug == slug)
             else:
                 conditions.append(CatalogDocumentRevision.slug == selector)
+            fallback = conditions
             rows = list(
-                session.scalars(select(CatalogDocumentRevision).where(*conditions))
+                session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        *conditions, active_head_revision()
+                    )
+                )
             )
         # A catalog row whose identity digest is damaged cannot be pinned: it is
         # skipped like any row the catalog does not hold, and the rest carry on.
         rows = [row for row in rows if _is_digest(row.content_digest)]
         digests = sorted({row.content_digest for row in rows})
+        if not digests and fallback is not None:
+            digests = _newest_cached_per_identity(session, fallback)
         if not digests:
             raise ModelCacheNotFoundInvalid(
                 ModelCacheCode.SELECTOR_MISSING, "model selector was not found"
@@ -307,15 +368,14 @@ class ResolutionMixin:
         model_variant: str | None = None,
         exact_revision_id: str | None = None,
     ) -> CacheResolution:
-        """Resolve one logical Recipe to its newest usable cached revision.
+        """Resolve one logical Recipe to its catalog head (or the exact revision).
 
         The profile read/load path calls this method for both web and CLI
         operators.  It is read-only: missing content is reported, never
-        downloaded.  A newer active revision may be uncached; in that case we
-        return the newest compatible cached receipt and mark that a catalog
-        update is available.  If no revision is cached, the newest active
-        revision is returned with unknown (``None``) resource estimates so a
-        load operation can prepare it explicitly.
+        downloaded.  The head may be uncached; it is still returned, with a
+        ``recipe-not-cached`` blocker, so a load operation can prepare it
+        explicitly.  An exact revision other than the head marks that a catalog
+        update is available.
 
         An explicitly selected exact revision is never replaced by an older
         cached one: either the caller names it in ``exact_revision_id``, or
@@ -398,7 +458,7 @@ class ResolutionMixin:
                         CatalogDocumentRevision.publisher == publisher,
                         CatalogDocumentRevision.slug == slug,
                     )
-                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                    .limit(1)
                 )
             else:
                 seed = session.scalar(
@@ -407,7 +467,8 @@ class ResolutionMixin:
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.slug == identity,
                     )
-                    .order_by(CatalogDocumentRevision.revision_number.desc())
+                    .order_by(CatalogDocumentRevision.publisher)
+                    .limit(1)
                 )
             if seed is None:
                 raise ModelCacheStorageUnknown(
@@ -446,15 +507,11 @@ class ResolutionMixin:
 
             revisions = list(
                 session.scalars(
-                    select(CatalogDocumentRevision)
-                    .where(
+                    select(CatalogDocumentRevision).where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.document_id == seed.document_id,
                         CatalogDocumentRevision.state == "active",
-                    )
-                    .order_by(
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.id.desc(),
+                        active_head_revision(),
                     )
                 )
             )
@@ -625,14 +682,7 @@ class ResolutionMixin:
             recipe_cached = receipt is not None
             image_bytes = receipt.image_bytes if receipt is not None else None
             image_digest = receipt.image_digest if receipt is not None else None
-            latest = next(
-                (
-                    item
-                    for item in revisions
-                    if item.revision_number > revision.revision_number
-                ),
-                None,
-            )
+            latest = next((item for item in revisions if item.id != revision.id), None)
             additional = (
                 model_expected + image_bytes
                 if isinstance(model_expected, int) and isinstance(image_bytes, int)
@@ -677,3 +727,22 @@ class ResolutionMixin:
                 ),
                 blockers=blockers,
             )
+
+
+class _CatalogResolver(ResolutionMixin, CatalogMixin):
+    """The cache's own resolution for readers that hold only a session."""
+
+    _fixture_sources = False
+
+
+def resolve_recipe_set(
+    session: Session, recipe_revision_id: str
+) -> ArtifactSetManifest:
+    """The artifact set a recipe revision resolves to, as a download resolves it."""
+
+    return _CatalogResolver()._manifest_in_session(
+        session,
+        model_digest=None,
+        recipe_digest=None,
+        recipe_revision_id=recipe_revision_id,
+    )

@@ -88,6 +88,7 @@ runs:
         version-file: .tool-versions
         python-version: "3.14"
         enable-cache: true
+        save-cache: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Validate package metadata and environment
       id: accepted
@@ -164,6 +165,7 @@ runs:
       with:
         shared-key: linux-arm64
         add-job-id-key: "false"
+        save-if: ${{ github.ref == 'refs/heads/main' }}
 
     - name: Revalidate protected package source authority
       shell: bash

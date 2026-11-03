@@ -88,6 +88,7 @@ from vonk_control.models import (
     Base,
     CatalogDocument,
     CatalogDocumentRevision,
+    CatalogRecipeModelReference,
     ClusterMapping,
     InstallationNode,
     Job,
@@ -117,6 +118,7 @@ from vonk_control.recipe_operations import (
 from vonk_control.recipe_operations.errors import RecipeRequestInvalid
 from vonk_control.recipe_routes import (
     AtomicRecipeRoutePublisher,
+    RecipeRecoveryDeadlineError,
     RecipeRouteService,
 )
 from vonk_control.route_runtime import (
@@ -582,7 +584,7 @@ def setup_services(
             kind="recipe",
             publisher=document["identity"]["publisher"],
             slug=document["identity"]["slug"],
-            title=document["metadata"]["title"],
+            title=document["identity"]["slug"],
             created_by="admin",
             created_at=NOW,
             updated_at=NOW,
@@ -609,15 +611,17 @@ def setup_services(
             kind="model",
             publisher=model_document["identity"]["publisher"],
             slug=model_document["identity"]["slug"],
-            title=model_document["identity"]["model"]["title"],
+            title=model_document["identity"]["slug"],
             created_by="admin",
             created_at=NOW,
             updated_at=NOW,
         )
         session.add(model_catalog)
         session.flush()
+        model_revision_id = str(uuid.uuid4())
         session.add(
             CatalogDocumentRevision(
+                id=model_revision_id,
                 document_id=model_catalog.id,
                 kind="model",
                 publisher=model_catalog.publisher,
@@ -643,6 +647,21 @@ def setup_services(
                 projected={},
                 created_by="admin",
                 created_at=NOW,
+            )
+        )
+        session.flush()
+        # An active recipe revision is always bound to its models, as the catalog
+        # writes it.
+        session.add(
+            CatalogRecipeModelReference(
+                recipe_revision_id=revision.id,
+                recipe_kind="recipe",
+                selection_id=str(document["models"][0]["id"]),
+                model_revision_id=model_revision_id,
+                model_kind="model",
+                model_publisher=model_catalog.publisher,
+                model_slug=model_catalog.slug,
+                model_content_digest=model_digest,
             )
         )
         session.flush()
@@ -2653,6 +2672,92 @@ def test_run_admission_and_start_queue_roll_back_together(tmp_path: Path) -> Non
             == []
         )
         assert session.scalar(select(Job).where(Job.request_id == "c" * 36)) is None
+
+
+def test_start_orders_carry_the_saved_runs_plan_digest_when_admission_replans(
+    tmp_path: Path,
+) -> None:
+    """The run row is the one reader of the plan digest.
+
+    Admission re-plans under its row locks; observations (inventory time,
+    memory figures) are hashed, so a fresh snapshot between the plans gives
+    the saved run a different digest than the one the start was planned with.
+    The start job and orders must carry the saved run's digest, or the
+    host-runtime grant refuses the Start as superseded.
+    """
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "7"
+    )
+    plan = service.preview_run(installation.owner_id, "qwen")
+    real_plan_run = service._run_admission.plan_run
+    calls: list[str] = []
+
+    def replanning(*args: Any, **kwargs: Any):
+        fresh = real_plan_run(*args, **kwargs)
+        calls.append(fresh.plan_digest)
+        if len(calls) == 1:
+            # A newer report lands between the start's plan and admission's.
+            InventoryRepository(sessions, clock=lambda: NOW).record(
+                NodeInventoryReport.model_validate_json(
+                    canonical_message(
+                        {
+                            "node_id": nodes[0],
+                            "observed_at": NOW + timedelta(seconds=1),
+                            "disk_total_bytes": 10_000,
+                            "disk_free_bytes": 8_000,
+                            "host_memory_total_bytes": 10_000,
+                            "host_memory_free_bytes": 8_000,
+                            "gpu_memory_total_bytes": 10_000,
+                            "gpu_memory_free_bytes": 8_000,
+                            "gpu_count": 1,
+                            "artifact_store_read_only": False,
+                            "capabilities": [
+                                "runtime.vonk.v1",
+                                "recipe.image.pull.v1",
+                                "recipe.operations.v1",
+                            ],
+                            "memory_pool": "shared",
+                            "schema_version": 1,
+                            "nvidia_driver_version": "unknown",
+                            "container_runtime_version": "unknown",
+                        }
+                    )
+                )
+            )
+        return fresh
+
+    service._run_admission.plan_run = replanning  # type: ignore[method-assign]
+    started = service.start(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id="0" * 35 + "8",
+    )
+
+    with sessions() as session:
+        run = _required(session.get(RecipeRun, started.owner_id))
+        assert calls[0] != run.plan_digest
+        job = _required(session.get(Job, started.id))
+        assert job.payload["plan_digest"] == run.plan_digest
+        operations = tuple(
+            session.scalars(
+                select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
+            )
+        )
+        assert operations
+        for operation in operations:
+            assert operation.payload["plan_digest"] == run.plan_digest
+            binding = derive_runtime_plan_binding(
+                session,
+                parent=job,
+                operation=operation,
+                node_id=operation.node_id,
+                action=ContainerRuntimeAction.START,
+                stop_plan_sha256=None,
+            )
+            assert binding.runtime_run_id == run.id
 
 
 def test_start_uses_current_alias_and_replays_by_request_identity(
@@ -5134,6 +5239,11 @@ def test_distributed_recovery_deadline_ends_attempt_and_retries_publication(
     mark_current_exact_observations(sessions, started.owner_id, routes._clock())
     publications_before = len(publisher.aliases)
 
+    # The pass that meets the expired deadline ends the attempt; the next
+    # pass (the worker's durable retry) publishes.
+    with pytest.raises(RecipeRecoveryDeadlineError):
+        routes.publish_run(started.owner_id)
+    assert len(publisher.aliases) == publications_before
     generation = routes.publish_run(started.owner_id)
 
     assert len(publisher.aliases) == publications_before + 1

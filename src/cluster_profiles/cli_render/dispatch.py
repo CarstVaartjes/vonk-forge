@@ -18,7 +18,8 @@ from .fleet import _fleet_overview, _node
 from .library import _library
 from .operations import _application, _job, _operation, _run_result
 from .profile import _gateway_keys, _profile, _profile_endpoints
-from .review import _cache_removal_review, _preview
+from .removal_review import _cache_removal_review
+from .review import _preview
 
 
 def render_payload(
@@ -127,7 +128,7 @@ def render_payload(
             _catalog_sync(payload)
         elif noun in {"model", "recipe"}:
             if action == "preview":
-                _cache_removal_review(payload)
+                _cache_removal_review(payload, verbose=wide)
             elif action in {None, "library", "detail"}:
                 _library(payload, noun, detail=action == "detail", wide=wide)
             else:

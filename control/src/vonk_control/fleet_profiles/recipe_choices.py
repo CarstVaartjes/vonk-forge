@@ -16,6 +16,7 @@ from vonk_agent_protocol.agent_words import (
     RunSwitchReasonScopeName,
 )
 
+from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import RecipeRevisionProjection, read_recipe_projection
 from ..content_identity import (
     cache_resolution_answers_revision,
@@ -107,11 +108,7 @@ class FleetProfileService:
                 CatalogDocumentRevision.document_id == document,
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
                 CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
-            )
-            .order_by(
-                CatalogDocumentRevision.revision_number.desc(),
-                CatalogDocumentRevision.created_at.desc(),
-                CatalogDocumentRevision.id.desc(),
+                active_head_revision(),
             )
             .limit(1)
         ).first()
@@ -163,35 +160,17 @@ class FleetProfileService:
             documents.setdefault((document.publisher, document.slug), []).append(
                 document
             )
-        ranked = (
-            select(
-                CatalogDocumentRevision.id,
-                func.row_number()
-                .over(
-                    partition_by=CatalogDocumentRevision.document_id,
-                    order_by=(
-                        CatalogDocumentRevision.revision_number.desc(),
-                        CatalogDocumentRevision.created_at.desc(),
-                        CatalogDocumentRevision.id.desc(),
-                    ),
-                )
-                .label("head_rank"),
-            )
-            .where(
-                CatalogDocumentRevision.document_id.in_(
-                    [rows[0].id for rows in documents.values() if len(rows) == 1]
-                ),
-                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
-                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
-            )
-            .subquery()
-        )
+        document_ids = [rows[0].id for rows in documents.values() if len(rows) == 1]
         revisions = {
             revision.document_id: revision
             for revision in session.scalars(
                 select(CatalogDocumentRevision)
-                .join(ranked, ranked.c.id == CatalogDocumentRevision.id)
-                .where(ranked.c.head_rank == 1)
+                .where(
+                    CatalogDocumentRevision.document_id.in_(document_ids),
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                    active_head_revision(),
+                )
                 .options(
                     *(
                         ()

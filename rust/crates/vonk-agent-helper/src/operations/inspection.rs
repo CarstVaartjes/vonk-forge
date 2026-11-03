@@ -17,14 +17,16 @@ pub(crate) fn process_exited(
     logs: Result<CommandOutput, String>,
     exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
 ) -> OperationError {
-    let (logs, capture_error) = match logs {
+    // The exit is classified from the capture; the windows cut from it once
+    // are what cross the protocol.
+    let (captured, capture_error) = match logs {
         // An unread log is reported as unread; it never becomes an empty tail
         // that reads like a container with nothing to say.
         Ok(logs) if logs.success => (
-            Some(Box::new(crate::runtime_logs::retain_container(
+            Some(crate::runtime_logs::CapturedOutput::new(
                 &logs.stdout,
                 &logs.stderr,
-            ))),
+            )),
             None,
         ),
         Ok(_) => (None, Some("the container log command failed")),
@@ -32,9 +34,10 @@ pub(crate) fn process_exited(
     };
     let exit_summary = crate::runtime_logs::exit_summary(
         exit.as_ref().map_err(|e| *e),
-        logs.as_deref(),
+        captured.as_ref(),
         capture_error,
     );
+    let logs = captured.map(|captured| Box::new(captured.into_retained()));
     OperationError::RuntimeProcessExited {
         logs,
         capture_error,

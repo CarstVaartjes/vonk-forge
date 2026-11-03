@@ -1,0 +1,9 @@
+# Network settings for every cargo invocation in the repository. They live here,
+# not in workflow `env`, because rust-cache hashes CARGO*/CC*/CFLAGS*/CXX*/CMAKE*/RUST*
+# environment variables into its key: a setting in one workflow's env would give
+# that workflow a different cache key from every other.
+[net]
+retry = 5
+
+[http]
+timeout = 60

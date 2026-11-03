@@ -713,14 +713,13 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
     assert _live_aliases(root) == {"qwen"}
 
 
-def test_authenticated_observation_producer_repairs_between_request_attempts(
+def test_authenticated_observation_producer_repairs_between_passes(
     tmp_path, monkeypatch
 ):
     from datetime import timedelta
 
     from sqlalchemy import select
     from vonk_control.models import AgentCertificate, RunNode
-    from vonk_control.recipe_routes import service as service_module
 
     from .test_agent_api import agent_headers, make_agent_system
 
@@ -747,44 +746,42 @@ def test_authenticated_observation_producer_repairs_between_request_attempts(
             )
         )
 
-    attempts = []
+    from vonk_control.recipe_routes import RecipeRouteNotReady
 
-    def observations():
-        attempts.append(0)
-        yield 0
-        # The real observation writer must be able to commit here: the failed
-        # request observation has rolled back and released its owner/rank locks.
-        response = client.post(
-            "/agent/recipe-runs/observations",
-            headers=agent_headers(node_id, "route-serial"),
-            json={
-                "observed_at": NOW.isoformat(),
-                "runs": [
-                    {
-                        "run_id": run_id,
-                        "run_generation": 1,
-                        "process_running": True,
-                        "endpoint_ready": True,
-                    }
-                ],
-            },
-        )
-        assert response.status_code == 204, response.text
-        attempts.append(1)
-        yield 1
-
-    monkeypatch.setattr(service_module, "bounded_attempts", observations)
+    # The first pass finds no exact observation and ends: its request
+    # observation has rolled back and released the owner/rank locks.
+    with pytest.raises(RecipeRouteNotReady):
+        base.publish_run(run_id)
+    # The real observation writer must be able to commit between passes.
+    response = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(node_id, "route-serial"),
+        json={
+            "observed_at": NOW.isoformat(),
+            "runs": [
+                {
+                    "run_id": run_id,
+                    "run_generation": 1,
+                    "process_running": True,
+                    "endpoint_ready": True,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 204, response.text
+    # The next pass (after the worker's durable backoff) publishes.
     base.publish_run(run_id)
-    assert attempts[:2] == [0, 1]
     assert len(applied) == 1
     with services.sessions() as session:
         assert _recipe_run(session, run_id).route_state == "published"
 
 
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
-    tmp_path,
-):
+def _exhaust_publication(tmp_path, *, stale_reason=None):
+    """Run publication to exhaustion with a Start job carrying `stale_reason`.
+
+    Returns the ended Start job's (id, state, status_reason, result) and the
+    fresh run id plus the service, for the caller to assert on.
+    """
     from datetime import UTC, timedelta
 
     from vonk_agent_protocol import AgentOperation, LifecycleState, RunState
@@ -806,6 +803,7 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
             payload_digest="a" * 64,
             payload={"owner_id": first, "recovery": {"deadline": "damaged"}},
             state=LifecycleState.RUNNING,
+            status_reason=stale_reason,
             created_at=NOW,
             updated_at=NOW,
         )
@@ -827,7 +825,33 @@ def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
         assert ended.state != LifecycleState.RUNNING
         assert _recipe_run(session, first).state == RunState.RUNNING
         assert _recipe_run(session, first).next_action_at is None
+        snapshot = (ended.state, ended.status_reason, ended.result)
     clock.now = NOW
     service.publish_run(fresh)
     # The failed, never-published owner has no accepted route to retain.
     assert _live_aliases(tmp_path / "live") == {"fresh"}
+    return snapshot
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_corrupt_owned_recovery_metadata_ends_only_its_attempt_and_allows_fresh(
+    tmp_path,
+):
+    _exhaust_publication(tmp_path)
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_exhausted_publication_ends_the_start_with_its_own_reason(tmp_path):
+    """Catches the failed Start keeping a wait note from before the end.
+
+    On main the end kept the existing reason, so an earlier retry note
+    survived instead of the publication error.
+    """
+    from vonk_agent_protocol import LifecycleState
+
+    state, reason, result = _exhaust_publication(
+        tmp_path, stale_reason="retry scheduled at 2026-01-01T00:00:00Z"
+    )
+    assert state != LifecycleState.RUNNING
+    assert reason and "retry scheduled" not in reason
+    assert result is not None and reason == result["recovery_error"]

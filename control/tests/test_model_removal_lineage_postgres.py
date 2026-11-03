@@ -8,15 +8,16 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import LifecycleState
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheRemovalResult
-from vonk_control.models import CatalogDocument
+from vonk_control.models import CatalogDocument, CatalogDocumentRevision, ModelCacheSet
 from vonk_forge_contracts import document_sha256
 
+from .display_fixtures import reworded
 from .removal_settle import advance_until_ended
 from .test_fleet_model_removal_postgres import submit_model_download
 from .test_model_cache import _canonical_model
@@ -33,9 +34,7 @@ def _revise_catalog_only(sessions, *, slug: str, data: bytes, note: str) -> str:
         file_id="weights",
         file_digest=hashlib.sha256(data).hexdigest(),
     )
-    model = model.model_copy(
-        update={"metadata": model.metadata.model_copy(update={"description": note})}
-    )
+    model = reworded(model, note)
     with sessions() as session:
         existing = session.scalar(
             select(CatalogDocument.id).where(
@@ -183,5 +182,70 @@ def test_a_set_another_model_also_serves_is_retained_with_its_bytes(
             assert path.read_bytes() == data
         # The ended removal leaves no fence: a fresh download is admitted.
         submit_model_download(service, tmp_path)
+    finally:
+        service.close()
+
+
+def test_a_3_0_model_resolves_the_cache_downloaded_under_its_2_x_revision(
+    postgres_engine, tmp_path: Path, monkeypatch
+) -> None:
+    """The display split gives every Model a new digest over the same files.
+
+    The cache was bound to the 2.x digest; the first 3.0 sync makes the same
+    files a new head. Removal reviews by the new digest and finds the cached
+    set through the publisher/slug lineage; the shared file key is what makes
+    the new revision the same bytes.
+    """
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    _content_keys(service, monkeypatch)
+    try:
+        v3, set_digest, _ = _revision(
+            service, sessions, tmp_path / "files", slug="display-split"
+        )
+        with sessions.begin() as session:
+            row = session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.slug == "display-split"
+                )
+            )
+            assert row is not None and row.content_digest == v3
+            legacy = {
+                **row.document,
+                "metadata": {"description": "as 2.x published it", "tags": []},
+            }
+            legacy_digest = document_sha256(legacy)
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == row.id)
+                .values(document=legacy, content_digest=legacy_digest)
+            )
+            session.execute(
+                update(ModelCacheSet)
+                .where(ModelCacheSet.model_content_sha256 == v3)
+                .values(model_content_sha256=legacy_digest)
+            )
+            legacy_key = row.artifact_key
+        head = _revise_catalog_only(
+            sessions, slug="display-split", data=b"old", note="old"
+        )
+        assert head == v3 != legacy_digest
+        with sessions() as session:
+            keys = {
+                revision.content_digest: revision.artifact_key
+                for revision in session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.slug == "display-split"
+                    )
+                )
+            }
+        assert keys[head] == keys[legacy_digest] == legacy_key
+
+        review = service.review_fleet_model_removal("test/display-split")
+        assert review.target_identity == head
+        assert [item.sha256 for item in review.assets if item.kind == "model-set"] == [
+            set_digest
+        ]
+        result = _removed(service, "test/display-split", review.review_digest)
+        assert result.removed_entries == [set_digest]
     finally:
         service.close()

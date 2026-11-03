@@ -6,7 +6,7 @@ set -euo pipefail
 
 root=${1:-${VONK_RECIPE_LIBRARY_ROOT:-}}
 if [[ -z "$root" ]]; then
-    echo "usage: scripts/build-recipe-library [RECIPE_CHECKOUT] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
+    echo "usage: scripts/build-recipe-library [RECIPE_CHECKOUT [SOURCE_COMMIT]] (or set VONK_RECIPE_LIBRARY_ROOT)" >&2
     exit 2
 fi
 root=$(cd "$root" && pwd -P)
@@ -14,5 +14,10 @@ test -f "$root/tools/build-catalog-index" || {
     echo "not a recipe checkout: $root" >&2
     exit 2
 }
+# A source tree without git history (an unpacked archive) names its commit.
+commit=()
+if [[ -n "${2:-}" ]]; then
+    commit=(--source-commit "$2")
+fi
 exec uv run --python 3.14 --no-project --with-editable "$root/contracts" \
-    python "$root/tools/build-catalog-index"
+    python "$root/tools/build-catalog-index" "${commit[@]}"

@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_forge_contracts import ModelDefinition
 
@@ -39,6 +40,7 @@ from ..cache_removal_review import (
 )
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import read_catalog_document
+from ..content_identity import installations_using_models
 from ..fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     FleetModelRemovalCheckpoint,
@@ -69,6 +71,7 @@ from ..models import (
     Job,
     ModelCacheOperation,
     ModelCacheSet,
+    ModelCacheSetArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
 )
@@ -81,10 +84,10 @@ from ..unused_storage_collection.references import (
     _installation_pointing,
 )
 from .errors import ModelCacheConflictInvalid
-from .lineage import lineage_contents, model_sets, set_bindings
+from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal, _store_operation_payload
 from .source_helpers import _model_selector, _request_key
-from .views import CacheOperationView
+from .views import CacheOperationView, ModelCacheRemovalScope
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -99,58 +102,49 @@ def _model_objects(
     observation_issues: list[FleetRemovalObservationIssue] | None = None,
     include_shared: bool = True,
 ) -> tuple[set[str], set[str]]:
-    target_objects: set[str] = set()
-    shared: set[str] = set()
+    """The model's objects, and those among them that a kept set also contains.
+
+    Sharing is set membership: an object is kept when a cached set outside the
+    model's own sets lists it. A catalog file that no kept set contains is
+    unused, whichever revision declared it.
+    """
+
     issues: list[FleetRemovalObservationIssue] = []
-    revisions = select(CatalogDocumentRevision, active_head_revision()).where(
-        CatalogDocumentRevision.kind == "model"
-    )
-    cache_sets = select(ModelCacheSet)
-    if not include_shared:
+    if include_shared:
+        contents = lineage_contents(session, digest)
+        owned = model_sets(session, contents).owned
+    else:
         # A profile acquires references only to this exact model. Unrelated
         # damaged evidence matters to deletion, never to acquiring this pin.
-        revisions = revisions.where(CatalogDocumentRevision.content_digest == digest)
-        cache_sets = cache_sets.where(ModelCacheSet.model_content_sha256 == digest)
-    rows = list(session.execute(revisions))
-    # Content of the model's own publisher/slug lineage is the model's, as the
-    # Library shows it: a refreshed revision owns the files of the one before.
-    lineage = {
-        revision.content_digest: (revision.publisher, revision.slug)
-        for revision, _current_head in rows
-    }
-    own = {
-        content
-        for content, name in lineage.items()
-        if content == digest or name == lineage.get(digest)
-    } | {digest}
-    for revision, current_head in rows:
+        contents = frozenset({digest})
+        owned = first_requested_sets(session, digest)
+    target_objects: set[str] = set()
+    for revision, current_head in session.execute(
+        select(CatalogDocumentRevision, active_head_revision()).where(
+            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+            CatalogDocumentRevision.content_digest.in_(sorted(contents)),
+        )
+    ):
         model = read_or_rebuild(
             kind=CatalogDocumentRevision.__tablename__,
             subject=revision.id,
             read=partial(read_catalog_document, revision),
         )
         if isinstance(model, Residue):
-            # Catalog heads for other content are not live byte references.
-            # Old source identities can retain heads indefinitely, even after
-            # replacement by a different slug. Cache manifests, installed plans
-            # and profile references independently protect their live bytes.
-            # Only damage to the requested head makes its objects unknown.
+            # Only damage to the requested head makes its objects unknown;
+            # cached sets list their own members independently.
             if current_head and revision.content_digest == digest:
                 issues.append(_observation_issue(model, note=model.note))
             continue
         assert isinstance(model, ModelDefinition)
-        objects = {file.sha256 for file in model.files}
-        if revision.content_digest in own:
-            target_objects.update(objects)
-            if not include_shared:
-                # Acquiring a pin needs only this immutable model's files. A
-                # readable copy proves the same content even when another copy
-                # or its cache history is damaged. Deletion still scans every
-                # reference and retains its conservative unknowns below.
-                return target_objects, shared
-        else:
-            shared.update(objects)
-    for row in session.scalars(cache_sets):
+        target_objects.update(file.sha256 for file in model.files)
+    if not include_shared and target_objects:
+        # Acquiring a pin needs only this immutable model's files. A readable
+        # copy proves the same content even when its cache history is damaged.
+        return target_objects, set()
+    for row in session.scalars(
+        select(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256.in_(owned))
+    ):
         manifest = read_or_rebuild(
             kind=ModelCacheSet.__tablename__,
             subject=row.artifact_set_sha256,
@@ -161,18 +155,19 @@ def _model_objects(
         if isinstance(manifest, Residue):
             issues.append(_observation_issue(manifest))
             continue
-        # A set bound to this model's lineage alone also owns the files its
-        # first requester named under a content the catalog no longer has.
-        bound = set_bindings(row.model_content_sha256, manifest.verified_models)
-        exclusive = bool(bound & own) and all(
-            content in own for content in bound if content in lineage
+        target_objects.update(artifact.sha256 for artifact in manifest.artifacts)
+    shared: set[str] = set()
+    if include_shared and target_objects:
+        shared.update(
+            session.scalars(
+                select(ModelCacheSetArtifact.artifact_sha256)
+                .where(
+                    ModelCacheSetArtifact.artifact_sha256.in_(sorted(target_objects)),
+                    ModelCacheSetArtifact.artifact_set_sha256.not_in(owned),
+                )
+                .distinct()
+            )
         )
-        for artifact in manifest.artifacts:
-            owner = artifact.model_content_sha256 or row.model_content_sha256
-            if owner in own or (include_shared and exclusive and owner not in lineage):
-                target_objects.add(artifact.sha256)
-            else:
-                shared.add(artifact.sha256)
     if observation_issues is not None:
         observation_issues.extend(issues)
     elif issues:
@@ -235,6 +230,11 @@ class FleetRemovalMixin:
             keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
+        # An installation uses the model when its columns name it or its plan
+        # names one of the model's sets (a reused set may never record the model
+        # in the columns). Damage to an installation that does neither is not
+        # this model's.
+        named = installations_using_models(session, contents)
         for installation in session.scalars(
             select(RecipeInstallation)
             .where(RecipeInstallation.state != InstallationState.UNINSTALLED)
@@ -254,13 +254,10 @@ class FleetRemovalMixin:
                 protected = True
                 keep_detail = "Installation model references are unavailable; refresh owner evidence."
                 continue
-            models = {installation.model_content_sha256}
-            models.update(
-                artifact.model.content_sha256
+            if installation.id not in named and not set(sets) & {
+                compiled.identity.model_artifact_set_sha256
                 for compiled in plan.compiled_execution_plans.values()
-                for artifact in compiled.artifacts
-            )
-            if models.isdisjoint(contents):
+            }:
                 continue
             detail = _installation_kept(session, installation.id, evidence)
             saved = _installation_pointing(
@@ -439,8 +436,14 @@ class FleetRemovalMixin:
         return set(scope.delete_objects) - shared
 
     def review_fleet_model_removal(self, selector: str) -> CacheRemovalReview:
+        return self._review_fleet_model_removal(selector)[0]
+
+    def _review_fleet_model_removal(
+        self, selector: str
+    ) -> tuple[CacheRemovalReview, ModelCacheRemovalScope]:
+        """The sealed review and the scope it read."""
         cache = cast("ModelCacheService", self)
-        review = cache.review_model_removal(selector)
+        review, scope = cache._review_model_removal(selector)
         shared: set[str] = set()
         with cache._session() as session:
             effects = cache._fleet_effects(
@@ -470,7 +473,7 @@ class FleetRemovalMixin:
             or any(value is None for value in candidates)
             else sum(value for value in candidates if value is not None)
         )
-        return seal_cache_removal_review(
+        sealed = seal_cache_removal_review(
             CacheRemovalReviewContent.model_validate(
                 {
                     **review.model_dump(
@@ -499,6 +502,7 @@ class FleetRemovalMixin:
                 }
             )
         )
+        return sealed, scope
 
     def remove_fleet_model_selector(
         self, selector: str, *, actor: str, request_key: str, review_digest: str
@@ -530,7 +534,7 @@ class FleetRemovalMixin:
                     fleet=True,
                     review_digest=review_digest,
                 )
-        review = cache.review_fleet_model_removal(selector)
+        review, reviewed_scope = cache._review_fleet_model_removal(selector)
         if review.review_digest != review_digest:
             raise ModelCacheConflictInvalid(
                 ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
@@ -554,38 +558,29 @@ class FleetRemovalMixin:
                 if asset.kind == "model-set" and effects.nas_remove
             )
         )
-        with cache._session() as session:
-            expected_scope = cache._model_removal_scope_for_sets(session, selected)
-            _, shared = _model_objects(session, review.target_identity)
-            reviewed_objects = {
-                asset.sha256
-                for asset in review.assets
-                if asset.kind == "model-object" and effects.nas_remove
-            }
-            reviewed_deletes = {
-                asset.sha256
-                for asset in review.assets
-                if asset.kind == "model-object"
-                and asset.disposition == CacheAssetDisposition.REMOVE
-            }
-            if (
-                set(expected_scope.selected_objects) != reviewed_objects
-                or set(expected_scope.delete_objects) - shared != reviewed_deletes
-            ):
-                raise ModelCacheConflictInvalid(
-                    ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,
-                    "NAS removal membership changed; a fresh review is available.",
-                )
+        # The scope is the one the review read; accept re-reads it under the
+        # fences and refuses a difference.
+        expected_scope = reviewed_scope if effects.nas_remove else None
+        planned_deletes = set(
+            () if expected_scope is None else expected_scope.delete_objects
+        )
+        reviewed_deletes = {
+            asset.sha256
+            for asset in review.assets
+            if asset.kind == "model-object"
+            and asset.disposition == CacheAssetDisposition.REMOVE
+        }
         try:
             with admitting(), cache._lock, cache._session(write=True) as session:
 
                 def verify(session: Session, selected: tuple[str, ...]) -> None:
-                    current = cache._fleet_effects(session, review.target_identity)
-                    _, current_shared = _model_objects(session, review.target_identity)
+                    current_shared: set[str] = set()
+                    current = cache._fleet_effects(
+                        session, review.target_identity, shared_objects=current_shared
+                    )
                     if (
                         current != effects
-                        or set(expected_scope.delete_objects) - current_shared
-                        != reviewed_deletes
+                        or planned_deletes - current_shared != reviewed_deletes
                     ):
                         raise ModelCacheConflictInvalid(
                             ArtifactLifecycleCode.REFERENCE_IDENTITY_MISMATCH,

@@ -469,7 +469,6 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
     selected_objects: list[Digest]
     delete_objects: list[Digest]
     object_index: int = Field(ge=0)
-    object_pending_bytes: int | None = Field(ge=0)
     reclaimed_bytes: int = Field(ge=0)
     set_index: int = Field(ge=0)
     retry: ModelCacheRetry
@@ -491,10 +490,6 @@ class ModelCacheRemovalPayload(_ModelCacheOperationPayload):
             raise ValueError("model removal object checkpoint exceeds its plan")
         if self.set_index > len(self.selected):
             raise ValueError("model removal set checkpoint exceeds its plan")
-        if self.object_pending_bytes is not None and self.object_index >= len(
-            self.delete_objects
-        ):
-            raise ValueError("model removal has a byte checkpoint without an object")
         if len(self.selected) != len(set(self.selected)):
             raise ValueError("model removal set identities are duplicated")
         if len(self.selected_objects) != len(set(self.selected_objects)):
@@ -716,7 +711,7 @@ class CacheEntryResponse(StrippedStrictModel):
     expected_bytes: int = Field(ge=0)
     verified_bytes: int = Field(ge=0)
     unique_bytes: int = Field(ge=0)
-    artifacts: list[CacheArtifactResponse] = Field(max_length=1024)
+    artifacts: list[CacheArtifactResponse]
     protected: bool
     protected_reasons: list[str] = Field(max_length=32)
     update_available: bool

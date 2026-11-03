@@ -49,13 +49,16 @@ ARTIFACT_JOB_STORAGE_MAX_BYTES = 16 * 1024**3
 ARTIFACT_JOB_RETENTION_SECONDS = 24 * 60 * 60
 ARTIFACT_JOB_RECONCILE_INTERVAL_SECONDS = 3600
 ARTIFACT_JOB_RECONCILE_BATCH_LIMIT = 1000
-MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3
 # Storage is freed only when it is short (see ``unused_storage_collection``): a
 # Spark or the NAS is short when its free space drops below the larger of this
 # fraction of its capacity and the largest install or model set already known
 # to it, never above the cap. A refused load, install, build or download asks
 # for more than that; either way eviction goes on to the demand plus a reserve.
 STORAGE_LOW_FREE_FRACTION = STORAGE_POLICY.low_free_percent / 100
+# The NAS volume also holds PostgreSQL, backups and builds, which fail hard on a
+# full disk: downloads never take the volume below this share of its capacity
+# free. It is the same line the collector keeps, so one number owns both.
+FREE_SPACE_FOR_COLOCATED_SERVICES_FRACTION = STORAGE_LOW_FREE_FRACTION
 STORAGE_LOW_FREE_CAP_FRACTION = 0.25
 STORAGE_EVICTION_RESERVE_FRACTION = 0.02
 STORAGE_EVICTION_RESERVE_FLOOR_BYTES = 5 * 1024**3

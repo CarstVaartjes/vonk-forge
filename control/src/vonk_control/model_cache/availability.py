@@ -69,7 +69,7 @@ class AvailabilityMixin:
             with cache._session(write=True) as session:
                 row = session.get(ModelCacheSet, manifest.digest)
                 if row is not None:
-                    row.verified_bytes = cache._verified_bytes(session, manifest.digest)
+                    row.verified_bytes = cache._verified_bytes(manifest.digest)
                     if present and row.state in {"needs-repair", "incomplete"}:
                         row.state = "cached"
                         row.verified_at = now
