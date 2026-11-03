@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
+import tarfile
 import threading
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -711,3 +714,228 @@ def test_only_results_refused_as_invalid_count_as_refusals():
     )
     assert len(carry.result_refusals(logs)) == 2
     assert carry.result_refusals("") == []
+
+
+def _stub_heavy_steps(monkeypatch, target, generation: str) -> None:
+    """Replace the hardware and network steps observe() calls, on a lane or class."""
+    release = types.SimpleNamespace(
+        generation=generation, version="v", package_version="p"
+    )
+    for name, value in {
+        "baseline": release,
+        "candidate": release,
+        "evidence": carry.CarryEvidence(),
+        "control": object(),
+        "bundle": object(),
+        "temporary_root": object(),
+        "_create_grant": lambda *a, **k: ("g", "url", "ca", "token"),
+        "_spark_bootstrap_url": lambda *a, **k: "url",
+        "_release_environment": lambda *a, **k: {},
+        "_prepare_podman_apparmor_profile": lambda *a, **k: None,
+        "_wait_for_agent_identity": lambda *a, **k: {"node_id": "spk_1"},
+        "_run_synthetic_canary": lambda *a, **k: {},
+        "_after_canary": lambda *a, **k: None,
+        "_require_no_result_refusals": lambda *a, **k: [],
+        "_probe_summary": lambda *a, **k: {},
+    }.items():
+        monkeypatch.setattr(target, name, value, raising=False)
+    monkeypatch.setattr(carry, "_run_spark_bootstrap", lambda *a, **k: None)
+
+
+def _observing_lane(monkeypatch, cls, generation: str):
+    lane = _scenario_lane(cls)
+    _stub_heavy_steps(monkeypatch, lane, generation)
+    return lane
+
+
+@pytest.mark.parametrize(
+    "cls", [carry.UpgradeCarryLifecycle, carry.RecipeRefreshLifecycle]
+)
+def test_observe_outside_test_mode_accepts_a_baseline_equal_to_the_candidate(
+    monkeypatch, cls
+):
+    # Recipe refresh installs the candidate as its own baseline; PR CI always
+    # sets the test mode, so this branch only ran in the Release workflow.
+    monkeypatch.delenv("VONK_ACCEPTANCE_TEST_MODE", raising=False)
+    lane = _observing_lane(monkeypatch, cls, "g1")
+    assert lane.observe()["generations_differ"] is False
+
+
+def _reset_then_succeed(monkeypatch, failures: int) -> list[int]:
+    calls: list[int] = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, limit):
+            calls.append(1)
+            if len(calls) <= failures:
+                raise ConnectionResetError("reset by peer")
+            return b"payload"
+
+    monkeypatch.setattr(carry.urllib.request, "urlopen", lambda *a, **k: Reply())
+    monkeypatch.setattr(carry.time, "sleep", lambda seconds: None)
+    return calls
+
+
+def test_fetch_survives_a_connection_reset(monkeypatch, tmp_path):
+    calls = _reset_then_succeed(monkeypatch, failures=1)
+    destination = tmp_path / "input"
+    carry._fetch("https://example.invalid/x", destination)
+    assert destination.read_bytes() == b"payload"
+    assert len(calls) == 2
+
+
+def test_fetch_that_keeps_failing_ends_in_a_lifecycle_error(monkeypatch, tmp_path):
+    calls = _reset_then_succeed(monkeypatch, failures=99)
+    with pytest.raises(LifecycleError, match="https://example.invalid/x"):
+        carry._fetch("https://example.invalid/x", tmp_path / "input")
+    assert len(calls) == carry.MAX_ATTEMPTS
+
+
+def test_fetch_survives_a_chunked_reply_closed_mid_stream(monkeypatch, tmp_path):
+    attempts: list[int] = []
+
+    class Reply:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, limit):
+            attempts.append(1)
+            if len(attempts) == 1:
+                raise http.client.IncompleteRead(b"par", 10)
+            return b"payload"
+
+    monkeypatch.setattr(carry.urllib.request, "urlopen", lambda *a, **k: Reply())
+    monkeypatch.setattr(carry.time, "sleep", lambda seconds: None)
+    destination = tmp_path / "input"
+    carry._fetch("https://example.invalid/x", destination)
+    assert destination.read_bytes() == b"payload"
+
+
+def test_retries_stop_at_the_deadline(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(carry.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        carry.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + 400)
+    )
+    calls: list[int] = []
+
+    def fail():
+        calls.append(1)
+        raise ConnectionResetError("reset")
+
+    with pytest.raises(LifecycleError, match="thing"):
+        carry._retry_transient("thing", fail)
+    assert len(calls) < carry.MAX_ATTEMPTS
+
+
+def _library_archive(monkeypatch, failures: int) -> list[int]:
+    calls: list[int] = []
+
+    class Closing:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def __iter__(self):
+            calls.append(1)
+            if len(calls) <= failures:
+                raise tarfile.ReadError("truncated")
+            return iter(())
+
+    monkeypatch.setattr(carry.urllib.request, "urlopen", lambda *a, **k: Closing())
+    monkeypatch.setattr(carry.tarfile, "open", lambda **k: Closing())
+    monkeypatch.setattr(carry.time, "sleep", lambda seconds: None)
+    return calls
+
+
+def test_library_download_survives_a_truncated_archive(monkeypatch, tmp_path):
+    calls = _library_archive(monkeypatch, failures=1)
+    carry._download_library("abc123", tmp_path)
+    assert len(calls) == 2
+
+
+def test_library_download_that_keeps_failing_names_the_url(monkeypatch, tmp_path):
+    _library_archive(monkeypatch, failures=99)
+    with pytest.raises(LifecycleError, match="codeload.github.com.*abc123"):
+        carry._download_library("abc123", tmp_path)
+
+
+def test_revision_lookup_retries_a_failed_gh_call(monkeypatch):
+    replies = [
+        types.SimpleNamespace(returncode=1, stdout="", stderr="502"),
+        types.SimpleNamespace(returncode=0, stdout="rev\n", stderr=""),
+    ]
+    monkeypatch.setattr(carry.subprocess, "run", lambda *a, **k: replies.pop(0))
+    monkeypatch.setattr(carry.time, "sleep", lambda seconds: None)
+    assert carry._revision_through_api("sha") == "rev\n"
+
+
+def _run_main(monkeypatch, tmp_path, *arguments: str) -> dict:
+    monkeypatch.delenv("VONK_ACCEPTANCE_TEST_MODE", raising=False)
+    output = tmp_path / "report.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carry", "--channel", "dev", "--run-id", "1", "--output", str(output)]
+        + list(arguments),
+    )
+    assert carry.main() == 0
+    return json.loads(output.read_text(encoding="utf-8"))
+
+
+def test_release_mode_refresh_passes_with_baseline_equal_to_candidate(
+    monkeypatch, tmp_path
+):
+    release = types.SimpleNamespace(
+        generation="g1", source_sha="s", version="v", release=tmp_path
+    )
+    monkeypatch.setattr(carry, "resolve_release", lambda *a, **k: release)
+    lifecycle = carry.RecipeRefreshLifecycle
+    monkeypatch.setattr(
+        lifecycle,
+        "__init__",
+        lambda self, arguments, *, baseline, candidate: None,
+    )
+    monkeypatch.setattr(lifecycle, "__enter__", lambda self: self)
+    monkeypatch.setattr(lifecycle, "__exit__", lambda self, *exc: False)
+    _stub_heavy_steps(monkeypatch, lifecycle, "g1")
+    report = _run_main(
+        monkeypatch,
+        tmp_path,
+        "--scenario",
+        "recipe-refresh",
+        "--candidate-generation",
+        "g1",
+        "--baseline-generation",
+        "g1",
+    )
+    assert report["status"] == "passed"
+
+
+def test_release_mode_carry_with_equal_generations_is_skipped(monkeypatch, tmp_path):
+    def unexpected(*a, **k):
+        raise AssertionError("a skipped carry resolves no release")
+
+    monkeypatch.setattr(carry, "resolve_release", unexpected)
+    report = _run_main(
+        monkeypatch,
+        tmp_path,
+        "--scenario",
+        "upgrade-carry",
+        "--candidate-generation",
+        "g1",
+        "--baseline-generation",
+        "g1",
+    )
+    assert report["status"] == "skipped"
