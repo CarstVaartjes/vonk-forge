@@ -136,17 +136,75 @@ impl<R> RecipeExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    /// Retire the local lifecycle of a run the Controller has no record of.
-    /// Only the lifecycle is removed; the run directory stays as history and
-    /// no process is touched.
-    pub(super) async fn retire_unowned_run(&self, run_id: &str, reason: &str) -> bool
+    /// Settle a run the Controller does not want on this Spark, if it is one:
+    /// a run whose process is gone is retired, and one whose process still
+    /// runs is stopped first. Returns whether the lifecycle was retired.
+    /// Only the lifecycle is removed; the run directory stays as history.
+    pub(super) async fn settle_unowned_run(&self, run_id: &str, process_running: bool) -> bool
     where
         R: ProcessRunner,
     {
         if self.run_disposition(run_id).await != Some(RecipeRunDisposition::Unowned) {
             return false;
         }
-        self.retire_claim(run_id, reason)
+        if process_running {
+            self.stop_unowned_container(run_id).await
+        } else {
+            self.retire_claim(run_id, "not running")
+        }
+    }
+}
+
+impl<R> RecipeExecutor<'_, R> {
+    /// Stop the running container of a run the Controller named unowned, then
+    /// retire its lifecycle.
+    ///
+    /// The container is named by its own managed labels, read by the helper.
+    /// The Controller grants the stop only while it wants the run on no live
+    /// claim; the helper still refuses a container that is not exactly that
+    /// identity's or is of a newer generation. Nothing changes on a refusal or
+    /// a missing answer, and the next cycle asks again. A stop that landed but
+    /// was not retired is healed next cycle: the process is gone, so the
+    /// ordinary retirement applies.
+    pub(super) async fn stop_unowned_container(&self, run_id: &str) -> bool
+    where
+        R: ProcessRunner,
+    {
+        let request_root = self.runtime_root.join("runtime-requests");
+        let boundary = HostRuntimeBoundary {
+            client: self.client,
+            request_root: &request_root,
+            helper_socket: self.helper_socket,
+        };
+        let pending = |kind: &str, detail: &str| {
+            if first_report_of_run(&format!("{run_id}/orphan-stop/{kind}")) {
+                eprintln!(
+                    "vonk-agent: running container of unowned recipe run {run_id} is not stopped yet ({detail}); retried next cycle; logged once per kind of cause"
+                );
+            }
+            false
+        };
+        let report = match boundary
+            .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()], false, None)
+            .await
+        {
+            Ok(report) => report,
+            Err(inspection) => {
+                return pending(&inspection.preflight_code(), &inspection.cause());
+            }
+        };
+        if !report.running {
+            return pending("not-running", "its process ended before the stop");
+        }
+        let Some(labels) = report.container_labels else {
+            return pending("no-labels", "the container carries no readable identity");
+        };
+        match boundary.stop_orphan(orphan_stop_plan(&labels)).await {
+            Ok(outcome) if !outcome.stop_uncertain => {}
+            Ok(_) => return pending("stop-uncertain", "the stop is unconfirmed"),
+            Err(refusal) => return pending(&refusal.preflight_code(), &refusal.cause()),
+        }
+        self.retire_claim(run_id, "process stopped")
     }
 }
 
@@ -159,13 +217,13 @@ impl<R> RecipeExecutor<'_, R> {
         match self.runtime.complete_stop(run_id) {
             Ok(()) => {
                 eprintln!(
-                    "vonk-agent: retired exact recipe run {run_id}: {reason} and unknown to the Controller"
+                    "vonk-agent: retired exact recipe run {run_id}: {reason} and not owned by the Controller"
                 );
                 true
             }
             Err(retire) => {
                 eprintln!(
-                    "vonk-agent: exact recipe run {run_id} is unknown to the Controller; retirement failed ({})",
+                    "vonk-agent: exact recipe run {run_id} is not owned by the Controller; retirement failed ({})",
                     retire.safe_category()
                 );
                 false
@@ -223,7 +281,14 @@ impl<R> RecipeExecutor<'_, R> {
                     .await
                 {
                     Ok(report) if !report.running => {}
-                    Ok(_) => return Err(skip("the container is running")),
+                    // Nothing owns it: stop it by its own labels, then retire.
+                    Ok(_) => {
+                        return if self.stop_unowned_container(run_id).await {
+                            Err(RecipeObservationError::UnownedRun)
+                        } else {
+                            Err(skip("the container is running; its stop is pending"))
+                        };
+                    }
                     Err(inspection) => {
                         return Err(skip_because(
                             &inspection.preflight_code(),
@@ -266,7 +331,7 @@ impl<R> RecipeExecutor<'_, R> {
                         endpoint_ready: Some(false),
                         failure_diagnostics: None,
                     }),
-                    Ok(true) => Err(skip("the container is running")),
+                    Ok(true) => Err(skip("the Controller wants the container running")),
                     Err(inspection) => Err(skip_because(
                         &inspection.preflight_code(),
                         &format!(
@@ -369,13 +434,13 @@ impl<R> RecipeExecutor<'_, R> {
                 let failure_diagnostics = inspection.log_error.as_deref()
                     .filter(|_| !process_running)
                     .and_then(crate::failure_evidence::host_memory_receipt);
-                // A stopped process of a run this Controller never owned (for
-                // example after its database was rebuilt) is retired locally
-                // instead of being reported forever.
-                if !process_running
-                    && self
-                        .retire_unowned_run(&plan.run_id.to_string(), "not running")
-                        .await
+                // A run this Controller does not want here (for example after its
+                // database was rebuilt) is settled locally instead of being
+                // reported forever: a gone process is retired, a running one
+                // is stopped under the Controller's grant, then retired.
+                if self
+                    .settle_unowned_run(&plan.run_id.to_string(), process_running)
+                    .await
                 {
                     return Err(RecipeObservationError::UnownedRun);
                 }

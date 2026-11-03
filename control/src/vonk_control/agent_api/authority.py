@@ -52,6 +52,7 @@ from ..host_helper_authority import (
     HostRuntimeAuthorityService,
     HostRuntimeEvidenceUnavailable,
     HostRuntimeGrantUnsatisfiable,
+    OrphanStopRunOwned,
 )
 from ..http_errors import SecurityHTTPError
 from ..logging import redact_text
@@ -60,6 +61,7 @@ from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..strict_json import ControllerAPIRoute
 from .common import (
+    _CANONICAL_UUID,
     AgentApiServices,
     AgentUpgradeGrantRequest,
     EnrollmentRateLimiter,
@@ -286,6 +288,65 @@ def install_authority_routes(
             evidence_available=lambda: attempt_evidence(body.fence),
             node_id=identity.node_id,
             subject=host_grant_subject(body.action),
+        )
+        return _json_response(_host_grant_response(grant))
+
+    @agent.post(
+        "/recipe-runs/{run_id}/orphan-stop-grant",
+        response_model=HostHelperGrantResponse,
+        responses={
+            409: {"description": "The run is owned: wanted here or in a live operation"}
+        },
+    )
+    # A stateless capability: it reads no accepted attempt and stores nothing,
+    # so there is no owner row for a receipt to name.
+    @operator_acceptance(ReceiptPolicy.OBSERVATION)
+    def orphan_stop_grant(
+        run_id: str, body: HostRuntimeGrantRequest, request: Request
+    ) -> Response:
+        """Grant the stop of a running container this Controller has no claim on.
+
+        The Spark names the container by its managed labels. The grant is
+        refused (409) while the run is wanted on this Spark or a live operation
+        owns it; the agent asks again on a later cycle.
+        """
+
+        identity = helper_identity(request)
+        required = host_runtime_service()
+        if (
+            _CANONICAL_UUID.fullmatch(run_id) is None
+            or body.action != ContainerRuntimeAction.STOP
+            or body.runtime_run_id != run_id
+            or body.stop_plan_sha256 is None
+            or body.run_generation is None
+            or body.runtime_target_id is None
+            or body.runtime_installation_id is None
+        ):
+            raise HTTPException(status_code=422, detail="orphan stop binding invalid")
+
+        def issue() -> SignedHostHelperGrant:
+            try:
+                return required.issue_orphan_stop_grant(
+                    node_id=identity.node_id,
+                    certificate_serial=identity.certificate_serial,
+                    run_id=run_id,
+                    fence=body.fence,
+                    request_sha256=body.request_sha256,
+                    stop_plan_sha256=body.stop_plan_sha256,
+                    run_generation=body.run_generation,
+                    runtime_target_id=body.runtime_target_id,
+                    runtime_installation_id=body.runtime_installation_id,
+                    expires_in_seconds=body.expires_in_seconds,
+                )
+            except OrphanStopRunOwned:
+                raise HTTPException(
+                    status_code=409, detail="recipe run is owned"
+                ) from None
+
+        grant = observe_grant(
+            issue,
+            node_id=identity.node_id,
+            subject=host_grant_subject(ContainerRuntimeAction.STOP),
         )
         return _json_response(_host_grant_response(grant))
 

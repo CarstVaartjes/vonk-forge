@@ -126,6 +126,8 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 error_code: None,
                 diagnostic: None,
                 process_logs: None,
+
+                container_labels: None,
             };
             let event = match last {
                 Answer::Running => "running",
