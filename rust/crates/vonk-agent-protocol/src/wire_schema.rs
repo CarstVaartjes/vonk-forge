@@ -60,7 +60,15 @@ pub(crate) fn deserialize_integer_number<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<serde_json::Number, D::Error> {
     match deserialize_original_value(deserializer)?.0 {
-        Value::Number(number) if !number.to_string().contains(['.', 'e', 'E']) => Ok(number),
+        Value::Number(number) if !number.to_string().contains(['.', 'e', 'E']) => {
+            // serde_json (1.0.154) keeps the sign of a "-0" lexeme; the
+            // canonical integer zero has no sign.
+            Ok(if number.to_string() == "-0" {
+                0_u64.into()
+            } else {
+                number
+            })
+        }
         _ => Err(D::Error::custom("expected an integer token")),
     }
 }
