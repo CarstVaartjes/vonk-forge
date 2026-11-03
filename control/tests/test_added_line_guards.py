@@ -2673,13 +2673,45 @@ def test_a_select_inside_a_keyed_outer_query_is_judged_with_the_outer_query():
     assert not check_source(
         PATH, _KEYED_SEMI_JOIN, inner, modes=("collection-readers",)
     )
-    bare = "def rows(s):\n    return s.scalars(\n        select(A.x).where(A.y.in_(select(Job.id)))\n    )\n"
-    # The outer where narrows the statement; a bare subquery with no outer one does not.
-    assert not check_source(PATH, bare, {3}, modes=("collection-readers",))
+    # A where whose only condition is the subquery is a semi-join with the whole
+    # table: the subquery fires (line 3); the keyed outer query is not its scope.
+    bare = (
+        "def rows(s):\n"
+        "    return s.scalars(\n"
+        "        select(ModelCacheSet).where(ModelCacheSet.digest.in_(select(Job.digest)))\n"
+        "    )\n"
+    )
+    assert check_source(PATH, bare, {3}, modes=("collection-readers",))
+    anded = (
+        "def rows(s, d):\n"
+        "    return s.scalars(\n"
+        "        select(A.x).where(and_(A.k == d, A.y.in_(select(Job.id))))\n"
+        "    )\n"
+    )
+    assert not check_source(PATH, anded, {3}, modes=("collection-readers",))
     unnarrowed = (
         "def rows(s):\n    return s.scalars(select(A.x).join(select(Job.id)))\n"
     )
     assert check_source(PATH, unnarrowed, {2}, modes=("collection-readers",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A narrowed select elsewhere in the same call is not this select's scope.
+        "def f(s, x):\n    return merge(s.scalars(select(Job)).all(), s.scalars(select(RecipeRun).where(RecipeRun.id == x)).all())\n",
+        "def f(s, x):\n    return s.execute(select(Job.id).union(select(RecipeRun.id).where(RecipeRun.id == x)))\n",
+    ],
+)
+@pytest.mark.parametrize(
+    "mode,path",
+    [
+        ("collection-readers", MODEL_CACHE_PATH),
+        ("request-scans", "control/src/vonk_control/api/example.py"),
+    ],
+)
+def test_a_narrowed_neighbour_does_not_scope_an_unnarrowed_select(source, mode, path):
+    assert check_source(path, source, {2}, modes=(mode,))
 
 
 @pytest.mark.parametrize("mode", ["collection-readers", "request-scans"])

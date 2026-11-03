@@ -67,20 +67,63 @@ def is_limit(node: ast.AST) -> bool:
     )
 
 
+# Methods whose arguments are conditions of the statement they extend.
+_CONDITION_METHODS = frozenset({"where", "filter", "filter_by", "having"})
+_COMBINATORS = frozenset({"and_", "or_"})
+
+
 def statement_nodes(
     call: ast.Call, parents: dict[ast.AST, ast.AST], scope: ast.AST
 ) -> list[ast.AST]:
-    """The outermost statement holding ``call`` and later uses of its variable.
+    """What scopes the select ``call``: its own statement, nothing beside it.
 
-    A select inside an IN-subquery is judged with the query around it.
+    Counted: a ``where``/``filter``/``limit`` chained on the select or on a
+    chain that holds it, the other conditions next to a subquery inside a
+    ``where``/``and_``/``or_``, and later uses of the variable it is assigned
+    to. Not counted: sibling arguments of an unrelated call (``merge(a, b)``),
+    a set operation's other operand, or a ``where`` whose only condition is the
+    subquery itself (a semi-join with the whole table is not target-keyed).
     """
-    query: ast.AST = call
-    while query in parents and isinstance(parents[query], ast.Call | ast.Attribute):
-        query = parents[query]
-    nodes = [query]
-    assignment = parents.get(query)
-    if isinstance(assignment, ast.Assign):
-        names = {_tail(target) for target in assignment.targets}
+    nodes: list[ast.AST] = []
+    # A condition beside the subquery inside the same ``and_``/``&``.
+    beside = False
+    current: ast.AST = call
+    parent = parents.get(current)
+    while parent is not None and not isinstance(parent, ast.stmt):
+        if isinstance(parent, ast.Attribute) and parent.value is current:
+            grand = parents.get(parent)
+            if isinstance(grand, ast.Call) and grand.func is parent:
+                if parent.attr in _CONDITION_METHODS or is_limit(grand):
+                    nodes.append(grand)
+                current = grand
+            else:
+                current = parent
+        elif isinstance(parent, ast.Call) and current is not parent.func:
+            siblings = [
+                item
+                for item in (*parent.args, *(word.value for word in parent.keywords))
+                if item is not current and item is not _child_value(current)
+            ]
+            method = _tail(parent.func)
+            if (siblings or beside) and method in _CONDITION_METHODS | _COMBINATORS:
+                nodes.append(ast.Call(func=parent.func, args=siblings, keywords=[]))
+            beside = beside or bool(siblings and method in _COMBINATORS)
+            current = parent
+        elif isinstance(parent, ast.BoolOp | ast.BinOp):
+            operands = (
+                parent.values
+                if isinstance(parent, ast.BoolOp)
+                else [parent.left, parent.right]
+            )
+            others = [item for item in operands if item is not current]
+            nodes.extend(others)
+            beside = beside or bool(others)
+            current = parent
+        else:
+            current = parent
+        parent = parents.get(current)
+    if isinstance(parent, ast.Assign):
+        names = {_tail(target) for target in parent.targets}
         nodes.extend(
             part
             for part in ast.walk(scope)
@@ -89,6 +132,10 @@ def statement_nodes(
             and _tail(part.func.value) in names
         )
     return nodes
+
+
+def _child_value(node: ast.AST) -> ast.AST | None:
+    return node.value if isinstance(node, ast.keyword) else None
 
 
 def _key(node: ast.AST) -> bool:
