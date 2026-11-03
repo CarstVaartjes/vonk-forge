@@ -319,7 +319,7 @@ impl<R> RecipeExecutor<'_, R> {
                 Ok(()) => {}
                 // The Controller refused these exact bytes for good: a newer
                 // observation supersedes them, so they must not block it.
-                Err(ClientError::Controller(error)) if error.refuses_for_good() => {
+                Err(ClientError::Controller(error)) if error.request_invalid() => {
                     let digest = canonical_generated_json(&report)
                         .map(|body| hex_sha256(&body))
                         .unwrap_or_default();
@@ -331,7 +331,7 @@ impl<R> RecipeExecutor<'_, R> {
                 }
                 Err(error) => return Err(error.into()),
             }
-            outbox.acknowledge_recipe_observation(&report)?;
+            outbox.release_pending_recipe_observation()?;
         }
         let mut page = self.runtime.recipe_run_inspection_page(checkpoint)?;
         let prepared: Vec<_> = page

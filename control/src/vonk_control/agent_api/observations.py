@@ -26,12 +26,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
 from ..agent_jobs import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
+from ..http_errors import temporary_http_answer
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -54,6 +56,7 @@ from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
+from ..recipe_operations.observation_helpers import RunNotAssigned
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository
@@ -278,10 +281,9 @@ def install_observations_routes(
         # Per-rank generation and observed_at comparisons below fence it from
         # newer intent/evidence. Its original time must never be refreshed.
         if observed_at > now + timedelta(seconds=30):
-            raise HTTPException(
-                status_code=422,
-                detail="recipe run observation time is in the future",
-            )
+            # Clock skew heals itself: the same bytes are accepted once the
+            # Controller's clock catches up, so this is a wait, not a verdict.
+            temporary_http_answer(TransientReason.ADMISSION_BUSY)
         # One stale or no-longer-assigned run must not discard the evidence
         # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
@@ -512,6 +514,9 @@ def install_observations_routes(
             # A durable replay must not become a permanent rejection after
             # newer authorized intent supersedes it; the next page replans.
 
+        except RunNotAssigned:
+            # A stop crossed this report between the two reads: re-observe.
+            temporary_http_answer(TransientReason.ADMISSION_BUSY)
         except ValueError as error:
             raise HTTPException(status_code=422, detail=str(error)) from None
         request.state.observation_acceptance = ObservationAcceptance(

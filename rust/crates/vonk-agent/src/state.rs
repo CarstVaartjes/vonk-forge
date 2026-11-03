@@ -322,6 +322,17 @@ impl StateStore {
         Ok(())
     }
 
+    /// Settle the page just read from custody, by its key: delivered or
+    /// refused for good. Matching re-serialized content could miss a row an
+    /// older agent stored in another (still parseable) shape.
+    pub fn release_pending_recipe_observation(&mut self) -> Result<(), StateError> {
+        self.connection.execute(
+            "DELETE FROM metadata WHERE key='pending_recipe_observation'",
+            [],
+        )?;
+        Ok(())
+    }
+
     pub fn acknowledge_recipe_observation(
         &mut self,
         report: &vonk_agent_protocol::RecipeRunObservationsWire,

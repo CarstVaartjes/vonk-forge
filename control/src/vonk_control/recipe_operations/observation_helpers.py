@@ -68,6 +68,13 @@ from .errors import RecipeRetryLater
 from .results import _RANK_FAILED
 
 
+class RunNotAssigned(InvalidValue):
+    """A run left the stoppable states between the unlocked and locked reads.
+
+    A fact about a moment, not about the report's bytes: answered as a wait.
+    """
+
+
 def wait_for_installation_upkeep(session: Session, installation_id: str) -> None:
     """Wait while the installation's own reconcile or uninstall has not ended.
 
@@ -295,7 +302,7 @@ def prepare_exact_recipe_run_observation_nodes(
         )
     )
     if included_run_ids - {node.run_id for node, _ in assigned}:
-        raise InvalidValue("recipe run observation is not assigned")
+        raise RunNotAssigned("recipe run observation is not assigned")
     if not included_run_ids:
         for node, run in assigned:
             if _aware(node.updated_at) >= observed_at:

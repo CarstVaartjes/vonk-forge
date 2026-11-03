@@ -67,12 +67,22 @@ def _ended_run(services, clock, *, state: str, node_id: str = NODE_A) -> str:
     return run_id
 
 
-def _report(client, clock, run_id: str, *, running: object, generation: object = 3):
+def _report(
+    client,
+    clock,
+    run_id: str,
+    *,
+    running: object,
+    generation: object = 3,
+    observed_ahead: object = 0,
+):
     return client.post(
         "/agent/recipe-runs/observations",
         headers=agent_headers(NODE_A, "serial-a"),
         json={
-            "observed_at": clock.now.isoformat(),
+            "observed_at": (
+                clock.now + timedelta(seconds=float(observed_ahead))  # type: ignore[arg-type]
+            ).isoformat(),
             "runs": [
                 {
                     "run_id": run_id,
@@ -160,3 +170,39 @@ def test_ended_run_without_an_exact_stop_is_not_reopened(
     before = _state(services, run_id)
     assert _report(client, clock, run_id, running=True).status_code == 204
     assert _state(services, run_id) == before
+
+
+def test_clock_skew_is_a_wait_not_a_verdict_on_the_report(
+    agent_system,  # noqa: F811
+) -> None:
+    client, services, _, clock = agent_system
+    run_id = _ended_run(services, clock, state="failed")
+
+    response = _report(client, clock, run_id, running=True, observed_ahead=60)
+
+    # The Spark's clock is ahead of the Controller's: the same bytes are
+    # accepted once the skew clears, so the agent must keep the page.
+    assert response.status_code == 503
+    assert "retry-after" in response.headers
+
+
+def test_run_leaving_the_stoppable_states_mid_report_is_a_wait(
+    agent_system,  # noqa: F811
+    monkeypatch,
+) -> None:
+    from vonk_control.agent_api import observations
+    from vonk_control.recipe_operations.observation_helpers import RunNotAssigned
+
+    client, services, _, clock = agent_system
+    run_id = _ended_run(services, clock, state="lost")
+
+    def raced(*_args, **_kwargs):
+        raise RunNotAssigned("recipe run observation is not assigned")
+
+    monkeypatch.setattr(
+        observations, "prepare_exact_recipe_run_observation_nodes", raced
+    )
+
+    # Wrong implementation: 422 tells the Spark these bytes can never be
+    # accepted, though a stop merely crossed the report.
+    assert _report(client, clock, run_id, running=False).status_code == 503

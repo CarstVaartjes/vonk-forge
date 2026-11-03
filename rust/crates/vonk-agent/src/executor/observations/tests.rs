@@ -1076,3 +1076,47 @@ async fn unreadable_pending_observation_is_discarded_and_the_cycle_proceeds() {
     let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
     assert!(state.pending_recipe_observation().unwrap().is_none());
 }
+
+#[tokio::test]
+async fn unjudged_refusals_keep_the_pending_observation() {
+    // Wrong implementation: dropping the page on any 4xx loses evidence when
+    // an edge (404/421) or an owner still settling (409) answers, not a verdict
+    // on the bytes.
+    for status in [404, 409, 421] {
+        let root = tempdir().unwrap();
+        retain_pending(root.path(), Uuid::new_v4());
+        let server = ObservationServer::scripted(&[status]);
+        assert!(pending_cycle(&server, root.path()).await.is_err());
+        let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        assert!(
+            state.pending_recipe_observation().unwrap().is_some(),
+            "HTTP {status} must keep the page"
+        );
+        server.finish();
+    }
+}
+
+#[tokio::test]
+async fn pending_row_stored_in_another_shape_is_settled_by_key() {
+    // Wrong implementation: settling by re-serialized content misses a row an
+    // older agent stored in a different (still parseable) byte shape, and the
+    // resulting error blocks every cycle again.
+    for statuses in [[422_u16, 204], [204, 204]] {
+        let root = tempdir().unwrap();
+        let pending = retain_pending(root.path(), Uuid::new_v4());
+        let database = root.path().join("state.sqlite");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "UPDATE metadata SET value=?1 WHERE key='pending_recipe_observation'",
+                [serde_json::to_string_pretty(&pending).unwrap()],
+            )
+            .unwrap();
+        drop(connection);
+        let server = ObservationServer::scripted(&statuses);
+        pending_cycle(&server, root.path()).await.unwrap();
+        assert_eq!(server.finish().len(), 2);
+        let state = StateStore::open(&database, NODE_ID).unwrap();
+        assert!(state.pending_recipe_observation().unwrap().is_none());
+    }
+}
