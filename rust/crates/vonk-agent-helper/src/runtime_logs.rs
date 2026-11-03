@@ -588,6 +588,26 @@ pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
     }
 }
 
+/// The whole captured output of one failed container (`CAPTURE_LINES` per
+/// stream), for classification only.  Retention bounds what crosses the
+/// protocol; the cause is read from everything that was captured, because a
+/// window can drop the line that names it: a two-Spark vLLM start prints the
+/// worker's `no kernel image is available` above kilobytes of C++ frames, and
+/// a window of those frames alone reads as unclassified.
+pub fn captured_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
+    let whole = |stream: &[u8]| FailureLogTail {
+        text: String::from_utf8_lossy(stream).into_owned(),
+        truncated: false,
+        dropped_bytes: Some(0),
+        dropped_lines: Some(0),
+    };
+    HostHelperProcessLogs {
+        exit_code: None,
+        stdout: whole(stdout),
+        stderr: whole(stderr),
+    }
+}
+
 /// How the container runtime says the container ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContainerExit {
@@ -700,7 +720,8 @@ fn has(text: &str, needles: &[&str]) -> bool {
 }
 
 /// Classify from the exit state first (it is authoritative), then from the
-/// container's own words.  Only the retained tails are read.
+/// container's own words: the whole capture (`captured_container`) when a
+/// process exited, so a cause the retained window dropped still names it.
 pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLogs>) -> ExitCause {
     if exit.is_some_and(|exit| exit.host_memory.is_some()) {
         return ExitCause::HostMemoryExhausted;

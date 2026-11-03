@@ -17,6 +17,15 @@ pub(crate) fn process_exited(
     logs: Result<CommandOutput, String>,
     exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
 ) -> OperationError {
+    // The retained windows cross the protocol; the cause is read from the
+    // whole capture, which may hold a line the windows dropped.
+    let captured = match &logs {
+        Ok(logs) if logs.success => Some(crate::runtime_logs::captured_container(
+            &logs.stdout,
+            &logs.stderr,
+        )),
+        _ => None,
+    };
     let (logs, capture_error) = match logs {
         // An unread log is reported as unread; it never becomes an empty tail
         // that reads like a container with nothing to say.
@@ -32,7 +41,7 @@ pub(crate) fn process_exited(
     };
     let exit_summary = crate::runtime_logs::exit_summary(
         exit.as_ref().map_err(|e| *e),
-        logs.as_deref(),
+        captured.as_ref(),
         capture_error,
     );
     OperationError::RuntimeProcessExited {

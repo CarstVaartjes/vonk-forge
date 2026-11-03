@@ -48,6 +48,60 @@ fn a_process_exit_always_carries_logs_or_a_typed_reason_none_were_read() {
 }
 
 #[test]
+fn a_cause_the_retained_window_dropped_still_classifies_the_exit() {
+    // Shape of a two-Spark vLLM start on GB10 (qwen3-8-flash-next tonyd2wild
+    // dual, 11-02): the worker names the cause once, then prints its C++
+    // frames, and the engine core repeats them; the window keeps only frames.
+    let frame = "(Worker_TP0 pid=250) ERROR 11-02 23:40:35 [multiproc_executor.py:1055] \
+frame #12: <unknown function> + 0x1357680 (0xf07b08327680 in \
+/usr/local/lib/python3.12/dist-packages/torch/lib/libtorch_cpu.so)\n";
+    let mut stdout = String::from(
+        "(Worker_TP0 pid=250) ERROR 11-02 23:40:35 [multiproc_executor.py:1055] \
+torch.AcceleratorError: CUDA error: no kernel image is available for execution on the device\n",
+    );
+    stdout.push_str(&frame.repeat(150));
+    stdout.push_str(
+        "(EngineCore pid=176) ERROR 11-02 23:40:35 [core.py:1385] EngineCore failed to start.\n",
+    );
+    stdout.push_str(
+        &"(EngineCore pid=176) ERROR 11-02 23:40:35 [core.py:1385] frame #58: PyObject_Call + 0x118 (0x4c5108 in VLLM::Worker_TP0)\n"
+            .repeat(150),
+    );
+    stdout.push_str(
+        "(EngineCore pid=176) ERROR 11-02 23:40:35 [core.py:1385] ', please check the stack trace above for the root cause\n\
+NCCL version 2.30.7+cuda12.9\n\
+(EngineCore pid=176) ERROR 11-02 23:40:39 [multiproc_executor.py:314] Worker proc VllmWorker-0 died unexpectedly (exit code: None), shutting down executor.\n",
+    );
+    let exit = crate::runtime_logs::ContainerExit {
+        exit_code: Some(1),
+        oom_killed: Some(false),
+        error: String::new(),
+        host_memory: None,
+    };
+    let log = Ok(CommandOutput {
+        success: true,
+        stdout: stdout.into_bytes(),
+        stderr: Vec::new(),
+        exit_code: None,
+    });
+    let OperationError::RuntimeProcessExited {
+        logs, exit_summary, ..
+    } = super::process_exited(log, Ok(exit))
+    else {
+        panic!("a process exit must stay a process exit");
+    };
+    let retained = logs.expect("captured logs are carried");
+    assert!(
+        !retained.stdout.text.contains("no kernel image"),
+        "precondition: the window drops the cause line"
+    );
+    assert!(
+        exit_summary.contains("exit_cause=unsupported_gpu_arch"),
+        "{exit_summary}"
+    );
+}
+
+#[test]
 fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
     let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
     let id = "a".repeat(64);
