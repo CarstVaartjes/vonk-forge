@@ -52,6 +52,7 @@ def _run(
     state: str | None,
     on: tuple[str, ...] = (NODE_A,),
     live_operation: bool = False,
+    remapped: bool = False,
 ) -> str:
     """One run row (none when ``state`` is None) assigned to the nodes ``on``."""
 
@@ -89,6 +90,28 @@ def _run(
                         updated_at=clock.now,
                     )
                 )
+    if remapped and state is not None:
+        # The installation moved on: a newer run now holds it on node A.
+        with services.sessions.begin() as session:
+            first = session.get(RecipeRun, run_id)
+            assert first is not None
+            session.add(
+                RecipeRun(
+                    id=str(uuid.uuid4()),
+                    installation_id=first.installation_id,
+                    mapping_id=str(uuid.uuid4()),
+                    mapping_generation=2,
+                    run_generation=GENERATION + 1,
+                    alias="orphan",
+                    plan_digest="1" * 64,
+                    plan={"schema_version": 1},
+                    state="running",
+                    route_state="withdrawn",
+                    actor="admin",
+                    created_at=clock.now,
+                    updated_at=clock.now,
+                )
+            )
     if live_operation:
         with services.sessions.begin() as session:
             session.add(
@@ -140,18 +163,20 @@ def _unowned(client, run_id: str, node: str) -> bool:
 
 
 @pytest.mark.parametrize(
-    "state, on",
+    "state, on, remapped",
     [
-        pytest.param(None, (NODE_A,), id="run-row-deleted"),
-        pytest.param("failed", (NODE_A,), id="failed-installation-moved-on"),
-        pytest.param("stopped", (NODE_A,), id="stopped"),
-        pytest.param("failed", (NODE_B,), id="failed-rank-removed"),
-        pytest.param("running", (NODE_B,), id="running-elsewhere-only"),
+        pytest.param(None, (NODE_A,), False, id="run-row-deleted"),
+        pytest.param("failed", (NODE_A,), True, id="failed-installation-moved-on"),
+        pytest.param("stopped", (NODE_A,), False, id="stopped"),
+        pytest.param("failed", (NODE_B,), False, id="failed-rank-removed"),
+        pytest.param("running", (NODE_B,), False, id="running-elsewhere-only"),
     ],
 )
-def test_grant_is_issued_for_a_container_no_claim_owns(world, state, on) -> None:
+def test_grant_is_issued_for_a_container_no_claim_owns(
+    world, state, on, remapped
+) -> None:
     client, services, clock, signer = world
-    run_id = _run(services, clock, state=state, on=on)
+    run_id = _run(services, clock, state=state, on=on, remapped=remapped)
     fence = str(uuid.uuid4())
 
     response = _grant(client, run_id, fence=fence)
@@ -234,6 +259,8 @@ def test_grant_binding_must_name_this_run_and_a_stop(world) -> None:
 
     other = str(uuid.uuid4())
     assert _grant(client, run_id, runtime_run_id=other).status_code == 422
+    # A job container carries the run's label but is named by its job id.
+    assert _grant(client, run_id, runtime_target_id=other).status_code == 422
     assert _grant(client, run_id, action="start").status_code == 422
     assert _grant(client, "not-a-run").status_code == 422
 

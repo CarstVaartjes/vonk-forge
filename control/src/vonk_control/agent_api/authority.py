@@ -317,6 +317,9 @@ def install_authority_routes(
             _CANONICAL_UUID.fullmatch(run_id) is None
             or body.action != ContainerRuntimeAction.STOP
             or body.runtime_run_id != run_id
+            # The serving container only: a job container (vonk-<job_id>) that
+            # carries this run's label is not covered.
+            or body.runtime_target_id != run_id
             or body.stop_plan_sha256 is None
             or body.run_generation is None
             or body.runtime_target_id is None
