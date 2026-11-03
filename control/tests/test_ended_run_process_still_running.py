@@ -249,12 +249,13 @@ def test_run_leaving_the_stoppable_states_between_the_reads_is_a_wait(
     raced = {"once": True}
 
     def stop_first(session, *args, **kwargs):
-        # A stop commits between the unlocked read and the locked read.
+        # A stop commits, in its own transaction, between the unlocked read
+        # and the locked read (the retry-later answer rolls this one back).
         if raced.pop("once", False):
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            run.state = "stopped"
-            session.flush()
+            with services.sessions.begin() as stopping:
+                run = stopping.get(RecipeRun, run_id)
+                assert run is not None
+                run.state = "stopped"
         return real(session, *args, **kwargs)
 
     monkeypatch.setattr(
@@ -267,5 +268,7 @@ def test_run_leaving_the_stoppable_states_between_the_reads_is_a_wait(
     waiting = _post(client, "/agent/recipe-runs/observations", body)
     assert waiting.status_code == 503
     assert waiting.headers["x-vonk-error-code"]
-    # The same bytes now find the run ended and are consumed.
+    # The same bytes now meet the committed stop: the run is no longer
+    # current, so its evidence is consumed as crossed (the production path).
     assert _post(client, "/agent/recipe-runs/observations", body).status_code == 204
+    assert _state(services, run_id)[0] == "stopped"

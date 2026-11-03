@@ -96,7 +96,7 @@ def _wait_out_clock_skew(observed_at: datetime, now: datetime) -> None:
     if excess > timedelta(0):
         temporary_http_answer(
             TransientReason.CLOCK_SKEW,
-            retry_after=min(max(1, math.ceil(excess.total_seconds())), 300),
+            retry_after=max(1, math.ceil(excess.total_seconds())),
         )
 
 
