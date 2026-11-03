@@ -257,12 +257,12 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
         "removal-review",
-        "the removal review is not yet target-bounded: statements, rows and plan parses grow with unrelated history (55 -> 325 statements, 7 -> 34 plan parses)",
+        "issue #2026: the removal review is not yet target-bounded (N+1 per active installation)",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
         "removal-review",
-        "the fleet removal review is not yet target-bounded: statements and plan parses grow with unrelated history (106 -> 376 statements, 16 -> 70 plan parses)",
+        "issue #2026: the fleet removal review is not yet target-bounded (overlaps audit A6)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.
@@ -363,7 +363,9 @@ def _entries() -> list[object]:
             marks=(
                 [
                     pytest.mark.xfail(
-                        strict=True, reason=f"{check.finding}: {check.reason}"
+                        strict=True,
+                        raises=CostGrew,
+                        reason=f"{check.finding}: {check.reason}",
                     )
                 ]
                 if check.finding
@@ -375,6 +377,10 @@ def _entries() -> list[object]:
     ]
 
 
+class CostGrew(AssertionError):
+    """The measured cost differs; the only failure a finding may expect."""
+
+
 # Slow by design: it seeds two databases once and runs each check four times.
 @pytest.mark.slow(30)
 @pytest.mark.parametrize("name", _entries())
@@ -384,9 +390,10 @@ def test_cost_of_a_target_does_not_grow_with_unrelated_history(
     check = TARGET_CHECKS[name]
     small = measure(worlds[SMALL], monkeypatch, check)
     large = measure(worlds[LARGE], monkeypatch, check)
-    assert large == small, (
-        f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
-    )
+    if large != small:
+        raise CostGrew(
+            f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
+        )
 
 
 @pytest.mark.parametrize("scale", [SMALL, LARGE])
