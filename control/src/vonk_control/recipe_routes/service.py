@@ -97,20 +97,8 @@ class RecipeRouteService:
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
         """Observe acquisition in fresh transactions, then reconcile the exact effect."""
-        last: Exception | None = None
-        for _attempt in bounded_attempts():
-            try:
-                publication = self._claim_run(run_id)
-                break
-            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
-                raise
-            except RecipeRouteNotReady as error:
-                last = error
-            except Exception as error:  # noqa: BLE001
-                last = error
-        else:
-            assert last is not None
-            raise last
+        # One claim, one publish: the worker records the durable per-run backoff.
+        publication = self._claim_run(run_id)
         return self._execute(publication)
 
     def _claim_run(self, run_id: str) -> _Publication:
@@ -685,19 +673,18 @@ class RecipeRouteService:
         )
 
     def maintain(self) -> bool:
-        for _attempt in bounded_attempts():
-            try:
-                return self._maintain_once()
-            except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
-                raise
-            except RecipeRouteNotReady:
-                continue
-            except Exception as error:  # noqa: BLE001 - local observation ends within this budget
-                _LOGGER.warning(
-                    "route reconciliation observation is unavailable: %s", error
-                )
-                continue
-        return False
+        # One pass: the durable owner backoff in _maintain_once is the retry.
+        try:
+            return self._maintain_once()
+        except (SecurityRefusalError, RecipeRouteOwnerBusy, _RecipeRunContended):
+            raise
+        except RecipeRouteNotReady:
+            return False
+        except Exception as error:  # noqa: BLE001 - local observation ends within this pass
+            _LOGGER.warning(
+                "route reconciliation observation is unavailable: %s", error
+            )
+            return False
 
     def _maintain_once(self) -> bool:
         now = _aware(self._clock())

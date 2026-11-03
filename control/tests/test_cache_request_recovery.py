@@ -120,7 +120,7 @@ def test_model_duplicate_insert_adopts_only_identical_issuer_intent(
     sessions = sessionmaker(postgres_engine)
     services = [
         ModelCacheService(
-            sessions, tmp_path / "models", reserve_bytes=0, fixture_sources=True
+            sessions, tmp_path / "models", free_fraction=0, fixture_sources=True
         )
         for _ in range(2)
     ]
@@ -202,7 +202,7 @@ def test_model_reference_contention_ends_bounded_and_fresh_request_admits(
     Base.metadata.create_all(postgres_engine)
     sessions = sessionmaker(postgres_engine)
     service = ModelCacheService(
-        sessions, tmp_path / "models", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "models", free_fraction=0, fixture_sources=True
     )
     artifact = _artifact(tmp_path, b"bounded contention", model_content_sha256="a" * 64)
     manifest = service.resolve_artifact_set(
@@ -461,7 +461,7 @@ def test_download_consent_digest_survives_observation_only_drift(tmp_path: Path)
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     service = ModelCacheService(
-        sessionmaker(engine), tmp_path / "models", reserve_bytes=0, fixture_sources=True
+        sessionmaker(engine), tmp_path / "models", free_fraction=0, fixture_sources=True
     )
     artifact = _artifact(tmp_path, b"same effects", model_content_sha256="a" * 64)
     manifest = service.resolve_artifact_set(

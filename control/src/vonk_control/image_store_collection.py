@@ -11,14 +11,18 @@ the receipts, an image's manifest or the database cannot be read, the pass
 deletes nothing, names the reason in the log and runs again next interval.
 Unreferenced blobs go once they are older than the grace period, and a later request that needs the image again stores or
 builds it again, as for any cache loss. A Spark build's uploaded archive that
-no build still waits on is removed the same way.
+no build still waits on is removed the same way, and so is a partial upload
+whose writer is gone (its lock is free) and that nobody wrote to for the grace
+period.
 """
 
 from __future__ import annotations
 
+import fcntl
 import logging
 import os
 import re
+import stat
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -56,6 +60,10 @@ from .runtime_image_preparation import (
 
 _LOGGER = logging.getLogger(__name__)
 _ADDRESS = re.compile(r"^[0-9a-f]{64}$")
+# A partial upload, written by ``agent_api.common._prepare_recipe_image_upload``
+# while it holds an exclusive ``flock`` on the file.
+# Its publisher lock (``_commit_recipe_image_upload``) is a zero-byte sibling.
+_PARTIAL_UPLOAD = re.compile(r"^\.[0-9a-f]{64}\.(upload|publish)$")
 _RECEIPT = re.compile(r"^([0-9a-f]{64})\.receipt\.json$")
 # Damaged receipted images evicted by one pass; the rest follow next interval.
 _MAX_REPAIRS = 64
@@ -232,19 +240,18 @@ class ImageStoreCollector:
         }
 
     def _collect_uploads(self) -> Collection:
-        """Remove uploaded archives no unconverted build waits on."""
+        """Remove uploaded archives no unconverted build waits on.
+
+        A succeeded build waits for its conversion only for the grace period,
+        like the blob reference check: an archive that still is not converted
+        after that is dropped and the build runs again on demand.
+        """
 
         if not self._image_cache.is_dir():
             return Collection(0, 0)
+        now = self._clock()
         with self._sessions() as session:
-            waiting = set(
-                session.scalars(
-                    select(RecipeBuild.oci_layout_sha256).where(
-                        builds_in_flight(self._clock())
-                        | (RecipeBuild.state == LifecycleState.SUCCEEDED)
-                    )
-                )
-            )
+            waiting = self._waiting_builds(session, now)
         cutoff = time.time() - GRACE.total_seconds()
         removed = reclaimed = 0
         try:
@@ -257,6 +264,14 @@ class ImageStoreCollector:
             )
             return Collection(0, 0)
         for upload in uploads:
+            if _PARTIAL_UPLOAD.fullmatch(upload.name) is not None:
+                size = _remove_abandoned_partial(
+                    upload, cutoff, lock_file=upload.name.endswith(".publish")
+                )
+                if size is not None:
+                    removed += 1
+                    reclaimed += size
+                continue
             if _ADDRESS.fullmatch(upload.name) is None or upload.name in waiting:
                 continue
             try:
@@ -269,6 +284,52 @@ class ImageStoreCollector:
             removed += 1
             reclaimed += status.st_size
         return Collection(removed, reclaimed)
+
+
+def _remove_abandoned_partial(
+    partial: Path, cutoff: float, *, lock_file: bool
+) -> int | None:
+    """Remove a partial upload nobody wrote to since ``cutoff``; return its size.
+
+    The writer holds an exclusive ``flock`` for as long as it works, and the
+    kernel drops it when the writer dies, so a lock that is busy means the
+    upload is live and it is left for the next pass; a lock that is free on an
+    old file means the writer is gone. The client's next upload starts a new
+    partial from offset 0.
+    """
+
+    try:
+        descriptor = os.open(partial, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        _log_deferred(
+            getattr(error, "code", type(error).__name__),
+            f"partial upload {partial.name} was not removed: {error}",
+        )
+        return None
+    try:
+        status = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(status.st_mode)
+            or status.st_mtime > cutoff
+            or (lock_file and status.st_size != 0)
+        ):
+            return None
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return None
+        partial.unlink(missing_ok=True)
+        return status.st_size
+    except OSError as error:
+        _log_deferred(
+            type(error).__name__,
+            f"partial upload {partial.name} was not removed: {error}",
+        )
+        return None
+    finally:
+        os.close(descriptor)
 
 
 def _log_deferred(code: str, detail: str) -> None:

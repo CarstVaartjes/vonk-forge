@@ -54,6 +54,7 @@ class BuildEvidenceMixin:
         require_available: bool = True,
         defer_source_build: bool = False,
         expected_image: RuntimeImageIdentity | None = None,
+        image_installed: bool = False,
     ) -> tuple[
         RunSwitchBuildEvidence,
         RuntimeImageStorageImpact,
@@ -200,7 +201,6 @@ class BuildEvidenceMixin:
         runtime_missing = 0
         runtime_missing_by_node: dict[str, int] = {}
         runtime_reclaimable = 0
-        runtime_reclaimable_digests: set[str] = set()
         runtime_raw_digest = (
             image_digest.removeprefix("sha256:")
             if isinstance(image_digest, str)
@@ -233,7 +233,6 @@ class BuildEvidenceMixin:
                     and artifact.ref_count == 0
                 ):
                     runtime_reclaimable += artifact.size_bytes
-                    runtime_reclaimable_digests.add(artifact.digest)
         runtime_coverage = (
             "complete"
             if image_bytes is not None and runtime_missing == 0
@@ -258,7 +257,10 @@ class BuildEvidenceMixin:
             ),
             reused_bytes=runtime_reused,
             copied_bytes=runtime_missing,
-            missing_nas_bytes=image_bytes if build is None else None,
+            # An installed image runs from the Sparks; the NAS copy is provenance.
+            missing_nas_bytes=image_bytes
+            if build is None and not image_installed
+            else None,
             missing_spark_bytes=(runtime_missing if image_bytes is not None else None),
             missing_image_distribution_bytes=(
                 runtime_missing if image_bytes is not None else None
@@ -268,20 +270,21 @@ class BuildEvidenceMixin:
             ),
             nas_coverage=(
                 "partial"
-                if build is None
+                if build is None and not image_installed
                 else "complete"
                 if image_bytes is not None and oci_layout is not None
                 else "unknown"
             ),
             spark_coverage=runtime_coverage,
             reclaimable_bytes=runtime_reclaimable,
-            reclaimable_digests=sorted(runtime_reclaimable_digests),
         )
         state = "missing" if candidate is None else str(candidate.state)
         detail: str | None = None
-        if build is not None:
+        if build is not None or image_installed:
             state = "available"
-            if not isinstance(oci_layout, str) or not _is_hex_digest(oci_layout):
+            if build is not None and (
+                not isinstance(oci_layout, str) or not _is_hex_digest(oci_layout)
+            ):
                 state = "incompatible"
                 detail = "The successful build has no verified OCI layout identity."
         elif candidate is not None:

@@ -1,0 +1,15 @@
+{
+  "_comment": "Every Rust ExitCause variant and its token, shared with the Python readers; vonk-agent-protocol tests prove it equals ExitCause::token().",
+  "tokens": {
+    "OomKilled": "oom_killed",
+    "HostMemoryExhausted": "host_memory_exhausted",
+    "BadArguments": "bad_arguments",
+    "MissingFile": "missing_file",
+    "UnsupportedGpuArch": "unsupported_gpu_arch",
+    "ImageArchMismatch": "image_arch_mismatch",
+    "StartRefused": "start_refused",
+    "CrashedBySignal": "crashed_by_signal",
+    "PythonException": "python_exception",
+    "Unclassified": "unclassified"
+  }
+}

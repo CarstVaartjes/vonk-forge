@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 import uuid
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response, status
@@ -26,12 +27,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import ClaimRequest
+from vonk_agent_protocol.http_failure import TransientReason
 from vonk_agent_protocol.telemetry import TelemetryRequest
 
 from ..agent_acceptance import InventoryAcceptance, ObservationAcceptance
 from ..agent_jobs import StaleAgentAttempt
 from ..auth import AgentIdentity
 from ..download_contract import download_responses
+from ..http_errors import temporary_http_answer
 from ..inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,
@@ -80,6 +83,21 @@ from .common import (
     _validated_authenticated_source,
 )
 from .ended_runs import reopen_ended_runs_still_running
+
+
+def _wait_out_clock_skew(observed_at: datetime, now: datetime) -> None:
+    """Answer a report stamped ahead of this clock as a wait, never a 422.
+
+    The bytes are fine: they are accepted once this clock catches up, so the
+    Spark keeps and replays them after the remaining skew.
+    """
+
+    excess = observed_at - (now + MAX_INVENTORY_FUTURE_SKEW)
+    if excess > timedelta(0):
+        temporary_http_answer(
+            TransientReason.CLOCK_SKEW,
+            retry_after=max(1, math.ceil(excess.total_seconds())),
+        )
 
 
 def install_observations_routes(
@@ -151,10 +169,8 @@ def install_observations_routes(
             )
         observed_at = body.observed_at.astimezone(UTC)
         now = _now(required.clock()).astimezone(UTC)
-        if (
-            observed_at > now + MAX_INVENTORY_FUTURE_SKEW
-            or now - observed_at > timedelta(hours=24)
-        ):
+        _wait_out_clock_skew(observed_at, now)
+        if now - observed_at > timedelta(hours=24):
             raise HTTPException(
                 status_code=422, detail="inventory time is outside the accepted window"
             )
@@ -277,11 +293,7 @@ def install_observations_routes(
         # Old content may be a durable replay after a lost acknowledgement.
         # Per-rank generation and observed_at comparisons below fence it from
         # newer intent/evidence. Its original time must never be refreshed.
-        if observed_at > now + timedelta(seconds=30):
-            raise HTTPException(
-                status_code=422,
-                detail="recipe run observation time is in the future",
-            )
+        _wait_out_clock_skew(observed_at, now)
         # One stale or no-longer-assigned run must not discard the evidence
         # for every other run in the report: each run is judged on its own.
         rejected: list[str] = []
@@ -446,11 +458,7 @@ def install_observations_routes(
                                 reason=(
                                     "workload.host_memory_exhausted: ran out of memory on hardware"
                                     if evidence.failure_diagnostics
-                                    and any(
-                                        item.name == "exit_cause"
-                                        and item.value == "host_memory_exhausted"
-                                        for item in evidence.failure_diagnostics.preflight
-                                    )
+                                    and evidence.failure_diagnostics.host_memory_exhausted
                                     else "workload process is not running"
                                 ),
                             )
@@ -461,18 +469,37 @@ def install_observations_routes(
                         and evidence.endpoint_ready is not True
                         else None
                     )
-                    node.observed_run_generation = run.run_generation
-                    node.observation_process_running = evidence.process_running
-                    node.observation_failure_diagnostics = (
+                    # The guard stops every managed container on a Spark: a rank
+                    # that was serving is a co-tenant of the run that exhausted
+                    # memory, and recovers as any lost rank. Only a rank never
+                    # seen running at this generation keeps the guard stop as
+                    # its failure (the recovery coordinator settles that run).
+                    served_before_guard_stop = (
+                        not evidence.process_running
+                        and evidence.failure_diagnostics is not None
+                        and evidence.failure_diagnostics.host_memory_exhausted
+                        and node.observed_run_generation == run.run_generation
+                        and (
+                            node.observation_process_running is True
+                            or (
+                                node.observation_process_running is False
+                                and node.observation_failure_diagnostics is None
+                            )
+                        )
+                    )
+                    exit_diagnostics = (
                         json.loads(canonical_message(evidence.failure_diagnostics))
                         if not evidence.process_running and evidence.failure_diagnostics
                         else None
                     )
-                    if node.observation_failure_diagnostics is not None:
+                    node.observed_run_generation = run.run_generation
+                    node.observation_process_running = evidence.process_running
+                    node.observation_failure_diagnostics = (
+                        None if served_before_guard_stop else exit_diagnostics
+                    )
+                    if exit_diagnostics is not None:
                         # Kept past the recovery that clears the observation.
-                        node.last_exit_diagnostics = (
-                            node.observation_failure_diagnostics
-                        )
+                        node.last_exit_diagnostics = exit_diagnostics
                     node.observation_observed_at = observed_at
                     node.observation_endpoint_ready = (
                         evidence.endpoint_ready if owner else None

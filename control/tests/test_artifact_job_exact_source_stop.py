@@ -288,6 +288,44 @@ def test_a_frozen_job_whose_order_vanished_never_holds_the_stop(tmp_path) -> Non
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
+def test_a_pending_stop_that_succeeds_carries_no_deferral_note(tmp_path) -> None:
+    """Catches an ended Stop still showing the wait note it carried while pending."""
+
+    sessions, operations, service, run_id, node_id, agent_jobs, _clock, stop = _service(
+        tmp_path
+    )
+    submitted_artifact_job(service, run_id, request_suffix=118)
+    job_claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert job_claim is not None
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop()
+    note = "waiting for the job's Spark to confirm its cancel"
+    with sessions.begin() as session:
+        pending = session.scalar(select(Job).where(Job.request_id == _STOP_REQUEST))
+        assert pending is not None
+        pending.status_reason = note
+    # No order of the job is left on any Spark, so the next Stop completes.
+    with sessions.begin() as session:
+        submitted_order = session.scalars(select(AgentOperation)).all()
+        for child in submitted_order:
+            for attempt in session.scalars(
+                select(AgentOperationAttempt).where(
+                    AgentOperationAttempt.operation_id == child.id
+                )
+            ):
+                session.delete(attempt)
+            session.flush()
+            session.delete(child)
+    with pytest.raises(StaleAgentFence):
+        agent_jobs.heartbeat(job_claim, OperationProgress(phase="running"), 30)
+    assert stop().state == "succeeded"
+    with sessions() as session:
+        ended = session.scalar(select(Job).where(Job.request_id == _STOP_REQUEST))
+        assert ended is not None and ended.state == "succeeded"
+        assert ended.status_reason is None
+    _activate_fresh_job_run(sessions, operations, run_id)
+
+
 def test_a_frozen_job_is_stopped_by_its_frozen_order(tmp_path) -> None:
     sessions, operations, service, run_id, node_id, agent_jobs, clock, stop = _service(
         tmp_path

@@ -30,22 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Executable Candidate recipe of NVIDIA's own DGX Spark playbook (trt-llm) for Llama 3.1 8B Instruct FP8: the NGC TensorRT-LLM release image 1.3.0rc13 (pinned by arm64 digest) serving the exact model revision through trtllm-serve with the playbook's LLM API options. Resource envelopes are estimates from the playbook's 0.8-0.9 KV memory fraction, not measurements; physical Spark acceptance is pending.",
-  "tags": [
-   "executable",
-   "candidate",
-   "nvidia",
-   "tensorrt-llm",
-   "openai",
-   "single",
-   "spark",
-   "llama",
-   "fp8"
-  ],
-  "title": "Llama 3.1 8B Instruct FP8 TensorRT-LLM single Spark (NVIDIA playbook)"
- },
  "models": [
   {
    "files": [
@@ -172,7 +156,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "756dd0f704b6ccb97d579238812d12eed04d796c77e116c7ce8b223f1bec2b77",
+    "content_sha256": "dace15bf9083735260ffeef9a56cb1ba5e224a47a16c7314fa6322c2f7bb6b0d",
     "kind": "model",
     "publisher": "nvidia",
     "slug": "llama-3-1-8b-instruct-fp8-42d9515e"
@@ -186,10 +170,10 @@
    "NVIDIA Corporation",
    "Meta Platforms"
   ],
-  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/b3bc0813e1864e54ce5ed9a0cc74e0b03745c027/nvidia/trt-llm/README.md"
+  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/98b3a473f30916ec05eef3e7a01b781aaf4daa8a/nvidia/trt-llm/README.md"
  },
  "release": {
-  "released_at": "2026-04-29",
+  "released_at": "2026-10-12",
   "version": "1.3.0rc13"
  },
  "runtime": {

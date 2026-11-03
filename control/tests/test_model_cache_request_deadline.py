@@ -89,7 +89,7 @@ def test_partial_content_survives_unknown_deadline_restart_and_fresh_request(
         restarted = ModelCacheService(
             sessions,
             service.root,
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
             http_client=client,
             clock=lambda: now[0],

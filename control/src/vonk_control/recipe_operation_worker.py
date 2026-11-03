@@ -24,7 +24,7 @@ from . import job_states
 from .categorized_errors import InvalidValue
 from .failure_classification import disposition, error_detail, wait_reason
 from .lifecycle.recipe_operation import RecipeOperationAdapter
-from .logging import log_event
+from .logging import log_event, redact_text
 from .models import Job, RecipeRun, RunNode
 from .optimistic import Stale, transition
 from .persisted_waits import schedule_wait
@@ -346,7 +346,7 @@ class RecipeOperationWorker:
                         and not job_states.means(job.state, *TERMINAL_LIFECYCLE_STATES)
                     ):
                         RecipeOperationAdapter().finish(
-                            job, now, failed=True, reason=str(error)
+                            job, now, failed=True, reason=redact_text(str(error))[:1024]
                         )
                         job.result = RecipeOperationResult(
                             successful_nodes=[],

@@ -156,8 +156,11 @@ class ArtifactStorageImpact(StrictModel):
     spark_coverage: RunSwitchCoverage
     retention: RunSwitchRetention
     running_coverage: RunSwitchCoverage = "unknown"
-    artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)
-    reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
+    # Kept for jobs stored before the plan became set + bytes; new plans leave it
+    # empty and nothing reads it (delete once in-flight work has turned over).
+    artifact_digests: list[Digest] = Field(default_factory=list)
+    # Stored before cleanup became bytes; new plans leave it empty, nothing reads it.
+    reclaimable_digests: list[Digest] = Field(default_factory=list)
 
 
 class BuildSourceEvidence(StrictModel):
@@ -200,7 +203,8 @@ class RuntimeImageStorageImpact(StrictModel):
     spark_coverage: RunSwitchCoverage
     running_coverage: RunSwitchCoverage = "unknown"
     reclaimable_bytes: int = Field(default=0, ge=0)
-    reclaimable_digests: list[Digest] = Field(default_factory=list, max_length=256)
+    # Stored before cleanup became bytes; new plans leave it empty, nothing reads it.
+    reclaimable_digests: list[Digest] = Field(default_factory=list)
 
 
 class RunSwitchBuildEvidence(StrictModel):

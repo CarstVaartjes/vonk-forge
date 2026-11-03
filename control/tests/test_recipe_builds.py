@@ -71,6 +71,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
 
+from .display_fixtures import create_draft, reword
 from .recipe_removal_review_support import remove_after_review
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -277,9 +278,9 @@ def setup(
         .read_text(encoding="utf-8")
     )
     if not existing_node:
-        model_draft = catalog.create_draft(model, actor="admin")
+        model_draft = create_draft(catalog, model, actor="admin")
         catalog.resolve(model_draft.id, actor="admin")
-    recipe_draft = catalog.create_draft(document, actor="admin")
+    recipe_draft = create_draft(catalog, document, actor="admin")
     with sessions.begin() as session:
         stored_revision = session.get(CatalogDocumentRevision, recipe_draft.id)
         assert stored_revision is not None
@@ -1066,7 +1067,7 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
         document = copy.deepcopy(current.document)
-        _json_object(document["metadata"])["title"] = "Editorially renamed recipe"
+        reword(document, "Editorially renamed recipe")
         read_recipe(document)
         content_digest = document_sha256(document)
         newer_revision = CatalogDocumentRevision(

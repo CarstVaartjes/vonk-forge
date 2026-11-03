@@ -1,6 +1,7 @@
 import json
+from dataclasses import replace
 
-from vonk_agent_protocol import ResourceBlockerCode
+from vonk_agent_protocol import ResourceBlockerCode, ResourcePlanningCode
 from vonk_control.owner_liveness import OwnerKind, OwnerRef
 from vonk_control.resource_planning import (
     PLATFORM_MEMORY_FLOOR_BYTES,
@@ -338,8 +339,23 @@ def _idle_capacity(total: int, free: int, *, claimed: int = 0):
     )
 
 
-def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
-    # Catches the idle-node exception that admitted an oversized declared peak.
+def _codes(plan) -> set[str]:
+    return {reason.code for reason in plan.reasons}
+
+
+def _tried(plan) -> list[str]:
+    """The details of the warnings that say an estimate is tried as the only claim."""
+    return [
+        reason.detail
+        for reason in plan.reasons
+        if reason.code == ResourcePlanningCode.ESTIMATE_UNCERTAIN
+        and "only claim" in reason.detail
+    ]
+
+
+def test_idle_spark_tries_a_peak_that_displaces_the_host_floor() -> None:
+    # A declared peak is an estimate: one byte over the floor boundary is tried
+    # (with its warning), and a peak that keeps the floor is a normal fit.
     floor = PLATFORM_MEMORY_FLOOR_BYTES
     available = 126_000_000_000
     # Fresh admission succeeds once the capacity shortfall clears.
@@ -349,7 +365,8 @@ def test_idle_spark_refuses_peak_that_displaces_the_host_floor() -> None:
             [_idle_capacity(128_000_000_000, available)],
             memory_floor_bytes=floor,
         )
-        assert plan.allowed == (headroom == 0)
+        assert plan.allowed
+        assert bool(_tried(plan)) == (headroom != 0)
         assert plan.nodes[0].current_free_after_bytes == floor + headroom
 
 
@@ -403,7 +420,7 @@ def _blocker_codes(plan) -> list[str]:
     return [reason.code for reason in plan.reasons if reason.severity == "blocker"]
 
 
-def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
+def test_a_shortfall_nothing_vonk_holds_can_clear_is_tried() -> None:
     # Production 2026-10-16: spark-3542 held no Vonk claim, 125_650_657_280
     # bytes free; the aday777 recipe's measured peak left less than the platform
     # floor, and its load backed off 40 times on a capacity wait no claim, stop
@@ -416,10 +433,10 @@ def test_a_shortfall_nothing_vonk_holds_can_clear_never_fits() -> None:
         [_idle_capacity(_SPARK_POOL, free)],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
-    assert not idle.allowed
-    assert _blocker_codes(idle) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
-    (never_fits,) = (r for r in idle.reasons if r.severity == "blocker")
-    assert str(left) in never_fits.detail
+    assert idle.allowed
+    assert _blocker_codes(idle) == []
+    (tried,) = _tried(idle)
+    assert str(left) in tried
 
     # The same shortfall while a Vonk claim holds memory there is a wait.
     held = plan_capacity(
@@ -468,27 +485,32 @@ def test_a_host_shortfall_inside_its_recent_noise_stays_a_wait() -> None:
     noisy = plan(125_670_000_000)
     assert not noisy.allowed
     assert _blocker_codes(noisy) == [ResourceBlockerCode.INSUFFICIENT_CAPACITY]
-    assert _blocker_codes(plan(None)) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    tried = plan(None)
+    assert tried.allowed
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(tried)
 
 
-def test_a_demand_above_the_physical_pool_never_fits_whatever_is_held() -> None:
+def test_a_demand_above_the_physical_pool_waits_while_something_is_held() -> None:
     plan = plan_capacity(
         {"rank-0": _declared_demand(_SPARK_POOL - 1_000_000_000)},
         [_idle_capacity(_SPARK_POOL, 90_000_000_000, claimed=30_000_000_000)],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
     assert not plan.allowed
-    assert _blocker_codes(plan) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
+    assert _blocker_codes(plan)
+    assert ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY not in _codes(plan)
+    # The claim is the Spark less the floor, not the recipe's larger estimate.
+    assert plan.nodes[0].required_bytes == _SPARK_POOL - PLATFORM_MEMORY_FLOOR_BYTES
 
 
-def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> None:
+def test_declared_peak_larger_than_physical_memory_is_tried_on_an_idle_spark() -> None:
     plan = plan_capacity(
         {"rank-0": _declared_demand(100)},
         [_idle_capacity(100, 96)],
         memory_floor_bytes=5,
     )
-    assert not plan.allowed
-    assert any(reason.severity == "blocker" for reason in plan.nodes[0].reasons)
+    assert plan.allowed
+    assert plan.nodes[0].required_bytes == 95
 
     fresh = plan_capacity(
         {"rank-0": _declared_demand(100)},
@@ -496,6 +518,8 @@ def test_declared_peak_larger_than_physical_memory_is_a_capacity_refusal() -> No
         memory_floor_bytes=5,
     )
     assert fresh.allowed
+    assert fresh.nodes[0].required_bytes == 100
+    assert not _tried(fresh)
 
 
 def test_unknown_capacity_evidence_still_blocks_an_idle_unverified_fit() -> None:
@@ -766,7 +790,6 @@ def test_decision_context_participates_in_resource_settings_identity() -> None:
 def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
     # Wrong implementation: checking only peak+floor against total, or adding
     # recipe reserve, misses the real reason this empty-host load was refused.
-    from dataclasses import replace
 
     from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
@@ -787,6 +810,6 @@ def test_deepseek_deferral_uses_observed_host_not_recipe_reserve() -> None:
         ],
         memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
     )
-    assert not plan.allowed
-    assert _blocker_codes(plan) == [ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY]
-    assert f"{left + 21_598_208} bytes" in plan.reasons[-1].detail
+    assert plan.allowed
+    (tried,) = _tried(plan)
+    assert f"{left + 21_598_208} bytes" in tried

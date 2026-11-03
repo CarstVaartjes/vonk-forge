@@ -90,6 +90,9 @@ class FailureMixin:
             failure_code = ModelCacheCode.OPERATION_FAILED
         cancellation_pending = False
         source_status = getattr(error, "source_status", None)
+        # The receipts are read before the transaction takes its row locks.
+        all_valid = all(cache._object_is_stored(spec) for spec in manifest.artifacts)
+        verified_bytes = cache._verified_bytes(set_digest)
         with cache._session(write=True) as session:
             operation = session.get(
                 ModelCacheOperation, operation_id, with_for_update=True
@@ -118,10 +121,7 @@ class FailureMixin:
                 None if cancellation_pending else session.get(ModelCacheSet, set_digest)
             )
             if row is not None:
-                row.verified_bytes = cache._verified_bytes(session, set_digest)
-                all_valid = all(
-                    cache._object_is_stored(spec) for spec in manifest.artifacts
-                )
+                row.verified_bytes = verified_bytes
                 row.state = "cached" if all_valid else "needs-repair"
                 row.updated_at = now
                 row.last_error = detail[:512]

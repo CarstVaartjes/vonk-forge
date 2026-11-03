@@ -20,6 +20,7 @@ from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.errors import ModelCacheError
 from vonk_control.models import Base, CatalogDocumentRevision
 
+from .display_fixtures import create_draft
 from .test_model_cache import _artifact, _canonical_model, _download
 
 NOW = datetime(2026, 10, 18, tzinfo=UTC)
@@ -31,7 +32,7 @@ def world(tmp_path: Path, postgres_engine: Engine):
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     catalog = CatalogEntityService(sessions, clock=lambda: NOW)
     cache = ModelCacheService(
-        sessions, tmp_path / "cache", reserve_bytes=0, fixture_sources=True
+        sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
     )
     tokens = TokenCodec(b"m" * 32)
     app = create_app(
@@ -54,7 +55,7 @@ def _activate(catalog: CatalogEntityService, *, publisher: str, weight: str):
         file_id="weights",
         file_digest=hashlib.sha256(weight.encode() * 3).hexdigest(),
     )
-    row = catalog.create_draft(model.model_dump(mode="json"), actor="test")
+    row = create_draft(catalog, model.model_dump(mode="json"), actor="test")
     return catalog.resolve(row.id, actor="test")
 
 

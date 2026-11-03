@@ -30,25 +30,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Candidate one-DGX Spark target-only profile with two resident DS4 sessions for concurrent serving and fairness through CUDA's ordered exact fallback; the DSpark drafter is omitted because speculative decoding is disabled while multiple sessions are active, and physical Spark acceptance is still required.",
-  "tags": [
-   "candidate",
-   "executable",
-   "deepseek",
-   "ds4",
-   "openai",
-   "chat",
-   "reasoning",
-   "concurrency",
-   "ordered-fallback",
-   "target-only",
-   "single",
-   "spark"
-  ],
-  "title": "DeepSeek V4 Flash 0731 DS4 two-session concurrency single Spark"
- },
  "models": [
   {
    "files": [
@@ -65,7 +46,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "22859b6f9d0634714c6753defcef24ffaeca8828bf68e7a1f9cf4303c07f606d",
+    "content_sha256": "46e2c607dfae5961badb502053208042f230d7d4eed3680efe85d3d4df0b268d",
     "kind": "model",
     "publisher": "antirez",
     "slug": "deepseek-v4-flash-0731-ds4"
@@ -127,11 +108,11 @@
    "DeepSeek AI",
    "Salvatore Sanfilippo (antirez)"
   ],
-  "source_reference": "https://github.com/antirez/ds4/tree/0aaea5a238fb41a35106a551e73c8409dfb751ac"
+  "source_reference": "https://github.com/antirez/ds4/tree/5379c1c9ac315f1540371b06a3db88491d4059ff"
  },
  "release": {
-  "released_at": "2026-09-20",
-  "version": "2.2.0"
+  "released_at": "2026-10-20",
+  "version": "2.2.2"
  },
  "runtime": {
   "arguments": [

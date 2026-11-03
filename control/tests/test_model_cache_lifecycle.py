@@ -398,7 +398,7 @@ def test_a_cancel_settles_after_a_restart(cache, tmp_path):
         },
     )
     restarted = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     restarted.tick()
     assert _row(sessions, operation.id).state == "cancelled"
@@ -421,7 +421,7 @@ def test_a_restart_in_the_middle_of_a_transfer_is_harmless(cache, tmp_path):
     restarted = ModelCacheService(
         sessions,
         service.root,
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
         clock=lambda: now[0],
     )

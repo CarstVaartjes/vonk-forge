@@ -35,6 +35,7 @@ from vonk_control.runtime_image_preparation import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .display_fixtures import reworded
 from .non_blocking import assert_ended_without_blocking
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_image_availability import (
@@ -220,13 +221,7 @@ def test_changed_frozen_revision_is_observed_without_unverified_child_commit(
     revision_id = next(iter(recipes))
     parent = _start(service, [revision_id])
     recipe = recipes[revision_id]
-    changed = recipe.model_copy(
-        update={
-            "metadata": recipe.metadata.model_copy(
-                update={"description": "changed after acceptance"}
-            )
-        }
-    )
+    changed = reworded(recipe, "changed after acceptance")
     recipes[revision_id] = changed
     with sessions.begin() as session:
         # Bypass the ORM immutability guard to model corrupt persisted identity.
@@ -545,13 +540,7 @@ def test_replay_binds_issuer_scope_and_frozen_current_head(update_env):
             )
         )
         replacement_id = str(uuid.uuid4())
-        replacement = recipe.model_copy(
-            update={
-                "metadata": recipe.metadata.model_copy(
-                    update={"description": "new accepted head"}
-                )
-            }
-        )
+        replacement = reworded(recipe, "new accepted head")
         _add_revision(session, replacement_id, replacement)
         head.active_revision_id = replacement_id
     replay = service.update(
@@ -888,7 +877,7 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
     cache = ModelCacheService(
         sessions,
         tmp_path / "models",
-        reserve_bytes=0,
+        free_fraction=0,
         clock=lambda: now[0],
         fixture_sources=True,
     )
@@ -907,8 +896,8 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
                 model_content_sha256=model_digest, artifacts=[artifact]
             )
 
-        def list_operations(self, *, limit: int = 100):
-            return cache.list_operations(limit=limit)
+        def reusable_operation(self, **kwargs):
+            return cache.reusable_operation(**kwargs)
 
         def start_download(self, **kwargs: Any):
             kwargs.pop("recipe_revision_id", None)

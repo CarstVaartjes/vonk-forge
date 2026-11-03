@@ -51,7 +51,7 @@ from vonk_forge_contracts import (
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from tests.recipe_library_source import recipe_library_root
 
-from .display_fixtures import display_of_model, display_of_recipe
+from .display_fixtures import create_draft, display_of_model, display_of_recipe, reword
 from .runtime_image_fixtures import place_test_image
 
 ROOT = recipe_library_root()
@@ -102,8 +102,7 @@ def _insert_canonical_rows(
     for index in range(count):
         document = copy.deepcopy(template)
         if description is not None:
-            metadata = _document_section(document, "metadata")
-            metadata["description"] = description
+            reword(document, description)
         identity = document["identity"]
         assert isinstance(identity, dict)
         identity["publisher"] = "test"
@@ -118,14 +117,14 @@ def _insert_canonical_rows(
             family["publisher"] = "test"
             family["slug"] = "family"
             canonical = ModelDefinition.model_validate(document)
-            title = canonical.identity.model.title
+            title = canonical.identity.slug
         else:
             if runtime_arguments is not None:
                 runtime = document["runtime"]
                 assert isinstance(runtime, dict)
                 runtime["arguments"] = copy.deepcopy(runtime_arguments)
             canonical = RecipeDefinition.model_validate(document)
-            title = canonical.metadata.title
+            title = canonical.identity.slug
         clean = canonical.model_dump(mode="json")
         document_id = str(uuid.uuid4())
         revision_id = str(uuid.uuid4())
@@ -219,12 +218,12 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
         for row in index["recipes"]
     }
     for document in model_documents:
-        revision = entities.create_draft(document, actor="test")
+        revision = create_draft(entities, document, actor="test")
         entities.resolve(revision.id, actor="test")
     recipe_ids: set[str] = set()
     recipe_revision_ids: dict[str, str] = {}
     for row in index["recipes"]:
-        revision = entities.create_draft(row["document"], actor="test")
+        revision = create_draft(entities, row["document"], actor="test")
         entities.resolve(revision.id, actor="test")
         recipe_ids.add(revision.document_id)
         recipe_revision_ids[row["content_sha256"]] = revision.id
@@ -662,12 +661,12 @@ def _local_projection_world(
         cursors=TokenCodec(b"d" * 32).cursor_codec(),
     )
     model_revisions = [
-        entities.create_draft(document, actor="test") for document in model_documents
+        create_draft(entities, document, actor="test") for document in model_documents
     ]
     for revision in model_revisions:
         entities.resolve(revision.id, actor="test")
     model_revision = model_revisions[0]
-    recipe_revision = entities.create_draft(recipe_document, actor="test")
+    recipe_revision = create_draft(entities, recipe_document, actor="test")
     entities.resolve(recipe_revision.id, actor="test")
 
     old_document = copy.deepcopy(model_revision.document)
@@ -894,8 +893,8 @@ def test_cached_download_progress_preserves_exact_totals_and_reads_negative_as_u
     now = datetime(2026, 9, 13, tzinfo=UTC)
     cursors = TokenCodec(b"z" * 32).cursor_codec()
     entities = CatalogEntityService(sessions, clock=lambda: now, cursors=cursors)
-    revision = entities.create_draft(
-        index["catalog_entities"][0]["document"], actor="test"
+    revision = create_draft(
+        entities, index["catalog_entities"][0]["document"], actor="test"
     )
     entities.resolve(revision.id, actor="test")
     expected = max(0, total_bytes)
@@ -1034,8 +1033,7 @@ def test_library_cursor_observes_a_changed_accepted_catalog(tmp_path: Path, kind
         )
         assert old is not None
         document = copy.deepcopy(old.document)
-        metadata = _document_section(document, "metadata")
-        metadata["description"] = "Changed after the first page"
+        reword(document, "Changed after the first page")
         canonical_type = ModelDefinition if kind == "model" else RecipeDefinition
         canonical = canonical_type.model_validate(document)
         new = CatalogDocumentRevision(
@@ -1703,7 +1701,7 @@ def test_connected_consumers_read_documents_only_from_detail(
     codec = TokenCodec(b"a" * 32)
     catalog = CatalogEntityService(sessions, clock=clock, cursors=codec.cursor_codec())
     for row in [*index["catalog_entities"], entry]:
-        revision = catalog.create_draft(row["document"], actor="test")
+        revision = create_draft(catalog, row["document"], actor="test")
         catalog.resolve(revision.id, actor="test")
     app = FastAPI()
     app.router.route_class = ControllerAPIRoute

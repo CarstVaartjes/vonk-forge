@@ -9,12 +9,12 @@ use vonk_agent_protocol::generated::ResourceTermProblem;
 use vonk_agent_protocol::host_memory_guard_policy::{
     DRIVER_FAILURE_FREE_BYTES, DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND, DRIVER_FAILURE_SUSTAIN,
     DRIVER_LINE_WINDOW, EXHAUSTED_BYTES, LOADING_FULL_AVG60_PERCENT, LOADING_PRESSURE_SUSTAIN,
-    PRESSURE_FIELDS, PRESSURE_PROPERTY, PSI_FALLING_RATIO, RECENT_FIELDS, RECENT_PROPERTY,
-    RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT, SERVING_PRESSURE_SUSTAIN,
-    SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES, SWAP_EXHAUSTED_FREE_PERCENT,
-    SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN, SWAP_FILLING_MEMORY_BYTES,
-    SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT, THRASH_FULL_PSI_PERCENT,
-    THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
+    PRESSURE_AVAILABLE_BYTES, PRESSURE_FIELDS, PRESSURE_PROPERTY, PSI_FALLING_RATIO, RECENT_FIELDS,
+    RECENT_PROPERTY, RECENT_SAMPLE_SPACING, RECENT_SAMPLES, SERVING_FULL_PSI_PERCENT,
+    SERVING_PRESSURE_SUSTAIN, SUSTAINED_PRESSURE, SWAP_EXHAUSTED_FREE_FLOOR_BYTES,
+    SWAP_EXHAUSTED_FREE_PERCENT, SWAP_EXHAUSTED_MEMORY_BYTES, SWAP_EXHAUSTED_SUSTAIN,
+    SWAP_FILLING_MEMORY_BYTES, SWAP_FILLING_SUSTAIN, SWAP_FILLING_USED_PERCENT,
+    THRASH_FULL_PSI_PERCENT, THRASH_HEADROOM_BYTES, THRASH_PAGES_PER_SECOND, THRASH_SUSTAIN,
 };
 
 /// Why the guard stopped the managed workloads; the evidence's `trigger`.
@@ -67,12 +67,23 @@ pub struct Counters {
     pub refault: u64,
 }
 
+/// Swap-backed memory resident in RAM, recorded in kill evidence so a rule on
+/// it can be calibrated on real readings; no rule reads it yet.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Resident {
+    pub anon_bytes: Option<u64>,
+    pub shmem_bytes: Option<u64>,
+    pub active_anon_bytes: Option<u64>,
+    pub inactive_anon_bytes: Option<u64>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sample {
     pub available_bytes: Option<u64>,
     pub free_bytes: Option<u64>,
     pub swap_total_bytes: Option<u64>,
     pub swap_free_bytes: Option<u64>,
+    pub resident: Resident,
     pub full_avg10: Option<f64>,
     pub full_avg60: Option<f64>,
     pub counters: Option<Counters>,
@@ -150,6 +161,12 @@ pub fn read_sample(mut read: impl FnMut(&str) -> std::io::Result<String>) -> Sam
         free_bytes: field("MemFree:"),
         swap_total_bytes: field("SwapTotal:"),
         swap_free_bytes: field("SwapFree:"),
+        resident: Resident {
+            anon_bytes: field("AnonPages:"),
+            shmem_bytes: field("Shmem:"),
+            active_anon_bytes: field("Active(anon):"),
+            inactive_anon_bytes: field("Inactive(anon):"),
+        },
         full_avg10: full("avg10="),
         full_avg60: full("avg60="),
         counters,
@@ -200,18 +217,19 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
             .full_avg10
             .is_some_and(|psi| psi > THRASH_FULL_PSI_PERCENT)
         && below(headroom, THRASH_HEADROOM_BYTES);
-    let pressure = if loading {
-        match (sample.full_avg60, sample.full_avg10) {
-            (Some(avg60), Some(avg10)) => {
-                avg60 > LOADING_FULL_AVG60_PERCENT && avg10 >= avg60 * PSI_FALLING_RATIO
+    let pressure = below(available, PRESSURE_AVAILABLE_BYTES)
+        && if loading {
+            match (sample.full_avg60, sample.full_avg10) {
+                (Some(avg60), Some(avg10)) => {
+                    avg60 > LOADING_FULL_AVG60_PERCENT && avg10 >= avg60 * PSI_FALLING_RATIO
+                }
+                _ => false,
             }
-            _ => false,
-        }
-    } else {
-        sample
-            .full_avg10
-            .is_some_and(|psi| psi > SERVING_FULL_PSI_PERCENT)
-    };
+        } else {
+            sample
+                .full_avg10
+                .is_some_and(|psi| psi > SERVING_FULL_PSI_PERCENT)
+        };
     Conditions {
         swap,
         exhausted,
@@ -220,7 +238,10 @@ fn conditions(sample: &Sample, rates: Option<Rates>, loading: bool) -> Condition
         pressure,
         // With swap, low MemFree while pages are swapping out is reclaim
         // absorbing the load; it counts only once swap-out has stopped.
+        // Low MemFree alone is page cache; real pressure also leaves
+        // MemAvailable under the same floor R4 uses.
         driver_free_low: below(sample.free_bytes, DRIVER_FAILURE_FREE_BYTES)
+            && below(available, PRESSURE_AVAILABLE_BYTES)
             && (!swap
                 || rates
                     .is_some_and(|rates| rates.swap_out < DRIVER_FAILURE_RECLAIM_PAGES_PER_SECOND)),
@@ -396,6 +417,10 @@ pub fn readings(sample: &Sample, rates: Option<Rates>, loading: bool) -> (String
         mib(sample.free_bytes),
         mib(sample.swap_total_bytes),
         mib(sample.swap_free_bytes),
+        mib(sample.resident.anon_bytes),
+        mib(sample.resident.shmem_bytes),
+        mib(sample.resident.active_anon_bytes),
+        mib(sample.resident.inactive_anon_bytes),
         sample.full_avg60.map_or_else(unknown, |v| v.to_string()),
         rate(rates.map(|r| r.swap_in)),
         rate(rates.map(|r| r.swap_out)),

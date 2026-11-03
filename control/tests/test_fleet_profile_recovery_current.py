@@ -38,6 +38,7 @@ from vonk_control.operation_blockers import make_blocker
 from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
+from .display_fixtures import reword
 from .test_fleet_profiles import _uuid
 from .test_recipe_operations import setup_services
 from .test_run_switch_operations import (
@@ -818,9 +819,7 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
         original = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert original is not None
         document = copy.deepcopy(original.document)
-        metadata = document["metadata"]
-        assert isinstance(metadata, dict)
-        metadata["title"] = "Editorially renamed recipe"
+        reword(document, "Editorially renamed recipe")
         canonical = RecipeDefinition.model_validate(document)
         successor = CatalogDocumentRevision(
             id=str(uuid.uuid4()),
@@ -1167,9 +1166,7 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
         old = session.get(CatalogDocumentRevision, revision.id)
         assert old is not None
         document = copy.deepcopy(old.document)
-        metadata = document["metadata"]
-        assert isinstance(metadata, dict)
-        metadata["description"] = "A newer synced revision"
+        reword(document, "A newer synced revision")
         newer = CatalogDocumentRevision(
             document_id=old.document_id,
             kind=old.kind,

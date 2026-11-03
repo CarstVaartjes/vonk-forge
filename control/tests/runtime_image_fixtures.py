@@ -105,3 +105,15 @@ def refresh_inventory(sessions, now) -> None:
                 )
             )
         )
+
+
+def install_another_image(installation, *, digest: str = "sha256:" + "e" * 64) -> None:
+    """Make an installation run another image, as install admission records it.
+
+    The installation row and every compiled rank carry the same image digest.
+    """
+    plan = json.loads(canonical_message(installation.plan))
+    for compiled in plan["compiled_execution_plans"].values():
+        compiled["runtime_image"]["image_digest"] = digest
+    installation.plan = plan
+    installation.image_digest = digest

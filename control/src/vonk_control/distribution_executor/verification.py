@@ -41,7 +41,6 @@ class DistributionVerification(DistributionIdentity):
             subphase=ProfileChildPhase.TARGET_COPY.value,
             skipped=skipped,
             verified=True,
-            verified_digests=list(plan.storage.artifact_digests),
             verified_build_id=build_id,
             verified_image_digest=(
                 verified_image_digest

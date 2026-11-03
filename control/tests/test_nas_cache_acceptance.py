@@ -56,7 +56,7 @@ def controller(tmp_path: Path):
     cache = ModelCacheService(
         sessions,
         tmp_path / "nas-cache",
-        reserve_bytes=0,
+        free_fraction=0,
         fixture_sources=True,
     )
     yield database, engine, sessions, cache
@@ -68,7 +68,7 @@ def _restart_controller(database: Path, root: Path):
         f"sqlite:///{database}", connect_args={"check_same_thread": False}
     )
     sessions = sessionmaker(engine, expire_on_commit=False)
-    cache = ModelCacheService(sessions, root, reserve_bytes=0, fixture_sources=True)
+    cache = ModelCacheService(sessions, root, free_fraction=0, fixture_sources=True)
     return engine, sessions, cache
 
 

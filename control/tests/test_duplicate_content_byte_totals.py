@@ -63,7 +63,7 @@ def test_two_paths_with_one_digest_agree_across_totals() -> None:
                 artifact_set_bytes=manifest.expected_bytes,
             )
         ),
-        storage=SimpleNamespace(artifact_digests=[item.sha256 for item in specs]),
+        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
     )
     placed, _digest, total = identity._model_objects(
         plan,  # type: ignore[arg-type]

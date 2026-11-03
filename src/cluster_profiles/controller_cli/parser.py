@@ -17,6 +17,7 @@ from .common import (
     _activity_target,
     _add_output,
     _add_profile_selection,
+    _add_verbose,
     _add_yes,
     _filters,
     _line_limit,
@@ -229,6 +230,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Remove unused installations and model objects on the NAS and every Spark",
     )
+    _add_verbose(model_remove)
     model_remove.add_argument(
         "--review",
         action="store_true",
@@ -328,6 +330,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     _selector(recipe_remove, "recipe", help="Exact recipe selector or friendly name")
     _action_flags(recipe_remove, recipe_remove=True, followable=True)
+    _add_verbose(recipe_remove)
     recipe_remove.add_argument(
         "--review",
         action="store_true",

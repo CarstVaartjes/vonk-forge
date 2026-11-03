@@ -1,0 +1,134 @@
+name: CI cache warm
+
+# Pull requests restore the Rust and uv caches that main last saved and never
+# save their own. Main runs ci.yml only when the release cannot reuse a pull
+# request's proof, so without this workflow those caches are rare and age out.
+# This one rebuilds them whenever their inputs change on main and weekly, which
+# also refreshes their last-access time before GitHub evicts idle entries.
+#
+# Every cache step here uses the key inputs of the ci.yml step it warms: the
+# same shared-key, runner image, pinned toolchain, python-env action and
+# Cargo.lock/manifests. The build commands are the ones those jobs run, so the
+# saved target/ directory holds what they need. A guard compares the two.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - "**/Cargo.toml"
+      - rust-toolchain.toml
+      - .tool-versions
+      - uv.lock
+      - control/uv.lock
+      - agent_protocol/pyproject.toml
+      - .github/actions/python-env/action.yml
+      - .cargo/config.toml
+      - .github/workflows/ci.yml
+      - .github/workflows/ci-cache-warm.yml
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-cache-warm
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rust-amd64:
+    name: Warm linux-amd64 Rust and uv caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+      - name: Install pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          scripts/retry-dependency-fetch rustup toolchain install 1.98.1 --component clippy,rustfmt
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-amd64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Fetch locked crates
+        run: scripts/retry-dependency-fetch cargo fetch --locked
+      - name: Lint Rust workspace
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build the Rust workspace tests
+        run: cargo test --workspace --locked --no-run
+      - name: Build the debug probes and examples
+        run: cargo build --workspace --all-targets --locked
+
+  rust-arm64:
+    name: Warm linux-arm64 Rust and uv caches
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Prepare Pydantic contracts for Cargo builds
+        uses: ./.github/actions/python-env
+        with:
+          contracts: none
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          rustup set profile minimal
+          rustup toolchain install 1.98.1
+          rustup default 1.98.1
+          rustup target add aarch64-unknown-linux-gnu
+      - name: Restore Rust dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: linux-arm64
+          add-job-id-key: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Materialize pinned package tools
+        run: scripts/materialize-agent-tools --output-root target
+      - name: Build the baseline and candidate packages
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r name value; do
+            declare "$name=$value"
+          done < <(scripts/agent-package-metadata development branch main \
+            "$GITHUB_SHA" "$(scripts/dev-publication-sequence "$GITHUB_SHA")")
+          key="$RUNNER_TEMP/throwaway-agent-key.pem"
+          openssl genpkey -algorithm ed25519 -out "$key"
+          epoch=1700000000
+          lock_digest=$(sha256sum Cargo.lock | cut -d' ' -f1)
+          digest() {
+            printf '%s\0%s\0%s\0%s\0%s' "$1" "$GITHUB_SHA" linux-arm64 "$lock_digest" "$2" \
+              | sha256sum | cut -d' ' -f1
+          }
+          export VONK_SOURCE_REVISION="$GITHUB_SHA"
+          export VONK_SOURCE_REPOSITORY="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          scripts/build-agent-deb --version "$version" --architecture linux-arm64 \
+            --build-digest "sha256:$(digest vonk-agent-build-v2 "$version")" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir dist
+          scripts/build-agent-deb --acceptance-baseline \
+            --version "$baseline_version" --architecture linux-arm64 \
+            --build-digest "sha256:$(digest vonk-agent-acceptance-baseline-v1 "$baseline_version")" \
+            --release-private-key "$key" --source-date-epoch "$epoch" \
+            --output-dir baseline
+          rm -f "$key"
+      - name: Build the static egress helper
+        run: |
+          RUSTFLAGS='-C target-feature=+crt-static' \
+            cargo build --locked --release --package vonk-build-egress
+      - name: Build the package activation probes
+        run: |
+          cargo build --locked --package vonk-agent-helper \
+            --bin vonk-agent-helper --example package_rollback_probe

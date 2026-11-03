@@ -53,6 +53,7 @@ impl Host {
             free_bytes: Some(self.free),
             swap_total_bytes: Some(self.swap_total),
             swap_free_bytes: Some(self.swap_free),
+            resident: Resident::default(),
             full_avg10: Some(self.avg10),
             full_avg60: Some(self.avg60),
             counters: Some(self.counters),
@@ -278,6 +279,7 @@ fn r3_a_refault_storm_without_headroom_kills_after_ten_seconds() {
 #[test]
 fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     let pressured = Host {
+        available: 2 * GIB,
         avg10: 65.0,
         avg60: 70.0,
         ..Host::serving()
@@ -305,6 +307,7 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     );
     // Loading: avg60 above 80% and not falling, for 60 s.
     let mut stuck = Host {
+        available: 2 * GIB,
         avg10: 85.0,
         avg60: 85.0,
         ..Host::serving()
@@ -334,6 +337,125 @@ fn r4_serving_pressure_kills_after_thirty_seconds_and_loading_waits_longer() {
     );
 }
 
+/// The production 2026-10-31 12:20Z reading that killed a MiniMax H3 job on
+/// spark-3542: reclaim absorbing the load into 64 GiB of free swap.
+fn minimax_h3_reading() -> Host {
+    Host {
+        available: 11 * GIB + 512 * 1024 * 1024,
+        free: 2 * GIB,
+        swap_total: 65_536 * 1024 * 1024,
+        swap_free: 64_789 * 1024 * 1024,
+        avg10: 70.0,
+        avg60: 43.0,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn r4_needs_low_mem_available_in_both_phases() {
+    let start = Instant::now();
+    // Serving: full PSI 70% with 11.5 GiB available is not a kill.
+    let mut roomy = minimax_h3_reading();
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(120)),
+            false
+        ),
+        None
+    );
+    // The same PSI with MemAvailable under 8 GiB and swap fully free is.
+    let bound = ticks(SERVING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 7 * GIB,
+        swap_free: 65_536 * 1024 * 1024,
+        ..minimax_h3_reading()
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            false
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+    // Loading: avg60 above 80% and not falling, for 60 s, the same pair.
+    let stuck = Host {
+        avg10: 85.0,
+        avg60: 85.0,
+        ..minimax_h3_reading()
+    };
+    let mut roomy = stuck;
+    assert_eq!(
+        run(
+            &mut roomy,
+            &mut Decision::default(),
+            start,
+            0..ticks(Duration::from_secs(300)),
+            true
+        ),
+        None
+    );
+    let bound = ticks(LOADING_PRESSURE_SUSTAIN);
+    let mut tight = Host {
+        available: 7 * GIB,
+        swap_free: 65_536 * 1024 * 1024,
+        ..stuck
+    };
+    assert_eq!(
+        run(
+            &mut tight,
+            &mut Decision::default(),
+            start,
+            0..bound + 1,
+            true
+        ),
+        Some((bound, Trigger::SustainedPressure))
+    );
+}
+
+#[test]
+fn r4_kills_within_its_bound_of_memory_available_crossing_the_floor() {
+    // Unswappable growth: swap stays fully free while MemAvailable falls from
+    // 20 GiB through the 8 GiB floor under full PSI already above 60%. The
+    // window starts at the crossing, so the kill lands one bound later.
+    let start = Instant::now();
+    let per_tick = 12 * GIB / u64::from(ticks(Duration::from_secs(60)));
+    for (loading, bound) in [
+        (false, ticks(SERVING_PRESSURE_SUSTAIN)),
+        (true, ticks(LOADING_PRESSURE_SUSTAIN)),
+    ] {
+        let mut host = Host {
+            avg10: 90.0,
+            avg60: 90.0,
+            ..Host::serving()
+        };
+        let mut decision = Decision::default();
+        let mut crossing = None;
+        let killed = (0..ticks(Duration::from_secs(300))).find_map(|tick| {
+            host.available = (20 * GIB).saturating_sub(per_tick * u64::from(tick));
+            if host.available < PRESSURE_AVAILABLE_BYTES {
+                crossing.get_or_insert(tick);
+            }
+            let sample = host.tick();
+            decision
+                .observe(start + SAMPLE_INTERVAL * tick, sample, false, true, loading)
+                .map(|trigger| (tick, trigger))
+        });
+        let (tick, trigger) = killed.expect("falling MemAvailable is killed");
+        assert_eq!(trigger, Trigger::SustainedPressure);
+        let crossing = crossing.expect("crossed the floor");
+        assert!(
+            (crossing + bound..=crossing + bound + 1).contains(&tick),
+            "loading={loading}: crossing {crossing}, kill {tick}, bound {bound}"
+        );
+    }
+}
+
 #[test]
 fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
     // Break caught: a healthy load's derived MemFree touches ~0.9 GB at its
@@ -344,11 +466,13 @@ fn r5_the_nvrm_line_kills_only_with_sustained_corroboration() {
         free_bytes: Some(5 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(60 * GIB),
+        resident: Resident::default(),
         full_avg10: Some(40.0),
         full_avg60: Some(20.0),
         counters: Some(Counters::default()),
     };
     let free_low = Sample {
+        available_bytes: Some(PRESSURE_AVAILABLE_BYTES - 1),
         free_bytes: Some(DRIVER_FAILURE_FREE_BYTES - 1),
         ..roomy
     };
@@ -400,6 +524,7 @@ fn unknown_readings_and_unmanaged_hosts_never_kill_and_reset_continuity() {
         free_bytes: Some(1),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
+        resident: Resident::default(),
         full_avg10: Some(99.0),
         full_avg60: Some(99.0),
         counters: Some(Counters::default()),
@@ -458,6 +583,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
         free_bytes: Some(2 * GIB),
         swap_total_bytes: Some(64 * GIB),
         swap_free_bytes: Some(0),
+        resident: Resident::default(),
         full_avg10: Some(10.0),
         full_avg60: Some(10.0),
         counters: Some(Counters::default()),
@@ -505,7 +631,7 @@ fn a_stalled_sampler_neither_hides_a_runaway_nor_invents_a_rate() {
 fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     let sample = read_sample(|path| {
         Ok(match path {
-            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\n".to_owned(),
+            "/proc/meminfo" => "MemTotal: 128 kB\nMemFree: 2048 kB\nMemAvailable: 4096 kB\nSwapTotal: 67108864 kB\nSwapFree: 33554432 kB\nAnonPages: 6144 kB\nShmem: 2048 kB\nActive(anon): 4096 kB\nInactive(anon): 1024 kB\n".to_owned(),
             "/proc/pressure/memory" => "some avg10=80.00 avg60=70.00 avg300=1.00 total=1\nfull avg10=45.50 avg60=50.25 avg300=1.00 total=1\n".to_owned(),
             "/proc/vmstat" => "pswpin 10\npswpout 20\nworkingset_refault_anon 3\nworkingset_refault_file 4\n".to_owned(),
             other => panic!("unexpected {other}"),
@@ -515,6 +641,15 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
     assert_eq!(sample.free_bytes, Some(2048 * 1024));
     assert_eq!(sample.swap_total_bytes, Some(64 * GIB));
     assert_eq!(sample.swap_free_bytes, Some(32 * GIB));
+    assert_eq!(
+        sample.resident,
+        Resident {
+            anon_bytes: Some(6144 * 1024),
+            shmem_bytes: Some(2048 * 1024),
+            active_anon_bytes: Some(4096 * 1024),
+            inactive_anon_bytes: Some(1024 * 1024),
+        }
+    );
     assert_eq!(sample.full_avg10, Some(45.5), "full, never some");
     assert_eq!(sample.full_avg60, Some(50.25));
     assert_eq!(
@@ -541,6 +676,10 @@ fn the_kernel_files_are_read_into_one_sample_and_the_evidence_names_swap() {
         "loading:true",
         "swap_total_mib:65536",
         "swap_free_mib:32768",
+        "anon_mib:6",
+        "shmem_mib:2",
+        "active_anon_mib:4",
+        "inactive_anon_mib:1",
         "swapin_per_s:1",
         "swapout_per_s:2",
         "refault_per_s:3",
@@ -562,6 +701,7 @@ fn a_phase_flip_starts_the_pressure_window_over() {
     // Break caught: 40 s of loading pressure read as 40 s of serving pressure
     // the moment one slow drop let the loading phase lapse.
     let mut host = Host {
+        available: 2 * GIB,
         avg10: 85.0,
         avg60: 85.0,
         ..Host::serving()
@@ -880,6 +1020,48 @@ fn r5_kills_on_low_memfree_when_swap_is_not_absorbing_the_load() {
     };
     assert_eq!(
         run_with_line(&mut host, &mut Decision::default(), start, 0..bound + 2).map(|k| k.1),
+        Some(Trigger::DriverAllocationFailure)
+    );
+}
+
+/// The DeepSeek V4.1 Flash EXL3 Mia dual load killed at 18:49:40Z on 2026-11-02
+/// (spark-3542, NVRM line present): MemFree 0.96 GiB, MemAvailable 17.4 GiB,
+/// 3.7 GiB swap used, swap-out 0/s, PSI full avg10 33%. Page-cache reclaim.
+fn dsv41_mia_dual_readings() -> Host {
+    Host {
+        available: 17 * GIB + 410 * 1024 * 1024,
+        free: 983 * 1024 * 1024,
+        swap_total: 64 * GIB,
+        swap_free: 64 * GIB - 3 * GIB - 700 * 1024 * 1024,
+        avg10: 33.0,
+        avg60: 33.0,
+        ..Host::serving()
+    }
+}
+
+#[test]
+fn r5_ignores_low_memfree_while_mem_available_is_plentiful() {
+    // Break caught: R5 killed a healthy load (it passed on 2026-10-24) on one
+    // NVRM line plus page-cache MemFree, with 17.4 GiB still available.
+    let mut host = dsv41_mia_dual_readings();
+    assert_eq!(
+        run_with_line(&mut host, &mut Decision::default(), Instant::now(), 0..400),
+        None
+    );
+    // Real pinned growth: the same MemFree with MemAvailable under the floor.
+    let bound = ticks(DRIVER_FAILURE_SUSTAIN);
+    let mut host = Host {
+        available: PRESSURE_AVAILABLE_BYTES - 1,
+        ..dsv41_mia_dual_readings()
+    };
+    assert_eq!(
+        run_with_line(
+            &mut host,
+            &mut Decision::default(),
+            Instant::now(),
+            0..bound + 2
+        )
+        .map(|k| k.1),
         Some(Trigger::DriverAllocationFailure)
     );
 }

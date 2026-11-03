@@ -184,7 +184,7 @@ def test_persisted_model_manifest_recovers_through_removal_gates_after_restart(
     object_path = service._object_path(object_digest)
     before_inode = object_path.stat().st_ino
     recovered = ModelCacheService(
-        sessions, service.root, reserve_bytes=0, fixture_sources=True
+        sessions, service.root, free_fraction=0, fixture_sources=True
     )
     try:
         with recovered._model_storage_lock(set_digest, model_set=True):

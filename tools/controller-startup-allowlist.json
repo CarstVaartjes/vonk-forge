@@ -70,6 +70,7 @@
         "DistributedRecoveryCoordinator",
         "DueWaitBackstop",
         "InstallAdmissionService",
+        "ModelPartialsCollector",
         "PrebuiltImageImporter",
         "RecipeBuildService",
         "RecipeOperationService",

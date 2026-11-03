@@ -39,7 +39,7 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
     artifact = _artifact(tmp_path, content)
     model_digest = "a" * 64
     service = ModelCacheService(
-        sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: now[0]
+        sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: now[0]
     )
     restarted: ModelCacheService | None = None
     try:
@@ -111,7 +111,7 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
         # original ending but accepts a new exact reviewed request normally.
         service.close()
         restarted = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: now[0]
+            sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: now[0]
         )
         with sessions() as session:
             ended = session.get(ModelCacheOperation, original.id)
@@ -186,7 +186,7 @@ def test_unknown_cancel_expiry_restart_admits_fresh_exact_artifact_and_fences_ol
             assert_no_orphaned_holds(session)
         restarted.close()
         restarted = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True, clock=lambda: now[0]
+            sessions, root, free_fraction=0, fixture_sources=True, clock=lambda: now[0]
         )
         with sessions() as session:
             ended = session.get(ModelCacheOperation, confirmed.id)

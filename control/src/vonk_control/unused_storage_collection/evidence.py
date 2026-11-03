@@ -11,8 +11,9 @@ from enum import StrEnum
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from ..artifact_reference_scan import _selector_revisions
-from ..catalog_revision_collection import GRACE, live_tokens, operation_tokens, tokens
+from ..artifact_reference_scan import _selectors_revisions
+from ..catalog_queries import active_head_revision
+from ..catalog_revision_collection import GRACE, operation_tokens, plan_tokens, tokens
 from ..content_identity import catalog_selector_membership
 from ..models import (
     ArtifactDistributionAssignment,
@@ -73,23 +74,22 @@ class _Evidence:
         they keep nothing for its review (the collector itself passes none)."""
 
         cutoff = now - GRACE
-        revisions = session.execute(
-            select(
-                CatalogDocumentRevision.id,
-                CatalogDocumentRevision.document_id,
-                CatalogDocumentRevision.revision_number,
-                CatalogDocumentRevision.created_at,
-                CatalogDocumentRevision.content_digest,
-            ).where(
-                CatalogDocumentRevision.kind == "recipe",
-                CatalogDocumentRevision.state == "active",
+        newest: dict[str, tuple[str, datetime, int, str]] = {
+            document_id: (revision_id, _utc(created), number, digest)
+            for revision_id, document_id, number, created, digest in session.execute(
+                select(
+                    CatalogDocumentRevision.id,
+                    CatalogDocumentRevision.document_id,
+                    CatalogDocumentRevision.revision_number,
+                    CatalogDocumentRevision.created_at,
+                    CatalogDocumentRevision.content_digest,
+                ).where(
+                    CatalogDocumentRevision.kind == "recipe",
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                )
             )
-        )
-        newest: dict[str, tuple[str, datetime, int, str]] = {}
-        for revision_id, document_id, number, created, digest in revisions:
-            known = newest.get(document_id)
-            if known is None or number > known[2]:
-                newest[document_id] = (revision_id, _utc(created), number, digest)
+        }
         pointers = _profile_pointers(session)
         selected = session.scalar(select(FleetProfileSelection.profile_id))
         loaded_pointers = (
@@ -99,11 +99,13 @@ class _Evidence:
         )
         head_ids = {item[0] for item in newest.values()}
         if pointers is not None:
-            for publisher, slug in pointers:
-                head_ids.update(
-                    revision.id
-                    for revision in _selector_revisions(session, f"{publisher}/{slug}")
-                )
+            head_ids.update(
+                revision.id
+                for found in _selectors_revisions(
+                    session, [f"{publisher}/{slug}" for publisher, slug in pointers]
+                ).values()
+                for revision in found
+            )
         # A load that is queued, admission-waiting or running needs the exact
         # revisions its plan resolved, whatever the saved profiles say now (a
         # sweep rewrites its profile between steps). A load waiting for
@@ -182,9 +184,11 @@ class _Evidence:
 class _CollectorEvidence:
     """The reference core plus what only the background collector may scan.
 
-    ``live`` replays 24 hours of jobs, profile applications and model
-    operations; no request path may build this (guarded in
-    ``test_principle_guards``).
+    ``live`` is the reference core's live operations plus what installations,
+    runs and builds still name. The ordering sets (``recent_sets``,
+    ``recent_archives``) replay the last 24 hours and exist only for the sweep's
+    ordering; a verify under the gate reads ``ordering=False`` and leaves them
+    empty. No request path may build this (guarded in ``test_principle_guards``).
     """
 
     reference: _Evidence
@@ -194,13 +198,49 @@ class _CollectorEvidence:
     recent_archives: frozenset[str]
 
     @classmethod
-    def read(cls, session: Session, now: datetime) -> _CollectorEvidence:
+    def read(
+        cls, session: Session, now: datetime, *, ordering: bool = True
+    ) -> _CollectorEvidence:
         reference = _Evidence.read(session, now)
         cutoff = reference.cutoff
         pointed_ids = reference.pointed_ids
+        recent_sets: frozenset[str] = frozenset()
+        recent_archives: frozenset[str] = frozenset()
+        if ordering:
+            recent_sets = frozenset(
+                session.scalars(
+                    select(ArtifactDistributionAssignment.model_artifact_set_sha256)
+                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
+                    .distinct()
+                )
+            )
+            recent_archives = (
+                frozenset(
+                    session.scalars(
+                        select(ArtifactDistributionAssignment.oci_archive_sha256)
+                        .where(ArtifactDistributionAssignment.updated_at > cutoff)
+                        .distinct()
+                    )
+                )
+                | frozenset(
+                    value
+                    for value in session.scalars(
+                        select(RecipeBuild.oci_layout_sha256).where(
+                            or_(
+                                RecipeBuild.updated_at > cutoff,
+                                builds_in_flight(now),
+                            )
+                        )
+                    )
+                    if value is not None
+                )
+                # An archive an operation of the last day named was just used:
+                # removed last, but it no longer keeps the image from expiring.
+                | operation_tokens(session, now, include_removals=False)
+            )
         return cls(
             reference=reference,
-            live=live_tokens(session, now, include_removals=False),
+            live=reference.operations | plan_tokens(session, now),
             # What a pointed recipe can run is every image its document built,
             # including a predecessor's build that a successor reuses.
             pointed_archives=revision_archives(session, pointed_ids)
@@ -214,32 +254,8 @@ class _CollectorEvidence:
                 if value is not None
             )
             | reference.pinned,
-            recent_sets=frozenset(
-                session.scalars(
-                    select(ArtifactDistributionAssignment.model_artifact_set_sha256)
-                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
-                    .distinct()
-                )
-            ),
-            recent_archives=frozenset(
-                session.scalars(
-                    select(ArtifactDistributionAssignment.oci_archive_sha256)
-                    .where(ArtifactDistributionAssignment.updated_at > cutoff)
-                    .distinct()
-                )
-            )
-            | frozenset(
-                value
-                for value in session.scalars(
-                    select(RecipeBuild.oci_layout_sha256).where(
-                        or_(
-                            RecipeBuild.updated_at > cutoff,
-                            builds_in_flight(now),
-                        )
-                    )
-                )
-                if value is not None
-            ),
+            recent_sets=recent_sets,
+            recent_archives=recent_archives,
         )
 
 
@@ -261,6 +277,12 @@ class _Pressure:
     why: str
     #: Work was refused for this space, so removing too little would not help it.
     demanded: bool
+    #: Bytes missing for the low-space line, whether or not work was refused.
+    #: Eviction goes toward the line even when the refused work cannot be met.
+    line_shortfall: int = 0
+    #: What a pass frees toward the line alone (the line shortfall plus a
+    #: reserve) when the refused work cannot be met.
+    line_need: int = 0
 
 
 class StorageItemKind(StrEnum):

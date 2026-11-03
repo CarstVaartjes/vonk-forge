@@ -38,11 +38,11 @@
    "input": {
     "max_bytes": 536870912,
     "media_types": [
+     "text/plain",
      "video/mp4",
      "video/quicktime",
      "video/webm",
-     "video/x-matroska",
-     "text/plain"
+     "video/x-matroska"
     ],
     "required": true,
     "slots": [
@@ -107,20 +107,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Installable Candidate for text-conditioned Foley generation from one video, with the exact official XL checkpoint and pinned local-only SigLIP2 and CLAP encoders; physical Spark acceptance remains pending.",
-  "tags": [
-   "executable",
-   "candidate",
-   "audio",
-   "video-to-audio",
-   "pytorch",
-   "single",
-   "spark"
-  ],
-  "title": "HunyuanVideo Foley XL PyTorch single Spark"
- },
  "models": [
   {
    "files": [
@@ -197,7 +183,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "67741520c530ad3d4dee0bf01abb24d86961f0b5df7c5b34ee5bb60e4ecdeeb4",
+    "content_sha256": "3a8283037bedab6744d7481727034dd24da9083ef88eaa3ec2f73d64766910db",
     "kind": "model",
     "publisher": "tencent",
     "slug": "hunyuan-video-foley-xl"
@@ -278,7 +264,7 @@
    ],
    "id": "siglip2",
    "model": {
-    "content_sha256": "b9369da043d15102a1d0846ead9d50e40e9e281032deb791a27561781bb62185",
+    "content_sha256": "a2735690a7471a2c063708d4944afd4c91f22cddac4d38cbfc4cdea813288606",
     "kind": "model",
     "publisher": "google",
     "slug": "siglip2-base-patch16-512-a89f5c50"
@@ -369,7 +355,7 @@
    ],
    "id": "clap",
    "model": {
-    "content_sha256": "93ad9df26ac5d64c323fc4f34eb557ecbfd100ccb65e067601e7499543f428d2",
+    "content_sha256": "c1f7a6b1591790031d1bb5c6bc1ad302194c37e507a415ca2b31b7cf4109ff8b",
     "kind": "model",
     "publisher": "laion",
     "slug": "larger-clap-general-ada0c23a"
@@ -384,7 +370,7 @@
  },
  "release": {
   "released_at": "2026-09-28",
-  "version": "1.4.8"
+  "version": "1.4.9"
  },
  "runtime": {
   "arguments": [

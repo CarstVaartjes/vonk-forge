@@ -79,7 +79,7 @@ class _Nas:
         service = ModelCacheService(
             self.sessions,
             self.root,
-            reserve_bytes=0,
+            free_fraction=0,
             http_client=self.client,
             fixture_sources=False,
             clock=lambda: self.now[0],

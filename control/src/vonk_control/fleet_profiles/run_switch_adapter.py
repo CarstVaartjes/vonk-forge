@@ -385,7 +385,7 @@ class RunSwitchFleetProfileAdapter(
             ProfileSwitchChildKind.INSTALL.value
             if assignment.desired_state == DesiredAssignmentState.INSTALLED
             else ProfileAction.SWITCH.value,
-            assignment.alias or assignment.recipe_title.lower().replace(" ", "-"),
+            assignment.alias or assignment.id,
         )
 
     @staticmethod

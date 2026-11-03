@@ -12,6 +12,7 @@ dependencies = [
   "cryptography>=50.0.1",
   "jsonschema>=4.26.0",
   "pydantic>=2.13.5",
+  "PyYAML>=6.0.3",
 ]
 
 [project.scripts]

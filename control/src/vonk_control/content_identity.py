@@ -253,3 +253,97 @@ def same_build_units(first: str | None, second: str | None) -> bool:
     """
 
     return first == second
+
+
+def recipe_model_digests(
+    session, revision_ids: Collection[str]
+) -> dict[str, frozenset[str]]:
+    """The model contents each recipe revision is bound to, by relational rows.
+
+    The binding rows were written with the revision and name the exact model
+    content. A revision without rows is absent.
+    """
+    from sqlalchemy import select
+
+    from .models import CatalogRecipeModelReference
+
+    found: dict[str, set[str]] = {}
+    if revision_ids:
+        for revision_id, model in session.execute(
+            select(
+                CatalogRecipeModelReference.recipe_revision_id,
+                CatalogRecipeModelReference.model_content_digest,
+            ).where(
+                CatalogRecipeModelReference.recipe_revision_id.in_(sorted(revision_ids))
+            )
+        ):
+            found.setdefault(revision_id, set()).add(model)
+    return {revision_id: frozenset(models) for revision_id, models in found.items()}
+
+
+def installations_using_models(session, contents: Collection[str]) -> frozenset[str]:
+    """Installed (not uninstalled) installations whose columns name ``contents``.
+
+    The model column, or a recipe bound to one of their catalog revisions. The
+    filter is in SQL on indexed columns. An installation running on a reused
+    set may name it only in its plan, so callers also read plans.
+    """
+    from sqlalchemy import or_, select
+    from vonk_agent_protocol import InstallationState
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import (
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+        RecipeInstallation,
+    )
+
+    lineage = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+        CatalogDocumentRevision.content_digest.in_(sorted(contents)),
+    )
+    bound = select(CatalogRecipeModelReference.recipe_revision_id).where(
+        CatalogRecipeModelReference.model_revision_id.in_(lineage)
+    )
+    return frozenset(
+        session.scalars(
+            select(RecipeInstallation.id).where(
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
+                or_(
+                    RecipeInstallation.model_content_sha256.in_(sorted(contents)),
+                    RecipeInstallation.recipe_revision_id.in_(bound),
+                ),
+            )
+        )
+    )
+
+
+def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
+    """Each recipe selector's active revision, in one read.
+
+    Heads without an active revision, or whose revision is gone, are absent:
+    the caller recovers those from the selector's own records.
+    """
+    from sqlalchemy import select
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import CatalogDocumentHead, CatalogDocumentRevision
+
+    return {
+        (head.publisher, head.slug): revision
+        for head, revision in session.execute(
+            select(CatalogDocumentHead, CatalogDocumentRevision)
+            .join(
+                CatalogDocumentRevision,
+                CatalogDocumentRevision.id == CatalogDocumentHead.active_revision_id,
+            )
+            .where(
+                CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                catalog_selector_membership(
+                    CatalogDocumentHead.publisher,
+                    CatalogDocumentHead.slug,
+                    tuple(selectors),
+                ),
+            )
+        )
+    }

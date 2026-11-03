@@ -68,13 +68,16 @@ class _Catalog:
     def refresh_build_policy(self):
         return ()
 
+    def refresh_model_projections(self) -> None:
+        return None
+
     def import_catalog_models(self, actor, documents) -> int:
         return 0
 
     def apply_displays(self, displays) -> list:
         return []
 
-    def retract_recipes_absent_from(self, published):
+    def retract_absent_from(self, published):
         return []
 
     def store_source_bundle(self, *args) -> None:

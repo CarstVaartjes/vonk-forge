@@ -26,6 +26,7 @@ from vonk_control.models import (
 )
 from vonk_forge_contracts import document_sha256
 
+from .display_fixtures import reworded
 from .removal_settle import advance_until_ended
 from .test_model_cache import _artifact, _canonical_model, _download
 from .test_model_removal_reference_lifecycle import _register_model, _removal_service
@@ -47,9 +48,7 @@ def _revision(
         file_id="weights",
         file_digest=hashlib.sha256(data).hexdigest(),
     )
-    model = model.model_copy(
-        update={"metadata": model.metadata.model_copy(update={"description": note})}
-    )
+    model = reworded(model, note)
     with sessions() as session:
         existing = session.scalar(
             select(CatalogDocument.id).where(
@@ -151,7 +150,7 @@ def test_metadata_only_revision_lists_one_copy_with_real_bytes(
         root = service.root
         service.close()
         service = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True
+            sessions, root, free_fraction=0, fixture_sources=True
         )
         library = LibraryProjection(
             sessions,
@@ -220,7 +219,7 @@ def test_completed_download_repairs_lost_revision_binding_after_restart(
         root = service.root
         service.close()
         service = ModelCacheService(
-            sessions, root, reserve_bytes=0, fixture_sources=True
+            sessions, root, free_fraction=0, fixture_sources=True
         )
         _next_pass(service)
         library = LibraryProjection(

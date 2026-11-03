@@ -17,11 +17,10 @@ permissions:
 
 # Dependency fetches retry transient network failures inside the tool; the
 # pre-sync steps below additionally run under scripts/retry-dependency-fetch.
+# Cargo's own settings live in .cargo/config.toml: rust-cache hashes CARGO* env.
 env:
   UV_HTTP_TIMEOUT: "60"
   UV_HTTP_RETRIES: "5"
-  CARGO_NET_RETRY: "5"
-  CARGO_HTTP_TIMEOUT: "60"
   npm_config_fetch_retries: "5"
   # Exhaustive sweeps run a fixed share on pull-request and merge-queue runs;
   # main's release run and every other caller sweep the full corpus.
@@ -29,13 +28,22 @@ env:
 
 # A new commit supersedes an older PR check. Every other run, including a
 # release workflow call, has its own group: the caller owns its cancellation.
+# Only the `release-acceptance` label starts a new run; any other label runs in
+# its own group so it never cancels the run in progress, and every job below
+# skips it. Only ci-gate is renamed ("CI gate (label ignored)"): it always runs,
+# so its name expression is evaluated, and no run of this kind reports "CI gate".
+# A job skipped by its own `if` keeps the raw `${{ ... }}` as its name (run
+# 40906603157, job 123574403196), so every other job keeps its literal name: a
+# renamed job that is skipped would report a raw expression and never satisfy
+# its required check on pull requests that legitimately skip it.
 concurrency:
-  group: vonk-forge-ci-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
+  group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
 
 jobs:
   changes:
     name: Select CI integration dependencies
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     permissions:
       contents: read
       actions: read
@@ -51,8 +59,11 @@ jobs:
       generated: ${{ steps.areas.outputs.generated }}
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
-      lane: ${{ steps.areas.outputs.lane }}
-      upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
+      # One owner of the label rule: the selector decides by paths; an
+      # integration PR (labelled, or same-repository from integration/*) asks
+      # for complete acceptance and the carry on top of that.
+      lane: ${{ steps.areas.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integration/')) }}
+      upgrade_carry: ${{ steps.areas.outputs.upgrade_carry == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integration/')) }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -85,6 +96,22 @@ jobs:
               --github-output </dev/null >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Label integration pull requests
+        # Visible marker only: acceptance is selected by the outputs above, not
+        # by the label landing. Labels set with the workflow token start no run.
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          startsWith(github.head_ref, 'integration/') &&
+          !contains(github.event.pull_request.labels.*.name, 'release-acceptance')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr edit "$PULL_REQUEST" --repo "$GITHUB_REPOSITORY" --add-label release-acceptance ||
+            echo "::warning::could not add the release-acceptance label; acceptance is selected by branch regardless"
+
       - name: Restore measured pytest durations
         id: timings
         shell: bash
@@ -110,6 +137,7 @@ jobs:
 
   lint:
     name: Ruff
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -145,6 +173,7 @@ jobs:
 
   supply-chain:
     name: Supply-chain evidence
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -758,6 +787,7 @@ jobs:
 
   repository-guards:
     name: Repository guards
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -1197,7 +1227,7 @@ jobs:
     needs: [changes, lint, repository-guards]
     if: >-
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
-      (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance'))
+      needs.changes.outputs.lane == 'true'
     permissions:
       actions: write
       contents: read
@@ -1206,14 +1236,14 @@ jobs:
     with:
       ref: ${{ github.sha }}
       # The upgrade carry runs on a pull request when it changes what the
-      # upgrade is made of, or when the label asks for complete acceptance;
-      # main's release carries every merge regardless.
-      upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') }}
+      # upgrade is made of, or when an integration PR asks for complete
+      # acceptance; main's release carries every merge regardless.
+      upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' }}
 
   ci-gate:
-    name: CI gate
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || 'CI gate' }}
     needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
-    if: always()
+    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -1245,7 +1275,7 @@ jobs:
           SELECTED_COMPOSE: ${{ needs.changes.outputs.compose }}
           SELECTED_NAS_INSTALL: ${{ needs.changes.outputs.nas_install }}
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
-          SELECTED_LANE: ${{ (needs.changes.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance')) && 'true' || 'false' }}
+          SELECTED_LANE: ${{ needs.changes.outputs.lane }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
@@ -1635,6 +1665,7 @@ jobs:
           version-file: .tool-versions
           python-version: "3.14"
           enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.
         continue-on-error: true

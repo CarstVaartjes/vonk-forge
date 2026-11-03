@@ -131,7 +131,6 @@ def _reserve_run_switch_assets(
                 session,
                 (model_set,),
                 now=now,
-                object_digests=plan.storage.artifact_digests,
                 allow_pending_removal=admitted_load,
             )
         if image_archive is not None:

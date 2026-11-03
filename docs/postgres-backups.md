@@ -1,11 +1,16 @@
 # PostgreSQL backups and recovery
 
 The PostgreSQL container writes a compressed SQL dump to `./backups/` beside
-`docker-compose.yaml` after startup, then every 24 hours. Each dump is tested by
-restoring it into a disposable PostgreSQL cluster before it is marked successful.
+`docker-compose.yaml` after startup, then every 24 hours. Each dump is
+gzip-tested, and restored into a disposable PostgreSQL cluster when scratch space
+allows (otherwise that round logs that verification was skipped). The success
+marker means a dump was published and gzip-tested, and copied off-host when
+configured; only the restore-verification marker means a restore check passed.
+Before each round the newest seven dumps and the newest restore-verified dump are
+kept; older ones are removed.
 CA issuance and revocation journals are included in the PostgreSQL dump.
 Failures appear in the PostgreSQL logs and retry after five minutes; a backup
-problem never stops PostgreSQL itself. A failed restore check does not advance the success marker.
+problem never stops PostgreSQL itself. A failed or skipped restore check does not advance the restore-verification marker.
 
 Set `VONK_BACKUP_OFFHOST_PATH` to an already mounted, private host directory to
 copy PostgreSQL dumps off the NAS. The copy is pruned to

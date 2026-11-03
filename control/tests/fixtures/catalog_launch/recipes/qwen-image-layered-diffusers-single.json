@@ -67,7 +67,7 @@
     "max_total_bytes": 33554432,
     "slots": [
      {
-      "description": "Exactly four generated transparent PNG layers.",
+      "description": "Generated transparent PNG layers; the selected recipe option sets the exact output count from one to four.",
       "extensions": [
        ".png"
       ],
@@ -79,31 +79,13 @@
       "media_types": [
        "image/png"
       ],
-      "min_files": 4
+      "min_files": 1
      }
     ]
    }
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "unspecified",
-  "description": "Separate layer-decomposition Candidate, not a general Qwen Image Edit variant: one Spark converts exactly one input image into four deterministic RGBA PNG layers at the pinned 640-pixel, 50-step schedule. Its declared admission envelope is 126.00 GB unified memory including reserve and 149.72 GB peak installation disk.",
-  "tags": [
-   "executable",
-   "candidate",
-   "layer-decomposition",
-   "qwen",
-   "image",
-   "editing",
-   "layered",
-   "diffusers",
-   "bf16",
-   "single",
-   "spark"
-  ],
-  "title": "Qwen Image Layered Diffusers single Spark"
- },
  "models": [
   {
    "files": [
@@ -440,11 +422,59 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "e9b7bcac28245097f08fba8c5097ee4d1fbd41513c68b636a8323d78f696d5db",
+    "content_sha256": "9e5d2d444647f36a999aa7946be6e2d6cb32100a4bea4ca689bc15f21236e1ed",
     "kind": "model",
     "publisher": "qwen",
     "slug": "qwen-image-layered-8f0ca708"
    }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "args": [
+      {
+       "name": "layers",
+       "value": 1
+      }
+     ],
+     "help": "Generate exactly 1 transparent PNG layer using the pinned pipeline.",
+     "label": "1 layer",
+     "value": "one-layer"
+    },
+    {
+     "args": [
+      {
+       "name": "layers",
+       "value": 2
+      }
+     ],
+     "help": "Generate exactly 2 transparent PNG layers using the pinned pipeline.",
+     "label": "2 layers",
+     "value": "two-layers"
+    },
+    {
+     "args": [
+      {
+       "name": "layers",
+       "value": 3
+      }
+     ],
+     "help": "Generate exactly 3 transparent PNG layers using the pinned pipeline.",
+     "label": "3 layers",
+     "value": "three-layers"
+    },
+    {
+     "default": true,
+     "help": "Generate exactly 4 transparent PNG layers using the pinned pipeline.",
+     "label": "4 layers",
+     "value": "four-layers"
+    }
+   ],
+   "help": "Choose the exact number of transparent PNG layers to generate, from one through four. Four remains the default and maximum offered count; larger counts expand the pinned pipeline latent batch and remain withheld until native memory qualification.",
+   "label": "Output layers",
+   "name": "layers"
   }
  ],
  "provenance": {
@@ -454,8 +484,8 @@
   "source_reference": "https://huggingface.co/Qwen/Qwen-Image-Layered/tree/8f0ca708dfff6ba1dd5f2d85d78f8c108a040bcf"
  },
  "release": {
-  "released_at": "2026-09-28",
-  "version": "1.1.12"
+  "released_at": "2026-09-30",
+  "version": "1.2.0"
  },
  "runtime": {
   "arguments": [

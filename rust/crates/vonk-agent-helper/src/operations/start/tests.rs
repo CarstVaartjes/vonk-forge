@@ -427,6 +427,31 @@ fn a_workload_is_launched_without_a_container_memory_limit() {
     }
 }
 
+/// The workload's `/dev/shm` holds what its role declared (vLLM maps a ~27 GiB
+/// table there). Only the launch says so: the signed argv keeps the projected
+/// `memory / 8` value, so the identity label of a run started before this
+/// change is the one the new helper computes, and that run is adopted.
+#[test]
+fn a_workload_is_launched_with_shared_memory_as_declared_and_an_unchanged_identity() {
+    let flag = |argv: &[String], name: &str| {
+        let index = argv.iter().position(|a| a == name).unwrap();
+        argv[index + 1].parse::<u64>().unwrap()
+    };
+    let mut plan = recipe_start_plan_for_authority(1);
+    let mut value = serde_json::to_value(&plan.compiled_execution_plan).unwrap();
+    value["runtime"]["placement"]["reserved_memory_bytes"] = serde_json::json!(100_000_000_000_u64);
+    plan.compiled_execution_plan = serde_json::from_value(value).unwrap();
+    let (signed, run) = launched(plan);
+    assert_eq!(flag(&run, "--shm-size"), 100_000_000_000);
+    assert_eq!(flag(&signed, "--memory"), 100_000_000_000);
+    assert_eq!(flag(&signed, "--shm-size"), 12_500_000_000);
+    let identity = format!(
+        "ai.vonkforge.runtime-request-sha256={}",
+        hex_sha256(&canonical_json(&signed[4..].to_vec()).unwrap())
+    );
+    assert!(run.contains(&identity), "{run:?}");
+}
+
 /// A Docker host whose one container answers every inspection with its line.
 #[derive(Clone)]
 struct InspectedRunner(String);

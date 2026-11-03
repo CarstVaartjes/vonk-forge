@@ -32,27 +32,6 @@
   }
  ],
  "kind": "recipe",
- "metadata": {
-  "alignment": "standard",
-  "description": "Xiaomi MiMo-V2.5 Omni (text, image, video and audio input) as lukealonso's ModelOpt NVFP4 checkpoint on three Sparks with vLLM tensor parallel 3 over Ray, a 1,000,000-token context on a 4-bit NVFP4 KV cache (DiffKV Triton backend with WMMA decode), MTP2 speculative decoding and the TP3 virtual-heads mod that pads the attention heads for three ranks. Basis: tonyd2wild's TP3 NVFP4-KV recipe (MIT) and his earlier TP3 MTP repository (FP8 KV variant, offered as an option), on his published patched vLLM 0.21.1rc1.dev85 dev-build image with the upstream mods applied at build time (the mods are derived from vLLM, Apache-2.0). The upstream TP3 repository does not name an image; the published TP2 image is used because the earlier TP3 repository's audio recipe names the same image lineage (vllm-mimo-omni-mtp2-1m-audio-exp:20260620). The two-Spark recipe by the same creator is mimo-v2-5-omni-nvfp4-tonyd2wild-vllm-dual. Upstream figures (about 36 tok/s decode, 10.59M-token KV pool at 1M context with NVFP4 KV against 3.06M with FP8 KV) are claims until measured here; Vonk physical three-Spark acceptance is pending.",
-  "tags": [
-   "audio",
-   "diffkv",
-   "mimo-v2.5",
-   "mtp",
-   "multimodal",
-   "nvfp4",
-   "nvfp4-kv",
-   "ray",
-   "reasoning",
-   "spark",
-   "tool-use",
-   "tp3",
-   "video",
-   "vllm"
-  ],
-  "title": "MiMo V2.5 Omni NVFP4 vLLM three Sparks"
- },
  "models": [
   {
    "files": [
@@ -653,7 +632,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "35a1b9afcce1740399b8ea384f9b3eb075920339379711ee2b55e7adcad4e68d",
+    "content_sha256": "499cf8ee5206932e94055c1dd55214d96aa8f8caeb3f6d941b50aa29d0f39e1e",
     "kind": "model",
     "publisher": "lukealonso",
     "slug": "mimo-v2-5-nvfp4-a147dd04"
@@ -722,31 +701,6 @@
    "help": "MTP drafting with the checkpoint's bundled MTP head. Upstream's TP3 recipes use two drafted tokens.",
    "label": "Speculative decoding",
    "name": "speculative"
-  },
-  {
-   "choices": [
-    {
-     "default": true,
-     "help": "No server default (upstream TP3 default).",
-     "label": "Chat template (default)",
-     "value": "template"
-    },
-    {
-     "args": [
-      {
-       "name": "default-chat-template-kwargs",
-       "setting": null,
-       "value": "{\"enable_thinking\":false}"
-      }
-     ],
-     "help": "Reasoning off unless a request enables it (upstream eval setting).",
-     "label": "Off",
-     "value": "off"
-    }
-   ],
-   "help": "Server default for the chat template's enable_thinking. The upstream TP3 recipes pass no default, so the chat template decides; upstream's tool/agent eval ran with thinking off.",
-   "label": "Thinking default",
-   "name": "thinking"
   }
  ],
  "provenance": {
@@ -760,7 +714,7 @@
  },
  "release": {
   "released_at": "2026-07-13",
-  "version": "1.0.0"
+  "version": "1.0.1"
  },
  "runtime": {
   "arguments": [
@@ -813,11 +767,6 @@
     "name": "kv-cache-dtype",
     "setting": null,
     "value": "nvfp4"
-   },
-   {
-    "name": "gpu-memory-utilization",
-    "setting": null,
-    "value": "0.89"
    },
    {
     "name": "max-model-len",
@@ -878,6 +827,11 @@
     "name": "reasoning-parser",
     "setting": null,
     "value": "mimo"
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.89"
    }
   ],
   "engine": "vllm",
@@ -1023,8 +977,8 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 124000000000,
-      "reserve_bytes": 6000000000
+      "peak_bytes": 124290276025,
+      "reserve_bytes": 8000000000
      }
     }
    },
@@ -1040,8 +994,8 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 124000000000,
-      "reserve_bytes": 6000000000
+      "peak_bytes": 124290276025,
+      "reserve_bytes": 8000000000
      }
     }
    }

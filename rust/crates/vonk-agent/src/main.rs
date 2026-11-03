@@ -1402,7 +1402,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
                 let attempt = attempts.get() + 1;
                 attempts.set(attempt);
                 if attempt <= 7 {
-                    Err(InventoryError::PrerequisiteUnavailable("Podman"))
+                    Err(InventoryError::PrerequisiteUnavailable("Docker runtime"))
                 } else {
                     Ok(test_inventory())
                 }

@@ -13,6 +13,10 @@ PATH = "control/src/vonk_control/example.py"
         ("vocabulary", "value = 'running'\n", 1),
         ("mapping", "value: dict[str, object]\n", 1),
         ("identity", "same = a.build_id == b.build_id\n", 1),
+        # A recipe's current revision is the catalog head, never a number.
+        ("identity", "q = select(R).order_by(R.revision_number.desc())\n", 1),
+        ("identity", "best = max(rows, key=lambda row: row.revision_number)\n", 1),
+        ("identity", "ok = newest.revision_number <= running.revision_number\n", 1),
         ("security", "raise SecurityRefusalError(reason)\n", 1),
         ("waits", "while True:\n    sleep(1)\n", 1),
         # A fixed deadline is the shape P1 forbids for a wait.
@@ -278,6 +282,24 @@ def test_a_stored_row_is_never_re_hashed_to_decide_what_it_is():
 
 
 def test_provenance_assignment_identity_is_rejected():
+    assert check_source(
+        PATH, "same = a.assignment_id == b.assignment_id\n", {1}, modes=("identity",)
+    )
+
+
+def test_a_primary_key_row_lookup_is_not_a_provenance_comparison():
+    assert not check_source(
+        PATH,
+        "stmt = update(RecipeBuild).where(RecipeBuild.id == build_id)\n",
+        {1},
+        modes=("identity",),
+    )
+    assert check_source(
+        PATH,
+        "same = a.recipe_build_id == b.recipe_build_id\n",
+        {1},
+        modes=("identity",),
+    )
     assert check_source(
         PATH, "same = a.assignment_id == b.assignment_id\n", {1}, modes=("identity",)
     )
@@ -1239,6 +1261,24 @@ def test_added_line_guard_rejects_start_budget_from_stored_timestamps(body):
     assert not check_source(PATH, source, {1}, modes=("start-budgets",))
 
 
+def test_plan_digest_guard_flags_reads_of_the_replanned_plan_only():
+    source = (
+        "def start(service, session, plan, run_id):\n"
+        "    if plan.plan_digest != reviewed:\n"
+        "        raise ValueError\n"
+        "    run_id = service.accept_run_in_session(session, plan)\n"
+        "    run = session.get(RecipeRun, run_id)\n"
+        "    stale = plan.plan_digest\n"
+        "    saved = run.plan_digest\n"
+        "def other(plan):\n"
+        "    return plan.plan_digest\n"
+    )
+    modes = ("plan-digests",)
+    assert check_source(PATH, source, {6}, modes=modes)
+    assert not check_source(PATH, source, {2, 7, 9}, modes=modes)
+    assert not check_source("control/tests/test_example.py", source, {6}, modes=modes)
+
+
 def test_start_budget_guard_allows_reviewed_sites_settings_and_other_clocks():
     source = (
         "def _anchor_start_budget(session, operation, now):\n"
@@ -1442,6 +1482,43 @@ def test_the_storage_owner_and_other_packages_may_read_nas_space() -> None:
         assert not check_source(path, _SPACE_CHECK, {2}, modes=("nas-space",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "reserve_bytes: int = 10 * 1024**3\n",
+        "_MODEL_CACHE_RESERVE_BYTES = 10 * 1024**3\n",
+        "NAS_RESERVE_BYTES = (4 << 30)\n",
+        "X_RESERVE_BYTES = OTHER_CONSTANT\n",
+        "def f(self, reserve_bytes: int = 5 * 1024**3): ...\n",
+    ],
+)
+def test_a_fixed_byte_reserve_is_flagged(source: str) -> None:
+    path = "control/src/vonk_control/settings.py"
+    assert check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            "control/src/vonk_control/recipe_builds/common.py",
+            "MINIMUM_BUILD_DISK_RESERVE_BYTES = 4 * 1024**3\n",
+        ),
+        ("control/src/vonk_control/other.py", "RESERVE_FRACTION = 0.1\n"),
+        (
+            "control/src/vonk_control/other.py",
+            "reserve_bytes=cache.reserve_of(total)\n",
+        ),
+        ("control/src/vonk_control/other.py", "reserve_bytes: int = Field(ge=0)\n"),
+        ("control/src/vonk_control/other.py", "reserved_bytes = 4096\n"),
+        ("control/tests/test_x.py", "RESERVE_BYTES = 10 * 1024**3\n"),
+    ],
+)
+def test_other_reserve_lines_are_not_flagged(path: str, source: str) -> None:
+    assert not check_source(path, source, {1}, modes=("fixed-reserves",))
+
+
 _SET_SELECTION = (
     "def sets(session, digest):\n"
     "    return session.scalars(\n"
@@ -1471,6 +1548,66 @@ def test_the_shared_resolver_and_other_modules_may_select_by_digest() -> None:
         "control/tests/test_model_removal_lineage_postgres.py",
     ):
         assert not check_source(path, _SET_SELECTION, {4}, modes=("model-sets",))
+
+
+_WHOLE_MEMBERSHIP = (
+    "def read(session, sets):\n"
+    "    every = session.scalars(select(ModelCacheSetArtifact.artifact_sha256))\n"
+    "    named = session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "        )\n"
+    "    )\n"
+    "    return every, named\n"
+)
+
+
+_DELETED_ACCEPTANCE_READ = (
+    "def read(session, selected):\n"
+    "    return session.scalars(\n"
+    "        select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+    "            ModelCacheSetArtifact.artifact_set_sha256.not_in(selected)\n"
+    "        )\n"
+    "    )\n"
+)
+_QUERY_ALL = (
+    "def read(session):\n    return session.query(ModelCacheSetArtifact).all()\n"
+)
+_TARGETED_FILTER = (
+    "def read(session, sets):\n"
+    "    return session.query(ModelCacheSetArtifact).filter(\n"
+    "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)\n"
+    "    ).all()\n"
+)
+_MEMBERSHIP_PATHS = (
+    "control/src/vonk_control/model_cache/removal_acceptance.py",
+    "control/src/vonk_control/artifact_reference_scan/model_sets.py",
+    "control/src/vonk_control/unused_storage_collection/service.py",
+)
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_whole_membership_table_read_is_flagged(path: str) -> None:
+    whole = "def r(s):\n    return s.scalars(select(ModelCacheSetArtifact))\n"
+    assert check_source(path, _DELETED_ACCEPTANCE_READ, {3}, modes=("model-sets",))
+    assert check_source(path, _QUERY_ALL, {2}, modes=("model-sets",))
+    assert check_source(path, whole, {2}, modes=("model-sets",))
+    assert not check_source(path, _DELETED_ACCEPTANCE_READ, {1}, modes=("model-sets",))
+
+
+@pytest.mark.parametrize("path", _MEMBERSHIP_PATHS)
+def test_a_membership_read_that_names_rows_passes(path: str) -> None:
+    named = (
+        "def r(s, sets):\n"
+        "    return s.scalars(select(ModelCacheSetArtifact.artifact_sha256).where(\n"
+        "        ModelCacheSetArtifact.artifact_set_sha256.in_(sets)))\n"
+    )
+    limited = "def r(s):\n    return s.scalar(select(ModelCacheSetArtifact).limit(1))\n"
+    for source in (_TARGETED_FILTER, named, limited):
+        assert not check_source(path, source, {2, 3}, modes=("model-sets",))
+    assert not check_source(
+        "control/tests/test_x.py", _QUERY_ALL, {2}, modes=("model-sets",)
+    )
 
 
 _DIRECT_OPENER = (
@@ -1622,6 +1759,371 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
     )
 
 
+_ITEM_COUNT = (
+    "class Plan(Model):\n"
+    "    artifact_digests: list[Digest] = Field(default_factory=list, max_length=256)\n"
+    "    objects: tuple[Obj, ...] = Field(\n"
+    "        min_length=1,\n"
+    "        max_length=4096,\n"
+    "    )\n"
+    "    files: list[F] = Field(max_length=8)  # item-count-limit: wire frame\n"
+    "    node_ids: list[str] = Field(max_length=32)\n"
+    "    digest: str = Field(max_length=64)\n"
+    "    input_files: list[In] = Field(max_length=MAX_INPUT_FILES)\n"
+    "    artifact_count: int = Field(ge=1, le=1024)\n"
+    "    artifact_bytes: int = Field(ge=1, le=1024)\n"
+    "    object_ids: list[str] = Field(max_length=MAX_FLEET)\n"
+    "    profile_count: int = Field(ge=0, le=MAX_DATABASE_INTEGER)\n"
+    "    rooms: list[str] = Field(max_length=MAX_DATABASE_INTEGER)\n"
+)
+
+
+def test_item_count_cap_on_a_model_sized_list_is_flagged() -> None:
+    """Catches a digest/object cap like the 256-digest one that failed a plan."""
+    path = "control/src/vonk_control/plan_contract.py"
+    assert check_source(path, _ITEM_COUNT, {2}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {5}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {7, 8, 9}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {1}, modes=("item-counts",))
+    # A named constant is a count too; so is ``le`` on a count field.
+    assert check_source(path, _ITEM_COUNT, {10}, modes=("item-counts",))
+    assert check_source(path, _ITEM_COUNT, {11}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {12}, modes=("item-counts",))
+    # Whole name tokens only: ``object_ids`` has the token ``object``; a database
+    # range constant and names without a model-sized token are not counts.
+    assert check_source(path, _ITEM_COUNT, {13}, modes=("item-counts",))
+    assert not check_source(path, _ITEM_COUNT, {14, 15}, modes=("item-counts",))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "asyncio.run(main())",
+        "asyncio.Runner()",
+        "uvloop.run(main())",
+        "anyio.run(main)",
+        "loop.run_until_complete(main())",
+    ],
+)
+def test_an_event_loop_entered_outside_the_transport_is_flagged(call: str) -> None:
+    source = f"def go(main, loop):\n    return {call}\n"
+    path = "src/cluster_profiles/cli.py"
+    assert check_source(path, source, {2}, modes=("event-loops",)), call
+    # The transport owns the entry; other trees and old lines stay quiet.
+    owner = "src/cluster_profiles/control_transport.py"
+    assert not check_source(owner, source, {2}, modes=("event-loops",))
+    assert not check_source(
+        "control/src/vonk_control/x.py", source, {2}, modes=("event-loops",)
+    )
+    assert not check_source(path, source, {1}, modes=("event-loops",))
+    quiet = "def go(runner, work):\n    return runner.run(work)  # asyncio.run(x)\n"
+    assert not check_source(path, quiet, {2}, modes=("event-loops",))
+
+
+# The three runtime caps the model-cache change deleted, line for line (main's
+# model_cache/artifacts.py:395 and :420, catalog_helpers.py:368), and the attribute
+# form of a live one (control source_bundles.py:509).
+_RUNTIME_CAPS = (
+    "def parts(parts):\n"
+    "    return (\n"
+    "        not 2 <= len(parts) <= _MAX_ARTIFACT_PARTS\n"
+    "    )\n"
+    "\n"
+    "\n"
+    "def manifest(value):\n"
+    "    if len(value.artifacts) < 1 or len(value.artifacts) > _MAX_ARTIFACTS:\n"
+    "        raise ValueError\n"
+    "\n"
+    "\n"
+    "def models(result):\n"
+    "    if len(result) > _MAX_ARTIFACTS:\n"
+    "        raise ValueError\n"
+    "    if len(result) < 2 or len(result) > MAX_NODES or len(result) > 3:\n"
+    "        raise ValueError\n"
+    "\n"
+    "\n"
+    "def bundle(files, limits):\n"
+    "    if len(files) >= limits.max_files:\n"
+    "        raise ValueError\n"
+    "    if len(nodes) >= limits.max_nodes:\n"
+    "        raise ValueError\n"
+)
+
+
+def test_runtime_len_caps_on_model_sized_collections_are_flagged() -> None:
+    """Catches the three runtime ``len(...)`` caps the model-cache change deleted."""
+    path = "control/src/vonk_control/model_cache/x.py"
+    for line in (3, 8, 13):
+        assert check_source(path, _RUNTIME_CAPS, {line}, modes=("item-counts",)), line
+    # A small literal or a name with no model-sized word is a shape check.
+    # ``limits.max_files`` is the same cap behind an attribute (source_bundles.py:509).
+    assert check_source(path, _RUNTIME_CAPS, {20}, modes=("item-counts",))
+    assert not check_source(path, _RUNTIME_CAPS, {15, 22}, modes=("item-counts",))
+    assert not check_source(path, _RUNTIME_CAPS, {1, 2, 7}, modes=("item-counts",))
+    lt = "class P(M):\n    artifact_count: int = Field(lt=1024)\n"
+    assert check_source(path, lt, {2}, modes=("item-counts",))
+
+
+TRAP_PATH = "deploy/compose/postgres/entrypoint.sh"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # The backup worker's old copy poll.
+        "trap 'cleanup; exit 0' TERM INT\nwhile kill -0 \"$pid\"; do\n  sleep 5\ndone\n",
+        # The Tailscale reconciler's old sleep.
+        'trap shutdown_services 1 2 15\nwhile :; do\n    sleep "${reconcile_interval}"\ndone\n',
+        "trap -- 'cleanup' TERM\nsleep 5 && true\n",
+        "trap cleanup TERM\nsleep 5 &\ntrue\n",
+    ],
+)
+def test_a_foreground_sleep_under_a_termination_trap_fails(source):
+    line = next(
+        number for number, text in enumerate(source.splitlines(), 1) if "sleep" in text
+    )
+    assert check_source(TRAP_PATH, source, {line}, modes=("trap-waits",))
+    # Only an added line can fail the change.
+    assert not check_source(TRAP_PATH, source, {line + 1}, modes=("trap-waits",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "trap 'cleanup; exit 0' TERM INT\nsleep 5 & wait $!\n",
+        'trap shutdown_services 1 2 15\nsleep "${reconcile_interval}" & wait $!\n',
+        "trap cleanup 0\nsleep 5\n",
+        "sleep 5\n",
+        "trap 'cleanup' TERM\n# sleep 5\n",
+        'trap cleanup TERM\nsleep 5 & wait "$!"\n',
+        'trap cleanup TERM\nsleep 5 & pid=$!; wait "$pid"\n',
+        "trap cleanup TERM\nsleep 5 &\nwait $!\n",
+        "trap cleanup TERM\necho sleep 1\n",
+        "trap - TERM\nsleep 5\n",
+    ],
+)
+def test_interruptible_or_untrapped_sleeps_pass(source):
+    lines = set(range(1, len(source.splitlines()) + 1))
+    assert not check_source(TRAP_PATH, source, lines, modes=("trap-waits",))
+
+
+def test_background_owners_may_not_add_request_retry_calls():
+    source = "def scan(cache):\n    return cache.resolve_artifact_set(model_content_sha256=d)\n"
+    modes = ("background-retries",)
+    owner = "control/src/vonk_control/model_cache/revisions.py"
+    request = "control/src/vonk_control/model_cache/download_admission.py"
+    assert check_source(owner, source, {2}, modes=modes)
+    assert check_source(
+        owner, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
+    assert not check_source(owner, source, {1}, modes=modes)  # not an added line
+    assert not check_source(request, source, {2}, modes=modes)
+    routes = "control/src/vonk_control/recipe_routes/withdrawal.py"
+    assert check_source(
+        routes, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
+    service = "control/src/vonk_control/recipe_routes/service.py"
+    assert check_source(
+        service, "for _a in bounded_attempts():\n    pass\n", {1}, modes=modes
+    )
+    assert not check_source(
+        owner,
+        "cache._resolve_artifact_set_once(model_content_sha256=d)\n",
+        {1},
+        modes=modes,
+    )
+
+
+LOCKED_READ = """\
+def claim(cache, spec):
+    with cache._session(write=True) as session:
+        row = session.scalar(select(Op).with_for_update(skip_locked=True))
+        {call}
+"""
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "cache._object_is_stored(spec)",
+        "cache._transfer_need(manifest, transfer, replaces=False)",
+        "cache._transfer_state_for_manifest(manifest, force=False)",
+        "cache._running_transfers(session)",
+        "cache._verified_bytes(session, digest)",
+        "os.scandir(root)",
+        "path.lstat()",
+    ],
+)
+def test_storage_io_inside_a_locking_transaction_fails(call):
+    source = LOCKED_READ.format(call=call)
+    lines = {1, 2, 3, 4}
+    assert check_source(PATH, source, lines, modes=("locked-io",))
+    assert not check_source(PATH, source, set(), modes=("locked-io",))
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "cache._transfer_state_for_manifest(manifest, force=False, cached=stored)",
+        "cache._payload_or_none(row)",
+    ],
+)
+def test_facts_read_before_the_transaction_pass(call):
+    source = LOCKED_READ.format(call=call)
+    assert not check_source(PATH, source, {1, 2, 3, 4}, modes=("locked-io",))
+    unlocked = source.replace(".with_for_update(skip_locked=True)", "")
+    assert not check_source(
+        PATH,
+        unlocked.replace(call, "cache._object_is_stored(spec)"),
+        {1, 2, 3, 4},
+        modes=("locked-io",),
+    )
+
+
+_TITLE_IDENTITY = (
+    "alias = assignment.recipe_title.lower().replace(' ', '-')\n"
+    "slug = slugify(recipe.title)\n"
+    "key = item.identity.title.casefold()\n"
+    "shown = recipe.title.title()\n"
+    "label = f'{assignment.recipe_title} {version}'\n"
+)
+
+
+def test_a_name_built_from_a_display_title_is_flagged() -> None:
+    path = "control/src/vonk_control/fleet_profiles/example.py"
+    for line in (1, 2, 3):
+        assert check_source(path, _TITLE_IDENTITY, {line}, modes=("identity",)), line
+    assert not check_source(path, _TITLE_IDENTITY, {4, 5}, modes=("identity",))
+
+
+def test_a_title_search_filter_is_allowed() -> None:
+    path = "control/src/vonk_control/library_projection/views.py"
+    source = "ok = wanted_search in item.identity.title.casefold()\n"
+    assert not check_source(path, source, {1}, modes=("identity",))
+    assert check_source(
+        path, "x = item.identity.title.casefold()\n", {1}, modes=("identity",)
+    )
+
+
+def test_model_file_removal_belongs_to_the_removal_executor():
+    source = "def go(cache):\n    cache._remove_model_object_files(digest)\n"
+    other = "control/src/vonk_control/model_cache/other.py"
+    executor = "control/src/vonk_control/model_cache/removal_execution.py"
+    assert check_source(other, source, {2}, modes=("model-sets",))
+    assert not check_source(executor, source, {2}, modes=("model-sets",))
+    assert not check_source(other, source, {1}, modes=("model-sets",))
+
+
+_SCRATCH_PATH = "control/src/vonk_control/recipe_packages/__init__.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'temporary = target.with_suffix(".tmp")\n',
+        'partial = root / f".{RELEASE_LIBRARY}.part"\n',
+        'temporary = report.with_name(f".{report.name}.part")\n',
+        'candidate = root / "snapshot.candidate.tmp"\n',
+        'partial = target.parent / (target.name + ".part")\n',
+    ],
+)
+def test_a_shared_scratch_name_is_flagged(source: str) -> None:
+    assert check_source(_SCRATCH_PATH, source, {1}, modes=("scratch-names",))
+    assert not check_source(_SCRATCH_PATH, source, set(), modes=("scratch-names",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            _SCRATCH_PATH,
+            (
+                "fd, name = tempfile.mkstemp(\n"
+                '    prefix=".snapshot.", suffix=".tmp", dir=root\n'
+                ")\n"
+            ),
+        ),
+        (
+            _SCRATCH_PATH,
+            'temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")\n',
+        ),
+        (_SCRATCH_PATH, 'orphans = root.glob(".snapshot.*.tmp")\n'),
+        (_SCRATCH_PATH, 'staging = root / ".tmp"\n'),
+        (
+            "control/src/vonk_control/model_cache/storage.py",
+            'return root / "partials" / set_digest / f"{digest}.part"\n',
+        ),
+        ("control/tests/test_x.py", 'path = tmp_path / "model.part"\n'),
+    ],
+)
+def test_private_or_classified_scratch_names_pass(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("scratch-names",))
+
+
+def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
+    for probe in (
+        "code = ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY\n",
+        "code = RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY\n",
+    ):
+        # Probe: an emission on the memory path fails the rule.
+        for path in (
+            "control/src/vonk_control/resource_planning/capacity.py",
+            "control/src/vonk_control/run_admission.py",
+            "control/src/vonk_control/run_switch_operations/resource_fit.py",
+        ):
+            assert check_source(path, probe, {1}, modes=("capacity-refusals",))
+        assert not check_source(
+            "control/src/vonk_control/fleet_profiles/colocation.py",
+            probe,
+            {1},
+            modes=("capacity-refusals",),
+        )
+        assert not check_source(
+            "control/src/vonk_control/resource_planning/capacity.py",
+            probe,
+            {2},
+            modes=("capacity-refusals",),
+        )
+    # The disk site carries its own marker; the marker is per line.
+    disk = "code = RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY  # capacity-refusal: disk\n"
+    assert not check_source(
+        "control/src/vonk_control/run_switch_operations/resource_fit.py",
+        disk,
+        {1},
+        modes=("capacity-refusals",),
+    )
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        "raise HTTPException(status_code=422, detail='time is in the future')\n",
+        "raise HTTPException(\n    status_code=422,\n    detail='x',\n)\n",
+        "return Response(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)\n",
+    ],
+)
+def test_new_agent_facing_422_is_flagged(probe: str) -> None:
+    # Wrong implementation: a clock or race answered 422 makes the Spark drop
+    # bytes that would be accepted a moment later.
+    path = "control/src/vonk_control/agent_api/observations.py"
+    line = next(
+        number for number, text in enumerate(probe.splitlines(), 1) if "422" in text
+    )
+    assert check_source(path, probe, {line}, modes=("agent-422",))
+
+
+def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
+    marked = "raise HTTPException(status_code=422)  # 422-verdict: body validation\n"
+    path = "control/src/vonk_control/agent_api/observations.py"
+    assert not check_source(path, marked, {1}, modes=("agent-422",))
+    other = "raise HTTPException(status_code=422)\n"
+    assert not check_source(
+        "control/src/vonk_control/library_api.py", other, {1}, modes=("agent-422",)
+    )
+    assert not check_source(path, other, set(), modes=("agent-422",))
+
+
 @pytest.mark.parametrize(
     "source,line",
     [
@@ -1631,24 +2133,10 @@ def test_typed_or_unrelated_read_passes_document_reads(source: str) -> None:
         ("def review(s):\n    return operation_tokens(s, recent=True)\n", 2),
         ("def review(s, n, now):\n    return spark_eviction_capacity(s, n, now)\n", 2),
         ("def review(c, s, n):\n    return c.relief_for_spark(s, n)\n", 2),
-        (
-            "def rows(s):\n    return s.execute(select(Job.id, Job.state))\n",
-            2,
-        ),
-        ("def rows(s):\n    return s.scalars(select(Job).join(Other))\n", 2),
         ("def review(s):\n    return pinned_by_heads(s)\n", 2),
         ("def review(s):\n    return _profile_pointers(s)\n", 2),
         ("def review(s, a):\n    return runtime_image_reference_findings(s, a)\n", 2),
         ("def review(s, a):\n    return model_set_reference_reasons(s, a)\n", 2),
-        ("def rows(s):\n    return s.scalars(select(RecipeInstallation))\n", 2),
-        (
-            "def rows(s):\n    return s.scalars(select(Job).order_by(Job.id))\n",
-            2,
-        ),
-        (
-            "def rows(s):\n    q = select(FleetProfile)\n    return s.scalars(q)\n",
-            2,
-        ),
     ],
 )
 def test_a_request_path_may_not_read_the_whole_collection(source, line):
@@ -1669,27 +2157,11 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
         ),
         (
             "control/src/vonk_control/terminal_history_collection.py",
-            "def run(s):\n    return s.scalars(select(Job))\n",
+            "def run(s):\n    return live_tokens(s, 1)\n",
         ),
-        # Target-keyed, narrowed or column reads are what a request path does.
+        # Target-keyed reads are what a request path does.
         (PATH, "def review(s, a):\n    return unused_for(s, a)\n"),
-        (PATH, "def rows(s):\n    return s.scalars(select(Job).where(Job.id == 1))\n"),
-        (PATH, "def rows(s):\n    return s.scalars(select(Job).limit(10))\n"),
-        (
-            PATH,
-            (
-                "def rows(s, node):\n"
-                "    q = select(RecipeInstallation)\n"
-                "    q = q.where(RecipeInstallation.node_id == node)\n"
-                "    return s.scalars(q)\n"
-            ),
-        ),
         (PATH, "def review(s):\n    return operation_tokens(s, recent=False)\n"),
-        (
-            PATH,
-            "def rows(s):\n    return s.execute(select(Job.id).where(Job.id == 1))\n",
-        ),
-        (PATH, "def rows(s):\n    return s.scalars(select(AgentNode))\n"),
         ("control/tests/test_x.py", "def t(s):\n    return live_tokens(s, 1)\n"),
     ],
 )
@@ -2107,12 +2579,9 @@ def test_json_decode_errors_and_raising_handlers():
             "control/src/vonk_control/unused_storage_collection/evidence.py",
             "def helper(s):\n    return operation_tokens(s, 1)\n",
         ),
-        (PATH, "def rows(s):\n    return s.scalars(select(RecipeRun))\n"),
-        (PATH, "def rows(s):\n    return s.scalars(select(NodeTelemetrySample))\n"),
-        (PATH, "def rows(s):\n    return s.execute(select(Job.id, Other.x))\n"),
     ],
 )
-def test_collector_modules_are_exempt_per_function_and_more_tables_grow(path, source):
+def test_collector_modules_are_exempt_per_function(path, source):
     assert check_source(path, source, {2}, modes=("collection-readers",))
 
 
@@ -2120,3 +2589,22 @@ def test_the_collector_functions_of_the_evidence_modules_stay_exempt():
     source = "def read(s, now):\n    return operation_tokens(s, now)\n"
     path = "control/src/vonk_control/unused_storage_collection/evidence.py"
     assert not check_source(path, source, {2}, modes=("collection-readers",))
+
+
+API_PATH = "control/src/vonk_control/example_api.py"
+
+
+@pytest.mark.parametrize(
+    "table",
+    ["Job", "JobAttempt", "FleetProfile", "InstallationNode", "NodeTelemetrySample"],
+)
+def test_the_request_scan_guard_covers_the_tables_that_grow_with_the_fleet(table):
+    """One table set: the tables the old collection rule named are the scan rule's."""
+    unnarrowed = f"def rows(s):\n    return s.scalars(select({table}))\n"
+    column = f"def rows(s):\n    return s.execute(select({table}.id))\n"
+    keyed = f"def rows(s, i):\n    return s.scalars(select({table}).where({table}.id == i))\n"
+    paged = f"def rows(s):\n    return s.scalars(select({table}).limit(10))\n"
+    assert check_source(API_PATH, unnarrowed, {2}, modes=("request-scans",))
+    assert check_source(API_PATH, column, {2}, modes=("request-scans",))
+    assert not check_source(API_PATH, keyed, {2}, modes=("request-scans",))
+    assert not check_source(API_PATH, paged, {2}, modes=("request-scans",))

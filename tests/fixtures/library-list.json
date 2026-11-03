@@ -23,14 +23,6 @@
           "publisher": "vonk-forge",
           "slug": "synthetic-tiny-build"
         },
-        "metadata": {
-          "title": "Synthetic Tiny build",
-          "description": "Synthetic source-build example.",
-          "tags": [
-            "synthetic",
-            "text"
-          ]
-        },
         "provenance": {
           "attribution": [
             "Vonk Forge"
@@ -101,12 +93,6 @@
         },
         "base_image_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         "options": [],
-        "title": "Synthetic Tiny build",
-        "description": "Synthetic source-build example.",
-        "tags": [
-          "synthetic",
-          "text"
-        ],
         "runtime_engine": "vllm",
         "topology": {
           "name": "solo",

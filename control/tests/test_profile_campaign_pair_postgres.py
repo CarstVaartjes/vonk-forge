@@ -124,11 +124,8 @@ class _PairedReceiptAdapter(_SwitchAdapter):
 def _add_second_recipe_revision(sessions: sessionmaker) -> str:
     document = _recipe_document()
     identity = document.get("identity")
-    metadata = document.get("metadata")
     assert isinstance(identity, dict)
-    assert isinstance(metadata, dict)
     identity["slug"] = "synthetic-tiny-solo"
-    metadata["title"] = "Synthetic Tiny Solo"
     recipe = RecipeDefinition.model_validate(document)
     document_id = _uuid(50)
     revision_id = _uuid(51)
@@ -139,7 +136,7 @@ def _add_second_recipe_revision(sessions: sessionmaker) -> str:
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="test",
                 created_at=NOW,
                 updated_at=NOW,

@@ -175,7 +175,7 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
         cache = ModelCacheService(
             sessions,
             tmp_path / "unrelated-cache",
-            reserve_bytes=0,
+            free_fraction=0,
             fixture_sources=True,
         )
         try:

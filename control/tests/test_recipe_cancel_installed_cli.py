@@ -56,7 +56,7 @@ def test_installed_recipe_cancel_recovers_dropped_acceptance_and_settles(
                 kind="recipe",
                 publisher=recipe.identity.publisher,
                 slug=recipe.identity.slug,
-                title=recipe.metadata.title,
+                title=recipe.identity.slug,
                 created_by="test",
                 created_at=now,
                 updated_at=now,
