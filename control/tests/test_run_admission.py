@@ -32,7 +32,6 @@ from vonk_control.run_admission import (
     RunAdmissionBusy,
     RunAdmissionService,
     RunPlanConflict,
-    RunPlanInvalid,
     allocate_service_port,
     require_admissible,
     run_port_demand,
@@ -504,29 +503,48 @@ def test_platform_floor_still_blocks_a_run_without_headroom(tmp_path) -> None:
     assert plan.nodes[0].memory_floor_bytes == 50
 
 
-def test_idle_spark_capacity_shortfall_recovers_with_fresh_inventory(tmp_path) -> None:
-    # Catches the idle-node exception that launched beyond observed capacity.
-    # A peak above the whole pool is a definite refusal, never a wait; a fresh
-    # request is still admitted once the Spark reports room for it.
+def test_an_estimate_above_the_whole_pool_is_tried_as_the_only_claim(tmp_path) -> None:
+    # The recipe's peak is an estimate until a try measures it: above what an
+    # idle Spark admits it claims all free memory, and nothing else may start.
     sessions, now, _node, installation = setup(
         tmp_path, free_memory=300, peak_bytes=1001
     )
     service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
     plan = service.plan_run(installation, alias="qwen", now=now)
-    assert not plan.allowed
-    with pytest.raises(RunPlanInvalid):
-        require_admissible(plan)
+    require_admissible(plan)
+    assert plan.nodes[0].required_memory_bytes == 1000
+    assert service.accept_run(plan, actor="admin", now=now)
 
+    # While that try holds the Spark, a second estimate waits.
+    other = service.plan_run(installation, alias="qwen", now=now)
+    assert not other.allowed
+
+
+def test_an_estimate_try_survives_free_memory_changing_before_accept(tmp_path) -> None:
+    # The claim of an over-max estimate is min(estimate, total - floor), not the
+    # free memory of one sample: a newer sample must not make the reviewed plan
+    # stale. Catches a claim sized from the current free memory.
+    sessions, now, _node, installation = setup(
+        tmp_path, free_memory=300, peak_bytes=1001
+    )
+    service = RunAdmissionService(sessions, inventory_max_age=300, memory_floor_bytes=0)
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    require_admissible(plan)
     with sessions.begin() as session:
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
-        snapshot.host_memory_total_bytes = 2000
-        snapshot.host_memory_free_bytes = 2000
-        snapshot.gpu_memory_total_bytes = 2000
-        snapshot.gpu_memory_free_bytes = 2000
-    fresh = service.plan_run(installation, alias="qwen", now=now)
-    require_admissible(fresh)
-    assert service.accept_run(fresh, actor="admin", now=now)
+        snapshot.host_memory_free_bytes -= 10
+        snapshot.gpu_memory_free_bytes -= 10
+    run_id = service.accept_run(plan, actor="admin", now=now)
+    with sessions() as session:
+        claim = session.scalar(
+            select(ResourceReservation).where(
+                ResourceReservation.owner_id == run_id,
+                ResourceReservation.kind == "unified-memory",
+            )
+        )
+        assert claim is not None
+        assert claim.amount_bytes == plan.nodes[0].required_memory_bytes == 1000
 
 
 def test_envelope_larger_than_the_spark_with_another_claim_is_a_retryable_wait(

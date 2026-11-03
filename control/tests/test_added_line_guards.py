@@ -2059,3 +2059,37 @@ def test_a_shared_scratch_name_is_flagged(source: str) -> None:
 def test_private_or_classified_scratch_names_pass(path: str, source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(path, source, lines, modes=("scratch-names",))
+
+
+def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
+    for probe in (
+        "code = ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY\n",
+        "code = RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY\n",
+    ):
+        # Probe: an emission on the memory path fails the rule.
+        for path in (
+            "control/src/vonk_control/resource_planning/capacity.py",
+            "control/src/vonk_control/run_admission.py",
+            "control/src/vonk_control/run_switch_operations/resource_fit.py",
+        ):
+            assert check_source(path, probe, {1}, modes=("capacity-refusals",))
+        assert not check_source(
+            "control/src/vonk_control/fleet_profiles/colocation.py",
+            probe,
+            {1},
+            modes=("capacity-refusals",),
+        )
+        assert not check_source(
+            "control/src/vonk_control/resource_planning/capacity.py",
+            probe,
+            {2},
+            modes=("capacity-refusals",),
+        )
+    # The disk site carries its own marker; the marker is per line.
+    disk = "code = RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY  # capacity-refusal: disk\n"
+    assert not check_source(
+        "control/src/vonk_control/run_switch_operations/resource_fit.py",
+        disk,
+        {1},
+        modes=("capacity-refusals",),
+    )

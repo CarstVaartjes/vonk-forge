@@ -892,6 +892,10 @@ class RunAdmissionService:
             free_after = (
                 memory_fit.selected_free_after_bytes if health_reason is None else None
             )
+            if memory_fit.required_bytes is not None:
+                # What the planner charges: an estimate claims at most the
+                # Spark less the floor.
+                required = memory_fit.required_bytes
             # A GPU fault can leave discovery without any capacity reading.
             # Wait for healthy inventory instead of blaming the recipe for
             # a zero-byte physical pool the driver never measured.

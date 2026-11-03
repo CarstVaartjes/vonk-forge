@@ -80,7 +80,19 @@ MODES = (
     "background-retries",
     "locked-io",
     "scratch-names",
+    "capacity-refusals",
 )
+# The only code that may name DEMAND_EXCEEDS_CAPACITY: sibling starts that
+# cannot share one Spark, and the mapping between the resource and run-switch
+# vocabularies. A disk allocation larger than its device is the one other site,
+# marked on its own line.
+CAPACITY_REFUSAL_SITES = frozenset(
+    {
+        "control/src/vonk_control/fleet_profiles/colocation.py",
+        "control/src/vonk_control/fleet_profiles/dependencies.py",
+    }
+)
+CAPACITY_REFUSAL_MARKER = "capacity-refusal: disk"
 # A name that reserves volume space (not "reserved": space a run holds) bound to
 # a number or a constant, anywhere on the line, annotated or not.
 FIXED_RESERVE = re.compile(
@@ -1731,6 +1743,23 @@ def check_source(
             (line, "NAS space read outside storage.py; use _storage_shortfall")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(r"\bfree_bytes\(\)|\bdisk_usage\(", text)
+        )
+    if (
+        python
+        and not is_test
+        and "capacity-refusals" in modes
+        and path.startswith("control/src/")
+        and path not in CAPACITY_REFUSAL_SITES
+    ):
+        # A recipe's declared peak and swap are estimates, tried on hardware and
+        # judged by the host memory guard (owner 2026-11-02). "Demand exceeds
+        # capacity" ends a request for good, so only the classified sites may
+        # emit it; a memory or swap estimate waits or is tried, never ends.
+        hits.extend(
+            (line, "demand-exceeds-capacity outside its classified sites")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(r"\b(?:RESOURCE_)?DEMAND_EXCEEDS_CAPACITY\b", text)
+            and CAPACITY_REFUSAL_MARKER not in text
         )
     if (
         python

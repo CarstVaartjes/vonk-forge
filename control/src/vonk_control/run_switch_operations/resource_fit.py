@@ -371,6 +371,10 @@ class ResourceFitMixin:
                             memory_floor_bytes=memory_need.floor_bytes,
                         )
                         fit_node = fit_capacity.nodes[0]
+                        if fit_node.required_bytes is not None:
+                            # What the planner charges: an estimate claims at
+                            # most the Spark less the floor.
+                            required_memory = fit_node.required_bytes
                         memory_free_after = (
                             fit_node.selected_free_after_bytes
                             if health_reason is None
@@ -507,7 +511,7 @@ class ResourceFitMixin:
                     ):
                         node_blockers.append(
                             _as_reason(
-                                RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,
+                                RunSwitchCode.RESOURCE_DEMAND_EXCEEDS_CAPACITY,  # capacity-refusal: disk
                                 f"The disk allocation needs {required_disk} bytes, "
                                 f"exceeding this Spark's entire {snapshot.disk_total_bytes}-byte device; "
                                 "eviction cannot make it fit.",
