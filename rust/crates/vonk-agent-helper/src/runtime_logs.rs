@@ -50,6 +50,9 @@ const OMISSION_MARKER_BYTES: usize = 48;
 const MEMORY_FIGURE_BYTES: usize = RETAINED_BYTES / 4;
 /// Lines read back from the container.  Kept well above what is retained so a
 /// failure header above the retained window is still visible to the anchor.
+/// The capture is the smaller of these lines and the last
+/// `package_command::STREAM_RETAINED_BYTES` (32 KiB) of each stream, which is
+/// all the helper's command runner keeps of `docker logs`.
 pub const CAPTURE_LINES: &str = "400";
 
 /// Headers that open a block reporting why a process stopped.
@@ -588,23 +591,44 @@ pub fn retain_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
     }
 }
 
-/// The whole captured output of one failed container (`CAPTURE_LINES` per
-/// stream), for classification only.  Retention bounds what crosses the
-/// protocol; the cause is read from everything that was captured, because a
-/// window can drop the line that names it: a two-Spark vLLM start prints the
-/// worker's `no kernel image is available` above kilobytes of C++ frames, and
-/// a window of those frames alone reads as unclassified.
-pub fn captured_container(stdout: &[u8], stderr: &[u8]) -> HostHelperProcessLogs {
-    let whole = |stream: &[u8]| FailureLogTail {
-        text: String::from_utf8_lossy(stream).into_owned(),
-        truncated: false,
-        dropped_bytes: Some(0),
-        dropped_lines: Some(0),
-    };
-    HostHelperProcessLogs {
-        exit_code: None,
-        stdout: whole(stdout),
-        stderr: whole(stderr),
+/// One failed container's captured output: what `docker logs --tail
+/// CAPTURE_LINES` printed, as the helper's command runner kept it (the last
+/// `package_command::STREAM_RETAINED_BYTES` of each stream).  An exit is
+/// classified from this alone; the windows that cross the protocol are cut
+/// from it by `retained`, so classification can never be handed a window.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapturedOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl CapturedOutput {
+    pub fn new(stdout: &[u8], stderr: &[u8]) -> Self {
+        Self {
+            stdout: stdout.to_vec(),
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    /// The bounded windows the protocol carries.
+    pub fn retained(&self) -> HostHelperProcessLogs {
+        retain_container(&self.stdout, &self.stderr)
+    }
+
+    /// The closing uncaught exception anywhere in the capture, for an exit
+    /// whose windows dropped it.
+    fn closing_exception(&self) -> Option<String> {
+        let whole = |stream: &[u8]| FailureLogTail {
+            text: String::from_utf8_lossy(stream).into_owned(),
+            truncated: false,
+            dropped_bytes: Some(0),
+            dropped_lines: Some(0),
+        };
+        python_exception(&HostHelperProcessLogs {
+            exit_code: None,
+            stdout: whole(&self.stdout),
+            stderr: whole(&self.stderr),
+        })
     }
 }
 
@@ -720,9 +744,73 @@ fn has(text: &str, needles: &[&str]) -> bool {
 }
 
 /// Classify from the exit state first (it is authoritative), then from the
-/// container's own words: the whole capture (`captured_container`) when a
-/// process exited, so a cause the retained window dropped still names it.
-pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLogs>) -> ExitCause {
+/// container's own words in the retained windows, the text the evidence
+/// carries.  A window can drop the line that names a cause: a two-Spark vLLM
+/// start ends in kilobytes of C++ frames below the engine's `RuntimeError:
+/// Worker failed with error 'CUDA error: no kernel image ...`.  So an exit the
+/// windows leave unclassified is read once more, from the closing exception
+/// of the whole capture and only from it, never from an incidental line far
+/// above the failure.
+pub fn classify(exit: Option<&ContainerExit>, output: Option<&CapturedOutput>) -> ExitCause {
+    let retained = output.map(CapturedOutput::retained);
+    let cause = classify_retained(exit, retained.as_ref());
+    if cause != ExitCause::Unclassified {
+        return cause;
+    }
+    match output.and_then(CapturedOutput::closing_exception) {
+        Some(exception) => {
+            named_cause(&exception.to_lowercase()).unwrap_or(ExitCause::PythonException)
+        }
+        None => cause,
+    }
+}
+
+/// The specific cause a workload's own words name, most specific first.
+fn named_cause(output: &str) -> Option<ExitCause> {
+    if has(
+        output,
+        &[
+            "no kernel image is available",
+            "nokernelimagefordevice",
+            "unsupported gpu architecture",
+            "invalid device function",
+        ],
+    ) {
+        return Some(ExitCause::UnsupportedGpuArch);
+    }
+    if has(
+        output,
+        &[
+            "unknown argument",
+            "unrecognized argument",
+            "unrecognized option",
+            "invalid argument",
+            "error: invalid",
+            "usage:",
+        ],
+    ) {
+        return Some(ExitCause::BadArguments);
+    }
+    if has(
+        output,
+        &[
+            "no such file or directory",
+            "failed to open",
+            "file not found",
+            "failed to load model",
+            "error loading model",
+        ],
+    ) {
+        return Some(ExitCause::MissingFile);
+    }
+    None
+}
+
+/// `classify` over the retained windows alone.
+fn classify_retained(
+    exit: Option<&ContainerExit>,
+    logs: Option<&HostHelperProcessLogs>,
+) -> ExitCause {
     if exit.is_some_and(|exit| exit.host_memory.is_some()) {
         return ExitCause::HostMemoryExhausted;
     }
@@ -754,41 +842,8 @@ pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLog
     if !runtime_error.is_empty() {
         return ExitCause::StartRefused;
     }
-    if has(
-        &output,
-        &[
-            "no kernel image is available",
-            "nokernelimagefordevice",
-            "unsupported gpu architecture",
-            "invalid device function",
-        ],
-    ) {
-        return ExitCause::UnsupportedGpuArch;
-    }
-    if has(
-        &output,
-        &[
-            "unknown argument",
-            "unrecognized argument",
-            "unrecognized option",
-            "invalid argument",
-            "error: invalid",
-            "usage:",
-        ],
-    ) {
-        return ExitCause::BadArguments;
-    }
-    if has(
-        &output,
-        &[
-            "no such file or directory",
-            "failed to open",
-            "file not found",
-            "failed to load model",
-            "error loading model",
-        ],
-    ) {
-        return ExitCause::MissingFile;
+    if let Some(cause) = named_cause(&output) {
+        return cause;
     }
     // An uncaught exception is the workload's own account of why it stopped.
     // It ranks below the specific causes above, which an exception often
@@ -809,7 +864,7 @@ pub fn classify(exit: Option<&ContainerExit>, logs: Option<&HostHelperProcessLog
 /// process-exit failure always says either what happened or why that is unknown.
 pub fn exit_summary(
     exit: Result<&ContainerExit, &'static str>,
-    logs: Option<&HostHelperProcessLogs>,
+    output: Option<&CapturedOutput>,
     log_error: Option<&'static str>,
 ) -> String {
     if let Ok(state) = exit
@@ -817,7 +872,9 @@ pub fn exit_summary(
     {
         return crate::host_memory_guard::summary(evidence);
     }
-    let cause = classify(exit.ok(), logs);
+    let cause = classify(exit.ok(), output);
+    let retained = output.map(CapturedOutput::retained);
+    let logs = retained.as_ref();
     let mut parts = Vec::new();
     match exit {
         Ok(state) => {
@@ -847,7 +904,10 @@ pub fn exit_summary(
     // text, so a reader takes the facts before it as tokens.  It is carried for
     // every cause, because a named cause such as `missing_file` still reads
     // better with the path the exception names.
-    if let Some(exception) = logs.and_then(python_exception) {
+    if let Some(exception) = logs
+        .and_then(python_exception)
+        .or_else(|| output.and_then(CapturedOutput::closing_exception))
+    {
         summary.push_str(vonk_agent_protocol::failure_evidence::EXIT_SUMMARY_EXCEPTION_FIELD);
         summary.push_str(&format!("{exception:?}"));
     }
@@ -1067,7 +1127,8 @@ mod tests {
                 b"[2026-10-15 08:11:58] Load weight end. avail mem=50.00 GB, mem usage=64.98 GB.\n"
                     .repeat(figures);
             stderr.extend(&stream);
-            let output = logs("", std::str::from_utf8(&stderr).unwrap());
+            let capture = CapturedOutput::new(b"", &stderr);
+            let output = capture.retained();
             assert!(output.stderr.text.len() <= RETAINED_BYTES);
             assert!(
                 python_exception(&output).is_some_and(|text| text.contains("AssertionError")),
@@ -1075,7 +1136,7 @@ mod tests {
                 output.stderr.text
             );
             assert_eq!(
-                classify(Some(&state), Some(&output)),
+                classify(Some(&state), Some(&capture)),
                 ExitCause::PythonException,
                 "{figures}: {}",
                 output.stderr.text
@@ -1402,7 +1463,8 @@ mod tests {
         // above it, it keeps ending on that pointer.
         let stderr = "(EngineCore pid=403) /usr/local/lib/python3.12/dist-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated.\n".repeat(4)
             + &triton_engine_core("(EngineCore pid=403) ", "Process EngineCore_DP0:");
-        let logs = retain_container(stdout, stderr.as_bytes());
+        let capture = CapturedOutput::new(stdout, stderr.as_bytes());
+        let logs = capture.retained();
         assert!(
             logs.stderr
                 .text
@@ -1410,7 +1472,7 @@ mod tests {
         );
         // The pointer quotes the worker's message, so the exit summary names
         // the worker's exception, and stops where the next log record begins.
-        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&capture), None);
         assert!(
             summary.ends_with(" exception=\"RuntimeError: Triton Error [CUDA]: an illegal memory access was encountered\""),
             "{summary}"
@@ -1436,8 +1498,8 @@ mod tests {
             ));
         }
         let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\n";
-        let logs = retain_container(stdout.as_bytes(), stderr.as_bytes());
-        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        let capture = CapturedOutput::new(stdout.as_bytes(), stderr.as_bytes());
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&capture), None);
         assert!(
             summary.ends_with(" exception=\"RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}\""),
             "{summary}"
@@ -1451,8 +1513,8 @@ mod tests {
         // summary because vLLM's pointer lists `{'EngineCore_DP0': 1}`.
         let stdout = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/app/probe.py\", line 9, in probe\n(APIServer pid=55) RuntimeError: 1\n";
         let stderr = "(APIServer pid=55) Traceback (most recent call last):\n(APIServer pid=55)   File \"/usr/local/lib/python3.12/dist-packages/vllm/v1/engine/utils.py\", line 1250, in wait_for_engine_startup\n(APIServer pid=55)     raise RuntimeError(\n(APIServer pid=55) RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {'EngineCore_DP0': 1}\n";
-        let logs = retain_container(stdout.as_bytes(), stderr.as_bytes());
-        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&logs), None);
+        let capture = CapturedOutput::new(stdout.as_bytes(), stderr.as_bytes());
+        let summary = exit_summary(Ok(&exit(1, false, "")), Some(&capture), None);
         assert!(
             summary.ends_with("Failed core proc(s): {'EngineCore_DP0': 1}\""),
             "{summary}"
@@ -1608,6 +1670,10 @@ mod tests {
         retain_container(stdout.as_bytes(), stderr.as_bytes())
     }
 
+    fn captured(stdout: &str, stderr: &str) -> CapturedOutput {
+        CapturedOutput::new(stdout.as_bytes(), stderr.as_bytes())
+    }
+
     #[test]
     fn the_exit_state_is_read_back_from_the_inspect_format() {
         let state = parse_exit(b"137\ttrue\t\n").unwrap();
@@ -1622,7 +1688,7 @@ mod tests {
     fn common_exit_causes_are_named() {
         // Wrong implementation this catches: every exit read as `unclassified`,
         // which is how a silent OOM-kill looked like any other crash.
-        let silent = logs("", "");
+        let silent = captured("", "");
         for (state, output, cause) in [
             (exit(137, true, ""), &silent, ExitCause::OomKilled),
             (exit(137, false, ""), &silent, ExitCause::CrashedBySignal),
@@ -1634,12 +1700,12 @@ mod tests {
             (exit(127, false, ""), &silent, ExitCause::MissingFile),
             (
                 exit(1, false, ""),
-                &logs("", "error: unknown argument: --foo\n"),
+                &captured("", "error: unknown argument: --foo\n"),
                 ExitCause::BadArguments,
             ),
             (
                 exit(1, false, ""),
-                &logs(
+                &captured(
                     "",
                     "gguf_init_from_file: failed to open '/models/x.gguf': No such file or directory\n",
                 ),
@@ -1647,7 +1713,7 @@ mod tests {
             ),
             (
                 exit(1, false, ""),
-                &logs(
+                &captured(
                     "",
                     "CUDA error: no kernel image is available for execution on the device\n",
                 ),
@@ -1662,7 +1728,7 @@ mod tests {
         assert_eq!(
             classify(
                 Some(&exit(3, false, "")),
-                Some(&logs(
+                Some(&captured(
                     "Device 0: NVIDIA GB10, compute capability 12.1\n",
                     ""
                 ))
@@ -1753,7 +1819,7 @@ mod tests {
 
     #[test]
     fn an_uncaught_python_exception_is_named_with_its_message() {
-        let output = logs("", std::str::from_utf8(&sglang_backend_refusal()).unwrap());
+        let output = captured("", std::str::from_utf8(&sglang_backend_refusal()).unwrap());
         let state = exit(1, false, "");
         assert_eq!(
             classify(Some(&state), Some(&output)),
@@ -1783,14 +1849,14 @@ mod tests {
     fn a_bare_137_is_never_an_oom_kill() {
         // Class guard: only the runtime's own OOM fact names `oom_killed`; a
         // 137 with OOMKilled=false is a plain SIGKILL, whatever the log says.
-        let output = logs("", SGLANG_SELF_KILL);
+        let output = captured("", SGLANG_SELF_KILL);
         assert_eq!(
             classify(Some(&exit(137, false, "")), Some(&output)),
             ExitCause::PythonException
         );
         for tail in ["", SGLANG_SELF_KILL, "Killed\n", "out of memory\n"] {
             assert_ne!(
-                classify(Some(&exit(137, false, "")), Some(&logs("", tail))),
+                classify(Some(&exit(137, false, "")), Some(&captured("", tail))),
                 ExitCause::OomKilled,
                 "{tail:?}"
             );
@@ -1823,7 +1889,7 @@ mod tests {
     fn a_named_cause_keeps_its_name_and_carries_the_exception() {
         let stderr = "Traceback (most recent call last):\n  File \"/app/load.py\", line 3, in load\n    open(path)\nFileNotFoundError: [Errno 2] No such file or directory: '/models/x.gguf'\n";
         let state = exit(1, false, "");
-        let output = logs("", stderr);
+        let output = captured("", stderr);
         assert_eq!(
             classify(Some(&state), Some(&output)),
             ExitCause::MissingFile
@@ -1838,7 +1904,7 @@ mod tests {
     #[test]
     fn output_that_is_not_a_traceback_is_not_an_exception() {
         // A capitalised `Word:` line outside a traceback is ordinary output.
-        let output = logs(
+        let output = captured(
             "INFO: Started server process\nWARNING: low memory\n",
             "Error: model not ready\n",
         );
@@ -1847,7 +1913,7 @@ mod tests {
             classify(Some(&state), Some(&output)),
             ExitCause::Unclassified
         );
-        assert!(python_exception(&output).is_none());
+        assert!(python_exception(&output.retained()).is_none());
         assert!(!exit_summary(Ok(&state), Some(&output), None).contains("exception="));
     }
 
@@ -1864,8 +1930,8 @@ mod tests {
             }),
             Err("inspect failed"),
         ];
-        let empty = logs("", "");
-        let some = logs("", "boom\n");
+        let empty = captured("", "");
+        let some = captured("", "boom\n");
         for state in states {
             for (output, error) in [
                 (None, Some("log command failed")),

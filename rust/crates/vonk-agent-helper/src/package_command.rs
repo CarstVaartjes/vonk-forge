@@ -9,7 +9,7 @@ use wait_timeout::ChildExt;
 /// Bytes retained per stream.  Wide enough that a runtime failure's own cause
 /// is still in hand when the retention window is chosen, and bounded so a
 /// command that never stops writing cannot grow the helper.
-const STREAM_RETAINED_BYTES: usize = 32 * 1024;
+pub(crate) const STREAM_RETAINED_BYTES: usize = 32 * 1024;
 /// Bytes of the two retained tails that a single-document caller receives.
 const DIAGNOSTIC_BYTES: usize = 8192;
 /// Bytes of that budget each stream keeps for itself.  A share rather than a

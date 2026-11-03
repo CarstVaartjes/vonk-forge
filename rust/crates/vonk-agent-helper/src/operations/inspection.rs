@@ -17,10 +17,10 @@ pub(crate) fn process_exited(
     logs: Result<CommandOutput, String>,
     exit: Result<crate::runtime_logs::ContainerExit, &'static str>,
 ) -> OperationError {
-    // The retained windows cross the protocol; the cause is read from the
-    // whole capture, which may hold a line the windows dropped.
+    // The retained windows cross the protocol; the exit is classified from
+    // the capture they are cut from, which may hold a line they dropped.
     let captured = match &logs {
-        Ok(logs) if logs.success => Some(crate::runtime_logs::captured_container(
+        Ok(logs) if logs.success => Some(crate::runtime_logs::CapturedOutput::new(
             &logs.stdout,
             &logs.stderr,
         )),
