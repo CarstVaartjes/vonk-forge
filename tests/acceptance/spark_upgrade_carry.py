@@ -25,6 +25,7 @@ import argparse
 import base64
 import functools
 import hashlib
+import http.client
 import itertools
 import json
 import os
@@ -51,7 +52,11 @@ from cluster_profiles.serving_execution import (
     evaluate_http_response,
 )
 from scripts.development_slice_client import SliceError, require_object
-from scripts.retry_dependency_fetch import backoff
+from scripts.retry_dependency_fetch import (
+    FETCH_DEADLINE_SECONDS,
+    MAX_ATTEMPTS,
+    backoff,
+)
 from tests.acceptance.controller_contract import ControllerContract
 from tests.acceptance.ephemeral import (
     release_public_key,
@@ -179,21 +184,31 @@ def result_refusals(log_text: str) -> list[dict[str, object]]:
     return refused
 
 
-FETCH_ATTEMPTS = 5
+TRANSIENT_FETCH_ERRORS = (
+    OSError,
+    http.client.HTTPException,
+    tarfile.TarError,
+    subprocess.SubprocessError,
+)
 
 
-def _retry_transient(label: str, fetch: Callable[[], None]) -> None:
-    """Run ``fetch`` up to FETCH_ATTEMPTS times with capped, jittered backoff.
+def _retry_transient[T](label: str, fetch: Callable[[], T]) -> T:
+    """Run ``fetch`` with the dependency fetcher's attempt limit, deadline and
+    capped, jittered backoff, then fail with a LifecycleError naming ``label``.
 
-    Every input is digest-checked after it is fetched, so repeating is safe.
+    Every caller is an idempotent GET of immutable, commit- or digest-addressed
+    content, so repeating it is safe.
     """
-    for attempt in range(1, FETCH_ATTEMPTS + 1):
+    deadline = time.monotonic() + FETCH_DEADLINE_SECONDS
+    for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             return fetch()
-        except (OSError, tarfile.TarError) as error:
-            if attempt == FETCH_ATTEMPTS:
+        except TRANSIENT_FETCH_ERRORS as error:
+            delay = backoff(attempt)
+            if attempt == MAX_ATTEMPTS or time.monotonic() + delay >= deadline:
                 raise LifecycleError(f"{label} is unavailable: {error}") from error
-            time.sleep(backoff(attempt))
+            time.sleep(delay)
+    raise AssertionError("retry loop must return")
 
 
 def _fetch(url: str, destination: Path) -> None:
@@ -455,25 +470,29 @@ def _revision_through_api(source_sha: str) -> str:
 
     The lane needs no history in its checkout this way.
     """
-    reply = subprocess.run(
-        [
-            "gh",
-            "api",
-            "-H",
-            "Accept: application/vnd.github.raw",
-            (
-                f"repos/CarstVaartjes/vonk-forge/contents/{LIBRARY_REVISION_FILE}"
-                f"?ref={source_sha}"
-            ),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if reply.returncode:
-        raise LifecycleError("the release's recipe library revision is unavailable")
-    return reply.stdout
+
+    def attempt() -> str:
+        reply = subprocess.run(
+            [
+                "gh",
+                "api",
+                "-H",
+                "Accept: application/vnd.github.raw",
+                (
+                    f"repos/CarstVaartjes/vonk-forge/contents/{LIBRARY_REVISION_FILE}"
+                    f"?ref={source_sha}"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if reply.returncode:
+            raise OSError(reply.stderr.strip() or f"gh exited {reply.returncode}")
+        return reply.stdout
+
+    return _retry_transient("the release's recipe library revision", attempt)
 
 
 def release_library_root(
