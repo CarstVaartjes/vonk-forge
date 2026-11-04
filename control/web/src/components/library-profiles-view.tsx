@@ -864,6 +864,12 @@ export function LibraryProfilesView({
               ))}
             </ul>
           )}
+          <WaitingFor
+            blockers={selectedProfile.maintenance_wait?.blockers}
+            nextAttemptAt={selectedProfile.maintenance_wait?.next_check}
+            dependencyDeadline={selectedProfile.maintenance_wait?.dependency_deadline}
+            resumeCondition={selectedProfile.maintenance_wait?.resume_condition}
+          />
         </section>
       )}
       {application && (
