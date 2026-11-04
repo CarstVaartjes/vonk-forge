@@ -267,6 +267,10 @@ jobs:
         run: scripts/retry-dependency-fetch cargo fetch --locked
       - name: Check deterministic wire generation
         run: scripts/check-generated-determinism --wire
+      # A full disk kills the runner without a log (runs 41772276715 and
+      # 41784505516); these reports keep the margin visible in every run.
+      - name: Report free disk before the Rust build
+        run: df -h /
       - name: Test complete Rust shard
         shell: bash
         env:
@@ -274,6 +278,17 @@ jobs:
           # until exec, making an immediately fresh cache attempt spuriously busy.
           RUST_TEST_THREADS: "1"
         run: cargo test --workspace --locked
+      - name: Report the Rust build's disk margin
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h /
+          du -sh target
+          free_kib=$(df --output=avail -k / | tail -1)
+          if ((free_kib < 4 * 1024 * 1024)); then
+            echo "::warning title=Rust job disk margin::$((free_kib / 1024)) MiB free after the Rust test build; the runner dies when the disk fills"
+          fi
       - name: Inject foreign-owned retention files across the agent and helper
         shell: bash
         run: |
