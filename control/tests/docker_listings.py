@@ -125,7 +125,11 @@ def scan_source(source: str, test_lines: set[int]) -> list[int]:
         line = source.count("\n", 0, call.start()) + 1
         if line in test_lines or _bounded_target(words):
             continue
-        inspects = words[:2] == ["container", "inspect"] or words[:1] == ["inspect"]
+        inspects = (
+            call.group(1) == "container_fields"
+            or words[:2] == ["container", "inspect"]
+            or words[:1] == ["inspect"]
+        )
         grows = _verb(words) or (
             inspects
             and (

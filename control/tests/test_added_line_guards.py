@@ -2839,12 +2839,24 @@ def test_a_captured_docker_listing_or_ranged_inspection_is_flagged(words: str) -
         assert not _docker_listings(source, set())
 
 
-def test_a_ranged_format_held_in_a_constant_is_flagged() -> None:
-    source = (
+def test_a_ranged_format_read_through_container_fields_is_flagged() -> None:
+    constant = (
         'const OWNERS: &str = "{{.Id}}{{range .Mounts}}{{json .Source}}{{end}}";\n'
-        + _call("container_fields", '"container", "inspect", "--format", OWNERS')
+        "fn read(&self) {\n"
+        "    let output = self.container_fields(id, OWNERS);\n"
+        "}\n"
     )
-    assert _docker_listings(source, {3})
+    assert _docker_listings(constant, {3})
+    inline = (
+        "fn read(&self) {\n"
+        '    let output = self.container_fields(&id, "{{range .Mounts}}{{.Source}}{{end}}");\n'
+        "}\n"
+    )
+    assert _docker_listings(inline, {2})
+    fixed = inline.replace(
+        "{{range .Mounts}}{{.Source}}{{end}}", "{{.State.StartedAt}}"
+    )
+    assert not _docker_listings(fixed, {2})
 
 
 def test_an_argument_vector_built_beside_the_call_is_judged() -> None:

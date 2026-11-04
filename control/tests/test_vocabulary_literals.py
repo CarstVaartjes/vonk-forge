@@ -43,6 +43,17 @@ def test_a_docker_subcommand_is_not_a_contract_word() -> None:
     ) == [3]
 
 
+def test_only_docker_subcommands_in_the_helper_are_exempt() -> None:
+    source = 'let a = ["container", "running"];\nlet b = ["container", "inspect"];\n'
+    words = frozenset({"inspect", "running"})
+    helper = "rust/crates/vonk-agent-helper/src/operations/example.rs"
+    assert scan.scan_source(source, path=helper, words=words) == [1]
+    # Outside the helper even a subcommand is a contract literal.
+    assert scan.scan_source(
+        source, path="rust/crates/vonk-agent/src/example.rs", words=words
+    ) == [1, 2]
+
+
 def _module(tmp_path: Path, source: str, relative: str = REL) -> Path:
     path = tmp_path / relative
     path.parent.mkdir(parents=True, exist_ok=True)
