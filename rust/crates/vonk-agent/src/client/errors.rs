@@ -129,9 +129,11 @@ impl ControllerError {
 
 impl ClientError {
     /// Retained job evidence can be delivered after an ingress limit is
-    /// repaired. This never authorizes repeating the job's process.
+    /// repaired (`Refusal::TooLarge`). This never authorizes repeating the
+    /// job's process.
     pub(crate) fn output_delivery_retryable(&self) -> bool {
-        self.retryable() || self.status() == Some(413)
+        self.retryable()
+            || matches!(self, Self::Controller(error) if error.refusal() == Refusal::TooLarge)
     }
 
     // Unknown/protocol/local identity errors never authorize HTTP replay.
@@ -312,13 +314,19 @@ pub(crate) fn endpoint_name(path: &str) -> Option<String> {
 }
 
 /// The one disposition of a Controller refusal, for every path that sent
-/// bytes (results, observation pages, renewals).  It is derived from the
-/// status table alone; a path never classifies a refusal by its own predicate.
+/// bytes (results, observation pages, renewals, output uploads).  It is
+/// derived from the status alone; a path never classifies a refusal by its
+/// own predicate.  The `InvalidBytes` / `TooLarge` subset (400, 413, 422) is
+/// an agent-side literal for now; moving it into the shared status table
+/// (`HTTP_STATUS_DISPOSITIONS`) is a follow-up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Refusal {
-    /// The request's own bytes (malformed, oversized or invalid): the same
+    /// The request's own bytes are malformed or invalid (400, 422): the same
     /// request can never be accepted.
     InvalidBytes,
+    /// The request is over the Controller's ingress limit (413): these bytes
+    /// are refused, though a repaired limit can accept retained evidence.
+    TooLarge,
     /// Definite for this exact request, though the bytes are not at fault (a
     /// missing, conflicting or gone resource): the owner re-plans a fresh one.
     Stale,
@@ -330,7 +338,8 @@ pub enum Refusal {
 impl Refusal {
     pub fn of_status(status: u16) -> Self {
         match (http_status_disposition(status), status) {
-            (Disposition::Fail, 400 | 413 | 422) => Self::InvalidBytes,
+            (Disposition::Fail, 400 | 422) => Self::InvalidBytes,
+            (Disposition::Fail, 413) => Self::TooLarge,
             (Disposition::Fail, _) => Self::Stale,
             _ => Self::Open,
         }
@@ -340,6 +349,12 @@ impl Refusal {
     /// evidence flows instead of waiting behind it.
     pub fn settles(self) -> bool {
         self != Self::Open
+    }
+
+    /// Whether the Controller refused the request's own bytes (invalid or
+    /// oversized): a smaller core of the same request may still be accepted.
+    pub fn refuses_bytes(self) -> bool {
+        matches!(self, Self::InvalidBytes | Self::TooLarge)
     }
 }
 

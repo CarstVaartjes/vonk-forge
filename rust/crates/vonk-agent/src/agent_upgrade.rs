@@ -81,7 +81,10 @@ impl AgentUpgradeError {
 
     /// Whether retrying cannot help: a security edge, an invalid claim, or a
     /// definite refusal by the shared disposition (a 4xx package answer, a
-    /// Controller's 400/404/422). Everything else is observed.
+    /// Controller's 4xx). Everything else is observed. This asks about the
+    /// answer to an upgrade request, not about settling sent bytes, so the
+    /// shared `Disposition::Fail` is the right classification here rather
+    /// than `Refusal`.
     pub fn definite(&self) -> bool {
         use crate::client::{Disposition, http_status_disposition};
         self.security_edge()

@@ -40,7 +40,7 @@ pub(super) fn classify_heartbeat_failure(error: &ClientError) -> HeartbeatFailur
         // The Controller refused the renewal's own bytes: the same renewal can
         // never be accepted, so the fence ends with that typed refusal as its
         // evidence instead of being retried silently until the order stalls.
-        Disposition::Fail if matches!(error, ClientError::Controller(controller) if controller.refusal() == crate::client::Refusal::InvalidBytes) => {
+        Disposition::Fail if matches!(error, ClientError::Controller(controller) if controller.refusal().refuses_bytes()) => {
             HeartbeatFailure::Refused
         }
         // A lapsed or not-yet-current fence (the Controller answers 404/409

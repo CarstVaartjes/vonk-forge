@@ -34,7 +34,7 @@ fn inspection_grant_refused(error: &HostRuntimeError) -> bool {
     matches!(
         error,
         HostRuntimeError::Controller(crate::client::ClientError::Controller(refusal))
-            if refusal.refusal() == crate::client::Refusal::InvalidBytes
+            if refusal.refusal().refuses_bytes()
     )
 }
 

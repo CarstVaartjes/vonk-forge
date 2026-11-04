@@ -324,8 +324,9 @@ async fn deliver_result<C: LoopClient>(
     Ok(())
 }
 
-/// Deliver `result`; one the Controller refuses as invalid is offered once
-/// more at once in its core-only form ([`crate::outcome::core_only`]).
+/// Deliver `result`; one the Controller refuses as invalid or oversized
+/// ([`crate::client::Refusal::refuses_bytes`]) is offered once more at once in
+/// its core-only form ([`crate::outcome::core_only`]).
 ///
 /// An accepted core settles the attempt with its true state and code, and the
 /// full result stays in local custody as the evidence.  A refused core answers
@@ -336,10 +337,8 @@ async fn submit_or_core<C: LoopClient>(
     result: &AgentResult,
 ) -> Result<(), ClientError> {
     let refusal = match client.submit_result(result).await {
-        Err(ClientError::ResultRejected(refusal))
-            if refusal.code
-                == vonk_agent_protocol::generated::ControllerErrorCode::ControllerInvalidRequest
-                    .as_str() =>
+        Err(ClientError::ResultRejected(refusal) | ClientError::Controller(refusal))
+            if refusal.refusal().refuses_bytes() =>
         {
             refusal
         }
