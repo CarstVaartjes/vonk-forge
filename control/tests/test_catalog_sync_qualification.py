@@ -2,8 +2,9 @@
 
 The status is evidence about one exact revision and changes without the recipe
 changing, so every sync records it for unchanged revisions too. It is
-informative: an unreadable status never withholds the recipe; it is a named
-sync problem, and the next sync observes it again.
+informative: an unreadable status (a catalog newer than this Controller's
+contract) is absent for that entry and never a sync problem, so nothing waits on
+it.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import CatalogSyncState
 from vonk_control.auth import CursorCodec, TokenCodec
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
@@ -131,7 +133,7 @@ def test_sync_carries_the_published_status_to_the_library_and_follows_new_eviden
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
-def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_hides_it(
+def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_blocks(
     postgres_engine: Engine, tmp_path: Path
 ) -> None:
     world = World(postgres_engine, tmp_path)
@@ -150,10 +152,34 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_hides_i
     # The detail (web detail, ``vonkctl recipe detail``) carries the same view.
     assert world.projection.recipe_detail(listed.selector).qualification == working
 
+    # A recipe the published library no longer lists, imported by an earlier view.
+    gone = replace(
+        _item(_recipe(_model(), slug="deleted-upstream")), dependencies=(_model(),)
+    )
+
+    class Earlier:
+        def list(self):
+            return RecipeLibrarySnapshot("e" * 40, (gone,))
+
+        def fetch(self, uri):
+            return gone
+
+    world.sync(Earlier())  # type: ignore[arg-type]
+
+    # A status this Controller's contract cannot read (a newer catalog) is
+    # absent for that entry, never a sync problem: nothing waits on it.
     publish({"status": "Something newer", "required_sparks": 1})
-    snapshot = world.reader.list()
-    (problem,) = snapshot.problems
-    assert problem.detail.startswith("recipe qualification status is invalid")
-    world.sync()
-    # Still offered; the unreadable status is unknown and keeps what was recorded.
-    assert world.library_recipe().qualification == working
+    assert world.reader.list().problems == ()
+    result = world.sync_service.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.AUTOMATIC,
+            actor="test",
+        )
+    )
+    assert result.state == CatalogSyncState.CURRENT
+    assert result.withdrawn_count == 1
+    # Not the last value kept forever: it reads as not yet verified.
+    listed = world.library_recipe()
+    assert listed.qualification is None
+    assert world.projection.recipe_detail(listed.selector).qualification is None

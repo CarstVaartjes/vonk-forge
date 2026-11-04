@@ -814,9 +814,9 @@ class RecipePackageClient:
                 )
             # Optional; an unreadable entry only means no prebuilt image.
             prebuilt_image = read_prebuilt_image(recipe.get("prebuilt_image"))
-            # Informative and optional: an unreadable status never withholds
-            # the recipe. It shows as not yet verified, and the named problem
-            # makes the next sync observe the published status again.
+            # Informative: an unreadable status (a contract newer than this
+            # Controller's pin) is not yet verified for this entry. It is never
+            # a sync problem, so nothing waits on it; a pin bump heals it.
             qualification = None
             if recipe.get("qualification") is not None:
                 try:
@@ -824,13 +824,12 @@ class RecipePackageClient:
                         recipe["qualification"]
                     )
                 except (TypeError, ValueError) as error:
-                    problems.append(
-                        _index_problem(
-                            _entry_uri(recipe),
-                            "recipe qualification status is invalid",
-                            recipe,
-                            error,
-                        )
+                    _LOGGER.warning(
+                        "recipe qualification status unreadable; shown as not yet "
+                        "verified: recipe=%s/%s error=%s",
+                        publisher,
+                        slug,
+                        _incompatible_detail("qualification", error),
                     )
             packages[key] = RecipePackageEntry(
                 publisher=publisher,

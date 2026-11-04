@@ -1,28 +1,29 @@
 import type { RecipeQualification } from "../api/types";
 import { compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
+import { QualificationOutcome, QualificationStatus } from "../api/vocabulary.generated";
 import { Time } from "./time";
 
-type QualificationStatus = RecipeQualification["status"];
+type PublishedStatus = RecipeQualification["status"];
 type QualificationRecord = NonNullable<RecipeQualification["last_pass"]>;
-
-/** The published status as shown; anything missing is "Not yet verified". */
-const NOT_YET_VERIFIED: QualificationStatus = "Not yet verified";
 
 /** One tone per published status, for the badge colour only. */
 type QualificationTone = "pass" | "recheck" | "fail" | "unverified";
-const QUALIFICATION_TONES: Record<QualificationStatus, QualificationTone> = {
-  Working: "pass",
-  "Re-check: worked before": "recheck",
-  "Fix to verify": "recheck",
-  "Failed: recipe": "fail",
-  "Not yet verified": "unverified",
+const QUALIFICATION_TONES: Record<PublishedStatus, QualificationTone> = {
+  [QualificationStatus.WORKING]: "pass",
+  [QualificationStatus.RECHECK]: "recheck",
+  [QualificationStatus.FIX_TO_VERIFY]: "recheck",
+  [QualificationStatus.FAILED_RECIPE]: "fail",
+  [QualificationStatus.NOT_YET_VERIFIED]: "unverified",
 };
 
+/** The published status as shown; anything missing or unknown is not yet verified. */
 export function qualificationStatus(
   qualification: RecipeQualification | null | undefined,
-): QualificationStatus {
+): PublishedStatus {
   const status = qualification?.status;
-  return status && Object.hasOwn(QUALIFICATION_TONES, status) ? status : NOT_YET_VERIFIED;
+  return status && Object.hasOwn(QUALIFICATION_TONES, status)
+    ? status
+    : QualificationStatus.NOT_YET_VERIFIED;
 }
 
 /** The hardware status badge. Informative: nothing in the Library gates on it. */
@@ -68,7 +69,7 @@ export function RecipeQualificationEvidence({
       <small data-qualification-evidence="reason">{qualification.reason}</small>
     ) : null;
   }
-  if (record.outcome === "passed") {
+  if (record.outcome === QualificationOutcome.PASSED) {
     const count = record.platform.spark_count;
     return (
       <small data-qualification-evidence="pass">

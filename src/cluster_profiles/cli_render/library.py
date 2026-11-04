@@ -6,6 +6,7 @@ import shlex
 from collections.abc import Mapping
 from enum import StrEnum
 
+from ..cli_states_generated import QualificationOutcome, QualificationStatus
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
@@ -39,9 +40,6 @@ class LibraryNoun(StrEnum):
     RECIPE = "recipe"
 
 
-_NOT_YET_VERIFIED = "Not yet verified"
-
-
 def _qualification(value: object) -> PublishedQualificationStatusView | None:
     """The published hardware status; informative, so unreadable is absent."""
     if not isinstance(value, Mapping):
@@ -55,7 +53,7 @@ def _qualification(value: object) -> PublishedQualificationStatusView | None:
 def _qualification_status(value: object) -> str:
     """The status word; a missing or unknown status is not yet verified."""
     view = _qualification(value)
-    return _NOT_YET_VERIFIED if view is None else view.status
+    return QualificationStatus.NOT_YET_VERIFIED if view is None else view.status
 
 
 def _qualification_evidence(value: object) -> tuple[str, str] | None:
@@ -73,7 +71,7 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
         return ("Not verified because", reason) if isinstance(reason, str) else None
     record = max(records, key=lambda evidence: evidence.tested_at)
     tested = record.tested_at.isoformat(sep=" ")
-    if record.outcome == "passed":
+    if record.outcome == QualificationOutcome.PASSED:
         count = record.platform.spark_count
         sparks = (
             f" on {count} Spark{'s' if count != 1 else ''}"
