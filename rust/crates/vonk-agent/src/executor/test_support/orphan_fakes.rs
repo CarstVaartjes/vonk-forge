@@ -299,6 +299,10 @@ pub(in crate::executor) enum HelperCall {
         name: String,
         removed: bool,
     },
+    /// A stop turned away because another stop of the installation was running.
+    Busy {
+        name: String,
+    },
 }
 
 struct Container {
@@ -316,6 +320,9 @@ struct HostState {
     drop_next_stop_reply: bool,
     /// The next stop takes this long to land.
     slow_next_stop: Duration,
+    /// Installations a stop is in progress for: the real helper's non-blocking
+    /// installation lock, which turns an overlapping stop away at once.
+    stopping: std::collections::BTreeSet<Uuid>,
 }
 
 pub(in crate::executor) struct FakeHost {
@@ -350,7 +357,11 @@ impl FakeHost {
             let deadline = Instant::now() + SERVE_FOR;
             while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
                 match listener.accept() {
-                    Ok((stream, _)) => serve_helper(stream, &shared, &request_root),
+                    Ok((stream, _)) => {
+                        // Like the real helper: each request on its own thread.
+                        let (shared, request_root) = (shared.clone(), request_root.clone());
+                        thread::spawn(move || serve_helper(stream, &shared, &request_root));
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1));
                     }
@@ -534,6 +545,17 @@ fn serve_helper(
         return;
     }
     let name = format!("vonk-{}", plan.target_runtime_id);
+    if !state.stopping.insert(plan.installation_id) {
+        state.calls.push(HelperCall::Busy { name });
+        reply(
+            &mut stream,
+            &rejection(
+                Some(request_id),
+                HelperErrorCode::InstallationReconciliationBusy,
+            ),
+        );
+        return;
+    }
     let slow = std::mem::take(&mut state.slow_next_stop);
     drop(state);
     thread::sleep(slow);
@@ -558,6 +580,7 @@ fn serve_helper(
         })
     });
     if owned == Some(false) {
+        state.stopping.remove(&plan.installation_id);
         state.calls.push(HelperCall::Stop {
             name,
             removed: false,
@@ -570,6 +593,7 @@ fn serve_helper(
     }
     let removed = state.containers.remove(&name).is_some();
     state.calls.push(HelperCall::Stop { name, removed });
+    state.stopping.remove(&plan.installation_id);
     if std::mem::take(&mut state.drop_next_stop_reply) {
         return;
     }

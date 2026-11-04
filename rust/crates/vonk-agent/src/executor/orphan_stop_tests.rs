@@ -378,10 +378,30 @@ async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated(
         "not retired before the stop landed"
     );
 
-    // The stop lands on its own; the next cycle only retires.
+    // While the stop is still running a second cycle sees the container
+    // running and asks again; the helper turns that stop away at once.
     cycle(&executor).await;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while world.host.is_running(run) {
+        assert!(Instant::now() < deadline, "the stop never landed");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    // Once it has landed the next cycle only retires.
     cycle(&executor).await;
-    assert!(!world.host.is_running(run));
     assert!(!world.lifecycle(run).exists());
-    assert_eq!(stops(&world.host).len(), 1, "no double effect");
+    let landed = world
+        .host
+        .calls()
+        .into_iter()
+        .filter(|call| matches!(call, HelperCall::Stop { removed: true, .. }))
+        .count();
+    assert_eq!(landed, 1, "exactly one effect");
+    // The second ask was made, and refused while the first still ran.
+    assert!(
+        world
+            .host
+            .calls()
+            .iter()
+            .any(|call| matches!(call, HelperCall::Busy { .. }))
+    );
 }
