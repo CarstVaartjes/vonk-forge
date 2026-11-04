@@ -1132,8 +1132,9 @@ def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
     """Catches trusting the pass inventory: a Job accepted after it names a row.
 
     The Job commits after the inventory read the references and before the
-    batch deletes; the recheck inside the batch transaction sees it, keeps
-    that revision, and still removes the unrelated one in the same pass.
+    batch deletes; the recheck inside the batch transaction sees it and rolls
+    the batch back. The next pass retries the batch without the named row and
+    removes the unrelated one.
     """
 
     Base.metadata.create_all(postgres_engine)
@@ -1154,13 +1155,19 @@ def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
     monkeypatch.setattr(
         catalog_revision_collection, "_bound_lock_waits", accept_during_batch
     )
-    result = catalog.collector().collect()
+    collector = catalog.collector()
+    rescinded = collector.collect()
 
     assert accepted
+    assert rescinded.revisions == 0
+    assert rescinded.kept == {"live operation": 1}
+    assert catalog.exists(named) and catalog.exists(unrelated)
+    assert collector._cursor is not None  # the next worker pass continues
+
+    retried = collector.collect()
+    assert retried.revisions == 1
     assert catalog.exists(named)
     assert not catalog.exists(unrelated)
-    assert result.revisions == 1
-    assert result.kept == {"live operation": 1}
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -1302,12 +1309,12 @@ def test_a_recheck_that_cannot_finish_removes_nothing_and_waits_its_interval(
 def test_a_rescinded_slow_batch_skips_no_untried_row_on_postgres(
     postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches the cursor jumping past rows a rescinded attempt never retried.
+    """Catches the cursor jumping past rows a rescinded batch never removed.
 
-    The first attempt takes three rows before its row budget ends; a Job
-    naming the second commits meanwhile, so the recheck rescinds it. The
-    retry, out of row budget, commits only the first row, and the next pass
-    continues right after it: every unnamed row goes within the same sweep.
+    The first batch takes three rows before its row budget ends; a Job naming
+    the second commits meanwhile, so the recheck rescinds the batch. The next
+    passes retry from the same place without the named row: every unnamed row
+    goes within the same sweep, each pass under one row and one recheck budget.
     """
 
     Base.metadata.create_all(postgres_engine)

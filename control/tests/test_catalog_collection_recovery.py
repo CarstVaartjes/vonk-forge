@@ -227,6 +227,10 @@ def test_new_bundle_reference_between_candidate_scan_and_delete_is_retained(
         row = session.scalar(select(Job))
         assert row is not None
         row.state = LifecycleState.SUCCEEDED.value
+    # The sweep that saw the reference skips the bundle to its end; the next
+    # sweep removes it.
+    collector.collect()
+    _assert_bundle(catalog, sha, exists=True)
     collector.collect()
     _assert_bundle(catalog, sha, exists=False)
     catalog.job(
