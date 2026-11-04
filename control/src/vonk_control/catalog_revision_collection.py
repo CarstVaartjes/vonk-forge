@@ -1135,7 +1135,11 @@ def _bound_lock_waits(session: Session, deadline: float) -> None:
 def _bound_statements(
     session: Session, deadline: float, *, lock_timeout_ms: int | None = None
 ) -> None:
-    """Every following statement of this transaction ends by ``deadline``."""
+    """Bound each following statement by the time left until ``deadline``.
+
+    ``statement_timeout`` is per statement: the whole transaction is bounded
+    by the deadline checks of the loops that use it, not by this setting.
+    """
     if session.get_bind().dialect.name != "postgresql":
         return
     remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
