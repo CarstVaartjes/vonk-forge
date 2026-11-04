@@ -244,11 +244,8 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "A3",
         "the scan walks every profile, installation and run",
     ),
-    "uninstall_review": TargetCheck(
-        _uninstall_review,
-        "A6",
-        "the uninstall review loads every live installation",
-    ),
+    # Asks the target's nodes only (audit A6).
+    "uninstall_review": TargetCheck(_uninstall_review),
     "fleet_node_selector": TargetCheck(
         _fleet_node_selector,
         "A7",
@@ -257,12 +254,14 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
         "removal-review",
-        "issue #2026: the removal review is not yet target-bounded (N+1 per active installation)",
+        "issue #2026: which installation uses a set is stored only in its plan, and which"
+        " profile names a recipe only in its assignments JSON, so every plan and profile is read",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
         "removal-review",
-        "issue #2026: the fleet removal review is not yet target-bounded (overlaps audit A6)",
+        "issue #2026: the removal review's plan and profile reads, plus the whole-world"
+        " retention evidence (audit A1)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.
