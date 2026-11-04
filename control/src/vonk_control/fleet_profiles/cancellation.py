@@ -22,7 +22,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
@@ -309,13 +309,7 @@ class FleetProfileService:
         cancellation_state = cancellation["state"].as_string()
         observation_due = FleetProfileApplication.next_action_at
         eligible = (
-            FleetProfileApplication.state.in_(
-                job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.NEEDS_OPERATOR,
-                )
-            )
+            FleetProfileApplication.state.in_(fleet_profile_states.LIVE)
             & cancellation_state.in_(fleet_profile_states.CANCEL_IN_FLIGHT)
             & (observation_due.is_(None) | (observation_due <= now))
         )

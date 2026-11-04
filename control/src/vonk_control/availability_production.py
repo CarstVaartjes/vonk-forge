@@ -1427,9 +1427,7 @@ def _observe_build(
             retryable=True,
             reason=WaitReason.SCOPE_CHANGED,
         )
-    if operation.state in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-    ):
+    if operation.state in job_states.LIVE:
         with sessions() as session:
             current_progress = _build_progress(session, operation.id, builder_node_id)
             decision, prebuilt_image = _prebuilt_choice(session, operation.owner_id)

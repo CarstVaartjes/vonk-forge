@@ -20,6 +20,7 @@ from . import deterministic_retries as retries
 from . import (
     docker_listings,
     legacy_tolerance,
+    lifecycle_sets,
     locked_io,
     repeated_parse,
     request_path_scans,
@@ -95,6 +96,7 @@ MODES = (
     "capacity-refusals",
     "agent-422",
     "docker-listings",
+    "lifecycle-sets",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1543,6 +1545,11 @@ def check_source(
             )
         if "legacy" in modes and legacy_tolerance.in_scope(path):
             hits.extend(legacy_tolerance.scan_source(source))
+        if "lifecycle-sets" in modes and lifecycle_sets.in_scope(path):
+            hits.extend(
+                (line, lifecycle_sets.KIND)
+                for line in lifecycle_sets.scan_source(source)
+            )
         if "progress" in modes:
             hits.extend(
                 (line, "monotonic progress without attempt key")

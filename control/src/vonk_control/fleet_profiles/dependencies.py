@@ -24,7 +24,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReportedPhase,
 )
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..fleet_profile_contract import (
     FleetProfileAssignmentState,
     FleetProfileChildPhase,
@@ -71,9 +71,7 @@ _CHILD_FAILED_STATES = frozenset(
     job_states.words(LifecycleState.FAILED, LifecycleState.CANCELLED)
 )
 
-_PROFILE_ACTIVITY_ACTIVE_STATES = job_states.words(
-    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-)
+_PROFILE_ACTIVITY_ACTIVE_STATES = fleet_profile_states.LIVE
 
 _OPERATION_STATE_ADAPTER = TypeAdapter(FleetProfileOperationState)
 

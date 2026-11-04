@@ -88,13 +88,7 @@ def request_superseded_workload_cancellation_in_session(
                         Job.payload["workload_intent_ordinal"].as_integer().is_(None),
                     ),
                 ),
-                Job.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                ),
+                Job.state.in_(job_states.LIVE),
             )
             .distinct()
             .order_by(StoredOperation.parent_job_id)
@@ -128,11 +122,7 @@ def request_superseded_workload_cancellation_in_session(
         children_by_parent.setdefault(child.parent_job_id, []).append(child)
     for parent_id in parent_ids:
         parent = parents.get(parent_id)
-        if parent is None or parent.state not in job_states.words(
-            LifecycleState.QUEUED,
-            LifecycleState.RUNNING,
-            LifecycleState.NEEDS_OPERATOR,
-        ):
+        if parent is None or parent.state not in job_states.LIVE:
             continue
         children = tuple(children_by_parent.get(parent_id, ()))
         bound = column_field(parent, "payload", "workload_intent_ordinal")

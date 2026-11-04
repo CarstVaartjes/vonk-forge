@@ -17,7 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePreview
 from ..lifecycle.evidence import Residue
 from ..models import FleetProfileApplication
@@ -218,11 +218,7 @@ class FleetProfileService:
                         select(FleetProfileApplication).where(
                             FleetProfileApplication.id != application_id,
                             FleetProfileApplication.state.in_(
-                                job_states.words(
-                                    LifecycleState.QUEUED,
-                                    LifecycleState.RUNNING,
-                                    LifecycleState.NEEDS_OPERATOR,
-                                )
+                                fleet_profile_states.LIVE
                             ),
                         )
                     )
