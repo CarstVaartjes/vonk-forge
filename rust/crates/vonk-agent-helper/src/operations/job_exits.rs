@@ -59,6 +59,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .filter(|_| failed)
                 .and_then(|evidence| evidence.logs.as_deref().cloned()),
             installation_intent_nonce: None,
+            container_labels: None,
         };
         let name = record_name(identity, run_id, plan_digest);
         if let Err(error) = self.write_job_exit(&name, &record) {
@@ -140,6 +141,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             exit_code: Some(i32::try_from(code).ok()?),
             logs: record.process_logs.filter(|_| failed).map(Box::new),
             log_error: record.diagnostic.filter(|_| failed),
+            container_labels: None,
         })
     }
 }

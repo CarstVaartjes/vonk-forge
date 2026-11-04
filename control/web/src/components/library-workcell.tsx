@@ -24,6 +24,10 @@ import { formatBytes } from "../lib/fleet";
 import { EmptyState } from "./empty-state";
 import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
 import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
+import {
+  RecipeQualificationBadge,
+  RecipeQualificationEvidence,
+} from "./library-recipe-qualification";
 import { LibraryRecipeUpdateAction } from "./library-recipe-update-action";
 import { LibrarySetupStrip } from "./library-setup";
 
@@ -244,7 +248,7 @@ export const FLEET_FIT_WORDS: Record<RecipeFleetFit, string> = {
   unassessed: "not assessed",
 };
 
-/** Engine, creator and Spark count as compact badges. */
+/** Engine, creator, Spark count, fleet fit and hardware status as compact badges. */
 export function RecipeBadges({ recipe }: { recipe: LibraryViewRecipe }) {
   const creator = recipeCreator(recipe);
   const fit = recipeFleetFit(recipe);
@@ -274,6 +278,7 @@ export function RecipeBadges({ recipe }: { recipe: LibraryViewRecipe }) {
           {FLEET_FIT_WORDS[fit]}
         </span>
       )}
+      <RecipeQualificationBadge qualification={recipe.qualification} />
     </span>
   );
 }
@@ -853,6 +858,7 @@ export function LibraryWorkcell({
                     >
                       <strong>{record.title}</strong>
                       <RecipeBadges recipe={record.recipe!} />
+                      <RecipeQualificationEvidence qualification={record.recipe!.qualification} />
                       <small>
                         {recipeAttribution(document)} · release {document.release.version}
                       </small>

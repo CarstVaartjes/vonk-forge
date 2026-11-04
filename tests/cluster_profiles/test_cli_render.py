@@ -622,6 +622,75 @@ def test_a_recipe_that_only_needs_its_download_is_not_called_blocked(capsys):
     assert "needs download" not in rows["p/too-big"] and "blocked" in rows["p/too-big"]
 
 
+def _evidence(outcome, tested_at, cause_code, cause_summary, **fields):
+    return {
+        "identity": {"content_sha256": "a" * 64, "required_sparks": 2},
+        "outcome": outcome,
+        "cause_code": cause_code,
+        "cause_summary": cause_summary,
+        "tested_at": tested_at,
+        "platform": {"controller_version": "1.2.3", "spark_count": 2},
+        **fields,
+    }
+
+
+def test_recipe_library_shows_the_published_hardware_status_never_an_error(capsys):
+    # Break caught: a missing, unknown or malformed published status breaking
+    # the library listing instead of reading as "Not yet verified".
+    passed = _evidence(
+        "passed",
+        "2026-11-01T10:00:00Z",
+        "qualification.hardware_pass",
+        "Hardware checks passed",
+    )
+    failed = _evidence(
+        "failed",
+        "2026-11-03T10:00:00Z",
+        "recipe.runtime_exit",
+        "Recipe runtime exited; needs fix",
+        blame="recipe",
+    )
+    recipes = {
+        "p/working": {"status": "Working", "required_sparks": 2, "last_pass": passed},
+        "p/failed": {
+            "status": "Failed: recipe",
+            "required_sparks": 2,
+            "last_pass": passed,
+            "last_failure": failed,
+        },
+        "p/newer": {"status": "Something newer", "required_sparks": 2},
+        "p/malformed": "Working",
+        "p/missing": None,
+    }
+    page = {
+        "recipes": [
+            _recipe(selector, readiness="ready", cache="ready")
+            | {"qualification": qualification}
+            for selector, qualification in recipes.items()
+        ],
+        "next_cursor": None,
+    }
+    render_payload(page, "recipe", action="library")
+    rows = {
+        line.split()[0]: line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("p/")
+    }
+    assert "Working" in rows["p/working"]
+    assert "Failed: recipe" in rows["p/failed"]
+    for selector in ("p/newer", "p/malformed", "p/missing"):
+        assert "Not yet verified" in rows[selector]
+
+    render_payload(page, "recipe", action="library", wide=True)
+    output = capsys.readouterr().out
+    assert "Last passed: 2026-11-01 10:00:00+00:00 on 2 Sparks" in output
+    # The failure is the newest evidence of the failed recipe.
+    assert (
+        "Last failure: Recipe runtime exited; needs fix (2026-11-03 10:00:00+00:00)"
+        in output
+    )
+
+
 def test_an_empty_library_page_names_the_filters_that_emptied_it(capsys):
     render_payload(
         {
@@ -1087,6 +1156,8 @@ def test_library_list_shared_vector_renders_without_documents(capsys):
     assert page.recipes[0].selector in rendered
     assert "not assessed" in rendered
     assert "Recipe library v2.3.0" in rendered
+    assert "Qualification: Working" in rendered
+    assert "Last passed: 2026-09-04 12:00:00+00:00 on 1 Spark" in rendered
 
 
 def test_clock_unavailable_readings_name_reason_and_receipt_cause(capsys):

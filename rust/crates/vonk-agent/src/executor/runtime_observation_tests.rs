@@ -262,6 +262,8 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                         job_progress_at: None,
                         diagnostic: None,
                         process_logs: None,
+
+                        container_labels: None,
                     };
                     let body = canonical_json(&response).unwrap();
                     stream

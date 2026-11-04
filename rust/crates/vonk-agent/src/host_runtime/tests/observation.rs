@@ -177,6 +177,8 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                     error_code: None,
                     diagnostic: None,
                     process_logs: None,
+
+                    container_labels: None,
                 };
                 let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
                 if background {

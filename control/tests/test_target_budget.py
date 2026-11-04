@@ -244,11 +244,8 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "A3",
         "the scan walks every profile, installation and run",
     ),
-    "uninstall_review": TargetCheck(
-        _uninstall_review,
-        "A6",
-        "the uninstall review loads every live installation",
-    ),
+    # Asks the target's nodes only (audit A6).
+    "uninstall_review": TargetCheck(_uninstall_review),
     "fleet_node_selector": TargetCheck(
         _fleet_node_selector,
         "A7",
@@ -260,9 +257,6 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
-        "A6",
-        "the uninstall plan of each installation using the model lists every live"
-        " installation (#2032)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.

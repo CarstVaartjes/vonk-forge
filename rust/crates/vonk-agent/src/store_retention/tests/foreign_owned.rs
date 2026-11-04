@@ -95,6 +95,8 @@ fn foreign_owned_scopes_leave_through_helper_with_progress() {
                 process_logs: None,
                 installation_intent_nonce: None,
                 job_progress_at: None,
+
+                container_labels: None,
             };
             vonk_agent_helper::protocol::write_frame(
                 &mut stream,
