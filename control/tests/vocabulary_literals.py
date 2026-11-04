@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
     SecurityRefusalReason,
-    StateAlias,
     WaitReason,
 )
 from vonk_agent_protocol.state_machines import MACHINES, ModelCacheOperatorStatus
@@ -120,12 +119,10 @@ _CORE_ONLY_WORDS = frozenset(
 _SEPARATORS = ("-", "_", ".")
 
 #: The retired state spellings the distinctive tier cannot see (it already finds
-#: ``waiting-for-operator`` in any context).  Only :data:`STATE_ALIASES` may spell
-#: them; they are read as a *state* when the statement that holds them also names
-#: a state (``row.state``, ``state=``, ``_STORED_STATES``, ``State.RUNNING``).
-LEGACY_STATE_WORDS = frozenset(
-    alias.value for alias in StateAlias if alias is not StateAlias.WAITING_FOR_OPERATOR
-)
+#: ``waiting-for-operator`` in any context).  No source may spell them as a state;
+#: they are read as a *state* when the statement that holds them also names a state
+#: (``row.state``, ``state=``, ``_STORED_STATES``, ``State.RUNNING``).
+LEGACY_STATE_WORDS = frozenset({"cancelling", "waiting", "partial", "expired"})
 #: The machine words that name nothing but a state of one of those machines: the
 #: lifecycle words and the retired spellings have their own tiers, and a word that
 #: is also ordinary prose or a field value elsewhere (``active``, ``pending``,

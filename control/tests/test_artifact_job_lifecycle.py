@@ -622,61 +622,6 @@ def test_an_exact_stop_cancels_a_live_job_with_a_typed_reason(tmp_path) -> None:
 # ------------------------------------ the stored vocabulary is the core's
 
 
-def test_rows_written_before_the_rename_read_as_preparation_state_and_cancel(
-    tmp_path,
-) -> None:
-    sessions, _ops, _service, _agent_jobs, _clock, submitted, _claim, _run = (
-        _issued_job(tmp_path, 340)
-    )
-    with sessions.begin() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        job.state = "cancelling"
-        job.cancel_requested_at = None
-    with sessions() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        assert ajs.state_of(job) == ajs.OBSERVING
-        assert ajs.cancel_requested_at(job) is not None
-        assert ajs.is_live(job) and not ajs.is_ended(job)
-        for word in ("draft", "ready"):
-            job.state, job.preparation = word, None
-            assert ajs.state_of(job) is None and ajs.preparation_of(job) == word
-        job.state = "waiting-for-operator"
-        assert ajs.state_of(job) == ajs.NEEDS_OPERATOR
-        session.rollback()
-
-
-def test_the_startup_adoption_rewrites_old_rows_once(tmp_path) -> None:
-    sessions, _ops, _service, _agent_jobs, _clock, submitted, _claim, _run = (
-        _issued_job(tmp_path, 341)
-    )
-    with sessions.begin() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        job.state = "cancelling"
-        job.cancel_requested_at = None
-    with sessions.begin() as session:
-        connection = session.connection()
-        ajs.adopt_legacy_artifact_jobs(connection)
-        ajs.adopt_legacy_artifact_jobs(connection)
-    with sessions() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        assert job.state == ajs.OBSERVING
-        assert job.cancel_requested_at is not None
-    with sessions.begin() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        job.state = "draft"
-    with sessions.begin() as session:
-        ajs.adopt_legacy_artifact_jobs(session.connection())
-    with sessions() as session:
-        job = session.get(ArtifactJob, submitted.id)
-        assert job is not None
-        assert job.state is None and job.preparation == "draft"
-
-
 def test_a_new_job_is_born_preparing_with_no_state() -> None:
     job = ArtifactJobAdapter.new_job(id="j")
     assert job.state is None and job.preparation == ajs.DRAFT

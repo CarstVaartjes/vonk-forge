@@ -16,7 +16,6 @@ from vonk_agent_protocol import LifecycleState as LifecycleState
 from vonk_agent_protocol import LifecycleSubject as LifecycleSubject
 from vonk_agent_protocol import OperationProgress as OperationProgress
 from vonk_agent_protocol import WaitReason as WaitReason
-from vonk_agent_protocol import state_adopter as state_adopter
 from vonk_agent_protocol.agent_words import ProfileChildPhase as ProfileChildPhase
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind as MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool

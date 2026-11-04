@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import OperatorActionName
+from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_control import job_states
 from vonk_control.jobs import JobService
 from vonk_control.lifecycle import Lifecycle, State, transition
@@ -16,6 +16,7 @@ from vonk_control.lifecycle.types import (
     CancelRequested,
     Claimed,
     Effect,
+    Execute,
     Heartbeat,
     LeaseLapsed,
     Observed,
@@ -52,7 +53,7 @@ def env(tmp_path):
 def _park(sessions, job_id: str, *, attempts: int = 1) -> None:
     with sessions.begin() as session:
         job = session.get(Job, job_id)
-        job.state = "waiting-for-operator"
+        job.state = LifecycleState.NEEDS_OPERATOR.value
         job.current_attempt = attempts
 
 
@@ -125,7 +126,7 @@ def test_heartbeat_extends_only_the_current_fence(env) -> None:
     assert jobs.claim("w2", 30, kinds=("probe",)) is None
 
 
-def test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> None:
+def test_a_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> None:
     jobs, sessions, _ = env
     job = jobs.enqueue("probe", "a", "r", ["n"], {})
     _park(sessions, job.id)
@@ -137,6 +138,32 @@ def test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> No
     # rule 1: a generic job is never irreversible, so the first decision retries it
     decision = transition(row, Tick(), adapter, NOW)
     assert decision.row.state is State.BACKOFF
+
+
+@pytest.mark.parametrize(
+    "word", ["waiting-for-operator", "waiting", "cancelling", "partial", "expired"]
+)
+def test_a_row_with_a_retired_word_is_unknown_and_heals(env, word: str) -> None:
+    """Principle 20: an unknown stored word reaches the self-healing branch.
+
+    A retired spelling means nothing now: it is not adopted as any state, and the
+    row is re-evaluated (retried) on its first tick, never trusted, refused or
+    left for a person; once its retry is due the job is offered for a fresh claim.
+    """
+
+    jobs, sessions, _ = env
+    job = jobs.enqueue("probe", "a", "r", ["n"], {})
+    with sessions.begin() as session:
+        stored = session.get(Job, job.id)
+        stored.state, stored.current_attempt = word, 1
+    assert job_states.core(word) is None
+    adapter = JobAdapter()
+    with sessions() as session:
+        row = adapter.adopt(session.get(Job, job.id))
+    retried = transition(row, Tick(), adapter, NOW).row
+    assert retried.state is State.BACKOFF and retried.next_action_at is not None
+    due = transition(retried, Tick(), adapter, retried.next_action_at)
+    assert due.row.state is State.QUEUED and Execute() in due.commands
 
 
 def test_resume_queues_a_waiting_job_and_refuses_anything_else(env) -> None:

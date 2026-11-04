@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
-    StateAlias,
 )
 from vonk_control import db
 from vonk_control.agent_jobs import AgentJobService
@@ -108,20 +107,26 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
             and row is not None
         )
         assert native.next_action_at is not None
-        # These are retained released-producer bytes, not a second live writer.
+        # These are retained released-producer bytes, not a second live writer:
+        # the retry encoding a row written before the core carries.
         table = AgentOperation.__table__
         assert isinstance(table, Table)
         session.execute(
             update(table)
             .where(table.c.id == native_id)
-            .values(state=StateAlias.WAITING_FOR_OPERATOR.value)
+            .values(
+                state=LifecycleState.BACKOFF.value,
+                next_action_at=None,
+                retry_disposition="retry",
+                retry_disposition_attempt=table.c.current_attempt,
+            )
         )
         damaged = deepcopy(original)
         damaged["total_steps"] = "damaged retained count"
         _persist_retained(session, row, damaged)
         retained_plan = deepcopy(row.plan)
 
-    # Hold the actual row that the final legacy-state pass must rewrite. The
+    # Hold the actual row that the startup order adoption must rewrite. The
     # test's connection factory only supplies a bounded lock timeout; startup,
     # adoption SQL, savepoint and schema verification remain production code.
     build_engine = db.build_engine
@@ -156,7 +161,6 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
             statement is not None and "UPDATE agent_operations" in statement
             for statement in startup_faults
         )
-        assert "legacy_states.py" in caplog.text
         assert "Lifecycle bookkeeping adoption deferred" in caplog.text
         with postgres_engine.connect() as connection:
             db.verify_schema_is_current(connection)
@@ -205,7 +209,7 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
     with sessions() as session:
         native = session.get(AgentOperation, native_id)
         assert native is not None
-        assert native.state != StateAlias.WAITING_FOR_OPERATOR.value
+        assert native.retry_disposition is None and native.next_action_at is not None
     restarted = FleetProfileService(sessions, clock=lambda: due)
     restarted.tick()
     with sessions() as session:
@@ -224,7 +228,7 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
 
     # Resume the exact native Stop after startup, then prove its actual receipt
     # reaches the original SQL child independently of the retired journal.
-    # Retained aliases heal through the ordinary native reconciler.
+    # The adopted retry heals through the ordinary native reconciler.
     fresh_jobs = AgentJobService(sessions, clock=lambda: clock[0])
     fresh_jobs.set_result_consumer(lifecycle.consume_agent_result)
     fresh_jobs.reconcile_orders()

@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
     ReservationState,
     RoutePublicationState,
     RunState,
-    StateAlias,
 )
 
 from .catalog_revision_collection import GRACE, INTERVAL, tokens
@@ -541,7 +540,7 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
             "compiled_contract",
             or_(
                 ArtifactJob.state.is_(None),
-                ArtifactJob.state.not_in((*_TERMINAL, StateAlias.EXPIRED.value)),
+                ArtifactJob.state.not_in(_TERMINAL),
                 ArtifactJob.updated_at >= cutoff,
             ),
         ),

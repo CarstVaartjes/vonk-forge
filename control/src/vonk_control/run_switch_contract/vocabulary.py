@@ -5,14 +5,11 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import (
-    BeforeValidator,
     Field,
     StringConstraints,
 )
 from vonk_agent_protocol import (
     LifecycleState,
-    LifecycleSubject,
-    state_adopter,
 )
 
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -92,21 +89,16 @@ RunSwitchSubphase = Literal[
 
 RunSwitchMemberState = Literal["pending", "running", "succeeded", "failed", "unknown"]
 
-RunSwitchProgressState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.NEEDS_OPERATOR,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-        "unknown",
-    ],
-    # A document written before the rename may still say ``waiting`` or
-    # ``waiting-for-operator``.
-    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
+RunSwitchProgressState = Literal[
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.NEEDS_OPERATOR,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
+    "unknown",
 ]
 
 RunSwitchOperationKind = Literal[

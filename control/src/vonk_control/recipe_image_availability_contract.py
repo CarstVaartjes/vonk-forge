@@ -2,26 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BeforeValidator, ConfigDict, Field
-from vonk_agent_protocol import LifecycleState, LifecycleSubject, state_adopter
+from pydantic import ConfigDict, Field
+from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.build_import import RecipeBuildEvidence
 
 from .strict_json import StrictJSONModel
 
-RecipeImageAvailabilityState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    # A row written before the rename may still say ``partial`` or ``cancelling``.
-    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
+RecipeImageAvailabilityState = Literal[
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
 ]
 
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from ..cli_states import ENDED_STATES, OPERATOR_WAIT_STATES
+from ..cli_states import ENDED_STATES, NEEDS_OPERATOR
 from ..fleet_qualification import (
     QualificationObservationUnknown,
 )
@@ -25,7 +25,7 @@ PROFILE_LABEL = "qualification-authority"
 # Recovery modes in the order the campaign exercises them: a rank loss leaves
 # the group running, a host restart takes every selected Spark down.
 FAILURE_MODES = ("single-host-restart", "dual-rank-loss-recovery", "dual-host-restart")
-_TERMINAL_APPLICATIONS = frozenset({*ENDED_STATES, *OPERATOR_WAIT_STATES})
+_TERMINAL_APPLICATIONS = frozenset({*ENDED_STATES, NEEDS_OPERATOR})
 _PASSED = frozenset({"passed", "covered"})
 
 

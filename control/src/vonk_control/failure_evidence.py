@@ -29,7 +29,6 @@ from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
     SecurityRefusalReason,
-    StateAlias,
 )
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
@@ -167,12 +166,11 @@ class FailureEvidenceBundle(EvidenceModel):
 
 
 #: The states of an operation (of any kind) whose failure evidence is downloadable:
-#: a failure, a cancellation, or a wait for a person in either spelling.
+#: a failure, a cancellation, or a wait for a person.
 FAILED_ATTEMPT_STATES = (
     LifecycleState.FAILED.value,
     LifecycleState.CANCELLED.value,
     LifecycleState.NEEDS_OPERATOR.value,
-    StateAlias.WAITING_FOR_OPERATOR.value,
 )
 
 # The attempts whose own terminal failure receipt must stay readable are the failed

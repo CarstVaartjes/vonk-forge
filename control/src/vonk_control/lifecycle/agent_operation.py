@@ -23,10 +23,8 @@ core state                stored order
 ``cancelled``             ``cancelled``
 ========================  ==========================================
 
-A row written before the rename says ``waiting-for-operator`` for all three waits;
-the contract adopts it (``agent_operation_states.PARKED`` selects both spellings)
-and the schedule columns still say which wait it was, so the reconciler classifies it
-on its first pass.  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
+A stored word outside the core vocabulary is unknown: the order is re-evaluated as
+a wait on its first pass (rules 1 to 3 of the core).  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
 ``observing`` with a typed ``observation_cause`` (``reported-unknown`` or
 ``lease-lapsed``); the agent wire keeps its own four result words and is mapped at
 ingress (``agent_operation_states.record_wire_state``).
@@ -146,7 +144,13 @@ ENDED_PARENT_STATES = frozenset(
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
 AGGREGATE_FINAL_STATES = frozenset(
-    {"cancelled", aos.RETAINED_COMPENSATED, "failed", "succeeded", aos.NEEDS_OPERATOR}
+    state.value
+    for state in (
+        LifecycleState.CANCELLED,
+        LifecycleState.FAILED,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.NEEDS_OPERATOR,
+    )
 )
 #: The operator actions of a parked order (the same pair the Job endpoints take).
 OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
@@ -970,14 +974,13 @@ def aggregate_parent_state(
 
     ``children`` are ``(stored state, retry scheduled)`` pairs.  A parent whose
     every unfinished order is an automatic retry is ``queued``: it is progressing,
-    not waiting for a person (the order label ``waiting-for-operator`` is legacy
-    for a retry).  Otherwise it ends only when every order has, and the worst
+    not waiting for a person.  Otherwise it ends only when every order has, and the worst
     outcome wins: failed, then waiting, then cancelled, then succeeded.
     """
 
     children = [
         (
-            (LifecycleState.BACKOFF.value if scheduled else adopted.state.value)
+            (LifecycleState.BACKOFF.value if scheduled else adopted.value)
             if (adopted := adopt_state(LifecycleSubject.AGENT_OPERATION, state))
             is not None
             else state,

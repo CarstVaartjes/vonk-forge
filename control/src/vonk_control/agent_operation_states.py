@@ -3,15 +3,10 @@
 An order's ``state`` is a word of the core vocabulary: ``queued``, ``running``,
 ``backoff`` (a scheduled retry), ``observing`` (the effect is being checked),
 ``needs-operator`` (a person must act), ``succeeded``, ``failed``, ``cancelled``.
-A row written before the rename carries ``waiting-for-operator`` for all three
-kinds of wait; the contract adopts it, and every selection below includes it, so
-an old row is found as well as a new one and no module spells a retired word.
 
 An attempt records one try.  It ends ``succeeded``, ``failed``, ``cancelled`` or
 ``observing`` (no definite answer), and the typed ``observation_cause`` says why:
-the executor ``reported-unknown`` or its ``lease-lapsed``.  The old spellings
-``waiting-for-operator`` and ``expired`` carried that cause in the word itself; the
-helpers read either.
+the executor ``reported-unknown`` or its ``lease-lapsed``.
 """
 
 from __future__ import annotations
@@ -24,9 +19,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     LifecycleSubject,
     ObservationCause,
-    StateAlias,
     is_state,
-    legacy_observation_cause,
     live_words,
     stored_words,
 )
@@ -42,16 +35,6 @@ _WAIT = (
 
 #: What the agent's result calls "I could not confirm the effect" (the wire word).
 WIRE_UNKNOWN = AgentResultState.OBSERVING.value
-
-#: The retired spellings an old attempt row may carry (see ``legacy_observation_cause``).
-LEGACY_UNKNOWN = StateAlias.WAITING_FOR_OPERATOR.value
-LEGACY_LAPSED = StateAlias.EXPIRED.value
-
-#: Immutable outcome carried by historical aggregate/member reads only.
-#: Current normal lifecycle writers do not emit it; it is neither a core state
-#: nor an adopted alias, and its terminal display meaning proves no effect.
-#: The underlying retained SQL columns still accept strings.
-RETAINED_COMPENSATED = "compensated"
 
 
 # -- orders ------------------------------------------------------------------
@@ -87,14 +70,12 @@ def attempt_is_observing(attempt: Any) -> bool:
 
 
 def attempt_cause(attempt: Any) -> ObservationCause | None:
-    """Why an attempt is observed: the typed field, or the old word's own meaning."""
+    """Why an attempt is observed (its typed field), or ``None``."""
 
     if not attempt_is_observing(attempt):
         return None
     recorded = getattr(attempt, "observation_cause", None)
-    if recorded:
-        return ObservationCause(recorded)
-    return legacy_observation_cause(attempt.state)
+    return ObservationCause(recorded) if recorded else None
 
 
 def attempt_lapsed(attempt: Any) -> bool:
@@ -144,14 +125,11 @@ def record_wire_state(attempt: Any, wire_state: str) -> None:
 
 
 def sql_attempt_lapsed(model: Any) -> Any:
-    """SQL: the attempt's lease lapsed without a report (old or new spelling)."""
+    """SQL: the attempt's lease lapsed without a report."""
 
-    return or_(
-        model.state == LEGACY_LAPSED,
-        and_(
-            model.state == OBSERVING,
-            model.observation_cause == ObservationCause.LEASE_LAPSED.value,
-        ),
+    return and_(
+        model.state == OBSERVING,
+        model.observation_cause == ObservationCause.LEASE_LAPSED.value,
     )
 
 
@@ -160,7 +138,6 @@ def sql_attempt_failed_or_unknown(model: Any) -> Any:
 
     return or_(
         model.state == FAILED,
-        model.state == LEGACY_UNKNOWN,
         and_(
             model.state == OBSERVING,
             model.observation_cause == ObservationCause.REPORTED_UNKNOWN.value,

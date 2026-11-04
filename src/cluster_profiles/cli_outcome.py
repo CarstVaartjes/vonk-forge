@@ -12,8 +12,7 @@ from typing import Literal, cast
 
 from .cli_states import (
     CANCEL_ACCEPTED_STATES,
-    LEGACY_PARTIAL,
-    OPERATOR_WAIT_STATES,
+    NEEDS_OPERATOR,
     PARTIAL_FIELD,
 )
 
@@ -159,7 +158,7 @@ class CommandOutcome:
         if self.context == "read":
             return 0
         state = operation_state(self.document)
-        if state == LEGACY_PARTIAL or self.document.get(PARTIAL_FIELD) is True:
+        if self.document.get(PARTIAL_FIELD) is True:
             return 1
         if state in {
             "failed",
@@ -167,7 +166,7 @@ class CommandOutcome:
             "cancelled",
             "superseded",
             "rejected",
-            *OPERATOR_WAIT_STATES,
+            NEEDS_OPERATOR,
         }:
             return 2
         return 0
