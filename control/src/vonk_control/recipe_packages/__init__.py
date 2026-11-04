@@ -35,6 +35,7 @@ from vonk_forge_contracts import (
     require_display_of,
 )
 from vonk_forge_contracts.model import ModelIdentity
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeIdentity
 from vonk_forge_contracts.resolver import validate_recipe_models
 
@@ -813,6 +814,24 @@ class RecipePackageClient:
                 )
             # Optional; an unreadable entry only means no prebuilt image.
             prebuilt_image = read_prebuilt_image(recipe.get("prebuilt_image"))
+            # Informative and optional: an unreadable status never withholds
+            # the recipe. It shows as not yet verified, and the named problem
+            # makes the next sync observe the published status again.
+            qualification = None
+            if recipe.get("qualification") is not None:
+                try:
+                    qualification = PublishedQualificationStatusView.model_validate(
+                        recipe["qualification"]
+                    )
+                except (TypeError, ValueError) as error:
+                    problems.append(
+                        _index_problem(
+                            _entry_uri(recipe),
+                            "recipe qualification status is invalid",
+                            recipe,
+                            error,
+                        )
+                    )
             packages[key] = RecipePackageEntry(
                 publisher=publisher,
                 slug=slug,
@@ -845,6 +864,7 @@ class RecipePackageClient:
                     package_sha256=package_digest,
                     source_bundle_sha256=source_digest,
                     prebuilt_image=prebuilt_image,
+                    qualification=qualification,
                 )
             )
         if [(item.publisher, item.slug) for item in items] != sorted(

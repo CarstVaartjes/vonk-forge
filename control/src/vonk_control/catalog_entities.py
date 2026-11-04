@@ -9,7 +9,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -31,6 +31,7 @@ from vonk_forge_contracts import (
     read_recipe,
     require_display_of,
 )
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.resolver import validate_recipe_models
 
 from .admission_locking import ConstraintReplay, admitting
@@ -59,6 +60,16 @@ if TYPE_CHECKING:
     from .catalog_sync_contract import ManagedCatalogSyncProblem
 
 _LOGGER = logging.getLogger(__name__)
+
+# ``(publisher, slug, content digest)``: one exact recipe revision.
+type RevisionKey = tuple[str, str, str]
+
+
+class PublishedFacts(TypedDict, total=False):
+    """The observed subset of what the catalog publishes beside a revision."""
+
+    prebuilt_image: PrebuiltImage | None
+    qualification: PublishedQualificationStatusView | None
 
 
 class CatalogError(RuntimeError):
@@ -280,40 +291,40 @@ class CatalogEntityService:
                 session, row, RecipeRevisionProjection.model_validate(projected)
             )
 
-    def record_prebuilt_images(
-        self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
+    def record_published_facts(
+        self,
+        images: Mapping[RevisionKey, PrebuiltImage | None],
+        qualifications: Mapping[RevisionKey, PublishedQualificationStatusView | None],
     ) -> None:
-        """Record the signed catalog's prebuilt image on each active recipe revision.
+        """Record what the signed catalog publishes beside each active revision.
 
-        ``images`` is keyed by ``(publisher, slug, content digest)``: a
-        prebuilt image belongs to one exact revision. Omitted keys are unknown
-        and keep their last verified pin; an observed key with None explicitly
-        withdraws its pin.
+        Both maps are keyed by ``(publisher, slug, content digest)``: a
+        prebuilt image and a qualification status belong to one exact
+        revision. In each map, omitted keys are unknown and keep their last
+        recorded value; an observed key with None explicitly withdraws it.
 
-        As in ``refresh_build_policy``, only a revision whose pin changes is
-        locked, in its own short transaction; a busy row is recorded by the
-        next sync.
+        As in ``refresh_build_policy``, only a revision whose recorded facts
+        change is locked, in its own short transaction; a busy row is recorded
+        by the next sync.
         """
         with self._read() as session:
             revisions = _active_recipe_revisions(session)
         for revision in revisions:
             key = (revision.publisher, revision.slug, revision.content_digest or "")
-            if key not in images:
-                continue
-            image = images[key]
-            if _prebuilt_image_current(revision, image):
+            facts: PublishedFacts = {}
+            if key in images:
+                facts["prebuilt_image"] = images[key]
+            if key in qualifications:
+                facts["qualification"] = qualifications[key]
+            if not facts or _published_facts_current(revision, facts):
                 continue
             with self._write() as session:
                 row = _lock_active_recipe_revision(session, revision)
-                if row is None or _prebuilt_image_current(row, image):
+                if row is None or _published_facts_current(row, facts):
                     continue
                 projected = read_catalog_projection(row)
                 assert isinstance(projected, RecipeRevisionProjection)
-                _store_projection(
-                    session,
-                    row,
-                    projected.model_copy(update={"prebuilt_image": image}),
-                )
+                _store_projection(session, row, projected.model_copy(update=facts))
 
     def create_draft(
         self,
@@ -858,17 +869,16 @@ def _build_policy_current(
     return refreshed == stored
 
 
-def _prebuilt_image_current(
-    row: CatalogDocumentRevision, image: PrebuiltImage | None
+def _published_facts_current(
+    row: CatalogDocumentRevision, facts: PublishedFacts
 ) -> bool:
-    """True when nothing is to be recorded: the pin matches or is unreadable."""
+    """True when nothing is to be recorded: the facts match or are unreadable."""
     try:
         projected = read_catalog_projection(row)
     except CatalogRevisionContractError:
         return True
-    return (
-        not isinstance(projected, RecipeRevisionProjection)
-        or projected.prebuilt_image == image
+    return not isinstance(projected, RecipeRevisionProjection) or all(
+        getattr(projected, name) == value for name, value in facts.items()
     )
 
 

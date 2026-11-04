@@ -6,6 +6,7 @@ import { ArtifactJobWorkspace } from "./artifact-job-workspace";
 import { LibraryProfileComposer } from "./library-profile-composer";
 import { LibraryRecipeFit } from "./library-recipe-fit";
 import { LibraryRecipeVisual } from "./library-recipe-visual";
+import { RecipeQualificationEvidence } from "./library-recipe-qualification";
 import { RecipeBadges, recipeAttribution, sparkLabel } from "./library-workcell";
 import "./library-recipe-detail.css";
 
@@ -78,6 +79,7 @@ export function LibraryRecipeAuthority({
           <h2 id="recipe-detail-heading">{detail.recipe.title}</h2>
           <p>{detail.recipe.description}</p>
           <RecipeBadges recipe={detail.recipe} />
+          <RecipeQualificationEvidence qualification={detail.recipe.qualification} />
           <small>{recipeAttribution(detail.definition)}</small>
         </div>
         <span className="library-schema-badge">Release {detail.definition.release.version}</span>

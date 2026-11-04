@@ -160,7 +160,26 @@
       "updated_at": "2026-09-05T12:00:00Z",
       "node_count": 1,
       "engine": "vllm",
-      "creator": "Vonk Forge"
+      "creator": "Vonk Forge",
+      "qualification": {
+        "status": "Working",
+        "required_sparks": 1,
+        "last_pass": {
+          "identity": {
+            "content_sha256": "e2e5055d9de9edfc4699fe97dd88e946d29af7c7b2d4bdd800e674dd7f7a406d",
+            "required_sparks": 1
+          },
+          "outcome": "passed",
+          "cause_code": "qualification.hardware_pass",
+          "cause_summary": "Hardware checks passed",
+          "tested_at": "2026-09-04T12:00:00Z",
+          "platform": {
+            "controller_version": "2.3.0",
+            "spark_count": 1,
+            "topology": "single"
+          }
+        }
+      }
     }
   ],
   "facets": {
