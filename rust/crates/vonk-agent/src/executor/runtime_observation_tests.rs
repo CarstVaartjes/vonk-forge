@@ -237,7 +237,10 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                             assert_eq!(target.cancel_pending_start, cancel_pending_start);
                         }
                         (
-                            Some(vonk_agent_protocol::RunInspectTarget::RuntimeIdentityTarget(_)),
+                            Some(
+                                vonk_agent_protocol::RunInspectTarget::RuntimeIdentityTarget(_)
+                                | vonk_agent_protocol::RunInspectTarget::JobIdentityTarget(_),
+                            ),
                             false,
                         ) => {}
                         other => panic!("unexpected inspection target {other:?}"),
