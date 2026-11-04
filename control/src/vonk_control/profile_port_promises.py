@@ -19,21 +19,16 @@ from sqlalchemy import or_, select, tuple_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
-    LifecycleState,
     ReservationState,
 )
 
-from . import job_states
+from . import fleet_profile_states
 from .admission_locking import ConstraintReplan
 from .models import FleetProfileApplication, ResourceReservation
 from .owner_liveness import profile_claim_consumable
 
 #: The unique index behind "one live promise per Spark port".
 PORT_PROMISE_CONSTRAINT = "uq_promised_node_port"
-
-_LIVE = job_states.words(
-    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-)
 
 
 class PortPromiseTaken(ConstraintReplan):
@@ -56,7 +51,7 @@ def port_binds() -> ColumnElement[bool]:
         ResourceReservation.state != ReservationState.PROMISED,
         ResourceReservation.owner_id.in_(
             select(FleetProfileApplication.id).where(
-                FleetProfileApplication.state.in_(_LIVE)
+                FleetProfileApplication.state.in_(fleet_profile_states.LIVE)
             )
         ),
     )

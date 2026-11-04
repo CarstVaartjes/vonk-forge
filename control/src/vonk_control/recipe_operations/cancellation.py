@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from .. import job_states
+from .. import agent_operation_states, job_states
 from ..agent_jobs import (
     _JsonFlagIsTrue,
 )
@@ -172,11 +172,7 @@ class CancellationMixin:
                     "cancellation request key was already used differently",
                     reason=InvalidRequestReason.CONFLICT,
                 )
-            if job.state not in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.NEEDS_OPERATOR,
-            ):
+            if job.state not in job_states.LIVE:
                 # A cancel always completes (rule 4): a parent that mirrors an
                 # order's wait (the Stop of a one-shot job in doubt, a legacy
                 # parked order) accepts it, and the orders end it.
@@ -210,13 +206,7 @@ class CancellationMixin:
                     AgentOperationAdapter(session).record_outcome(
                         child, None, job, Outcome.CANCELLED, now
                     )
-            if any(
-                child.state
-                in job_states.words(
-                    LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-                )
-                for child in children
-            ):
+            if any(child.state in agent_operation_states.LIVE for child in children):
                 job.result = serialize_json_value(
                     _validated_result(
                         job.kind,
@@ -286,13 +276,7 @@ class CancellationMixin:
                 .where(Job.id == job_id if job_id is not None else true())
                 .where(
                     Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    Job.state.in_(job_states.LIVE),
                     or_(
                         _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                         Job.payload["build_intent"]["kind"].as_string() == "dependency",

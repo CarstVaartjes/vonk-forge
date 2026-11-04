@@ -2892,3 +2892,58 @@ def test_each_call_is_judged_on_its_own() -> None:
 )
 def test_a_line_read_exact_target_or_paged_docker_call_passes(source: str) -> None:
     assert not _docker_listings(source, {2})
+
+
+_STATES_PATH = "control/src/vonk_control/fleet_profiles/example.py"
+
+
+def _lifecycle_sets(
+    source: str, added: set[int], path: str = _STATES_PATH
+) -> list[str]:
+    return check_source(path, source, added, modes=("lifecycle-sets",))
+
+
+@pytest.mark.parametrize(
+    "spelled",
+    [
+        # The shape that left a backing-off load out of "live".
+        (
+            "job_states.words(\n    LifecycleState.QUEUED,\n"
+            "    LifecycleState.RUNNING,\n    LifecycleState.NEEDS_OPERATOR,\n)"
+        ),
+        "{LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}",
+        "(State.RUNNING, State.OBSERVING)",
+        "job_states.means(row.state, LifecycleState.QUEUED, LifecycleState.BACKOFF)",
+        "frozenset({aos.QUEUED, aos.RUNNING})",
+        "('queued', 'running')",
+    ],
+)
+def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
+    source = f"LIVE = {spelled}\n"
+    lines = set(range(1, source.count("\n") + 1))
+    assert _lifecycle_sets(source, lines)
+    # Only an added line can fail the change.
+    assert not _lifecycle_sets(source, set())
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        "fleet_profile_states.LIVE",
+        "job_states.words(LifecycleState.NEEDS_OPERATOR)",
+        # A full vocabulary names a terminal state: a contract listing.
+        "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
+        # Another machine's states.
+        "{RunState.STARTING, RunState.RUNNING, RunState.STOPPING}",
+    ],
+)
+def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:
+    assert not _lifecycle_sets(f"LIVE = {named}\n", {1})
+
+
+def test_a_subject_states_module_owns_its_sets() -> None:
+    source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
+    assert _lifecycle_sets(source, {1})
+    assert not _lifecycle_sets(
+        source, {1}, path="control/src/vonk_control/fleet_profile_states.py"
+    )

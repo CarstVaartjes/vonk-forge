@@ -20,7 +20,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import read_recipe
 
-from . import job_states
+from . import fleet_profile_states, job_states
 from .admission_locking import is_admission_contention
 from .agent_jobs import _JsonFlagIsTrue
 from .categorized_errors import InvalidValue
@@ -250,13 +250,7 @@ def lock_build_dependency(
         select(Job).where(
             Job.kind == "recipe.build.v1",
             Job.payload["owner_id"].as_string() == build.id,
-            Job.state.in_(
-                job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.NEEDS_OPERATOR,
-                )
-            ),
+            Job.state.in_(job_states.LIVE),
             _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
         )
     )
@@ -340,13 +334,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
     profiles = session.scalars(
         select(FleetProfileApplication)
         .where(
-            FleetProfileApplication.state.in_(
-                job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.NEEDS_OPERATOR,
-                )
-            ),
+            FleetProfileApplication.state.in_(fleet_profile_states.LIVE),
             cast(FleetProfileApplication.plan["preparation_decisions"], String).like(
                 f'%"{build.id}"%'
             ),

@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     AgentProgress,
     Disposition,
     InvalidRequestReason,
-    LifecycleState,
     RecipeBuildRequest,
     WaitReason,
 )
@@ -142,13 +141,7 @@ def _claim_once(
                     StoredOperation.state.in_(agent_operation_states.PARKED),
                     StoredOperation.kind.in_(_RESTART_REISSUE_OPERATIONS),
                     _retry_not_authorized_for_current_attempt(),
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    Job.state.in_(job_states.LIVE),
                     *(condition.expression for condition in predicate.common),
                     *(condition.expression for condition in predicate.diagnostics),
                 )

@@ -231,13 +231,7 @@ class EndingsMixin:
                 select(Job.id).where(
                     Job.kind == WireAgentOperation.RECIPE_START.value,
                     Job.request_id == start_request_id,
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    Job.state.in_(job_states.LIVE),
                 )
             )
         if start_id is None:
