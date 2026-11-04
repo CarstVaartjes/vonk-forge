@@ -285,10 +285,6 @@ jobs:
           set -euo pipefail
           df -h /
           du -sh target
-          # TEMP baseline measurement, dropped with the fix
-          find target -type f -size +50M -printf '%s %p\n' | sort -rn | head -40 | numfmt --to=iec --field=1
-          find target/debug/deps -maxdepth 1 -type f -executable | wc -l
-          du -sh target/debug/deps target/debug/build target/debug/incremental 2>/dev/null || true
           free_kib=$(df --output=avail -k / | tail -1)
           if ((free_kib < 4 * 1024 * 1024)); then
             echo "::warning title=Rust job disk margin::$((free_kib / 1024)) MiB free after the Rust test build; the runner dies when the disk fills"
