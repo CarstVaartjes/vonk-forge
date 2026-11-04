@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -12,6 +13,7 @@ from datetime import datetime
 
 from vonk_agent_protocol import GatewayRouteState, SecurityRefusalError
 from vonk_agent_protocol.outcome import UnknownError
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..litellm import (
@@ -33,7 +35,6 @@ from ..route_runtime import (
     verify_active_route_bundle,
 )
 from .shared import (
-    _ALIAS,
     _NODE_ID,
     _UPSTREAM_MODEL,
     RecipeRouteNotReady,
@@ -126,7 +127,11 @@ class AtomicRecipeRoutePublisher:
         if len(found) != 1:
             return None
         alias, raw = found[0]
-        if _ALIAS.fullmatch(alias) is None or raw.scheme != "http" or raw.path != "/v1":
+        if (
+            re.fullmatch(ENDPOINT_ALIAS_PATTERN, alias) is None
+            or raw.scheme != "http"
+            or raw.path != "/v1"
+        ):
             return None
         try:
             policy.validate(raw.address)

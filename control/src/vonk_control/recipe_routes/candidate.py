@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC
 from typing import TYPE_CHECKING
@@ -15,7 +16,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol import RunState
-from vonk_forge_contracts import read_recipe
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
 from ..interface_adapters import InterfaceAdapterError, interface_adapter
 from ..litellm import (
@@ -46,7 +47,6 @@ from ..route_bundle_contract import (
 )
 from ..security.route_authority import require_route_authority
 from .shared import (
-    _ALIAS,
     _UPSTREAM_MODEL,
     RecipeEndpointAuthorityRefused,
     RecipeRankStopped,
@@ -139,7 +139,10 @@ def _candidate_once(
             require_route_authority(agent, run.id)
         try:
             retained: list[str] = []
-            if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
+            if (
+                re.fullmatch(ENDPOINT_ALIAS_PATTERN, run.alias) is None
+                or run.alias in aliases
+            ):
                 raise RecipeRouteNotReady(
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )

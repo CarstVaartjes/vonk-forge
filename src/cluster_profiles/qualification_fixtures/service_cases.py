@@ -6,15 +6,7 @@ import json
 import re
 from collections.abc import Mapping
 
-from .contracts import (
-    _DIGEST,
-    _ENDPOINT_ALIAS,
-    _KEY,
-    _NAME,
-    FixtureError,
-    ServiceCase,
-    ServiceRecipe,
-)
+from .contracts import _DIGEST, _KEY, _NAME, FixtureError, ServiceCase, ServiceRecipe
 from .values import _integer, _object
 
 
@@ -126,7 +118,9 @@ def _parse_service_recipe(
     higher = _object(item.get("higher_tiers", {}), f"service recipe {key} tiers")
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         raise FixtureError(f"service recipe {key} digest is invalid")
-    if not isinstance(alias, str) or not _ENDPOINT_ALIAS.fullmatch(alias):
+    # The Controller's alias contract and the recipes ingress check own the
+    # alias rule; a profile save refuses an invalid one with a typed 422.
+    if not isinstance(alias, str) or not alias:
         raise FixtureError(f"service recipe {key} alias is invalid")
     if (
         not isinstance(smoke_cases, list)

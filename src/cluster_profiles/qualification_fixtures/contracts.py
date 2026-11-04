@@ -27,14 +27,6 @@ _SLOT = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
-# The platform endpoint alias, owned by vonk_forge_contracts.endpoint_alias.
-# The installed vonkctl wheel does not depend on that package (nor on
-# pydantic), so the pattern is mirrored here and in the manifest schema, and
-# control/tests/test_endpoint_alias_rule.py pins both copies to the owner.
-ENDPOINT_ALIAS_PATTERN = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
-_ENDPOINT_ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)
-
-
 _CASE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}\Z")
 
 
