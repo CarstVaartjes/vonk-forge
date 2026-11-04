@@ -10,6 +10,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from pydantic import TypeAdapter
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session, sessionmaker
@@ -26,8 +27,10 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
+from vonk_control.alias_contract import ALIAS_MAX_LENGTH
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
+    Alias,
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
@@ -1469,6 +1472,61 @@ def test_atomic_adapter_keeps_caddy_routes_static_and_activates_litellm(
     assert withdrawn.assignments is not None
     assert withdrawn.assignments[0].state == "withdrawn"
     assert withdrawn.assignments[0].endpoint is None
+
+
+def test_longest_profile_alias_is_planned_published_and_discovered(
+    tmp_path: Path,
+) -> None:
+    # Catches a plan, route or endpoint contract that caps aliases shorter
+    # than the profile accepts: the profile saves, then the load cannot run.
+    alias = "chat-" + "x" * (ALIAS_MAX_LENGTH - len("chat-"))
+    assert TypeAdapter(Alias).validate_python(alias) == alias
+    service, _publisher, _applied, run_id = setup(
+        tmp_path / "database", run_alias=alias
+    )
+    service = RecipeRouteService(
+        service.sessions,
+        publisher=AtomicRecipeRoutePublisher(
+            AtomicRouteBundlePublisher(tmp_path / "live")
+        ),
+        management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
+        clock=lambda: NOW,
+        maximum_age_seconds=120,
+    )
+
+    assert service.publish_run(run_id).generation == 1
+    marker = json.loads((tmp_path / "live" / "activation.json").read_text())
+    litellm = tmp_path / "live" / "generations" / marker["directory"] / "litellm.json"
+    assert json.loads(litellm.read_text())["model_list"][0]["model_name"] == alias
+
+    projection = durable_operation_services(
+        service.sessions,
+        tmp_path / "live",
+        clock=lambda: NOW,
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+        profile_endpoint_intent=lambda _session, number: FleetProfileEndpointIntent(
+            number=number,
+            profile_id="00000000-0000-4000-8000-000000000101",
+            application_id="00000000-0000-4000-8000-000000000102",
+            application_state=LifecycleState.SUCCEEDED,
+            assignments=(
+                FleetProfileEndpointAssignmentIntent(
+                    assignment_id="00000000-0000-4000-8000-000000000103",
+                    recipe_title="Qwen",
+                    desired_state=DesiredAssignmentState.RUNNING,
+                    alias=alias,
+                    state=EndpointState.NOT_PUBLISHED_YET,
+                    expected_run_id=run_id,
+                ),
+            ),
+        ),
+    )
+    assert projection.profile_endpoint is not None
+    found = projection.profile_endpoint(3, alias, GATEWAY)
+    assert found.assignments is not None
+    assert found.assignments[0].state == "published"
+    assert found.assignments[0].endpoint is not None
+    assert found.assignments[0].endpoint.alias == alias
 
 
 def test_worker_republishes_from_fresh_all_rank_evidence_and_recovers_owner(

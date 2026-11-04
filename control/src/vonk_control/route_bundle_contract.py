@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from vonk_agent_protocol.state_machines import GatewayRouteState
 
+from .alias_contract import Alias
 from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictModel
 
@@ -57,7 +58,7 @@ class RouteRankIdentity(StrictModel):
 
 class RouteRunIdentity(StrictModel):
     run_id: str = Field(min_length=1, max_length=128)
-    alias: str = Field(min_length=1, max_length=128)
+    alias: Alias
     plan_digest: str = Field(min_length=1, max_length=128)
     run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=0)
     upstream_model: str = Field(min_length=1, max_length=256)
@@ -76,7 +77,7 @@ class RouteAcceptedRunIdentity(StrictModel):
     """Retained immutable serving facts while current bookkeeping is unreadable."""
 
     run_id: str = Field(min_length=1, max_length=128)
-    alias: str = Field(min_length=1, max_length=128)
+    alias: Alias
     accepted_endpoint: RouteEndpointDocument
     accepted_policy: RouteAcceptedModelPolicy
 

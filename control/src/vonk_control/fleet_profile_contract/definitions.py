@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
 
+from ..alias_contract import Alias
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate
 from ..recipe_update_notice import RecipeUpdateNotice
@@ -26,7 +27,6 @@ from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
 from .vocabulary import (
     MAX_PROFILE_WARNINGS,
-    Alias,
     Description,
     DesiredAssignmentStateField,
     Digest,

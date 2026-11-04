@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.enrollment import NodeId
 
 from ..admission_locking import ConstraintReplay, admitting
+from ..alias_contract import ALIAS_PATTERN
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..failure_classification import disposition
 from ..litellm import (
@@ -47,7 +48,7 @@ from ..route_runtime import (
 )
 
 _NODE_ID = TypeAdapter(NodeId)
-_ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\Z")
+_ALIAS = re.compile(ALIAS_PATTERN)
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _HEALTH_RECOVERY_ERROR = "recipe rank health requires recovery"

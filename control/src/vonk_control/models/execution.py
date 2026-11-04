@@ -33,6 +33,7 @@ from vonk_agent_protocol import (
     machine_check,
 )
 
+from ..alias_contract import ALIAS_MAX_LENGTH
 from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
@@ -211,7 +212,7 @@ class RecipeRun(Base):
     observation_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
-    alias: Mapped[str] = mapped_column(String(128), nullable=False)
+    alias: Mapped[str] = mapped_column(String(ALIAS_MAX_LENGTH), nullable=False)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)

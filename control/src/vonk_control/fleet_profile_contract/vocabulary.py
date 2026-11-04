@@ -71,15 +71,6 @@ LabelName = Annotated[
 
 LabelValue = Annotated[str, StringConstraints(min_length=1, max_length=63)]
 
-Alias = Annotated[
-    str,
-    StringConstraints(
-        min_length=1,
-        max_length=128,
-        pattern=r"^[a-z0-9](?:[a-z0-9_.-]{0,126}[a-z0-9])?$",
-    ),
-]
-
 OptionSlug = Annotated[
     str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_-]*$")
 ]

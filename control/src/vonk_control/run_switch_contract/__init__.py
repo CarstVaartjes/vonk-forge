@@ -22,6 +22,7 @@ from vonk_agent_protocol.compiled_execution_plan import MemoryKind as MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 from vonk_forge_contracts.recipe import Scalar as Scalar
 
+from ..alias_contract import Alias as Alias
 from ..distribution_assignment import (
     NodeDistributionAssignment as NodeDistributionAssignment,
 )
@@ -132,7 +133,6 @@ from .requests import RunSwitchStopPreviewRequest as RunSwitchStopPreviewRequest
 from .requests import SparkGroup as SparkGroup
 from .requests import SparkGroupNode as SparkGroupNode
 from .vocabulary import _DIGEST_PATTERN as _DIGEST_PATTERN
-from .vocabulary import Alias as Alias
 from .vocabulary import Digest as Digest
 from .vocabulary import PortNumber as PortNumber
 from .vocabulary import RunSwitchAction as RunSwitchAction

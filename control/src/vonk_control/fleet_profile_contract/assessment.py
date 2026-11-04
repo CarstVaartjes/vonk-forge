@@ -11,6 +11,7 @@ from pydantic import (
 )
 from vonk_agent_protocol.inventory import MemoryPool
 
+from ..alias_contract import Alias
 from ..preparation_contract import (
     CompatibilityIdentity,
     ModelArtifactIdentity,
@@ -30,7 +31,6 @@ from ..run_switch_contract import (
 )
 from ..strict_json import StrictModel
 from .vocabulary import (
-    Alias,
     DesiredAssignmentStateField,
     Digest,
     FleetProfileAction,

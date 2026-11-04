@@ -17,11 +17,11 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
 )
 
+from ..alias_contract import Alias
 from ..endpoint_contract import EndpointResponse
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..strict_json import StrictModel
 from .vocabulary import (
-    Alias,
     DesiredAssignmentStateField,
     FleetProfileEndpointState,
     FleetProfileOperationState,

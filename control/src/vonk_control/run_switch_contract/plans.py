@@ -12,6 +12,7 @@ from pydantic import (
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 
+from ..alias_contract import Alias
 from ..preparation_contract import RolloutPreparation
 from ..run_switch_identity_contract import UuidId
 from ..strict_json import StrictModel
@@ -34,7 +35,7 @@ from .requests import (
     RunSwitchReconciliationAuthority,
     SparkGroup,
 )
-from .vocabulary import Alias, Digest, RunSwitchAction
+from .vocabulary import Digest, RunSwitchAction
 
 
 class RunSwitchAssessment(StrictModel):

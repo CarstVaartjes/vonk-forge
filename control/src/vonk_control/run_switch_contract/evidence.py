@@ -16,6 +16,7 @@ from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
 from vonk_forge_contracts.recipe import Scalar
 
+from ..alias_contract import Alias
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..mapping_parameters import MappingParameters
 from ..operation_blockers import SwapShortfallEvidence
@@ -23,7 +24,6 @@ from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
 from .requests import MemoryUsageUncertainty, SparkGroupNode
 from .vocabulary import (
-    Alias,
     Digest,
     PortNumber,
     RunSwitchBuildEvidenceState,

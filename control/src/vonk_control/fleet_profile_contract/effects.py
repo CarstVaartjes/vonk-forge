@@ -14,13 +14,14 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 
+from ..alias_contract import Alias
 from ..child_phases import FleetProfileChildPhase
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_contract import (
     RunSwitchProfileStopScope,
 )
 from ..strict_json import StrictModel
-from .vocabulary import Alias, Digest, NodeId, UuidId
+from .vocabulary import Digest, NodeId, UuidId
 
 
 class FleetProfileRunEffect(StrictModel):

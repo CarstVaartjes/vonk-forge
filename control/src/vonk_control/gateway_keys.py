@@ -41,6 +41,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
+from .alias_contract import Alias
 from .auth import MUTATION_ROLES, Actor
 from .capabilities import CapabilityUnavailableError
 from .gateway_route_grants import GatewayInferenceRoute
@@ -63,7 +64,6 @@ DEFAULT_KEY_FILE = Path("/gateway-secrets/client-key")
 DEFAULT_KEY_NAME = "default"
 
 _NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
-_MODEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}$"
 _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
@@ -126,9 +126,7 @@ class GatewayKeyCreateRequest(StrictJSONModel):
 
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
     name: str = Field(pattern=_NAME_PATTERN, max_length=63)
-    models: list[Annotated[str, Field(pattern=_MODEL_PATTERN)]] = Field(
-        default_factory=list, max_length=64
-    )
+    models: list[Alias] = Field(default_factory=list, max_length=64)
     expires: str | None = Field(default=None, pattern=_DURATION_PATTERN)
 
 
