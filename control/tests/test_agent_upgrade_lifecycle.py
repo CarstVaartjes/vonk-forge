@@ -124,7 +124,7 @@ def test_a_legacy_waiting_rollout_is_healed_from_its_orders(tmp_path) -> None:
     sessions, _operations, upgrades, job = _rollout(tmp_path, "legacy-wait")
     with sessions.begin() as session:
         parent = _stored(session, job.id)
-        parent.state = "waiting-for-operator"
+        parent.state = "needs-operator"
     assert upgrades.heal_rollouts() is True
     with sessions() as session:
         parent = _stored(session, job.id)
@@ -198,7 +198,7 @@ def test_an_expired_legacy_dispatch_is_projected_from_its_orders(tmp_path) -> No
 def test_the_worker_tick_heals_rollouts(tmp_path) -> None:
     sessions, operations, _upgrades, job = _rollout(tmp_path, "tick")
     with sessions.begin() as session:
-        _stored(session, job.id).state = "waiting-for-operator"
+        _stored(session, job.id).state = "needs-operator"
     assert operations.reconcile_orders() is True
     with sessions() as session:
         assert _stored(session, job.id).state == "queued"

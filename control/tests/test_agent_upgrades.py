@@ -781,10 +781,11 @@ def test_operator_resume_always_sets_fresh_install_safety_fence(
             )
         )
         assert parent is not None and operation is not None and attempt is not None
-        parent.state = "waiting-for-operator"
+        parent.state = "needs-operator"
         parent.status_reason = "runtime identity was not proven"
-        operation.state = "waiting-for-operator"
-        attempt.state = "waiting-for-operator"
+        operation.state = "needs-operator"
+        attempt.state = "observing"
+        attempt.observation_cause = "reported-unknown"
         attempt.result = stored_result
         attempt.lease_deadline = clock()
 
@@ -1941,14 +1942,14 @@ def test_latest_request_supersedes_an_older_paused_rollout(
     with sessions.begin() as session:
         old = session.get(AgentOperation, fenced_operation(sessions, old_claim).id)
         assert old is not None
-        old.state = "waiting-for-operator"
+        old.state = "needs-operator"
         old.created_at -= timedelta(minutes=1)
         payload = json.loads(json.dumps(old.payload))
         payload["rollback"]["attempt_nonce"] = "0" * 64
         old.payload = payload
         waiting = session.get(Job, old_job.id)
         assert waiting is not None
-        waiting.state = "waiting-for-operator"
+        waiting.state = "needs-operator"
     plan = upgrades.preview(None, PACKAGE_MODEL)
     current = upgrades.apply(
         None,

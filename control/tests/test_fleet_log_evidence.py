@@ -136,7 +136,7 @@ def _parked_start(
     *,
     attempt_number: int = 1,
     current_attempt: int = 1,
-    operation_state: str = "waiting-for-operator",
+    operation_state: str = "needs-operator",
     updated_at: datetime = _NOW,
 ) -> str:
     """One ``recipe.start`` whose attempt stopped renewing and parked the order.
@@ -171,7 +171,8 @@ def _parked_start(
                 fence=str(uuid4()),
                 lease_deadline=_LEASE_DEADLINE,
                 agent_certificate_serial="test-serial",
-                state="expired",
+                state="observing",
+                observation_cause="lease-lapsed",
                 progress={"phase": "rank-launch"},
                 result=None,
             )
@@ -372,7 +373,8 @@ def test_a_superseded_lapse_that_kept_its_receipt_stays_readable(tmp_path):
                 fence=str(uuid4()),
                 lease_deadline=_LEASE_DEADLINE,
                 agent_certificate_serial="test-serial",
-                state="expired",
+                state="observing",
+                observation_cause="lease-lapsed",
                 progress={"phase": "starting"},
                 result={
                     "reason": _REASON,

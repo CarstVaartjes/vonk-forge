@@ -597,7 +597,8 @@ def test_a_pass_that_lost_a_race_leaves_the_row_to_the_next_pass(agent_service) 
     decision = _decision_for(jobs, sessions, clock, operation.id)
     # An operator resumes the order between the read and the write.
     with sessions.begin() as session:
-        session.get(AgentOperation, operation.id).next_action_at = clock.now
+        resumed = session.get(AgentOperation, operation.id)
+        resumed.state, resumed.next_action_at = LifecycleState.BACKOFF.value, clock.now
     assert store.save(row, decision.row) is False
     assert _stored(sessions, operation.id).next_action_at is not None
 

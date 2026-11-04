@@ -160,7 +160,7 @@ def test_terminal_operation_never_claims_work_is_stalled_or_running():
     from vonk_control.operation_api import _progress_projection
 
     document = sample(completed_bytes=10, total_bytes=20, total_bytes_known=True)
-    for state in ("succeeded", "failed", "cancelled", "waiting-for-operator"):
+    for state in ("succeeded", "failed", "cancelled", "needs-operator"):
         projected = _progress_projection(document, state)
         assert projected is not None
         assert projected.activity is None

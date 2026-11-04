@@ -85,7 +85,7 @@ def test_installed_profile_cancel_recovery_is_visible_in_activity(
             "fleet",
             "activity",
             "--state",
-            "cancelling",
+            "observing",
             "--request-id",
             application.request_key,
         )

@@ -491,7 +491,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     assert filtered.json()["operations"][0]["id"] == "run-1"
 
 
-@pytest.mark.parametrize("profile_state", ["running", "failed", "waiting-for-operator"])
+@pytest.mark.parametrize("profile_state", ["running", "failed", "needs-operator"])
 def test_profile_operation_provider_is_registered_through_the_global_api(
     tmp_path,
     profile_state,
@@ -612,7 +612,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     if profile_state != "running":
         failure = detail.json()["failure"]
         assert failure["detail"] == "Spark could not start: token=<redacted>"
-        assert failure["uncertain"] is (profile_state == "waiting-for-operator")
+        assert failure["uncertain"] is (profile_state not in {"running", "failed"})
         assert first.json()["operations"][0]["failure"] == failure
         assert detail.json()["recovery"]["uncertain"] == failure["uncertain"]
         assert "private-credential" not in first.text + detail.text
@@ -1025,7 +1025,7 @@ def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
     job = Job(
         request_id="33333333-3333-4333-8333-333333333333",
         kind="agent-upgrade",
-        state="waiting-for-operator",
+        state="needs-operator",
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_ID],
@@ -1052,7 +1052,7 @@ def test_durable_resume_dispatches_agent_upgrade_to_its_operation_queue(
     with sessions() as session:
         stored = session.get(Job, job.id)
         assert stored is not None
-        assert stored.state == "waiting-for-operator"
+        assert stored.state == job.state
         assert stored.payload == {"immutable": "upgrade-plan"}
         assert stored.current_attempt == 0
 
@@ -1296,7 +1296,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
     job = Job(
         request_id="33333333-3333-4333-8333-333333333333",
         kind="agent-upgrade",
-        state="waiting-for-operator",
+        state="needs-operator",
         actor="operator",
         authority_revision=COMMIT,
         targets=[NODE_ID],
@@ -1347,7 +1347,7 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             payload_digest="f" * 64,
             payload=package,
             authority_revision=COMMIT,
-            state="waiting-for-operator",
+            state="needs-operator",
             current_attempt=2,
             created_at=now,
             updated_at=now,
@@ -2215,6 +2215,7 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
         tmp_path, clock=clock
     )
     _claim_parked(_jobs)
+    parked = "needs-operator"
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None
@@ -2227,14 +2228,14 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
         # The parent was re-parked at the spent budget, but the attempt still
         # holds an unexpired lease, so the effect is live and must not be
         # abandoned.
-        stored.state = "waiting-for-operator"
+        stored.state = parked
         stored.current_attempt = RecoveryPolicy().max_failures
         stored.next_action_at = None
         attempt.attempt = stored.current_attempt
         attempt.state = "running"
         parent = session.get(Job, job_id)
         assert parent is not None
-        parent.state = "waiting-for-operator"
+        parent.state = parked
 
     with pytest.raises(Exception) as _ending:
         _retire_parked(services, job_id)
@@ -2242,7 +2243,7 @@ def test_durable_retire_refuses_a_parked_operation_whose_lease_is_live(
     with sessions() as session:
         stored = session.get(AgentOperation, operation.id)
         assert stored is not None
-        assert stored.state == "waiting-for-operator"
+        assert stored.state == parked
 
 
 def test_zero_target_upgrade_job_still_projects_a_valid_progress_object() -> None:

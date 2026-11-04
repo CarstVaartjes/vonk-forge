@@ -98,13 +98,13 @@ def _drive(service, agent_jobs, clock, job_id: str, *, until: str) -> str:
     return service.get(job_id).state
 
 
-def _write_legacy_wait(sessions, job_id: str, *, cancel_requested: bool) -> None:
+def _write_parked_wait(sessions, job_id: str, *, cancel_requested: bool) -> None:
     """The rows the pre-core writers left for a job waiting for an operator."""
 
     with sessions.begin() as session:
         job = session.get(ArtifactJob, job_id)
         assert job is not None and job.operation_id is not None
-        job.state = "waiting-for-operator"
+        job.state = "needs-operator"
         job.status_reason = "artifact cancellation could not safely stop the scope"
         job.result_evidence = {
             "failure_kind": "cancellation-stop-uncertain",
@@ -113,7 +113,7 @@ def _write_legacy_wait(sessions, job_id: str, *, cancel_requested: bool) -> None
         }
         parent = session.get(Job, job.operation_id)
         assert parent is not None
-        parent.state = "waiting-for-operator"
+        parent.state = "needs-operator"
         if cancel_requested:
             parent.result = {
                 **dict(parent.result or {}),
@@ -125,7 +125,7 @@ def _write_legacy_wait(sessions, job_id: str, *, cancel_requested: bool) -> None
             select(AgentOperation).where(AgentOperation.parent_job_id == parent.id)
         )
         assert order is not None
-        order.state = "waiting-for-operator"
+        order.state = "needs-operator"
         order.next_action_at = None
         order.observe_count = 0
         attempt = session.scalar(
@@ -135,7 +135,8 @@ def _write_legacy_wait(sessions, job_id: str, *, cancel_requested: bool) -> None
             )
         )
         assert attempt is not None
-        attempt.state = "waiting-for-operator"
+        attempt.state = "observing"
+        attempt.observation_cause = "reported-unknown"
 
 
 def _adopted(sessions, service, job_id: str):
@@ -312,7 +313,7 @@ def test_a_legacy_waiting_job_with_a_cancel_heals_to_cancelled(tmp_path) -> None
     sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
         tmp_path, 330
     )
-    _write_legacy_wait(sessions, submitted.id, cancel_requested=True)
+    _write_parked_wait(sessions, submitted.id, cancel_requested=True)
     row, view = _adopted(sessions, service, submitted.id)
     assert row.state is State.NEEDS_OPERATOR
     assert row.cancel_requested
@@ -333,7 +334,7 @@ def test_a_legacy_waiting_job_ends_without_blocking_fresh_intent(tmp_path) -> No
     sessions, _ops, service, agent_jobs, clock, submitted, _claim, _run = _issued_job(
         tmp_path, 340
     )
-    _write_legacy_wait(sessions, submitted.id, cancel_requested=False)
+    _write_parked_wait(sessions, submitted.id, cancel_requested=False)
     view = service.get(submitted.id)
     assert view.state != ajs.NEEDS_OPERATOR
     assert view.supported_actions == ("stop",)

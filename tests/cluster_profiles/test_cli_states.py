@@ -18,10 +18,6 @@ def test_a_failed_update_with_some_children_done_exits_one() -> None:
     assert _outcome({"state": "failed"}).exit_code == 2
 
 
-def test_a_wait_for_a_person_exits_two() -> None:
-    assert _outcome({"state": cli_states.NEEDS_OPERATOR}).exit_code == 2
-
-
 def test_a_retired_word_is_not_a_state_the_cli_knows() -> None:
     for word in ("waiting-for-operator", "cancelling", "partial", "expired"):
         assert word not in cli_states.ARTIFACT_JOB_STATES

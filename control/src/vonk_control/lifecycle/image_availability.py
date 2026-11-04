@@ -220,7 +220,7 @@ class ImageAvailabilityAdapter:
             state = State.FAILED
         elif stored == State.CANCELLED:
             state = State.CANCELLED
-        else:  # waiting-for-operator or an unknown state: re-evaluate it
+        else:  # a word this adapter does not know: re-evaluate it
             state = State.NEEDS_OPERATOR
         if state is State.SUCCEEDED:
             effect = Effect.ESTABLISHED

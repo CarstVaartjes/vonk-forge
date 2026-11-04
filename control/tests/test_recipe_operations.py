@@ -1042,7 +1042,7 @@ def test_retry_scheduled_start_observation_failure_keeps_the_run_pending(
             select(AgentOperation).where(AgentOperation.parent_job_id == started.id)
         )
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "backoff"
         child.next_action_at = NOW + timedelta(seconds=2)
         service.consume_agent_result(
             session,
@@ -1940,7 +1940,7 @@ def test_collective_readiness_past_its_budget_fails_the_start_instead_of_waiting
     now[0] = NOW + timedelta(seconds=3700)
     with sessions.begin() as session:
         stored = _required(session.get(AgentOperation, target.id))
-        stored.state = "waiting-for-operator"
+        stored.state = "backoff"
         stored.next_action_at = now[0]
         parent = _required(session.get(Job, start.id))
         parent.result = {

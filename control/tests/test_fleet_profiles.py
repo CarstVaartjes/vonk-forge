@@ -4443,12 +4443,9 @@ def test_every_application_state_is_active_or_named_ended() -> None:
     )
 
     active = {"queued", "running", "backoff", "needs-operator"}
-    literal = next(
-        arg for arg in get_args(FleetProfileOperationState) if hasattr(arg, "__args__")
-    )
-    assert {str(state) for state in get_args(literal)} == active | set(
-        FLEET_PROFILE_ENDED_STATES
-    )
+    assert {
+        str(state) for state in get_args(FleetProfileOperationState)
+    } == active | set(FLEET_PROFILE_ENDED_STATES)
 
 
 def test_a_superseded_application_names_its_reason_and_never_a_failure() -> None:

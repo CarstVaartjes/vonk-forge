@@ -137,7 +137,7 @@ class _Harness:
             }
 
     def make_legacy_operator_wait(self) -> None:
-        """What an older Controller left: ``waiting-for-operator``, no clock."""
+        """What an older Controller left: ``needs-operator``, no clock."""
 
         with self.sessions.begin() as session:
             job = session.get(Job, self.id)
@@ -145,7 +145,7 @@ class _Harness:
             result = dict(job.result)
             for key in ("observation_due_at", "retry_attempt", "retry_reason"):
                 result.pop(key, None)
-            job.state = "waiting-for-operator"
+            job.state = "needs-operator"
             job.result = result
 
     def advance_to_due(self) -> None:
@@ -213,7 +213,7 @@ _SHAPES: dict[str, dict[str, Any]] = {
         },
     },
 }
-_STORED = ("queued", "running", "waiting", "waiting-for-operator")
+_STORED = ("queued", "running", "observing", "needs-operator")
 _EVENTS = (
     Reported(Outcome.FAILED, retryable=True, reason="x"),
     Reported(Outcome.UNKNOWN, reason="x"),
@@ -248,7 +248,7 @@ def test_no_run_switch_state_can_wait_for_an_operator(stored: str, shape: str) -
 
 def test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision() -> None:
     adapter = RunSwitchAdapter()
-    job = _job("waiting-for-operator", {})
+    job = _job("needs-operator", {})
     now = NOW
     row = adapter.lifecycle(job, _read_progress(job.result), now)
     assert row.state is State.NEEDS_OPERATOR  # legacy, only ever read
@@ -256,7 +256,7 @@ def test_a_legacy_operator_wait_is_re_evaluated_by_the_first_decision() -> None:
     assert healed.state is State.BACKOFF
     assert healed.next_action_at is not None and healed.next_action_at > now
     # with a clock it was already an observation (what its view presents)
-    clocked = _job("waiting-for-operator", dict(_SHAPES["clock"]))
+    clocked = _job("needs-operator", dict(_SHAPES["clock"]))
     assert (
         adapter.lifecycle(clocked, _read_progress(clocked.result), now).state
         is State.OBSERVING
@@ -307,7 +307,7 @@ def test_a_legacy_operator_wait_with_a_live_child_is_observed_not_failed(
 
 
 def test_a_cancel_completes_for_a_legacy_parked_operation(tmp_path: Path) -> None:
-    """Before: a ``waiting-for-operator`` operation could not be cancelled at all."""
+    """Before: a ``needs-operator`` operation could not be cancelled at all."""
 
     harness = _Harness(tmp_path, RecordingArtifactExecutor())
     harness.make_legacy_operator_wait()
