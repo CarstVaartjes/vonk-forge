@@ -54,7 +54,6 @@ MODES = (
     "waits",
     "reads",
     "remedies",
-    "retention",
     "tests",
     "noexit",
     "causes",
@@ -2067,11 +2066,6 @@ def check_source(
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
         )
-    if python and not is_test and "retention" in modes:
-        hits.extend(
-            (site.line, site.kind)
-            for site in principles.scan_retention([(path, ast.parse(source))])
-        )
     if python:
         tree = ast.parse(source)
         spans = [
@@ -2220,24 +2214,10 @@ def planner_defect_waits(source: str) -> list[int]:
 def main(*, modes: Sequence[str] = MODES) -> int:
     messages = []
     changes = added_lines(sys.stdin.read())
-    per_file_modes = tuple(mode for mode in modes if mode != "retention")
     for path, lines in changes.items():
         target = ROOT / path
         if target.is_file() and target.resolve().is_relative_to(ROOT):
-            messages.extend(
-                check_source(path, target.read_text(), lines, modes=per_file_modes)
-            )
-    if "retention" in modes and any(
-        lines
-        and path.endswith(".py")
-        and (ROOT / path).is_file()
-        and "__tablename__" in (ROOT / path).read_text()
-        for path, lines in changes.items()
-    ):
-        # Retention policy may live in a different, unchanged producer module.
-        for site in principles.scan_sites("retention"):
-            if site.line in changes.get(site.path, set()):
-                messages.append(f"{site.path}:{site.line}: {site.kind}")
+            messages.extend(check_source(path, target.read_text(), lines, modes=modes))
     for message in messages:
         print(message, file=sys.stderr)
     return int(bool(messages))

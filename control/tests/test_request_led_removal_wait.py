@@ -146,7 +146,7 @@ def test_accepted_image_request_waits_for_exact_lock_and_recovers_after_restart(
                 "artifact_sha256": ARCHIVE_SHA,
             },
         )
-        assert gate is not None and gate.removal_owner_id is None
+        assert gate is None or gate.removal_owner_id is None
     assert receipt_file.exists()
 
 

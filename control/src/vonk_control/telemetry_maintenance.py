@@ -5,7 +5,17 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import DateTime, cast, delete, func, select, text, update
+from sqlalchemy import (
+    DateTime,
+    and_,
+    cast,
+    delete,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -23,7 +33,12 @@ from .models import (
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
-from .models.fleet import LocalCertificateIssuance, LocalCertificateRevocation
+from .models.fleet import (
+    AgentIssuedCertificateRevocation,
+    LocalCertificateIssuance,
+    LocalCertificateRevocation,
+)
+from .step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows
@@ -189,7 +204,13 @@ class TelemetryMaintenance:
     def _prune_local_revocations(
         session: Session, *, now: datetime, limit: int
     ) -> None:
-        """Only known expired certificates can leave the intermediate's CRL."""
+        """Only known expired certificates can leave the intermediate's CRL.
+
+        A serial known only from revocation evidence (its issuance receipt and
+        certificate row are gone, or it was never signed) expires no later than
+        one certificate lifetime after that evidence was recorded: its binding
+        was made before the evidence and every binding ends one lifetime later.
+        """
         expiry = func.coalesce(
             cast(
                 LocalCertificateIssuance.binding["not_after"].as_string(),
@@ -209,7 +230,21 @@ class TelemetryMaintenance:
                     AgentCertificate,
                     AgentCertificate.serial == LocalCertificateRevocation.serial,
                 )
-                .where(expiry < now)
+                .outerjoin(
+                    AgentIssuedCertificateRevocation,
+                    AgentIssuedCertificateRevocation.serial
+                    == LocalCertificateRevocation.serial,
+                )
+                .where(
+                    or_(
+                        expiry < now,
+                        and_(
+                            expiry.is_(None),
+                            AgentIssuedCertificateRevocation.created_at
+                            < now - CERTIFICATE_LIFETIME,
+                        ),
+                    )
+                )
                 .order_by(expiry, LocalCertificateRevocation.serial)
                 .limit(limit)
                 .with_for_update(of=LocalCertificateRevocation, skip_locked=True)

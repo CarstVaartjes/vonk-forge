@@ -268,7 +268,8 @@ class ArtifactLifecycleGate(Base):
     artifact_kind: Mapped[str] = mapped_column(String(24), primary_key=True)
     artifact_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     removal_owner_kind: Mapped[str | None] = mapped_column(String(32))
-    removal_owner_id: Mapped[str | None] = mapped_column(String(36))
+    # Indexed: history retention asks whether a removal owner still holds a gate.
+    removal_owner_id: Mapped[str | None] = mapped_column(String(36), index=True)
     removal_fence: Mapped[str | None] = mapped_column(String(36))
     # Maximum remote authority lifetime, retained even if its owner is lost.
     removal_authority_expires_at: Mapped[datetime | None] = mapped_column(

@@ -6,8 +6,8 @@ import stat
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, exists, select
+from sqlalchemy.orm import Session, aliased
 from vonk_agent_protocol import (
     CacheReferenceReason,
     ModelCacheCode,
@@ -44,6 +44,25 @@ from .source_helpers import _contains_digest
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+def holds_unique_objects(set_digest: str) -> ColumnElement[bool]:
+    """Whether this set lists an object that no other set lists.
+
+    The cache's answer to "would dropping this set's record free any bytes?":
+    only an object no other set lists is collected with it. Conservative: an
+    object it lists but never stored counts as held.
+    """
+
+    own = aliased(ModelCacheSetArtifact)
+    other = aliased(ModelCacheSetArtifact)
+    return exists().where(
+        own.artifact_set_sha256 == set_digest,
+        ~exists().where(
+            other.artifact_sha256 == own.artifact_sha256,
+            other.artifact_set_sha256 != set_digest,
+        ),
+    )
 
 
 class InventoryMixin:

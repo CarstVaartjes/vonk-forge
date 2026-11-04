@@ -337,7 +337,7 @@ def test_late_signer_is_fenced_by_the_revocation(world):
     """Catches revoking only issued bindings: a never-signed one must be fenced.
 
     The service is built first (the fixture), then the row is seeded, so
-    ``_import_revocations`` cannot have fenced the serial at construction.
+    nothing but the reconciler can have fenced the serial.
     """
     ca, sessions, _clock, service = world
     csr = _csr()
