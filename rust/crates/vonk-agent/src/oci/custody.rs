@@ -480,7 +480,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
     /// object. Only metadata is read; no content is.
     pub fn installed_bytes(&self, installation_id: &str) -> Result<u64, OciError> {
         let installation = managed_path(self.data_root, "installations", installation_id)?;
-        tree_bytes(&installation)
+        strict_tree_bytes(&installation)
     }
 
     pub fn artifact_set_digest(&self, installation_id: &str) -> Result<String, OciError> {

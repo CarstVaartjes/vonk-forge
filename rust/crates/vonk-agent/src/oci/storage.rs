@@ -25,13 +25,13 @@ pub(super) fn lower_hex(value: &str, length: usize) -> bool {
 
 /// Sum of the lengths of the regular files below `directory`; strict, for the
 /// install receipt: anything unreadable or not a file or directory refuses.
-pub(super) fn tree_bytes(directory: &Path) -> Result<u64, OciError> {
+pub(super) fn strict_tree_bytes(directory: &Path) -> Result<u64, OciError> {
     let mut total = 0_u64;
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
         let file_type = entry.file_type()?;
         let size = if file_type.is_dir() {
-            tree_bytes(&entry.path())?
+            strict_tree_bytes(&entry.path())?
         } else if file_type.is_file() {
             entry.metadata()?.len()
         } else {
@@ -61,9 +61,12 @@ pub(crate) fn installation_tree_bytes(
     data_root: &Path,
     installation_id: &str,
 ) -> Result<TreeSize, OciError> {
-    let root = managed_path(data_root, "installations", installation_id)?;
+    tree_bytes(&managed_path(data_root, "installations", installation_id)?)
+}
+
+fn tree_bytes(root: &Path) -> Result<TreeSize, OciError> {
     let mut size = TreeSize::default();
-    measure_tree(&root, &mut size, true)?;
+    measure_tree(root, &mut size, true)?;
     Ok(size)
 }
 
