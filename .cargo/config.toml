@@ -1,9 +1,16 @@
-# Network settings for every cargo invocation in the repository. They live here,
-# not in workflow `env`, because rust-cache hashes CARGO*/CC*/CFLAGS*/CXX*/CMAKE*/RUST*
+# Settings for every cargo invocation in the repository. They live here, not in
+# workflow `env`, because rust-cache hashes CARGO*/CC*/CFLAGS*/CXX*/CMAKE*/RUST*
 # environment variables into its key: a setting in one workflow's env would give
-# that workflow a different cache key from every other.
+# that workflow a different cache key from every other. This file is itself a
+# key input (the root Cargo.toml is not), so a change here rotates the cache.
 [net]
 retry = 5
 
 [http]
 timeout = 60
+
+# Full debuginfo was copied into every linked test binary and filled the
+# ubuntu-24.04 runner's disk (runs 41772276715 and 41784505516). Line tables
+# keep file:line backtraces; `cargo test` inherits this through profile.test.
+[profile.dev]
+debug = "line-tables-only"
