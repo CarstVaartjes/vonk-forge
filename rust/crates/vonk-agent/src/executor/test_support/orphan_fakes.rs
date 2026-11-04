@@ -480,15 +480,19 @@ fn serve_helper(
     {
         let request = read_request(&inspection.request_sha256);
         // The container of a name-only look, or the one a full identity names.
-        let name = match request.arguments.as_slice() {
-            [run_id] => format!("vonk-{run_id}"),
-            arguments => arguments
+        let name = match request.inspect_target.as_ref() {
+            Some(vonk_agent_protocol::RunInspectTarget::RunNameTarget(target)) => {
+                format!("vonk-{}", target.run_id)
+            }
+            Some(vonk_agent_protocol::RunInspectTarget::ContainerRunTarget(target)) => target
+                .command
                 .iter()
                 .find(|argument| {
                     argument.starts_with("vonk-") && Uuid::parse_str(&argument[5..]).is_ok()
                 })
                 .cloned()
                 .expect("a full-identity inspection names its container"),
+            other => panic!("unexpected inspection target {other:?}"),
         };
         state.calls.push(HelperCall::Inspect { name: name.clone() });
         let mut response = bare_response(

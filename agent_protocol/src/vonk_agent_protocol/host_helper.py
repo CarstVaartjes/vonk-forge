@@ -20,6 +20,7 @@ from .contracts import (
 )
 from .gpu_clock import GpuClockIntent
 from .package_upgrade import PackageRollbackAuthority
+from .run_inspect_target import ContainerRunTarget, RunInspectTarget
 from .swap import SwapIntent
 from .wire_model import MAX_RUN_GENERATION, WireModel
 
@@ -84,6 +85,10 @@ class HostRuntimeRequest(WireModel):
     # legal too (the plan's opaque-argv contract admits it), so only the payload
     # ceiling bounds an item.
     arguments: list[Annotated[str, Field(pattern=r"^[^\x00]*$")]]
+    # A `run-inspect` names what it asks about here and carries no arguments.
+    inspect_target: RunInspectTarget | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     start_plan: "RecipeStartPayload | None" = Field(  # noqa: UP037
         default=None, exclude_if=lambda value: value is None
     )
@@ -112,9 +117,14 @@ class HostRuntimeRequest(WireModel):
             "runtime-preflight",
             "stop",
             "installation-cleanup",
+            ContainerRuntimeAction.RUN_INSPECT,
         }
         if (not self.arguments) != argument_free:
             raise ValueError("runtime arguments do not match the action")
+        if (self.inspect_target is not None) != (
+            self.action == ContainerRuntimeAction.RUN_INSPECT
+        ):
+            raise ValueError("runtime inspection target does not match the action")
         if (self.installation_id is not None) != (
             self.action == "installation-cleanup"
         ):
@@ -162,9 +172,11 @@ class HostRuntimeRequest(WireModel):
                 self.start_plan,
                 self.job_plan,
                 self.stop_plan,
-                # An inspection may name the generation its container carries.
+                # Only an inspection of an exact Start container may name the
+                # generation its label carries; the other targets carry their
+                # own or none.
                 None
-                if self.action == ContainerRuntimeAction.RUN_INSPECT
+                if isinstance(self.inspect_target, ContainerRunTarget)
                 else self.run_generation,
             )
         ):

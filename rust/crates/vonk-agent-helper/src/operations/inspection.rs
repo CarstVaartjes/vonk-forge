@@ -72,58 +72,68 @@ impl<R: CommandRunner> OperationExecutor<R> {
         {
             return Err(OperationError::InvalidOperation);
         }
-        // Only the full run identity can bind a named generation; the shorter
-        // shapes never answer for one.
-        let unbound = request.run_generation.is_none();
-        match request.arguments.as_slice() {
-            [marker, installation_id]
-                if unbound
-                    && !include_logs
-                    && marker == vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT =>
-            {
+        // Only an exact Start container can bind a named generation; the other
+        // targets carry their own identity or none.
+        let Some(target) = request.inspect_target.as_ref() else {
+            return Err(OperationError::InvalidOperation);
+        };
+        if request.run_generation.is_some()
+            && !matches!(target, RunInspectTarget::ContainerRunTarget(_))
+        {
+            return Err(OperationError::InvalidOperation);
+        }
+        match target {
+            RunInspectTarget::InstallationInUseTarget(target) => {
+                if include_logs {
+                    return Err(OperationError::InvalidOperation);
+                }
                 Ok(RunInspection {
-                    running: self.installation_runtime_present(installation_id, false)?,
+                    running: self
+                        .installation_runtime_present(&target.installation_id.to_string(), false)?,
                     ..RunInspection::default()
                 })
             }
-            [marker, identity @ ..]
-                if unbound && marker == vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT =>
-            {
-                self.inspect_effect(identity, include_logs, EffectObservation::Job)
-            }
-            [marker, identity @ ..]
-                if unbound && marker == vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT =>
-            {
-                self.inspect_effect(identity, include_logs, EffectObservation::Runtime)
-            }
-            [marker, identity @ ..]
-                if unbound && marker == vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT =>
-            {
-                self.inspect_effect(
-                    identity,
-                    include_logs,
-                    EffectObservation::Stop {
-                        cancel_pending_start: false,
-                    },
-                )
-            }
-            [marker, identity @ ..]
-                if unbound && marker == vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT =>
-            {
-                self.inspect_effect(
-                    identity,
-                    include_logs,
-                    EffectObservation::Stop {
-                        cancel_pending_start: true,
-                    },
-                )
-            }
-            // A single argument is a run id alone: the Controller-side truth
-            // for a run whose local metadata is unreadable, checked by
-            // container name. Without the full run identity the container
-            // cannot be proven to be this run's, so its output is never read.
-            [run_id] if unbound => {
-                let named = self.runtime_run_container(run_id)?;
+            RunInspectTarget::JobIdentityTarget(target) => self.inspect_effect(
+                EffectIdentity {
+                    runtime_id: target.runtime_id,
+                    run_id: target.run_id,
+                    installation_id: target.installation_id,
+                    run_generation: target.run_generation,
+                    plan_digest: &target.plan_digest,
+                },
+                include_logs,
+                EffectObservation::Job,
+            ),
+            RunInspectTarget::RuntimeIdentityTarget(target) => self.inspect_effect(
+                EffectIdentity {
+                    runtime_id: target.runtime_id,
+                    run_id: target.run_id,
+                    installation_id: target.installation_id,
+                    run_generation: target.run_generation,
+                    plan_digest: &target.plan_digest,
+                },
+                include_logs,
+                EffectObservation::Runtime,
+            ),
+            RunInspectTarget::StopIdentityTarget(target) => self.inspect_effect(
+                EffectIdentity {
+                    runtime_id: target.runtime_id,
+                    run_id: target.run_id,
+                    installation_id: target.installation_id,
+                    run_generation: target.run_generation,
+                    plan_digest: &target.plan_digest,
+                },
+                include_logs,
+                EffectObservation::Stop {
+                    cancel_pending_start: target.cancel_pending_start,
+                },
+            ),
+            // A run id alone is the Controller-side truth for a run whose
+            // local metadata is unreadable, checked by container name. Without
+            // the full run identity the container cannot be proven to be this
+            // run's, so its output is never read.
+            RunInspectTarget::RunNameTarget(target) => {
+                let named = self.runtime_run_container(&target.run_id.to_string())?;
                 Ok(RunInspection {
                     running: named.running,
                     job_progress_at: None,
@@ -135,14 +145,23 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     container_labels: named.labels,
                 })
             }
-            arguments => self.runtime_run_inspect_detail(
-                arguments,
+            RunInspectTarget::ContainerRunTarget(target) => self.runtime_run_inspect_detail(
+                target,
                 include_logs,
                 include_logs,
                 request.run_generation,
             ),
         }
     }
+}
+
+/// One container's whole identity, as an exact-effect inspection names it.
+struct EffectIdentity<'a> {
+    runtime_id: uuid::Uuid,
+    run_id: uuid::Uuid,
+    installation_id: uuid::Uuid,
+    run_generation: u64,
+    plan_digest: &'a str,
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -153,30 +172,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// `RuntimeRunMissing`; anything unread keeps its cause.
     fn inspect_effect(
         &self,
-        identity: &[String],
+        EffectIdentity {
+            runtime_id,
+            run_id,
+            installation_id,
+            run_generation,
+            plan_digest,
+        }: EffectIdentity<'_>,
         include_logs: bool,
         mode: EffectObservation,
     ) -> Result<RunInspection, OperationError> {
-        let canonical = |value: &String| {
-            uuid::Uuid::parse_str(value)
-                .ok()
-                .filter(|parsed| parsed.to_string() == *value)
-        };
-        let [job_id, run_id, installation_id, run_generation, plan_digest] = identity else {
-            return Err(OperationError::InvalidOperation);
-        };
-        let (Some(runtime_id), Some(run_id), Some(installation_id), Some(run_generation), true) = (
-            canonical(job_id),
-            canonical(run_id),
-            canonical(installation_id),
-            run_generation
-                .parse::<u64>()
-                .ok()
-                .filter(|parsed| parsed.to_string() == *run_generation),
-            lower_hex(plan_digest, 64),
-        ) else {
-            return Err(OperationError::InvalidOperation);
-        };
         let identity = RuntimeEffectIdentity {
             runtime_id,
             installation_id,
@@ -209,7 +214,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }),
             Reobserved::Exited { code } => {
                 let (logs, log_error) = if include_logs && code != 0 {
-                    let (logs, exit) = self.container_exit_evidence(&format!("vonk-{job_id}"));
+                    let (logs, exit) = self.container_exit_evidence(&format!("vonk-{runtime_id}"));
                     match process_exited(logs, exit) {
                         OperationError::RuntimeProcessExited {
                             logs, exit_summary, ..
@@ -343,11 +348,11 @@ fn parse_managed_labels(
 impl<R: CommandRunner> OperationExecutor<R> {
     pub(super) fn runtime_run_inspect(
         &self,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         capture_failure: bool,
         expected_generation: Option<u64>,
     ) -> Result<bool, OperationError> {
-        self.runtime_run_inspect_detail(arguments, capture_failure, false, expected_generation)
+        self.runtime_run_inspect_detail(target, capture_failure, false, expected_generation)
             .map(|inspection| inspection.running)
     }
 }
@@ -357,7 +362,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
     /// is the run generation its label must carry.
     pub(super) fn runtime_run_inspect_detail(
         &self,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         capture_failure: bool,
         include_logs: bool,
         expected_generation: Option<u64>,
@@ -370,22 +375,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
             log_error: None,
             container_labels: None,
         };
-        let [
+        let ContainerRunTarget {
             archive_sha256,
             registry_index_digest,
             platform_manifest_digest,
             image_reference,
-            docker @ ..,
-        ] = arguments
-        else {
-            return Err(OperationError::InvalidOperation);
-        };
+            command: docker,
+            ..
+        } = target;
         let mut validated = validate_docker_run_with_archive(
             docker,
             &self.roots,
             self.runtime_request_owner_uid,
-            Some(archive_sha256),
-            Some(registry_index_digest),
+            Some(archive_sha256.as_str()),
+            Some(registry_index_digest.as_str()),
         )?;
         if image_reference != &validated.local_image_reference
             || archive_sha256 != &validated.archive_sha256

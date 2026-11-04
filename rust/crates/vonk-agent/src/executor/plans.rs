@@ -112,6 +112,38 @@ pub fn runtime_arguments_for_plan(
     arguments
 }
 
+/// The typed target that asks the helper about the container
+/// `runtime_arguments_for_plan` starts: the same image identity and command line.
+pub fn container_run_target_for_plan(
+    plan: &crate::oci::RuntimeStartPlan,
+    command: &[String],
+) -> ContainerRunTarget {
+    container_run_target(
+        &plan.archive_sha256,
+        &plan.registry_index_digest,
+        &plan.platform_manifest_digest,
+        &plan.image_reference,
+        command,
+    )
+}
+
+pub fn container_run_target(
+    archive_sha256: &str,
+    registry_index_digest: &str,
+    platform_manifest_digest: &str,
+    image_reference: &str,
+    command: &[String],
+) -> ContainerRunTarget {
+    ContainerRunTarget {
+        kind: vonk_agent_protocol::generated::ContainerRunTargetKind::ContainerRun,
+        archive_sha256: archive_sha256.to_owned(),
+        registry_index_digest: registry_index_digest.to_owned(),
+        platform_manifest_digest: platform_manifest_digest.to_owned(),
+        image_reference: image_reference.to_owned(),
+        command: command.to_vec(),
+    }
+}
+
 pub fn runtime_arguments_digest(arguments: &[String]) -> Result<String, ProtocolError> {
     canonical_json(&arguments.to_vec()).map(|value| hex_sha256(&value))
 }

@@ -610,6 +610,7 @@ fn runtime_operation(request: &HostRuntimeRequest, digest: String) -> HostOperat
 
 fn runtime_request(action: HostRuntimeAction, arguments: Vec<String>) -> HostRuntimeRequest {
     HostRuntimeRequest {
+        inspect_target: None,
         action,
         fence: Uuid::parse_str("30000000-0000-4000-8000-000000000003").unwrap(),
         arguments,

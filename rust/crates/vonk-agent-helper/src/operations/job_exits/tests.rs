@@ -17,29 +17,72 @@ fn identity(target: &str) -> RuntimeEffectIdentity {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Shape {
+    Job,
+    Runtime,
+    Stop,
+    CancelStop,
+}
+
 /// The agent's grant-free re-observation of `JOB` at `generation`.
 fn reobserve(
     executor: &OperationExecutor<Host>,
     generation: &str,
 ) -> Result<RunInspection, OperationError> {
-    reobserve_mode(
-        executor,
-        generation,
-        vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
-    )
+    reobserve_mode(executor, generation, Shape::Job)
 }
 
 fn reobserve_mode(
     executor: &OperationExecutor<Host>,
     generation: &str,
-    marker: &str,
+    shape: Shape,
 ) -> Result<RunInspection, OperationError> {
+    use vonk_agent_protocol::generated::{
+        JobIdentityTarget, JobIdentityTargetKind, RuntimeIdentityTarget, RuntimeIdentityTargetKind,
+        StopIdentityTarget, StopIdentityTargetKind,
+    };
+    let (runtime_id, run_id, installation_id, run_generation, plan_digest) = (
+        JOB.parse().unwrap(),
+        RUN.parse().unwrap(),
+        INSTALLATION.parse().unwrap(),
+        generation.parse().unwrap(),
+        PLAN_DIGEST.to_owned(),
+    );
+    let target = match shape {
+        Shape::Job => RunInspectTarget::JobIdentityTarget(JobIdentityTarget {
+            kind: JobIdentityTargetKind::JobIdentity,
+            runtime_id,
+            run_id,
+            installation_id,
+            run_generation,
+            plan_digest,
+        }),
+        Shape::Runtime => RunInspectTarget::RuntimeIdentityTarget(RuntimeIdentityTarget {
+            kind: RuntimeIdentityTargetKind::RuntimeIdentity,
+            runtime_id,
+            run_id,
+            installation_id,
+            run_generation,
+            plan_digest,
+        }),
+        Shape::Stop | Shape::CancelStop => {
+            RunInspectTarget::StopIdentityTarget(StopIdentityTarget {
+                kind: StopIdentityTargetKind::StopIdentity,
+                runtime_id,
+                run_id,
+                installation_id,
+                run_generation,
+                plan_digest,
+                cancel_pending_start: matches!(shape, Shape::CancelStop),
+            })
+        }
+    };
     let request = HostRuntimeRequest {
+        inspect_target: Some(target),
         action: HostRuntimeAction::RunInspect,
         fence: uuid::Uuid::new_v4(),
-        arguments: [marker, JOB, RUN, INSTALLATION, generation, PLAN_DIGEST]
-            .map(str::to_owned)
-            .to_vec(),
+        arguments: Vec::new(),
         job_plan: None,
         installation_id: None,
         reconciliation_identity: None,
@@ -155,12 +198,7 @@ fn a_stopped_running_job_retains_no_invented_exit() {
 fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_container() {
     let host = exited_job(3);
     let (_temp, executor) = host_executor(&host);
-    let observed = reobserve_mode(
-        &executor,
-        "1",
-        vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT,
-    )
-    .unwrap();
+    let observed = reobserve_mode(&executor, "1", Shape::Runtime).unwrap();
     assert_eq!(observed.exit_code, Some(3));
     assert!(host.present(JOB), "observation cannot stop or remove");
     executor.sweep_stray_jobs();
@@ -169,19 +207,11 @@ fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_containe
         "job retains its real exit"
     );
     assert!(matches!(
-        reobserve_mode(
-            &executor,
-            "1",
-            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
-        ),
+        reobserve_mode(&executor, "1", Shape::Runtime),
         Err(OperationError::RuntimeRunMissing)
     ));
     assert!(matches!(
-        reobserve_mode(
-            &executor,
-            "2",
-            vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT
-        ),
+        reobserve_mode(&executor, "2", Shape::Runtime),
         Err(OperationError::RuntimeRunMissing)
     ));
 }
@@ -192,7 +222,7 @@ fn runtime_absence_probe_never_substitutes_a_retained_exit_or_removes_a_containe
 fn cancel_stop_observation_requires_durable_fence_and_start_quiescence() {
     let host = Host::with(&[]);
     let (_temp, executor) = host_executor(&host);
-    let marker = vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT;
+    let marker = Shape::CancelStop;
     assert!(matches!(
         reobserve_mode(&executor, "1", marker),
         Err(OperationError::StopUncertain)
@@ -247,7 +277,7 @@ fn cancel_stop_observation_requires_durable_fence_and_start_quiescence() {
 fn ordinary_stop_observation_requires_its_generation_high_water_mark() {
     let host = Host::with(&[]);
     let (_temp, executor) = host_executor(&host);
-    let marker = vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT;
+    let marker = Shape::Stop;
     assert!(matches!(
         reobserve_mode(&executor, "1", marker),
         Err(OperationError::StopUncertain)

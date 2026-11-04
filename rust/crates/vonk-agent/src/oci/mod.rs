@@ -152,7 +152,7 @@ const MAX_COMPILED_EXECUTION_PLAN_SPEC_BYTES: usize = MAX_COMPILED_EXECUTION_PLA
 pub struct RecipeRunInspectionPlan {
     pub run_id: uuid::Uuid,
     pub run_generation: u64,
-    pub arguments: Vec<String>,
+    pub target: vonk_agent_protocol::generated::ContainerRunTarget,
     pub endpoint_address: Option<IpAddr>,
     pub endpoint_port: u16,
     pub health_path: String,

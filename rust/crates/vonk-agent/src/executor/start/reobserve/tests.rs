@@ -227,7 +227,13 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
         },
         runtime_root: runtime_root.path(),
     };
-    let arguments = ["the start's exact inspection arguments".to_owned()];
+    let arguments = crate::executor::container_run_target(
+        &"a".repeat(64),
+        &format!("sha256:{}", "b".repeat(64)),
+        &format!("sha256:{}", "b".repeat(64)),
+        "vonk/image:test",
+        &["the start's exact inspection arguments".to_owned()],
+    );
     let settled = match failed {
         Failed::Start(error) => {
             executor

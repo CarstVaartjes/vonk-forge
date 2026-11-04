@@ -117,6 +117,7 @@ fn a_many_artifact_runtime_command_is_framed() {
 
     let start_plan = crate::recipe_start_tests::valid_start_plan();
     let request = HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::Start,
         fence: Uuid::new_v4(),
         arguments,

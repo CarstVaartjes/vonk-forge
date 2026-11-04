@@ -559,18 +559,19 @@ fn a_job_reobservation_answers_running_its_recorded_exit_or_proven_absence() {
     let inspect = |host: &Host, generation: &str| {
         let (_temp, executor) = host_executor(host);
         let request = HostRuntimeRequest {
+            inspect_target: Some(RunInspectTarget::JobIdentityTarget(
+                vonk_agent_protocol::generated::JobIdentityTarget {
+                    kind: vonk_agent_protocol::generated::JobIdentityTargetKind::JobIdentity,
+                    runtime_id: JOB.parse().unwrap(),
+                    run_id: RUN.parse().unwrap(),
+                    installation_id: INSTALLATION.parse().unwrap(),
+                    run_generation: generation.parse().unwrap(),
+                    plan_digest: PLAN_DIGEST.to_owned(),
+                },
+            )),
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
-            arguments: [
-                vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
-                JOB,
-                RUN,
-                INSTALLATION,
-                generation,
-                PLAN_DIGEST,
-            ]
-            .map(str::to_owned)
-            .to_vec(),
+            arguments: Vec::new(),
             job_plan: None,
             installation_id: None,
             reconciliation_identity: None,
@@ -659,12 +660,15 @@ fn installation_ownership_uses_running_containers_and_mounts_not_metadata() {
         )
         .unwrap();
         let request = HostRuntimeRequest {
+            inspect_target: Some(RunInspectTarget::InstallationInUseTarget(
+                vonk_agent_protocol::generated::InstallationInUseTarget {
+                    kind: vonk_agent_protocol::generated::InstallationInUseTargetKind::InstallationInUse,
+                    installation_id: "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c".parse().unwrap(),
+                },
+            )),
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
-            arguments: vec![
-                vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT.to_owned(),
-                "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c".to_owned(),
-            ],
+            arguments: Vec::new(),
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,

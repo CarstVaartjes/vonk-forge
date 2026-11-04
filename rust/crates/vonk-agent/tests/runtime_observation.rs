@@ -117,7 +117,7 @@ fn assert_unbound_install_retains_inspection(mut started: CompiledExecutionPlan)
         .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].run_id.to_string(), RUN);
-    assert_eq!(&inspections[0].arguments[4..], launched.main.as_slice());
+    assert_eq!(inspections[0].target.command, launched.main);
     assert_eq!(runtime.load_spec(INSTALLATION).unwrap(), installed);
 
     let retained_path = root
@@ -211,20 +211,21 @@ fn retained_inspection_and_agent_preparation_leave_private_tmp_cleanup_to_helper
         .unwrap();
     assert_eq!(inspections.len(), 1);
     assert_eq!(inspections[0].endpoint_address, None);
-    assert!(
-        !inspections[0]
-            .arguments
-            .iter()
-            .any(|value| value == "--publish")
-    );
+    let target = &inspections[0].target;
+    assert!(!target.command.iter().any(|value| value == "--publish"));
     assert_eq!(
-        &inspections[0].arguments[..4],
-        &[
-            plan.runtime_image.oci_layout_sha256.clone(),
-            plan.runtime_image.image_digest.clone(),
-            plan.runtime_image.image_digest.clone(),
-            plan.runtime_image.local_image_reference(),
-        ]
+        (
+            target.archive_sha256.as_str(),
+            target.registry_index_digest.as_str(),
+            target.platform_manifest_digest.as_str(),
+            target.image_reference.as_str(),
+        ),
+        (
+            plan.runtime_image.oci_layout_sha256.as_str(),
+            plan.runtime_image.image_digest.as_str(),
+            plan.runtime_image.image_digest.as_str(),
+            plan.runtime_image.local_image_reference().as_str(),
+        )
     );
     assert_eq!(fs::read(&marker).unwrap(), b"live kernel workspace");
     assert_eq!(fs::read(&cache).unwrap(), b"persistent cache");

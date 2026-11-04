@@ -107,13 +107,13 @@ pub(super) fn peers(job_id: Uuid, script: Vec<Answer>) -> Peers {
                 &fs::read(requests.join(format!("{}.json", request.request_sha256))).unwrap(),
             )
             .unwrap();
-            assert_eq!(
-                runtime.arguments[..2],
-                [
-                    vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT.to_owned(),
-                    job_id.to_string()
-                ]
-            );
+            assert!(runtime.arguments.is_empty());
+            let Some(vonk_agent_protocol::RunInspectTarget::JobIdentityTarget(target)) =
+                runtime.inspect_target
+            else {
+                panic!("the re-observation names a job identity");
+            };
+            assert_eq!(target.runtime_id, job_id);
             last = answers.next().unwrap_or(last);
             let mut response = HostHelperResponse {
                 installation_intent_nonce: None,

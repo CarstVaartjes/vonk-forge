@@ -191,7 +191,8 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
             let run_id = run_id.expect("validated UUID");
             match self.recipe_run_inspection_plan(run_id) {
                 Ok(Some(plan)) => {
-                    bytes += plan.arguments.iter().map(String::len).sum::<usize>()
+                    bytes += plan.target.command.iter().map(String::len).sum::<usize>()
+                        + plan.target.image_reference.len()
                         + plan.health_path.len();
                     progress.had_plans = true;
                     plans.push(plan);
@@ -244,13 +245,14 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         // installed content. Observation constructs inspection arguments from
         // that snapshot; the start path's second lifecycle read could change
         // the snapshot and repeatedly parse every retained plan in this page.
-        let mut arguments = vec![
-            spec.runtime_image.oci_layout_sha256.clone(),
-            spec.runtime_image.image_digest.clone(),
-            spec.runtime_image.image_digest.clone(),
-            spec.runtime_image.local_image_reference(),
-        ];
-        arguments.extend(self.start_arguments(&spec, &installation_id, run_id, &placement)?);
+        let command = self.start_arguments(&spec, &installation_id, run_id, &placement)?;
+        let target = crate::executor::container_run_target(
+            &spec.runtime_image.oci_layout_sha256,
+            &spec.runtime_image.image_digest,
+            &spec.runtime_image.image_digest,
+            &spec.runtime_image.local_image_reference(),
+            &command,
+        );
         let endpoint_owner =
             placement.world_size == 1 || placement.local_address == placement.master_address;
         let health_path = spec
@@ -262,7 +264,7 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
         Ok(Some(RecipeRunInspectionPlan {
             run_id: uuid::Uuid::parse_str(run_id).map_err(|_| OciError::Artifact)?,
             run_generation,
-            arguments,
+            target,
             endpoint_address: if endpoint_owner {
                 Some(placement.endpoint_address.ok_or(OciError::Artifact)?)
             } else {

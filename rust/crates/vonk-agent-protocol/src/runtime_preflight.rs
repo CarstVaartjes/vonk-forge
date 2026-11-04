@@ -45,6 +45,7 @@ mod tests {
     #[test]
     fn fixed_helper_preflight_cannot_carry_a_command_or_mount_argument() {
         let mut request = HostRuntimeRequest {
+            inspect_target: None,
             action: HostRuntimeAction::RuntimePreflight,
             fence: uuid::Uuid::new_v4(),
             arguments: vec![],

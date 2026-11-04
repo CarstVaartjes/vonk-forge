@@ -15,6 +15,7 @@ fn a_request_document_between_the_retired_private_cap_and_the_exchange_ceiling_i
     let requests = temp.path().join("runtime-requests");
     fs::create_dir_all(&requests).unwrap();
     let request = HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::ImagePull,
         fence: uuid::Uuid::new_v4(),
         arguments: (0..3000)

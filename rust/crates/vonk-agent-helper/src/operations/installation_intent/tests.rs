@@ -195,6 +195,7 @@ fn signed_cleanup_fences_never_executed_start_and_newer_intent_launches_after_re
     let delayed = signed(make_operation(&request, Some(nonce.clone()), 1), &signer);
     assert!(roots.data.join(RUNTIME_GENERATION_FENCE_DIRECTORY).exists());
     let cleanup = HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::InstallationCleanup,
         fence: uuid::Uuid::new_v4(),
         arguments: Vec::new(),

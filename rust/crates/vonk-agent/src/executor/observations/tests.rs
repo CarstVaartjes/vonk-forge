@@ -699,14 +699,19 @@ async fn exited_serving_workload_carries_its_retained_output() {
         request_root: &requests,
         helper_socket: &socket,
     };
-    let arguments = vec![Uuid::new_v4().to_string()];
+    let target = vonk_agent_protocol::RunInspectTarget::RunNameTarget(
+        vonk_agent_protocol::generated::RunNameTarget {
+            kind: vonk_agent_protocol::generated::RunNameTargetKind::RunName,
+            run_id: Uuid::new_v4(),
+        },
+    );
     let observed = boundary
-        .inspect_recipe_run_evidence_for_observation(arguments.clone(), false, None)
+        .inspect_recipe_run_evidence_for_observation(target.clone(), false, None)
         .await
         .unwrap();
     assert!(!observed.running);
     let Err(exited) = boundary
-        .inspect_recipe_run_evidence_for_observation(arguments, true, None)
+        .inspect_recipe_run_evidence_for_observation(target, true, None)
         .await
     else {
         panic!("an exited container answers with its process-exit account");

@@ -1,0 +1,405 @@
+{
+  "valid": [
+    {
+      "name": "installation-in-use",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "installation-in-use",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1"
+        }
+      }
+    },
+    {
+      "name": "run-name",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "a0000000-0000-4000-8000-00000000000a"
+        }
+      }
+    },
+    {
+      "name": "job-identity",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "job-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "runtime-identity",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "runtime-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "stop-identity",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "stop-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cancel_pending_start": false
+        }
+      }
+    },
+    {
+      "name": "cancel-stop-identity",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "stop-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cancel_pending_start": true
+        }
+      }
+    },
+    {
+      "name": "container-run",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "container-run",
+          "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "registry_index_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "platform_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "image_reference": "vonk/image:test",
+          "command": [
+            "run",
+            "--detach",
+            "--name",
+            "vonk-a0000000-0000-4000-8000-00000000000a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "container-run bound to its generation",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "container-run",
+          "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "registry_index_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "platform_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "image_reference": "vonk/image:test",
+          "command": [
+            "run",
+            "--detach",
+            "--name",
+            "vonk-a0000000-0000-4000-8000-00000000000a"
+          ]
+        },
+        "run_generation": 2
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "legacy job-identity argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "job-identity",
+          "a1000000-0000-4000-8000-0000000000a1",
+          "a0000000-0000-4000-8000-00000000000a",
+          "b0000000-0000-4000-8000-0000000000b1",
+          "3",
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ]
+      }
+    },
+    {
+      "name": "legacy installation-in-use argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "installation-in-use",
+          "b0000000-0000-4000-8000-0000000000b1"
+        ]
+      }
+    },
+    {
+      "name": "legacy run-id-only argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "a0000000-0000-4000-8000-00000000000a"
+        ]
+      }
+    },
+    {
+      "name": "target beside arguments",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "a0000000-0000-4000-8000-00000000000a"
+        ],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "a0000000-0000-4000-8000-00000000000a"
+        }
+      }
+    },
+    {
+      "name": "target on another action",
+      "request": {
+        "action": "image-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "x"
+        ],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "a0000000-0000-4000-8000-00000000000a"
+        }
+      }
+    },
+    {
+      "name": "run-name bound to a generation",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "a0000000-0000-4000-8000-00000000000a"
+        },
+        "run_generation": 1
+      }
+    },
+    {
+      "name": "identity bound to a request generation",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "job-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "run_generation": 3
+      }
+    },
+    {
+      "name": "unknown kind",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "job-identities",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1"
+        }
+      }
+    },
+    {
+      "name": "missing kind",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1"
+        }
+      }
+    },
+    {
+      "name": "stop-identity without its cancel flag",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "stop-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "job-identity with the stop flag",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "job-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cancel_pending_start": false
+        }
+      }
+    },
+    {
+      "name": "generation zero",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "runtime-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 0,
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "generation as text",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "runtime-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": "3",
+          "plan_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "uppercase digest",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "runtime-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+        }
+      }
+    },
+    {
+      "name": "short digest",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "runtime-identity",
+          "runtime_id": "a1000000-0000-4000-8000-0000000000a1",
+          "run_id": "a0000000-0000-4000-8000-00000000000a",
+          "installation_id": "b0000000-0000-4000-8000-0000000000b1",
+          "run_generation": 3,
+          "plan_digest": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      }
+    },
+    {
+      "name": "not a uuid",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "not-a-uuid"
+        }
+      }
+    },
+    {
+      "name": "container-run with a bare image digest",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "container-run",
+          "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "registry_index_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "platform_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "image_reference": "vonk/image:test",
+          "command": [
+            "run",
+            "--detach",
+            "--name",
+            "vonk-a0000000-0000-4000-8000-00000000000a"
+          ]
+        }
+      }
+    },
+    {
+      "name": "container-run with a NUL in its command",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "container-run",
+          "archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "registry_index_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "platform_manifest_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "image_reference": "vonk/image:test",
+          "command": [
+            "run",
+            "a\u0000b"
+          ]
+        }
+      }
+    }
+  ]
+}
