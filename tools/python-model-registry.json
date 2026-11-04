@@ -115,6 +115,10 @@
       "kind": "agent-protocol"
     },
     {
+      "module": "agent_protocol/src/vonk_agent_protocol/run_inspect_target.py",
+      "kind": "agent-protocol"
+    },
+    {
       "module": "agent_protocol/src/vonk_agent_protocol/runtime_preflight.py",
       "kind": "agent-protocol"
     },
