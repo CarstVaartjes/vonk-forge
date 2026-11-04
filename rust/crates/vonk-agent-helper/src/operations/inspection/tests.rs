@@ -279,7 +279,8 @@ fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
         let roots = ManagedRoots::under(temp.path());
         OperationExecutor::new(roots, &[0; 32], NameOnlyRunner { inspect, listing }, None)
             .unwrap()
-            .runtime_run_container_running(run)
+            .runtime_run_container(run)
+            .map(|named| named.running)
     };
     // Removed by hand: docker cannot inspect it and no listing has it.
     assert!(matches!(
@@ -300,7 +301,7 @@ fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
         .is_err()
     );
     let line = |running: &str, managed: &str, label: &str| {
-        docker_output(true, &format!("{id}\t{running}\t{managed}\t{label}\n"), 0)
+        docker_output(true, &managed_line(&id, running, managed, label), 0)
     };
     let none = docker_output(true, "", 0);
     assert!(matches!(
@@ -315,6 +316,60 @@ fn name_only_run_check_reports_absent_stopped_running_and_refuses_the_rest() {
     assert!(check(line("false", "false", run_id), none.clone(), run_id).is_err());
     assert!(check(line("false", "true", "other"), none.clone(), run_id).is_err());
     assert!(check(none.clone(), none, "AB69F1BA-1FA2-4283-BDF1-A6D2ED59549C").is_err());
+}
+
+const LABELLED_TARGET: &str = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
+const LABELLED_INSTALLATION: &str = "c0000000-0000-4000-8000-00000000000c";
+
+/// The docker answer of the name-only look, with every managed label set.
+fn managed_line(id: &str, running: &str, managed: &str, run: &str) -> String {
+    format!(
+        "{id}\t{running}\t{managed}\t{run}\t{LABELLED_TARGET}\t{LABELLED_INSTALLATION}\t3\t{}\n",
+        "d".repeat(64)
+    )
+}
+
+#[test]
+fn name_only_run_check_returns_the_container_labels_it_read() {
+    // Catches a stop built from anything but the container's own labels: the
+    // reply must carry exactly what was read, and nothing when a label is
+    // damaged.
+    let run_id = "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c";
+    let id = "a".repeat(64);
+    let named = |stdout: String| {
+        let temp = tempfile::tempdir().unwrap();
+        let roots = ManagedRoots::under(temp.path());
+        OperationExecutor::new(
+            roots,
+            &[0; 32],
+            NameOnlyRunner {
+                inspect: docker_output(true, &stdout, 0),
+                listing: docker_output(true, "", 0),
+            },
+            None,
+        )
+        .unwrap()
+        .runtime_run_container(run_id)
+        .unwrap()
+    };
+    let labels = named(managed_line(&id, "true", "true", run_id))
+        .labels
+        .expect("labels");
+    assert_eq!(labels.run_id.to_string(), run_id);
+    assert_eq!(labels.target_id.to_string(), LABELLED_TARGET);
+    assert_eq!(labels.installation_id.to_string(), LABELLED_INSTALLATION);
+    assert_eq!(labels.run_generation, 3);
+    assert_eq!(labels.plan_digest, "d".repeat(64));
+    // A container from before the labels existed has them empty: still known
+    // to be running, but with no identity to stop it by.
+    let bare = named(format!("{id}\ttrue\ttrue\t{run_id}\t\t\t\t\n"));
+    assert!(bare.running && bare.labels.is_none());
+    // A non-canonical generation is no identity either.
+    let damaged = named(format!(
+        "{id}\ttrue\ttrue\t{run_id}\t{LABELLED_TARGET}\t{LABELLED_INSTALLATION}\t03\t{}\n",
+        "d".repeat(64)
+    ));
+    assert!(damaged.running && damaged.labels.is_none());
 }
 
 #[test]
