@@ -951,8 +951,57 @@ def test_a_batch_slower_than_its_budget_still_commits_progress_every_pass(
 
     removed = 0
     for _ in range(len(old)):
+        waiting = any(catalog.exists(revision) for revision in old)
         result = collector.collect()
-        assert result.revisions > 0
+        # Every pass that starts with work left commits some of it.
+        assert result.revisions > 0 or not waiting
+        removed += result.revisions
+        if collector._cursor is None:
+            break
+
+    assert collector._cursor is None
+    assert removed == len(old)
+    assert not any(catalog.exists(revision) for revision in old)
+
+
+def test_a_recheck_as_slow_as_the_inventory_still_commits_progress(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a recheck that only gets what the rows left of the budget.
+
+    The inventory and the recheck each take 0.6 of the budget and every row
+    0.45 of it. The recheck has a budget of its own, so each pass commits the
+    rows it took and the backlog is gone within a few passes.
+    """
+
+    old = [_refresh(catalog, f"slow-recheck-{index}")[0] for index in range(4)]
+    elapsed = [0.0]
+    real_remove = CatalogRevisionCollector._remove
+    real_references = CatalogRevisionCollector._references
+
+    def slow_remove(self, *args, **kwargs) -> frozenset[str]:
+        elapsed[0] += SWEEP_BUDGET_SECONDS * 0.45
+        return real_remove(self, *args, **kwargs)
+
+    def slow_references(self, *args, **kwargs) -> frozenset[str]:
+        elapsed[0] += SWEEP_BUDGET_SECONDS * 0.6
+        return real_references(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        catalog_revision_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    monkeypatch.setattr(CatalogRevisionCollector, "_remove", slow_remove)
+    monkeypatch.setattr(CatalogRevisionCollector, "_references", slow_references)
+    collector = catalog.collector()
+
+    removed = 0
+    for _ in range(len(old)):
+        waiting = any(catalog.exists(revision) for revision in old)
+        result = collector.collect()
+        # Every pass that starts with work left commits some of it.
+        assert result.revisions > 0 or not waiting
         removed += result.revisions
         if collector._cursor is None:
             break
@@ -1215,8 +1264,9 @@ def test_a_recheck_that_cannot_finish_removes_nothing_and_waits_its_interval(
     """Catches a failed batch recheck that commits, or retries every worker pass.
 
     The recheck inside the batch transaction cannot complete once (a damaged
-    row or a scan over budget). The batch rolls back, the cursor stays, and
-    the sweep waits for its interval; the next sweep removes both revisions.
+    row or a scan over budget). As with an inventory that cannot finish, the
+    batch rolls back and the sweep starts over at its interval; the next sweep
+    removes both revisions.
     """
 
     Base.metadata.create_all(postgres_engine)
@@ -1238,12 +1288,72 @@ def test_a_recheck_that_cannot_finish_removes_nothing_and_waits_its_interval(
     assert failed
     assert all(catalog.exists(revision) for revision in old)
     assert collector._due_at == catalog.now + INTERVAL
+    assert collector._cursor is None
     assert collector.tick() is False  # paced: no retry before the interval
 
     catalog.now = catalog.now + INTERVAL
     assert collector.tick() is True
     assert not any(catalog.exists(revision) for revision in old)
     catalog.job(_job_payload(old[0]), state=LifecycleState.RUNNING.value, updated=NOW)
+    assert catalog.count(Job) == 1
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_rescinded_slow_batch_skips_no_untried_row_on_postgres(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches the cursor jumping past rows a rescinded attempt never retried.
+
+    The first attempt takes three rows before its row budget ends; a Job
+    naming the second commits meanwhile, so the recheck rescinds it. The
+    retry, out of row budget, commits only the first row, and the next pass
+    continues right after it: every unnamed row goes within the same sweep.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    first, named, third, fourth = sorted(
+        _refresh(catalog, f"rescind-{index}")[0] for index in range(4)
+    )
+    elapsed = [0.0]
+    real_remove = CatalogRevisionCollector._remove
+    real_bound = catalog_revision_collection._bound_lock_waits
+    accepted: list[str] = []
+
+    def slow_remove(self, *args, **kwargs) -> frozenset[str]:
+        elapsed[0] += SWEEP_BUDGET_SECONDS * 0.4
+        return real_remove(self, *args, **kwargs)
+
+    def accept_during_batch(session: Session, deadline: float) -> None:
+        if not accepted:
+            accepted.append(named)
+            catalog.job(
+                _job_payload(named), state=LifecycleState.RUNNING.value, updated=NOW
+            )
+        real_bound(session, deadline)
+
+    monkeypatch.setattr(
+        catalog_revision_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    monkeypatch.setattr(CatalogRevisionCollector, "_remove", slow_remove)
+    monkeypatch.setattr(
+        catalog_revision_collection, "_bound_lock_waits", accept_during_batch
+    )
+    collector = catalog.collector()
+
+    passes = 0
+    while passes < 4:
+        collector.collect()
+        passes += 1
+        if collector._cursor is None:
+            break
+
+    assert accepted
+    assert collector._cursor is None
+    assert catalog.exists(named)
+    assert not any(catalog.exists(revision) for revision in (first, third, fourth))
 
 
 def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(

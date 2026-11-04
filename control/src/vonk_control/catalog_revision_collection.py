@@ -121,10 +121,10 @@ INTERVAL = timedelta(hours=1)
 # Rows fetched per round trip when scanning stored documents; bounds a scan by
 # the largest few documents instead of the whole table.
 _SCAN_BATCH = 20
-# A pass starts no new batch or phase after this, and each batch (its deletes,
-# rechecks and retries) stops at this long; the rest continues from the cursor
-# on the next worker pass. One pass is bounded by its inventory reads (each
-# with this budget), this budget and one more batch, so a large backlog never
+# A pass starts no new batch or phase after this. A batch takes rows for this
+# long (always at least one) and its recheck gets this long again; the rest
+# continues from the cursor on the next worker pass. One pass is bounded by its
+# inventory reads, this budget and one more batch, so a large backlog never
 # holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
 # Candidates removed in one transaction; the JSON references are read once per
@@ -163,9 +163,9 @@ class _Kept(Exception):
 class _Unfinished(Exception):
     """The batch recheck could not finish (damaged row, scan over budget).
 
-    Nothing of the batch was removed. Like an inventory that cannot finish, it
-    proves nothing unused: the cursor stays and the sweep retries at its next
-    interval, not on the next worker pass.
+    Nothing of the batch was removed. Exactly like an inventory that cannot
+    finish, it proves nothing unused: the sweep ends and starts over at its
+    next interval, not on the next worker pass.
     """
 
 
@@ -203,8 +203,8 @@ class _Bundle:
 class _Attempt:
     """One batch transaction: committed (``removed``) or rescinded (``retry``).
 
-    ``stopped_after`` is the last row tried when the row budget ended the
-    attempt before the batch did; the next pass continues after it.
+    ``stopped_after`` is the last row a committed attempt tried when the row
+    budget ended it before the batch did; the next pass continues after it.
     """
 
     removed: int | None
@@ -292,8 +292,9 @@ class CatalogRevisionCollector:
                             phase, pending, now, cutoff, counts
                         )
                     except _Unfinished:
-                        # Paced: the cursor stays and the interval set by tick holds.
-                        self._cursor = (phase, after)
+                        # As an inventory that cannot finish: start over at the
+                        # interval tick already set.
+                        self._cursor = None
                         return self._swept(removed, bundles, kept)
                     if phase == _Phase.BUNDLE:
                         bundles += gone
@@ -416,26 +417,20 @@ class CatalogRevisionCollector:
         """Remove ``pending``; a row named since the inventory stays.
 
         Returns how many were removed and, when the row budget ended the batch
-        early, the last row tried. Rows are taken until half the batch budget
-        has passed, and always at least one, so every batch commits progress;
-        the other half is for the recheck. A rescinded attempt keeps the named
-        rows and retries the rest within the same budget. Every retry has fewer
-        rows, so the loop ends.
+        early, the last row tried. Rows are taken for one budget, and always at
+        least one; the recheck then gets a budget of its own, the same as the
+        inventory it repeats, so a recheck fails only where the inventory
+        would. A rescinded attempt keeps the named rows and retries the rest,
+        untried rows included. Every retry has fewer rows, so the loop ends.
         """
 
-        started = time.monotonic()
-        rows_until = started + self._budget_seconds / 2
-        deadline = started + self._budget_seconds
-        stopped: str | None = None
+        rows_until = time.monotonic() + self._budget_seconds
         while pending:
-            attempt = self._attempt(
-                phase, pending, now, cutoff, kept, rows_until, deadline
-            )
-            stopped = stopped or attempt.stopped_after
+            attempt = self._attempt(phase, pending, now, cutoff, kept, rows_until)
             if attempt.removed is not None:
-                return attempt.removed, stopped
+                return attempt.removed, attempt.stopped_after
             pending = attempt.retry
-        return 0, stopped
+        return 0, None
 
     def _attempt(
         self,
@@ -445,7 +440,6 @@ class CatalogRevisionCollector:
         cutoff: datetime,
         kept: Counter[str],
         rows_until: float,
-        deadline: float,
     ) -> _Attempt:
         """Remove ``pending`` in one transaction, each under its own savepoint.
 
@@ -457,12 +451,14 @@ class CatalogRevisionCollector:
 
         removed: list[tuple[Any, frozenset[str]]] = []
         stopped_after: str | None = None
+        untried: list[Any] = []
         try:
             with self._sessions.begin() as session:
-                _bound_lock_waits(session, deadline)
+                _bound_lock_waits(session, rows_until)
                 for index, item in enumerate(pending):
                     if index and time.monotonic() > rows_until:
                         stopped_after = pending[index - 1].id
+                        untried = pending[index:]
                         break
                     try:
                         with session.begin_nested():
@@ -488,8 +484,10 @@ class CatalogRevisionCollector:
                         continue
                     removed.append((item, names))
                 if removed:
+                    recheck_until = time.monotonic() + self._budget_seconds
+                    _bound_statements(session, recheck_until)
                     fresh = self._references(
-                        session, phase, now, deadline, since=cutoff
+                        session, phase, now, recheck_until, since=cutoff
                     )
                     named = frozenset(
                         item.id
@@ -501,7 +499,7 @@ class CatalogRevisionCollector:
         except _Rescinded as rescinded:
             kept["live operation"] += len(rescinded.named)
             retry = [item for item, _ in removed if item.id not in rescinded.named]
-            return _Attempt(None, retry, stopped_after)
+            return _Attempt(None, retry + untried, stopped_after)
         except (_Kept, SQLAlchemyError) as error:
             # The recheck could not finish; nothing of the batch is removed.
             kept[
