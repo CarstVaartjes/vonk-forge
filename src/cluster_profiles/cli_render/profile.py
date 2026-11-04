@@ -94,10 +94,10 @@ def connection_snippets(api_base: str, alias: str) -> dict[str, str]:
 
     tests/fixtures/connection-examples.json is asserted by both renderers.
     """
-    body = json.dumps(
-        {"model": alias, "messages": [{"role": "user", "content": "Hello"}]},
-        separators=(",", ":"),
-        ensure_ascii=False,
+    body = (
+        '{"model":'
+        + json.dumps(alias, ensure_ascii=False)
+        + ',"messages":[{"role":"user","content":"Hello"}]}'
     )
     return {
         "setup": "\n".join(
