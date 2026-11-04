@@ -28,7 +28,7 @@
 //! local miss repairs, it never refuses.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Path, PathBuf},
@@ -235,22 +235,59 @@ fn scope_names(root: &Path, names: &mut BTreeSet<uuid::Uuid>) -> Option<()> {
     Some(())
 }
 
+/// Installations whose unreadable entries were already reported, with the count
+/// reported: a pass logs only a change, not every ~2 minutes.
+static UNREADABLE_REPORTED: Mutex<BTreeMap<uuid::Uuid, u64>> = Mutex::new(BTreeMap::new());
+
+fn report_unreadable(id: uuid::Uuid, size: &crate::oci::TreeSize) {
+    let mut reported = UNREADABLE_REPORTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if changed_unreadable(&mut reported, id, size.unreadable)
+        && let Some(diagnostic) = size.unreadable_diagnostic(&id.to_string())
+    {
+        eprintln!("{diagnostic}");
+    }
+}
+
+/// Whether `unreadable` is news for `id`: the first time, or a different count.
+fn changed_unreadable(
+    reported: &mut BTreeMap<uuid::Uuid, u64>,
+    id: uuid::Uuid,
+    unreadable: u64,
+) -> bool {
+    if unreadable == 0 {
+        reported.remove(&id);
+        return false;
+    }
+    reported.insert(id, unreadable) != Some(unreadable)
+}
+
 /// Each installation directory's logical size now, measured as its install
 /// receipt was (metadata only), as inventory reports them; `None` when the
-/// installations cannot be listed. One that cannot be measured is left out.
+/// installations cannot be listed. Unreadable subtrees are skipped and logged
+/// once per installation; one whose directory cannot be read is left out.
 pub fn installation_sizes(
     data_root: &Path,
     installations: &[uuid::Uuid],
 ) -> Option<Vec<vonk_agent_protocol::generated::InstallationBytes>> {
+    let listed: BTreeSet<&uuid::Uuid> = installations.iter().collect();
+    UNREADABLE_REPORTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .retain(|id, _| listed.contains(id));
     Some(
         installations
             .iter()
             .filter_map(|id| {
                 match crate::oci::installation_tree_bytes(data_root, &id.to_string()) {
-                    Ok(bytes) => Some(vonk_agent_protocol::generated::InstallationBytes {
-                        installation_id: *id,
-                        bytes,
-                    }),
+                    Ok(size) => {
+                        report_unreadable(*id, &size);
+                        Some(vonk_agent_protocol::generated::InstallationBytes {
+                            installation_id: *id,
+                            bytes: size.bytes,
+                        })
+                    }
                     // A directory/file removed during the scan is a cache miss.
                     // Permission and other I/O errors remain visible, never absence.
                     Err(crate::oci::OciError::Io(error))

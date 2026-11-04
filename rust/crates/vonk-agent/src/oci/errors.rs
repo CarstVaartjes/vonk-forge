@@ -22,7 +22,7 @@ pub enum OciError {
         destination: PathBuf,
         errno: Option<i32>,
     },
-    #[error("managed workload storage failed")]
+    #[error("managed workload storage failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("managed workload metadata is invalid")]
     Json(#[from] serde_json::Error),

@@ -70,7 +70,7 @@ fn compiled_models_reject_duplicate_final_target() {
 }
 
 #[test]
-fn installed_bytes_sum_file_lengths_and_refuse_anything_but_files_and_directories() {
+fn installed_bytes_sum_file_lengths_and_count_links_without_following_them() {
     let data = tempdir().unwrap();
     let (installation_id, installation, _) = persisted_installation(data.path());
     let runner = NoProcess;
@@ -86,8 +86,36 @@ fn installed_bytes_sum_file_lengths_and_refuse_anything_but_files_and_directorie
     .sum();
     assert_eq!(runtime.installed_bytes(&installation_id).unwrap(), expected);
 
+    // A link counts its own length, whatever it points at, file or directory.
     symlink(installation.join("spec.json"), installation.join("link")).unwrap();
-    assert!(runtime.installed_bytes(&installation_id).is_err());
-    fs::remove_file(installation.join("link")).unwrap();
-    assert_eq!(runtime.installed_bytes(&installation_id).unwrap(), expected);
+    symlink(data.path(), installation.join("dir-link")).unwrap();
+    let links: u64 = ["link", "dir-link"]
+        .iter()
+        .map(|name| fs::symlink_metadata(installation.join(name)).unwrap().len())
+        .sum();
+    assert_eq!(
+        runtime.installed_bytes(&installation_id).unwrap(),
+        expected + links
+    );
+}
+
+#[test]
+fn installed_bytes_of_a_started_installation_skips_the_root_only_runtime_cache() {
+    use std::os::unix::fs::PermissionsExt;
+    let data = tempdir().unwrap();
+    let (installation_id, installation, _) = persisted_installation(data.path());
+    let runner = NoProcess;
+    let runtime = runtime(data.path(), &runner);
+    let before = runtime.installed_bytes(&installation_id).unwrap();
+    // The helper's runtime-cache/home on a reused, started installation.
+    let home = installation.join("runtime-cache/home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("blob"), b"hidden").unwrap();
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o000)).unwrap();
+    let measured = runtime.installed_bytes(&installation_id);
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).unwrap();
+    if fs::read_dir(&home).map(|_| ()).is_ok() && measured.as_ref().is_ok_and(|b| *b > before) {
+        return; // running as root: nothing was unreadable
+    }
+    assert_eq!(measured.unwrap(), before);
 }
