@@ -45,6 +45,14 @@ COLLECTOR_FUNCTIONS = {
     ),
     # Controller startup fills the saved-profile projection once per start.
     "control/src/vonk_control/reference_facts.py": frozenset({"_fill_profile_recipes"}),
+    # Both walk every saved profile by design: the image scan is itself a
+    # whole-collection reader, and the storage refresh recomputes every set.
+    "control/src/vonk_control/artifact_reference_scan/image_references.py": frozenset(
+        {"runtime_image_reference_findings"}
+    ),
+    "control/src/vonk_control/model_cache/inventory.py": frozenset(
+        {"_refresh_protection"}
+    ),
 }
 # Readers that load or parse the whole collection to answer for any target.
 WHOLE_COLLECTION_READERS = frozenset(
@@ -58,6 +66,8 @@ WHOLE_COLLECTION_READERS = frozenset(
         "runtime_image_reference_reasons",
         "model_set_reference_findings",
         "model_set_reference_reasons",
+        # Every saved profile's recipes when called without ``recipes``.
+        "profiles_naming",
         # Wrappers that rebuild the whole evidence for one node.
         "spark_eviction_capacity",
         "relief_for_spark",
@@ -104,6 +114,12 @@ def _keyed_by_recipes(call: ast.Call) -> bool:
 
 def _reader_call(call: ast.Call) -> bool:
     name = _tail(call.func)
+    if name == "profiles_naming":
+        # Every saved profile's recipes, unless the call names the recipes.
+        positional = len(call.args) > 1 and not (
+            isinstance(call.args[1], ast.Constant) and call.args[1].value is None
+        )
+        return not positional and not _keyed_by_recipes(call)
     if name in WHOLE_COLLECTION_READERS:
         return not _non_terminal_only(call)
     return (

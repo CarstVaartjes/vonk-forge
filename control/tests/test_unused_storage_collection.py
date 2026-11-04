@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, create_engine, event, func, select, update
+from sqlalchemy import Engine, create_engine, event, func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallationState,
@@ -1288,11 +1288,17 @@ def test_installation_is_kept_while_a_profile_cannot_be_read(world: Catalog) -> 
                 number=1,
                 name="Broken",
                 installation_policy="exact",
-                assignments=[{"recipe_selector": 7}],
+                assignments=[],
                 created_by="test",
                 created_at=OLD,
                 updated_at=OLD,
             )
+        )
+    with world.sessions.begin() as session:
+        # Past the recipe projection, as damage reaches a stored row.
+        session.execute(
+            text("UPDATE fleet_profiles SET assignments = :value"),
+            {"value": '[{"recipe_selector": 7}]'},
         )
     lifecycle = FakeLifecycle(world.sessions)
 

@@ -26,7 +26,6 @@ from ..model_cache_contract import (
     RetainedModelRevision,
 )
 from ..models import CatalogDocumentRevision, ModelCacheOperation, ModelCacheSet
-from ..reference_facts import fill_installation_model_sets
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _revision_identity
 from .constants import _LOGGER
@@ -375,10 +374,6 @@ class RevisionsMixin:
         if cache._revision_scan_at is not None and now < cache._revision_scan_at:
             return
         cache._revision_scan_at = now + _REVISION_SCAN_INTERVAL
-        # An installation admitted by a Controller that did not record its
-        # model set yet (one still running through an upgrade) gets it here.
-        with cache._session(write=True) as session:
-            fill_installation_model_sets(session.connection())
         stored = cache._stored_sets()
         cache._reconcile_verified_models(stored)
         cache._adopt_current_model_bindings(stored)

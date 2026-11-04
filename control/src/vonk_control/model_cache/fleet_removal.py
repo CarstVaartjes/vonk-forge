@@ -101,8 +101,10 @@ def _model_objects(
     *,
     observation_issues: list[FleetRemovalObservationIssue] | None = None,
     include_shared: bool = True,
-) -> tuple[set[str], set[str]]:
-    """The model's objects, and those among them that a kept set also contains.
+) -> tuple[set[str], set[str], frozenset[str] | None]:
+    """The model's objects, those among them that a kept set also contains, and
+    the files its catalog documents list (``None`` when one cannot be read, so
+    nothing narrows a later set read by them).
 
     Sharing is set membership: an object is kept when a cached set outside the
     model's own sets lists it. A catalog file that no kept set contains is
@@ -112,13 +114,12 @@ def _model_objects(
     issues: list[FleetRemovalObservationIssue] = []
     if include_shared:
         contents = lineage_contents(session, digest)
-        owned = model_sets(session, contents).owned
     else:
         # A profile acquires references only to this exact model. Unrelated
         # damaged evidence matters to deletion, never to acquiring this pin.
         contents = frozenset({digest})
-        owned = first_requested_sets(session, digest)
     target_objects: set[str] = set()
+    documents_readable = True
     for revision, current_head in session.execute(
         select(CatalogDocumentRevision, active_head_revision()).where(
             CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
@@ -131,6 +132,7 @@ def _model_objects(
             read=partial(read_catalog_document, revision),
         )
         if isinstance(model, Residue):
+            documents_readable = False
             # Only damage to the requested head makes its objects unknown;
             # cached sets list their own members independently.
             if current_head and revision.content_digest == digest:
@@ -141,7 +143,13 @@ def _model_objects(
     if not include_shared and target_objects:
         # Acquiring a pin needs only this immutable model's files. A readable
         # copy proves the same content even when its cache history is damaged.
-        return target_objects, set()
+        return target_objects, set(), None
+    catalog_files = frozenset(target_objects) if documents_readable else None
+    owned = (
+        model_sets(session, contents, files=catalog_files).owned
+        if include_shared
+        else first_requested_sets(session, digest)
+    )
     for row in session.scalars(
         select(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256.in_(owned))
     ):
@@ -178,7 +186,7 @@ def _model_objects(
             issues[0].detail,
             retryable=True,
         )
-    return target_objects, shared
+    return target_objects, shared, catalog_files
 
 
 def _observation_issue(
@@ -224,7 +232,7 @@ class FleetRemovalMixin:
     ) -> FleetModelRemovalEffects:
         cache = cast("ModelCacheService", self)
         issues: list[FleetRemovalObservationIssue] = []
-        target_objects, shared = _model_objects(
+        target_objects, shared, catalog_files = _model_objects(
             session, digest, observation_issues=issues
         )
         if shared_objects is not None:
@@ -234,7 +242,7 @@ class FleetRemovalMixin:
         # a subset of its files and sets first downloaded under an earlier
         # revision of it.
         contents = lineage_contents(session, digest)
-        sets, kept_sets = model_sets(session, contents)
+        sets, kept_sets = model_sets(session, contents, files=catalog_files)
         names = target_objects | contents | set(sets)
         # An installation uses the model when its recorded model set is one of
         # the model's sets (a reused set never names the model in the other

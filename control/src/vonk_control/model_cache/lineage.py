@@ -13,9 +13,11 @@ from collections.abc import Collection, Iterable
 from typing import NamedTuple
 
 from sqlalchemy import (
+    ColumnElement,
     Exists,
     and_,
     case,
+    exists,
     func,
     literal,
     literal_column,
@@ -23,9 +25,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Session, load_only
-from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
@@ -119,11 +119,17 @@ class ModelSets(NamedTuple):
 
 
 def model_sets(
-    session: Session, contents: Collection[str], *, among: Collection[str] | None = None
+    session: Session,
+    contents: Collection[str],
+    *,
+    among: Collection[str] | None = None,
+    files: Collection[str] | None = None,
 ) -> ModelSets:
     """The cached sets bound to any of ``contents``, in digest order.
 
-    ``among`` limits the read to these set digests.
+    ``among`` limits the read to these set digests. ``files`` are the files the
+    callers already read from the catalog documents of ``contents``: a manifest
+    is only read for a set whose membership holds one of them (or has none).
 
     A set's binding is its first requester's content or a verified binding in
     its stored manifest; a manifest that does not read binds only through its
@@ -148,14 +154,8 @@ def model_sets(
             or_(
                 ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
                 and_(
-                    ModelCacheSet.artifact_set_sha256.in_(
-                        sorted(
-                            _sets_holding_files(session, wanted)
-                            if among is None
-                            else among
-                        )
-                    ),
                     verifies_model(session, wanted),
+                    *(() if files is None else (_may_hold(files),)),
                 ),
             ),
             *(
@@ -191,45 +191,23 @@ def model_sets(
     )
 
 
-def _sets_holding_files(session: Session, contents: Collection[str]) -> set[str]:
-    """The cached sets that hold a file of one of these catalog models.
+def _may_hold(files: Collection[str]) -> ColumnElement[bool]:
+    """Whether a set's membership lists one of ``files``, or lists nothing.
 
-    A verified binding is published only for a set whose files the model
-    resolves to, so only these sets (and those first requested under the
-    models) can be bound to them: no other manifest is read.
+    A set whose membership rows are missing cannot be ruled out by them, so it
+    stays a candidate and its manifest decides.
     """
 
-    from ..artifact_lifecycle import ArtifactReferenceUnverified
-    from ..catalog_revision_contract import (
-        CatalogRevisionContractError,
-        read_catalog_document,
-    )
-
-    files: set[str] = set()
-    for revision in session.scalars(
-        select(CatalogDocumentRevision).where(
-            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
-            CatalogDocumentRevision.content_digest.in_(sorted(contents)),
-        )
-    ):
-        try:
-            model = read_catalog_document(revision)
-        except CatalogRevisionContractError as error:
-            raise ArtifactReferenceUnverified(
-                ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
-                "a model document cannot be read; the review is deferred",
-                retryable=True,
-            ) from error
-        if isinstance(model, ModelDefinition):
-            files.update(file.sha256 for file in model.files)
-    if not files:
-        return set()
-    return set(
-        session.scalars(
-            select(ModelCacheSetArtifact.artifact_set_sha256)
-            .where(ModelCacheSetArtifact.artifact_sha256.in_(sorted(files)))
-            .distinct()
-        )
+    return or_(
+        ModelCacheSet.artifact_set_sha256.in_(
+            select(ModelCacheSetArtifact.artifact_set_sha256).where(
+                ModelCacheSetArtifact.artifact_sha256.in_(sorted(files))
+            )
+        ),
+        ~exists().where(
+            ModelCacheSetArtifact.artifact_set_sha256
+            == ModelCacheSet.artifact_set_sha256
+        ),
     )
 
 

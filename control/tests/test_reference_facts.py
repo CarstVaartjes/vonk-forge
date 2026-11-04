@@ -114,6 +114,7 @@ def _reused_installation(world: Small) -> str:
                 id=installation_id,
                 recipe_revision_id=world.other_recipe[0],
                 model_content_sha256=_hex("another-model"),
+                model_artifact_set_sha256=TARGET_SET,
                 mapping_id=real.mapping_id,
                 mapping_generation=real.mapping_generation,
                 recipe_build_id=real.recipe_build_id,
@@ -262,9 +263,8 @@ def test_rows_from_before_the_facts_are_filled_and_an_upgrade_install_heals(
     """Fault test: an upgrade adopts rows written without the facts.
 
     Admission records the set. Rows in the old shape (no set, no projection)
-    are filled at startup; a damaged plan stays unfilled without stopping
-    startup. An installation admitted by a Controller still running the old
-    code during the upgrade is filled by the next model-cache pass.
+    are filled once at startup; a damaged plan stays unfilled without stopping
+    startup; a projection row its profile no longer names is removed.
     """
     world = _small(tmp_path)
     try:
@@ -316,17 +316,17 @@ def test_rows_from_before_the_facts_are_filled_and_an_upgrade_install_heals(
             assert session.scalars(select(FleetProfileRecipe.profile_id)).all() == [
                 pins
             ]
-            # Admitted during the upgrade by a Controller without the column.
-            session.execute(
-                text(
-                    "UPDATE recipe_installations SET model_artifact_set_sha256 = NULL "
-                    "WHERE id = :id"
-                ),
-                {"id": world.target_installation},
+            # A row the profile no longer names is removed; its own are kept.
+            session.add(
+                FleetProfileRecipe(profile_id=pins, publisher="stale", slug="gone")
             )
-        world.cache.reconcile_model_revisions()
-        with world.sessions() as session:
-            row = session.get(RecipeInstallation, world.target_installation)
-            assert row is not None and row.model_artifact_set_sha256 == admitted
+            session.flush()
+            assert fill_reference_facts(session.connection()) == 1
+            assert session.scalars(select(FleetProfileRecipe.profile_id)).all() == [
+                pins
+            ]
+            assert session.scalars(select(FleetProfileRecipe.publisher)).all() != [
+                "stale"
+            ]
     finally:
         world.cache.close()

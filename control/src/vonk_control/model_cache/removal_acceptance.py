@@ -208,7 +208,7 @@ class RemovalAcceptanceMixin:
             if fleet is not None:
                 from .fleet_removal import _model_objects
 
-                _, shared = _model_objects(session, model_content_sha256 or "")
+                _, shared, _files = _model_objects(session, model_content_sha256 or "")
             identities = (
                 *(
                     ArtifactIdentity("model-set", digest)

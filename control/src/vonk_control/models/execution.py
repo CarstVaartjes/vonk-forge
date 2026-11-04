@@ -18,11 +18,9 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
-    event,
     text,
 )
-from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Mapped, MappedColumn, Mapper, mapped_column
+from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 from vonk_agent_protocol import (
     ArtifactPreparation,
     InstallationNodeState,
@@ -77,9 +75,9 @@ class RecipeInstallation(Base):
         String(64), nullable=True, index=True
     )
     # The model set every rank of the accepted plan runs: the one stored fact
-    # for "which installations use this set", derived from the plan when the
-    # row is inserted (``_installation_model_set_recorded``). Rows inserted
-    # before the column existed are filled from their plan at startup.
+    # for "which installations use this set", written by install admission
+    # (the one writer) from the stored plan. Rows inserted before the column
+    # existed are filled from their plan once at startup.
     model_artifact_set_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
@@ -106,18 +104,6 @@ class RecipeInstallation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-
-
-@event.listens_for(RecipeInstallation, "before_insert")
-def _installation_model_set_recorded(
-    _mapper: Mapper[RecipeInstallation],
-    _connection: Connection,
-    target: RecipeInstallation,
-) -> None:
-    """Record the model set the inserted row's plan names: the one writer."""
-    from ..reference_facts import plan_model_set
-
-    target.model_artifact_set_sha256 = plan_model_set(target.plan)
 
 
 class InstallationNode(Base):

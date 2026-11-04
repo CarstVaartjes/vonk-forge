@@ -19,10 +19,17 @@ from sqlalchemy import delete, insert, select, update
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import InstallationState
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from .content_identity import catalog_selector_membership
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from .models import FleetProfile, FleetProfileRecipe, RecipeInstallation
+from .models import (
+    CatalogDocumentRevision,
+    FleetProfile,
+    FleetProfileRecipe,
+    RecipeInstallation,
+)
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
@@ -98,14 +105,39 @@ def profiles_naming(
     return {owner: frozenset(names) for owner, names in found.items()}
 
 
+def recipes_without_revision(session: Session) -> frozenset[tuple[str, str]]:
+    """The saved-profile recipes the catalog has no revision of at all.
+
+    A profile naming one cannot be resolved, so it protects what it might use:
+    the reader treats these as bound to every model.
+    """
+    return frozenset(
+        (publisher, slug)
+        for publisher, slug in session.execute(
+            select(FleetProfileRecipe.publisher, FleetProfileRecipe.slug)
+            .where(
+                ~select(CatalogDocumentRevision.id)
+                .where(
+                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+                    CatalogDocumentRevision.publisher == FleetProfileRecipe.publisher,
+                    CatalogDocumentRevision.slug == FleetProfileRecipe.slug,
+                )
+                .exists()
+            )
+            .distinct()
+        )
+    )
+
+
 def fill_reference_facts(connection: Connection) -> int:
     """Fill both facts for rows written before they existed; the rows filled.
 
-    Idempotent. An installation is filled from its own stored plan; a plan that
-    does not name one set is reported and left for its owner to replace. A
-    profile only gains the projection rows it is missing, never loses one: a
-    concurrent save rewrites its own rows, and an extra row only keeps
-    something until that save.
+    Idempotent, and run once at startup. An installation that is not
+    uninstalled is filled from its own stored plan; a plan that does not name
+    one set is reported once and left for its owner to replace. A profile with
+    readable assignments has its projection rows made to match them (rows
+    missing are added, rows it no longer names are removed); a profile whose
+    assignments are damaged is reported and left as it is.
     """
     filled, _unreadable = fill_installation_model_sets(connection)
     return filled + _fill_profile_recipes(connection)
@@ -138,7 +170,9 @@ def fill_installation_model_sets(
     unreadable: list[Residue] = []
     for installation_id, plan in connection.execute(
         select(RecipeInstallation.id, RecipeInstallation.plan).where(
-            RecipeInstallation.model_artifact_set_sha256.is_(None)
+            RecipeInstallation.model_artifact_set_sha256.is_(None),
+            # An uninstalled installation holds no model: nothing reads it.
+            RecipeInstallation.state != InstallationState.UNINSTALLED,
         )
     ).all():
         model_set = plan_model_set(plan)
@@ -176,24 +210,34 @@ def _fill_profile_recipes(connection: Connection) -> int:
         )
     }
     wanted: set[tuple[str, str, str]] = set()
+    readable: set[str] = set()
     for profile_id, assignments in connection.execute(
         select(FleetProfile.id, FleetProfile.assignments)
     ):
         recipes = _readable_recipes(profile_id, assignments)
         if isinstance(recipes, Residue):
             continue
+        readable.add(profile_id)
         wanted.update((profile_id, publisher, slug) for publisher, slug in recipes)
     missing = [
         {"profile_id": profile_id, "publisher": publisher, "slug": slug}
         for profile_id, publisher, slug in sorted(wanted - present)
     ]
-    if not missing:
-        return 0
-    dialect = postgresql if connection.dialect.name == "postgresql" else sqlite
-    connection.execute(
-        dialect.insert(FleetProfileRecipe).on_conflict_do_nothing(), missing
-    )
-    return len(missing)
+    stale = sorted(row for row in present - wanted if row[0] in readable)
+    for profile_id, publisher, slug in stale:
+        connection.execute(
+            delete(FleetProfileRecipe).where(
+                FleetProfileRecipe.profile_id == profile_id,
+                FleetProfileRecipe.publisher == publisher,
+                FleetProfileRecipe.slug == slug,
+            )
+        )
+    if missing:
+        dialect = postgresql if connection.dialect.name == "postgresql" else sqlite
+        connection.execute(
+            dialect.insert(FleetProfileRecipe).on_conflict_do_nothing(), missing
+        )
+    return len(missing) + len(stale)
 
 
 def _readable_recipes(

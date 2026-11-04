@@ -29,7 +29,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from ..reference_facts import profiles_naming
+from ..reference_facts import profiles_naming, recipes_without_revision
 from ..stored_json import read_row_column
 from .intents import (
     _profile_plan,
@@ -86,7 +86,11 @@ def model_set_reference_findings(
     # Only a recipe bound to a catalog model these sets serve can resolve to
     # one of them, so only the saved profiles naming such a recipe are read.
     served = _served_contents(session, sets.values())
-    named = profiles_naming(session, recipes_bound_to(session, served))
+    # A saved recipe the catalog has no revision of cannot be resolved: its
+    # profile holds every selected set, as before.
+    named = profiles_naming(
+        session, recipes_bound_to(session, served) | recipes_without_revision(session)
+    )
     resolved = _selectors_revisions(
         session,
         {

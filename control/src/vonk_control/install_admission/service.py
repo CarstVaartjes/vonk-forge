@@ -299,14 +299,15 @@ class InstallAdmissionService(InstallPlanningService):
                 InstallAdmissionCode.PLAN_INVALID, reason=InvalidRequestReason.MALFORMED
             ) from error
         if stored_plan.model_artifact_set_sha256 is None:
-            # Every rank of one installation runs one model set; the inserted
-            # row records it (``RecipeInstallation`` derives it from the plan).
+            # Every rank of one installation runs one model set; a plan that
+            # names none is a contract error, never stored as NULL.
             raise InstallPlanStale(
                 InstallAdmissionCode.PLAN_INVALID, reason=InvalidRequestReason.MALFORMED
             )
         installation = RecipeInstallation(
             recipe_revision_id=plan.recipe_revision_id,
             model_content_sha256=_primary_model_sha256(revision.document),
+            model_artifact_set_sha256=stored_plan.model_artifact_set_sha256,
             mapping_id=plan.mapping_id,
             mapping_generation=plan.mapping_generation,
             recipe_build_id=plan.recipe_build_id,
