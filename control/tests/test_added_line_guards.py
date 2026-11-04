@@ -1,6 +1,7 @@
 """Each fixture proves a new violation fails while untouched source is ignored."""
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 
 from .added_line_guards import AGENT_REQUESTS, added_lines, check_source
 
@@ -2916,6 +2917,10 @@ def _lifecycle_sets(
         "job_states.means(row.state, LifecycleState.QUEUED, LifecycleState.BACKOFF)",
         "frozenset({aos.QUEUED, aos.RUNNING})",
         "('queued', 'running')",
+        # An "ended" set that counted a wait for a person as ended.
+        "{LifecycleState.FAILED, LifecycleState.CANCELLED, LifecycleState.NEEDS_OPERATOR}",
+        "job_states.words(LifecycleState.SUCCEEDED, LifecycleState.FAILED)",
+        "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
     ],
 )
 def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
@@ -2931,8 +2936,11 @@ def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
     [
         "fleet_profile_states.LIVE",
         "job_states.words(LifecycleState.NEEDS_OPERATOR)",
-        # A full vocabulary names a terminal state: a contract listing.
-        "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
+        # Every lifecycle state: the vocabulary itself.
+        "tuple(LifecycleState)",
+        "(\n    "
+        + ",\n    ".join(f"LifecycleState.{state.name}" for state in LifecycleState)
+        + ",\n)",
         # Another machine's states.
         "{RunState.STARTING, RunState.RUNNING, RunState.STOPPING}",
     ],
@@ -2941,9 +2949,15 @@ def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:
     assert not _lifecycle_sets(f"LIVE = {named}\n", {1})
 
 
-def test_a_subject_states_module_owns_its_sets() -> None:
+@pytest.mark.parametrize(
+    "owner",
+    [
+        "control/src/vonk_control/fleet_profile_states.py",
+        "control/src/vonk_control/model_cache_contract.py",
+        "control/src/vonk_control/run_switch_contract/vocabulary.py",
+    ],
+)
+def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
     source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
     assert _lifecycle_sets(source, {1})
-    assert not _lifecycle_sets(
-        source, {1}, path="control/src/vonk_control/fleet_profile_states.py"
-    )
+    assert not _lifecycle_sets(source, {1}, path=owner)
