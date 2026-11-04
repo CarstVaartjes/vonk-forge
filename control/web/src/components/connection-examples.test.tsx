@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
 import { ConnectionExamples, PER_REQUEST_NOTE } from "./connection-examples";
@@ -8,10 +9,7 @@ const fixture: {
   note: string;
   cases: { api_base: string; alias: string; setup: string; curl: string; python: string }[];
 } = JSON.parse(
-  readFileSync(
-    new URL("../../../../tests/fixtures/connection-examples.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(resolve(process.cwd(), "../../tests/fixtures/connection-examples.json"), "utf8"),
 );
 
 test.each(fixture.cases)("renders the shared example text for $alias", (item) => {
