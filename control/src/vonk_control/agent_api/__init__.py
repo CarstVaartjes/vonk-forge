@@ -148,7 +148,6 @@ from .observations import MAX_INVENTORY_FUTURE_SKEW as MAX_INVENTORY_FUTURE_SKEW
 from .observations import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,
 )
-from .observations import STOPPABLE_RUN_STATES as STOPPABLE_RUN_STATES
 from .observations import UTC as UTC
 from .observations import AgentClaim as AgentClaim
 from .observations import AgentEvidenceCode as AgentEvidenceCode

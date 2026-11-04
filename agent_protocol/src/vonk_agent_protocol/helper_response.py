@@ -8,7 +8,7 @@ from .agent_words import HostHelperResponseStatus
 from .failure_evidence import FailureLogTail
 from .host_helper import Digest, Uuid4Text
 from .reason_codes.helpers import HelperErrorCode
-from .wire_model import WireModel
+from .wire_model import MAX_RUN_GENERATION, WireModel
 
 
 class HostHelperProcessLogs(WireModel):
@@ -24,6 +24,20 @@ class HostHelperProcessLogs(WireModel):
     exit_code: Annotated[int, Field(strict=True, ge=0, le=255)] | None = None
     stdout: FailureLogTail
     stderr: FailureLogTail
+
+
+class HostHelperContainerLabels(WireModel):
+    """A running container's own managed identity, as the helper read its labels.
+
+    This is the whole identity the container carries; nothing is inferred from
+    local files or Controller records.
+    """
+
+    run_id: Uuid4Text
+    target_id: Uuid4Text
+    installation_id: Uuid4Text
+    run_generation: Annotated[int, Field(strict=True, ge=1, le=MAX_RUN_GENERATION)]
+    plan_digest: Digest
 
 
 class HostHelperResponse(WireModel):
@@ -47,3 +61,6 @@ class HostHelperResponse(WireModel):
     # (a failed job or an exited workload) or read while it ran (an inspection
     # that asked for logs).
     process_logs: HostHelperProcessLogs | None = None
+    # Set only in the reply to a run-id-only inspection of a managed container
+    # whose labels all parse; absent when any label is missing or malformed.
+    container_labels: HostHelperContainerLabels | None = None

@@ -131,7 +131,7 @@ def test_prebuilt_image_record_checks_without_holding_row_locks(
     with _paused_check(
         monkeypatch,
         "read_catalog_projection",
-        lambda: catalog.record_prebuilt_images({key: image}),
+        lambda: catalog.record_published_facts({key: image}, {}),
     ):
         _lock_now(catalog, view.id)
 

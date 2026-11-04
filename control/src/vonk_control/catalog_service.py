@@ -28,6 +28,7 @@ from vonk_forge_contracts import (
     read_model,
     read_recipe,
 )
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
 from .admission_locking import ConstraintReplay, admitting
 from .auth import CursorCodec
@@ -446,11 +447,15 @@ class CatalogService:
             self._sessions, clock=self._clock
         ).refresh_model_projections()
 
-    def record_prebuilt_images(
-        self, images: Mapping[tuple[str, str, str], PrebuiltImage | None]
+    def record_published_facts(
+        self,
+        images: Mapping[tuple[str, str, str], PrebuiltImage | None],
+        qualifications: Mapping[
+            tuple[str, str, str], PublishedQualificationStatusView | None
+        ],
     ) -> None:
-        CatalogEntityService(self._sessions, clock=self._clock).record_prebuilt_images(
-            images
+        CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
+            images, qualifications
         )
 
     def import_recipe_library(

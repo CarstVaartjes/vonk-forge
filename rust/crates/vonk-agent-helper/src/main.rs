@@ -395,6 +395,7 @@ fn reject(stream: &mut UnixStream, error: &HelperRejection) {
                 kept.into_iter().collect()
             }),
         process_logs: error.process_logs.as_deref().cloned(),
+        container_labels: None,
         schema_version: 1,
         request_id,
         status: HostHelperResponseStatus::Rejected,
@@ -514,6 +515,7 @@ fn handle(
                 job_progress_at: None,
                 diagnostic: failure.map(|(_, detail)| detail),
                 process_logs: None,
+                container_labels: None,
             },
         );
     }
@@ -546,6 +548,7 @@ fn handle(
                     job_progress_at: None,
                     diagnostic: None,
                     process_logs: None,
+                    container_labels: None,
                 },
             );
         }
@@ -563,6 +566,7 @@ fn handle(
                 // reads like a workload with nothing to say.
                 diagnostic: inspected.log_error,
                 process_logs: inspected.logs.map(|logs| *logs),
+                container_labels: inspected.container_labels,
                 installation_intent_nonce: None,
                 schema_version: 1,
                 request_id: Some(inspection.request_id),
@@ -607,6 +611,7 @@ fn handle(
     let response = HelperResponse {
         diagnostic: outcome.diagnostic.clone(),
         process_logs: outcome.process_logs.clone(),
+        container_labels: None,
         installation_intent_nonce: None,
         schema_version: 1,
         request_id: Some(request.claims.request_id),
@@ -1016,6 +1021,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            container_labels: None,
             installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),
@@ -1037,6 +1043,7 @@ mod tests {
         let response = HelperResponse {
             diagnostic: None,
             process_logs: None,
+            container_labels: None,
             installation_intent_nonce: None,
             schema_version: 1,
             request_id: Some("10000000-0000-4000-8000-000000000001".parse().unwrap()),

@@ -39,6 +39,35 @@ impl AgentHttpClient {
         Ok(response.grant)
     }
 
+    /// The Controller's signed stop of one running container no claim owns.
+    ///
+    /// The request is the agent's own stop document, built from the
+    /// container's labels, under a fresh fence. The Controller refuses (409)
+    /// while it wants the run here or a live operation owns it; any error
+    /// leaves everything as it was and the next cycle asks again.
+    pub async fn orphan_stop_grant(
+        &self,
+        request: &HostRuntimeRequest,
+        request_sha256: &str,
+    ) -> Result<SignedHostHelperGrant, ClientError> {
+        let (run_id, grant_request) = build_orphan_stop_grant_request(request, request_sha256)?;
+        let body = canonical_generated_json(&grant_request).map_err(|_| ClientError::Protocol)?;
+        let mut response = self
+            .current_client()
+            .await?
+            .post(self.endpoint(&format!("/agent/recipe-runs/{run_id}/orphan-stop-grant"))?)
+            .header("content-type", "application/json")
+            .body(body)
+            .timeout(CONTROLLER_REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        classify_response(&mut response).await?;
+        let body = bounded_body(response).await?;
+        let response: HostHelperGrantResponse =
+            parse_strict(&body).map_err(|_| ClientError::Protocol)?;
+        Ok(response.grant)
+    }
+
     /// Whether the Controller has any record of one locally retained run.
     ///
     /// Needs only the run id, so it also answers for a run directory whose
@@ -176,6 +205,41 @@ pub(crate) fn build_host_runtime_grant_request(
         runtime_target_id: plan_binding.runtime_target_id,
         runtime_installation_id: plan_binding.runtime_installation_id,
     })
+}
+
+/// The grant request for a stop no attempt owns, and the run it names.
+fn build_orphan_stop_grant_request(
+    request: &HostRuntimeRequest,
+    request_sha256: &str,
+) -> Result<(uuid::Uuid, HostRuntimeGrantRequest), ClientError> {
+    request.validate().map_err(|_| ClientError::Protocol)?;
+    let request_body = canonical_json(request).map_err(|_| ClientError::Protocol)?;
+    if request.action != HostRuntimeAction::Stop
+        || !valid_sha256(request_sha256)
+        || hex_sha256(&request_body) != request_sha256
+    {
+        return Err(ClientError::Protocol);
+    }
+    let binding = host_runtime_plan_binding(request)?;
+    let run_id = binding.runtime_run_id.ok_or(ClientError::Protocol)?;
+    Ok((
+        run_id,
+        HostRuntimeGrantRequest {
+            installation_intent_nonce: None,
+            fence: request.fence,
+            action: HostRuntimeGrantRequestAction::Stop,
+            request_sha256: request_sha256.to_owned(),
+            expires_in_seconds: u32::from(HOST_RUNTIME_GRANT_TTL_SECONDS),
+            installation_id: None,
+            reconciliation_identity: None,
+            start_plan_sha256: None,
+            stop_plan_sha256: binding.stop_plan_sha256,
+            run_generation: binding.run_generation,
+            runtime_run_id: binding.runtime_run_id,
+            runtime_target_id: binding.runtime_target_id,
+            runtime_installation_id: binding.runtime_installation_id,
+        },
+    ))
 }
 
 pub(super) fn host_runtime_plan_binding(

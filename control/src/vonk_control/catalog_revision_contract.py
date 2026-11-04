@@ -23,6 +23,7 @@ from vonk_forge_contracts.model import (
     ModelFormat,
     ModelIdentity,
 )
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import (
     ModelReference,
     RecipeIdentity,
@@ -181,6 +182,8 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     artifact_inputs: list[ArtifactInputProjection] | None = None
     # The CI-built image the signed catalog pins for this revision, if any.
     prebuilt_image: PrebuiltImage | None = None
+    # The signed catalog's qualification status for this revision; informative.
+    qualification: PublishedQualificationStatusView | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection

@@ -49,6 +49,7 @@ STRICT_BODIES = {
     "ActivateRequest": "certificate activation identity",
     "AgentUpgradeGrantRequest": "authorization request for a signed grant",
     "HostRuntimeGrantRequest": "authorization request for a signed grant",
+    "OrphanStopGrantRequest": "authorization request for a signed grant",
     "PackageActivationGrantRequest": "authorization request for a signed grant",
     "RecipeRunObservationsWire": "each run is judged on its own at the endpoint",
     "RenewRequest": "certificate renewal identity",
