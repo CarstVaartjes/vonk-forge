@@ -237,7 +237,8 @@ fn scope_names(root: &Path, names: &mut BTreeSet<uuid::Uuid>) -> Option<()> {
 
 /// Each installation directory's logical size now, measured as its install
 /// receipt was (metadata only), as inventory reports them; `None` when the
-/// installations cannot be listed. One that cannot be measured is left out.
+/// installations cannot be listed. Unreadable subtrees are skipped and logged
+/// once per installation; one whose directory cannot be read is left out.
 pub fn installation_sizes(
     data_root: &Path,
     installations: &[uuid::Uuid],
@@ -247,10 +248,20 @@ pub fn installation_sizes(
             .iter()
             .filter_map(|id| {
                 match crate::oci::installation_tree_bytes(data_root, &id.to_string()) {
-                    Ok(bytes) => Some(vonk_agent_protocol::generated::InstallationBytes {
-                        installation_id: *id,
-                        bytes,
-                    }),
+                    Ok(size) => {
+                        if let Some(error) = &size.first_error {
+                            eprintln!(
+                                "vonk-agent: inventory measured installation {id} without {} unreadable entries ({:?}, os error {:?}): {error}",
+                                size.unreadable,
+                                error.kind(),
+                                error.raw_os_error(),
+                            );
+                        }
+                        Some(vonk_agent_protocol::generated::InstallationBytes {
+                            installation_id: *id,
+                            bytes: size.bytes,
+                        })
+                    }
                     // A directory/file removed during the scan is a cache miss.
                     // Permission and other I/O errors remain visible, never absence.
                     Err(crate::oci::OciError::Io(error))

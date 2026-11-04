@@ -23,15 +23,8 @@ pub(super) fn lower_hex(value: &str, length: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// Sum of the lengths of the regular files below `directory`.
-/// An installation directory's logical size, as its install receipt measured it.
-pub(crate) fn installation_tree_bytes(
-    data_root: &Path,
-    installation_id: &str,
-) -> Result<u64, OciError> {
-    tree_bytes(&managed_path(data_root, "installations", installation_id)?)
-}
-
+/// Sum of the lengths of the regular files below `directory`; strict, for the
+/// install receipt: anything unreadable or not a file or directory refuses.
 pub(super) fn tree_bytes(directory: &Path) -> Result<u64, OciError> {
     let mut total = 0_u64;
     for entry in fs::read_dir(directory)? {
@@ -47,6 +40,71 @@ pub(super) fn tree_bytes(directory: &Path) -> Result<u64, OciError> {
         total = total.checked_add(size).ok_or(OciError::Artifact)?;
     }
     Ok(total)
+}
+
+/// What could be measured of an installation directory.
+#[derive(Debug, Default)]
+pub(crate) struct TreeSize {
+    /// Logical bytes of everything readable; a symlink counts its own length.
+    pub bytes: u64,
+    /// Entries or subtrees that could not be read (not counted in `bytes`).
+    pub unreadable: u64,
+    /// The first such failure, for the diagnostic.
+    pub first_error: Option<std::io::Error>,
+}
+
+/// An installation directory's logical size now, for inventory (metadata
+/// only). Unlike the strict receipt measurement, it fails open: unreadable subtrees
+/// (the helper's root-only runtime cache) are skipped and reported, and
+/// symlinks are counted by their own length, never followed.
+pub(crate) fn installation_tree_bytes(
+    data_root: &Path,
+    installation_id: &str,
+) -> Result<TreeSize, OciError> {
+    let root = managed_path(data_root, "installations", installation_id)?;
+    let mut size = TreeSize::default();
+    measure_tree(&root, &mut size, true)?;
+    Ok(size)
+}
+
+fn measure_tree(directory: &Path, size: &mut TreeSize, top: bool) -> Result<(), OciError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if top => return Err(error.into()),
+        Err(error) => {
+            size.skip(error);
+            return Ok(());
+        }
+    };
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                size.skip(error);
+                continue;
+            }
+        };
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => measure_tree(&entry.path(), size, false)?,
+            Ok(_) => match fs::symlink_metadata(entry.path()) {
+                Ok(metadata) => size.bytes = size.bytes.saturating_add(metadata.len()),
+                Err(error) => size.skip(error),
+            },
+            Err(error) => size.skip(error),
+        }
+    }
+    Ok(())
+}
+
+impl TreeSize {
+    fn skip(&mut self, error: std::io::Error) {
+        // Removed during the scan: nothing to count, nothing to report.
+        if error.kind() == std::io::ErrorKind::NotFound {
+            return;
+        }
+        self.unreadable += 1;
+        self.first_error.get_or_insert(error);
+    }
 }
 
 pub(super) fn visit_files(

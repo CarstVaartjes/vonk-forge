@@ -729,10 +729,6 @@ fn inventory_measures_each_installation_as_it_is_now() {
     file(&installation.join("spec.json"), b"{}");
     // A runtime cache grows the installation after its install.
     file(&installation.join("runtime-cache/compiled"), b"kernels!!");
-    // A tree that cannot be measured is left out, never guessed.
-    let broken = root.path().join("installations").join(ORPHAN);
-    fs::create_dir_all(&broken).unwrap();
-    std::os::unix::fs::symlink("/etc", broken.join("escape")).unwrap();
 
     let sizes = super::installation_sizes(
         root.path(),
@@ -744,6 +740,48 @@ fn inventory_measures_each_installation_as_it_is_now() {
     assert_eq!(sizes[0].installation_id.to_string(), INSTALLATION);
     // Every file at its full length, a shared model link included.
     assert_eq!(sizes[0].bytes, 7 + 2 + 9);
+}
+
+#[test]
+fn inventory_measures_what_it_can_read_of_an_installation() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let installation = root.path().join("installations").join(INSTALLATION);
+    file(&installation.join("spec.json"), b"{}");
+    // The helper's root-only runtime cache, and an HF-style symlink.
+    file(
+        &installation.join("runtime-cache/home/blob"),
+        b"hidden-bytes",
+    );
+    let locked = installation.join("runtime-cache/home");
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read_dir(&locked).is_ok() {
+        // Running as root: nothing is unreadable.
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+    std::os::unix::fs::symlink("/etc/hosts", installation.join("link")).unwrap();
+    let link_len = fs::symlink_metadata(installation.join("link"))
+        .unwrap()
+        .len();
+
+    let size = crate::oci::installation_tree_bytes(root.path(), INSTALLATION).unwrap();
+    let sizes = super::installation_sizes(root.path(), &[INSTALLATION.parse().unwrap()]);
+    fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+
+    // Readable bytes plus the link's own length; the locked subtree is reported.
+    assert_eq!(size.bytes, 2 + link_len);
+    assert_eq!(size.unreadable, 1);
+    let error = size.first_error.unwrap();
+    assert_eq!(error.raw_os_error(), Some(13));
+    assert!(error.to_string().contains("os error 13"));
+    assert_eq!(sizes.unwrap()[0].bytes, 2 + link_len);
+}
+
+#[test]
+fn an_io_error_names_its_cause() {
+    let error = crate::oci::OciError::Io(std::io::Error::from_raw_os_error(13));
+    assert!(error.to_string().contains("os error 13"), "{error}");
 }
 
 #[test]
