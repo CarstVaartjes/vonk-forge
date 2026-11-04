@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -330,6 +330,48 @@ class HostRuntimeGrantRequest(AgentGrantRequest):
         ):
             raise ValueError("host runtime reconciliation binding is invalid")
         return self
+
+
+class OrphanStopBinding(NamedTuple):
+    stop_plan_sha256: str
+    run_generation: int
+    run_id: str
+    target_id: str
+    installation_id: str
+
+
+class OrphanStopGrantRequest(HostRuntimeGrantRequest):
+    """The stop of a serving container named by its own labels, nothing else."""
+
+    @model_validator(mode="after")
+    def orphan_stop_binding(self) -> OrphanStopGrantRequest:
+        # The serving container only: its target is the run itself, so a job
+        # container carrying this run's label is never named.
+        if (
+            self.action != ContainerRuntimeAction.STOP
+            or self.runtime_target_id != self.runtime_run_id
+            or self.stop_plan_sha256 is None
+            or self.run_generation is None
+            or self.runtime_installation_id is None
+        ):
+            raise ValueError("orphan stop binding is invalid")
+        return self
+
+    def binding(self) -> OrphanStopBinding:
+        """The validated identity, typed without the optional forms."""
+
+        assert self.stop_plan_sha256 is not None
+        assert self.run_generation is not None
+        assert self.runtime_run_id is not None
+        assert self.runtime_target_id is not None
+        assert self.runtime_installation_id is not None
+        return OrphanStopBinding(
+            self.stop_plan_sha256,
+            self.run_generation,
+            self.runtime_run_id,
+            self.runtime_target_id,
+            self.runtime_installation_id,
+        )
 
 
 class PackageActivationGrantRequest(StrictJSONModel):

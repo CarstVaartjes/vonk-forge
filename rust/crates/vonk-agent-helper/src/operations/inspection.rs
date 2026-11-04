@@ -122,15 +122,19 @@ impl<R: CommandRunner> OperationExecutor<R> {
             // for a run whose local metadata is unreadable, checked by
             // container name. Without the full run identity the container
             // cannot be proven to be this run's, so its output is never read.
-            [run_id] if unbound => Ok(RunInspection {
-                running: self.runtime_run_container_running(run_id)?,
-                job_progress_at: None,
-                exit_code: None,
-                logs: None,
-                log_error: include_logs.then(|| {
-                    "the run identity was too short to authorise reading its output".into()
-                }),
-            }),
+            [run_id] if unbound => {
+                let named = self.runtime_run_container(run_id)?;
+                Ok(RunInspection {
+                    running: named.running,
+                    job_progress_at: None,
+                    exit_code: None,
+                    logs: None,
+                    log_error: include_logs.then(|| {
+                        "the run identity was too short to authorise reading its output".into()
+                    }),
+                    container_labels: named.labels,
+                })
+            }
             arguments => self.runtime_run_inspect_detail(
                 arguments,
                 include_logs,
@@ -221,6 +225,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     exit_code: Some(code),
                     logs,
                     log_error,
+                    container_labels: None,
                 })
             }
             // Removed after its exit was retained: that exit is the answer.
@@ -233,14 +238,22 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
+/// What a name-only look at the managed container `vonk-<run_id>` found.
+pub(super) struct NamedContainer {
+    pub(super) running: bool,
+    /// Its managed identity, when every label parses.
+    pub(super) labels: Option<HostHelperContainerLabels>,
+}
+
 impl<R: CommandRunner> OperationExecutor<R> {
-    /// Whether the exact managed container `vonk-<run_id>` is running.
+    /// Whether the exact managed container `vonk-<run_id>` is running, and
+    /// the managed identity its labels carry.
     /// Provably absent or stopped is `false`; a foreign container under the
     /// name or an unproven answer is an error, never a claim of absence.
-    pub(super) fn runtime_run_container_running(
+    pub(super) fn runtime_run_container(
         &self,
         run_id: &str,
-    ) -> Result<bool, OperationError> {
+    ) -> Result<NamedContainer, OperationError> {
         if uuid::Uuid::parse_str(run_id)
             .map(|parsed| parsed.to_string() != run_id)
             .unwrap_or(true)
@@ -252,33 +265,79 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}\t{{index .Config.Labels \"ai.vonkforge.plan-digest\"}}".to_owned(),
             name.clone(),
         ])?;
         if !existing.success {
             return if self.prove_container_absent(&name, &existing)? {
-                Ok(false)
+                Ok(NamedContainer {
+                    running: false,
+                    labels: None,
+                })
             } else {
                 Err(CommandFailure::exit(&existing).into())
             };
         }
+        // An empty last label must not be trimmed away with the line end.
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
-            .map(str::trim)
+            .map(|text| text.strip_suffix('\n').unwrap_or(text))
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
-        let [container_id, running, managed, label_run_id] = fields.as_slice() else {
+        let [
+            container_id,
+            running,
+            managed,
+            label_run_id,
+            target,
+            installation,
+            generation,
+            plan_digest,
+        ] = fields.as_slice()
+        else {
             return Err(OperationError::InvalidArtifact);
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *label_run_id != run_id {
             return Err(OperationError::InvalidArtifact);
         }
-        match *running {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            _ => Err(OperationError::InvalidArtifact),
-        }
+        let running = match *running {
+            "true" => true,
+            "false" => false,
+            _ => return Err(OperationError::InvalidArtifact),
+        };
+        Ok(NamedContainer {
+            running,
+            labels: parse_managed_labels(run_id, target, installation, generation, plan_digest),
+        })
     }
+}
+
+/// The managed identity of a container from its labels; none unless every
+/// label is canonical, so a damaged label never becomes part of a stop.
+fn parse_managed_labels(
+    run_id: &str,
+    target: &str,
+    installation: &str,
+    generation: &str,
+    plan_digest: &str,
+) -> Option<HostHelperContainerLabels> {
+    let uuid = |text: &str| {
+        uuid::Uuid::parse_str(text)
+            .ok()
+            .filter(|parsed| parsed.to_string() == text)
+            .filter(|parsed| parsed.get_version() == Some(uuid::Version::Random))
+    };
+    Some(HostHelperContainerLabels {
+        run_id: uuid(run_id)?,
+        target_id: uuid(target)?,
+        installation_id: uuid(installation)?,
+        run_generation: generation
+            .parse::<u64>()
+            .ok()
+            .filter(|parsed| parsed.to_string() == generation)
+            .filter(|parsed| (1..=i64::MAX as u64).contains(parsed))?,
+        plan_digest: lower_hex(plan_digest, 64).then(|| plan_digest.to_owned())?,
+    })
 }
 
 impl<R: CommandRunner> OperationExecutor<R> {
@@ -309,6 +368,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             exit_code: None,
             logs: None,
             log_error: None,
+            container_labels: None,
         };
         let [
             archive_sha256,
@@ -352,7 +412,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.plan-digest\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
         if !existing.success {
@@ -363,13 +423,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             return Err(CommandFailure::exit(&existing).into());
         }
+        // Only the line end is dropped: an empty last label is a field.
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
-            .map(str::trim)
+            .map(|text| text.strip_suffix('\n').unwrap_or(text))
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
-        // A container without the generation label ends the line with an
-        // empty field, which the trim drops.
         let [
             container_id,
             running,
@@ -381,10 +440,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return Err(CommandFailure::UnexpectedAnswer.into());
         };
-        let generation = match generation {
-            [] => "",
-            [label] => label,
-            _ => return Err(CommandFailure::UnexpectedAnswer.into()),
+        // The line carries the generation and the identity labels, each empty
+        // when the container lacks it.
+        let [generation, target, installation, plan_digest] = generation else {
+            return Err(CommandFailure::UnexpectedAnswer.into());
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
             return Err(CommandFailure::UnexpectedAnswer.into());
@@ -392,7 +451,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // A container of another generation, or one without the label, is
         // not this Start's: the helper's own Start refuses to adopt it, and
         // so does an inspection that names the Start's generation.
-        if expected_generation.is_some_and(|expected| generation != expected.to_string()) {
+        if expected_generation.is_some_and(|expected| *generation != expected.to_string()) {
             return Err(OperationError::InvalidArtifact);
         }
         if *digest != semantic_digest {
@@ -411,6 +470,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !matches!(*running, "true" | "false") {
             return Err(CommandFailure::UnexpectedAnswer.into());
         }
+        let container_labels =
+            parse_managed_labels(run_id, target, installation, generation, plan_digest);
         if *running == "true" {
             if !include_logs {
                 return Ok(RunInspection {
@@ -419,6 +480,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     exit_code: None,
                     logs: None,
                     log_error: None,
+                    container_labels,
                 });
             }
             // Read-only: the exact, identity-checked container's tail while it
@@ -450,6 +512,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 exit_code: None,
                 logs,
                 log_error,
+                container_labels,
             });
         }
         if *running == "false"
@@ -463,6 +526,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 exit_code: None,
                 logs: None,
                 log_error: Some(crate::host_memory_guard::summary(&evidence)),
+                container_labels: None,
             });
         }
         if *running == "false" && capture_failure {

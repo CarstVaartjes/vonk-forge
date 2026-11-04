@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 )
 
 from .models import (
+    STOPPABLE_RUN_STATES,
     ArtifactJob,
     InstallationNode,
     RecipeInstallation,
@@ -26,6 +27,34 @@ from .models import (
 def node_run_ids(node_id: str) -> Select[str]:
     """Run identities assigned here; observed state does not change membership."""
     return select(RunNode.run_id).where(RunNode.node_id == node_id)
+
+
+def wanted_run_ids(node_id: str) -> Select[str]:
+    """The runs the Controller still wants on this Spark.
+
+    The one rule for "wanted here": the run is assigned to the Spark and in a
+    state a plan can still stop. The disposition answer, the observation
+    acceptance and the orphan stop grant all read it, so they can never
+    disagree about one run.
+    """
+
+    return (
+        select(RunNode.run_id)
+        .join(RecipeRun, RecipeRun.id == RunNode.run_id)
+        .where(
+            RunNode.node_id == node_id,
+            RecipeRun.state.in_(STOPPABLE_RUN_STATES),
+        )
+    )
+
+
+def run_wanted_here(session: Session, node_id: str, run_id: str) -> bool:
+    """Whether the Controller still wants this run on this Spark."""
+
+    return (
+        session.scalar(wanted_run_ids(node_id).where(RunNode.run_id == run_id).limit(1))
+        is not None
+    )
 
 
 def untracked_installations(

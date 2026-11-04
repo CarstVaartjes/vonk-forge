@@ -21,7 +21,7 @@ impl CommandRunner for InstallRunner {
         self.0.lock().unwrap().push(executable.to_owned());
         let stdout = if executable == Path::new("/usr/bin/docker") {
             format!(
-                "{}\ttrue\ttrue\t{}\n",
+                "{}\ttrue\ttrue\t{}\t\t\t\t\n",
                 "f".repeat(64),
                 super::super::test_support::RUN_ID
             )

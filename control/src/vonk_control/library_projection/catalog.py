@@ -158,9 +158,11 @@ def _recipe_projection(
                 "build_model_artifacts": None,
                 "artifact_inputs": None,
                 "package_handle": None,
+                "qualification": None,
             }
         ),
         prebuilt_image=projected.prebuilt_image,
+        qualification=projected.qualification,
         model_selectors=model_selectors,
         usage=usage,
         resources=resources,

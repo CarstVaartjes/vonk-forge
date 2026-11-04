@@ -852,19 +852,27 @@ class ManagedRecipeCatalogSyncService:
                 )
             result.withdrawn_count = len(retracted)
         # Prebuilt images can arrive after their revision (CI publishes the
-        # bundle first and adds image digests once the builds finish), so
-        # every sync records them for unchanged revisions too.
-        record_prebuilt = getattr(self._catalog, "record_prebuilt_images", None)
-        if callable(record_prebuilt):
+        # bundle first and adds image digests once the builds finish), and a
+        # qualification status changes whenever new hardware evidence is
+        # published, so every sync records both for unchanged revisions too.
+        record_facts = getattr(self._catalog, "record_published_facts", None)
+        if callable(record_facts):
             try:
-                record_prebuilt(
+                record_facts(
                     {
                         (item.publisher, item.slug, item.content_sha256): (
                             item.prebuilt_image
                         )
                         for item in snapshot.items
                         if item.prebuilt_image is not None or withdrawals_observed
-                    }
+                    },
+                    {
+                        (item.publisher, item.slug, item.content_sha256): (
+                            item.qualification
+                        )
+                        for item in snapshot.items
+                        if item.qualification is not None or withdrawals_observed
+                    },
                 )
             except Exception as error:  # noqa: BLE001 - images are optional; recipes still apply
                 self._record_problem_values(

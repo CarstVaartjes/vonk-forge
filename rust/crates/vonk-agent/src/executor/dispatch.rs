@@ -280,6 +280,8 @@ mod tests {
                     exit_code: None,
                     process_running: None,
                     job_progress_at: None,
+
+                    container_labels: None,
                 };
                 let bytes = canonical_json(&response).unwrap();
                 stream

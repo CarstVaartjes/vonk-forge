@@ -1662,6 +1662,10 @@ def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents(
         for reference in recipe.projected.models
     ]
     assert recipe.projected.interfaces and recipe.projected.validation.serving.checks
+    # The published hardware status crosses the boundary as the contract type.
+    assert recipe.qualification is not None
+    assert recipe.qualification.status == "Working"
+    assert recipe.qualification.last_pass is not None
 
 
 @pytest.mark.needs_recipe_library

@@ -32,9 +32,9 @@ use thiserror::Error;
 
 use vonk_agent_protocol::generated::{
     CompiledExecutionPlan, ConfirmPackageActivationOperation,
-    ExecuteContainerRuntimeRequestOperation, HostHelperProcessLogs, HostHelperResponseStatus,
-    InstallVonkDebOperation, InstallationIntentFence, RecipeJobRunRequest, RecipeStartPayload,
-    RecipeStopPayload,
+    ExecuteContainerRuntimeRequestOperation, HostHelperContainerLabels, HostHelperProcessLogs,
+    HostHelperResponseStatus, InstallVonkDebOperation, InstallationIntentFence,
+    RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
 };
 
 use vonk_agent_protocol::{
@@ -305,6 +305,9 @@ pub struct RunInspection {
     pub logs: Option<Box<HostHelperProcessLogs>>,
     /// Why the requested tail could not be read; never both `logs` and this.
     pub log_error: Option<String>,
+    /// The container's own managed identity, read from its labels by a
+    /// run-id-only inspection; none when any label is missing or malformed.
+    pub container_labels: Option<HostHelperContainerLabels>,
 }
 
 #[derive(Clone, Copy)]

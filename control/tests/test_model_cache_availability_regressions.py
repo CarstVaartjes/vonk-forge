@@ -502,19 +502,24 @@ def test_progress_supports_more_than_128_members(tmp_path: Path) -> None:
 
 
 def _model_document(
-    slug: str, digest_byte: str, *, supersedes: str | None = None
+    slug: str,
+    digest_byte: str,
+    *,
+    supersedes: str | None = None,
+    publisher: str = "upstream",
+    repository: str = "https://huggingface.co/acme/model",
 ) -> dict[str, object]:
     source = resources.files("vonk_forge_contracts").joinpath(
         "examples/model-definition.json"
     )
     document = copy.deepcopy(json.loads(source.read_text(encoding="utf-8")))
-    document["identity"]["publisher"] = "upstream"
+    document["identity"]["publisher"] = publisher
     document["identity"]["slug"] = slug
     document["identity"]["model"]["publisher"] = "logical"
     document["identity"]["model"]["slug"] = "stable"
     document["identity"]["variant"] = "fp8"
     document["format"]["precision"] = "fp8"
-    document["source"]["repository"] = "https://huggingface.co/acme/model"
+    document["source"]["repository"] = repository
     document["source"]["revision"] = digest_byte * 40
     document["files"][0]["sha256"] = digest_byte * 64
     document["files"][0]["size_bytes"] = 1
@@ -628,6 +633,90 @@ def test_update_discovery_reports_incomparable_lineage_candidates(
         "candidate-a",
         "candidate-b",
     }
+    service.close()
+
+
+def test_update_discovery_ignores_another_republishers_quantization(
+    tmp_path: Path,
+) -> None:
+    # Same logical model, variant and format, but another republisher's files:
+    # a sibling quantization, never an update of the installed one.
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    current_doc = _model_document("source-revision-1", "6")
+    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    _insert_model_revision(
+        sessions,
+        _model_document("other-quant", "7", publisher="other-republisher"),
+        created_at=NOW + timedelta(hours=1),
+    )
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
+    assert update["model_update_available"] is False
+    assert update["model_update_ambiguous"] is False
+    service.close()
+
+
+def test_update_discovery_ignores_another_repository_of_the_same_republisher(
+    tmp_path: Path,
+) -> None:
+    # One republisher, one logical model, variant and format, but another
+    # repository (e.g. a 3.5 bpw beside a 2.9 bpw): a sibling, never an update.
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    current_doc = _model_document("source-revision-1", "b")
+    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    _insert_model_revision(
+        sessions,
+        _model_document(
+            "other-bpw",
+            "c",
+            repository="https://huggingface.co/acme/model-other-bpw",
+        ),
+        created_at=NOW + timedelta(hours=1),
+    )
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
+    assert update["model_update_available"] is False
+    assert update["model_update_ambiguous"] is False
+    service.close()
+
+
+def test_update_discovery_picks_same_republisher_revision_beside_another_one(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    current_doc = _model_document("source-revision-1", "8")
+    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    _insert_model_revision(
+        sessions,
+        _model_document("other-quant", "9", publisher="other-republisher"),
+        created_at=NOW + timedelta(hours=1),
+    )
+    _insert_model_revision(
+        sessions,
+        _model_document("source-revision-2", "a"),
+        created_at=NOW + timedelta(hours=2),
+    )
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
+    assert update["model_update_available"] is True
+    model_update_to = _update_detail(update, "model_update_to")
+    assert model_update_to["publisher"] == "upstream"
+    assert model_update_to["slug"] == "source-revision-2"
     service.close()
 
 

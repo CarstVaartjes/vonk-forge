@@ -28,6 +28,7 @@ from vonk_forge_contracts import (
     RecipeDefinition,
     RecipeDisplay,
 )
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .catalog_revision_contract import (
@@ -346,6 +347,10 @@ class LibraryRecipeProjection(StrictModel):
     creator: Text128 | None = None
     assessment: RecipeReadiness | None = None
     prebuilt_image: PrebuiltImage | None = None
+    # The signed catalog's hardware qualification of this exact revision, as
+    # published; null until a library release carries one. Informative only:
+    # no readiness, fit, filter or order reads it.
+    qualification: PublishedQualificationStatusView | None = None
 
 
 class RecipeLibraryResponse(StrictModel):

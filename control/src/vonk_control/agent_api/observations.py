@@ -45,7 +45,6 @@ from ..library_contract import UuidId
 from ..logging import log_event
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
-    STOPPABLE_RUN_STATES,
     ClusterMapping,
     RecipeBuild,
     RecipeRun,
@@ -61,9 +60,10 @@ from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository
 from ..untracked_installations import (
-    node_run_ids,
+    run_wanted_here,
     untracked_installations,
     untracked_runs,
+    wanted_run_ids,
 )
 from .common import (
     _CANONICAL_UUID,
@@ -308,16 +308,7 @@ def install_observations_routes(
                 observed_nodes: list[str] = []
                 included = set(by_run)
                 if included:
-                    current = set(
-                        session.scalars(
-                            select(RunNode.run_id)
-                            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-                            .where(
-                                RunNode.node_id == identity.node_id,
-                                RecipeRun.state.in_(STOPPABLE_RUN_STATES),
-                            )
-                        )
-                    )
+                    current = set(session.scalars(wanted_run_ids(identity.node_id)))
                     # An ended run's process that is still running is the
                     # Spark's evidence that reopens the run, never dropped.
                     reopened = reopen_ended_runs_still_running(
@@ -576,25 +567,25 @@ def install_observations_routes(
         failed or stopped, is named ``unowned``: it holds no capacity here, so
         the agent retires its local lifecycle instead of keeping it forever.
         The agent retires only after proving the process gone. A process still
-        running for an ended run is reported, reopening it as lost.
+        running for an unowned run is stopped under an orphan stop grant, which
+        reads the same ``run_wanted_here`` rule.
         """
 
         identity = helper_identity(request)
         if _CANONICAL_UUID.fullmatch(run_id) is None:
             raise HTTPException(status_code=422, detail="recipe run id is invalid")
         with _require_services(services).sessions() as session:
-            run = session.scalar(
-                select(RecipeRun).where(
-                    RecipeRun.id == run_id,
-                    RecipeRun.id.in_(node_run_ids(identity.node_id)),
-                )
-            )
-            wanted = run is not None and run.state in STOPPABLE_RUN_STATES
+            wanted = run_wanted_here(session, identity.node_id, run_id)
             # A lost run (a cancelled start left it so) is reported on too: the
             # agent's word that its process is gone releases its claims.
             generation = (
-                run.run_generation
-                if run is not None and run.state in {RunState.RUNNING, RunState.LOST}
+                session.scalar(
+                    select(RecipeRun.run_generation).where(
+                        RecipeRun.id == run_id,
+                        RecipeRun.state.in_({RunState.RUNNING, RunState.LOST}),
+                    )
+                )
+                if wanted
                 else None
             )
         response = Response(status_code=status.HTTP_204_NO_CONTENT)
