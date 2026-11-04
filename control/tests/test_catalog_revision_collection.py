@@ -854,6 +854,75 @@ def test_the_sweep_runs_once_per_interval(catalog: Catalog) -> None:
     assert not catalog.exists(second)
 
 
+def test_a_backlog_reads_live_references_once_per_batch_not_per_candidate(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches rescanning every live operation for each candidate.
+
+    Production 2026-11-04 had 1,708 superseded revisions waiting; a scan per
+    candidate makes one pass cost candidates x live operations. The inventory
+    scans once per phase and each batch rechecks once.
+    """
+
+    old = [_refresh(catalog, f"backlog-{index:03d}")[0] for index in range(120)]
+    scans: list[int] = []
+    real_live = catalog_revision_collection.live_tokens
+
+    def counting_live(*args, **kwargs) -> frozenset[str]:
+        scans.append(1)
+        return real_live(*args, **kwargs)
+
+    monkeypatch.setattr(catalog_revision_collection, "live_tokens", counting_live)
+    result = catalog.collector().collect()
+
+    batches = -(-len(old) // catalog_revision_collection._BATCH)
+    assert result.revisions == len(old)
+    assert len(scans) == 1 + batches
+
+
+def test_a_backlog_larger_than_one_pass_resumes_from_its_cursor(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a pass budget that restarts the walk and never reaches the tail.
+
+    Each pass removes some of the backlog and continues where the last one
+    stopped, so the whole backlog goes within a few passes.
+    """
+
+    old = [_refresh(catalog, f"resume-{index:03d}")[0] for index in range(120)]
+    elapsed = [0.0]
+    candidates = CatalogRevisionCollector._candidates
+
+    def slow_candidates(session: Session, cutoff: datetime, **kwargs) -> object:
+        elapsed[0] += SWEEP_BUDGET_SECONDS + 1
+        return candidates(session, cutoff, **kwargs)
+
+    monkeypatch.setattr(
+        catalog_revision_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    monkeypatch.setattr(
+        CatalogRevisionCollector, "_candidates", staticmethod(slow_candidates)
+    )
+    collector = catalog.collector()
+
+    first = collector.collect()
+    assert 0 < first.revisions < len(old)
+    assert collector._cursor is not None
+    removed = first.revisions
+    passes = 1
+    while collector._cursor is not None and passes < 5:
+        result = collector.collect()
+        assert result.revisions > 0 or collector._cursor is None
+        removed += result.revisions
+        passes += 1
+
+    assert collector._cursor is None
+    assert removed == len(old)
+    assert not any(catalog.exists(revision) for revision in old)
+
+
 def test_a_candidate_inventory_slower_than_the_budget_still_advances_the_pass(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:

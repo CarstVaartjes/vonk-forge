@@ -121,8 +121,10 @@ INTERVAL = timedelta(hours=1)
 # Rows fetched per round trip when scanning stored documents; bounds a scan by
 # the largest few documents instead of the whole table.
 _SCAN_BATCH = 20
-# One sweep stops here and the rest continues on the next worker pass, so a
-# first sweep over a large catalog never holds the worker loop for long.
+# A pass starts no new batch after this, and every batch transaction (deletes
+# and recheck) gets at most this long; the rest continues from the cursor on
+# the next worker pass. One pass is bounded by its inventory reads, this budget
+# and one more batch, so a large backlog never holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
 # Candidates removed in one transaction; the JSON references are read once per
 # batch, so the recheck costs one scan per batch, not one per candidate.
