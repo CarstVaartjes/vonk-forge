@@ -271,10 +271,11 @@ pub fn installation_sizes(
     data_root: &Path,
     installations: &[uuid::Uuid],
 ) -> Option<Vec<vonk_agent_protocol::generated::InstallationBytes>> {
+    let listed: BTreeSet<&uuid::Uuid> = installations.iter().collect();
     UNREADABLE_REPORTED
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .retain(|id, _| installations.contains(id));
+        .retain(|id, _| listed.contains(id));
     Some(
         installations
             .iter()
