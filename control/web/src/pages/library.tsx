@@ -62,6 +62,7 @@ function viewRecipe(recipe: RecipeLibrary["recipes"][number]): LibraryViewRecipe
     creator: recipe.creator,
     model_selectors: recipe.model_selectors,
     assessment: recipe.assessment,
+    qualification: recipe.qualification,
   };
 }
 
@@ -173,6 +174,7 @@ function viewRecipeDetail(detail: RecipeDetail): LibraryViewRecipeDetail {
     engine: detail.engine,
     creator: detail.creator,
     assessment: detail.assessment,
+    qualification: detail.qualification,
   };
   return {
     generated_at: detail.updated_at,

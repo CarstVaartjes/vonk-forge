@@ -94,6 +94,10 @@ def typescript_vocabulary() -> str:
         CacheOperationKind,
         ModelStorageObservationReason,
     )
+    from vonk_forge_contracts.qualification_status import (
+        QualificationOutcome,
+        QualificationStatus,
+    )
 
     word_types = [
         field.annotation
@@ -107,6 +111,8 @@ def typescript_vocabulary() -> str:
             CacheAssetDisposition,
             CacheOperationKind,
             ModelStorageObservationReason,
+            QualificationStatus,
+            QualificationOutcome,
         )
     )
     for words in word_types:
