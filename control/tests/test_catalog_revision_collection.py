@@ -1075,6 +1075,101 @@ def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
     assert result.kept == {"live operation": 1}
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_writer_holding_a_reference_wins_and_the_rest_is_removed_on_postgres(
+    postgres_engine: Engine,
+) -> None:
+    """Catches a refused row breaking its batch, or the sweep making it wait.
+
+    A new installation is being planned for an old revision: its mapping row
+    is inserted but not committed, so the database holds that revision's key.
+    The delete of that revision is refused after a short lock wait and its
+    savepoint rolls back; the unrelated revision in the same batch is removed,
+    and the writer commits its mapping.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    planned, _ = _refresh(catalog, "planned")
+    unrelated, _ = _refresh(catalog, "unrelated")
+    with catalog.sessions() as writer:
+        writer.add(
+            ClusterMapping(
+                recipe_revision_id=planned,
+                topology_name="single",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest=_digest("placement/planned"),
+                endpoint_owner_node_id=NODE,
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        writer.flush()
+
+        result = catalog.collector().collect()
+
+        assert catalog.exists(planned)
+        assert not catalog.exists(unrelated)
+        assert result.revisions == 1
+        assert result.kept == {"refused OperationalError": 1}
+        writer.commit()
+    assert catalog.count(ClusterMapping) == 1
+    # A fresh request is admitted after the sweep.
+    catalog.job(_job_payload(planned), state=LifecycleState.RUNNING.value, updated=NOW)
+
+
+def test_a_run_reopened_after_the_check_keeps_its_revision_on_postgres(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches deleting dead rows by id after their state was checked.
+
+    A Spark offline for over a day comes back and reports a stopped run's
+    process still running, so the run is reopened as ``lost`` between the
+    collector's check and its delete. The delete no longer matches the run,
+    and the revision, run and installation all stay.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    old, _head = _refresh(catalog, "reopened")
+    installation, run = catalog.workload(old)
+    with catalog.sessions.begin() as session:
+        _row(session, RecipeRun, run).state = "stopped"
+        for node in session.scalars(select(RunNode).where(RunNode.run_id == run)):
+            node.observation_process_running = False
+        _row(session, RecipeInstallation, installation).state = "uninstalled"
+    real_check = CatalogRevisionCollector._require_unused
+    reopened: list[str] = []
+
+    def reopen_after_check(session: Session, revision, *args, **kwargs) -> None:
+        real_check(session, revision, *args, **kwargs)
+        if not reopened:
+            reopened.append(run)
+            with catalog.sessions.begin() as other:
+                other.execute(
+                    update(RecipeRun).where(RecipeRun.id == run).values(state="lost")
+                )
+
+    monkeypatch.setattr(
+        CatalogRevisionCollector, "_require_unused", staticmethod(reopen_after_check)
+    )
+    result = catalog.collector().collect()
+
+    assert reopened
+    assert catalog.exists(old)
+    assert result.kept == {"run reopened": 1}
+    with catalog.sessions() as session:
+        assert _row(session, RecipeRun, run).state == "lost"
+        assert session.scalar(
+            select(func.count()).select_from(RunNode).where(RunNode.run_id == run)
+        )
+        assert session.get(RecipeInstallation, installation) is not None
+
+
 def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
     postgres_engine: Engine,
 ) -> None:

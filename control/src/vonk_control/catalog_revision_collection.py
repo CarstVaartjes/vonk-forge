@@ -121,10 +121,11 @@ INTERVAL = timedelta(hours=1)
 # Rows fetched per round trip when scanning stored documents; bounds a scan by
 # the largest few documents instead of the whole table.
 _SCAN_BATCH = 20
-# A pass starts no new batch after this, and every batch transaction (deletes
-# and recheck) gets at most this long; the rest continues from the cursor on
-# the next worker pass. One pass is bounded by its inventory reads, this budget
-# and one more batch, so a large backlog never holds the worker loop for long.
+# A pass starts no new batch or phase after this, and each batch (its deletes,
+# rechecks and retries) stops at this long; the rest continues from the cursor
+# on the next worker pass. One pass is bounded by its inventory reads (each
+# with this budget), this budget and one more batch, so a large backlog never
+# holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
 # Candidates removed in one transaction; the JSON references are read once per
 # batch, so the recheck costs one scan per batch, not one per candidate.
@@ -157,6 +158,13 @@ class _Phase(StrEnum):
 
 class _Kept(Exception):
     """The revision is still referenced; leave it for a later sweep."""
+
+
+class _Unfinished(Exception):
+    """The batch ran out of budget or its recheck could not finish.
+
+    Nothing of it was removed; the next pass retries the same batch.
+    """
 
 
 class _Rescinded(Exception):
@@ -248,38 +256,54 @@ class CatalogRevisionCollector:
         kept: Counter[str] = Counter()
         deadline: float | None = None
         for phase in tuple(_Phase)[tuple(_Phase).index(start) :]:
+            if deadline is not None and time.monotonic() > deadline:
+                return self._resume(phase, after, now, removed, bundles, kept)
             # Bundle refusals are logged, not reported as kept revisions.
             counts = Counter[str]() if phase == _Phase.BUNDLE else kept
             try:
-                for batch, named, held in self._batches(phase, after, now, cutoff):
+                for batch, named in self._batches(phase, after, now, cutoff):
                     if deadline is None:
                         # The budget starts after the inventory, so every pass
                         # reaches a batch.
                         deadline = time.monotonic() + self._budget_seconds
                     pending = []
                     for item in batch:
-                        if not named.isdisjoint(item.names):
-                            counts["live operation"] += 1
-                        elif not isinstance(item, _Candidate) or (
-                            item.content_digest not in held
-                        ):
+                        if named.isdisjoint(item.names):
                             pending.append(item)
-                    gone = self._remove_batch(phase, pending, now, cutoff, held, counts)
+                        else:
+                            counts["live operation"] += 1
+                    try:
+                        gone = self._remove_batch(phase, pending, now, cutoff, counts)
+                    except _Unfinished:
+                        return self._resume(phase, after, now, removed, bundles, kept)
                     if phase == _Phase.BUNDLE:
                         bundles += gone
                     else:
                         removed += gone
+                    after = batch[-1].id
                     if time.monotonic() > deadline:
-                        # The next worker pass continues after this batch.
-                        self._cursor = (phase, batch[-1].id)
-                        self._due_at = now
-                        return self._swept(removed, bundles, kept)
+                        return self._resume(phase, after, now, removed, bundles, kept)
             except _Kept as reason:
                 # A damaged or unfinished reference scan proves nothing unused.
                 kept[str(reason)] += 1
                 break
             after = ""
         self._cursor = None
+        return self._swept(removed, bundles, kept)
+
+    def _resume(
+        self,
+        phase: _Phase,
+        after: str,
+        now: datetime,
+        removed: int,
+        bundles: int,
+        kept: Counter[str],
+    ) -> Collected:
+        """End the pass; the next worker pass continues after ``after``."""
+
+        self._cursor = (phase, after)
+        self._due_at = now
         return self._swept(removed, bundles, kept)
 
     @staticmethod
@@ -297,27 +321,20 @@ class CatalogRevisionCollector:
 
     def _batches(
         self, phase: _Phase, after: str, now: datetime, cutoff: datetime
-    ) -> Iterator[tuple[list[Any], frozenset[str], frozenset[str]]]:
-        """Each next batch after ``after``, with the pass inventory beside it.
+    ) -> Iterator[tuple[list[Any], frozenset[str]]]:
+        """Each next batch after ``after``, with what live rows name beside it.
 
-        The inventory is read once per phase, after its first batch: what live
-        rows name now (only to skip it; the batch recheck decides) and, for
-        Model revisions, the digests a cached set holds (NAS models are kept
-        until space is short) or another Model declares as a dependency.
+        The inventory is read once per phase, after its first batch, only to
+        skip what is named now; the batch recheck decides.
         """
 
         batch = self._next_batch(phase, after, cutoff)
         if not batch:
             return
         with self._sessions() as session:
-            held: frozenset[str] = frozenset()
-            if phase == _Phase.MODEL:
-                held = _model_dependencies(session) | (
-                    self._cached_model_digests(session) or frozenset()
-                )
             named = self._references(session, phase, now)
         while batch:
-            yield batch, named, held
+            yield batch, named
             batch = self._next_batch(phase, batch[-1].id, cutoff)
 
     def _next_batch(self, phase: _Phase, after: str, cutoff: datetime) -> list[Any]:
@@ -332,12 +349,24 @@ class CatalogRevisionCollector:
         phase: _Phase,
         now: datetime,
         deadline: float | None = None,
+        *,
+        since: datetime | None = None,
     ) -> frozenset[str]:
-        """Every id and digest a live row names that keeps a ``phase`` row."""
+        """Every id and digest a live row names that keeps a ``phase`` row.
+
+        For Model revisions that includes the digests a cached set holds (NAS
+        models stay until space is short) and the ones another Model declares
+        as a dependency; ``since`` limits the latter to Models created since
+        then (the recheck only needs those the inventory cannot have seen).
+        """
 
         if deadline is None:
             deadline = time.monotonic() + self._budget_seconds
         found = live_tokens(session, now, require_complete=True, deadline=deadline)
+        if phase == _Phase.MODEL:
+            found |= _model_dependencies(session, since=since) | (
+                self._cached_model_digests(session) or frozenset()
+            )
         if phase != _Phase.BUNDLE:
             return found | pinned_by_heads(
                 session, require_complete=True, deadline=deadline
@@ -359,17 +388,18 @@ class CatalogRevisionCollector:
         pending: list[Any],
         now: datetime,
         cutoff: datetime,
-        depended: frozenset[str],
         kept: Counter[str],
     ) -> int:
         """Remove ``pending``; a row named since the inventory stays.
 
-        A rescinded attempt keeps the named rows and retries the rest. Every
-        retry has fewer rows, so the loop ends.
+        A rescinded attempt keeps the named rows and retries the rest, within
+        the one budget of this batch. Every retry has fewer rows, so the loop
+        ends; ``_Unfinished`` when the budget ends first.
         """
 
+        deadline = time.monotonic() + self._budget_seconds
         while pending:
-            outcome = self._attempt(phase, pending, now, cutoff, depended, kept)
+            outcome = self._attempt(phase, pending, now, cutoff, kept, deadline)
             if isinstance(outcome, int):
                 return outcome
             pending = outcome
@@ -381,12 +411,12 @@ class CatalogRevisionCollector:
         pending: list[Any],
         now: datetime,
         cutoff: datetime,
-        depended: frozenset[str],
         kept: Counter[str],
+        deadline: float,
     ) -> int | list[Any]:
         """Remove ``pending`` in one transaction, each under its own savepoint.
 
-        After the deletes, the JSON references are read again in the same
+        After the deletes, the references are read again in the same
         transaction. Returns how many were removed or, when a committed write
         named a removed row since the inventory, nothing is removed and the
         rows to retry are returned (kept and refused ones are already counted).
@@ -395,15 +425,16 @@ class CatalogRevisionCollector:
         removed: list[tuple[Any, frozenset[str]]] = []
         try:
             with self._sessions.begin() as session:
-                deadline = time.monotonic() + self._budget_seconds
                 _bound_lock_waits(session, deadline)
                 for item in pending:
+                    if time.monotonic() > deadline:
+                        raise _Unfinished
                     try:
                         with session.begin_nested():
                             names = (
                                 self._remove_bundle(session, item, cutoff)
                                 if phase == _Phase.BUNDLE
-                                else self._remove(session, item, cutoff, now, depended)
+                                else self._remove(session, item, cutoff, now)
                             )
                     except _Kept as reason:
                         kept[str(reason)] += 1
@@ -422,7 +453,9 @@ class CatalogRevisionCollector:
                         continue
                     removed.append((item, names))
                 if removed:
-                    fresh = self._references(session, phase, now, deadline)
+                    fresh = self._references(
+                        session, phase, now, deadline, since=cutoff
+                    )
                     named = frozenset(
                         item.id
                         for item, names in removed
@@ -435,12 +468,7 @@ class CatalogRevisionCollector:
             return [item for item, _ in removed if item.id not in rescinded.named]
         except (_Kept, SQLAlchemyError) as error:
             # The recheck could not finish; nothing of the batch is removed.
-            kept[
-                str(error)
-                if isinstance(error, _Kept)
-                else f"refused {type(error).__name__}"
-            ] += len(removed)
-            return 0
+            raise _Unfinished from error
         for item, _ in removed:
             log_event(
                 _LOGGER,
@@ -531,12 +559,10 @@ class CatalogRevisionCollector:
         revision: _Candidate,
         cutoff: datetime,
         now: datetime,
-        depended: frozenset[str],
     ) -> frozenset[str]:
         """Delete one revision and what only it owned, or raise ``_Kept``.
 
         Returns every id the deletes removed, for the batch recheck.
-        ``depended`` is the pass's Model dependency inventory.
         """
 
         # A read: the heads' RESTRICT keys refuse deleting a revision a head
@@ -576,8 +602,8 @@ class CatalogRevisionCollector:
             now,
             heads=tuple(value for value in (head or ()) if value is not None),
         )
-        self._delete_dead_rows(session, revision, installations, runs, now)
-        self._require_no_remaining_reference(session, revision, depended, cutoff)
+        self._delete_dead_rows(session, revision, installations, runs, now, cutoff)
+        self._require_no_remaining_reference(session, revision, cutoff)
         session.execute(
             delete(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.id == revision.id
@@ -670,7 +696,15 @@ class CatalogRevisionCollector:
         installations: list[str],
         runs: list[str],
         now: datetime,
+        cutoff: datetime,
     ) -> None:
+        """Delete the dead rows only this revision owned, or raise ``_Kept``.
+
+        The state each was checked in is part of its delete: a run reopened or
+        an installation reinstalled since the check no longer matches, and the
+        savepoint rolls the revision's deletes back.
+        """
+
         for run_id in runs:
             release_owned_reservations_in_session(session, "run", run_id, now)
         for installation_id in installations:
@@ -679,18 +713,30 @@ class CatalogRevisionCollector:
             )
         if runs:
             session.execute(delete(RunNode).where(RunNode.run_id.in_(runs)))
-            session.execute(delete(RecipeRun).where(RecipeRun.id.in_(runs)))
+            deleted = session.execute(
+                delete(RecipeRun).where(
+                    RecipeRun.id.in_(runs),
+                    RecipeRun.state.in_(_DEAD_RUNS),
+                    RecipeRun.updated_at <= cutoff,
+                )
+            )
+            if _rowcount(deleted) != len(runs):
+                raise _Kept("run reopened")
         if installations:
             session.execute(
                 delete(InstallationNode).where(
                     InstallationNode.installation_id.in_(installations)
                 )
             )
-            session.execute(
+            deleted = session.execute(
                 delete(RecipeInstallation).where(
-                    RecipeInstallation.id.in_(installations)
+                    RecipeInstallation.id.in_(installations),
+                    RecipeInstallation.state == InstallationState.UNINSTALLED,
+                    RecipeInstallation.updated_at <= cutoff,
                 )
             )
+            if _rowcount(deleted) != len(installations):
+                raise _Kept("installation reopened")
         # A build or mapping another installation still uses stays, and keeps
         # the revision through the remaining-reference check below.
         session.execute(
@@ -741,7 +787,6 @@ class CatalogRevisionCollector:
     def _require_no_remaining_reference(
         session: Session,
         revision: _Candidate,
-        depended: frozenset[str],
         cutoff: datetime,
     ) -> None:
         """The database's own foreign keys, checked first-hand before the delete.
@@ -767,9 +812,7 @@ class CatalogRevisionCollector:
                     for reference in manifest.verified_models
                 ):
                     raise _Kept(WaitOwnerKind.MODEL_CACHE.value)
-            if revision.content_digest in depended | _model_dependencies(
-                session, since=cutoff
-            ):
+            if revision.content_digest in _model_dependencies(session, since=cutoff):
                 raise _Kept("model dependency")
         for name, reference in (
             (
@@ -803,7 +846,7 @@ class CatalogRevisionCollector:
                 RecipeSourceBundle.verified_at <= cutoff,
             )
         )
-        if int(getattr(deleted, "rowcount", 0) or 0) != 1:
+        if _rowcount(deleted) != 1:
             raise _Kept("stored again")
         session.execute(
             delete(SourceBundleArchive).where(SourceBundleArchive.sha256 == bundle.id)
@@ -1090,6 +1133,11 @@ def tokens(values: Iterable[object]) -> frozenset[str]:
     for value in values:
         found.update(_TOKEN.findall(json.dumps(value, default=str)))
     return frozenset(found)
+
+
+def _rowcount(result: object) -> int:
+    """Rows a conditional delete matched."""
+    return int(getattr(result, "rowcount", 0) or 0)
 
 
 def _ids(session: Session, column, *conditions) -> list[str]:

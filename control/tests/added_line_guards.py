@@ -145,9 +145,6 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
         "reserve_floor_bytes",
     ): "the collector's headroom floor, defaulted from that setting",
 }
-# The agent's messages a Controller test may send only as the stand-in pinned
-# to the agent's shared vector; built by hand they are the Controller's idea of
-# the agent, which agrees with the Controller whatever the agent sends (#1579).
 # The only modules that may lock a whole table: one-time schema adoption at
 # startup (before services run) and user-authority serialization (security).
 TABLE_LOCK_OWNERS = frozenset(
@@ -157,6 +154,9 @@ TABLE_LOCK_OWNERS = frozenset(
         "control/src/vonk_control/user_authority.py",
     }
 )
+# The agent's messages a Controller test may send only as the stand-in pinned
+# to the agent's shared vector; built by hand they are the Controller's idea of
+# the agent, which agrees with the Controller whatever the agent sends (#1579).
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
@@ -174,15 +174,17 @@ SECURITY_EDGES = frozenset(
 )
 
 
-# The files that allocate the next revision_number, and the collector that keeps
-# each document's newest one so it is never allocated twice; no other source
-# names it.
+# The files that allocate the next revision_number; no other source names it.
 REVISION_NUMBER_ALLOCATORS = frozenset(
     {
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
-        "control/src/vonk_control/catalog_revision_collection.py",
     }
+)
+# Readers that keep each document's newest revision_number, so an allocator
+# (max + 1) never hands one out twice; they never allocate.
+REVISION_NUMBER_KEEPERS = frozenset(
+    {"control/src/vonk_control/catalog_revision_collection.py"}
 )
 
 # The one owner of how a container's exit cause is spelled and read.
@@ -1636,7 +1638,7 @@ def check_source(
             # definition may name it.
             if (
                 path.startswith("control/src/vonk_control/")
-                and path not in REVISION_NUMBER_ALLOCATORS
+                and path not in REVISION_NUMBER_ALLOCATORS | REVISION_NUMBER_KEEPERS
                 and not path.startswith("control/src/vonk_control/models/")
             ):
                 hits.extend(
