@@ -1,6 +1,7 @@
 //! Observations.
 
 use super::*;
+use vonk_agent_protocol::generated::HostHelperContainerLabels;
 
 /// True the first time this process reports on `key`; keeps a permanent
 /// per-run condition from filling the journal every sweep.
@@ -81,7 +82,7 @@ async fn deliver_recipe_observation(
     let report = crate::client::build_exact_recipe_run_observations(observed_at, runs)?;
     outbox.retain_recipe_observation(&report)?;
     client.report_recipe_observation_envelope(&report).await?;
-    outbox.acknowledge_recipe_observation(&report)?;
+    outbox.release_pending_recipe_observation()?;
     Ok(())
 }
 
@@ -136,21 +137,60 @@ impl<R> RecipeExecutor<'_, R> {
 }
 
 impl<R> RecipeExecutor<'_, R> {
-    /// Settle a run the Controller does not want on this Spark, if it is one:
-    /// a run whose process is gone is retired, and one whose process still
-    /// runs is stopped first. Returns whether the lifecycle was retired.
-    /// Only the lifecycle is removed; the run directory stays as history.
-    pub(super) async fn settle_unowned_run(&self, run_id: &str, process_running: bool) -> bool
+    /// Retire the lifecycle of a run whose process is gone, if the Controller
+    /// does not want the run here. Only the lifecycle is removed; the run
+    /// directory stays as history.
+    pub(super) async fn retire_unowned_run(&self, run_id: &str, reason: &str) -> bool
     where
         R: ProcessRunner,
     {
         if self.run_disposition(run_id).await != Some(RecipeRunDisposition::Unowned) {
             return false;
         }
-        if process_running {
-            self.stop_unowned_container(run_id).await
-        } else {
-            self.retire_claim(run_id, "not running")
+        self.retire_claim(run_id, reason)
+    }
+}
+
+/// How long a page waits for the Controller's dispositions of its running
+/// runs. They are asked only after the page is reported, so a slow Controller
+/// delays nothing already observed; an unanswered ask is repeated next cycle.
+const RUNNING_DISPOSITION_WINDOW: Duration = Duration::from_secs(15);
+
+impl<R> RecipeExecutor<'_, R> {
+    /// Stop the running containers of runs the Controller does not want here,
+    /// then retire their lifecycles. Runs after the page's reports are
+    /// delivered and outside its inspection budget, so neither a slow
+    /// Controller nor a slow stop can cost a healthy run its report.
+    ///
+    /// `confirmed` are runs already named unowned; `running` are reported
+    /// running runs whose disposition is still to be asked. A stop that outlasts
+    /// this future's life lands anyway and is retired next cycle.
+    pub(super) async fn settle_running_unowned(
+        &self,
+        confirmed: Vec<(String, Option<HostHelperContainerLabels>)>,
+        running: Vec<(String, Option<HostHelperContainerLabels>)>,
+    ) where
+        R: ProcessRunner,
+    {
+        let mut unowned = confirmed;
+        let asked = stream::iter(running)
+            .map(|(run_id, labels)| async move {
+                let disposition = self.run_disposition(&run_id).await;
+                (run_id, labels, disposition)
+            })
+            .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+            .take_until(tokio::time::sleep(RUNNING_DISPOSITION_WINDOW))
+            .collect::<Vec<_>>()
+            .await;
+        unowned.extend(
+            asked
+                .into_iter()
+                .filter_map(|(run_id, labels, disposition)| {
+                    (disposition == Some(RecipeRunDisposition::Unowned)).then_some((run_id, labels))
+                }),
+        );
+        for (run_id, labels) in unowned {
+            self.stop_unowned_container(&run_id, labels).await;
         }
     }
 }
@@ -159,14 +199,18 @@ impl<R> RecipeExecutor<'_, R> {
     /// Stop the running container of a run the Controller named unowned, then
     /// retire its lifecycle.
     ///
-    /// The container is named by its own managed labels, read by the helper.
-    /// The Controller grants the stop only while it wants the run on no live
-    /// claim; the helper still refuses a container that is not exactly that
-    /// identity's or is of a newer generation. Nothing changes on a refusal or
-    /// a missing answer, and the next cycle asks again. A stop that landed but
-    /// was not retired is healed next cycle: the process is gone, so the
-    /// ordinary retirement applies.
-    pub(super) async fn stop_unowned_container(&self, run_id: &str) -> bool
+    /// The container is named by the managed labels the helper read in the
+    /// inspection that found it running. The Controller grants the stop only
+    /// while it wants the run on no live claim; the helper still refuses a
+    /// container that is not exactly that identity's or is of a newer
+    /// generation. Nothing changes on a refusal or a missing answer, and the
+    /// next cycle asks again. A stop that landed but was not retired is healed
+    /// next cycle: the process is gone, so the ordinary retirement applies.
+    pub(super) async fn stop_unowned_container(
+        &self,
+        run_id: &str,
+        labels: Option<HostHelperContainerLabels>,
+    ) -> bool
     where
         R: ProcessRunner,
     {
@@ -184,19 +228,7 @@ impl<R> RecipeExecutor<'_, R> {
             }
             false
         };
-        let report = match boundary
-            .inspect_recipe_run_evidence_for_observation(vec![run_id.to_owned()], false, None)
-            .await
-        {
-            Ok(report) => report,
-            Err(inspection) => {
-                return pending(&inspection.preflight_code(), &inspection.cause());
-            }
-        };
-        if !report.running {
-            return pending("not-running", "its process ended before the stop");
-        }
-        let Some(labels) = report.container_labels else {
+        let Some(labels) = labels else {
             return pending("no-labels", "the container carries no readable identity");
         };
         match boundary.stop_orphan(orphan_stop_plan(&labels)).await {
@@ -281,13 +313,13 @@ impl<R> RecipeExecutor<'_, R> {
                     .await
                 {
                     Ok(report) if !report.running => {}
-                    // Nothing owns it: stop it by its own labels, then retire.
-                    Ok(_) => {
-                        return if self.stop_unowned_container(run_id).await {
-                            Err(RecipeObservationError::UnownedRun)
-                        } else {
-                            Err(skip("the container is running; its stop is pending"))
-                        };
+                    // Nothing owns it: it is stopped by its own labels once the
+                    // page is reported, then retired.
+                    Ok(report) => {
+                        return Err(RecipeObservationError::UnownedRunning {
+                            run_id: run_id.to_owned(),
+                            labels: report.container_labels,
+                        });
                     }
                     Err(inspection) => {
                         return Err(skip_because(
@@ -376,10 +408,27 @@ impl<R> RecipeExecutor<'_, R> {
             self.client.node_id(),
         )?;
         if let Some(report) = outbox.pending_recipe_observation()? {
-            self.client
+            match self
+                .client
                 .report_recipe_observation_envelope(&report)
-                .await?;
-            outbox.acknowledge_recipe_observation(&report)?;
+                .await
+            {
+                Ok(()) => {}
+                // The Controller refused these exact bytes for good: a newer
+                // observation supersedes them, so they must not block it.
+                Err(ClientError::Controller(error)) if error.request_invalid() => {
+                    let digest = canonical_generated_json(&report)
+                        .map(|body| hex_sha256(&body))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "vonk-agent: discarding refused pending recipe observation sha256={digest} HTTP {} ({}); fresh evidence is collected instead",
+                        error.status,
+                        error.rejection_context()
+                    );
+                }
+                Err(error) => return Err(error.into()),
+            }
+            outbox.release_pending_recipe_observation()?;
         }
         let mut page = self.runtime.recipe_run_inspection_page(checkpoint)?;
         let prepared: Vec<_> = page
@@ -392,8 +441,11 @@ impl<R> RecipeExecutor<'_, R> {
         // Inspection is read-only. A timed-out page retains unknown evidence
         // but releases the claim lane; durable traversal proceeds, and the next
         // complete cycle retries every omitted inspection.
+        let running = std::sync::Mutex::new(Vec::new());
+        let running_ref = &running;
         let results = stream::iter(prepared)
             .map(|prepared| async move {
+                let running = running_ref;
                 let plan = match prepared {
                     Ok(plan) => plan,
                     Err(failure) => {
@@ -434,12 +486,18 @@ impl<R> RecipeExecutor<'_, R> {
                 let failure_diagnostics = inspection.log_error.as_deref()
                     .filter(|_| !process_running)
                     .and_then(crate::failure_evidence::host_memory_receipt);
-                // A run this Controller does not want here (for example after its
-                // database was rebuilt) is settled locally instead of being
-                // reported forever: a gone process is retired, a running one
-                // is stopped under the Controller's grant, then retired.
-                if self
-                    .settle_unowned_run(&plan.run_id.to_string(), process_running)
+                // A stopped process of a run this Controller never owned (for
+                // example after its database was rebuilt) is retired locally
+                // instead of being reported forever. A running one is reported
+                // like any other; whether it is unowned is asked after the page
+                // is delivered, outside this budget.
+                if process_running {
+                    running
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push((plan.run_id.to_string(), inspection.container_labels.clone()));
+                } else if self
+                    .retire_unowned_run(&plan.run_id.to_string(), "not running")
                     .await
                 {
                     return Err(RecipeObservationError::UnownedRun);
@@ -497,9 +555,14 @@ impl<R> RecipeExecutor<'_, R> {
                 progress.had_failures = true;
             }
         }
+        let mut confirmed = Vec::new();
         let results = results
             .into_iter()
             .map(|result| match result {
+                Err(RecipeObservationError::UnownedRunning { run_id, labels }) => {
+                    confirmed.push((run_id, labels));
+                    Err(RecipeObservationError::UnownedRun)
+                }
                 Err(RecipeObservationError::Inspection(error)) => {
                     eprintln!(
                         "vonk-agent: partial run observation: {}",
@@ -517,7 +580,13 @@ impl<R> RecipeExecutor<'_, R> {
             page.empty_snapshot_safe,
             &mut outbox,
         )
-        .await?;
+        .await;
+        // Delivered or not, a container nothing owns is still stopped.
+        let running = running
+            .into_inner()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        self.settle_running_unowned(confirmed, running).await;
+        let reported = reported?;
         Ok(RecipeObservationSweep {
             reported,
             checkpoint: page.checkpoint,

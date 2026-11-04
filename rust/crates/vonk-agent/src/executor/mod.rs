@@ -56,7 +56,7 @@ use vonk_agent_protocol::{
     ProtocolError, RecipeJobEvidence, RecipeJobFile, RecipeJobOutputLimits,
     RecipeJobOutputManifest, RecipeJobOutputMapping, RecipeJobRunResult, RecipeOperationRequest,
     RecipeReconciliationIdentity, RecipeStartPhase, RecipeStartRequest, RecipeStopRequest,
-    canonical_json, hex_sha256,
+    canonical_generated_json, canonical_json, hex_sha256,
 };
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(10);
@@ -155,6 +155,13 @@ pub enum RecipeObservationError {
     /// A run proved stopped is retired locally; a running one is left alone.
     #[error("retained recipe run is unknown to the Controller")]
     UnownedRun,
+    /// The Controller named this run unowned and its container still runs; it
+    /// is stopped after the page is reported, outside the inspection budget.
+    #[error("running container of an unowned recipe run awaits its stop")]
+    UnownedRunning {
+        run_id: String,
+        labels: Option<vonk_agent_protocol::generated::HostHelperContainerLabels>,
+    },
     #[error("managed recipe run observation failed ({})", .0.safe_category())]
     Runtime(#[from] crate::oci::OciError),
     #[error("exact recipe run inspection failed ({})", .0.preflight_code())]

@@ -35,6 +35,8 @@ struct ControllerState {
     down: bool,
     /// Every grant ask is refused as if a live operation owned the run.
     refuse_grants: bool,
+    /// How long a disposition answer is held back.
+    disposition_delay: Duration,
     reports: Vec<Value>,
     grants: Vec<String>,
     refused: Vec<String>,
@@ -58,7 +60,11 @@ impl FakeController {
             let deadline = Instant::now() + SERVE_FOR;
             while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
                 match listener.accept() {
-                    Ok((stream, _)) => serve_controller(stream, &shared),
+                    Ok((stream, _)) => {
+                        // A slow answer must not hold up the others.
+                        let shared = shared.clone();
+                        thread::spawn(move || serve_controller(stream, &shared));
+                    }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(1));
                     }
@@ -84,6 +90,24 @@ impl FakeController {
     /// While down every request is dropped without an answer.
     pub(in crate::executor) fn set_down(&self, down: bool) {
         self.state.lock().unwrap().down = down;
+    }
+
+    pub(in crate::executor) fn delay_dispositions(&self, delay: Duration) {
+        self.state.lock().unwrap().disposition_delay = delay;
+    }
+
+    /// How many observation reports have arrived.
+    pub(in crate::executor) fn reports_seen(&self) -> usize {
+        self.state.lock().unwrap().reports.len()
+    }
+
+    /// The run ids named by the reports from number `from` on.
+    pub(in crate::executor) fn reported_since(&self, from: usize) -> Vec<String> {
+        self.state.lock().unwrap().reports[from..]
+            .iter()
+            .flat_map(|report| report["runs"].as_array().cloned().unwrap_or_default())
+            .map(|run| run["run_id"].as_str().unwrap().to_owned())
+            .collect()
     }
 
     pub(in crate::executor) fn refuse_grants(&self, refuse: bool) {
@@ -162,6 +186,10 @@ fn serve_controller(mut stream: std::net::TcpStream, state: &Mutex<ControllerSta
         request.extend_from_slice(&buffer[..size]);
     }
     let body = &request[header_end..];
+    if line.contains("/disposition") {
+        let delay = state.lock().unwrap().disposition_delay;
+        thread::sleep(delay);
+    }
     let mut state = state.lock().unwrap();
     if state.down {
         return;
@@ -286,6 +314,8 @@ struct HostState {
     replace_before_stop: Option<(String, HostHelperContainerLabels)>,
     /// The helper stops the container, then the reply never arrives.
     drop_next_stop_reply: bool,
+    /// The next stop takes this long to land.
+    slow_next_stop: Duration,
 }
 
 pub(in crate::executor) struct FakeHost {
@@ -368,6 +398,10 @@ impl FakeHost {
         self.state.lock().unwrap().replace_before_stop = Some((format!("vonk-{run}"), labels));
     }
 
+    pub(in crate::executor) fn slow_next_stop(&self, delay: Duration) {
+        self.state.lock().unwrap().slow_next_stop = delay;
+    }
+
     pub(in crate::executor) fn lose_next_stop_reply(&self) {
         self.state.lock().unwrap().drop_next_stop_reply = true;
     }
@@ -411,7 +445,7 @@ fn rejection(request_id: Option<Uuid>, code: HelperErrorCode) -> HostHelperRespo
 
 fn serve_helper(
     mut stream: std::os::unix::net::UnixStream,
-    state: &Mutex<HostState>,
+    host: &Mutex<HostState>,
     request_root: &std::path::Path,
 ) {
     stream.set_nonblocking(false).unwrap();
@@ -424,7 +458,7 @@ fn serve_helper(
     }
     let mut body = vec![0; u32::from_be_bytes(prefix) as usize];
     stream.read_exact(&mut body).unwrap();
-    let mut state = state.lock().unwrap();
+    let mut state = host.lock().unwrap();
     let read_request = |digest: &str| -> vonk_agent_protocol::HostRuntimeRequest {
         let bytes = fs::read(request_root.join(format!("{digest}.json"))).unwrap();
         assert_eq!(vonk_agent_protocol::hex_sha256(&bytes), digest);
@@ -450,7 +484,6 @@ fn serve_helper(
             Some(inspection.request_id),
             HostHelperResponseStatus::ContainerRuntimeRequestExecuted,
         );
-        let name_only = request.arguments.len() == 1;
         match state.containers.get(&name) {
             Some(container) => {
                 if let Some(generation) = request.run_generation
@@ -469,9 +502,7 @@ fn serve_helper(
                     return;
                 }
                 response.process_running = Some(container.running);
-                if name_only {
-                    response.container_labels = container.labels.clone();
-                }
+                response.container_labels = container.labels.clone();
             }
             None => response.process_running = Some(false),
         }
@@ -503,6 +534,10 @@ fn serve_helper(
         return;
     }
     let name = format!("vonk-{}", plan.target_runtime_id);
+    let slow = std::mem::take(&mut state.slow_next_stop);
+    drop(state);
+    thread::sleep(slow);
+    let mut state = host.lock().unwrap();
     if let Some((replaced, labels)) = state.replace_before_stop.take() {
         state.containers.insert(
             replaced,

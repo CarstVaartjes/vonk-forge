@@ -13,6 +13,7 @@ from datetime import timedelta
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
+from sqlalchemy import select
 from vonk_agent_protocol import SignedHostHelperGrant
 from vonk_agent_protocol.host_helper import (
     ExecuteContainerRuntimeRequestOperation,
@@ -91,13 +92,19 @@ def _run(
                     )
                 )
     if remapped and state is not None:
-        # The installation moved on: a newer run now holds it on node A.
+        # The installation moved on: a newer run took its rank on node A, so
+        # this run is assigned there no longer. Only that makes it unwanted.
         with services.sessions.begin() as session:
             first = session.get(RecipeRun, run_id)
             assert first is not None
+            for node in session.scalars(
+                select(RunNode).where(RunNode.run_id == run_id)
+            ):
+                session.delete(node)
+            newer = str(uuid.uuid4())
             session.add(
                 RecipeRun(
-                    id=str(uuid.uuid4()),
+                    id=newer,
                     installation_id=first.installation_id,
                     mapping_id=str(uuid.uuid4()),
                     mapping_generation=2,
@@ -109,6 +116,19 @@ def _run(
                     route_state="withdrawn",
                     actor="admin",
                     created_at=clock.now,
+                    updated_at=clock.now,
+                )
+            )
+            session.flush()
+            session.add(
+                RunNode(
+                    run_id=newer,
+                    node_id=NODE_A,
+                    rank=0,
+                    role="worker",
+                    state="running",
+                    port=8100,
+                    reserved_memory_bytes=0,
                     updated_at=clock.now,
                 )
             )
@@ -166,7 +186,7 @@ def _unowned(client, run_id: str, node: str) -> bool:
     "state, on, remapped",
     [
         pytest.param(None, (NODE_A,), False, id="run-row-deleted"),
-        pytest.param("failed", (NODE_A,), True, id="failed-installation-moved-on"),
+        pytest.param("running", (NODE_A,), True, id="running-installation-remapped"),
         pytest.param("stopped", (NODE_A,), False, id="stopped"),
         pytest.param("failed", (NODE_B,), False, id="failed-rank-removed"),
         pytest.param("running", (NODE_B,), False, id="running-elsewhere-only"),

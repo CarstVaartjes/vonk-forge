@@ -412,7 +412,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
             "container".to_owned(),
             "inspect".to_owned(),
             "--format".to_owned(),
-            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}".to_owned(),
+            "{{.Id}}\t{{.State.Running}}\t{{index .Config.Labels \"ai.vonkforge.runtime-request-sha256\"}}\t{{index .Config.Labels \"ai.vonkforge.managed\"}}\t{{index .Config.Labels \"ai.vonkforge.run-id\"}}\t{{index .Config.Labels \"ai.vonkforge.run-generation\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.plan-digest\"}}".to_owned(),
             format!("vonk-{}", validated.run_id),
         ])?;
         if !existing.success {
@@ -423,13 +423,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
             return Err(CommandFailure::exit(&existing).into());
         }
+        // Only the line end is dropped: an empty last label is a field.
         let fields = std::str::from_utf8(&existing.stdout)
             .ok()
-            .map(str::trim)
+            .map(|text| text.strip_suffix('\n').unwrap_or(text))
             .map(|text| text.split('\t').collect::<Vec<_>>())
             .unwrap_or_default();
-        // A container without the generation label ends the line with an
-        // empty field, which the trim drops.
         let [
             container_id,
             running,
@@ -441,9 +440,14 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return Err(CommandFailure::UnexpectedAnswer.into());
         };
-        let generation = match generation {
-            [] => "",
-            [label] => label,
+        // A container without the generation label ends the line there; a
+        // whole line also carries the identity labels.
+        let (generation, identity) = match generation {
+            [] => ("", None),
+            [label] => (*label, None),
+            [label, target, installation, plan_digest] => {
+                (*label, Some((*target, *installation, *plan_digest)))
+            }
             _ => return Err(CommandFailure::UnexpectedAnswer.into()),
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
@@ -471,6 +475,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !matches!(*running, "true" | "false") {
             return Err(CommandFailure::UnexpectedAnswer.into());
         }
+        let container_labels = identity.and_then(|(target, installation, plan_digest)| {
+            parse_managed_labels(run_id, target, installation, generation, plan_digest)
+        });
         if *running == "true" {
             if !include_logs {
                 return Ok(RunInspection {
@@ -479,7 +486,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     exit_code: None,
                     logs: None,
                     log_error: None,
-                    container_labels: None,
+                    container_labels,
                 });
             }
             // Read-only: the exact, identity-checked container's tail while it
@@ -511,7 +518,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 exit_code: None,
                 logs,
                 log_error,
-                container_labels: None,
+                container_labels,
             });
         }
         if *running == "false"

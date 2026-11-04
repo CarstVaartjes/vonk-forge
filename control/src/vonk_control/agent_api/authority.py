@@ -7,8 +7,9 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, HTTPException, Path, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
@@ -61,12 +62,12 @@ from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..repeated_evidence_contract import RepeatedEvidenceSubject, host_grant_subject
 from ..strict_json import ControllerAPIRoute
 from .common import (
-    _CANONICAL_UUID,
     AgentApiServices,
     AgentUpgradeGrantRequest,
     EnrollmentRateLimiter,
     HostHelperGrantResponse,
     HostRuntimeGrantRequest,
+    OrphanStopGrantRequest,
     PackageActivationGrantRequest,
     _authenticated_activation_identity,
     _authenticated_identity,
@@ -302,7 +303,11 @@ def install_authority_routes(
     # so there is no owner row for a receipt to name.
     @operator_acceptance(ReceiptPolicy.OBSERVATION)
     def orphan_stop_grant(
-        run_id: str, body: HostRuntimeGrantRequest, request: Request
+        run_id: Annotated[
+            str, Path(pattern=r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+        ],
+        body: OrphanStopGrantRequest,
+        request: Request,
     ) -> Response:
         """Grant the stop of a running container this Controller has no claim on.
 
@@ -313,19 +318,18 @@ def install_authority_routes(
 
         identity = helper_identity(request)
         required = host_runtime_service()
-        if (
-            _CANONICAL_UUID.fullmatch(run_id) is None
-            or body.action != ContainerRuntimeAction.STOP
-            or body.runtime_run_id != run_id
-            # The serving container only: a job container (vonk-<job_id>) that
-            # carries this run's label is not covered.
-            or body.runtime_target_id != run_id
-            or body.stop_plan_sha256 is None
-            or body.run_generation is None
-            or body.runtime_target_id is None
-            or body.runtime_installation_id is None
-        ):
-            raise HTTPException(status_code=422, detail="orphan stop binding invalid")
+        binding = body.binding()
+        if binding.run_id != run_id:
+            raise RequestValidationError(
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("path", "run_id"),
+                        "msg": "the run differs from the one the stop names",
+                        "input": run_id,
+                    }
+                ]
+            )
 
         def issue() -> SignedHostHelperGrant:
             try:
@@ -335,10 +339,10 @@ def install_authority_routes(
                     run_id=run_id,
                     fence=body.fence,
                     request_sha256=body.request_sha256,
-                    stop_plan_sha256=body.stop_plan_sha256,
-                    run_generation=body.run_generation,
-                    runtime_target_id=body.runtime_target_id,
-                    runtime_installation_id=body.runtime_installation_id,
+                    stop_plan_sha256=binding.stop_plan_sha256,
+                    run_generation=binding.run_generation,
+                    runtime_target_id=binding.target_id,
+                    runtime_installation_id=binding.installation_id,
                     expires_in_seconds=body.expires_in_seconds,
                 )
             except OrphanStopRunOwned:

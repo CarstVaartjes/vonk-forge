@@ -178,10 +178,11 @@ async fn an_unowned_container_is_stopped_and_retired_and_a_known_one_is_left_alo
     );
     assert!(world.lifecycle(known).exists());
     // Later pages carry the known run only.
+    let before = world.controller.reports_seen();
     cycle(&executor).await;
-    let reported = world.controller.reported_runs();
-    assert!(reported.contains(&known.to_string()));
-    assert!(!reported.contains(&unowned.to_string()));
+    let later = world.controller.reported_since(before);
+    assert!(later.contains(&known.to_string()));
+    assert!(!later.contains(&unowned.to_string()));
     assert_eq!(stops(&world.host).len(), 1);
 }
 
@@ -298,4 +299,54 @@ async fn a_container_without_a_readable_identity_is_not_stopped() {
     assert!(world.host.is_running(run) && world.lifecycle(run).exists());
     assert!(world.controller.grants().is_empty());
     assert!(stops(&world.host).is_empty());
+}
+
+#[tokio::test]
+async fn a_slow_disposition_never_costs_a_running_run_its_report() {
+    // The Controller answers dispositions after longer than the page's
+    // inspection budget. A healthy running run is reported all the same: its
+    // report never waits for a Controller call inside the budget.
+    let world = world();
+    let (known, installation) = world.prepared_run(2);
+    world
+        .host
+        .run(known, Some(labels_of(known, installation, 2)));
+    world.controller.say(known, FakeDisposition::Wanted(2));
+    world.controller.delay_dispositions(Duration::from_secs(11));
+    let runner = NoProcess;
+    let executor = world.executor(&runner);
+
+    cycle(&executor).await;
+
+    assert!(
+        world
+            .controller
+            .reported_runs()
+            .contains(&known.to_string()),
+        "the running run's report was dropped by the slow Controller"
+    );
+    assert!(world.host.is_running(known));
+    assert!(stops(&world.host).is_empty());
+}
+
+#[tokio::test]
+async fn a_stop_slower_than_the_page_budget_completes_in_its_own_cycle() {
+    // The stop runs after the page's reports, outside the 10 s inspection
+    // budget, so it is not cut off halfway: it lands once and is retired.
+    let world = world();
+    let (run, installation) = world.prepared_run(2);
+    world.host.run(run, Some(labels_of(run, installation, 2)));
+    world.controller.say(run, FakeDisposition::Unowned);
+    world.host.slow_next_stop(Duration::from_secs(11));
+    let runner = NoProcess;
+    let executor = world.executor(&runner);
+
+    cycle(&executor).await;
+
+    assert!(!world.host.is_running(run));
+    assert!(!world.lifecycle(run).exists());
+    assert_eq!(stops(&world.host).len(), 1);
+    assert_eq!(world.controller.grants().len(), 1);
+    cycle(&executor).await;
+    assert_eq!(stops(&world.host).len(), 1, "no double effect");
 }
