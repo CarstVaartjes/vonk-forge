@@ -440,15 +440,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
         else {
             return Err(CommandFailure::UnexpectedAnswer.into());
         };
-        // A container without the generation label ends the line there; a
-        // whole line also carries the identity labels.
-        let (generation, identity) = match generation {
-            [] => ("", None),
-            [label] => (*label, None),
-            [label, target, installation, plan_digest] => {
-                (*label, Some((*target, *installation, *plan_digest)))
-            }
-            _ => return Err(CommandFailure::UnexpectedAnswer.into()),
+        // The line carries the generation and the identity labels, each empty
+        // when the container lacks it.
+        let [generation, target, installation, plan_digest] = generation else {
+            return Err(CommandFailure::UnexpectedAnswer.into());
         };
         if !lower_hex(container_id, 64) || *managed != "true" || *run_id != validated.run_id {
             return Err(CommandFailure::UnexpectedAnswer.into());
@@ -456,7 +451,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         // A container of another generation, or one without the label, is
         // not this Start's: the helper's own Start refuses to adopt it, and
         // so does an inspection that names the Start's generation.
-        if expected_generation.is_some_and(|expected| generation != expected.to_string()) {
+        if expected_generation.is_some_and(|expected| *generation != expected.to_string()) {
             return Err(OperationError::InvalidArtifact);
         }
         if *digest != semantic_digest {
@@ -475,9 +470,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if !matches!(*running, "true" | "false") {
             return Err(CommandFailure::UnexpectedAnswer.into());
         }
-        let container_labels = identity.and_then(|(target, installation, plan_digest)| {
-            parse_managed_labels(run_id, target, installation, generation, plan_digest)
-        });
+        let container_labels =
+            parse_managed_labels(run_id, target, installation, generation, plan_digest);
         if *running == "true" {
             if !include_logs {
                 return Ok(RunInspection {

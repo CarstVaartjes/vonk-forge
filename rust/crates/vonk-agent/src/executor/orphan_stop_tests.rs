@@ -350,3 +350,38 @@ async fn a_stop_slower_than_the_page_budget_completes_in_its_own_cycle() {
     cycle(&executor).await;
     assert_eq!(stops(&world.host).len(), 1, "no double effect");
 }
+
+#[tokio::test]
+async fn a_stop_that_never_finishes_cannot_hold_up_the_pass_and_is_not_repeated() {
+    // Catches a stop phase with no bound: one container whose stop never
+    // completes would add its whole timeout to every pass, and with it to
+    // every claim, every cycle. The pass returns within the stop window; the
+    // stop that outlasts it lands anyway and is retired next cycle without a
+    // second effect.
+    let world = world();
+    let (run, installation) = world.prepared_run(2);
+    world.host.run(run, Some(labels_of(run, installation, 2)));
+    world.controller.say(run, FakeDisposition::Unowned);
+    world.host.slow_next_stop(Duration::from_secs(22));
+    let runner = NoProcess;
+    let executor = world.executor(&runner);
+
+    let started = Instant::now();
+    cycle(&executor).await;
+    assert!(
+        started.elapsed() < Duration::from_secs(19),
+        "the pass waited for the stop: {:?}",
+        started.elapsed()
+    );
+    assert!(
+        world.lifecycle(run).exists(),
+        "not retired before the stop landed"
+    );
+
+    // The stop lands on its own; the next cycle only retires.
+    cycle(&executor).await;
+    cycle(&executor).await;
+    assert!(!world.host.is_running(run));
+    assert!(!world.lifecycle(run).exists());
+    assert_eq!(stops(&world.host).len(), 1, "no double effect");
+}

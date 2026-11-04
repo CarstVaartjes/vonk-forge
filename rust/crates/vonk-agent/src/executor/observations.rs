@@ -151,6 +151,12 @@ impl<R> RecipeExecutor<'_, R> {
     }
 }
 
+/// How long a page waits for the orphan stops it started. A stop that outlasts
+/// it lands anyway (the helper works on its own thread, from the request file
+/// it already read) and is retired next cycle, so a container whose stop never
+/// finishes cannot hold up a claim.
+const ORPHAN_STOP_WINDOW: Duration = Duration::from_secs(15);
+
 /// How long a page waits for the Controller's dispositions of its running
 /// runs. They are asked only after the page is reported, so a slow Controller
 /// delays nothing already observed; an unanswered ask is repeated next cycle.
@@ -189,9 +195,14 @@ impl<R> RecipeExecutor<'_, R> {
                     (disposition == Some(RecipeRunDisposition::Unowned)).then_some((run_id, labels))
                 }),
         );
-        for (run_id, labels) in unowned {
-            self.stop_unowned_container(&run_id, labels).await;
-        }
+        stream::iter(unowned)
+            .map(|(run_id, labels)| async move {
+                self.stop_unowned_container(&run_id, labels).await
+            })
+            .buffer_unordered(BACKGROUND_RUN_INSPECTION_CONCURRENCY)
+            .take_until(tokio::time::sleep(ORPHAN_STOP_WINDOW))
+            .collect::<Vec<_>>()
+            .await;
     }
 }
 

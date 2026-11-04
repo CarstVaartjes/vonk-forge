@@ -474,7 +474,7 @@ fn an_inspection_naming_a_generation_refuses_another_generations_container() {
         let mut plan = recipe_start_plan_for_authority(2);
         let (_temp, roots) = start_fixture(&mut plan);
         let container = format!(
-            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\t\t\t\n",
             "f".repeat(64),
             "d".repeat(64),
             plan.run_id
@@ -555,7 +555,7 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
         )
         .unwrap();
         let container = format!(
-            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\t\t\t\n",
             "f".repeat(64),
             hex_sha256(&canonical_json(&validated.arguments).unwrap()),
             plan.run_id
