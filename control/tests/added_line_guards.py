@@ -148,6 +148,15 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
+# The only modules that may lock a whole table: one-time schema adoption at
+# startup (before services run) and user-authority serialization (security).
+TABLE_LOCK_OWNERS = frozenset(
+    {
+        "control/src/vonk_control/exact_integer_adoption.py",
+        "control/src/vonk_control/db/node_facts.py",
+        "control/src/vonk_control/user_authority.py",
+    }
+)
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
@@ -165,11 +174,14 @@ SECURITY_EDGES = frozenset(
 )
 
 
-# The files that allocate the next revision_number; no other source names it.
+# The files that allocate the next revision_number, and the collector that keeps
+# each document's newest one so it is never allocated twice; no other source
+# names it.
 REVISION_NUMBER_ALLOCATORS = frozenset(
     {
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
+        "control/src/vonk_control/catalog_revision_collection.py",
     }
 )
 
@@ -1449,6 +1461,23 @@ def check_source(
             and re.search(
                 r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
             )
+        )
+    if (
+        "locks" in modes
+        and not is_test
+        and path.endswith(".py")
+        and path.startswith("control/src/")
+        and path not in TABLE_LOCK_OWNERS
+    ):
+        # A table-wide lock taken NOWAIT loses to any writer in flight, so a
+        # recurring pass that needs one is refused for as long as traffic
+        # lasts (the catalog collector's 21-table fence, 2026-11-04). Recheck
+        # per row instead: a conditional delete, the foreign keys, and a short
+        # lock_timeout that skips a held row.
+        noexit_hits.extend(
+            f"{path}:{line}: table-wide lock; recheck per row instead"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and re.search(r"\bLOCK\s+TABLE\b", text, re.IGNORECASE)
         )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]

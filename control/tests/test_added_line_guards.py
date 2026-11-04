@@ -739,6 +739,24 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert not check_source(agent, unit, {4}, modes=("locks",))
 
 
+def test_a_table_wide_lock_is_taken_only_by_its_owners():
+    # The catalog collector's fence: refused by every writer in flight, it kept
+    # 1,708 of 2,348 revisions in production (2026-11-04).
+    fence = 'session.execute(text("LOCK TABLE jobs IN EXCLUSIVE MODE NOWAIT"))\n'
+    collector = "control/src/vonk_control/catalog_revision_collection.py"
+    assert check_source(collector, fence, {1}, modes=("locks",))
+    assert check_source(
+        collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
+    )
+    assert not check_source(collector, fence, set(), modes=("locks",))
+    owner = "control/src/vonk_control/user_authority.py"
+    assert not check_source(owner, fence, {1}, modes=("locks",))
+    test = "control/tests/test_catalog_revision_collection.py"
+    assert not check_source(test, fence, {1}, modes=("locks",))
+    row = "with session.begin_nested():\n    session.execute(delete(Row))\n"
+    assert not check_source(collector, row, {1, 2}, modes=("locks",))
+
+
 @pytest.mark.parametrize(
     "source",
     [

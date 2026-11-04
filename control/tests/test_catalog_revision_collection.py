@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
@@ -864,9 +863,9 @@ def test_a_candidate_inventory_slower_than_the_budget_still_advances_the_pass(
     elapsed = [0.0]
     candidates = CatalogRevisionCollector._candidates
 
-    def slow_candidates(session: Session, cutoff: datetime) -> object:
+    def slow_candidates(session: Session, cutoff: datetime, **kwargs) -> object:
         elapsed[0] += SWEEP_BUDGET_SECONDS + 1
-        return candidates(session, cutoff)
+        return candidates(session, cutoff, **kwargs)
 
     monkeypatch.setattr(
         catalog_revision_collection,
@@ -911,55 +910,100 @@ def test_removal_succeeds_on_postgres_with_its_real_constraints(
         assert catalog.count(model) == 1
 
 
-def test_a_busy_reference_fence_ends_the_pass_and_retries_after_release(
-    postgres_engine: Engine, caplog: pytest.LogCaptureFixture
-) -> None:
-    """Catches a sweep that re-tries the shared fence once per candidate.
+def _job_payload(identity: str) -> dict[str, object]:
+    return RecipeStopParent(
+        schema_version=1,
+        owner_kind=ProfileSwitchChildKind.RUN.value,
+        owner_id=identity,
+        plan_digest="0" * 64,
+    ).model_dump(mode="json")
 
-    Every candidate takes the same table fence, so a writer in flight on one
-    fenced table refuses them all; trying each in turn is a hot loop.
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_normal_traffic_in_flight_never_stops_collection_on_postgres(
+    postgres_engine: Engine,
+) -> None:
+    """Catches a collector that needs every writer gone before it may delete.
+
+    Production 2026-11-04: the collector's 21-table ``LOCK TABLE ... NOWAIT``
+    fence lost to ordinary traffic on every pass (``fence_busy`` 12 to 33
+    passes in 40 minutes) and kept 1,708 of 2,348 revisions. Here a request
+    is being accepted (an uncommitted Job) and a running workload is being
+    updated while the sweep runs: the unused revisions still go in one pass,
+    the one in use stays, and the writer is never refused or made to wait.
     """
 
     Base.metadata.create_all(postgres_engine)
     catalog = Catalog(postgres_engine)
     old = [_refresh(catalog, f"busy-{index}")[0] for index in range(3)]
-    collector = catalog.collector()
-    fences: list[str] = []
+    in_use, _ = _refresh(catalog, "in-use")
+    _installation, run = catalog.workload(in_use)
+    with postgres_engine.connect() as writer:
+        writer.execute(
+            insert(Job).values(
+                request_id=str(uuid.uuid4()),
+                kind=OperationKind.RECIPE_STOP.value,
+                state=LifecycleState.RUNNING.value,
+                actor="test",
+                authority_revision="r",
+                targets=[NODE],
+                payload_digest="0" * 64,
+                payload=_job_payload(str(uuid.uuid4())),
+                current_attempt=0,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        writer.execute(
+            update(RecipeRun).where(RecipeRun.id == run).values(updated_at=OLD)
+        )
 
-    def count_fence(_connection, _cursor, statement, *_rest) -> None:
-        if "NOWAIT" in statement:
-            fences.append(statement)
+        result = catalog.collector().collect()
 
-    caplog.set_level(logging.INFO, logger="vonk_control.catalog_revision_collection")
-    event.listen(postgres_engine, "before_cursor_execute", count_fence)
-    try:
-        with postgres_engine.connect() as writer:
-            writer.execute(text("LOCK TABLE jobs IN ROW EXCLUSIVE MODE"))
+        assert result.revisions == len(old)
+        assert not any(catalog.exists(revision) for revision in old)
+        assert catalog.exists(in_use)
+        writer.commit()
+    # A fresh request is admitted after the sweep, and nothing was left held.
+    catalog.job(_job_payload(in_use), state=LifecycleState.RUNNING.value, updated=NOW)
 
-            assert collector.tick() is False
-            assert len(fences) == 1
-            assert len(caplog.records) == 1
-            assert all(catalog.exists(revision) for revision in old)
-            assert collector._due_at is not None
-            first_wait = collector._due_at - catalog.now
 
-            # The wait is paced: a worker pass before the retry tries nothing.
-            assert collector.tick() is False
-            assert len(fences) == 1
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_reference_committed_during_the_batch_keeps_its_revision_on_postgres(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches trusting the pass inventory: a Job accepted after it names a row.
 
-            # A writer still in flight at the retry backs the next wait off.
-            catalog.now = collector._due_at
-            assert collector.tick() is False
-            assert len(fences) == 2
-            assert collector._due_at - catalog.now > first_wait
-            writer.rollback()
+    The Job commits after the inventory read the references and before the
+    batch deletes; the recheck inside the batch transaction sees it, keeps
+    that revision, and still removes the unrelated one in the same pass.
+    """
 
-        # Re-checked within moments, not after the hourly interval.
-        catalog.now = NOW + timedelta(minutes=1)
-        assert collector.tick() is True
-    finally:
-        event.remove(postgres_engine, "before_cursor_execute", count_fence)
-    assert not any(catalog.exists(revision) for revision in old)
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    named, _ = _refresh(catalog, "named")
+    unrelated, _ = _refresh(catalog, "unrelated")
+    real_bound = catalog_revision_collection._bound_lock_waits
+    accepted: list[str] = []
+
+    def accept_during_batch(session: Session, deadline: float) -> None:
+        if not accepted:
+            accepted.append(named)
+            catalog.job(
+                _job_payload(named), state=LifecycleState.RUNNING.value, updated=NOW
+            )
+        real_bound(session, deadline)
+
+    monkeypatch.setattr(
+        catalog_revision_collection, "_bound_lock_waits", accept_during_batch
+    )
+    result = catalog.collector().collect()
+
+    assert accepted
+    assert catalog.exists(named)
+    assert not catalog.exists(unrelated)
+    assert result.revisions == 1
+    assert result.kept == {"live operation": 1}
 
 
 def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
@@ -1101,23 +1145,23 @@ def test_a_model_revision_a_kept_model_depends_on_is_kept(catalog: Catalog) -> N
     assert not catalog.exists(by_kept)
 
 
-def test_a_dependent_imported_after_the_inventory_is_kept_by_the_fence_recheck(
+def test_a_dependent_imported_after_the_inventory_is_kept_by_the_batch_recheck(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches the fence trusting the pass inventory for a later import.
+    """Catches trusting the pass inventory for a later import.
 
     Wrong implementation caught: the dependency set is taken once before the
     candidates and never rechecked, so a Model that declares the candidate as
-    a dependency, imported between the inventory and the candidate's
-    transaction, still lets the candidate be deleted.
+    a dependency, imported between the inventory and the batch transaction,
+    still lets the candidate be deleted.
     """
 
     encoder = catalog.revision("encoder", 1, kind="model")
     catalog.revision("encoder", 2, kind="model", head="active")
-    real_fence = catalog_revision_collection._fence_references
+    real_bound = catalog_revision_collection._bound_lock_waits
     imported: list[str] = []
 
-    def import_before_fence(session: Session, deadline: float) -> None:
+    def import_before_batch(session: Session, deadline: float) -> None:
         if not imported:
             imported.append(
                 catalog.revision(
@@ -1130,10 +1174,10 @@ def test_a_dependent_imported_after_the_inventory_is_kept_by_the_fence_recheck(
                     document=_model_depending_on(_digest("encoder/1")),
                 )
             )
-        real_fence(session, deadline)
+        real_bound(session, deadline)
 
     monkeypatch.setattr(
-        catalog_revision_collection, "_fence_references", import_before_fence
+        catalog_revision_collection, "_bound_lock_waits", import_before_batch
     )
     result = catalog.collector().collect()
 
@@ -1142,10 +1186,10 @@ def test_a_dependent_imported_after_the_inventory_is_kept_by_the_fence_recheck(
     assert result.kept == {"model dependency": 1}
 
 
-def test_the_dependency_inventory_parses_each_model_once_and_the_fence_none(
+def test_the_dependency_inventory_parses_each_model_once_per_pass(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches rescanning every Model document per candidate under the fence."""
+    """Catches rescanning every Model document per candidate."""
 
     total = 300
     for index in range(total):

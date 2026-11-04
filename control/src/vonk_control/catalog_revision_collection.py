@@ -34,14 +34,22 @@ A source bundle (archive bytes stored in PostgreSQL) is removed once no
 remaining revision, build or live payload names its digest and it is older than
 the grace period.
 
-Every revision is removed in its own transaction, and one that cannot be
-removed (a reference appeared, a constraint refused) is skipped and retried at
-the next sweep: a failure never stops the rest and never touches a workload.
-The reference fence is shared by every candidate, so a writer holding it ends
-the pass instead, and the sweep is re-checked with jittered backoff.
-The head is re-checked under its row lock inside that transaction. Cached
-model files and runtime-image receipts are not owned by a revision (they are
-content-addressed and shared) and are left to their own request-led removal.
+Revisions are removed in bounded batches walked by a cursor, so every pass
+moves on from where the last one stopped and nothing ever waits for a global
+fence. Each revision is rechecked and deleted under its own savepoint: one that
+cannot be removed (a reference appeared, a constraint refused, a row is locked)
+is skipped and retried at the next sweep, so a failure never stops the rest and
+never touches a workload. References the database keeps (heads, installations,
+builds, mappings, model bindings) refuse the delete through their ``RESTRICT``
+foreign keys, and a writer still holding one wins after a short lock wait. The
+references kept in JSON are read once per pass to skip what is named, and read
+again inside the batch transaction after its deletes: anything named there by
+a committed write rolls the batch back and is kept, and the rest is retried.
+A JSON reference still uncommitted at that recheck is not seen: it can only
+name a revision superseded longer than the grace period, and the request that
+wrote it finds the revision gone (its foreign-key writes are refused).
+Cached model files and runtime-image receipts are not owned by a revision (they
+are content-addressed and shared) and are left to their own request-led removal.
 
 Revisions are read as plain columns and deleted with Core statements. Loading
 one as an ORM object would run the immutability guards on an old-contract
@@ -56,18 +64,18 @@ import logging
 import re
 import time
 from collections import Counter
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import Select, and_, delete, exists, false, or_, select, text
-from sqlalchemy.exc import DBAPIError, SQLAlchemyError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy import Select, and_, delete, exists, false, or_, select, text, union_all
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, aliased, sessionmaker
 from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
     InstallationState,
-    LifecycleState,
     LifecycleSubject,
     RunState,
     WaitReason,
@@ -77,7 +85,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
-from . import job_states
 from .agent_jobs import release_owned_reservations_in_session
 from .catalog_revision_contract import UnprojectedRevision, cached_catalog_document
 from .logging import log_event
@@ -85,7 +92,6 @@ from .model_cache_contract import CacheManifest, CacheOperationKind
 from .models import (
     AgentOperation,
     ArtifactJob,
-    CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
@@ -101,12 +107,10 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
     RecipeSourceBundle,
-    ResourceReservation,
     RunNode,
     SourceBundleArchive,
 )
 from .owner_liveness import builds_in_flight
-from .recovery_policy import RECOVERY
 from .revision_images import revision_images
 from .stored_json import binding_for
 from .wait_contract import WaitOwnerKind
@@ -120,12 +124,12 @@ _SCAN_BATCH = 20
 # One sweep stops here and the rest continues on the next worker pass, so a
 # first sweep over a large catalog never holds the worker loop for long.
 SWEEP_BUDGET_SECONDS = 20.0
-_FINISHED = job_states.words(
-    LifecycleState.SUCCEEDED,
-    LifecycleState.FAILED,
-    LifecycleState.CANCELLED,
-    LifecycleState.SUPERSEDED,
-)
+# Candidates removed in one transaction; the JSON references are read once per
+# batch, so the recheck costs one scan per batch, not one per candidate.
+_BATCH = 50
+# A row a writer holds is skipped after this wait, never queued for: the writer
+# wins and the row is retried at the next sweep.
+_LOCK_TIMEOUT_MS = 250
 _FINISHED_BUILDS = ("succeeded", "failed")
 # Terminal states are candidates only; exact current-generation absence is
 # independently required before releasing claims and discarding recovery rows.
@@ -136,16 +140,29 @@ _TOKEN = re.compile(
 )
 
 
+class _Phase(StrEnum):
+    """What the sweep cursor walks, in this order.
+
+    Recipe revisions go first, so a model revision only a collected recipe
+    revision pinned follows in the same sweep; source bundles go last, once no
+    removed revision names them.
+    """
+
+    RECIPE = RunSwitchReasonScopeName.RECIPE.value
+    MODEL = RunSwitchReasonScopeName.MODEL.value
+    BUNDLE = "bundle"
+
+
 class _Kept(Exception):
     """The revision is still referenced; leave it for a later sweep."""
 
 
-class _FenceBusy(Exception):
-    """A writer holds a fenced table; this pass ends and waits, never spins.
+class _Rescinded(Exception):
+    """The batch recheck found deleted rows named; the batch rolls back."""
 
-    Not a database fault: every candidate shares the same fence, so trying the
-    next one would only meet the same writer again.
-    """
+    def __init__(self, named: frozenset[str]) -> None:
+        super().__init__(len(named))
+        self.named = named
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +172,19 @@ class _Candidate:
     publisher: str
     slug: str
     content_digest: str
+
+    @property
+    def names(self) -> frozenset[str]:
+        return frozenset({self.id, self.content_digest})
+
+
+@dataclass(frozen=True, slots=True)
+class _Bundle:
+    id: str
+
+    @property
+    def names(self) -> frozenset[str]:
+        return frozenset({self.id})
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,8 +208,9 @@ class CatalogRevisionCollector:
         self._clock = clock
         self._budget_seconds = budget_seconds
         self._due_at: datetime | None = None
-        # Consecutive passes that met a busy fence; a won fence resets it.
-        self._busy_streak = 0
+        # Where the next pass continues (phase, last id passed); None starts a
+        # new sweep. Held in memory: a restarted worker simply starts over.
+        self._cursor: tuple[str, str] | None = None
 
     def tick(self) -> bool:
         """Collect at most once per interval; True when anything was removed."""
@@ -202,89 +233,55 @@ class CatalogRevisionCollector:
         return result.revisions > 0 or result.bundles > 0
 
     def collect(self) -> Collected:
-        try:
-            result = self._sweep()
-        except _FenceBusy:
-            # A wait, not a failure: the pass ends, never per candidate, and
-            # is re-checked with jittered backoff that grows while it lasts.
-            self._busy_streak += 1
-            self._due_at = RECOVERY.next_attempt(
-                "catalog_revision.fence",
-                self._busy_streak,
-                self._clock(),
-                ongoing_intent=True,
-            )
-            log_event(
-                _LOGGER,
-                "catalog_revision.fence_busy",
-                service="control-worker",
-                busy_passes=self._busy_streak,
-                retry_at=self._due_at,
-            )
-            return Collected(0, 0, {})
-        self._busy_streak = 0
-        return result
+        """One pass: batches from the cursor until the sweep ends or the budget.
 
-    def _sweep(self) -> Collected:
+        Never waits for another writer: a held row is skipped, and the pass
+        continues with the next batch.
+        """
+
         now = self._clock()
         cutoff = now - GRACE
-        with self._sessions() as session:
-            candidates = self._candidates(session, cutoff)
-            depended: frozenset[str] = frozenset()
-            if any(item.kind == RunSwitchReasonScopeName.MODEL for item in candidates):
-                cached = self._cached_model_digests(session)
-                if cached is not None:
-                    # A revision a cached set still holds stays (NAS models are
-                    # kept until space is short). Decided once per pass, before
-                    # any lock fence, instead of fencing and scanning per revision.
-                    candidates = [
-                        item
-                        for item in candidates
-                        if item.kind != RunSwitchReasonScopeName.MODEL
-                        or item.content_digest not in cached
-                    ]
-                # A Model another Model still declares as a dependency stays; it
-                # follows once nothing depending on it is left. Decided once per
-                # pass in the inventory; the fence only adds newer revisions.
-                depended = _model_dependencies(session)
-                candidates = [
-                    item
-                    for item in candidates
-                    if item.kind != RunSwitchReasonScopeName.MODEL
-                    or item.content_digest not in depended
-                ]
-        # The budget starts after the inventory so every pass reaches a candidate.
-        deadline = time.monotonic() + self._budget_seconds
-        removed = 0
+        start, after = self._cursor or (_Phase.RECIPE, "")
+        removed = bundles = 0
         kept: Counter[str] = Counter()
-        for candidate in candidates:
-            if time.monotonic() > deadline:
-                self._due_at = now  # continue on the next worker pass
-                break
+        deadline: float | None = None
+        for phase in tuple(_Phase)[tuple(_Phase).index(start) :]:
+            # Bundle refusals are logged, not reported as kept revisions.
+            counts = Counter[str]() if phase == _Phase.BUNDLE else kept
             try:
-                with self._sessions.begin() as session:
-                    _fence_references(session, deadline)
-                    live = live_tokens(
-                        session, now, require_complete=True, deadline=deadline
-                    ) | pinned_by_heads(
-                        session, require_complete=True, deadline=deadline
-                    )
-                    self._remove(session, candidate, live, cutoff, now, depended)
+                for batch, named, held in self._batches(phase, after, now, cutoff):
+                    if deadline is None:
+                        # The budget starts after the inventory, so every pass
+                        # reaches a batch.
+                        deadline = time.monotonic() + self._budget_seconds
+                    pending = []
+                    for item in batch:
+                        if not named.isdisjoint(item.names):
+                            counts["live operation"] += 1
+                        elif not isinstance(item, _Candidate) or (
+                            item.content_digest not in held
+                        ):
+                            pending.append(item)
+                    gone = self._remove_batch(phase, pending, now, cutoff, held, counts)
+                    if phase == _Phase.BUNDLE:
+                        bundles += gone
+                    else:
+                        removed += gone
+                    if time.monotonic() > deadline:
+                        # The next worker pass continues after this batch.
+                        self._cursor = (phase, batch[-1].id)
+                        self._due_at = now
+                        return self._swept(removed, bundles, kept)
             except _Kept as reason:
+                # A damaged or unfinished reference scan proves nothing unused.
                 kept[str(reason)] += 1
-                continue
-            except SQLAlchemyError as error:
-                kept[f"refused {type(error).__name__}"] += 1
-                log_event(
-                    _LOGGER,
-                    "catalog_revision.refused",
-                    service="control-worker",
-                    revision_id=candidate.id,
-                    code=type(error).__name__,
-                )
-                continue
-            removed += 1
-        bundles = self._collect_bundles(cutoff, now, deadline)
+                break
+            after = ""
+        self._cursor = None
+        return self._swept(removed, bundles, kept)
+
+    @staticmethod
+    def _swept(removed: int, bundles: int, kept: Counter[str]) -> Collected:
         if removed or bundles or kept:
             log_event(
                 _LOGGER,
@@ -296,62 +293,233 @@ class CatalogRevisionCollector:
             )
         return Collected(removed, bundles, dict(kept))
 
+    def _batches(
+        self, phase: _Phase, after: str, now: datetime, cutoff: datetime
+    ) -> Iterator[tuple[list[Any], frozenset[str], frozenset[str]]]:
+        """Each next batch after ``after``, with the pass inventory beside it.
+
+        The inventory is read once per phase, after its first batch: what live
+        rows name now (only to skip it; the batch recheck decides) and, for
+        Model revisions, the digests a cached set holds (NAS models are kept
+        until space is short) or another Model declares as a dependency.
+        """
+
+        batch = self._next_batch(phase, after, cutoff)
+        if not batch:
+            return
+        with self._sessions() as session:
+            held: frozenset[str] = frozenset()
+            if phase == _Phase.MODEL:
+                held = _model_dependencies(session) | (
+                    self._cached_model_digests(session) or frozenset()
+                )
+            named = self._references(session, phase, now)
+        while batch:
+            yield batch, named, held
+            batch = self._next_batch(phase, batch[-1].id, cutoff)
+
+    def _next_batch(self, phase: _Phase, after: str, cutoff: datetime) -> list[Any]:
+        with self._sessions() as session:
+            if phase == _Phase.BUNDLE:
+                return self._bundle_candidates(session, cutoff, after=after)
+            return self._candidates(session, cutoff, kind=phase, after=after)
+
+    def _references(
+        self,
+        session: Session,
+        phase: _Phase,
+        now: datetime,
+        deadline: float | None = None,
+    ) -> frozenset[str]:
+        """Every id and digest a live row names that keeps a ``phase`` row."""
+
+        if deadline is None:
+            deadline = time.monotonic() + self._budget_seconds
+        found = live_tokens(session, now, require_complete=True, deadline=deadline)
+        if phase != _Phase.BUNDLE:
+            return found | pinned_by_heads(
+                session, require_complete=True, deadline=deadline
+            )
+        return (
+            found
+            | streamed_tokens(
+                session,
+                select(CatalogDocumentRevision.projected),
+                require_complete=True,
+                deadline=deadline,
+            )
+            | frozenset(session.scalars(select(RecipeBuild.source_bundle_sha256)))
+        )
+
+    def _remove_batch(
+        self,
+        phase: _Phase,
+        pending: list[Any],
+        now: datetime,
+        cutoff: datetime,
+        depended: frozenset[str],
+        kept: Counter[str],
+    ) -> int:
+        """Remove ``pending``; a row named since the inventory stays.
+
+        A rescinded attempt keeps the named rows and retries the rest. Every
+        retry has fewer rows, so the loop ends.
+        """
+
+        while pending:
+            outcome = self._attempt(phase, pending, now, cutoff, depended, kept)
+            if isinstance(outcome, int):
+                return outcome
+            pending = outcome
+        return 0
+
+    def _attempt(
+        self,
+        phase: _Phase,
+        pending: list[Any],
+        now: datetime,
+        cutoff: datetime,
+        depended: frozenset[str],
+        kept: Counter[str],
+    ) -> int | list[Any]:
+        """Remove ``pending`` in one transaction, each under its own savepoint.
+
+        After the deletes, the JSON references are read again in the same
+        transaction. Returns how many were removed or, when a committed write
+        named a removed row since the inventory, nothing is removed and the
+        rows to retry are returned (kept and refused ones are already counted).
+        """
+
+        removed: list[tuple[Any, frozenset[str]]] = []
+        try:
+            with self._sessions.begin() as session:
+                deadline = time.monotonic() + self._budget_seconds
+                _bound_lock_waits(session, deadline)
+                for item in pending:
+                    try:
+                        with session.begin_nested():
+                            names = (
+                                self._remove_bundle(session, item, cutoff)
+                                if phase == _Phase.BUNDLE
+                                else self._remove(session, item, cutoff, now, depended)
+                            )
+                    except _Kept as reason:
+                        kept[str(reason)] += 1
+                        continue
+                    except SQLAlchemyError as error:
+                        # A constraint refused or a writer holds a row.
+                        kept[f"refused {type(error).__name__}"] += 1
+                        log_event(
+                            _LOGGER,
+                            "catalog_revision.refused",
+                            service="control-worker",
+                            phase=phase.value,
+                            id=item.id,
+                            code=type(error).__name__,
+                        )
+                        continue
+                    removed.append((item, names))
+                if removed:
+                    fresh = self._references(session, phase, now, deadline)
+                    named = frozenset(
+                        item.id
+                        for item, names in removed
+                        if not fresh.isdisjoint(names)
+                    )
+                    if named:
+                        raise _Rescinded(named)
+        except _Rescinded as rescinded:
+            kept["live operation"] += len(rescinded.named)
+            return [item for item, _ in removed if item.id not in rescinded.named]
+        except (_Kept, SQLAlchemyError) as error:
+            # The recheck could not finish; nothing of the batch is removed.
+            kept[
+                str(error)
+                if isinstance(error, _Kept)
+                else f"refused {type(error).__name__}"
+            ] += len(removed)
+            return 0
+        for item, _ in removed:
+            log_event(
+                _LOGGER,
+                "catalog_revision.removed",
+                service="control-worker",
+                phase=phase.value,
+                id=item.id,
+            )
+        return len(removed)
+
     # -- candidates ---------------------------------------------------------
 
     @staticmethod
-    def _candidates(session: Session, cutoff: datetime) -> list[_Candidate]:
-        """Superseded revisions past the grace period, recipes before models."""
+    def _candidates(
+        session: Session,
+        cutoff: datetime,
+        *,
+        kind: str = _Phase.RECIPE,
+        after: str = "",
+        limit: int = _BATCH,
+    ) -> list[_Candidate]:
+        """The next superseded revisions of ``kind`` past the grace period.
 
-        heads = {
-            (kind, publisher, slug): (active, candidate)
-            for kind, publisher, slug, active, candidate in session.execute(
-                select(
-                    CatalogDocumentHead.kind,
-                    CatalogDocumentHead.publisher,
-                    CatalogDocumentHead.slug,
-                    CatalogDocumentHead.active_revision_id,
-                    CatalogDocumentHead.candidate_revision_id,
-                )
-            )
-        }
+        Keyset over the primary key from ``after``. A revision is a candidate
+        when no head points at it and a newer revision of its document exists,
+        and it and every newer one are older than the cutoff (no row records
+        when a revision was superseded; the one that replaced it was created
+        at that moment).
+        """
+
+        revision = CatalogDocumentRevision
+        newer = aliased(CatalogDocumentRevision)
+        pointed = union_all(
+            select(CatalogDocumentHead.active_revision_id.label("id")),
+            select(CatalogDocumentHead.candidate_revision_id.label("id")),
+        ).subquery()
+        # Revision numbers are the catalog allocator's (max + 1): the newest one
+        # of each document stays, so a number is never handed out twice.
+        later = and_(
+            newer.document_id == revision.document_id,
+            newer.revision_number > revision.revision_number,
+        )
         rows = session.execute(
             select(
-                CatalogDocumentRevision.id,
-                CatalogDocumentRevision.document_id,
-                CatalogDocumentRevision.kind,
-                CatalogDocumentRevision.publisher,
-                CatalogDocumentRevision.slug,
-                CatalogDocumentRevision.revision_number,
-                CatalogDocumentRevision.content_digest,
-                CatalogDocumentRevision.created_at,
+                revision.id,
+                revision.kind,
+                revision.publisher,
+                revision.slug,
+                revision.content_digest,
             )
+            .where(
+                revision.kind == kind,
+                revision.id > after,
+                revision.created_at <= cutoff,
+                ~exists().where(pointed.c.id == revision.id),
+                exists().where(later),
+                ~exists().where(later, newer.created_at > cutoff),
+            )
+            .order_by(revision.id)
+            .limit(limit)
         ).all()
-        created = {row.id: _utc(row.created_at) for row in rows}
-        newest: dict[str, int] = {}
-        for row in rows:
-            newest[row.document_id] = max(
-                newest.get(row.document_id, 0), row.revision_number
-            )
-        found: list[_Candidate] = []
-        for row in rows:
-            active, candidate = heads.get(
-                (row.kind, row.publisher, row.slug), (None, None)
-            )
-            if row.id in (active, candidate) or row.revision_number == newest.get(
-                row.document_id
-            ):
-                continue
-            # No row records when a revision was superseded; the head that
-            # replaced it was created at that moment.
-            superseded_at = max(created[row.id], created.get(active, created[row.id]))
-            if superseded_at <= cutoff:
-                found.append(
-                    _Candidate(
-                        row.id, row.kind, row.publisher, row.slug, row.content_digest
-                    )
+        return [_Candidate(*row) for row in rows]
+
+    @staticmethod
+    def _bundle_candidates(
+        session: Session, cutoff: datetime, *, after: str = "", limit: int = _BATCH
+    ) -> list[_Bundle]:
+        """The next source bundles past the grace period, keyset by digest."""
+
+        return [
+            _Bundle(sha)
+            for sha in session.scalars(
+                select(RecipeSourceBundle.sha256)
+                .where(
+                    RecipeSourceBundle.sha256 > after,
+                    RecipeSourceBundle.verified_at <= cutoff,
                 )
-        found.sort(key=lambda item: (item.kind != "recipe", item.id))
-        return found
+                .order_by(RecipeSourceBundle.sha256)
+                .limit(limit)
+            )
+        ]
 
     # -- one revision -------------------------------------------------------
 
@@ -359,27 +527,27 @@ class CatalogRevisionCollector:
         self,
         session: Session,
         revision: _Candidate,
-        live: frozenset[str],
         cutoff: datetime,
         now: datetime,
         depended: frozenset[str],
-    ) -> None:
+    ) -> frozenset[str]:
         """Delete one revision and what only it owned, or raise ``_Kept``.
 
+        Returns every id the deletes removed, for the batch recheck.
         ``depended`` is the pass's Model dependency inventory.
         """
 
+        # A read: the heads' RESTRICT keys refuse deleting a revision a head
+        # points at, and a head moving onto it holds its key until it commits.
         head = session.execute(
             select(
                 CatalogDocumentHead.active_revision_id,
                 CatalogDocumentHead.candidate_revision_id,
-            )
-            .where(
+            ).where(
                 CatalogDocumentHead.kind == revision.kind,
                 CatalogDocumentHead.publisher == revision.publisher,
                 CatalogDocumentHead.slug == revision.slug,
             )
-            .with_for_update()
         ).one_or_none()
         if head is not None and revision.id in tuple(head):
             raise _Kept("head")
@@ -402,7 +570,6 @@ class CatalogRevisionCollector:
             installations,
             runs,
             builds,
-            live,
             cutoff,
             now,
             heads=tuple(value for value in (head or ()) if value is not None),
@@ -414,13 +581,7 @@ class CatalogRevisionCollector:
                 CatalogDocumentRevision.id == revision.id
             )
         )
-        log_event(
-            _LOGGER,
-            "catalog_revision.removed",
-            service="control-worker",
-            revision_id=revision.id,
-            kind=revision.kind,
-        )
+        return revision.names | frozenset(installations) | frozenset(runs)
 
     @staticmethod
     def _require_unused(
@@ -429,21 +590,13 @@ class CatalogRevisionCollector:
         installations: list[str],
         runs: list[str],
         builds: list[str],
-        live: frozenset[str],
         cutoff: datetime,
         now: datetime,
         *,
         heads: tuple[str, ...] = (),
     ) -> None:
-        """Raise ``_Kept`` when anything live or recent still names the revision."""
+        """Raise ``_Kept`` when a live or recent row still names the revision."""
 
-        if (
-            revision.id in live
-            or revision.content_digest in live
-            or not live.isdisjoint(installations)
-            or not live.isdisjoint(runs)
-        ):
-            raise _Kept("live operation")
         if session.scalar(
             select(
                 exists().where(
@@ -593,8 +746,8 @@ class CatalogRevisionCollector:
 
         Revisions are immutable, so a dependent imported during the pass is the
         only thing the inventory can have missed. An importer stamps
-        ``created_at`` before it commits, so the rows read under the fence are
-        those created since ``cutoff`` (the grace window), not since the pass.
+        ``created_at`` before it commits, so the rows read here are those
+        created since ``cutoff`` (the grace window), not since the pass.
         """
 
         if revision.kind == RunSwitchReasonScopeName.MODEL:
@@ -630,87 +783,30 @@ class CatalogRevisionCollector:
 
     # -- source bundles -----------------------------------------------------
 
-    def _collect_bundles(self, cutoff: datetime, now: datetime, deadline: float) -> int:
-        """Recheck complete references under a DML fence before each deletion.
+    @staticmethod
+    def _remove_bundle(
+        session: Session, bundle: _Bundle, cutoff: datetime
+    ) -> frozenset[str]:
+        """Delete one bundle unless a put refreshed it since the inventory.
 
         Archive bytes are in this same database, so deletion has no external
-        storage wait. NOWAIT contention ends the pass (see ``_FenceBusy``).
+        storage wait. The grace condition is part of the delete itself, so a
+        concurrent put (which refreshes ``verified_at``) wins: committed, it no
+        longer matches; in flight, it holds the row and the delete is refused.
         """
-        try:
-            with self._sessions() as session:
-                old = list(
-                    session.scalars(
-                        select(RecipeSourceBundle.sha256).where(
-                            RecipeSourceBundle.verified_at <= cutoff
-                        )
-                    )
-                )
-        except SQLAlchemyError as error:
-            log_event(
-                _LOGGER,
-                "catalog_revision.bundle_scan_failed",
-                service="control-worker",
-                code=type(error).__name__,
+
+        deleted = session.execute(
+            delete(RecipeSourceBundle).where(
+                RecipeSourceBundle.sha256 == bundle.id,
+                RecipeSourceBundle.verified_at <= cutoff,
             )
-            return 0
-        removed = 0
-        for sha in sorted(old):
-            if time.monotonic() >= deadline:
-                self._due_at = now
-                break
-            try:
-                with self._sessions.begin() as session:
-                    _fence_references(session, deadline)
-                    # A concurrent put refreshes verified_at; the old candidate
-                    # list is never proof that this bundle is still collectible.
-                    eligible = session.scalar(
-                        select(RecipeSourceBundle.sha256).where(
-                            RecipeSourceBundle.sha256 == sha,
-                            RecipeSourceBundle.verified_at <= cutoff,
-                        )
-                    )
-                    if eligible is None:
-                        continue
-                    named = (
-                        live_tokens(
-                            session, now, require_complete=True, deadline=deadline
-                        )
-                        | streamed_tokens(
-                            session,
-                            select(CatalogDocumentRevision.projected),
-                            require_complete=True,
-                            deadline=deadline,
-                        )
-                        | frozenset(
-                            session.scalars(select(RecipeBuild.source_bundle_sha256))
-                        )
-                    )
-                    if sha in named:
-                        continue
-                    session.execute(
-                        delete(SourceBundleArchive).where(
-                            SourceBundleArchive.sha256 == sha
-                        )
-                    )
-                    session.execute(
-                        delete(RecipeSourceBundle).where(
-                            RecipeSourceBundle.sha256 == sha
-                        )
-                    )
-            except (_Kept, SQLAlchemyError) as error:
-                # Unknown references and concurrent writers prove nothing unused.
-                log_event(
-                    _LOGGER,
-                    "catalog_revision.bundle_refused",
-                    service="control-worker",
-                    sha256=sha,
-                    code=str(error)
-                    if isinstance(error, _Kept)
-                    else type(error).__name__,
-                )
-                continue
-            removed += 1
-        return removed
+        )
+        if int(getattr(deleted, "rowcount", 0) or 0) != 1:
+            raise _Kept("stored again")
+        session.execute(
+            delete(SourceBundleArchive).where(SourceBundleArchive.sha256 == bundle.id)
+        )
+        return bundle.names
 
 
 def _model_dependencies(
@@ -967,57 +1063,24 @@ def streamed_tokens(
     return frozenset(found)
 
 
-def _fence_references(session: Session, deadline: float) -> None:
-    """Fence phantom JSON references without changes to any accepting producer.
+def _bound_lock_waits(session: Session, deadline: float) -> None:
+    """Bound every wait of one batch transaction; it never takes a fence.
 
-    PostgreSQL DML automatically conflicts with this short collector fence.
-    Readers remain available; a writer already in flight wins immediately.
-    EXCLUSIVE also conflicts with existing FOR UPDATE row owners, preventing
-    a lock-order cycle while allowing ordinary SELECTs. All tables this sweep
-    mutates share that fence. Lock acquisition never waits, and all following
-    SQL shares the sweep budget.
+    A row a writer holds (a head moving, an installation being written, a
+    bundle being stored) refuses its statement after a short lock wait, and
+    the whole transaction shares the sweep budget.
     """
     if session.get_bind().dialect.name != "postgresql":
         return
     remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-    session.execute(
-        text("SELECT set_config('statement_timeout', :timeout, true)"),
-        {"timeout": f"{remaining_ms}ms"},
-    )
-    tables = sorted(
-        model.__tablename__
-        for model in (
-            AgentOperation,
-            ArtifactJob,
-            CatalogDocument,
-            CatalogDocumentHead,
-            CatalogDocumentRevision,
-            CatalogRecipeModelReference,
-            ClusterMapping,
-            ClusterMappingNode,
-            FleetProfileApplication,
-            FleetProfileSelection,
-            InstallationNode,
-            Job,
-            ModelCacheOperation,
-            ModelCacheSet,
-            RecipeBuild,
-            RecipeInstallation,
-            RecipeRun,
-            RecipeSourceBundle,
-            ResourceReservation,
-            RunNode,
-            SourceBundleArchive,
-        )
-    )
-    try:
+    for setting, value in (
+        ("statement_timeout", remaining_ms),
+        ("lock_timeout", min(_LOCK_TIMEOUT_MS, remaining_ms)),
+    ):
         session.execute(
-            text("LOCK TABLE " + ", ".join(tables) + " IN EXCLUSIVE MODE NOWAIT")
+            text("SELECT set_config(:name, :value, true)"),
+            {"name": setting, "value": f"{value}ms"},
         )
-    except DBAPIError as error:
-        if getattr(error.orig, "sqlstate", None) != "55P03":
-            raise
-        raise _FenceBusy from None
 
 
 def tokens(values: Iterable[object]) -> frozenset[str]:

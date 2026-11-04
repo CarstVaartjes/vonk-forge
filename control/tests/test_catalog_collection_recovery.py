@@ -208,17 +208,17 @@ def test_new_bundle_reference_between_candidate_scan_and_delete_is_retained(
     catalog = Catalog(postgres_engine)
     sha = "7" * 64
     _bundle(catalog, sha)
-    real_fence = collection._fence_references
+    real_bound = collection._bound_lock_waits
     accepted = False
 
-    def accept_before_fence(session, deadline):
+    def accept_during_batch(session, deadline):
         nonlocal accepted
         if not accepted:
             accepted = True
             catalog.job(_payload(sha), state=LifecycleState.RUNNING.value, updated=OLD)
-        real_fence(session, deadline)
+        real_bound(session, deadline)
 
-    monkeypatch.setattr(collection, "_fence_references", accept_before_fence)
+    monkeypatch.setattr(collection, "_bound_lock_waits", accept_during_batch)
     collector = catalog.collector()
     collector.collect()
     assert accepted
@@ -235,17 +235,23 @@ def test_new_bundle_reference_between_candidate_scan_and_delete_is_retained(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_uncommitted_reference_wins_without_waiting_or_leaking_collector_locks(
+def test_an_open_writer_neither_waits_for_nor_stops_collection(
     postgres_engine: Engine,
 ):
+    """Catches a sweep that is refused, or makes a writer wait, while it runs.
+
+    A request being accepted (uncommitted) touches the same tables the sweep
+    reads and deletes from; the sweep removes what is unused regardless, and
+    the writer commits without having waited.
+    """
     Base.metadata.create_all(postgres_engine)
     catalog = Catalog(postgres_engine)
     old, _head = _refresh(catalog, "concurrent")
     sha = "8" * 64
     _bundle(catalog, sha)
+    catalog.job(_payload(sha), state=LifecycleState.RUNNING.value, updated=OLD)
     collector = catalog.collector()
     with catalog.sessions.begin() as writer:
-        # This transaction has accepted a reference but has not published it yet.
         writer.execute(
             insert(Job).values(
                 request_id=str(uuid.uuid4()),
@@ -255,23 +261,19 @@ def test_uncommitted_reference_wins_without_waiting_or_leaking_collector_locks(
                 authority_revision="r",
                 targets=[NODE],
                 payload_digest="0" * 64,
-                payload=_payload(sha),
+                payload=_payload(str(uuid.uuid4())),
                 current_attempt=0,
                 created_at=OLD,
                 updated_at=OLD,
             )
         )
         collector.collect()
-        assert catalog.exists(old)
+        assert not catalog.exists(old)
+        # A committed reference keeps its bundle.
         _assert_bundle(catalog, sha, exists=True)
-    # The next scan sees the committed reference and can collect unrelated rows.
-    collector.collect()
-    assert not catalog.exists(old)
-    _assert_bundle(catalog, sha, exists=True)
     with catalog.sessions.begin() as session:
-        row = session.scalar(select(Job))
-        assert row is not None
-        row.state = LifecycleState.SUCCEEDED.value
+        for row in session.scalars(select(Job)):
+            row.state = LifecycleState.SUCCEEDED.value
     collector.collect()
     _assert_bundle(catalog, sha, exists=False)
     fresh, _ = _refresh(catalog, "fresh-after-contention")
