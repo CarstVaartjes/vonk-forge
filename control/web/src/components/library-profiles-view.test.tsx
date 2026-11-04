@@ -283,16 +283,12 @@ test("a loaded profile names the inference gateway and alias as its client endpo
   expect(within(endpoint).getByText("qwen-code")).toBeVisible();
   const diagnostic = within(endpoint).getByText("Spark backend (diagnostic)").closest("details");
   expect(diagnostic).not.toHaveAttribute("open");
-  const curl = within(endpoint).getByLabelText("curl example").textContent ?? "";
-  const python = within(endpoint).getByLabelText("Python example").textContent ?? "";
-  expect(curl).toContain("https://vonk-forge.example.ts.net/v1/chat/completions");
-  expect(curl).toContain('"model":"qwen-code"');
-  expect(python).toContain('model="qwen-code"');
-  for (const example of [curl, python]) {
-    expect(example).toContain("VONK_API_KEY");
-    expect(example).not.toMatch(/sk-|vk_[A-Za-z0-9]/);
-  }
-  expect(within(endpoint).getByText(/set per request/)).toBeVisible();
+  expect(within(endpoint).getByLabelText("setup example").textContent).toContain(
+    "export OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'",
+  );
+  expect(within(endpoint).getByLabelText("Python example").textContent).toContain(
+    'model="qwen-code"',
+  );
   expect(within(endpoint).getByRole("button", { name: "Copy curl example" })).toBeVisible();
   expect(profileEndpoints).toHaveBeenCalledWith(2, expect.any(AbortSignal));
 });
