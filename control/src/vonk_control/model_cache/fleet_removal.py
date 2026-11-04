@@ -8,7 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -40,7 +40,7 @@ from ..cache_removal_review import (
 )
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import read_catalog_document
-from ..content_identity import installations_using_models
+from ..content_identity import installations_using_models, recipes_bound_to
 from ..fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     FleetModelRemovalCheckpoint,
@@ -66,6 +66,7 @@ from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models import (
     AgentNode,
     ArtifactLifecycleGate,
+    CatalogDocumentHead,
     CatalogDocumentRevision,
     InstallationNode,
     Job,
@@ -197,15 +198,50 @@ def _observation_issue(
     )
 
 
+def _installation_recipes(
+    session: Session, installations: tuple[RecipeInstallation, ...]
+) -> frozenset[tuple[str, str]]:
+    """The (publisher, slug) of the recipes these installations run."""
+
+    if not installations:
+        return frozenset()
+    return frozenset(
+        (publisher, slug)
+        for publisher, slug in session.execute(
+            select(
+                CatalogDocumentRevision.publisher, CatalogDocumentRevision.slug
+            ).where(
+                CatalogDocumentRevision.id.in_(
+                    sorted({row.recipe_revision_id for row in installations})
+                )
+            )
+        )
+    )
+
+
+def _recipes_being_bound(session: Session) -> frozenset[tuple[str, str]]:
+    """Recipes whose candidate revision names its models only in its document.
+
+    A recipe binds its models when its revision is activated; until then the
+    pending candidate's document is what names them.
+    """
+
+    return frozenset(
+        (publisher, slug)
+        for publisher, slug in session.execute(
+            select(CatalogDocumentHead.publisher, CatalogDocumentHead.slug).where(
+                CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                CatalogDocumentHead.candidate_revision_id.is_not(None),
+            )
+        )
+    )
+
+
 class FleetRemovalMixin:
     def _fleet_effects(
         self, session: Session, digest: str, *, shared_objects: set[str] | None = None
     ) -> FleetModelRemovalEffects:
         cache = cast("ModelCacheService", self)
-        evidence = _Evidence.read(session, cache._clock())
-        readable = (
-            evidence.pointers is not None and evidence.application_references_readable
-        )
         issues: list[FleetRemovalObservationIssue] = []
         target_objects, shared = _model_objects(
             session, digest, observation_issues=issues
@@ -219,6 +255,34 @@ class FleetRemovalMixin:
         contents = lineage_contents(session, digest)
         sets, kept_sets = model_sets(session, contents)
         names = target_objects | contents | set(sets)
+        # An installation uses the model when its recorded model set is one of
+        # the model's sets (a reused set never names the model in the other
+        # columns) or its model columns name it.
+        using = tuple(
+            session.scalars(
+                select(RecipeInstallation)
+                .where(
+                    RecipeInstallation.state != InstallationState.UNINSTALLED,
+                    or_(
+                        RecipeInstallation.model_artifact_set_sha256.in_(sets),
+                        RecipeInstallation.id.in_(
+                            sorted(installations_using_models(session, contents))
+                        ),
+                    ),
+                )
+                .order_by(RecipeInstallation.id)
+            )
+        )
+        # Only these recipes can name the model: those bound to it, those its
+        # installations run, and those a catalog sync is about to bind.
+        evidence = _Evidence.read(
+            session,
+            cache._clock(),
+            recipes=recipes_bound_to(session, contents)
+            | _installation_recipes(session, using)
+            | _recipes_being_bound(session),
+        )
+        readable = evidence.application_references_readable
         protected = bool(
             names & (evidence.operations | evidence.pointed_models | evidence.pinned)
         )
@@ -230,16 +294,7 @@ class FleetRemovalMixin:
             keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
-        # An installation uses the model when its columns name it or its plan
-        # names one of the model's sets (a reused set may never record the model
-        # in the columns). Damage to an installation that does neither is not
-        # this model's.
-        named = installations_using_models(session, contents)
-        for installation in session.scalars(
-            select(RecipeInstallation)
-            .where(RecipeInstallation.state != InstallationState.UNINSTALLED)
-            .order_by(RecipeInstallation.id)
-        ):
+        for installation in using:
             plan = read_or_rebuild(
                 kind=RecipeInstallation.__tablename__,
                 subject=installation.id,
@@ -253,11 +308,6 @@ class FleetRemovalMixin:
                 issues.append(_observation_issue(plan))
                 protected = True
                 keep_detail = "Installation model references are unavailable; refresh owner evidence."
-                continue
-            if installation.id not in named and not set(sets) & {
-                compiled.identity.model_artifact_set_sha256
-                for compiled in plan.compiled_execution_plans.values()
-            }:
                 continue
             detail = _installation_kept(session, installation.id, evidence)
             saved = _installation_pointing(

@@ -18,21 +18,18 @@ from vonk_agent_protocol import (
 from ..bounded_retry import bounded_attempts
 from ..catalog_queries import active_head_revision
 from ..categorized_errors import InvalidValue
-from ..fleet_profile_contract import FleetProfileAssignmentInput
 from ..inventory_items_contract import InventoryArtifactItem
-from ..lifecycle.evidence import Residue
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache_contract import CacheManifest
 from ..models import (
     CatalogDocumentRevision,
-    FleetProfile,
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeInstallation,
     RecipeRun,
 )
+from ..reference_facts import profiles_naming
 from ..stored_json import read_row_column
-from ..strict_json import serialize_json_value
 from .artifacts import ArtifactSetManifest, ArtifactSpec, _optional_digest
 from .catalog_helpers import _iso, _recipe_model_content_digests
 from .constants import SCHEMA_VERSION
@@ -40,7 +37,6 @@ from .errors import (
     ModelCacheError,
     ModelCacheStorageUnknown,
 )
-from .source_helpers import _contains_digest
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
@@ -269,18 +265,17 @@ class InventoryMixin:
                 for revision_id in running_revision_ids
             ):
                 reasons.add(CacheReferenceReason.RUNNING_MODEL)
-        for profile in session.scalars(select(FleetProfile)):
-            assignments = read_row_column(profile, "assignments")
-            if (
-                isinstance(assignments, Residue)
-                or _contains_digest(
-                    serialize_json_value(assignments),
-                    row.model_content_sha256,
-                    row.recipe_revision_sha256,
-                )
-                or cache._profile_references_cache(session, profile, row)
-            ):
-                reasons.add(CacheReferenceReason.SAVED_PROFILE)
+        if any(
+            cache._recipe_head_references_cache(session, publisher, slug, row)
+            for publisher, slug in sorted(
+                {
+                    recipe
+                    for recipes in profiles_naming(session).values()
+                    for recipe in recipes
+                }
+            )
+        ):
+            reasons.add(CacheReferenceReason.SAVED_PROFILE)
         row.protected = bool(reasons)
         row.protected_reasons = sorted(reasons)
 
@@ -330,52 +325,36 @@ class InventoryMixin:
             return True
         return bool(cache_model_digests.intersection(model_rows))
 
-    def _profile_references_cache(
+    def _recipe_head_references_cache(
         self,
         session: Session,
-        profile: FleetProfile,
+        publisher: str,
+        slug: str,
         row: ModelCacheSet,
     ) -> bool:
-        """Resolve profile recipe IDs before deciding a cache set is evictable."""
+        """Whether the current revision of a recipe a saved profile names uses this set."""
         cache = cast("ModelCacheService", self)
-        assignments = read_row_column(profile, "assignments")
-        if not isinstance(assignments, list):
-            return isinstance(
-                assignments, Residue
-            )  # destructive cleanup retains unknown references
-        for assignment in assignments:
-            if not isinstance(assignment, FleetProfileAssignmentInput):
-                continue
-            publisher, separator, slug = assignment.recipe_selector.partition("/")
-            if not separator:
-                publisher, slug = "vonk-forge", publisher
-            revision = session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.publisher == publisher,
-                    CatalogDocumentRevision.slug == slug,
-                    CatalogDocumentRevision.state == "active",
-                    active_head_revision(),
-                )
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.publisher == publisher,
+                CatalogDocumentRevision.slug == slug,
+                CatalogDocumentRevision.state == "active",
+                active_head_revision(),
             )
-            if (
-                revision is None
-                or revision.kind != "recipe"
-                or revision.state != "active"
-            ):
-                continue
-            if (
-                row.recipe_revision_sha256 is not None
-                and revision.content_digest == row.recipe_revision_sha256
-            ):
-                return True
-            if row.model_content_sha256 is None:
-                continue
-            if cache._recipe_references_cache(
-                session, revision.id, cache._cache_model_content_digests(row)
-            ):
-                return True
-        return False
+        )
+        if revision is None:
+            return False
+        if (
+            row.recipe_revision_sha256 is not None
+            and revision.content_digest == row.recipe_revision_sha256
+        ):
+            return True
+        if row.model_content_sha256 is None:
+            return False
+        return cache._recipe_references_cache(
+            session, revision.id, cache._cache_model_content_digests(row)
+        )
 
     def _update_flags(
         self, session: Session, row: ModelCacheSet, manifest: ArtifactSetManifest

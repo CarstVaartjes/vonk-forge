@@ -72,6 +72,7 @@ from vonk_agent_protocol import (
     RunState,
     WaitReason,
     canonical_message,
+    live_words,
     stored_words,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
@@ -772,12 +773,11 @@ def operation_tokens(
     window = now - GRACE if recent else None
 
     def live(state, updated, subject=LifecycleSubject.JOB):
+        if window is None:
+            # By the subject's live words, so the state index answers it.
+            return state.in_(live_words(subject))
         ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
-        return (
-            state.not_in(ended)
-            if window is None
-            else or_(state.not_in(ended), updated >= window)
-        )
+        return or_(state.not_in(ended), updated >= window)
 
     selected = session.scalar(select(FleetProfileSelection.application_id))
     sources = (

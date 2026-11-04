@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import or_, select
+from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from ..artifact_reference_scan import _selectors_revisions
 from ..catalog_queries import active_head_revision
@@ -54,8 +55,8 @@ class _Evidence:
     # Newest active recipe revision of each document: id, creation time, number
     # and content digest (what an installation is compared on).
     newest: Mapping[str, tuple[str, datetime, int, str]]
-    # (publisher, slug) -> Spark sets of the saved profile assignments naming it.
-    # None when a profile cannot be read: nothing can then be proven unused.
+    # (publisher, slug) -> Spark sets of the saved profile assignments naming it,
+    # from the stored projection of which profiles name which recipes.
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
     # The same for the loaded (selected) profile alone: its installations never go.
     loaded_pointers: (
@@ -69,43 +70,62 @@ class _Evidence:
         session: Session,
         now: datetime,
         superseded_applications: Collection[str] = (),
+        *,
+        recipes: Collection[tuple[str, str]] | None = None,
     ) -> _Evidence:
         """``superseded_applications`` are the loads a reviewed load replaces:
-        they keep nothing for its review (the collector itself passes none)."""
+        they keep nothing for its review (the collector itself passes none).
+
+        ``recipes`` limits every recipe-keyed read to these (publisher, slug)
+        pairs: a review about one target passes the recipes that can name it.
+        """
 
         cutoff = now - GRACE
+
+        def among[*Columns](statement: Select[*Columns]) -> Select[*Columns]:
+            if recipes is None:
+                return statement
+            return statement.where(
+                catalog_selector_membership(
+                    CatalogDocumentRevision.publisher,
+                    CatalogDocumentRevision.slug,
+                    sorted(set(recipes)),
+                )
+            )
+
         newest: dict[str, tuple[str, datetime, int, str]] = {
             document_id: (revision_id, _utc(created), number, digest)
             for revision_id, document_id, number, created, digest in session.execute(
-                select(
-                    CatalogDocumentRevision.id,
-                    CatalogDocumentRevision.document_id,
-                    CatalogDocumentRevision.revision_number,
-                    CatalogDocumentRevision.created_at,
-                    CatalogDocumentRevision.content_digest,
-                ).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                    active_head_revision(),
+                among(
+                    select(
+                        CatalogDocumentRevision.id,
+                        CatalogDocumentRevision.document_id,
+                        CatalogDocumentRevision.revision_number,
+                        CatalogDocumentRevision.created_at,
+                        CatalogDocumentRevision.content_digest,
+                    ).where(
+                        CatalogDocumentRevision.kind == "recipe",
+                        CatalogDocumentRevision.state == "active",
+                        active_head_revision(),
+                    )
                 )
             )
         }
-        pointers = _profile_pointers(session)
+        pointers = _profile_pointers(session, recipes=recipes)
         selected = session.scalar(select(FleetProfileSelection.profile_id))
         loaded_pointers = (
             {}
             if selected is None
-            else _profile_pointers(session, only_profile_id=selected)
+            else _profile_pointers(session, only_profile_id=selected, recipes=recipes)
         )
         head_ids = {item[0] for item in newest.values()}
-        if pointers is not None:
-            head_ids.update(
-                revision.id
-                for found in _selectors_revisions(
-                    session, [f"{publisher}/{slug}" for publisher, slug in pointers]
-                ).values()
-                for revision in found
-            )
+        head_ids.update(
+            revision.id
+            for found in _selectors_revisions(
+                session, [f"{publisher}/{slug}" for publisher, slug in pointers]
+            ).values()
+            for revision in found
+        )
         # A load that is queued, admission-waiting or running needs the exact
         # revisions its plan resolved, whatever the saved profiles say now (a
         # sweep rewrites its profile between steps). A load waiting for
@@ -118,12 +138,19 @@ class _Evidence:
             CatalogDocumentHead.active_revision_id,
             CatalogDocumentHead.candidate_revision_id,
         ):
-            head_ids.update(
-                value
-                for value in session.scalars(
-                    select(column).where(CatalogDocumentHead.kind == "recipe")
+            heads = select(column).where(
+                CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE
+            )
+            if recipes is not None:
+                heads = heads.where(
+                    catalog_selector_membership(
+                        CatalogDocumentHead.publisher,
+                        CatalogDocumentHead.slug,
+                        sorted(set(recipes)),
+                    )
                 )
-                if value is not None
+            head_ids.update(
+                value for value in session.scalars(heads) if value is not None
             )
         # What a profile points to is the newest revision of the recipes it
         # names. A recipe nobody named is offered by the catalog but is no
@@ -134,21 +161,19 @@ class _Evidence:
             CatalogDocumentRevision.slug,
             CatalogDocumentRevision.content_digest,
             CatalogDocumentRevision.document,
-        ).where(CatalogDocumentRevision.id.in_(head_ids))
-        if pointers is not None:
+        ).where(
+            CatalogDocumentRevision.id.in_(head_ids),
             # Filter before loading JSON: preview fits each Spark separately,
             # and an unpointed library head contributes no retention evidence.
-            # Unreadable profiles still conservatively retain every head.
-            pointed_query = pointed_query.where(
-                or_(
-                    CatalogDocumentRevision.id.in_(applied_ids),
-                    catalog_selector_membership(
-                        CatalogDocumentRevision.publisher,
-                        CatalogDocumentRevision.slug,
-                        tuple(pointers),
-                    ),
-                )
-            )
+            or_(
+                CatalogDocumentRevision.id.in_(applied_ids),
+                catalog_selector_membership(
+                    CatalogDocumentRevision.publisher,
+                    CatalogDocumentRevision.slug,
+                    tuple(pointers),
+                ),
+            ),
+        )
         pointed = session.execute(pointed_query).all()
         pointed_ids = frozenset(row.id for row in pointed)
         pinned = tokens(row.document for row in pointed)

@@ -123,6 +123,15 @@ class StoredInstallationPlan(_PersistedModel):
             raise ValueError("installation plan compiled documents do not match nodes")
         return self
 
+    @property
+    def model_artifact_set_sha256(self) -> str | None:
+        """The one model set every rank runs; ``None`` when ranks name none or several."""
+        sets = {
+            compiled.identity.model_artifact_set_sha256
+            for compiled in self.compiled_execution_plans.values()
+        }
+        return next(iter(sets)) if len(sets) == 1 else None
+
 
 class StoredRunNodePlan(_PersistedModel):
     node_id: NodeId

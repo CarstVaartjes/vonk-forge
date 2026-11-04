@@ -254,15 +254,15 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "A7",
         "a node route builds the whole fleet projection to find one node (and A8's parses)",
     ),
+    # Asks the stored facts keyed by the model's sets and recipes (#2026).
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: the removal review is not yet target-bounded (N+1 per active installation)",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: the fleet removal review is not yet target-bounded (overlaps audit A6)",
+        "A6",
+        "the uninstall plan of each installation using the model lists every live"
+        " installation (#2032)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.

@@ -135,7 +135,6 @@ from .provider_contracts import (
 )
 from .provider_contracts import _GitHubReleaseMetadata as _GitHubReleaseMetadata
 from .service import ModelCacheService as ModelCacheService
-from .source_helpers import _contains_digest as _contains_digest
 from .source_helpers import _fsync_directory as _fsync_directory
 from .source_helpers import (
     _is_allowed_github_release_redirect as _is_allowed_github_release_redirect,

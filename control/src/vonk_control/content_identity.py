@@ -318,6 +318,37 @@ def installations_using_models(session, contents: Collection[str]) -> frozenset[
     )
 
 
+def recipes_bound_to(session, contents: Collection[str]) -> frozenset[tuple[str, str]]:
+    """The (publisher, slug) of every recipe with a revision bound to ``contents``.
+
+    By the relational binding rows, keyed by the model contents (indexed).
+    """
+    from sqlalchemy import select
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .models import CatalogDocumentRevision, CatalogRecipeModelReference
+
+    if not contents:
+        return frozenset()
+    models = select(CatalogDocumentRevision.id).where(
+        CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+        CatalogDocumentRevision.content_digest.in_(sorted(contents)),
+    )
+    return frozenset(
+        (publisher, slug)
+        for publisher, slug in session.execute(
+            select(CatalogDocumentRevision.publisher, CatalogDocumentRevision.slug)
+            .join(
+                CatalogRecipeModelReference,
+                CatalogRecipeModelReference.recipe_revision_id
+                == CatalogDocumentRevision.id,
+            )
+            .where(CatalogRecipeModelReference.model_revision_id.in_(models))
+            .distinct()
+        )
+    )
+
+
 def active_recipe_revisions(session, selectors: Collection[tuple[str, str]]):
     """Each recipe selector's active revision, in one read.
 

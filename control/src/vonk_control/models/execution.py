@@ -18,9 +18,11 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    event,
     text,
 )
-from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Mapped, MappedColumn, Mapper, mapped_column
 from vonk_agent_protocol import (
     ArtifactPreparation,
     InstallationNodeState,
@@ -55,6 +57,10 @@ class RecipeInstallation(Base):
             _nullable_lower_hex("model_content_sha256", 64),
             name="ck_recipe_installations_model_content_sha256",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("model_artifact_set_sha256", 64),
+            name="ck_recipe_installations_model_artifact_set_sha256",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -68,6 +74,13 @@ class RecipeInstallation(Base):
     # recipe revision.  This makes model-to-installation ownership explicit
     # without attempting to infer it from mutable catalog display metadata.
     model_content_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    # The model set every rank of the accepted plan runs: the one stored fact
+    # for "which installations use this set", written with the plan at
+    # admission. Rows accepted before the column existed are filled from their
+    # plan at Controller startup.
+    model_artifact_set_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
     mapping_id: Mapped[str] = mapped_column(
@@ -93,6 +106,20 @@ class RecipeInstallation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+@event.listens_for(RecipeInstallation, "before_insert")
+def _installation_model_set_recorded(
+    _mapper: Mapper[RecipeInstallation],
+    _connection: Connection,
+    target: RecipeInstallation,
+) -> None:
+    """A row inserted without its model set records the one its plan names."""
+    if target.model_artifact_set_sha256 is not None:
+        return
+    from ..reference_facts import plan_model_set
+
+    target.model_artifact_set_sha256 = plan_model_set(target.plan)
 
 
 class InstallationNode(Base):

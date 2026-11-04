@@ -362,6 +362,7 @@ def _unrelated_load(
             digest = models[index][1]
             session.add(
                 RecipeInstallation(
+                    model_artifact_set_sha256=real.model_artifact_set_sha256,
                     id=str(uuid.uuid4()),
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
@@ -381,6 +382,7 @@ def _unrelated_load(
             digest = models[index][1]
             session.add(
                 RecipeInstallation(
+                    model_artifact_set_sha256=real.model_artifact_set_sha256,
                     id=str(uuid.uuid4()),
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
@@ -691,11 +693,14 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         protected.cache.close()
 
 
-def test_a_damaged_installation_plan_blocks_the_removal(tmp_path: Path) -> None:
-    """Catches skipping an unreadable plan because its columns name another model.
+def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
+    tmp_path: Path,
+) -> None:
+    """Catches skipping an installation whose plan is damaged once it is read by its set.
 
-    The plan cannot say which sets it uses, so an installed installation with a
-    damaged plan keeps the removal from being accepted, whatever its columns name.
+    The installation records the target's model set while its other columns
+    name another model (a reused set). Its damaged plan keeps the removal from
+    being accepted.
     """
     world = _world(tmp_path, "damaged", unrelated=ONE_OF_EACH)
     try:
@@ -711,6 +716,7 @@ def test_a_damaged_installation_plan_blocks_the_removal(tmp_path: Path) -> None:
             damaged_id = str(uuid.uuid4())
             session.add(
                 RecipeInstallation(
+                    model_artifact_set_sha256=_hex("set/target"),
                     id=damaged_id,
                     recipe_revision_id=other.id,
                     model_content_sha256=_hex("elsewhere"),

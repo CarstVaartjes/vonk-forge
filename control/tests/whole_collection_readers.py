@@ -43,6 +43,8 @@ COLLECTOR_FUNCTIONS = {
     f"{_STORAGE}service.py": frozenset(
         {"tick", "collect", "redrive_installation", "redrive_artifact", "_expire"}
     ),
+    # Controller startup fills the saved-profile projection once per start.
+    "control/src/vonk_control/reference_facts.py": frozenset({"_fill_profile_recipes"}),
 }
 # Readers that load or parse the whole collection to answer for any target.
 WHOLE_COLLECTION_READERS = frozenset(
@@ -89,6 +91,17 @@ def _non_terminal_only(call: ast.Call) -> bool:
     )
 
 
+def _keyed_by_recipes(call: ast.Call) -> bool:
+    """``…read(..., recipes=…)`` answers for the recipes the target names only."""
+    return any(
+        keyword.arg == "recipes"
+        and not (
+            isinstance(keyword.value, ast.Constant) and keyword.value.value is None
+        )
+        for keyword in call.keywords
+    )
+
+
 def _reader_call(call: ast.Call) -> bool:
     name = _tail(call.func)
     if name in WHOLE_COLLECTION_READERS:
@@ -97,6 +110,7 @@ def _reader_call(call: ast.Call) -> bool:
         name == "read"
         and isinstance(call.func, ast.Attribute)
         and _tail(call.func.value) in EVIDENCE_CLASSES
+        and not _keyed_by_recipes(call)
     )
 
 

@@ -14,6 +14,7 @@ from typing import NamedTuple
 
 from sqlalchemy import (
     Exists,
+    and_,
     case,
     func,
     literal,
@@ -22,11 +23,13 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.orm import Session, load_only
+from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
-from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..models import CatalogDocumentRevision, ModelCacheSet, ModelCacheSetArtifact
 from ..stored_json import read_row_column
 
 
@@ -144,7 +147,16 @@ def model_sets(
         .where(
             or_(
                 ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
-                verifies_model(session, wanted),
+                and_(
+                    ModelCacheSet.artifact_set_sha256.in_(
+                        sorted(
+                            _sets_holding_files(session, wanted)
+                            if among is None
+                            else among
+                        )
+                    ),
+                    verifies_model(session, wanted),
+                ),
             ),
             *(
                 ()
@@ -176,6 +188,48 @@ def model_sets(
     return ModelSets(
         owned=tuple(sorted(d for d, b in bound.items() if not b & catalogued)),
         shared=tuple(sorted(d for d, b in bound.items() if b & catalogued)),
+    )
+
+
+def _sets_holding_files(session: Session, contents: Collection[str]) -> set[str]:
+    """The cached sets that hold a file of one of these catalog models.
+
+    A verified binding is published only for a set whose files the model
+    resolves to, so only these sets (and those first requested under the
+    models) can be bound to them: no other manifest is read.
+    """
+
+    from ..artifact_lifecycle import ArtifactReferenceUnverified
+    from ..catalog_revision_contract import (
+        CatalogRevisionContractError,
+        read_catalog_document,
+    )
+
+    files: set[str] = set()
+    for revision in session.scalars(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+            CatalogDocumentRevision.content_digest.in_(sorted(contents)),
+        )
+    ):
+        try:
+            model = read_catalog_document(revision)
+        except CatalogRevisionContractError as error:
+            raise ArtifactReferenceUnverified(
+                ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
+                "a model document cannot be read; the review is deferred",
+                retryable=True,
+            ) from error
+        if isinstance(model, ModelDefinition):
+            files.update(file.sha256 for file in model.files)
+    if not files:
+        return set()
+    return set(
+        session.scalars(
+            select(ModelCacheSetArtifact.artifact_set_sha256)
+            .where(ModelCacheSetArtifact.artifact_sha256.in_(sorted(files)))
+            .distinct()
+        )
     )
 
 
