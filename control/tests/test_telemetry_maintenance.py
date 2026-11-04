@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.reason_codes import ProjectionCode
@@ -21,6 +21,7 @@ from vonk_control.models import (
     Base,
     FleetEventCursor,
     FleetStreamEvent,
+    NodeInventoryResourceSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
 )
@@ -171,6 +172,71 @@ def test_retention_boundaries_are_strict_ordered_and_repeatedly_bounded(
         assert session.scalars(select(NodeTelemetrySample.id)).all() == ["raw-boundary"]
         assert session.scalars(select(FleetStreamEvent.id)).all() == [3]
         assert session.get(FleetEventCursor, 1).last_id == 3
+
+
+def test_measurements_leave_with_their_day_without_the_cascade_key(sessions) -> None:
+    """Production's database lacked ``fk_inventory_resource_sample`` (2026-11-04):
+    923,782 of 1,004,699 measurements outlived their pruned sample. SQLite here
+    does not enforce keys either, so only maintenance itself can remove them.
+    """
+
+    cutoff = NOW - timedelta(hours=24)
+    with sessions.begin() as session:
+        session.add_all(
+            (
+                _raw("attached-oldest", cutoff - timedelta(hours=3), sequence=1),
+                _raw("orphan-older", cutoff - timedelta(hours=2), sequence=2),
+                _raw("orphan-old", cutoff - timedelta(hours=1), sequence=3),
+                _raw("attached-old", cutoff - timedelta(minutes=1), sequence=4),
+                _raw("orphan-recent", NOW - timedelta(minutes=29), sequence=5),
+                _raw("attached-recent", NOW - timedelta(minutes=5), sequence=6),
+            )
+        )
+    with sessions.begin() as session:
+        # Their samples were pruned while the database had no cascade key.
+        session.execute(
+            delete(NodeTelemetrySample).where(
+                NodeTelemetrySample.id.in_(
+                    ("orphan-older", "orphan-old", "orphan-recent")
+                )
+            )
+        )
+
+    def measurements() -> set[str]:
+        with sessions() as session:
+            return set(
+                session.scalars(select(NodeInventoryResourceSnapshot.source_sample_id))
+            )
+
+    maintenance = telemetry_maintenance.TelemetryMaintenance(
+        sessions, clock=lambda: NOW
+    )
+    maintenance.run_once(delete_limit=1)
+    # One bounded pass: the oldest sample goes with its measurement; the old
+    # sample still waiting for its pass keeps the evidence its view reads.
+    assert measurements() == {
+        "orphan-older",
+        "orphan-old",
+        "attached-old",
+        "orphan-recent",
+        "attached-recent",
+    }
+    maintenance.run_once(delete_limit=1)
+    assert measurements() == {
+        "orphan-old",
+        "attached-old",
+        "orphan-recent",
+        "attached-recent",
+    }
+
+    maintenance.run_once()
+    # Memory admission reads the last 30 minutes; those measurements stay,
+    # orphaned or not, until their own day has passed.
+    assert measurements() == {"orphan-recent", "attached-recent"}
+    with sessions() as session:
+        assert set(session.scalars(select(NodeTelemetrySample.id))) == {
+            "attached-recent"
+        }
 
 
 def test_latest_raw_pruning_appends_authoritative_missing_sample_reset(
