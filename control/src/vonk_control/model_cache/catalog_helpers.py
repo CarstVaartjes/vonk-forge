@@ -470,16 +470,18 @@ def _same_model_artifact_identity(
 def _model_lineage_signature(
     document: ModelDefinition,
 ) -> tuple[object, object, object]:
-    """Return the logical model and representation identity from ModelDefinition."""
+    """Return who published the files, the logical model and its representation.
+
+    An update successor must come from the same republisher: quantizations of
+    one logical model by different republishers are siblings, not revisions.
+    """
 
     model = document if isinstance(document, ModelDefinition) else read_model(document)
     identity = model.identity
-    publisher = identity.model.publisher
-    slug = identity.model.slug
     variant = identity.variant
     representation = model.format.model_dump(mode="json")
     return (
-        (publisher, slug),
+        (identity.publisher, identity.model.publisher, identity.model.slug),
         variant,
         json.dumps(representation, sort_keys=True, separators=(",", ":")),
     )
