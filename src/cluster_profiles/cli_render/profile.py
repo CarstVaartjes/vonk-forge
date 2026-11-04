@@ -89,8 +89,9 @@ def _profile(payload: Mapping[str, object]) -> None:
 def _connection_examples(api_base: str, alias: str) -> None:
     """Print copyable client examples; the key is only ever read from $VONK_API_KEY."""
     base = api_base.rstrip("/")
-    body = json.dumps(
-        {"model": alias, "messages": [{"role": "user", "content": "Hello"}]}
+    body = (
+        '{"model": ' + json.dumps(alias) + ', "messages": '
+        '[{"role": "user", "content": "Hello"}]}'
     )
     print("Client examples (set VONK_API_KEY to your client key first):")
     print("  curl:")
