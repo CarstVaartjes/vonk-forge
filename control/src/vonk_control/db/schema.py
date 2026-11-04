@@ -9,6 +9,7 @@ from sqlalchemy.exc import (
 )
 
 from .constants import _LOGGER
+from .schema_drift import report_constraint_drift
 from .schema_helpers import (
     _REPLACED_CONSTRAINT_NAMES,
     _TOLERATED_SCHEMA_DIFFERENCES,
@@ -17,6 +18,7 @@ from .schema_helpers import (
     _constraint_kind,
     _cosmetic_type_difference,
     _flatten_schema_differences,
+    _install_foreign_keys,
     _is_generated_sequence_default,
     _quoted,
     _release_retired_table_foreign_keys,
@@ -365,6 +367,8 @@ def reconcile_schema(connection: Connection) -> None:
                     error,
                 )
 
+    # Keys reference the unique constraints installed above.
+    _install_foreign_keys(connection, ops, differences)
     _repair_check_constraints(connection)
 
     # Drop obsolete constraints/indexes before their columns.
@@ -478,6 +482,8 @@ def reconcile_schema(connection: Connection) -> None:
     move_artifact_facts(connection)
     move_repeated_evidence(connection)
     move_resource_facts(connection)
+
+    report_constraint_drift(connection)
 
     remaining = _check_constraint_differences(connection)
     if remaining:

@@ -332,3 +332,70 @@ def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> Non
                     name,
                     error,
                 )
+
+
+def _install_foreign_keys(
+    connection: Connection, ops: Any, differences: list[tuple[Any, ...]]
+) -> None:
+    """Install model foreign keys the live catalog lacks or holds differently.
+
+    Alembic reports a missing key as ``add_fk``; a live key on the same columns
+    whose target or delete rule differs comes as a ``remove_fk`` of the old form.
+    The old form is dropped only in the savepoint that installs its
+    replacement. Rows that already violate the key (for example measurements
+    left behind by a missing cascade) do not block startup: PostgreSQL then
+    installs the key ``NOT VALID``, which still checks new rows and still runs
+    its ``ON DELETE`` rule, while the owners of the old rows delete them.
+    """
+
+    replaced: dict[tuple[str, frozenset[str]], list[str]] = {}
+    for difference in differences:
+        if difference[0] == "remove_fk" and difference[1].name:
+            key = (difference[1].table.name, frozenset(difference[1].column_keys))
+            replaced.setdefault(key, []).append(difference[1].name)
+    for difference in differences:
+        if difference[0] != "add_fk":
+            continue
+        constraint = difference[1]
+        table_name = constraint.table.name
+        old_names = replaced.get((table_name, frozenset(constraint.column_keys)), [])
+        label = f"{table_name}.{constraint.name or ','.join(constraint.column_keys)}"
+        try:
+            _create_foreign_key(connection, ops, constraint, old_names, not_valid=False)
+            _LOGGER.info("Created foreign key %s", label)
+            continue
+        except SQLAlchemyError as error:
+            if connection.dialect.name != "postgresql":
+                _LOGGER.warning("Could not create foreign key %s: %s", label, error)
+                continue
+            validated_error = error
+        try:
+            _create_foreign_key(connection, ops, constraint, old_names, not_valid=True)
+            _LOGGER.warning(
+                "Created foreign key %s NOT VALID because the validated add failed: %s",
+                label,
+                validated_error,
+            )
+        except SQLAlchemyError as error:
+            _LOGGER.warning("Could not create foreign key %s: %s", label, error)
+
+
+def _create_foreign_key(
+    connection: Connection,
+    ops: Any,
+    constraint: Any,
+    old_names: list[str],
+    *,
+    not_valid: bool,
+) -> None:
+    """Replace ``old_names`` with ``constraint`` in one savepoint."""
+
+    from alembic.operations.ops import CreateForeignKeyOp
+
+    operation = CreateForeignKeyOp.from_constraint(constraint)
+    if not_valid:
+        operation.kw["postgresql_not_valid"] = True
+    with connection.begin_nested():
+        for name in old_names:
+            ops.drop_constraint(name, constraint.table.name, type_="foreignkey")
+        ops.invoke(operation)

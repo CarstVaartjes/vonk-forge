@@ -9,10 +9,21 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, insert, inspect, text, update
+from sqlalchemy import create_engine, insert, inspect, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.db import initialize_database, verify_schema_is_current
-from vonk_control.models import Base, Job, RoutePublicationOwner
+from vonk_control.db.schema_drift import SchemaDrift, SchemaDriftKind, constraint_drift
+from vonk_control.models import (
+    AgentNode,
+    Base,
+    Job,
+    NodeInventoryResourceSnapshot,
+    NodeTelemetrySample,
+    RoutePublicationOwner,
+)
+
+from .telemetry_support import telemetry_with_resources
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_TABLES = {
@@ -664,3 +675,132 @@ def test_postgres_startup_adopts_heartbeat_step_columns(postgres_engine) -> None
         }
     assert columns["running_step"]["nullable"] is True
     assert columns["step_started_at"]["nullable"] is True
+
+
+_RESOURCE_SAMPLE_KEY = "fk_inventory_resource_sample"
+_RESOURCE_SAMPLE_NODE = "spk_" + "c" * 32
+
+
+def _store_sample(engine, sample_id: str) -> None:
+    observed_at = datetime(2026, 11, 4, 12, 0, tzinfo=UTC)
+    with Session(engine) as session, session.begin():
+        if session.get(AgentNode, _RESOURCE_SAMPLE_NODE) is None:
+            session.add(AgentNode(node_id=_RESOURCE_SAMPLE_NODE, state="active"))
+            session.flush()
+        session.add(
+            telemetry_with_resources(
+                NodeTelemetrySample(
+                    id=sample_id,
+                    node_id=_RESOURCE_SAMPLE_NODE,
+                    boot_id="00000000-0000-4000-8000-000000000003",
+                    observed_at=observed_at,
+                    received_at=observed_at,
+                ),
+                HostResourceSample(
+                    memory_total_bytes=None,
+                    memory_available_bytes=None,
+                    disk_total_bytes=None,
+                    disk_free_bytes=None,
+                ),
+            )
+        )
+
+
+def _resource_sample_key(connection) -> tuple[str | None, bool] | None:
+    """The live key's delete rule and whether PostgreSQL validated it."""
+
+    row = connection.execute(
+        text(
+            "SELECT confdeltype, convalidated FROM pg_constraint "
+            "WHERE conname = :name AND contype = 'f'"
+        ),
+        {"name": _RESOURCE_SAMPLE_KEY},
+    ).first()
+    return None if row is None else (row[0], row[1])
+
+
+def _measurement_sources(engine) -> set[str]:
+    with Session(engine) as session:
+        return set(
+            session.scalars(select(NodeInventoryResourceSnapshot.source_sample_id))
+        )
+
+
+def test_postgres_startup_installs_a_missing_foreign_key_over_violating_rows(
+    postgres_engine,
+) -> None:
+    """Production lacked ``fk_inventory_resource_sample`` (2026-11-04).
+
+    The key was declared after the table existed and reconciliation ignored
+    Alembic's ``add_fk``, so 923,782 measurements outlived their sample. Startup
+    reports the drift, installs the key although orphans violate it, and the
+    key's cascade then works for new deletes.
+    """
+
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            f"ALTER TABLE node_inventory_snapshots DROP CONSTRAINT {_RESOURCE_SAMPLE_KEY}"
+        )
+    _store_sample(postgres_engine, "pruned-without-cascade")
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text(
+                "DELETE FROM node_telemetry_samples WHERE id = 'pruned-without-cascade'"
+            )
+        )
+        assert constraint_drift(connection) == [
+            SchemaDrift(
+                SchemaDriftKind.MISSING_FOREIGN_KEY,
+                "node_inventory_snapshots",
+                _RESOURCE_SAMPLE_KEY,
+                ("node_id", "source_sample_id"),
+            )
+        ]
+
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.connect() as connection:
+        assert _resource_sample_key(connection) == ("c", False)
+        assert constraint_drift(connection) == []
+    # Reconciliation changes the schema only; the orphan is maintenance's.
+    assert _measurement_sources(postgres_engine) == {"pruned-without-cascade"}
+    _store_sample(postgres_engine, "pruned-with-cascade")
+    with postgres_engine.begin() as connection:
+        connection.execute(
+            text("DELETE FROM node_telemetry_samples WHERE id = 'pruned-with-cascade'")
+        )
+    assert _measurement_sources(postgres_engine) == {"pruned-without-cascade"}
+
+    _initialize_source_checkout(database_url)
+    with postgres_engine.connect() as connection:
+        assert _resource_sample_key(connection) == ("c", False)
+
+
+def test_postgres_startup_replaces_a_foreign_key_whose_delete_rule_changed(
+    postgres_engine,
+) -> None:
+    """A live key on the declared columns with another rule is replaced in place."""
+
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            f"ALTER TABLE node_inventory_snapshots DROP CONSTRAINT {_RESOURCE_SAMPLE_KEY}"
+        )
+        connection.exec_driver_sql(
+            f"ALTER TABLE node_inventory_snapshots ADD CONSTRAINT {_RESOURCE_SAMPLE_KEY} "
+            "FOREIGN KEY (node_id, source_sample_id) "
+            "REFERENCES node_telemetry_samples (node_id, id)"
+        )
+        assert {item.kind for item in constraint_drift(connection)} == {
+            SchemaDriftKind.MISSING_FOREIGN_KEY,
+            SchemaDriftKind.UNDECLARED_FOREIGN_KEY,
+        }
+
+    _initialize_source_checkout(database_url)
+
+    with postgres_engine.connect() as connection:
+        assert _resource_sample_key(connection) == ("c", True)
+        assert constraint_drift(connection) == []
