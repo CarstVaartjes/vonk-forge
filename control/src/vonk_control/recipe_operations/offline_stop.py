@@ -132,7 +132,15 @@ class OfflineStopMixin:
                     profile_target_node_ids=review.profile_target_node_ids,
                     profile_application_id=review.profile_application_id,
                 )
-                progressed = True
+                # A deferral (busy node keys, unsettled route) only moves the
+                # +5 s wake-up; progress is the Stop having been dispatched.
+                if not service._service_stop_pending(
+                    candidate.request_id,
+                    document.plan_digest,
+                    review.profile_target_node_ids,
+                    review.profile_application_id,
+                ):
+                    progressed = True
             except (SecurityRefusalError, InvalidRequestError) as error:
                 # A denied authority, a run that is gone or no longer
                 # stoppable, changed targets or a newer profile requester is

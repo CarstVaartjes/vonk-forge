@@ -249,7 +249,25 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
                 range(2),
             )
         )
-    assert any(outcomes)
+    assert len(outcomes) == 2
+    # The guarantee: at most one dispatch, never a second child. A racing pass
+    # may find the node keys busy and defer by five seconds (the loser, or the
+    # only dispatcher), so one serial pass after the wake-up completes it.
+    with sessions() as session:
+        assert (
+            len(
+                tuple(
+                    session.scalars(
+                        select(AgentOperation.id).where(
+                            AgentOperation.parent_job_id == accepted_id
+                        )
+                    )
+                )
+            )
+            <= 1
+        )
+    now[0] += timedelta(seconds=6)
+    worker.tick()
     with sessions() as session:
         cleanup = session.scalar(select(Job).where(Job.kind == "recipe.stop"))
         assert cleanup is not None and cleanup.id == accepted_id
