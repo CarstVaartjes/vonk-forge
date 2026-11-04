@@ -145,7 +145,10 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_hides_i
 
     publish(working.model_dump(mode="json", exclude_none=True))
     world.sync()
-    assert world.library_recipe().qualification == working
+    listed = world.library_recipe()
+    assert listed.qualification == working
+    # The detail (web detail, ``vonkctl recipe detail``) carries the same view.
+    assert world.projection.recipe_detail(listed.selector).qualification == working
 
     publish({"status": "Something newer", "required_sparks": 1})
     snapshot = world.reader.list()
