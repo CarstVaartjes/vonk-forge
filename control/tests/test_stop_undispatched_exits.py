@@ -137,6 +137,12 @@ def _unknown_outcome_on_dispatch() -> _Service:
     )
 
 
+def _issue(service: _Service) -> RecipeOperationView:
+    return service.stop(
+        "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+    )
+
+
 @pytest.mark.parametrize(
     "build",
     [
@@ -152,7 +158,5 @@ def test_every_non_dispatch_exit_of_stop_returns_an_undispatched_view(
 ):
     monkeypatch.setattr(stop_module, "_bound_workload_intent", lambda _job: 1)
     monkeypatch.setattr(stop_module, "schedule_wait", lambda *_a, **_k: None)
-    view = build().stop(
-        "run-1", plan_digest="digest", actor="admin", request_id="request-1"
-    )
+    view = _issue(build())
     assert isinstance(view, UndispatchedStopView)
