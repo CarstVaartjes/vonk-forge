@@ -335,43 +335,20 @@ _RUST_STATUS_LITERAL = re.compile(
 )
 
 
-#: The only agent files that may name the Controller's invalid-request code
-#: or map a 409 to `ResultSuperseded`: `Refusal` and the result mapping.
-RUST_REFUSAL_OWNERS = frozenset(
-    {
-        "rust/crates/vonk-agent/src/client/errors.rs",
-        "rust/crates/vonk-agent/src/client/operations.rs",
-    }
-)
-_RUST_REFUSAL_CODE = re.compile(r"\bControllerInvalidRequest\b")
-_RUST_SUPERSEDED_MAPPING = re.compile(
-    r"(?:=>|\breturn\b)\s*Err\(\s*(?:ClientError::)?ResultSuperseded\b"
-)
-
-
 def scan_rust_dispositions(
     source: str, *, path: str, test_lines: frozenset[int] | set[int] = frozenset()
 ) -> list[tuple[int, str]]:
-    """Agent lines that classify a Controller refusal by hand instead of through
-    ``ClientError::disposition`` / ``client::Refusal``: an HTTP status read, a
-    comparison with the invalid-request code, or a new ``ResultSuperseded``
-    mapping."""
+    """Agent lines that read an HTTP error status by hand instead of
+    ``ClientError::disposition`` (the shared contract's table)."""
 
-    hits: list[tuple[int, str]] = []
-    for number, line in enumerate(source.splitlines(), start=1):
-        if number in test_lines:
-            continue
-        code = line.split("//", 1)[0]
-        if path not in RUST_DISPOSITION_OWNERS and _RUST_STATUS_LITERAL.search(code):
-            hits.append((number, "HTTP status classified outside the one disposition"))
-        if path not in RUST_REFUSAL_OWNERS:
-            if _RUST_REFUSAL_CODE.search(code):
-                hits.append((number, "refusal classified by error code, not Refusal"))
-            if _RUST_SUPERSEDED_MAPPING.search(code):
-                hits.append(
-                    (number, "409 mapped to ResultSuperseded outside the client")
-                )
-    return hits
+    if path in RUST_DISPOSITION_OWNERS:
+        return []
+    return [
+        (number, "HTTP status classified outside the one disposition")
+        for number, line in enumerate(source.splitlines(), start=1)
+        if number not in test_lines
+        and _RUST_STATUS_LITERAL.search(line.split("//", 1)[0])
+    ]
 
 
 # A standing owner bounds its retry rate; only a request-local retry may spend

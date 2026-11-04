@@ -25,6 +25,11 @@ const STATE_SCHEMA_VERSION: &str = "3";
 /// the minimum to the maximum and then repeats at the maximum.
 pub const RESULT_RETRY_MIN_SECONDS: u64 = 15;
 pub const RESULT_RETRY_MAX_SECONDS: u64 = 900;
+/// A definite refusal (the shared disposition's `FAIL`: a 4xx that is not a
+/// wait) is re-offered this many times, so a corrected Controller rule can
+/// still accept the bytes, and is then recorded: kept and surfaced as
+/// evidence, never re-sent for good.
+pub const RESULT_RECORD_AFTER_REFUSALS: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum StateError {
@@ -85,9 +90,12 @@ pub struct ResultRejection {
 }
 
 impl ResultRejection {
-    /// The Controller's disposition of these exact request bytes.
-    pub fn refusal(&self) -> crate::client::Refusal {
-        crate::client::Refusal::of_status(self.http_status)
+    /// The Controller's typed verdict about these exact request bytes.
+    pub fn invalid_request(&self) -> bool {
+        crate::client::http_status_disposition(self.http_status) == crate::client::Disposition::Fail
+            && self.code
+                == vonk_agent_protocol::generated::ControllerErrorCode::ControllerInvalidRequest
+                    .as_str()
     }
 }
 
@@ -649,11 +657,18 @@ impl StateStore {
         now: DateTime<Utc>,
     ) -> Result<Option<ResultRejection>, StateError> {
         Ok(self.retained_rejection(result)?.filter(|rejection| {
+            // A definite refusal that recurred is recorded: held back for good
+            // and surfaced by the delivery loop, never re-sent forever.
+            let recorded = !rejection.invalid_request()
+                && rejection.rejections >= RESULT_RECORD_AFTER_REFUSALS
+                && crate::client::http_status_disposition(rejection.http_status)
+                    == crate::client::Disposition::Fail;
             // A due date beyond the longest cool-down is clock skew, not a
             // longer refusal: offer the result again.
-            rejection.retry_due_at > now
-                && rejection.retry_due_at
-                    <= now + chrono::Duration::seconds(RESULT_RETRY_MAX_SECONDS as i64)
+            recorded
+                || (rejection.retry_due_at > now
+                    && rejection.retry_due_at
+                        <= now + chrono::Duration::seconds(RESULT_RETRY_MAX_SECONDS as i64))
         }))
     }
 
@@ -847,7 +862,7 @@ impl StateStore {
         result.validate()?;
         if !self
             .retained_rejection(result)?
-            .is_some_and(|r| r.refusal().settles())
+            .is_some_and(|r| r.invalid_request())
         {
             return Err(StateError::ResultState);
         }

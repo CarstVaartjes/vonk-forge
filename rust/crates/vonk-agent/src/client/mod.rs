@@ -202,7 +202,7 @@ mod test_support;
 use buffering::*;
 pub(crate) use errors::endpoint_name;
 pub use errors::{
-    ClientError, ControllerError, Disposition, Refusal, http_status_disposition, local_disposition,
+    ClientError, ControllerError, Disposition, http_status_disposition, local_disposition,
     local_storage_full,
 };
 #[cfg(test)]

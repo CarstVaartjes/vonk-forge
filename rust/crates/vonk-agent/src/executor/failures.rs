@@ -477,9 +477,7 @@ pub(super) fn runtime_failure(
     {
         // A definite Controller answer (a plan it can never bind: superseded,
         // not ready, malformed) keeps its typed code in the evidence. It is
-        // no authority denial, so it names no helper grant code. This names
-        // the failure of an exact host request, not the settling of sent
-        // bytes, so the shared `Disposition::Fail` is the right classification.
+        // no authority denial, so it names no helper grant code.
         return ExecutionResult::Failed(
             Failure::new(format!(
                 "{reason}: the Controller refused this exact request"

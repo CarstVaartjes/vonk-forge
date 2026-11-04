@@ -29,9 +29,7 @@ impl AgentHttpClient {
         request.validate().map_err(|_| ClientError::Protocol)?;
         let core = inventory_core(&request);
         match self.post_inventory(&request).await {
-            Err(ClientError::Controller(error))
-                if error.refusal().refuses_bytes() && core != request =>
-            {
+            Err(ClientError::Controller(error)) if error.request_invalid() && core != request => {
                 eprintln!(
                     "vonk-agent: the Controller refused the inventory's optional evidence (HTTP {}); reporting its core",
                     error.status

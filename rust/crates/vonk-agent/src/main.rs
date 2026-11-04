@@ -612,9 +612,7 @@ async fn claim_lane<'a>(
                 let delay = match &error {
                     // A definite refusal of a control request is not retried
                     // at the floor: it is shown with its typed cause and
-                    // re-observed at the capped cadence. This is a retry
-                    // cadence, not the settling of sent bytes, so the shared
-                    // `Disposition::Fail` is the right classification.
+                    // re-observed at the capped cadence.
                     LoopError::Client(error) if error.disposition() == Disposition::Fail => {
                         eprintln!("vonk-agent: control request refused: {error}");
                         Duration::from_secs(POLL_MAX_SECONDS)
