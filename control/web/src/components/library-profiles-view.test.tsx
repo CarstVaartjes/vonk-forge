@@ -692,19 +692,20 @@ test("a profile in maintenance wait shows the deadline and resume condition the 
     dependency_deadline: "2026-09-29T13:00:00+00:00",
     resume_condition: "effect-observed",
     next_check: "2026-09-29T12:00:00+00:00",
-  };
+  } satisfies NonNullable<FleetProfile["maintenance_wait"]>;
   const api = apiFor({
     profiles: vi.fn(async () => ({
       generated_at: "2026-09-10T00:00:00Z",
       profiles: [{ ...profile, maintenance_wait }],
     })),
-  } as unknown as Partial<ControlApi>);
+  });
   render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
   const list = await screen.findByRole("list", { name: "Waiting for" });
   expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
   expect(within(list).getByText(/Next attempt/)).toBeVisible();
   expect(within(list).getByText(/Dependency deadline/)).toBeVisible();
   expect(within(list).getByText("Resumes when effect-observed")).toBeVisible();
+  expect(screen.getByText("Recovery reason: run-switch.inventory-unknown")).toBeVisible();
 });
 
 test("a profile without a maintenance wait shows no waiting list", async () => {

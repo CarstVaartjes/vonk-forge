@@ -864,6 +864,9 @@ export function LibraryProfilesView({
               ))}
             </ul>
           )}
+          {selectedProfile.maintenance_wait && (
+            <span>Recovery reason: {selectedProfile.maintenance_wait.reason}</span>
+          )}
           <WaitingFor
             blockers={selectedProfile.maintenance_wait?.blockers}
             nextAttemptAt={selectedProfile.maintenance_wait?.next_check}
