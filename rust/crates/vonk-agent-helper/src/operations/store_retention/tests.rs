@@ -1,5 +1,6 @@
 #![cfg(test)]
 use super::*;
+use crate::operations::test_support::{Host, host_executor, job};
 use std::sync::{Arc, Mutex};
 
 const INSTALLATION: &str = "0b7d2c9e-6a51-4c43-9d07-3a3c3c3c3c3c";
@@ -355,4 +356,60 @@ fn interrupted_store_collection_does_not_poison_future_retention() {
     );
     executor.remove_agent_store(&request).unwrap();
     assert!(!scope.exists());
+}
+
+fn managed_containers(count: usize) -> Vec<crate::operations::test_support::Container> {
+    (0..count)
+        .map(|number| {
+            job(
+                &format!("run-{number}"),
+                &format!("{number:032x}"),
+                "running",
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn owner_collection_completes_however_many_managed_containers_exist() {
+    // The id listing grows with the containers; a total output bound ended
+    // the pass at about sixty, and no owner-dependent store was ever collected.
+    let host = Host::with(&managed_containers(500));
+    let (_temp, executor) = host_executor(&host);
+    let owners = executor
+        .helper_store_owners(Instant::now() + Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(owners.runtimes.len(), 500);
+    assert!(
+        owners
+            .installations
+            .contains(crate::operations::test_support::INSTALLATION)
+    );
+}
+
+#[test]
+fn a_container_with_no_provable_owner_keeps_every_store_until_it_is_proven() {
+    let containers = managed_containers(3);
+    let unproven = containers[1].id();
+    let host = Host::with(&containers);
+    host.uninspectable.lock().unwrap().push(unproven);
+    let (_temp, executor) = host_executor(&host);
+    let deadline = Instant::now() + Duration::from_secs(600);
+    // It may own any store, so no owner set is offered.
+    assert!(matches!(
+        executor.helper_store_owners(deadline),
+        Err(OperationError::InstallationReconciliationBusy)
+    ));
+}
+
+#[test]
+fn a_container_gone_before_its_inspection_owns_nothing() {
+    let host = Host::with(&managed_containers(2));
+    host.ghosts.lock().unwrap().push("a".repeat(64));
+    host.uninspectable.lock().unwrap().push("a".repeat(64));
+    let (_temp, executor) = host_executor(&host);
+    let owners = executor
+        .helper_store_owners(Instant::now() + Duration::from_secs(600))
+        .unwrap();
+    assert_eq!(owners.runtimes.len(), 2);
 }

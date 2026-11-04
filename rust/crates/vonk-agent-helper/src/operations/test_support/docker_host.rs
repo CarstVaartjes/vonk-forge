@@ -4,7 +4,7 @@
 //! runner's capture rules (what it captures, its output bound).
 
 use super::*;
-use crate::operations::commands::captures_stdout;
+use crate::operations::commands::{MAX_LISTED_LINE_BYTES, captures_stdout};
 use crate::operations::reobserve::REOBSERVE_FORMAT;
 
 pub(in crate::operations) const INSTALLATION: &str = "50000000-0000-4000-8000-000000000005";
@@ -55,6 +55,12 @@ pub(in crate::operations) struct Host {
     pub(in crate::operations) listing_fails: bool,
     /// How many `docker wait` answers are unreadable before Docker answers.
     pub(in crate::operations) unreadable_waits: Arc<Mutex<u32>>,
+    /// Tagged images as `(reference, image id)`.
+    pub(in crate::operations) images: Arc<Mutex<Vec<(String, String)>>>,
+    /// Containers whose owner inspection fails while Docker still lists them.
+    pub(in crate::operations) uninspectable: Arc<Mutex<Vec<String>>>,
+    /// Ids the all-containers listing still names after the container is gone.
+    pub(in crate::operations) ghosts: Arc<Mutex<Vec<String>>>,
 }
 
 impl Host {
@@ -82,6 +88,41 @@ impl Host {
 
 impl CommandRunner for Host {
     fn run(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
+        let mut output = self.answer(executable, args)?;
+        // The production runner discards what it does not capture and refuses
+        // captured output over its bound; the caller never sees a partial
+        // listing.
+        if !captures_stdout(executable) {
+            output.stdout.clear();
+        }
+        if output.stdout.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
+            return Err("compiled command output exceeded its bound".to_owned());
+        }
+        Ok(output)
+    }
+
+    /// The production line reader: no total bound, one bounded line at a time.
+    fn run_lines(
+        &self,
+        executable: &Path,
+        args: &[String],
+        _: Duration,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CommandOutput, String> {
+        let mut output = self.answer(executable, args)?;
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+        if text.lines().any(|line| line.len() > MAX_LISTED_LINE_BYTES) {
+            return Err("compiled command output exceeded its bound".to_owned());
+        }
+        text.lines().for_each(on_line);
+        output.stdout.clear();
+        Ok(output)
+    }
+}
+
+impl Host {
+    /// What Docker answers, before the runner's capture rules apply.
+    fn answer(&self, executable: &Path, args: &[String]) -> Result<CommandOutput, String> {
         assert_eq!(executable, Path::new("/usr/bin/docker"));
         self.calls.lock().unwrap().push(args.to_vec());
         let mut containers = self.containers.lock().unwrap();
@@ -97,13 +138,17 @@ impl CommandRunner for Host {
                 container.run, container.target, container.generation
             )
         };
-        let mut output = match args
+        let output = match args
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>()
             .as_slice()
         {
             ["container", "ls", ..] if self.listing_fails => docker_output(false, "", 1),
+            // No container of this host is an image's descendant.
+            ["container", "ls", ..] if args.iter().any(|arg| arg.starts_with("ancestor=")) => {
+                docker_output(true, "", 0)
+            }
             ["container", "ls", ..] => {
                 let run_filter = args
                     .iter()
@@ -155,7 +200,46 @@ impl CommandRunner for Host {
                         }
                     })
                     .collect();
+                let ghosts: String = if quiet && id_filter.is_none() {
+                    self.ghosts
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .map(|id| format!("{id}\n"))
+                        .collect()
+                } else {
+                    String::new()
+                };
+                docker_output(true, &(lines + &ghosts), 0)
+            }
+            ["images", ..] => {
+                let lines: String = self
+                    .images
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(reference, id)| format!("{reference}\t{id}\n"))
+                    .collect();
                 docker_output(true, &lines, 0)
+            }
+            ["image", "inspect", "--format", "{{.Id}}", reference] => {
+                match self
+                    .images
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|(image, _)| image == reference)
+                {
+                    Some((_, id)) => docker_output(true, id, 0),
+                    None => docker_output(false, "", 1),
+                }
+            }
+            ["rmi", reference] => {
+                self.images
+                    .lock()
+                    .unwrap()
+                    .retain(|(image, _)| image != reference);
+                docker_output(true, "", 0)
             }
             ["logs", ..] => docker_output(true, "job output so far\n", 0),
             ["wait", _] if *self.unreadable_waits.lock().unwrap() > 0 => {
@@ -199,6 +283,21 @@ impl CommandRunner for Host {
                     None => docker_output(false, "", 1),
                 }
             }
+            // The owner read of the store collector: installation and target.
+            ["container", "inspect", "--format", format, _]
+                if *format == crate::operations::store_retention::OWNERS_FORMAT =>
+            {
+                match find(&name) {
+                    Some(index) if !self.uninspectable.lock().unwrap().contains(&name) => {
+                        docker_output(
+                            true,
+                            &format!("{INSTALLATION}\t{}\n", containers[index].target),
+                            0,
+                        )
+                    }
+                    _ => docker_output(false, "", 1),
+                }
+            }
             ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
             ["container", "inspect", ..] => match find(&name) {
                 Some(index) => {
@@ -228,15 +327,6 @@ impl CommandRunner for Host {
             }
             _ => return Err(format!("unexpected command {args:?}")),
         };
-        // The production runner discards what it does not capture and refuses
-        // captured output over its bound; the caller never sees a partial
-        // listing.
-        if !captures_stdout(executable) {
-            output.stdout.clear();
-        }
-        if output.stdout.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
-            return Err("compiled command output exceeded its bound".to_owned());
-        }
         Ok(output)
     }
 }

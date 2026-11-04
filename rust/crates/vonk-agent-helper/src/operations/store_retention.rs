@@ -14,7 +14,7 @@ struct Owners {
 
 // Docker emits the two canonical identity labels, then one JSON string per
 // mount source. Its unrelated inspection fields need no parallel wire model.
-const OWNERS_FORMAT: &str = "{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}";
+pub(super) const OWNERS_FORMAT: &str = "{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}";
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// Local retention delegates only an agent-owned scope. Reuse the same
@@ -181,8 +181,16 @@ impl<R: CommandRunner> OperationExecutor<R> {
         }
     }
 
+    /// What every managed container (any state) keeps in use. A container
+    /// whose owner cannot be proven (its fields do not parse, or Docker will
+    /// not inspect it) could use any store, so the pass then reports
+    /// `InstallationReconciliationBusy` and every owner-dependent collection
+    /// keeps everything until a later pass proves each owner. A container that
+    /// is gone by the time it is inspected owns nothing.
     fn helper_store_owners(&self, deadline: Instant) -> Result<Owners, OperationError> {
-        let output = self.run_docker_with_timeout(
+        let mut ids = Vec::new();
+        let mut malformed = false;
+        let output = self.run_docker_lines(
             &[
                 "container",
                 "ls",
@@ -194,56 +202,77 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ]
             .map(str::to_owned),
             Duration::from_secs(10),
+            &mut |line| {
+                if lower_hex(line, 64) {
+                    ids.push(line.to_owned());
+                } else {
+                    malformed = true;
+                }
+            },
         )?;
         if !output.success {
             return Err(OperationError::CommandFailed {
                 cause: CommandFailure::exit(&output),
             });
         }
-        let listing =
-            std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
+        if malformed {
+            return Err(OperationError::InvalidArtifact);
+        }
         let mut owners = Owners::default();
-        for id in listing.lines() {
+        let mut unproven = Vec::new();
+        for id in ids {
             if Instant::now() >= deadline {
                 return Err(OperationError::InstallationReconciliationBusy);
-            }
-            if !lower_hex(id, 64) {
-                return Err(OperationError::InvalidArtifact);
             }
             // Reuse the helper's existing bounded Docker inspection path.
             if deadline.saturating_duration_since(Instant::now()) < Duration::from_secs(30) {
                 return Err(OperationError::InstallationReconciliationBusy);
             }
-            let output = self
-                .container_fields(id, OWNERS_FORMAT)
-                .map_err(CommandFailure::Runner)?;
-            if !output.success {
-                return Err(OperationError::CommandFailed {
-                    cause: CommandFailure::exit(&output),
-                });
-            }
-            let text =
-                std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
-            let mut lines = text.lines();
-            let (installation, runtime) = lines
-                .next()
-                .and_then(|line| line.split_once('\t'))
-                .filter(|(installation, runtime)| {
-                    valid_artifact_id(installation) && valid_artifact_id(runtime)
-                })
-                .ok_or(OperationError::InvalidArtifact)?;
-            owners.installations.insert(installation.to_owned());
-            owners.runtimes.insert(runtime.to_owned());
-            for line in lines {
-                let source: PathBuf =
-                    serde_json::from_str(line).map_err(|_| OperationError::InvalidArtifact)?;
-                if !source.is_absolute() {
-                    return Err(OperationError::InvalidArtifact);
+            let parsed = self
+                .container_fields(&id, OWNERS_FORMAT)
+                .ok()
+                .filter(|output| output.success)
+                .and_then(|output| parse_owners(&output.stdout));
+            match parsed {
+                Some((installation, runtime, mounts)) => {
+                    owners.installations.insert(installation);
+                    owners.runtimes.insert(runtime);
+                    owners.mounts.extend(mounts);
                 }
-                owners.mounts.insert(source);
+                None => unproven.push(id),
             }
         }
-        Ok(owners)
+        unproven.retain(|id| !self.container_gone(id));
+        if unproven.is_empty() {
+            return Ok(owners);
+        }
+        eprintln!(
+            "vonk-agent-helper: {} managed container(s) have no provable owner ({}); owner-dependent collection keeps everything until they do",
+            unproven.len(),
+            unproven.join(",")
+        );
+        Err(OperationError::InstallationReconciliationBusy)
+    }
+
+    /// Docker lists no container with this id any more. An unavailable answer
+    /// is not an answer: the container stays unproven.
+    fn container_gone(&self, id: &str) -> bool {
+        let mut listed = false;
+        self.run_docker_lines(
+            &[
+                "container".to_owned(),
+                "ls".to_owned(),
+                "--all".to_owned(),
+                "--quiet".to_owned(),
+                "--no-trunc".to_owned(),
+                "--filter".to_owned(),
+                format!("id={id}"),
+            ],
+            Duration::from_secs(10),
+            &mut |line| listed |= !line.trim().is_empty(),
+        )
+        .is_ok_and(|output| output.success)
+            && !listed
     }
 
     fn helper_record_unused(&self, store: &Store, name: &str, owners: &Owners) -> bool {
@@ -375,6 +404,28 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
         }
     }
+}
+
+/// The installation and runtime labels, then the mount sources, of one
+/// `OWNERS_FORMAT` inspection; `None` when any field is not what Docker's
+/// format produces.
+fn parse_owners(stdout: &[u8]) -> Option<(String, String, Vec<PathBuf>)> {
+    let text = std::str::from_utf8(stdout).ok()?;
+    let mut lines = text.lines();
+    let (installation, runtime) =
+        lines
+            .next()?
+            .split_once('\t')
+            .filter(|(installation, runtime)| {
+                valid_artifact_id(installation) && valid_artifact_id(runtime)
+            })?;
+    let mounts = lines
+        .map(|line| serde_json::from_str::<PathBuf>(line).ok())
+        .collect::<Option<Vec<_>>>()?;
+    mounts
+        .iter()
+        .all(|source| source.is_absolute())
+        .then(|| (installation.to_owned(), runtime.to_owned(), mounts))
 }
 
 fn absent(path: &Path) -> bool {

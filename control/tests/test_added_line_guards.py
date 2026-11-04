@@ -2806,3 +2806,39 @@ def test_an_exists_inside_a_where_does_not_scope_the_outer_select(body):
     source = "def f(s):\n    " + body + "\n"
     path = "control/src/vonk_control/api/example.py"
     assert check_source(path, source, {2}, modes=("request-scans",)), body
+
+
+_LISTING_PATH = "rust/crates/vonk-agent-helper/src/operations/example.rs"
+_CAPTURED_LISTING = (
+    "fn owners(&self) {\n"
+    "    let output = self.run_docker_with_timeout(\n"
+    '        &["container", "ls", "--all", "--quiet"].map(str::to_owned),\n'
+    "        timeout,\n"
+    "    );\n"
+    "}\n"
+)
+
+
+def test_a_captured_docker_listing_is_flagged() -> None:
+    assert check_source(
+        _LISTING_PATH, _CAPTURED_LISTING, {3}, modes=("docker-listings",)
+    )
+    assert not check_source(
+        _LISTING_PATH, _CAPTURED_LISTING, set(), modes=("docker-listings",)
+    )
+    images = _CAPTURED_LISTING.replace('"container", "ls"', '"images"')
+    assert check_source(_LISTING_PATH, images, {3}, modes=("docker-listings",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        _CAPTURED_LISTING.replace("run_docker_with_timeout", "run_docker_lines"),
+        _CAPTURED_LISTING.replace('"--quiet"', '"--last", "5"'),
+        _CAPTURED_LISTING.replace(
+            '"container", "ls", "--all", "--quiet"', '"stop", "x"'
+        ),
+    ],
+)
+def test_a_line_read_or_paged_docker_listing_passes(source: str) -> None:
+    assert not check_source(_LISTING_PATH, source, {3}, modes=("docker-listings",))

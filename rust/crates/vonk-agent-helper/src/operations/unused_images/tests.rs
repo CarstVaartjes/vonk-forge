@@ -154,7 +154,11 @@ fn an_uninstall_starts_its_images_grace() {
     assert!(!present(&runner, &manifest));
 }
 
-fn retention(executor: &OperationExecutor<PullRunner>, required: u64, protected: Vec<String>) {
+fn retention<R: CommandRunner>(
+    executor: &OperationExecutor<R>,
+    required: u64,
+    protected: Vec<String>,
+) {
     let request = vonk_agent_protocol::generated::StoreRetentionRequest {
         issued_at: std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -351,4 +355,49 @@ fn orphan_image_grace_records_disappear_when_docker_no_longer_has_the_content() 
     fs::write(&marker, b"").unwrap();
     executor.sweep_unused_runtime_images();
     assert!(!marker.exists());
+}
+
+#[test]
+fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() {
+    // The listing grows with the images the helper must remove. A total
+    // output bound wedged it for good: the orphan was never seen, so the
+    // listing never shrank.
+    let host = Host::default();
+    let (_temp, executor) = host_executor(&host);
+    fs::create_dir_all(&executor.roots.agent_data).unwrap();
+    let managed: Vec<String> = (0..5000).map(|number| format!("{number:064x}")).collect();
+    let orphan = format!("sha256:{}", "e".repeat(64));
+    {
+        let mut images = host.images.lock().unwrap();
+        for address in &managed {
+            images.push((
+                format!("localhost/vonk/compiled-runtime-{address}:latest"),
+                format!("sha256:{address}"),
+            ));
+        }
+        images.push((
+            "localhost/vonk/recipe-build-orphan:latest".to_owned(),
+            orphan.clone(),
+        ));
+    }
+    retention(&executor, 0, managed);
+    fs::create_dir_all(&executor.roots.runtime_image_receipts).unwrap();
+    let marker = executor
+        .roots
+        .runtime_image_receipts
+        .join(format!(".untracked-{}", &orphan[7..]));
+    File::create(&marker)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+        .unwrap();
+
+    executor.sweep_runtime_images_unused_for(UNUSED_IMAGE_GRACE, &|| None);
+
+    let images = host.images.lock().unwrap();
+    assert_eq!(images.len(), 5000, "only the orphan goes");
+    assert!(
+        images
+            .iter()
+            .all(|(reference, _)| !reference.contains("orphan"))
+    );
 }

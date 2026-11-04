@@ -160,30 +160,40 @@ fn managed_identity(line: &str, expected: &str) -> Option<i32> {
     pid.parse::<i32>().ok().filter(|pid| *pid > 1)
 }
 
-fn inventory_ids(bytes: &[u8]) -> Result<Vec<String>, String> {
-    let text = std::str::from_utf8(bytes).map_err(|_| "inventory is not UTF-8")?;
-    let ids: Vec<_> = text.lines().collect();
-    if ids.iter().any(|id| !valid_id(id)) {
+/// The ids of the managed containers (every state with `all`, else the running
+/// ones), read a line at a time: the list grows with the containers, so no
+/// total size bounds it. An id that is not one makes the inventory incomplete,
+/// and an incomplete inventory is never read as absence.
+fn managed_container_ids(runner: &impl CommandRunner, all: bool) -> Result<Vec<String>, String> {
+    let mut ids = Vec::new();
+    let mut complete = true;
+    let output = runner.run_lines(
+        Path::new("/usr/bin/docker"),
+        &INVENTORY
+            .iter()
+            .filter(|word| all || **word != "--all")
+            .map(|word| (*word).to_owned())
+            .collect::<Vec<_>>(),
+        COMMAND_TIMEOUT,
+        &mut |line| {
+            if valid_id(line) {
+                ids.push(line.to_owned());
+            } else {
+                complete = false;
+            }
+        },
+    )?;
+    if !output.success {
+        return Err("docker command failed".into());
+    }
+    if !complete {
         return Err("inventory is incomplete".into());
     }
-    Ok(ids.into_iter().map(str::to_owned).collect())
+    Ok(ids)
 }
 
 fn collect_absent_receipts(runner: &impl CommandRunner, data_root: &Path) {
-    let inventory = docker(
-        runner,
-        &[
-            "ps",
-            "--all",
-            "--no-trunc",
-            "--filter",
-            "label=ai.vonkforge.managed=true",
-            "--format",
-            "{{.ID}}",
-        ],
-    )
-    .and_then(|bytes| inventory_ids(&bytes));
-    let Ok(ids) = inventory else {
+    let Ok(ids) = managed_container_ids(runner, true) else {
         return;
     }; // unavailable is never absent
     if let Ok(entries) = fs::read_dir(data_root.join("host-memory-evidence")) {
@@ -221,8 +231,9 @@ fn docker(runner: &impl CommandRunner, args: &[&str]) -> Result<Vec<u8>, String>
 type Known = BTreeMap<String, Option<PathBuf>>;
 type Trip = (Vec<String>, FailureDiagnostics);
 
-const INVENTORY: [&str; 6] = [
+const INVENTORY: [&str; 7] = [
     "ps",
+    "--all",
     "--no-trunc",
     "--filter",
     "label=ai.vonkforge.managed=true",
@@ -233,7 +244,7 @@ const INVENTORY: [&str; 6] = [
 // Labels are immutable, so each container's identity is checked once, while
 // Docker answers; its cgroup is recorded then and needs no daemon at kill time.
 fn observe(runner: &impl CommandRunner, cgroups: &Path, known: &Known) -> Result<Known, String> {
-    let ids = inventory_ids(&docker(runner, &INVENTORY)?)?;
+    let ids = managed_container_ids(runner, false)?;
     let mut next = Known::new();
     for id in ids {
         // An unverified container is never a target; it is checked again next cycle.
@@ -797,9 +808,24 @@ mod tests {
 
     #[test]
     fn partial_inventory_never_triggers_false_stops() {
-        assert!(inventory_ids(format!("{}\npartial", "a".repeat(64)).as_bytes()).is_err());
-        assert!(inventory_ids(b"daemon error").is_err());
-        assert_eq!(inventory_ids(b"").unwrap(), Vec::<String>::new());
+        let answer = |stdout: Vec<u8>| Scripted {
+            answer: move |_: &[String], _| {
+                Ok(crate::operations::CommandOutput {
+                    success: true,
+                    stdout: stdout.clone(),
+                    stderr: Vec::new(),
+                    exit_code: Some(0),
+                })
+            },
+            calls: Mutex::new(vec![]),
+        };
+        let partial = format!("{}\npartial", "a".repeat(64)).into_bytes();
+        assert!(managed_container_ids(&answer(partial), true).is_err());
+        assert!(managed_container_ids(&answer(b"daemon error".to_vec()), true).is_err());
+        assert_eq!(
+            managed_container_ids(&answer(Vec::new()), true).unwrap(),
+            Vec::<String>::new()
+        );
     }
 
     /// Docker under thrash: every call answers only at its deadline, with an error.

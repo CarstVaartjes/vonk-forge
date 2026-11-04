@@ -150,10 +150,13 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => return,
         };
-        let listing = self.run_docker_with_timeout(
+        // Tagged images only: the reference filter never matches an
+        // intermediate layer, so `--all` adds nothing. The listing is read a
+        // line at a time; it grows with the images this pass must remove.
+        let mut images: Vec<(String, String)> = Vec::new();
+        let listing = self.run_docker_lines(
             &[
                 "images",
-                "--all",
                 "--no-trunc",
                 "--filter",
                 "reference=localhost/vonk/*",
@@ -162,23 +165,21 @@ impl<R: CommandRunner> OperationExecutor<R> {
             ]
             .map(str::to_owned),
             Duration::from_secs(15),
+            &mut |line| {
+                if let Some((reference, id)) = line.split_once('\t') {
+                    images.push((reference.to_owned(), id.to_owned()));
+                }
+            },
         );
-        let listing = match listing {
-            Ok(output) if output.success => output,
+        match listing {
+            Ok(output) if output.success => {}
             other => {
                 eprintln!(
                     "vonk-agent-helper: Docker image inventory unavailable: {other:?}; retried next pass"
                 );
                 return;
             }
-        };
-        let Ok(text) = std::str::from_utf8(&listing.stdout) else {
-            return;
-        };
-        let images: Vec<_> = text
-            .lines()
-            .filter_map(|line| line.split_once('\t'))
-            .collect();
+        }
         let protected = |reference: &str| {
             let name = reference.split(':').next().unwrap_or_default();
             let address = name.rsplit('-').next().unwrap_or_default();
@@ -194,12 +195,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
         let kept: HashSet<_> = images
             .iter()
             .filter(|(reference, _)| protected(reference))
-            .map(|(_, id)| *id)
+            .map(|(_, id)| id.as_str())
             .collect();
         if fs::create_dir_all(&self.roots.runtime_image_receipts).is_err() {
             return;
         }
-        let configs: HashSet<_> = images.iter().map(|(_, id)| *id).collect();
+        let configs: HashSet<_> = images.iter().map(|(_, id)| id.as_str()).collect();
         if let Ok(markers) = fs::read_dir(&self.roots.runtime_image_receipts) {
             for entry in markers.flatten() {
                 if let Some(config) = entry
@@ -214,7 +215,10 @@ impl<R: CommandRunner> OperationExecutor<R> {
             }
         }
         let deadline = Instant::now() + Duration::from_secs(60);
-        for (reference, id) in images {
+        for (reference, id) in images
+            .iter()
+            .map(|(reference, id)| (reference.as_str(), id.as_str()))
+        {
             if Instant::now() >= deadline {
                 break;
             }
@@ -308,7 +312,8 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     fn image_has_no_containers(&self, image: &str) -> Option<bool> {
-        match self.run_docker_with_timeout(
+        let mut any = false;
+        match self.run_docker_lines(
             &[
                 "container".to_owned(),
                 "ls".to_owned(),
@@ -318,8 +323,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 format!("ancestor={image}"),
             ],
             Duration::from_secs(15),
+            &mut |line| any |= !line.trim().is_empty(),
         ) {
-            Ok(output) if output.success => Some(output.stdout.iter().all(u8::is_ascii_whitespace)),
+            Ok(output) if output.success => Some(!any),
             other => {
                 eprintln!(
                     "vonk-agent-helper: container references for image {image} unavailable: {other:?}; retried next pass"

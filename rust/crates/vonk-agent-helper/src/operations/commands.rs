@@ -60,15 +60,8 @@ impl CommandRunner for ProcessCommandRunner {
         // consumed by the helper, so they must not be piped into its bounded
         // command-output reader.
         let inherit_output = executable == Path::new("/usr/bin/dpkg");
-        let mut command = Command::new(executable);
+        let mut command = base_command(executable, arguments);
         command
-            .args(arguments)
-            .env_clear()
-            .env("LANG", "C.UTF-8")
-            .env("LC_ALL", "C.UTF-8")
-            .env("PATH", ROOT_COMMAND_PATH)
-            .current_dir("/")
-            .stdin(Stdio::null())
             // Standard error is the command's own account of a failure; a
             // captured command retains its tail as `CommandFailure` evidence.
             .stderr(if inherit_output {
@@ -105,6 +98,34 @@ impl CommandRunner for ProcessCommandRunner {
         }
         run_captured_command(&mut command, timeout).map_err(|failure| failure.to_string())
     }
+
+    fn run_lines(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout: Duration,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CommandOutput, String> {
+        if executable != Path::new("/usr/bin/docker") {
+            return Err("executable is not compiled into the helper".to_owned());
+        }
+        let mut command = base_command(executable, arguments);
+        command.stdout(Stdio::piped()).stderr(Stdio::piped());
+        run_line_command(&mut command, timeout, on_line).map_err(|failure| failure.to_string())
+    }
+}
+
+fn base_command(executable: &Path, arguments: &[String]) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .env_clear()
+        .env("LANG", "C.UTF-8")
+        .env("LC_ALL", "C.UTF-8")
+        .env("PATH", ROOT_COMMAND_PATH)
+        .current_dir("/")
+        .stdin(Stdio::null());
+    command
 }
 
 /// Whether the helper reads `executable`'s standard output. It depends on the
@@ -121,6 +142,15 @@ pub(super) fn captures_stdout(executable: &Path) -> bool {
 /// Bytes of a failed command's standard error kept as its evidence: the end of
 /// the stream, where a command states why it failed.
 const COMMAND_STDERR_TAIL_BYTES: usize = 512;
+
+/// Bytes of one line of a streamed listing (`run_line_command`). The helper
+/// fixes every `--format` it lists with; its longest line is an image
+/// reference plus a 71-byte `sha256:` id (about 250 bytes), so 1 KiB leaves
+/// room for any registry path. The listing itself has no total bound: it
+/// grows with the images and containers the helper must remove, and a total
+/// bound would end the pass for good once the listing outgrew it. Only the
+/// command's deadline limits the whole.
+pub(super) const MAX_LISTED_LINE_BYTES: usize = 1024;
 
 /// Why a compiled command gave the helper no usable answer: the evidence of
 /// `OperationError::CommandFailed`. It is journaled with the rejection; the
@@ -221,6 +251,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
+impl<R: CommandRunner> OperationExecutor<R> {
+    /// A Docker listing read line by line; see `CommandRunner::run_lines`.
+    pub(super) fn run_docker_lines(
+        &self,
+        arguments: &[String],
+        timeout: Duration,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CommandOutput, OperationError> {
+        self.runner
+            .run_lines(Path::new("/usr/bin/docker"), arguments, timeout, on_line)
+            .map_err(|reason| CommandFailure::Runner(reason).into())
+    }
+}
+
 /// Read output and reap the process under the same command budget. A descendant
 /// retaining stdout cannot keep the helper occupied after its parent exits.
 /// Standard error is retained as a bounded tail and never counts toward the
@@ -228,6 +272,55 @@ impl<R: CommandRunner> OperationExecutor<R> {
 fn run_captured_command(
     command: &mut Command,
     timeout: Duration,
+) -> Result<CommandOutput, RunnerFailure> {
+    let mut stdout = Vec::new();
+    let mut output = drive_command(command, timeout, &mut |bytes| {
+        if stdout.len() + bytes.len() > MAX_COMMAND_OUTPUT_BYTES as usize {
+            return Err(RunnerFailure::OutputBound);
+        }
+        stdout.extend_from_slice(bytes);
+        Ok(())
+    })?;
+    output.stdout = stdout;
+    Ok(output)
+}
+
+/// Like `run_captured_command`, but hands each line of standard output to
+/// `on_line` as it arrives. Only one line is held at a time and it is bounded
+/// by `MAX_LISTED_LINE_BYTES`; the whole output is limited by `timeout` alone.
+/// A caller trusts the lines only when the returned status succeeded.
+fn run_line_command(
+    command: &mut Command,
+    timeout: Duration,
+    on_line: &mut dyn FnMut(&str),
+) -> Result<CommandOutput, RunnerFailure> {
+    let mut pending = Vec::new();
+    let mut emit = |line: &[u8]| on_line(&String::from_utf8_lossy(line));
+    let output = drive_command(command, timeout, &mut |bytes| {
+        for chunk in bytes.split_inclusive(|byte| *byte == b'\n') {
+            pending.extend_from_slice(chunk);
+            let complete = pending.last() == Some(&b'\n');
+            if pending.len() - usize::from(complete) > MAX_LISTED_LINE_BYTES {
+                return Err(RunnerFailure::OutputBound);
+            }
+            if complete {
+                pending.pop();
+                emit(&pending);
+                pending.clear();
+            }
+        }
+        Ok(())
+    })?;
+    if !pending.is_empty() {
+        emit(&pending);
+    }
+    Ok(output)
+}
+
+fn drive_command(
+    command: &mut Command,
+    timeout: Duration,
+    on_stdout: &mut dyn FnMut(&[u8]) -> Result<(), RunnerFailure>,
 ) -> Result<CommandOutput, RunnerFailure> {
     use std::os::unix::process::CommandExt;
 
@@ -251,7 +344,6 @@ fn run_captured_command(
             rustix::fs::fcntl_setfl(pipe, flags | rustix::fs::OFlags::NONBLOCK)
                 .map_err(unreadable)?;
         }
-        let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut status = None;
         let mut output_closed = output.is_none();
@@ -263,12 +355,7 @@ fn run_captured_command(
             if !output_closed {
                 match output.as_mut().expect("piped output").read(&mut buffer) {
                     Ok(0) => output_closed = true,
-                    Ok(count) => {
-                        if stdout.len() + count > MAX_COMMAND_OUTPUT_BYTES as usize {
-                            return Err(RunnerFailure::OutputBound);
-                        }
-                        stdout.extend_from_slice(&buffer[..count]);
-                    }
+                    Ok(count) => on_stdout(&buffer[..count])?,
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(error) => return Err(RunnerFailure::OutputUnreadable(error.kind())),
                 }
@@ -298,7 +385,7 @@ fn run_captured_command(
             {
                 return Ok(CommandOutput {
                     success: status.success(),
-                    stdout,
+                    stdout: Vec::new(),
                     stderr,
                     exit_code: status.code(),
                 });
@@ -372,6 +459,35 @@ mod capture_tests {
             run_captured_command(&mut flood, Duration::from_secs(5)),
             Err(RunnerFailure::OutputBound)
         );
+    }
+
+    fn lines_of(script: &str) -> (Result<CommandOutput, RunnerFailure>, Vec<String>) {
+        let mut lines = Vec::new();
+        let result = run_line_command(&mut shell(script), Duration::from_secs(5), &mut |line| {
+            lines.push(line.to_owned());
+        });
+        (result, lines)
+    }
+
+    #[test]
+    fn a_listing_has_no_total_bound_only_a_line_bound() {
+        // 20,000 lines is far over the single-answer bound; the last line has
+        // no newline and is still delivered.
+        let (result, lines) =
+            lines_of("i=0; while [ $i -lt 20000 ]; do echo line-$i; i=$((i+1)); done; printf tail");
+        assert!(result.unwrap().success);
+        assert_eq!(lines.len(), 20001);
+        assert_eq!(lines[19999], "line-19999");
+        assert_eq!(lines[20000], "tail");
+    }
+
+    #[test]
+    fn a_line_over_its_bound_is_typed_and_a_failed_exit_keeps_its_status() {
+        let (result, _) = lines_of("head -c 4096 /dev/zero | tr '\\0' x");
+        assert_eq!(result, Err(RunnerFailure::OutputBound));
+        let (result, lines) = lines_of("echo kept; exit 3");
+        assert_eq!(result.unwrap().exit_code, Some(3));
+        assert_eq!(lines, ["kept"]);
     }
 
     #[test]
