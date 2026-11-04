@@ -507,6 +507,7 @@ def _model_document(
     *,
     supersedes: str | None = None,
     publisher: str = "upstream",
+    repository: str = "https://huggingface.co/acme/model",
 ) -> dict[str, object]:
     source = resources.files("vonk_forge_contracts").joinpath(
         "examples/model-definition.json"
@@ -518,7 +519,7 @@ def _model_document(
     document["identity"]["model"]["slug"] = "stable"
     document["identity"]["variant"] = "fp8"
     document["format"]["precision"] = "fp8"
-    document["source"]["repository"] = "https://huggingface.co/acme/model"
+    document["source"]["repository"] = repository
     document["source"]["revision"] = digest_byte * 40
     document["files"][0]["sha256"] = digest_byte * 64
     document["files"][0]["size_bytes"] = 1
@@ -650,6 +651,35 @@ def test_update_discovery_ignores_another_republishers_quantization(
     _insert_model_revision(
         sessions,
         _model_document("other-quant", "7", publisher="other-republisher"),
+        created_at=NOW + timedelta(hours=1),
+    )
+    update = _first_update(
+        service.discover_updates(artifact_set_sha256=manifest.digest)
+    )
+    assert update["model_update_available"] is False
+    assert update["model_update_ambiguous"] is False
+    service.close()
+
+
+def test_update_discovery_ignores_another_repository_of_the_same_republisher(
+    tmp_path: Path,
+) -> None:
+    # One republisher, one logical model, variant and format, but another
+    # repository (e.g. a 3.5 bpw beside a 2.9 bpw): a sibling, never an update.
+    sessions = _database(tmp_path)
+    service, _ = _service(tmp_path, sessions)
+    current_doc = _model_document("source-revision-1", "b")
+    current_digest = _insert_model_revision(sessions, current_doc, created_at=NOW)
+    manifest = service.resolve_artifact_set(model_content_sha256=current_digest)
+    with sessions.begin() as session:
+        service._ensure_set(session, manifest)
+    _insert_model_revision(
+        sessions,
+        _model_document(
+            "other-bpw",
+            "c",
+            repository="https://huggingface.co/acme/model-other-bpw",
+        ),
         created_at=NOW + timedelta(hours=1),
     )
     update = _first_update(

@@ -470,10 +470,12 @@ def _same_model_artifact_identity(
 def _model_lineage_signature(
     document: ModelDefinition,
 ) -> tuple[object, object, object]:
-    """Return who published the files, the logical model and its representation.
+    """Return where the files come from, the logical model and its representation.
 
-    An update successor must come from the same republisher: quantizations of
-    one logical model by different republishers are siblings, not revisions.
+    An update successor is a newer commit or release of the same source
+    repository by the same republisher. Other repositories holding the same
+    logical model (another republisher, or another bpw of one republisher)
+    are siblings, not revisions.
     """
 
     model = document if isinstance(document, ModelDefinition) else read_model(document)
@@ -481,7 +483,12 @@ def _model_lineage_signature(
     variant = identity.variant
     representation = model.format.model_dump(mode="json")
     return (
-        (identity.publisher, identity.model.publisher, identity.model.slug),
+        (
+            identity.publisher,
+            model.source.repository,
+            identity.model.publisher,
+            identity.model.slug,
+        ),
         variant,
         json.dumps(representation, sort_keys=True, separators=(",", ":")),
     )
