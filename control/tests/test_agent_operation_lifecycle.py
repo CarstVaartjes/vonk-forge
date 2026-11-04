@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
+from vonk_agent_protocol import LifecycleState, ObservationCause
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
@@ -35,7 +36,6 @@ from vonk_control.lifecycle import (
 )
 from vonk_control.lifecycle.agent_operation import (
     AgentOperationAdapter,
-    adopt_legacy_orders,
     aggregate_parent_state,
     parked_orders,
 )
@@ -77,13 +77,13 @@ def _stored(sessions, operation_id: str) -> AgentOperation:
         return stored
 
 
-def _park_like_a_legacy_wait(sessions, operation_id: str, **fields: object) -> None:
+def _park(sessions, operation_id: str, **fields: object) -> None:
     """Write the row an order leaves behind when it waits for an operator."""
 
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation_id)
         assert stored is not None
-        stored.state = "waiting-for-operator"
+        stored.state = LifecycleState.NEEDS_OPERATOR.value
         stored.next_action_at = None
         for name, value in fields.items():
             setattr(stored, name, value)
@@ -94,7 +94,8 @@ def _park_like_a_legacy_wait(sessions, operation_id: str, **fields: object) -> N
             )
         )
         if attempt is not None and attempt.state == "running":
-            attempt.state = "expired"
+            attempt.state = LifecycleState.OBSERVING.value
+            attempt.observation_cause = ObservationCause.LEASE_LAPSED.value
 
 
 def _flag_cancel(sessions, parent_job_id: str, now: datetime) -> None:
@@ -129,71 +130,15 @@ def test_a_stored_order_maps_onto_the_core_states(agent_service) -> None:
     assert running.state is State.RUNNING and running.attempt == 1
     assert running.effect is Effect.ISSUED and running.lease_deadline is not None
 
-    # A waiting order with a schedule is a retry; without one it is a wait.
-    _park_like_a_legacy_wait(sessions, queued.id)
+    # A waiting order is a wait; a backing-off one with a schedule is a retry.
+    _park(sessions, queued.id)
     parked = adapter.adopt(_stored(sessions, queued.id))
     assert parked.state is State.NEEDS_OPERATOR and parked.next_action_at is None
     with sessions.begin() as session:
-        session.get(AgentOperation, queued.id).next_action_at = clock.now
+        stored = session.get(AgentOperation, queued.id)
+        stored.state, stored.next_action_at = LifecycleState.BACKOFF.value, clock.now
     scheduled = adapter.adopt(_stored(sessions, queued.id))
     assert scheduled.state is State.BACKOFF and scheduled.next_action_at == clock.now
-
-
-def test_a_row_written_before_the_core_adopts_its_retry_schedule(agent_service) -> None:
-    jobs, sessions, clock = agent_service
-    operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
-    )
-    claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None
-    due = clock.now + timedelta(seconds=30)
-    _park_like_a_legacy_wait(
-        sessions,
-        operation.id,
-        retry_disposition="retry",
-        retry_disposition_attempt=1,
-        retry_due_at=due,
-    )
-    adapter = _bound_adapter(sessions, clock)
-    adopted = adapter.adopt(_stored(sessions, operation.id))
-    assert adopted.state is State.BACKOFF and adopted.next_action_at == due
-    # A disposition keyed to another attempt never authorises this one.
-    _park_like_a_legacy_wait(sessions, operation.id, retry_disposition_attempt=7)
-    assert adapter.adopt(_stored(sessions, operation.id)).state is State.NEEDS_OPERATOR
-
-
-def test_startup_adoption_moves_the_legacy_schedule_onto_next_action_at(
-    agent_service,
-) -> None:
-    jobs, sessions, clock = agent_service
-    operation = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
-    )
-    assert claim_agent(jobs, NODE_A, "serial-a") is not None
-    due = clock.now + timedelta(seconds=30)
-    _park_like_a_legacy_wait(
-        sessions,
-        operation.id,
-        retry_disposition="retry",
-        retry_disposition_attempt=1,
-        retry_due_at=due,
-    )
-    other = jobs.enqueue(
-        parent(sessions, clock).id, NODE_A, KIND_STOP, COMMIT, STOP_PAYLOAD
-    )
-    with sessions.begin() as session:
-        assert adopt_legacy_orders(session.connection()) == 1
-    stored = _stored(sessions, operation.id)
-    assert stored.next_action_at is not None
-    assert stored.next_action_at.replace(tzinfo=UTC) == due
-    assert stored.retry_disposition is None and stored.retry_due_at is None
-    assert (
-        _stored(sessions, other.id).next_action_at is not None
-    )  # persisted queue observation
-    with sessions.begin() as session:  # idempotent
-        assert adopt_legacy_orders(session.connection()) == 0
-    clock.now = due + timedelta(seconds=1)
-    assert claim_agent(jobs, NODE_A, "serial-a") is not None  # claimable as it was
 
 
 # ------------------------------------------------------------ the kind's facts
@@ -354,7 +299,7 @@ def test_actions_are_advertised_exactly_when_the_job_endpoints_accept_them(
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
-    _park_like_a_legacy_wait(sessions, operation.id)
+    _park(sessions, operation.id)
     adapter = _bound_adapter(sessions, clock)
     row = adapter.adopt(_stored(sessions, operation.id))
     assert adapter.actions(row) == ("resume", "retire")
@@ -373,7 +318,7 @@ def test_a_never_executed_order_parked_for_an_operator_is_queued_again(
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()  # even an irreversible kind: it never ran
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
-    _park_like_a_legacy_wait(sessions, operation.id)  # attempt 0
+    _park(sessions, operation.id)  # attempt 0
     assert _stored(sessions, operation.id).current_attempt == 0
 
     assert jobs.reconcile_orders() is True
@@ -395,7 +340,7 @@ def test_a_never_executed_start_parked_for_an_operator_is_queued_again(
         COMMIT,
         canonical_start_payload(start_deadline=clock.now + timedelta(minutes=30)),
     )
-    _park_like_a_legacy_wait(sessions, operation.id)  # a start that never ran
+    _park(sessions, operation.id)  # a start that never ran
 
     assert jobs.reconcile_orders() is True
 
@@ -413,7 +358,7 @@ def test_a_restart_safe_order_parked_for_an_operator_is_retried(agent_service) -
     assert claim is not None
     clock.advance(seconds=45)
     jobs.record_late_result(_restart_interrupted_result(claim, KIND_STOP))
-    _park_like_a_legacy_wait(sessions, operation.id)  # the shape before the fix
+    _park(sessions, operation.id)  # the shape before the fix
     before = _stored(sessions, operation.id)
     assert before.next_action_at is None
 
@@ -458,7 +403,7 @@ def test_irreversible_observation_exhaustion_is_lost_without_an_operator(
     operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
-    _park_like_a_legacy_wait(sessions, operation.id)
+    _park(sessions, operation.id)
     adapter = _bound_adapter(sessions, clock)
 
     # Advertised actions cannot turn an exhausted unknown into a queue head, and
@@ -541,7 +486,7 @@ def test_an_order_whose_job_ended_ends_with_it(agent_service) -> None:
     assert claim is not None
     clock.advance(seconds=45)
     jobs.record_late_result(_restart_interrupted_result(claim, KIND_STOP))
-    _park_like_a_legacy_wait(sessions, operation.id)
+    _park(sessions, operation.id)
     with sessions.begin() as session:
         session.get(Job, parent_job.id).state = "failed"
 
@@ -589,7 +534,7 @@ def test_many_legacy_parked_orders_heal_in_one_pass(agent_service) -> None:
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
     for operation_id in ids:
-        _park_like_a_legacy_wait(sessions, operation_id)
+        _park(sessions, operation_id)
     jobs.reconcile_orders()
     for operation_id in ids:
         stored = _stored(sessions, operation_id)
@@ -644,7 +589,7 @@ def test_a_pass_that_lost_a_race_leaves_the_row_to_the_next_pass(agent_service) 
     assert claim is not None
     clock.advance(seconds=45)
     jobs.record_late_result(_restart_interrupted_result(claim, KIND_STOP))
-    _park_like_a_legacy_wait(sessions, operation.id)
+    _park(sessions, operation.id)
 
     reconciler = jobs._order_reconciler()
     store = reconciler._store
@@ -672,8 +617,8 @@ def _decision_for(jobs, sessions, clock, operation_id):
         ([("running", False)], False, None),
         ([("succeeded", False), ("queued", False)], False, None),
         # every unfinished order is an automatic retry: the job is progressing
-        ([("waiting-for-operator", True), ("succeeded", False)], False, "queued"),
-        ([("waiting-for-operator", True)], True, None),
+        ([("backoff", True), ("succeeded", False)], False, "queued"),
+        ([("backoff", True)], True, None),
         (
             [("needs-operator", False), ("succeeded", False)],
             False,
@@ -768,34 +713,10 @@ def test_a_lapsed_attempt_is_observed_with_its_cause_and_an_old_one_reads_the_sa
         ).all()
         assert attempt.id in found
 
-        # The row a Controller wrote before the rename carries the cause in the word.
-        attempt.state = "expired"
-        attempt.observation_cause = None
-        session.flush()
-        assert aos.attempt_lapsed(attempt) and aos.attempt_is_observing(attempt)
-        assert (
-            attempt.id
-            in session.scalars(
-                select(AgentOperationAttempt.id).where(
-                    aos.sql_attempt_lapsed(AgentOperationAttempt)
-                )
-            ).all()
-        )
-        attempt.state = "waiting-for-operator"
-        session.flush()
-        assert aos.attempt_reported_unknown(attempt) and not aos.attempt_lapsed(attempt)
-        assert (
-            attempt.id
-            in session.scalars(
-                select(AgentOperationAttempt.id).where(
-                    aos.sql_attempt_failed_or_unknown(AgentOperationAttempt)
-                )
-            ).all()
-        )
         session.rollback()
 
 
-def test_a_legacy_parked_order_is_found_by_every_selection_and_a_new_one_too(
+def test_a_parked_order_is_found_by_every_selection(
     agent_service,
 ) -> None:
     jobs, sessions, clock = agent_service
@@ -804,7 +725,6 @@ def test_a_legacy_parked_order_is_found_by_every_selection_and_a_new_one_too(
     )
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     for word in (
-        "waiting-for-operator",
         aos.NEEDS_OPERATOR,
         aos.BACKOFF,
         aos.OBSERVING,

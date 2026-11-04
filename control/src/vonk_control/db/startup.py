@@ -33,11 +33,6 @@ def adopt_legacy_rows(connection: Connection) -> None:
     schema is current.  Rows it misses are adopted lazily by their kind's
     lifecycle adapter, so a gap here heals instead of stranding a row.
     """
-    from ..lifecycle.agent_operation import adopt_legacy_orders
-
-    adopted = adopt_legacy_orders(connection)
-    if adopted:
-        _LOGGER.info("Adopted %d Spark orders onto the lifecycle schedule", adopted)
     from ..lifecycle.model_cache import adopt_legacy_operations
 
     adopted = adopt_legacy_operations(connection)

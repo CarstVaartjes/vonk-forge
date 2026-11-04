@@ -66,12 +66,8 @@ class AgentOperation(Base):
     recovery_deadline: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
-    #: Legacy retry encoding, replaced by ``next_action_at``.  Read only by the
-    #: lifecycle adapter's ``adopt`` (and the startup adoption) for rows written
-    #: before the core; nothing writes them any more.  Dropped once no deployed
-    #: row can carry them.
-    retry_disposition: Mapped[str | None] = mapped_column(String(32))
-    retry_disposition_attempt: Mapped[int | None] = mapped_column(Integer)
+    #: The last column of the retry encoding ``next_action_at`` replaced; nothing
+    #: reads it, and every writer clears it.
     retry_due_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
