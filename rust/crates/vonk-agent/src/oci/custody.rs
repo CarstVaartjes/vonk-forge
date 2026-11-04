@@ -477,10 +477,15 @@ impl<R: ProcessRunner> OciRuntime<'_, R> {
 
     /// The logical size of the installation tree: every file counted at its
     /// full length, whether it is a private copy or a link to a shared model
-    /// object. Only metadata is read; no content is.
+    /// object. Only metadata is read; no content is. A count, not an integrity
+    /// check (see `verify_plan_materialization`): a started tree's root-only
+    /// runtime cache is skipped and reported, never a failed install.
     pub fn installed_bytes(&self, installation_id: &str) -> Result<u64, OciError> {
-        let installation = managed_path(self.data_root, "installations", installation_id)?;
-        strict_tree_bytes(&installation)
+        let size = installation_tree_bytes(self.data_root, installation_id)?;
+        if let Some(diagnostic) = size.unreadable_diagnostic(installation_id) {
+            eprintln!("{diagnostic}");
+        }
+        Ok(size.bytes)
     }
 
     pub fn artifact_set_digest(&self, installation_id: &str) -> Result<String, OciError> {

@@ -23,25 +23,6 @@ pub(super) fn lower_hex(value: &str, length: usize) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
-/// Sum of the lengths of the regular files below `directory`; strict, for the
-/// install receipt: anything unreadable or not a file or directory refuses.
-pub(super) fn strict_tree_bytes(directory: &Path) -> Result<u64, OciError> {
-    let mut total = 0_u64;
-    for entry in fs::read_dir(directory)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let size = if file_type.is_dir() {
-            strict_tree_bytes(&entry.path())?
-        } else if file_type.is_file() {
-            entry.metadata()?.len()
-        } else {
-            return Err(OciError::Artifact);
-        };
-        total = total.checked_add(size).ok_or(OciError::Artifact)?;
-    }
-    Ok(total)
-}
-
 /// What could be measured of an installation directory.
 #[derive(Debug, Default)]
 pub(crate) struct TreeSize {
@@ -53,10 +34,11 @@ pub(crate) struct TreeSize {
     pub first_error: Option<std::io::Error>,
 }
 
-/// An installation directory's logical size now, for inventory (metadata
-/// only). Unlike the strict receipt measurement, it fails open: unreadable subtrees
-/// (the helper's root-only runtime cache) are skipped and reported, and
-/// symlinks are counted by their own length, never followed.
+/// An installation directory's logical size now (metadata only), for the
+/// install receipt and inventory. A count, not an integrity check, so it fails
+/// open: unreadable subtrees (the helper's root-only runtime cache) are skipped
+/// and reported, and symlinks are counted by their own length, never followed.
+/// Only an unreadable installation directory itself is an error.
 pub(crate) fn installation_tree_bytes(
     data_root: &Path,
     installation_id: &str,
@@ -100,6 +82,18 @@ fn measure_tree(directory: &Path, size: &mut TreeSize, top: bool) -> Result<(), 
 }
 
 impl TreeSize {
+    /// The one-line diagnostic for entries that could not be read, naming the
+    /// io kind and errno; `None` when everything was readable.
+    pub(crate) fn unreadable_diagnostic(&self, installation_id: &str) -> Option<String> {
+        let error = self.first_error.as_ref()?;
+        Some(format!(
+            "vonk-agent: installation {installation_id} measured without {} unreadable entries ({:?}, os error {:?}): {error}",
+            self.unreadable,
+            error.kind(),
+            error.raw_os_error(),
+        ))
+    }
+
     fn skip(&mut self, error: std::io::Error) {
         // Removed during the scan: nothing to count, nothing to report.
         if error.kind() == std::io::ErrorKind::NotFound {

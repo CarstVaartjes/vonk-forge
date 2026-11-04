@@ -772,10 +772,24 @@ fn inventory_measures_what_it_can_read_of_an_installation() {
     // Readable bytes plus the link's own length; the locked subtree is reported.
     assert_eq!(size.bytes, 2 + link_len);
     assert_eq!(size.unreadable, 1);
-    let error = size.first_error.unwrap();
+    let error = size.first_error.as_ref().unwrap();
     assert_eq!(error.raw_os_error(), Some(13));
     assert!(error.to_string().contains("os error 13"));
+    let diagnostic = size.unreadable_diagnostic(INSTALLATION).unwrap();
+    assert!(diagnostic.contains("os error 13") && diagnostic.contains(INSTALLATION));
     assert_eq!(sizes.unwrap()[0].bytes, 2 + link_len);
+}
+
+#[test]
+fn an_unreadable_condition_is_reported_once_per_change() {
+    let id: uuid::Uuid = INSTALLATION.parse().unwrap();
+    let mut reported = std::collections::BTreeMap::new();
+    assert!(super::changed_unreadable(&mut reported, id, 1));
+    assert!(!super::changed_unreadable(&mut reported, id, 1));
+    assert!(super::changed_unreadable(&mut reported, id, 2));
+    assert!(!super::changed_unreadable(&mut reported, id, 0));
+    // Healed, then broken again, is news again.
+    assert!(super::changed_unreadable(&mut reported, id, 2));
 }
 
 #[test]
