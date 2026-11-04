@@ -272,13 +272,24 @@ def test_retry_rejects_revoked_scope_but_uses_accepted_profile_snapshot(
 
 
 def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> None:
-    _sessions, _lifecycle, service, _profile, _desired, _first, _child, _nodes = (
+    _sessions, _lifecycle, service, _profile, _desired, backing_off, _child, _nodes = (
         _failed_profile(tmp_path)
     )
     idle = service.create(
         FleetProfileInput(name="Keep cached", installation_policy="keep-cached"),
         actor="admin",
     )
+    # The failed load backs off for its retry, so it is live: the first idle
+    # load replaces it (the newest request steers) and is not a no-op.
+    retiring = service.load(idle.number, request_key=_uuid(804), actor="admin")
+    for _ in range(8):
+        if not service.tick():
+            break
+    retiring = service.application(retiring.id)
+    assert retiring.state == "succeeded"
+    assert retiring.result is not None and retiring.result.changed is True
+    assert service.application(backing_off.id).state == "superseded"
+
     first = service.load(
         idle.number,
         request_key=_uuid(805),
