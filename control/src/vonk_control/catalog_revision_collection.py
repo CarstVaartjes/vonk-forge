@@ -161,9 +161,11 @@ class _Kept(Exception):
 
 
 class _Unfinished(Exception):
-    """The batch ran out of budget or its recheck could not finish.
+    """The batch recheck could not finish (damaged row, scan over budget).
 
-    Nothing of it was removed; the next pass retries the same batch.
+    Nothing of the batch was removed. Like an inventory that cannot finish, it
+    proves nothing unused: the cursor stays and the sweep retries at its next
+    interval, not on the next worker pass.
     """
 
 
@@ -195,6 +197,19 @@ class _Bundle:
     @property
     def names(self) -> frozenset[str]:
         return frozenset({self.id})
+
+
+@dataclass(frozen=True, slots=True)
+class _Attempt:
+    """One batch transaction: committed (``removed``) or rescinded (``retry``).
+
+    ``stopped_after`` is the last row tried when the row budget ended the
+    attempt before the batch did; the next pass continues after it.
+    """
+
+    removed: int | None
+    retry: list[Any]
+    stopped_after: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,13 +288,19 @@ class CatalogRevisionCollector:
                         else:
                             counts["live operation"] += 1
                     try:
-                        gone = self._remove_batch(phase, pending, now, cutoff, counts)
+                        gone, stopped = self._remove_batch(
+                            phase, pending, now, cutoff, counts
+                        )
                     except _Unfinished:
-                        return self._resume(phase, after, now, removed, bundles, kept)
+                        # Paced: the cursor stays and the interval set by tick holds.
+                        self._cursor = (phase, after)
+                        return self._swept(removed, bundles, kept)
                     if phase == _Phase.BUNDLE:
                         bundles += gone
                     else:
                         removed += gone
+                    if stopped is not None:
+                        return self._resume(phase, stopped, now, removed, bundles, kept)
                     after = batch[-1].id
                     if time.monotonic() > deadline:
                         return self._resume(phase, after, now, removed, bundles, kept)
@@ -332,7 +353,9 @@ class CatalogRevisionCollector:
         if not batch:
             return
         with self._sessions() as session:
-            named = self._references(session, phase, now)
+            deadline = time.monotonic() + self._budget_seconds
+            _bound_statements(session, deadline)
+            named = self._references(session, phase, now, deadline)
         while batch:
             yield batch, named
             batch = self._next_batch(phase, batch[-1].id, cutoff)
@@ -389,21 +412,30 @@ class CatalogRevisionCollector:
         now: datetime,
         cutoff: datetime,
         kept: Counter[str],
-    ) -> int:
+    ) -> tuple[int, str | None]:
         """Remove ``pending``; a row named since the inventory stays.
 
-        A rescinded attempt keeps the named rows and retries the rest, within
-        the one budget of this batch. Every retry has fewer rows, so the loop
-        ends; ``_Unfinished`` when the budget ends first.
+        Returns how many were removed and, when the row budget ended the batch
+        early, the last row tried. Rows are taken until half the batch budget
+        has passed, and always at least one, so every batch commits progress;
+        the other half is for the recheck. A rescinded attempt keeps the named
+        rows and retries the rest within the same budget. Every retry has fewer
+        rows, so the loop ends.
         """
 
-        deadline = time.monotonic() + self._budget_seconds
+        started = time.monotonic()
+        rows_until = started + self._budget_seconds / 2
+        deadline = started + self._budget_seconds
+        stopped: str | None = None
         while pending:
-            outcome = self._attempt(phase, pending, now, cutoff, kept, deadline)
-            if isinstance(outcome, int):
-                return outcome
-            pending = outcome
-        return 0
+            attempt = self._attempt(
+                phase, pending, now, cutoff, kept, rows_until, deadline
+            )
+            stopped = stopped or attempt.stopped_after
+            if attempt.removed is not None:
+                return attempt.removed, stopped
+            pending = attempt.retry
+        return 0, stopped
 
     def _attempt(
         self,
@@ -412,23 +444,26 @@ class CatalogRevisionCollector:
         now: datetime,
         cutoff: datetime,
         kept: Counter[str],
+        rows_until: float,
         deadline: float,
-    ) -> int | list[Any]:
+    ) -> _Attempt:
         """Remove ``pending`` in one transaction, each under its own savepoint.
 
         After the deletes, the references are read again in the same
-        transaction. Returns how many were removed or, when a committed write
-        named a removed row since the inventory, nothing is removed and the
-        rows to retry are returned (kept and refused ones are already counted).
+        transaction. When a committed write named a removed row since the
+        inventory, nothing is removed and the rows to retry are returned (kept
+        and refused ones are already counted).
         """
 
         removed: list[tuple[Any, frozenset[str]]] = []
+        stopped_after: str | None = None
         try:
             with self._sessions.begin() as session:
                 _bound_lock_waits(session, deadline)
-                for item in pending:
-                    if time.monotonic() > deadline:
-                        raise _Unfinished
+                for index, item in enumerate(pending):
+                    if index and time.monotonic() > rows_until:
+                        stopped_after = pending[index - 1].id
+                        break
                     try:
                         with session.begin_nested():
                             names = (
@@ -465,9 +500,15 @@ class CatalogRevisionCollector:
                         raise _Rescinded(named)
         except _Rescinded as rescinded:
             kept["live operation"] += len(rescinded.named)
-            return [item for item, _ in removed if item.id not in rescinded.named]
+            retry = [item for item, _ in removed if item.id not in rescinded.named]
+            return _Attempt(None, retry, stopped_after)
         except (_Kept, SQLAlchemyError) as error:
             # The recheck could not finish; nothing of the batch is removed.
+            kept[
+                str(error)
+                if isinstance(error, _Kept)
+                else f"refused {type(error).__name__}"
+            ] += len(removed)
             raise _Unfinished from error
         for item, _ in removed:
             log_event(
@@ -477,7 +518,7 @@ class CatalogRevisionCollector:
                 phase=phase.value,
                 id=item.id,
             )
-        return len(removed)
+        return _Attempt(len(removed), [], stopped_after)
 
     # -- candidates ---------------------------------------------------------
 
@@ -1113,15 +1154,22 @@ def _bound_lock_waits(session: Session, deadline: float) -> None:
 
     A row a writer holds (a head moving, an installation being written, a
     bundle being stored) refuses its statement after a short lock wait, and
-    the whole transaction shares the sweep budget.
+    the whole transaction shares the batch budget.
     """
+    _bound_statements(session, deadline, lock_timeout_ms=_LOCK_TIMEOUT_MS)
+
+
+def _bound_statements(
+    session: Session, deadline: float, *, lock_timeout_ms: int | None = None
+) -> None:
+    """Every following statement of this transaction ends by ``deadline``."""
     if session.get_bind().dialect.name != "postgresql":
         return
     remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
-    for setting, value in (
-        ("statement_timeout", remaining_ms),
-        ("lock_timeout", min(_LOCK_TIMEOUT_MS, remaining_ms)),
-    ):
+    settings = [("statement_timeout", remaining_ms)]
+    if lock_timeout_ms is not None:
+        settings.append(("lock_timeout", min(lock_timeout_ms, remaining_ms)))
+    for setting, value in settings:
         session.execute(
             text("SELECT set_config(:name, :value, true)"),
             {"name": setting, "value": f"{value}ms"},

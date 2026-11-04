@@ -923,6 +923,45 @@ def test_a_backlog_larger_than_one_pass_resumes_from_its_cursor(
     assert not any(catalog.exists(revision) for revision in old)
 
 
+def test_a_batch_slower_than_its_budget_still_commits_progress_every_pass(
+    catalog: Catalog, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches resubmitting a batch that cannot fit its budget, unchanged.
+
+    Each removal here costs a quarter of the budget, so no batch of ten fits
+    in one pass. Every pass still commits the rows it reached and continues
+    after the last one it tried, until the backlog is gone.
+    """
+
+    old = [_refresh(catalog, f"slow-{index}")[0] for index in range(10)]
+    elapsed = [0.0]
+    real_remove = CatalogRevisionCollector._remove
+
+    def slow_remove(self, *args, **kwargs) -> frozenset[str]:
+        elapsed[0] += SWEEP_BUDGET_SECONDS / 4
+        return real_remove(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        catalog_revision_collection,
+        "time",
+        SimpleNamespace(monotonic=lambda: elapsed[0]),
+    )
+    monkeypatch.setattr(CatalogRevisionCollector, "_remove", slow_remove)
+    collector = catalog.collector()
+
+    removed = 0
+    for _ in range(len(old)):
+        result = collector.collect()
+        assert result.revisions > 0
+        removed += result.revisions
+        if collector._cursor is None:
+            break
+
+    assert collector._cursor is None
+    assert removed == len(old)
+    assert not any(catalog.exists(revision) for revision in old)
+
+
 def test_a_candidate_inventory_slower_than_the_budget_still_advances_the_pass(
     catalog: Catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1168,6 +1207,43 @@ def test_a_run_reopened_after_the_check_keeps_its_revision_on_postgres(
             select(func.count()).select_from(RunNode).where(RunNode.run_id == run)
         )
         assert session.get(RecipeInstallation, installation) is not None
+
+
+def test_a_recheck_that_cannot_finish_removes_nothing_and_waits_its_interval(
+    postgres_engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a failed batch recheck that commits, or retries every worker pass.
+
+    The recheck inside the batch transaction cannot complete once (a damaged
+    row or a scan over budget). The batch rolls back, the cursor stays, and
+    the sweep waits for its interval; the next sweep removes both revisions.
+    """
+
+    Base.metadata.create_all(postgres_engine)
+    catalog = Catalog(postgres_engine)
+    old = [_refresh(catalog, f"unfinished-{index}")[0] for index in range(2)]
+    real_references = CatalogRevisionCollector._references
+    failed: list[bool] = []
+
+    def failing_recheck(self, session, phase, now, deadline=None, *, since=None):
+        if since is not None and not failed:
+            failed.append(True)
+            raise catalog_revision_collection._Kept("observation_unavailable")
+        return real_references(self, session, phase, now, deadline, since=since)
+
+    monkeypatch.setattr(CatalogRevisionCollector, "_references", failing_recheck)
+    collector = catalog.collector()
+
+    assert collector.tick() is False
+    assert failed
+    assert all(catalog.exists(revision) for revision in old)
+    assert collector._due_at == catalog.now + INTERVAL
+    assert collector.tick() is False  # paced: no retry before the interval
+
+    catalog.now = catalog.now + INTERVAL
+    assert collector.tick() is True
+    assert not any(catalog.exists(revision) for revision in old)
+    catalog.job(_job_payload(old[0]), state=LifecycleState.RUNNING.value, updated=NOW)
 
 
 def test_a_retained_image_authorization_row_never_blocks_collection_on_postgres(
