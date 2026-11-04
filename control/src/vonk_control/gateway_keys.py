@@ -40,8 +40,8 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_forge_contracts import EndpointAlias
 
-from .alias_contract import Alias
 from .auth import MUTATION_ROLES, Actor
 from .capabilities import CapabilityUnavailableError
 from .gateway_route_grants import GatewayInferenceRoute
@@ -126,7 +126,7 @@ class GatewayKeyCreateRequest(StrictJSONModel):
 
     request_id: str | None = Field(default=None, min_length=1, max_length=128)
     name: str = Field(pattern=_NAME_PATTERN, max_length=63)
-    models: list[Alias] = Field(default_factory=list, max_length=64)
+    models: list[EndpointAlias] = Field(default_factory=list, max_length=64)
     expires: str | None = Field(default=None, pattern=_DURATION_PATTERN)
 
 

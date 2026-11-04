@@ -27,7 +27,12 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
 from vonk_agent_protocol.wire_model import strict_json_datetime
-from vonk_forge_contracts import RecipeDefinition, document_sha256, read_recipe
+from vonk_forge_contracts import (
+    EndpointAlias,
+    RecipeDefinition,
+    document_sha256,
+    read_recipe,
+)
 
 from ..machine_states import (
     CertificateStateField,
@@ -390,7 +395,7 @@ class RunPresence(StrictModel):
     recipe_id: Text128
     recipe_revision_id: Text128
     title: Text200
-    alias: Text128
+    alias: EndpointAlias
     expected_rank_count: int = Field(ge=1, le=_MAX_FLEET_NODES)
     present_ranks: list[Rank] = Field(max_length=_MAX_FLEET_NODES)
     member_node_ids: list[NodeId] = Field(max_length=_MAX_FLEET_NODES)
@@ -453,7 +458,7 @@ class UnavailableRunPresence(StrictModel):
     recipe_id: Text128 | None = None
     recipe_revision_id: Text128 | None = None
     title: Text200 | None = None
-    alias: Text128 | None = None
+    alias: EndpointAlias | None = None
     expected_rank_count: Annotated[int, Field(ge=1, le=_MAX_FLEET_NODES)] | None = None
     present_ranks: Annotated[list[Rank], Field(max_length=_MAX_FLEET_NODES)] | None = (
         None

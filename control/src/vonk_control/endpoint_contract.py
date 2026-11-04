@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 
 from pydantic import ConfigDict, Field
+from vonk_forge_contracts import EndpointAlias
 
-from .alias_contract import Alias
 from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictJSONModel
 
@@ -48,7 +48,7 @@ class EndpointResponse(StrictJSONModel):
 
     model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
 
-    alias: Alias
+    alias: EndpointAlias
     api_base: str = Field(min_length=1, max_length=512)
     backend_api_base: str = Field(min_length=1, max_length=512)
     generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)

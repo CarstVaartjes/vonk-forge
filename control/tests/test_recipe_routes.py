@@ -27,10 +27,8 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control import recipe_routes
-from vonk_control.alias_contract import ALIAS_MAX_LENGTH
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
-    Alias,
     FleetProfileEndpointAssignmentIntent,
     FleetProfileEndpointIntent,
 )
@@ -67,7 +65,13 @@ from vonk_control.recipe_routes import (
 from vonk_control.route_runtime import (
     AtomicRouteBundlePublisher,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    EndpointAlias,
+    ModelDefinition,
+    RecipeDefinition,
+    document_sha256,
+)
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from .node_contacts import contact_row
 from .observed_actions import observe_action
@@ -1479,8 +1483,8 @@ def test_longest_profile_alias_is_planned_published_and_discovered(
 ) -> None:
     # Catches a plan, route or endpoint contract that caps aliases shorter
     # than the profile accepts: the profile saves, then the load cannot run.
-    alias = "chat-" + "x" * (ALIAS_MAX_LENGTH - len("chat-"))
-    assert TypeAdapter(Alias).validate_python(alias) == alias
+    alias = "chat-" + "x" * (ENDPOINT_ALIAS_MAX_LENGTH - len("chat-"))
+    assert TypeAdapter(EndpointAlias).validate_python(alias) == alias
     service, _publisher, _applied, run_id = setup(
         tmp_path / "database", run_alias=alias
     )

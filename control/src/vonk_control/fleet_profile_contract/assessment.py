@@ -10,8 +10,8 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_forge_contracts import EndpointAlias
 
-from ..alias_contract import Alias
 from ..preparation_contract import (
     CompatibilityIdentity,
     ModelArtifactIdentity,
@@ -133,7 +133,7 @@ class FleetProfileResourceRequirement(StrictModel):
 
 class FleetProfileAdmissionDecision(StrictModel):
     assignment_id: UuidId
-    alias: Alias | None
+    alias: EndpointAlias | None
     allowed: bool
     blockers: list[RunSwitchReason] = Field(max_length=128)
     requirements: list[FleetProfileResourceRequirement] = Field(max_length=32)

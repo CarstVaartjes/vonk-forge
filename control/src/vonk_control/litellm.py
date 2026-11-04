@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from pydantic import Field
+from vonk_forge_contracts import EndpointAlias
 
 from .strict_json import StrictModel
 
@@ -168,7 +169,7 @@ class LiteLlmUpstreamParams(_ConfigModel):
 
 
 class LiteLlmModelEntry(_ConfigModel):
-    model_name: str
+    model_name: EndpointAlias
     litellm_params: LiteLlmUpstreamParams
 
 

@@ -356,19 +356,19 @@ class _InvalidRouteAlias(RecipeRouteNotReady):
     """One route's model alias fails the gateway pattern; others are unaffected."""
 
 
-def _checked_alias(alias: str, run_id: str) -> str:
-    if _UPSTREAM_MODEL.fullmatch(alias) is None:
+def _checked_upstream_model(model: str, run_id: str) -> str:
+    if _UPSTREAM_MODEL.fullmatch(model) is None:
         raise _InvalidRouteAlias(
-            f"route.invalid-alias: model alias {alias!r} is not accepted by the gateway",
+            f"route.invalid-alias: model alias {model!r} is not accepted by the gateway",
             run_id=run_id,
         )
-    return alias
+    return model
 
 
 def _primary_model_alias(session: Session, run: RecipeRun) -> str:
     stored = parse_stored_run_plan(run.plan)
     if stored.upstream_model is not None:
-        return _checked_alias(stored.upstream_model, run.id)
+        return _checked_upstream_model(stored.upstream_model, run.id)
     installation = session.get(RecipeInstallation, run.installation_id)
     revision = (
         session.get(CatalogDocumentRevision, installation.recipe_revision_id)
@@ -415,7 +415,7 @@ def _primary_model_alias(session: Session, run: RecipeRun) -> str:
         raise RecipeRouteNotReady(
             "recipe runtime model authority is invalid", run_id=run.id
         )
-    return _checked_alias(primary, run.id)
+    return _checked_upstream_model(primary, run.id)
 
 
 def _endpoint(

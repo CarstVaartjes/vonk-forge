@@ -6,8 +6,9 @@ from typing import Annotated, Any, NoReturn
 
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, status
 from vonk_agent_protocol import InvalidRequestError
+from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
-from .alias_contract import ALIAS_MAX_LENGTH, ALIAS_PATTERN
 from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor
 from .endpoint_contract import inference_gateway_api_base
@@ -165,8 +166,8 @@ def install_fleet_profile_routes(
         number: Annotated[int, Path(ge=1, le=MAX_DATABASE_INTEGER)],
         alias: str | None = Query(
             default=None,
-            pattern=ALIAS_PATTERN,
-            max_length=ALIAS_MAX_LENGTH,
+            pattern=ENDPOINT_ALIAS_PATTERN,
+            max_length=ENDPOINT_ALIAS_MAX_LENGTH,
         ),
         _actor: Actor = authenticated,
     ) -> FleetProfileEndpointsView:

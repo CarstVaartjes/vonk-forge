@@ -18,7 +18,6 @@ from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import InvalidRequestError, UnknownOutcomeError
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
-from vonk_control.alias_contract import ALIAS_MAX_LENGTH
 from vonk_control.api import create_app
 from vonk_control.auth import MUTATION_ROLES, Actor, TokenCodec
 from vonk_control.fleet_profile_contract import FleetProfileApplicationView
@@ -32,6 +31,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.strict_json import route_endpoint
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -187,7 +187,7 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
 # The longest alias a profile accepts is discoverable too: a narrower query
 # rule refuses the endpoint of a profile that saved fine.
 @pytest.mark.parametrize(
-    "alias", ["studio-chat", "chat-" + "x" * (ALIAS_MAX_LENGTH - 5)]
+    "alias", ["studio-chat", "chat-" + "x" * (ENDPOINT_ALIAS_MAX_LENGTH - 5)]
 )
 def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope(
     alias: str,

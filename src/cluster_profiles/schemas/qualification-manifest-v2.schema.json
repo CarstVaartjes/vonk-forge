@@ -43,6 +43,10 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"},
+    "endpointAlias": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
+    },
     "recipeKey": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{0,62}/[a-z0-9][a-z0-9-]{0,62}$"
@@ -165,7 +169,7 @@
       "required": ["content_sha256", "alias", "smoke_cases"],
       "properties": {
         "content_sha256": {"$ref": "#/$defs/digest"},
-        "alias": {"$ref": "#/$defs/name"},
+        "alias": {"$ref": "#/$defs/endpointAlias"},
         "smoke_cases": {
           "type": "array",
           "minItems": 1,

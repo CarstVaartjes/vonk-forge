@@ -12,8 +12,12 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TypeGuard
 
+from . import claim_registry as claims
+from . import collection_continuation as collections
+from . import content_identity_boundaries as identity
+from . import coordination_boundaries as coordination
+from . import deterministic_retries as retries
 from . import (
-    alias_rules,
     docker_listings,
     legacy_tolerance,
     locked_io,
@@ -23,11 +27,6 @@ from . import (
     shell_trap_waits,
     whole_collection_readers,
 )
-from . import claim_registry as claims
-from . import collection_continuation as collections
-from . import content_identity_boundaries as identity
-from . import coordination_boundaries as coordination
-from . import deterministic_retries as retries
 from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
@@ -96,7 +95,6 @@ MODES = (
     "capacity-refusals",
     "agent-422",
     "docker-listings",
-    "alias-rules",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2060,10 +2058,6 @@ def check_source(
         )
     if python and path.startswith("control/src/") and "locked-io" in modes:
         hits.extend((line, locked_io.KIND) for line in locked_io.scan_source(source))
-    if "alias-rules" in modes and alias_rules.in_scope(path):
-        hits.extend(
-            (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
-        )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(
             (line, scratch_names.KIND)

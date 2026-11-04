@@ -9,7 +9,6 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import UnknownError
-from vonk_control.alias_contract import ALIAS_MAX_LENGTH
 from vonk_control.auth import Actor
 from vonk_control.gateway_keys import (
     GatewayKeyCreated,
@@ -17,6 +16,7 @@ from vonk_control.gateway_keys import (
     install_gateway_key_routes,
 )
 from vonk_control.strict_json import ControllerAPIRoute
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 
 @pytest.fixture(autouse=True)
@@ -182,7 +182,7 @@ def test_roll_replaces_the_secret_and_keeps_name_and_models():
 def test_a_key_can_be_limited_to_the_longest_profile_alias():
     # Catches a grant rule narrower than the profile alias: the model serves,
     # but no key could be limited to it.
-    alias = "chat-" + "x" * (ALIAS_MAX_LENGTH - len("chat-"))
+    alias = "chat-" + "x" * (ENDPOINT_ALIAS_MAX_LENGTH - len("chat-"))
     client = _client(_service(FakeLiteLlm()))
     created = client.post("/api/key", json={"name": "ci", "models": [alias]})
     assert created.status_code == 201, created.text

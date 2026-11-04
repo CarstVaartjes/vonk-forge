@@ -10,16 +10,14 @@ digest, so an otherwise identical heartbeat never generates a new bundle.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field, field_validator
 from vonk_agent_protocol.state_machines import GatewayRouteState
+from vonk_forge_contracts import EndpointAlias
 
-from .alias_contract import Alias
 from .integer_domains import MAX_DATABASE_BIGINT
 from .strict_json import StrictModel
-
-Identifier = Annotated[str, Field(min_length=1, max_length=256)]
 
 
 class RouteEndpointDocument(StrictModel):
@@ -44,7 +42,7 @@ class RouteBundleDocument(StrictModel):
     """``routes.json``: the gateway's published aliases at one generation."""
 
     generation: int = Field(ge=1)
-    routes: dict[Identifier, RouteEndpointDocument]
+    routes: dict[EndpointAlias, RouteEndpointDocument]
     schema_version: Literal[2]
     state: GatewayRouteState
     reason: str | None = Field(default=None, max_length=256)
@@ -58,7 +56,7 @@ class RouteRankIdentity(StrictModel):
 
 class RouteRunIdentity(StrictModel):
     run_id: str = Field(min_length=1, max_length=128)
-    alias: Alias
+    alias: EndpointAlias
     plan_digest: str = Field(min_length=1, max_length=128)
     run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=0)
     upstream_model: str = Field(min_length=1, max_length=256)
@@ -77,7 +75,7 @@ class RouteAcceptedRunIdentity(StrictModel):
     """Retained immutable serving facts while current bookkeeping is unreadable."""
 
     run_id: str = Field(min_length=1, max_length=128)
-    alias: Alias
+    alias: EndpointAlias
     accepted_endpoint: RouteEndpointDocument
     accepted_policy: RouteAcceptedModelPolicy
 
@@ -87,4 +85,4 @@ class RouteIdentityDocument(StrictModel):
 
     schema_version: Literal[1] = 1
     runs: list[RouteRunIdentity | RouteAcceptedRunIdentity]
-    aliases: dict[Identifier, str]
+    aliases: dict[EndpointAlias, str]

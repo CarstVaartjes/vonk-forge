@@ -11,8 +11,8 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_forge_contracts import EndpointAlias
 
-from ..alias_contract import Alias
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
@@ -125,7 +125,7 @@ class RunSwitchPreviewRequest(StrictModel):
     model_content_sha256: Digest
     recipe_revision_id: UuidId
     spark_group: SparkGroup
-    alias: Alias
+    alias: EndpointAlias
     action: RunSwitchPlacementAction = "run"
     retention: RunSwitchRetention = "retain-cached"
     # Recipe option name -> chosen value. An option left out takes the

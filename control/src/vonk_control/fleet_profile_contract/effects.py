@@ -13,8 +13,8 @@ from vonk_agent_protocol import (
     OperationProgress,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_forge_contracts import EndpointAlias
 
-from ..alias_contract import Alias
 from ..child_phases import FleetProfileChildPhase
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_contract import (
@@ -27,7 +27,7 @@ from .vocabulary import Digest, NodeId, UuidId
 class FleetProfileRunEffect(StrictModel):
     run_id: UuidId
     installation_id: UuidId
-    alias: Alias
+    alias: EndpointAlias
     # node_ids always names the full stored topology.  For a profile-owned
     # cleanup after fleet removal, this separately binds the live Stop targets
     # and missing ranks; ordinary Stops keep this field absent.

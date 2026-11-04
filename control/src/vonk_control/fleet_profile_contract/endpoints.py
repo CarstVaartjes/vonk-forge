@@ -16,8 +16,8 @@ from vonk_agent_protocol import (
     EndpointState,
     ProfileReasonCode,
 )
+from vonk_forge_contracts import EndpointAlias
 
-from ..alias_contract import Alias
 from ..endpoint_contract import EndpointResponse
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..strict_json import StrictModel
@@ -65,7 +65,7 @@ class FleetProfileEndpointAssignmentView(StrictModel):
     assignment_id: UuidId
     recipe_title: Name
     desired_state: DesiredAssignmentStateField
-    alias: Alias | None = None
+    alias: EndpointAlias | None = None
     state: FleetProfileEndpointState
     endpoint: EndpointResponse | None = None
 

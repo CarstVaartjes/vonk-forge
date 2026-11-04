@@ -22,7 +22,6 @@ from vonk_agent_protocol.compiled_execution_plan import MemoryKind as MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 from vonk_forge_contracts.recipe import Scalar as Scalar
 
-from ..alias_contract import Alias as Alias
 from ..distribution_assignment import (
     NodeDistributionAssignment as NodeDistributionAssignment,
 )
@@ -151,7 +150,6 @@ from .vocabulary import RunSwitchRetention as RunSwitchRetention
 from .vocabulary import RunSwitchSubphase as RunSwitchSubphase
 
 __all__ = [
-    "Alias",
     "ArtifactStorageImpact",
     "ArtifactVerificationEvidence",
     "BuildCompatibilityEvidence",

@@ -39,7 +39,6 @@ from vonk_agent_protocol.agent_words import (
 )
 from vonk_agent_protocol.inventory import MemoryPool as MemoryPool
 
-from ..alias_contract import Alias as Alias
 from ..child_phases import FleetProfileChildPhase as FleetProfileChildPhase
 from ..endpoint_contract import EndpointResponse as EndpointResponse
 from ..integer_domains import MAX_DATABASE_INTEGER as MAX_DATABASE_INTEGER

@@ -2061,44 +2061,6 @@ def test_private_or_classified_scratch_names_pass(path: str, source: str) -> Non
     assert not check_source(path, source, lines, modes=("scratch-names",))
 
 
-_ALIAS_PATH = "control/src/vonk_control/endpoint_contract.py"
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "    alias: str = Field(pattern=_PATTERN, max_length=63)\n",
-        '_ALIAS = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}\\Z")\n',
-        "    alias: Mapped[str] = mapped_column(String(128), nullable=False)\n",
-        "def f(alias: str | None = Query(default=None, max_length=63)): ...\n",
-        "def f(alias: Annotated[str, Field(max_length=63)]): ...\n",
-    ],
-)
-def test_a_hand_written_alias_rule_is_flagged(source: str) -> None:
-    assert check_source(_ALIAS_PATH, source, {1}, modes=("alias-rules",))
-    assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
-
-
-@pytest.mark.parametrize(
-    ("path", "source"),
-    [
-        (_ALIAS_PATH, "    alias: Alias\n"),
-        (
-            _ALIAS_PATH,
-            "    alias: Mapped[str] = mapped_column(String(ALIAS_MAX_LENGTH))\n",
-        ),
-        (
-            _ALIAS_PATH,
-            'request_id: str = Header(alias="X-Request-ID", max_length=64)\n',
-        ),
-        ("control/src/vonk_control/alias_contract.py", "ALIAS_MAX_LENGTH = 128\n"),
-    ],
-)
-def test_the_contract_alias_rule_passes(path: str, source: str) -> None:
-    lines = set(range(1, source.count("\n") + 1))
-    assert not check_source(path, source, lines, modes=("alias-rules",))
-
-
 def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
     for probe in (
         "code = ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY\n",
