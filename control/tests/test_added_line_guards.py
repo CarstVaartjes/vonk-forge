@@ -2921,6 +2921,22 @@ def _lifecycle_sets(
         "{LifecycleState.FAILED, LifecycleState.CANCELLED, LifecycleState.NEEDS_OPERATOR}",
         "job_states.words(LifecycleState.SUCCEEDED, LifecycleState.FAILED)",
         "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
+        # Stored words: the same fleet-removal set, string-spelled.
+        "child.state in {'failed', 'cancelled', 'needs-operator'}",
+        "('succeeded', 'failed', 'cancelled')",
+        "('cancelled', 'superseded')",
+        # Composed sets.
+        (
+            "(*job_states.words(LifecycleState.QUEUED),"
+            " *job_states.words(LifecycleState.RUNNING))"
+        ),
+        (
+            "job_states.words(LifecycleState.QUEUED)"
+            " + job_states.words(LifecycleState.BACKOFF)"
+        ),
+        # A comparison chain on one subject.
+        "state == 'queued' or state == 'running'",
+        "state != LifecycleState.SUCCEEDED and state != LifecycleState.CANCELLED",
     ],
 )
 def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
@@ -2943,6 +2959,13 @@ def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
         + ",\n)",
         # Another machine's states.
         "{RunState.STARTING, RunState.RUNNING, RunState.STOPPING}",
+        # "failed" alone is an installation's word too.
+        "('installed', 'failed')",
+        # Two subjects, one state each.
+        "state == 'queued' or other == 'running'",
+        # A statement around one named predicate.
+        "select(Job).where(Job.state.in_(job_states.LIVE), Job.kind == 'x')",
+        "(*job_states.LIVE, *job_states.words(LifecycleState.FAILED))",
     ],
 )
 def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:

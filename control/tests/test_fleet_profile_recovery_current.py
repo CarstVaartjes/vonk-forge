@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     FailureCode,
     LifecycleState,
     RunSwitchCode,
+    SupersedeCode,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import ProfileChildJobKind
@@ -288,7 +289,9 @@ def test_repeated_idle_loads_preserve_distinct_noop_receipts(tmp_path: Path) -> 
     retiring = service.application(retiring.id)
     assert retiring.state == "succeeded"
     assert retiring.result is not None and retiring.result.changed is True
-    assert service.application(backing_off.id).state == "superseded"
+    replaced = service.application(backing_off.id)
+    assert replaced.state == "superseded"
+    assert replaced.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
 
     first = service.load(
         idle.number,
