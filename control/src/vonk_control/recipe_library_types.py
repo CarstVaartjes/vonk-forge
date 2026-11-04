@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from vonk_forge_contracts import ModelDisplay, RecipeDisplay
+from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
 if TYPE_CHECKING:
     from .catalog_revision_contract import PrebuiltImage
@@ -64,6 +65,8 @@ class RecipeLibraryItem:
     source_bundle_sha256: str | None = None
     # The signed index's CI-built runtime image for this exact revision.
     prebuilt_image: PrebuiltImage | None = None
+    # The hardware qualification the signed index derived for this revision.
+    qualification: PublishedQualificationStatusView | None = None
 
 
 @dataclass(frozen=True, slots=True)

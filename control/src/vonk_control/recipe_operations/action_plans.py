@@ -452,8 +452,34 @@ class ActionPlansMixin:
         exclude_installation_ids: Collection[str],
         lock: bool,
     ) -> dict[str, tuple[str, ...]]:
-        statement = select(RecipeInstallation).where(
-            RecipeInstallation.state != InstallationState.UNINSTALLED
+        """Recipes on ``node_ids`` that still need the model, by node.
+
+        Only installations with a live rank on these nodes can keep the model
+        there, so the read starts from those nodes: what other Sparks hold never
+        costs anything here (audit A6).
+        """
+        dependent_recipe_ids: dict[str, set[str]] = {
+            node_id: set() for node_id in node_ids
+        }
+        if not node_ids:
+            return {}
+        statement = (
+            select(
+                RecipeInstallation.id,
+                RecipeInstallation.recipe_revision_id,
+                RecipeInstallation.model_content_sha256,
+                InstallationNode.node_id,
+            )
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .where(
+                InstallationNode.node_id.in_(sorted(node_ids)),
+                InstallationNode.state != InstallationNodeState.UNINSTALLED,
+                RecipeInstallation.state != InstallationState.UNINSTALLED,
+            )
+            .order_by(RecipeInstallation.id, InstallationNode.node_id)
         )
         if exclude_installation_ids:
             statement = statement.where(
@@ -461,69 +487,53 @@ class ActionPlansMixin:
             )
         if lock:
             statement = statement.with_for_update(of=RecipeInstallation)
-        candidates = tuple(session.scalars(statement))
-        dependent_recipe_ids: dict[str, set[str]] = {
-            node_id: set() for node_id in node_ids
-        }
-        if not candidates or not node_ids:
-            return {node_id: () for node_id in sorted(node_ids)}
-        candidate_ids = [item.id for item in candidates]
         memberships: dict[str, set[str]] = {}
-        for installation_id, node_id in session.execute(
-            select(InstallationNode.installation_id, InstallationNode.node_id).where(
-                InstallationNode.installation_id.in_(candidate_ids),
-                InstallationNode.node_id.in_(node_ids),
-                InstallationNode.state != InstallationNodeState.UNINSTALLED,
-            )
-        ):
+        candidates: dict[str, tuple[str, str | None]] = {}
+        for installation_id, revision_id, model, node_id in session.execute(statement):
             memberships.setdefault(installation_id, set()).add(node_id)
-        for installation in candidates:
-            member_nodes = memberships.get(installation.id)
-            if not member_nodes:
-                continue
-            revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            # What this installation needs is known from its recipe revision and,
-            # failing that, from the model its own row records.  Whatever cannot
-            # be proven unused is a dependent: a model is never removed on a guess.
-            recipe_id = (
-                revision.document_id
-                if revision is not None
-                else installation.recipe_revision_id
-            )
-            identity = (
-                _primary_model_identity(read_row_column(revision, "document"))
-                if revision is not None
-                else None
-            )
-            identities = (
-                _recipe_model_identities(session, read_row_column(revision, "document"))
-                if revision is not None and identity is not None
-                else None
-            )
-            if identity is None or identities is None:
-                retire_as_unknown(
-                    "recipe.model-dependents",
-                    installation.id,
-                    BookkeepingReason.EVIDENCE_UNAVAILABLE,
-                    "the installation's model needs are not provable",
-                )
-                uses = True
-            else:
-                if installation.model_content_sha256 not in {None, identity[0]}:
-                    retire_as_unknown(
-                        "recipe.model-dependents",
-                        installation.id,
-                        BookkeepingReason.EVIDENCE_MISMATCH,
-                        "installation model differs from its recipe revision",
-                    )
-                uses = (
-                    any(digest == model_content_sha256 for digest, _title in identities)
-                    or installation.model_content_sha256 == model_content_sha256
-                )
-            if uses:
-                for node_id in member_nodes:
+            candidates[installation_id] = (revision_id, model)
+        # One recipe revision's needs are read once, however many of the
+        # installations on these nodes use it.
+        needs = {
+            revision_id: _recipe_needs(session, revision_id)
+            for revision_id in sorted({item[0] for item in candidates.values()})
+        }
+        for installation_id, (revision_id, installed_model) in candidates.items():
+            recipe_id, needed = needs[revision_id]
+            # What this installation needs is known from its recipe revision and
+            # from the model its own row records.  Whatever cannot be proven
+            # unused is a dependent: a model is never removed on a guess.
+            if (
+                needed is None
+                or model_content_sha256 in needed
+                or installed_model == model_content_sha256
+            ):
+                for node_id in memberships[installation_id]:
                     dependent_recipe_ids[node_id].add(recipe_id)
         return {
             node_id: tuple(sorted(recipe_ids))
             for node_id, recipe_ids in sorted(dependent_recipe_ids.items())
         }
+
+
+def _recipe_needs(
+    session: Session, revision_id: str
+) -> tuple[str, frozenset[str] | None]:
+    """A recipe revision's recipe id and every model it needs.
+
+    The needed models are ``None`` when the active revision or its model
+    closure cannot be read: the caller then keeps the model.
+    """
+    revision = _active_recipe_revision(session, revision_id)
+    if revision is None:
+        return revision_id, None
+    document = read_row_column(revision, "document")
+    identities = (
+        _recipe_model_identities(session, document)
+        if _primary_model_identity(document) is not None
+        else None
+    )
+    return (
+        revision.document_id,
+        None if identities is None else frozenset(digest for digest, _ in identities),
+    )

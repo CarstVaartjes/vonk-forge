@@ -66,3 +66,6 @@ pub(super) static WATCHDOG_FEEDS: std::sync::atomic::AtomicUsize =
 
 mod fixtures_0;
 pub(super) use fixtures_0::*;
+
+mod orphan_fakes;
+pub(super) use orphan_fakes::*;

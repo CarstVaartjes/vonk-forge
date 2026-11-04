@@ -57,6 +57,8 @@ export type LibrarySort = NonNullable<
   NonNullable<paths["/api/model/library"]["get"]["parameters"]["query"]>["sort"]
 >;
 export type LibraryViewRecipeModel = components["schemas"]["LibraryRecipeModel"];
+// The signed catalog's hardware qualification of one exact recipe revision.
+export type RecipeQualification = components["schemas"]["PublishedQualificationStatusView"];
 // The three verdict states of a readiness check, as the contract spells them.
 export type RecipeReadinessState = components["schemas"]["RecipeReadinessCheck"]["state"];
 
@@ -86,6 +88,8 @@ export type LibraryViewRecipe = {
   // The Controller's read-only assessment of this exact recipe against the
   // live fleet (fleet_fit is what `vonkctl recipe library --fits-fleet` tests).
   assessment?: components["schemas"]["RecipeReadiness"] | null;
+  // Informative only: null means not yet verified, and nothing gates on it.
+  qualification?: RecipeQualification | null;
   installations?: unknown[];
   runs?: unknown[];
   installation_returned_count?: WireNumber;

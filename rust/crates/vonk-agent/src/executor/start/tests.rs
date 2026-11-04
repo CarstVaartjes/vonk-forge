@@ -142,6 +142,7 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
                 process_running: None, exit_code: Some(0),
                 installation_intent_nonce: None, job_progress_at: None,
                 error_code: None, diagnostic: None, process_logs: None,
+                container_labels: None,
             };
             let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
             stream
@@ -348,6 +349,7 @@ async fn collective_start_with_drops(
             error_code: None,
             diagnostic: None,
             process_logs: None,
+            container_labels: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         stream

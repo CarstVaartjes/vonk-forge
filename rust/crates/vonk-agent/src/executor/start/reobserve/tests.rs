@@ -149,6 +149,8 @@ async fn settle_failed(seen: Seen, failed: Failed) -> Settled {
                 error_code: None,
                 diagnostic: None,
                 process_logs: None,
+
+                container_labels: None,
             };
             match seen {
                 Seen::Running => {
