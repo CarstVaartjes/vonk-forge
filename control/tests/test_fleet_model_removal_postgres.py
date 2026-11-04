@@ -642,9 +642,9 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         cache.reconcile_removal_gates()
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
-            # An open gate is deleted where it is released: missing reads as open.
-            released = gate is None or gate.removal_owner_id is None
-            assert released == (damage == "deadline")
+            # An open gate is deleted where it is released.
+            assert (gate is None) == (damage == "deadline")
+            assert gate is None or gate.removal_owner_id is not None
         # A lost owner retains its committed maximum authority bound. A
         # terminal owner can no longer renew a grant, so only its last TTL is
         # needed. Neither missing JSON nor a missing row becomes a forever wait.
@@ -660,7 +660,7 @@ def test_lost_owner_authority_expires_before_fresh_reference(
         with world.sessions() as session:
             gate = session.get(ArtifactLifecycleGate, ("model-object", path.name))
             row = session.get(ModelCacheOperation, receipt.id)
-            assert gate is None or gate.removal_owner_id is None, (
+            assert gate is None, (
                 now[0],
                 None if row is None else (row.state, row.updated_at, row.completed_at),
                 None if gate is None else gate.removal_authority_expires_at,

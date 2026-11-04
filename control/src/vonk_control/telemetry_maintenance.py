@@ -21,6 +21,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from .admission_locking import is_admission_contention, label_transaction
+from .catalog_revision_collection import GRACE
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .inventory_items_contract import InventorySnapshotKind
@@ -179,7 +180,7 @@ class TelemetryMaintenance:
 
     @staticmethod
     def _prune_local_issuance(session: Session, *, now: datetime, limit: int) -> None:
-        """Keep exact receipts, including PENDING, through expired recovery."""
+        """Keep exact receipts, including PENDING, for a day past their expiry."""
         expiry = cast(
             LocalCertificateIssuance.binding["not_after"].as_string(),
             DateTime(timezone=True),
@@ -187,7 +188,7 @@ class TelemetryMaintenance:
         stale = list(
             session.scalars(
                 select(LocalCertificateIssuance.request_id)
-                .where(expiry < now - timedelta(days=30))
+                .where(expiry < now - GRACE)
                 .order_by(expiry, LocalCertificateIssuance.request_id)
                 .limit(limit)
                 .with_for_update(of=LocalCertificateIssuance, skip_locked=True)

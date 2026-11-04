@@ -216,7 +216,7 @@ class ModelCacheOperation(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     #: When received bytes last advanced; the recovery budget is a stall window
@@ -360,7 +360,9 @@ class RecipeLibrarySyncRun(Base):
     )
     # Last progress of a running sync; a stale one is dead.
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
 
 class RecipeBuild(Base):

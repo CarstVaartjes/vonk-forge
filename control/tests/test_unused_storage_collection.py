@@ -3349,8 +3349,8 @@ def test_orphaned_receipt_removal_fence_is_reconciled_by_a_fresh_sweep(
     assert not path.exists()
     with world.sessions() as session:
         gate = session.scalar(select(ArtifactLifecycleGate))
-        # An open gate is deleted where it is released: missing reads as open.
-        assert gate is None or gate.removal_owner_id is None
+        # An open gate is deleted where it is released.
+        assert gate is None
     fresh = _receipt(tmp_path, AN_IMAGE)
     assert _collector(world, image_cache_root=tmp_path).collect().images == 1
     assert not fresh.exists()

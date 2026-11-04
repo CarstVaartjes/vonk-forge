@@ -8,22 +8,29 @@ no longer grow without a deletion rule.
 
 from __future__ import annotations
 
+import asyncio
 import itertools
+import logging
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from sqlalchemy import create_engine, event, select, text
 from sqlalchemy.engine import Connection, Engine, ExecutionContext
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+from starlette.types import Message, Receive, Scope, Send
 from vonk_control import terminal_history_collection
+from vonk_control.agent_contacts import record_contact
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
     clear_removal,
     reserve_removal,
 )
+from vonk_control.auth import _AGENT_IDENTITY_SCOPE_KEY, AgentIdentity
 from vonk_control.models import (
     AgentCertificate,
     AgentEnrollment,
@@ -47,6 +54,7 @@ from vonk_control.models import (
     ResourceReservation,
     RunNode,
 )
+from vonk_control.observation_delivery import ObservationDeliveryMiddleware
 from vonk_control.terminal_history_collection import (
     PASS_BUDGET_SECONDS,
     RETAINED,
@@ -55,6 +63,9 @@ from vonk_control.terminal_history_collection import (
 )
 
 from .test_terminal_history_collection import _job, _stopped_run
+
+if TYPE_CHECKING:
+    from vonk_control.agent_api import AgentApiServices
 
 NOW = datetime(2026, 11, 4, 12, tzinfo=UTC)
 NODE = "spk_" + "1" * 32
@@ -68,7 +79,12 @@ def sessions(monkeypatch: pytest.MonkeyPatch) -> Iterator[sessionmaker[Session]]
     monkeypatch.setattr(
         terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
     )
-    engine = create_engine("sqlite:///:memory:")
+    # One shared connection: the delivery recorder writes from a worker thread.
+    engine = create_engine(
+        "sqlite:///:memory:",
+        poolclass=StaticPool,
+        connect_args={"check_same_thread": False},
+    )
     Base.metadata.create_all(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
     with factory.begin() as session:
@@ -388,19 +404,49 @@ def test_the_running_worker_keeps_its_heartbeat_and_another_one_goes(
         ) == {WORKER}
 
 
+async def _deliver_observations(sessions: sessionmaker[Session], status: int) -> None:
+    """One recipe-run observation report through the real delivery recorder."""
+
+    async def app(_scope: Scope, _receive: Receive, send: Send) -> None:
+        await send({"type": "http.response.start", "status": status, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(_message: Message) -> None:
+        return None
+
+    identity = AgentIdentity(
+        node_id=NODE,
+        certificate_serial="1",
+        certificate_fingerprint="f" * 64,
+        verified=True,
+    )
+    services = cast("AgentApiServices", SimpleNamespace(sessions=sessions))
+    scope: Scope = {
+        "type": "http",
+        "path": "/agent/recipe-runs/observations",
+        "method": "POST",
+        "headers": [],
+        _AGENT_IDENTITY_SCOPE_KEY: identity,
+    }
+    await ObservationDeliveryMiddleware(app, services=services)(scope, receive, send)
+
+
 @pytest.mark.parametrize(
-    ("last_word", "seen_since", "kept"),
+    ("observation", "kept"),
     [
-        # The Spark said its process still ran and has not reported since.
-        (True, False, True),
-        # It has been heard from since: a running process would have reopened it.
-        (True, True, False),
-        # Its last word was that nothing runs.
-        (False, False, False),
+        # Only a job claim since the end: contact proves nothing about processes.
+        (None, True),
+        # A report the Controller refused proves nothing either.
+        (409, True),
+        # An accepted report after the end that left the run failed: no process.
+        (204, False),
     ],
 )
-def test_a_failed_run_is_kept_until_its_stop_is_proven(
-    sessions: sessionmaker[Session], last_word: bool, seen_since: bool, kept: bool
+def test_a_failed_run_is_kept_until_an_accepted_report_after_its_end(
+    sessions: sessionmaker[Session], observation: int | None, kept: bool
 ) -> None:
     old = NOW - timedelta(days=2)
     run = _stopped_run(old, NODE)
@@ -418,20 +464,125 @@ def test_a_failed_run_is_kept_until_its_stop_is_proven(
                 port=8000,
                 reserved_memory_bytes=1,
                 observed_run_generation=2,
-                observation_process_running=last_word,
+                observation_process_running=True,
                 observation_observed_at=old,
                 updated_at=old,
             )
         )
-        session.add(
-            AgentNodeContact(
-                node_id=NODE,
-                last_seen_at=old + timedelta(hours=1) if seen_since else old,
-            )
-        )
+        # The writer every job claim uses: contact after the run ended.
+        record_contact(session, NODE, last_seen_at=old + timedelta(hours=1))
+    if observation is not None:
+        asyncio.run(_deliver_observations(sessions, observation))
     TerminalHistoryCollector(sessions, clock=lambda: NOW).collect()
     with sessions() as session:
         assert (session.get(RecipeRun, run.id) is not None) is kept
+
+
+def test_a_normal_pass_takes_only_declared_edges(
+    sessions: sessionmaker[Session], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The last table deleting or keeping a row ends the cycle without a restart."""
+    caplog.set_level(logging.INFO, logger=terminal_history_collection.__name__)
+    old = NOW - timedelta(days=40)
+    with sessions.begin() as session:
+        gone = _retired_node(session, old)
+        held = _retired_node(session, old)
+        session.add(_job(old))
+        session.flush()
+        session.add(
+            AgentCertificate(
+                serial="99",
+                node_id=held,
+                not_before=old - timedelta(days=30),
+                not_after=NOW,
+                fingerprint="99",
+                state="active",
+                generation=1,
+            )
+        )
+    collector = TerminalHistoryCollector(sessions, clock=lambda: NOW)
+    removed = collector.collect()
+    assert removed["agent_nodes"] == 1 and removed["jobs"] == 1
+    removed = collector.collect()
+    assert not removed
+    with sessions() as session:
+        assert session.get(AgentNode, gone) is None
+        assert session.get(AgentNode, held) is not None
+    assert not [
+        record
+        for record in caplog.records
+        if "history.cycle_restarted" in record.getMessage()
+    ]
+
+
+def test_rows_kept_without_a_release_cost_no_statement_per_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Kept rows with no release event (yet) are not selected again each pass.
+
+    A failed download that lists objects of its own and a retired node that an
+    installation, build, mapping or reservation still names stay. Their keeps
+    are part of the indexed selection, so the statements of a pass do not grow
+    with how many such rows there are.
+    """
+    monkeypatch.setattr(
+        terminal_history_collection, "time", SimpleNamespace(monotonic=lambda: 0.0)
+    )
+
+    def statements_per_pass(kept: int) -> int:
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        factory = sessionmaker(engine, expire_on_commit=False)
+        old = NOW - timedelta(days=40)
+        with factory.begin() as session:
+            session.add(AgentNode(node_id=NODE, state="active"))
+            for index in range(kept):
+                digest = _cache_set(session, old)
+                node_id = _retired_node(session, old)
+                session.flush()
+                session.add(
+                    ModelCacheSetArtifact(
+                        artifact_set_sha256=digest,
+                        artifact_key="weights",
+                        artifact_sha256=f"{index:064x}",
+                        path="model.safetensors",
+                    )
+                )
+                session.add(
+                    ResourceReservation(
+                        node_id=node_id,
+                        kind="disk",
+                        resource_key="disk",
+                        amount_bytes=1,
+                        owner_kind="job",
+                        owner_id=str(uuid.uuid4()),
+                        state="active",
+                        plan_digest="a" * 64,
+                        created_at=old,
+                    )
+                )
+        executed: list[str] = []
+
+        def count(
+            _connection: Connection,
+            _cursor: object,
+            statement: str,
+            _parameters: object,
+            _context: ExecutionContext,
+            _executemany: bool,
+        ) -> None:
+            executed.append(statement)
+
+        collector = TerminalHistoryCollector(factory, clock=lambda: NOW)
+        event.listen(engine, "after_cursor_execute", count)
+        try:
+            assert not collector.collect()
+        finally:
+            event.remove(engine, "after_cursor_execute", count)
+            engine.dispose()
+        return len(executed)
+
+    assert statements_per_pass(5) == statements_per_pass(100)
 
 
 def test_the_newest_sync_runs_stay_and_older_ones_go(

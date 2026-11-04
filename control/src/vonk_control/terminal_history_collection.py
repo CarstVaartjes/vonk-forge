@@ -37,7 +37,13 @@ from sqlalchemy import (
     union_all,
 )
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import InstrumentedAttribute, Session, load_only, sessionmaker
+from sqlalchemy.orm import (
+    InstrumentedAttribute,
+    Session,
+    aliased,
+    load_only,
+    sessionmaker,
+)
 from sqlalchemy.sql.elements import ColumnElement
 from vonk_agent_protocol import (
     ControllerErrorCode,
@@ -79,7 +85,6 @@ from .models import (
     JobAttempt,
     ModelCacheOperation,
     ModelCacheSet,
-    ModelCacheSetArtifact,
     NodeSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
@@ -120,8 +125,8 @@ _LIVE_ATTEMPT = LifecycleState.RUNNING.value
 #: loop: such a row is past every window, unless it is this worker's own.
 _NEVER = datetime(1970, 1, 1, tzinfo=UTC)
 
-#: Whether one candidate row must stay: ``(session, locked row, protected)``.
-type Keep = Callable[[Session, Any, frozenset[str]], bool]
+#: A keep-rule that needs the locked row itself: ``(session, row, protected)``.
+type RowKeep = Callable[[Session, Any, frozenset[str]], bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +140,12 @@ class RetentionRule:
     clock: ColumnElement[datetime] | InstrumentedAttribute[Any]
     #: The indexed terminal predicate, given the window's cutoff.
     ended: Callable[[datetime], ColumnElement[bool]]
-    #: Keyed checks of the locked row; any true one keeps it for a later pass.
-    keep: tuple[Keep, ...] = ()
+    #: Keyed ``exists`` checks over this table's own columns, any of which keeps
+    #: the row. They are part of the selection itself: a kept row is never
+    #: selected, so rows kept for a long time cost no statement per pass.
+    held: tuple[ColumnElement[bool], ...] = ()
+    #: Checks that need the locked row in Python (JSON evidence, references).
+    keep_row: tuple[RowKeep, ...] = ()
     #: Foreign-key columns of child tables, deleted first by this row's key.
     children: tuple[InstrumentedAttribute[Any], ...] = ()
     window: timedelta = GRACE
@@ -144,6 +153,14 @@ class RetentionRule:
     @property
     def table(self) -> str:
         return str(self.model.__tablename__)
+
+    def candidate(self, cutoff: datetime) -> ColumnElement[bool]:
+        """Ended, past its window, and no keyed check holds it."""
+        return and_(
+            self.clock <= cutoff,
+            self.ended(cutoff),
+            *(~held for held in self.held),
+        )
 
 
 class Retained(StrEnum):
@@ -248,32 +265,24 @@ RETAINED: dict[str, tuple[Retained, str]] = {
         "this pass's last phase, by its authority's clock",
     ),
     "sessions": (Retained.OWNED_ELSEWHERE, "browser_auth: expired login sessions"),
+    "model_cache_set_artifacts": (
+        Retained.OWNED_ELSEWHERE,
+        "deleted with its model cache set by the foreign-key cascade",
+    ),
 }
 
 
-def _held(build: Callable[[Any], ColumnElement[bool]]) -> Keep:
-    """A keep-rule that is one keyed ``exists`` about the locked row."""
-
-    def keep(session: Session, row: Any, _protected: frozenset[str]) -> bool:
-        return bool(session.scalar(select(build(row))))
-
-    return keep
-
-
-def _reserved(row: Any) -> ColumnElement[bool]:
+def _reserved(owner: InstrumentedAttribute[str]) -> ColumnElement[bool]:
     return exists().where(
-        ResourceReservation.owner_id == row.id,
+        ResourceReservation.owner_id == owner,
         ResourceReservation.state != ReservationState.RELEASED.value,
     )
 
 
-def _operation_kept(session: Session, row: Any, _protected: frozenset[str]) -> bool:
+def _command_evidence(session: Session, row: Any, _protected: frozenset[str]) -> bool:
     from .evidence_repeats import command_evidence_needed
 
-    if command_evidence_needed(session, row):
-        return True
-    parent = session.get(Job, row.parent_job_id)
-    return parent is not None and parent.state not in _TERMINAL
+    return command_evidence_needed(session, row)
 
 
 def _assignment_named(session: Session, row: Any, protected: frozenset[str]) -> bool:
@@ -283,46 +292,55 @@ def _assignment_named(session: Session, row: Any, protected: frozenset[str]) -> 
     ).isdisjoint(protected)
 
 
-def _newest_sync(session: Session, row: Any, _protected: frozenset[str]) -> bool:
+def _newest_sync() -> ColumnElement[bool]:
     """The newest succeeded run, and the newest failed one when it is newer."""
 
-    states = (
-        (LifecycleState.SUCCEEDED.value,)
-        if row.state == LifecycleState.SUCCEEDED.value
-        else (LifecycleState.SUCCEEDED.value, LifecycleState.FAILED.value)
-    )
-    newer = exists().where(
-        RecipeLibrarySyncRun.state.in_(states),
-        or_(
-            RecipeLibrarySyncRun.completed_at > row.completed_at,
-            and_(
-                RecipeLibrarySyncRun.completed_at == row.completed_at,
-                RecipeLibrarySyncRun.id > row.id,
-            ),
+    newer = aliased(RecipeLibrarySyncRun)
+    later = or_(
+        newer.completed_at > RecipeLibrarySyncRun.completed_at,
+        and_(
+            newer.completed_at == RecipeLibrarySyncRun.completed_at,
+            newer.id > RecipeLibrarySyncRun.id,
         ),
     )
-    return not session.scalar(select(newer))
+    succeeded, failed = LifecycleState.SUCCEEDED.value, LifecycleState.FAILED.value
+    return or_(
+        and_(
+            RecipeLibrarySyncRun.state == succeeded,
+            ~exists().where(newer.state == succeeded, later),
+        ),
+        and_(
+            RecipeLibrarySyncRun.state == failed,
+            ~exists().where(newer.state.in_((succeeded, failed)), later),
+        ),
+    )
 
 
-def _stop_unproven(row: Any) -> ColumnElement[bool]:
-    """A failed run whose Spark has not been heard from since, with a process.
+def _stop_unproven() -> ColumnElement[bool]:
+    """A failed run stays until each of its Sparks delivered a report after it.
 
-    A Spark reports every process still running, and that report reopens an
-    ended run as ``lost`` so a load stops it; a missing run cannot be reopened.
-    So a failed run stays while a rank's last word was not "not running" and
-    its Spark has not been in contact since the run ended. A retired Spark has
-    no contact row and can report nothing.
+    A Spark reports every run it still holds. A process still running for an
+    ended run reopens it as ``lost`` (or is stopped under an orphan stop
+    grant), so a report the Controller accepted after the run ended, with the
+    run still failed, is the Spark's word that nothing of it runs. Job claims
+    and other contact prove nothing about processes. A Spark without a contact
+    row (retired) can report nothing.
     """
 
-    if row.state != RunState.FAILED.value:
-        return literal(False)
-    return exists().where(
-        RunNode.run_id == row.id,
-        RunNode.observation_process_running.is_not(False),
-        AgentNodeContact.node_id == RunNode.node_id,
-        or_(
-            AgentNodeContact.last_seen_at.is_(None),
-            AgentNodeContact.last_seen_at <= row.updated_at,
+    status = AgentNodeContact.recipe_observation_http_status
+    delivered_at = AgentNodeContact.recipe_observation_status_at
+    return and_(
+        RecipeRun.state == RunState.FAILED.value,
+        exists().where(
+            RunNode.run_id == RecipeRun.id,
+            AgentNodeContact.node_id == RunNode.node_id,
+            or_(
+                delivered_at.is_(None),
+                delivered_at <= RecipeRun.updated_at,
+                status.is_(None),
+                status < 200,
+                status >= 300,
+            ),
         ),
     )
 
@@ -333,29 +351,28 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
     from .journal_models import RunSwitchJournalRepair, RunSwitchJournalRepairPending
     from .model_cache.inventory import holds_unique_objects
 
-    terminal = AgentOperation.state.in_(_TERMINAL)
     return (
         RetentionRule(
             AgentOperation,
             AgentOperation.id,
             AgentOperation.updated_at,
-            lambda _cutoff: terminal,
-            keep=(
-                _held(_reserved),
-                _operation_kept,
+            lambda _cutoff: AgentOperation.state.in_(_TERMINAL),
+            held=(
+                _reserved(AgentOperation.id),
                 # A retained artifact job still advertises this operation tree.
-                _held(
-                    lambda row: exists().where(
-                        ArtifactJob.operation_id == row.parent_job_id
-                    )
+                exists().where(
+                    ArtifactJob.operation_id == AgentOperation.parent_job_id
                 ),
-                _held(
-                    lambda row: exists().where(
-                        AgentOperationAttempt.operation_id == row.id,
-                        AgentOperationAttempt.state == _LIVE_ATTEMPT,
-                    )
+                exists().where(
+                    Job.id == AgentOperation.parent_job_id,
+                    Job.state.not_in(_TERMINAL),
+                ),
+                exists().where(
+                    AgentOperationAttempt.operation_id == AgentOperation.id,
+                    AgentOperationAttempt.state == _LIVE_ATTEMPT,
                 ),
             ),
+            keep_row=(_command_evidence,),
             children=(AgentOperationAttempt.operation_id,),
         ),
         RetentionRule(
@@ -363,22 +380,14 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             Job.id,
             Job.updated_at,
             lambda _cutoff: Job.state.in_(_TERMINAL),
-            keep=(
-                _held(_reserved),
-                _held(
-                    lambda row: exists().where(
-                        JobAttempt.job_id == row.id, JobAttempt.state == _LIVE_ATTEMPT
-                    )
+            held=(
+                _reserved(Job.id),
+                exists().where(
+                    JobAttempt.job_id == Job.id, JobAttempt.state == _LIVE_ATTEMPT
                 ),
-                _held(
-                    lambda row: exists().where(AgentOperation.parent_job_id == row.id)
-                ),
-                _held(lambda row: exists().where(ArtifactJob.operation_id == row.id)),
-                _held(
-                    lambda row: exists().where(
-                        ArtifactLifecycleGate.removal_owner_id == row.id
-                    )
-                ),
+                exists().where(AgentOperation.parent_job_id == Job.id),
+                exists().where(ArtifactJob.operation_id == Job.id),
+                exists().where(ArtifactLifecycleGate.removal_owner_id == Job.id),
             ),
             # A job's journal repairs and its pending repair end with it.
             children=(
@@ -392,12 +401,10 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             ModelCacheOperation.id,
             ModelCacheOperation.updated_at,
             lambda _cutoff: ModelCacheOperation.state.in_(_TERMINAL),
-            keep=(
-                _held(_reserved),
-                _held(
-                    lambda row: exists().where(
-                        ArtifactLifecycleGate.removal_owner_id == row.id
-                    )
+            held=(
+                _reserved(ModelCacheOperation.id),
+                exists().where(
+                    ArtifactLifecycleGate.removal_owner_id == ModelCacheOperation.id
                 ),
             ),
         ),
@@ -406,12 +413,10 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             FleetProfileApplication.id,
             FleetProfileApplication.updated_at,
             lambda _cutoff: FleetProfileApplication.state.in_(_TERMINAL),
-            keep=(
-                _held(_reserved),
-                _held(
-                    lambda row: exists().where(
-                        FleetProfileSelection.application_id == row.id
-                    )
+            held=(
+                _reserved(FleetProfileApplication.id),
+                exists().where(
+                    FleetProfileSelection.application_id == FleetProfileApplication.id
                 ),
             ),
         ),
@@ -420,7 +425,7 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             RecipeLibrarySyncRun.id,
             RecipeLibrarySyncRun.completed_at,
             lambda _cutoff: RecipeLibrarySyncRun.state.in_(_TERMINAL),
-            keep=(_newest_sync,),
+            held=(_newest_sync(),),
         ),
         RetentionRule(
             ArtifactDistributionAssignment,
@@ -432,7 +437,8 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
                     DistributionAssignmentState.EXPIRED.value,
                 )
             ),
-            keep=(_held(_reserved), _assignment_named),
+            held=(_reserved(ArtifactDistributionAssignment.id),),
+            keep_row=(_assignment_named,),
         ),
         RetentionRule(
             ResourceReservation,
@@ -449,10 +455,10 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             lambda _cutoff: RecipeRun.state.in_(
                 (RunState.STOPPED.value, RunState.FAILED.value)
             ),
-            keep=(
-                _held(_reserved),
-                _held(lambda row: exists().where(ArtifactJob.run_id == row.id)),
-                _held(_stop_unproven),
+            held=(
+                _reserved(RecipeRun.id),
+                exists().where(ArtifactJob.run_id == RecipeRun.id),
+                _stop_unproven(),
             ),
             children=(RunNode.run_id,),
         ),
@@ -475,6 +481,7 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
         RetentionRule(
             # A set that lists no object of its own frees no byte: removing
             # its row removes no model file, only a record that holds nothing.
+            # Its membership rows go with it (foreign-key cascade).
             ModelCacheSet,
             ModelCacheSet.artifact_set_sha256,
             ModelCacheSet.last_accessed_at,
@@ -482,25 +489,20 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
                 ModelCacheSet.protected.is_(False),
                 ModelCacheSet.state != ModelCacheSetState.CACHED.value,
             ),
-            keep=(
-                _held(lambda row: holds_unique_objects(row.artifact_set_sha256)),
-                _held(
-                    lambda row: exists().where(
-                        ModelCacheOperation.artifact_set_sha256
-                        == row.artifact_set_sha256,
-                        ModelCacheOperation.state.not_in(_TERMINAL),
-                    )
+            held=(
+                holds_unique_objects(ModelCacheSet.artifact_set_sha256),
+                exists().where(
+                    ModelCacheOperation.artifact_set_sha256
+                    == ModelCacheSet.artifact_set_sha256,
+                    ModelCacheOperation.state.not_in(_TERMINAL),
                 ),
-                _held(
-                    lambda row: exists().where(
-                        ArtifactLifecycleGate.artifact_kind == "model-set",
-                        ArtifactLifecycleGate.artifact_sha256
-                        == row.artifact_set_sha256,
-                        ArtifactLifecycleGate.removal_owner_id.is_not(None),
-                    )
+                exists().where(
+                    ArtifactLifecycleGate.artifact_kind == "model-set",
+                    ArtifactLifecycleGate.artifact_sha256
+                    == ModelCacheSet.artifact_set_sha256,
+                    ArtifactLifecycleGate.removal_owner_id.is_not(None),
                 ),
             ),
-            children=(ModelCacheSetArtifact.artifact_set_sha256,),
         ),
         RetentionRule(
             # Expired, revoked at the CA, and no attempt or enrollment names it.
@@ -508,21 +510,16 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             AgentCertificate.serial,
             AgentCertificate.not_after,
             lambda _cutoff: AgentCertificate.ca_revoked_at.is_not(None),
-            keep=(
-                _held(
-                    lambda row: exists().where(
-                        AgentOperationAttempt.agent_certificate_serial == row.serial
-                    )
+            held=(
+                exists().where(
+                    AgentOperationAttempt.agent_certificate_serial
+                    == AgentCertificate.serial
                 ),
-                _held(
-                    lambda row: exists().where(
-                        AgentEnrollment.certificate_serial == row.serial
-                    )
+                exists().where(
+                    AgentEnrollment.certificate_serial == AgentCertificate.serial
                 ),
-                _held(
-                    lambda row: exists().where(
-                        AgentCertificateRotation.source_serial == row.serial
-                    )
+                exists().where(
+                    AgentCertificateRotation.source_serial == AgentCertificate.serial
                 ),
             ),
         ),
@@ -544,12 +541,10 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
                 AgentEnrollmentGrant.consumed_at.is_(None),
                 AgentEnrollmentGrant.consumed_at <= cutoff,
             ),
-            keep=(
-                _held(
-                    lambda row: exists().where(
-                        AgentEnrollment.grant_id == row.id,
-                        AgentEnrollment.state == EnrollmentRecordState.ISSUING.value,
-                    )
+            held=(
+                exists().where(
+                    AgentEnrollment.grant_id == AgentEnrollmentGrant.id,
+                    AgentEnrollment.state == EnrollmentRecordState.ISSUING.value,
                 ),
             ),
             children=(AgentEnrollment.grant_id,),
@@ -561,8 +556,8 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             AgentNode.node_id,
             AgentNode.revoked_at,
             lambda _cutoff: AgentNode.state == NodeIdentityState.RETIRED.value,
-            keep=tuple(
-                _held(lambda row, column=column: exists().where(column == row.node_id))
+            held=tuple(
+                exists().where(column == AgentNode.node_id)
                 for column in (
                     AgentCertificate.node_id,
                     AgentOperation.node_id,
@@ -626,7 +621,7 @@ _EDGES: dict[PassPhase, frozenset[PassPhase]] = {
     PassPhase.SELECT: frozenset(
         {PassPhase.SELECT, PassPhase.DELETE, PassPhase.PUBLICATIONS}
     ),
-    PassPhase.DELETE: frozenset({PassPhase.SELECT}),
+    PassPhase.DELETE: frozenset({PassPhase.SELECT, PassPhase.PUBLICATIONS}),
     PassPhase.PUBLICATIONS: frozenset({PassPhase.SELECT}),
 }
 
@@ -737,9 +732,7 @@ class TerminalHistoryCollector:
 
     def _select(self, rule: RetentionRule, now: datetime) -> None:
         cutoff = now - rule.window
-        statement = select(rule.key, rule.clock).where(
-            rule.clock <= cutoff, rule.ended(cutoff)
-        )
+        statement = select(rule.key, rule.clock).where(rule.candidate(cutoff))
         boundary = self._after.get(rule.table)
         if boundary is not None:
             at, identity = boundary
@@ -794,14 +787,12 @@ class TerminalHistoryCollector:
             with self._sessions.begin() as session:
                 row = session.scalar(
                     select(rule.model)
-                    .where(
-                        rule.key == identity, rule.clock <= cutoff, rule.ended(cutoff)
-                    )
+                    .where(rule.key == identity, rule.candidate(cutoff))
                     .with_for_update(skip_locked=True)
                 )
                 if row is None or str(identity) in protected:
                     return False
-                if any(keep(session, row, protected) for keep in rule.keep):
+                if any(keep(session, row, protected) for keep in rule.keep_row):
                     return False
                 for child in rule.children:
                     session.execute(
