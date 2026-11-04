@@ -354,7 +354,7 @@ async fn a_corrected_ingress_reconciles_the_retained_result() {
     let path = directory.path().join("state.sqlite");
     let mut state = StateStore::open(&path, NODE_ID).unwrap();
     let result = completed_install_result(&mut state);
-    for _ in 0..crate::state::RESULT_RECORD_AFTER_REFUSALS {
+    for _ in 0..3 {
         state
             .reject_result(
                 &result,
@@ -1408,6 +1408,11 @@ impl LoopClient for DefinitelyRefusingClient {
 
     async fn submit_result(&self, result: &AgentResult) -> Result<(), ClientError> {
         self.submitted.lock().unwrap().push(result.clone());
+        // As the real client answers: a 409 fences the result and is
+        // `ResultSuperseded`; every other definite refusal is a Controller error.
+        if self.status == 409 {
+            return Err(ClientError::ResultSuperseded);
+        }
         Err(ClientError::Controller(Box::new(
             ControllerError::from_status(self.status),
         )))
@@ -1419,7 +1424,7 @@ async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
     // Wrong implementation: a 400/404/410 answer broke delivery on every pass
     // with nothing durable, so the refusal was invisible and the same bytes
     // were offered forever.
-    for status in [400, 404, 410] {
+    for status in [400, 404, 409, 410] {
         let directory = tempdir().unwrap();
         let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
         let result = completed_install_result(&mut state);
@@ -1446,40 +1451,34 @@ async fn a_definitely_refused_result_is_recorded_never_silently_dropped() {
             .unwrap()
             .settled();
         }
-        // Offered once, kept in custody, and the refusal is durable evidence.
+        // Offered once and settled (one disposition for every definite
+        // refusal); the refusal stays as durable evidence.
         assert_eq!(client.submitted.lock().unwrap().len(), 1, "HTTP {status}");
-        assert_eq!(state.pending_results().unwrap().len(), 1);
-        let rejection = state
-            .result_rejection(&result, Utc::now())
-            .unwrap()
-            .expect("a recorded refusal");
-        assert_eq!(rejection.http_status, status);
+        assert!(state.pending_results().unwrap().is_empty(), "HTTP {status}");
+        let rejection = state.result_rejection(&result, Utc::now()).unwrap();
+        if status == 409 {
+            // A fenced result is acknowledged, not a refusal record.
+            assert!(rejection.is_none());
+        } else {
+            assert_eq!(rejection.expect("a recorded refusal").http_status, status);
+        }
     }
 }
 
 #[test]
-fn a_historical_invalid_request_is_due_for_current_delivery() {
-    // A historical 422 must reach the corrected delivery path once, even
-    // when an older agent parked it permanently after three refusals.
+fn a_refused_result_is_due_once_its_cool_down_has_elapsed() {
+    // No refusal count parks a result for good: once the cool-down is due the
+    // result is offered again, however often it was refused before.
     let directory = tempdir().unwrap();
     let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
     let result = completed_install_result(&mut state);
-    let refused = ingress_refusal();
     let now = Utc::now();
-    for _ in 0..crate::state::RESULT_RECORD_AFTER_REFUSALS {
-        state.reject_result(&result, &refused, now).unwrap();
+    for _ in 0..3 {
+        state
+            .reject_result(&result, &ingress_refusal(), now)
+            .unwrap();
     }
-    // Long after the cool-down it is due; delivery either accepts it or
-    // explicitly discards it with the new refusal as evidence.
     let later = now + ChronoDuration::seconds(10 * crate::state::RESULT_RETRY_MAX_SECONDS as i64);
-    let held = state.result_rejection(&result, later).unwrap();
-    assert!(held.is_none());
-    assert_eq!(state.pending_results().unwrap().len(), 1);
-
-    // A single refusal is still offered again once its cool-down is due.
-    let directory = tempdir().unwrap();
-    let mut state = StateStore::open(&directory.path().join("state.sqlite"), NODE_ID).unwrap();
-    let result = completed_install_result(&mut state);
-    state.reject_result(&result, &refused, now).unwrap();
     assert!(state.result_rejection(&result, later).unwrap().is_none());
+    assert_eq!(state.pending_results().unwrap().len(), 1);
 }

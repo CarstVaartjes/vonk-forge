@@ -442,6 +442,28 @@ def test_the_agent_guard_finds_a_hand_read_status(line: str) -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "            if refusal.code == ControllerErrorCode::ControllerInvalidRequest.as_str() {\n",
+        "        StatusCode::CONFLICT => Err(ClientError::ResultSuperseded),\n",
+        "        return Err(ClientError::ResultSuperseded);\n",
+    ],
+)
+def test_the_agent_guard_finds_a_refusal_classified_outside_refusal(line: str) -> None:
+    from .deterministic_retries import scan_rust_dispositions
+
+    path = "rust/crates/vonk-agent/src/executor/agent_loop.rs"
+    assert scan_rust_dispositions(line, path=path)
+    assert not scan_rust_dispositions(
+        line, path="rust/crates/vonk-agent/src/client/operations.rs"
+    )
+    # Handling a superseded result is not mapping one.
+    assert not scan_rust_dispositions(
+        "            Ok(()) | Err(ClientError::ResultSuperseded) => {\n", path=path
+    )
+
+
 def test_no_agent_lane_reads_an_http_status_by_hand() -> None:
     from pathlib import Path
 
