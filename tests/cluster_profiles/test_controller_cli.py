@@ -3354,7 +3354,14 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
         in presentation.out
     )
     assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in presentation.out
-    assert "Authorization" not in presentation.out
+    assert (
+        "curl https://vonk-forge.example.ts.net/v1/chat/completions" in presentation.out
+    )
+    assert 'api_key=os.environ["VONK_API_KEY"]' in presentation.out
+    assert 'model="example-model"' in presentation.out
+    assert "set per request" in presentation.out
+    assert "Bearer $VONK_API_KEY" in presentation.out
+    assert "Bearer " not in presentation.out.replace("Bearer $VONK_API_KEY", "")
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 
 

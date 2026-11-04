@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ConnectionExamples } from "./connection-examples";
 import type { MouseEvent, ReactNode } from "react";
 import {
   addWire,
@@ -1264,11 +1265,14 @@ export function LibraryProfilesView({
                         <code>{item.alias}</code>
                       </dd>
                     </div>
-                    <div>
-                      <dt>Spark backend (diagnostic)</dt>
-                      <dd>{item.endpoint?.backend_api_base}</dd>
-                    </div>
                   </dl>
+                  {item.endpoint?.api_base && item.alias && (
+                    <ConnectionExamples apiBase={item.endpoint.api_base} alias={item.alias} />
+                  )}
+                  <details>
+                    <summary>Spark backend (diagnostic)</summary>
+                    <p>{item.endpoint?.backend_api_base}</p>
+                  </details>
                 </section>
               ))}
             {preview && <ProfileReview preview={preview} />}
