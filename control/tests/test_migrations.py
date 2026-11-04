@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,11 +10,19 @@ from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import create_engine, insert, inspect, select, text, update
+from sqlalchemy import (
+    ForeignKeyConstraint,
+    create_engine,
+    insert,
+    inspect,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_control.db import initialize_database, verify_schema_is_current
-from vonk_control.db.schema_drift import SchemaDrift, SchemaDriftKind, constraint_drift
+from vonk_control.db.schema_helpers import SchemaDriftKind
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -726,14 +735,29 @@ def _measurement_sources(engine) -> set[str]:
         )
 
 
+def _startup_drift(database_url: str, caplog) -> dict[str, list[str]]:
+    """Run startup and return the drift its end-of-reconcile warning reported."""
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="vonk_control.db"):
+        _initialize_source_checkout(database_url)
+    reported = [
+        record.schema_drift
+        for record in caplog.records
+        if hasattr(record, "schema_drift")
+    ]
+    assert len(reported) <= 1
+    return reported[0] if reported else {}
+
+
 def test_postgres_startup_installs_a_missing_foreign_key_over_violating_rows(
-    postgres_engine,
+    postgres_engine, caplog
 ) -> None:
     """Production lacked ``fk_inventory_resource_sample`` (2026-11-04).
 
     The key was declared after the table existed and reconciliation ignored
     Alembic's ``add_fk``, so 923,782 measurements outlived their sample. Startup
-    reports the drift, installs the key although orphans violate it, and the
+    installs the key although orphans violate it (SQLSTATE 23503), and the
     key's cascade then works for new deletes.
     """
 
@@ -750,20 +774,11 @@ def test_postgres_startup_installs_a_missing_foreign_key_over_violating_rows(
                 "DELETE FROM node_telemetry_samples WHERE id = 'pruned-without-cascade'"
             )
         )
-        assert constraint_drift(connection) == [
-            SchemaDrift(
-                SchemaDriftKind.MISSING_FOREIGN_KEY,
-                "node_inventory_snapshots",
-                _RESOURCE_SAMPLE_KEY,
-                ("node_id", "source_sample_id"),
-            )
-        ]
 
-    _initialize_source_checkout(database_url)
+    assert _startup_drift(database_url, caplog) == {}
 
     with postgres_engine.connect() as connection:
         assert _resource_sample_key(connection) == ("c", False)
-        assert constraint_drift(connection) == []
     # Reconciliation changes the schema only; the orphan is maintenance's.
     assert _measurement_sources(postgres_engine) == {"pruned-without-cascade"}
     _store_sample(postgres_engine, "pruned-with-cascade")
@@ -773,13 +788,13 @@ def test_postgres_startup_installs_a_missing_foreign_key_over_violating_rows(
         )
     assert _measurement_sources(postgres_engine) == {"pruned-without-cascade"}
 
-    _initialize_source_checkout(database_url)
+    assert _startup_drift(database_url, caplog) == {}
     with postgres_engine.connect() as connection:
         assert _resource_sample_key(connection) == ("c", False)
 
 
 def test_postgres_startup_replaces_a_foreign_key_whose_delete_rule_changed(
-    postgres_engine,
+    postgres_engine, caplog
 ) -> None:
     """A live key on the declared columns with another rule is replaced in place."""
 
@@ -794,13 +809,104 @@ def test_postgres_startup_replaces_a_foreign_key_whose_delete_rule_changed(
             "FOREIGN KEY (node_id, source_sample_id) "
             "REFERENCES node_telemetry_samples (node_id, id)"
         )
-        assert {item.kind for item in constraint_drift(connection)} == {
-            SchemaDriftKind.MISSING_FOREIGN_KEY,
-            SchemaDriftKind.UNDECLARED_FOREIGN_KEY,
-        }
 
-    _initialize_source_checkout(database_url)
+    assert _startup_drift(database_url, caplog) == {}
 
     with postgres_engine.connect() as connection:
         assert _resource_sample_key(connection) == ("c", True)
-        assert constraint_drift(connection) == []
+
+
+def test_postgres_startup_reports_what_reconciliation_leaves_in_place(
+    postgres_engine, caplog
+) -> None:
+    """A live key the model never declared, and a difference no rule handles,
+    stay in place and are named in the one end-of-reconcile warning."""
+
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE node_inventory_snapshots ADD CONSTRAINT fk_operator_extra "
+            "FOREIGN KEY (node_id) REFERENCES agent_nodes (node_id)"
+        )
+        connection.exec_driver_sql("COMMENT ON TABLE agent_nodes IS 'operator note'")
+
+    drift = _startup_drift(database_url, caplog)
+
+    assert drift == {
+        SchemaDriftKind.UNDECLARED_FOREIGN_KEY.value: [
+            "node_inventory_snapshots.fk_operator_extra(node_id)"
+        ],
+        SchemaDriftKind.UNHANDLED_DIFFERENCE.value: [
+            "remove_table_comment:agent_nodes"
+        ],
+    }
+    with postgres_engine.connect() as connection:
+        assert "fk_operator_extra" in {
+            key["name"]
+            for key in inspect(connection).get_foreign_keys("node_inventory_snapshots")
+        }
+
+
+def _declared_rule(rule: str | None) -> str:
+    return (rule or "NO ACTION").upper()
+
+
+def test_postgres_startup_reinstalls_every_declared_foreign_key(
+    postgres_engine, caplog
+) -> None:
+    """Class guard: every key the model declares converges from its absence.
+
+    All foreign keys of the model's tables are dropped, as on a database
+    created before they were declared. One startup must reinstall each with its
+    declared columns, target and delete rule, validated.
+    """
+
+    database_url = postgres_engine.url.render_as_string(hide_password=False)
+    _upgrade(database_url)
+    declared = sorted(
+        (
+            table.name,
+            tuple(constraint.column_keys),
+            constraint.referred_table.name,
+            tuple(element.column.name for element in constraint.elements),
+            _declared_rule(constraint.ondelete),
+        )
+        for table in Base.metadata.tables.values()
+        for constraint in table.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+    )
+    assert declared
+    with postgres_engine.begin() as connection:
+        for table_name, key_name in connection.execute(
+            text(
+                "SELECT conrelid::regclass::text, conname FROM pg_constraint "
+                "WHERE contype = 'f' AND conrelid::regclass::text = ANY(:tables)"
+            ),
+            {"tables": sorted(Base.metadata.tables)},
+        ).all():
+            connection.exec_driver_sql(
+                f'ALTER TABLE "{table_name}" DROP CONSTRAINT "{key_name}"'
+            )
+
+    assert _startup_drift(database_url, caplog) == {}
+
+    with postgres_engine.connect() as connection:
+        inspector = inspect(connection)
+        live = sorted(
+            (
+                table_name,
+                tuple(key["constrained_columns"]),
+                key["referred_table"],
+                tuple(key["referred_columns"]),
+                _declared_rule(key["options"].get("ondelete")),
+            )
+            for table_name in Base.metadata.tables
+            for key in inspector.get_foreign_keys(table_name)
+        )
+        assert live == declared
+        assert not connection.execute(
+            text(
+                "SELECT conname FROM pg_constraint WHERE contype = 'f' AND NOT convalidated"
+            )
+        ).all()

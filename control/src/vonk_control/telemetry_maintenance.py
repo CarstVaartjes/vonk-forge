@@ -145,6 +145,10 @@ class TelemetryMaintenance:
                 events=events,
                 candidates=raw_candidates,
             ),
+            # Its own transaction: no node lock is held while it deletes.
+            lambda session: self._prune_measurements(
+                session, cutoff=cutoff, limit=limit
+            ),
             lambda session: self._prune_events(session, now=now, limit=limit),
             lambda session: self._prune_inventory(session, cutoff=cutoff, limit=limit),
             # Prune CRL entries while their issuance expiry is still available.
@@ -355,7 +359,6 @@ class TelemetryMaintenance:
                 .where(NodeTelemetrySample.id.in_(chunk))
                 .execution_options(synchronize_session=False)
             )
-        TelemetryMaintenance._prune_measurements(session, cutoff=cutoff, limit=limit)
 
     @staticmethod
     def _prune_measurements(session: Session, *, cutoff: datetime, limit: int) -> None:
@@ -366,8 +369,10 @@ class TelemetryMaintenance:
         measurement has no reader (memory admission reads the last 30 minutes).
         This pass does not rely on the database's cascade key: a database that
         lacks it keeps no orphans, and its backlog drains through the same
-        bounded pass. A measurement whose old sample is still waiting for its
-        own pass keeps the evidence that sample's view needs.
+        bounded pass. It runs right after the raw stage in its own transaction,
+        so the samples that stage deleted leave their measurements in the same
+        pass. A measurement whose old sample is still waiting for its own pass
+        keeps the evidence that sample's view needs.
 
         Each node's candidates come from ``ix_inventory_node_observed``; the
         nodes are the fleet, so the cost is one indexed range per node, at most

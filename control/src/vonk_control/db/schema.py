@@ -9,13 +9,15 @@ from sqlalchemy.exc import (
 )
 
 from .constants import _LOGGER
-from .schema_drift import report_constraint_drift
 from .schema_helpers import (
     _REPLACED_CONSTRAINT_NAMES,
     _TOLERATED_SCHEMA_DIFFERENCES,
+    SchemaDrift,
+    SchemaDriftKind,
     _check_constraint_differences,
     _column_default_sql,
     _constraint_kind,
+    _constraint_label,
     _cosmetic_type_difference,
     _flatten_schema_differences,
     _install_foreign_keys,
@@ -24,6 +26,7 @@ from .schema_helpers import (
     _release_retired_table_foreign_keys,
     _repair_check_constraints,
     _schema_difference_key,
+    _unhandled_differences,
 )
 
 
@@ -51,6 +54,10 @@ def reconcile_schema(connection: Connection) -> None:
         )
         if _schema_difference_key(difference) not in _TOLERATED_SCHEMA_DIFFERENCES
     ]
+    drift: SchemaDrift = {kind: [] for kind in SchemaDriftKind}
+    drift[SchemaDriftKind.UNHANDLED_DIFFERENCE].extend(
+        _unhandled_differences(differences)
+    )
     inspector = inspect(connection)
     tables = set(inspector.get_table_names()) - {"alembic_version"}
     metadata_tables = set(Base.metadata.tables)
@@ -361,6 +368,11 @@ def reconcile_schema(connection: Connection) -> None:
                 )
             except SQLAlchemyError as error:
                 failed_constraint_tables.add(constraint.table.name)
+                drift[
+                    SchemaDriftKind.MISSING_UNIQUE_CONSTRAINT
+                    if kind == "unique"
+                    else SchemaDriftKind.UNHANDLED_DIFFERENCE
+                ].append(_constraint_label(constraint))
                 _LOGGER.warning(
                     "Skipped constraint %s due to existing data or unsupported change: %s",
                     constraint.name,
@@ -368,7 +380,7 @@ def reconcile_schema(connection: Connection) -> None:
                 )
 
     # Keys reference the unique constraints installed above.
-    _install_foreign_keys(connection, ops, differences)
+    _install_foreign_keys(connection, ops, differences, drift)
     _repair_check_constraints(connection)
 
     # Drop obsolete constraints/indexes before their columns.
@@ -387,6 +399,7 @@ def reconcile_schema(connection: Connection) -> None:
         for difference in differences
         if difference[0] == "add_index"
     }
+    undeclared_uniques: set[str] = set()
     for difference in differences:
         operation = difference[0]
         if operation == "remove_constraint":
@@ -394,6 +407,9 @@ def reconcile_schema(connection: Connection) -> None:
             name = getattr(constraint, "name", None)
             kind = _constraint_kind(constraint)
             table_name = constraint.table.name
+            if kind == "unique" and table_name in metadata_tables:
+                # Reported unless the replacement below drops it.
+                undeclared_uniques.add(_constraint_label(constraint))
             if (
                 name
                 and kind
@@ -432,6 +448,7 @@ def reconcile_schema(connection: Connection) -> None:
                 try:
                     with connection.begin_nested():
                         ops.drop_constraint(name, constraint.table.name, type_=kind)
+                    undeclared_uniques.discard(_constraint_label(constraint))
                     _LOGGER.info(
                         "Dropped obsolete constraint %s.%s", constraint.table.name, name
                     )
@@ -465,6 +482,9 @@ def reconcile_schema(connection: Connection) -> None:
                     "Could not drop obsolete index %s: %s", index.name, error
                 )
 
+    drift[SchemaDriftKind.UNDECLARED_UNIQUE_CONSTRAINT].extend(
+        sorted(undeclared_uniques)
+    )
     _release_retired_table_foreign_keys(connection, ops)
 
     from .node_facts import (
@@ -483,11 +503,13 @@ def reconcile_schema(connection: Connection) -> None:
     move_repeated_evidence(connection)
     move_resource_facts(connection)
 
-    report_constraint_drift(connection)
-
-    remaining = _check_constraint_differences(connection)
-    if remaining:
+    drift[SchemaDriftKind.DEFERRED_CHECK_CONSTRAINT].extend(
+        _check_constraint_differences(connection)
+    )
+    left = {kind.value: items for kind, items in drift.items() if items}
+    if left:
         _LOGGER.warning(
-            "Schema reconciliation left deferred CHECK constraints: %s",
-            ", ".join(remaining),
+            "Schema reconciliation left drift: %s",
+            "; ".join(f"{kind}: {', '.join(items)}" for kind, items in left.items()),
+            extra={"schema_drift": left},
         )
