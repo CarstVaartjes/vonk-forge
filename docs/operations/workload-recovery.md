@@ -159,13 +159,21 @@ owns, is settled as failed with its reason instead of being recovered.
 A retained run whose managed metadata cannot be read (an older agent's format,
 a retired field, no run generation) is settled from its run id and the
 Controller alone. The agent asks for the run's disposition. The Controller
-names every run it does not want (never owned, failed, or stopped) unowned, and
-the agent retires that run's lifecycle claim. A known running run comes back with its accepted
+names every run it does not want on this Spark (never owned, failed, stopped, or
+assigned elsewhere) unowned, and the agent retires that run's lifecycle claim.
+An unowned run whose container is still running is stopped first: the agent
+reads the container's own managed labels from the root helper and asks the
+Controller for an orphan stop grant, which it issues only while it wants the
+run on no live claim (the same "wanted here" rule as the disposition, and no
+live operation owns the run). The helper still removes only a container that is
+exactly that identity's, of that generation or older. A refusal or a missing
+answer changes nothing and the next cycle asks again. Artifact-job containers
+are not covered. A known running run comes back with its accepted
 generation; when the root helper proves the exact `vonk-<run_id>` container is
 absent or stopped, the agent reports that absence at that generation and the
 Controller recovers the run through its normal singleton recovery. A running
-container is never reported from unreadable metadata. Each skip is logged once
-per process.
+container the Controller wants is never reported from unreadable metadata.
+Each skip is logged once per process.
 
 ## Validation boundaries
 

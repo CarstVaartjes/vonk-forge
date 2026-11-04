@@ -274,14 +274,14 @@ def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogSer
                 view.content_sha256,
             )
         )
-    catalog.record_prebuilt_images(dict.fromkeys(keys, image))
-    catalog.record_prebuilt_images({keys[0]: image})
+    catalog.record_published_facts(dict.fromkeys(keys, image), {})
+    catalog.record_published_facts({keys[0]: image}, {})
     with catalog._sessions() as session:
         assert all(
             _projection(session, view.id).prebuilt_image == image for view in views
         )
     # An explicit authoritative withdrawal affects only its exact revision.
-    catalog.record_prebuilt_images({keys[0]: None})
+    catalog.record_published_facts({keys[0]: None}, {})
     with catalog._sessions() as session:
         first = _projection(session, views[0].id)
         second = _projection(session, views[1].id)
@@ -292,7 +292,7 @@ def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogSer
             isinstance(second, RecipeRevisionProjection)
             and second.prebuilt_image == image
         )
-    catalog.record_prebuilt_images({keys[0]: image})
+    catalog.record_published_facts({keys[0]: image}, {})
     assert _request_import(
         catalog, _recipe(_model(), slug="fresh-after-pin-withdrawal")
     ).id
@@ -340,7 +340,7 @@ def test_current_catalog_maintenance_writes_nothing(catalog: CatalogService):
         )
     }
     catalog.refresh_build_policy()
-    catalog.record_prebuilt_images(pins)
+    catalog.record_published_facts(pins, {})
     engine = catalog._sessions.kw["bind"]
     writes: list[str] = []
 
@@ -351,7 +351,7 @@ def test_current_catalog_maintenance_writes_nothing(catalog: CatalogService):
     event.listen(engine, "before_cursor_execute", record)
     try:
         assert catalog.refresh_build_policy() == ()
-        catalog.record_prebuilt_images(pins)
+        catalog.record_published_facts(pins, {})
     finally:
         event.remove(engine, "before_cursor_execute", record)
     assert writes == []

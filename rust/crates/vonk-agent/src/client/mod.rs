@@ -164,7 +164,9 @@ pub enum RecipeRunDisposition {
     /// The Controller has a record of the run; its integrity checks apply.
     /// `run_generation` is its accepted generation while the run is running.
     Known { run_generation: Option<u64> },
-    /// The Controller has no record of the run and never will accept it.
+    /// The Controller does not want the run on this Spark: it has no record of
+    /// it, or it ended or is assigned elsewhere. Its container is stopped under
+    /// an orphan stop grant, never left running unowned.
     Unowned,
 }
 

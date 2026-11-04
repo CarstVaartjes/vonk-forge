@@ -474,7 +474,7 @@ fn an_inspection_naming_a_generation_refuses_another_generations_container() {
         let mut plan = recipe_start_plan_for_authority(2);
         let (_temp, roots) = start_fixture(&mut plan);
         let container = format!(
-            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\t\t\t\n",
             "f".repeat(64),
             "d".repeat(64),
             plan.run_id
@@ -555,7 +555,7 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
         )
         .unwrap();
         let container = format!(
-            "{}\ttrue\t{}\ttrue\t{}\t{label}\n",
+            "{}\ttrue\t{}\ttrue\t{}\t{label}\t\t\t\n",
             "f".repeat(64),
             hex_sha256(&canonical_json(&validated.arguments).unwrap()),
             plan.run_id
@@ -618,6 +618,55 @@ fn a_granted_inspection_is_bound_to_the_generation_its_grant_names() {
         ));
     }
     assert!(matches!(inspect("1", None, None), Ok(())));
+}
+
+#[test]
+fn a_full_identity_inspection_returns_the_container_labels_it_read() {
+    // Catches an orphan stop that needs a second look to learn the container's
+    // identity: the inspection that found it running already carries it.
+    let mut plan = recipe_start_plan_for_authority(2);
+    let (_temp, roots) = start_fixture(&mut plan);
+    let projector = OperationExecutor::new(
+        roots.clone(),
+        &[0; 32],
+        InspectedRunner(String::new()),
+        None,
+    )
+    .unwrap();
+    let arguments = projector
+        .projected_runtime_arguments(
+            &plan.compiled_execution_plan,
+            plan.installation_id,
+            plan.run_id,
+        )
+        .unwrap();
+    let validated = validate_docker_run_with_archive(
+        &arguments[4..],
+        &roots,
+        projector.runtime_request_owner_uid,
+        Some(&arguments[0]),
+        Some(&arguments[1]),
+    )
+    .unwrap();
+    let digest = "d".repeat(64);
+    let container = format!(
+        "{}\ttrue\t{}\ttrue\t{}\t2\t{}\t{}\t{digest}\n",
+        "f".repeat(64),
+        hex_sha256(&canonical_json(&validated.arguments).unwrap()),
+        plan.run_id,
+        plan.run_id,
+        plan.installation_id,
+    );
+    let executor =
+        OperationExecutor::new(roots, &[0; 32], InspectedRunner(container), None).unwrap();
+    let inspected = executor
+        .runtime_run_inspect_detail(&arguments, false, false, Some(2))
+        .unwrap();
+    let labels = inspected.container_labels.expect("labels");
+    assert_eq!(labels.run_id, plan.run_id);
+    assert_eq!(labels.installation_id, plan.installation_id);
+    assert_eq!(labels.run_generation, 2);
+    assert_eq!(labels.plan_digest, digest);
 }
 
 // A pre-#1795 image can still be bound to an accepted plan. Both launch

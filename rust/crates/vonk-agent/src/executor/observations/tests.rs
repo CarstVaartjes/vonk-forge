@@ -370,6 +370,8 @@ fn lifecycle_inspector(socket: &std::path::Path, running: bool) -> std::thread::
             error_code: None,
             diagnostic: None,
             process_logs: None,
+
+            container_labels: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         stream
@@ -659,6 +661,8 @@ async fn exited_serving_workload_carries_its_retained_output() {
                 error_code: None,
                 diagnostic: None,
                 process_logs: None,
+
+                container_labels: None,
             };
             if with_output {
                 response.status = HostHelperResponseStatus::Rejected;
@@ -759,7 +763,8 @@ async fn exited_serving_workload_carries_its_retained_output() {
 async fn an_observation_names_the_generation_of_its_run() {
     use std::io::{Read, Write};
     use vonk_agent_protocol::generated::{HostHelperResponse, HostHelperResponseStatus};
-    let server = ObservationServer::new(Some(204));
+    // The Controller wants this running run: it is reported, never stopped.
+    let server = ObservationServer::with_disposition(Some(204), Some(""));
     let root = tempdir().unwrap();
     let runtime_root = tempdir().unwrap();
     let installation = Uuid::new_v4().to_string();
@@ -820,6 +825,8 @@ async fn an_observation_names_the_generation_of_its_run() {
             error_code: None,
             diagnostic: None,
             process_logs: None,
+
+            container_labels: None,
         };
         let body = vonk_agent_protocol::canonical_generated_json(&response).unwrap();
         stream
@@ -843,7 +850,8 @@ async fn an_observation_names_the_generation_of_its_run() {
     );
     assert_eq!(helper.join().unwrap(), Some(2));
     let reports = server.finish();
-    assert_eq!(reports[0]["runs"][0]["run_generation"], 2);
+    let report = reports.iter().find(|report| report.get("runs").is_some());
+    assert_eq!(report.unwrap()["runs"][0]["run_generation"], 2);
 }
 
 #[tokio::test]

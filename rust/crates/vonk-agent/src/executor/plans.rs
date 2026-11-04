@@ -68,6 +68,35 @@ pub(super) fn exact_stop_plan_from_claim(
     })
 }
 
+/// Seconds a container no claim owns gets to stop before it is killed.
+const ORPHAN_STOP_TIMEOUT_SECONDS: u16 = 10;
+
+/// The stop document of a container no claim owns, built from its own managed
+/// labels and nothing else.
+///
+/// The labels carry the whole identity the helper checks (run, target,
+/// installation, generation). The document's other required fields are
+/// provenance the labels do not carry and the helper never compares, so they
+/// repeat the identity the container does carry rather than invent a new one.
+pub(super) fn orphan_stop_plan(
+    labels: &vonk_agent_protocol::generated::HostHelperContainerLabels,
+) -> RecipeStopRequest {
+    RecipeStopRequest {
+        cancel_pending_start: false,
+        rank: 0_u64.into(),
+        role: "orphan".to_owned(),
+        recipe_content_sha256: labels.plan_digest.clone(),
+        stop_timeout_seconds: ORPHAN_STOP_TIMEOUT_SECONDS.into(),
+        installation_id: labels.installation_id,
+        mapping_id: labels.run_id,
+        plan_digest: labels.plan_digest.clone(),
+        recipe_revision_id: labels.run_id,
+        run_generation: labels.run_generation,
+        run_id: labels.run_id,
+        target_runtime_id: labels.target_id,
+    }
+}
+
 /// Build the exact runtime argument vector used for start and inspection.
 pub fn runtime_arguments_for_plan(
     plan: &crate::oci::RuntimeStartPlan,

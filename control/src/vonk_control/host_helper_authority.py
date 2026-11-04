@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import stat
 from collections.abc import Callable, Mapping
@@ -57,6 +58,7 @@ from .host_runtime_plan_authority import (
     RuntimePlanUnsatisfiable,
     derive_runtime_plan_binding,
 )
+from .logging import log_event
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -66,8 +68,12 @@ from .models import (
 from .models import AgentOperation as StoredAgentOperation
 from .offline_stops import is_deferred_stop
 from .own_cleanup import CLEANUP_ACTIONS
+from .owner_liveness import run_has_live_operation
 from .package_activation import matches_receipt
 from .strict_json import read_stored_model
+from .untracked_installations import run_wanted_here
+
+_LOGGER = logging.getLogger("vonk_control.host_helper_authority")
 
 #: How far a Spark's clock may lag the Controller's when it checks a grant.
 #: The helper refuses a grant whose ``issued_at`` is still in its future, so a
@@ -105,6 +111,41 @@ class HostRuntimeGrantUnsatisfiable(HostHelperAuthorityError):
 
 class HostRuntimeEvidenceUnavailable(HostHelperAuthorityError):
     """The evidence that would authorize the plan is not readable now."""
+
+
+class OrphanStopRunOwned(HostHelperAuthorityError):
+    """The run is wanted on this Spark or a live operation owns it.
+
+    Not an authority denial: the Controller will stop (or has just planned) the
+    container itself, so the Spark asks again only if the run is orphaned later.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("run is owned; no orphan stop grant")
+
+
+def _node_certificate_live(
+    session: Session,
+    node_id: str,
+    certificate_serial: str,
+    now: datetime,
+) -> bool:
+    """Whether this node is active and the certificate is its active one now."""
+
+    node = session.get(AgentNode, node_id)
+    certificate = session.get(AgentCertificate, certificate_serial)
+    return (
+        node is not None
+        and certificate is not None
+        and node.state == "active"
+        and node.revoked_at is None
+        and certificate.node_id == node_id
+        and certificate.state == "active"
+        and certificate.revoked_at is None
+        and certificate.ca_revoked_at is None
+        and _aware(certificate.not_before) <= _aware(now)
+        and _aware(certificate.not_after) > _aware(now)
+    )
 
 
 def _load_private_key(path: Path) -> ed25519.Ed25519PrivateKey:
@@ -408,6 +449,63 @@ class HostRuntimeAuthorityService:
             )
         return grant
 
+    def issue_orphan_stop_grant(
+        self,
+        *,
+        node_id: str,
+        certificate_serial: str,
+        run_id: str,
+        fence: str,
+        request_sha256: str,
+        stop_plan_sha256: str,
+        run_generation: int,
+        runtime_target_id: str,
+        runtime_installation_id: str,
+        expires_in_seconds: int = 30,
+    ) -> SignedHostHelperGrant:
+        """Sign the stop of a running container nothing here owns.
+
+        The Spark sends the container's own managed identity; the Controller
+        grants its stop only while it wants the run on no live claim: not
+        wanted on this Spark (``run_wanted_here``) and owned by no live
+        operation. Nothing is stored. The helper still refuses a container that
+        is not exactly this identity's, or of a newer generation.
+        """
+
+        with self._sessions() as session:
+            if not _node_certificate_live(
+                session, node_id, certificate_serial, self._clock()
+            ):
+                raise HostHelperAuthorityError("orphan stop node identity is invalid")
+            if run_wanted_here(session, node_id, run_id) or run_has_live_operation(
+                session, run_id
+            ):
+                raise OrphanStopRunOwned
+        grant = self._issuer.issue_grant(
+            node_id=node_id,
+            operation=ExecuteContainerRuntimeRequestOperation(
+                type=HostOperationKind.EXECUTE_CONTAINER_RUNTIME_REQUEST.value,
+                action=ContainerRuntimeAction.STOP.value,
+                fence=fence,
+                request_sha256=request_sha256,
+                stop_plan_sha256=stop_plan_sha256,
+                run_generation=run_generation,
+                runtime_run_id=run_id,
+                runtime_target_id=runtime_target_id,
+                runtime_installation_id=runtime_installation_id,
+            ),
+            expires_in_seconds=expires_in_seconds,
+        )
+        log_event(
+            _LOGGER,
+            "recipe.run.orphan_stop_granted",
+            service="control-api",
+            run_id=run_id,
+            node_id=node_id,
+            run_generation=run_generation,
+        )
+        return grant
+
     def issue_agent_upgrade_grant(
         self,
         *,
@@ -569,7 +667,6 @@ class HostRuntimeAuthorityService:
                 None if operation is None else session.get(Job, operation.parent_job_id)
             )
             node = session.get(AgentNode, node_id)
-            certificate = session.get(AgentCertificate, certificate_serial)
             cancellation_requested = bool(
                 parent is not None
                 and isinstance(parent.result, Mapping)
@@ -590,20 +687,12 @@ class HostRuntimeAuthorityService:
                 or current is None
                 or parent is None
                 or node is None
-                or certificate is None
+                or not _node_certificate_live(session, node_id, certificate_serial, now)
                 or (
                     parent.state not in {"queued", "running"}
                     and not is_deferred_stop(parent, operation)
                 )
                 or node_id not in parent.targets
-                or node.state != "active"
-                or node.revoked_at is not None
-                or certificate.node_id != node_id
-                or certificate.state != "active"
-                or certificate.revoked_at is not None
-                or certificate.ca_revoked_at is not None
-                or _aware(certificate.not_before) > _aware(now)
-                or _aware(certificate.not_after) <= _aware(now)
                 or operation.node_id != node_id
                 or operation.authority_revision != parent.authority_revision
                 or operation.kind not in self._ACTION_KINDS[action]

@@ -6,11 +6,18 @@ import shlex
 from collections.abc import Mapping
 from enum import StrEnum
 
+from ..cli_states_generated import QualificationOutcome, QualificationStatus
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
 from ..generated_control.models.model_cache_usage import ModelCacheUsage
+from ..generated_control.models.published_qualification_status_view import (
+    PublishedQualificationStatusView,
+)
+from ..generated_control.models.qualification_evidence_record import (
+    QualificationEvidenceRecord,
+)
 from .common import (
     _bytes,
     _field,
@@ -31,6 +38,48 @@ from .progress import progress_line
 class LibraryNoun(StrEnum):
     MODEL = "model"
     RECIPE = "recipe"
+
+
+def _qualification(value: object) -> PublishedQualificationStatusView | None:
+    """The published hardware status; informative, so unreadable is absent."""
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        return PublishedQualificationStatusView.from_dict(value)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _qualification_status(value: object) -> str:
+    """The status word; a missing or unknown status is not yet verified."""
+    view = _qualification(value)
+    return QualificationStatus.NOT_YET_VERIFIED if view is None else view.status
+
+
+def _qualification_evidence(value: object) -> tuple[str, str] | None:
+    """The newest published evidence as one labelled line, if there is any."""
+    view = _qualification(value)
+    if view is None:
+        return None
+    records = [
+        record
+        for record in (view.last_pass, view.last_failure)
+        if isinstance(record, QualificationEvidenceRecord)
+    ]
+    if not records:
+        reason = view.reason
+        return ("Not verified because", reason) if isinstance(reason, str) else None
+    record = max(records, key=lambda evidence: evidence.tested_at)
+    tested = record.tested_at.isoformat(sep=" ")
+    if record.outcome == QualificationOutcome.PASSED:
+        count = record.platform.spark_count
+        sparks = (
+            f" on {count} Spark{'s' if count != 1 else ''}"
+            if isinstance(count, int)
+            else ""
+        )
+        return ("Last passed", f"{tested}{sparks}")
+    return ("Last failure", f"{record.cause_summary} ({tested})")
 
 
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
@@ -90,6 +139,10 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
             _field("Assessed", _time(assessment.get("observed_at")))
         else:
             _field("Readiness", "not assessed")
+        # Informative only: the published hardware status never gates a step.
+        _field("Qualification", _qualification_status(item.get("qualification")))
+        if (evidence := _qualification_evidence(item.get("qualification"))) is not None:
+            _field(*evidence)
     preparation = _optional(local.get("preparation"), "preparation")
     if preparation:
         _field("Preparation", preparation.get("state"))
@@ -232,6 +285,7 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
             if readiness
             else "not assessed"
         )
+        row.append(_qualification_status(item.get("qualification")))
     return row
 
 
@@ -326,7 +380,7 @@ def _library(
         labels = [noun.upper(), "CACHE", "DISK", "RUNNING"]
         if noun == "recipe":
             labels.insert(1, "SPARKS")
-            labels.append("READY")
+            labels.extend(["READY", "QUALIFICATION"])
         if noun == LibraryNoun.MODEL:
             labels.extend(["UNIQUE", "SHARED"])
         _table(labels, [_library_row(item, noun) for item in rows])

@@ -153,6 +153,8 @@ pub struct RunInspectionReport {
     pub process_logs: Option<Box<FailureProcessLogs>>,
     /// Why a requested tail is missing.
     pub log_error: Option<String>,
+    /// The container's own managed identity, from a run-id-only inspection.
+    pub container_labels: Option<vonk_agent_protocol::generated::HostHelperContainerLabels>,
 }
 
 /// What one re-observation of a job container by its identity found. An
@@ -197,6 +199,24 @@ pub(crate) fn runtime_request(
     reconciliation_identity: Option<RecipeReconciliationIdentity>,
     lifecycle_plan: Option<&HostRuntimePlan>,
 ) -> HostRuntimeRequest {
+    runtime_request_for_fence(
+        claim.fence,
+        action,
+        arguments,
+        installation_id,
+        reconciliation_identity,
+        lifecycle_plan,
+    )
+}
+
+fn runtime_request_for_fence(
+    fence: uuid::Uuid,
+    action: HostRuntimeAction,
+    arguments: Vec<String>,
+    installation_id: Option<uuid::Uuid>,
+    reconciliation_identity: Option<RecipeReconciliationIdentity>,
+    lifecycle_plan: Option<&HostRuntimePlan>,
+) -> HostRuntimeRequest {
     let (start_plan, job_plan, stop_plan, run_generation) = match lifecycle_plan {
         Some(HostRuntimePlan::Start(plan)) => {
             (Some(plan.clone()), None, None, Some(plan.run_generation))
@@ -211,7 +231,7 @@ pub(crate) fn runtime_request(
     };
     HostRuntimeRequest {
         action,
-        fence: claim.fence,
+        fence,
         arguments,
         job_plan,
         installation_id,
@@ -308,6 +328,25 @@ pub struct HostRuntimeBoundary<'a> {
     pub client: &'a AgentHttpClient,
     pub request_root: &'a Path,
     pub helper_socket: &'a Path,
+}
+
+/// Who authorizes one helper request.
+enum Authority<'a> {
+    /// A claimed operation attempt: its fence names it and its grant is bound
+    /// to it.
+    Attempt(&'a AgentClaim),
+    /// No attempt: the stop of a container no claim owns, under a fresh fence
+    /// and the Controller's orphan stop grant.
+    OrphanStop { fence: uuid::Uuid },
+}
+
+impl Authority<'_> {
+    fn fence(&self) -> uuid::Uuid {
+        match self {
+            Self::Attempt(claim) => claim.fence,
+            Self::OrphanStop { fence } => *fence,
+        }
+    }
 }
 
 /// What one helper request is bound to, beyond its action and arguments.
@@ -419,6 +458,7 @@ impl HostRuntimeBoundary<'_> {
                 .diagnostic
                 .as_deref()
                 .map(crate::failure_evidence::sanitize_exit_summary),
+            container_labels: response.container_labels,
         })
     }
 
@@ -599,8 +639,13 @@ impl HostRuntimeBoundary<'_> {
         action: HostRuntimeAction,
         arguments: Vec<String>,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
-        self.execute_bound(claim, action, arguments, Binding::default())
-            .await
+        self.execute_bound(
+            Authority::Attempt(claim),
+            action,
+            arguments,
+            Binding::default(),
+        )
+        .await
     }
 
     /// Pull an image while `progress` (the bytes Docker reads through the
@@ -616,8 +661,13 @@ impl HostRuntimeBoundary<'_> {
             progress: Some(progress.clone()),
             ..Binding::default()
         };
-        self.execute_bound(claim, HostRuntimeAction::ImagePull, arguments, binding)
-            .await
+        self.execute_bound(
+            Authority::Attempt(claim),
+            HostRuntimeAction::ImagePull,
+            arguments,
+            binding,
+        )
+        .await
     }
 
     /// A granted inspection of one Start's container: the helper answers for
@@ -633,8 +683,13 @@ impl HostRuntimeBoundary<'_> {
             run_generation: Some(run_generation),
             ..Binding::default()
         };
-        self.execute_bound(claim, HostRuntimeAction::RunInspect, arguments, binding)
-            .await
+        self.execute_bound(
+            Authority::Attempt(claim),
+            HostRuntimeAction::RunInspect,
+            arguments,
+            binding,
+        )
+        .await
     }
 
     pub async fn execute_plan(
@@ -648,7 +703,29 @@ impl HostRuntimeBoundary<'_> {
             lifecycle_plan: Some(plan),
             ..Binding::default()
         };
-        self.execute_bound(claim, action, arguments, binding).await
+        self.execute_bound(Authority::Attempt(claim), action, arguments, binding)
+            .await
+    }
+
+    /// Stop a container no claim owns: the Controller's orphan stop grant for
+    /// the document built from its labels, under a fresh fence.
+    pub async fn stop_orphan(
+        &self,
+        plan: RecipeStopRequest,
+    ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
+        let binding = Binding {
+            lifecycle_plan: Some(HostRuntimePlan::Stop(plan)),
+            ..Binding::default()
+        };
+        self.execute_bound(
+            Authority::OrphanStop {
+                fence: uuid::Uuid::new_v4(),
+            },
+            HostRuntimeAction::Stop,
+            Vec::new(),
+            binding,
+        )
+        .await
     }
 
     pub async fn cleanup_installation(
@@ -661,7 +738,7 @@ impl HostRuntimeBoundary<'_> {
             ..Binding::default()
         };
         self.execute_bound(
-            claim,
+            Authority::Attempt(claim),
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
             binding,
@@ -680,7 +757,7 @@ impl HostRuntimeBoundary<'_> {
             ..Binding::default()
         };
         self.execute_bound(
-            claim,
+            Authority::Attempt(claim),
             HostRuntimeAction::InstallationCleanup,
             Vec::new(),
             binding,
@@ -690,7 +767,7 @@ impl HostRuntimeBoundary<'_> {
 
     async fn execute_bound(
         &self,
-        claim: &AgentClaim,
+        authority: Authority<'_>,
         action: HostRuntimeAction,
         arguments: Vec<String>,
         binding: Binding,
@@ -734,8 +811,8 @@ impl HostRuntimeBoundary<'_> {
                 }),
             _ => Duration::from_secs(610),
         };
-        let mut request = runtime_request(
-            claim,
+        let mut request = runtime_request_for_fence(
+            authority.fence(),
             action,
             arguments,
             installation_id,
@@ -762,10 +839,21 @@ impl HostRuntimeBoundary<'_> {
             // Challenge repair is one bounded observation, not a local planner.
             // Each nonce returns to the authority for a fresh current decision.
             for _ in 0..3 {
-                let grant = self
-                    .client
-                    .host_runtime_grant_with_intent_nonce(claim, &request, &digest, nonce.take())
-                    .await?;
+                let grant = match &authority {
+                    Authority::Attempt(claim) => {
+                        self.client
+                            .host_runtime_grant_with_intent_nonce(
+                                claim,
+                                &request,
+                                &digest,
+                                nonce.take(),
+                            )
+                            .await?
+                    }
+                    Authority::OrphanStop { .. } => {
+                        self.client.orphan_stop_grant(&request, &digest).await?
+                    }
+                };
                 let request_id = grant.claims.request_id.to_string();
                 let grant = canonical_json(&grant).map_err(|_| {
                     HostRuntimeError::HelperProtocol(HelperProtocolCause::RequestEncoding)

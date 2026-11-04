@@ -642,16 +642,6 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
     alone = _world(tmp_path, "alone", unrelated=ONE_OF_EACH)
     history = _world(tmp_path, "history", unrelated=HISTORY)
     protected = _world(tmp_path, "protected", unrelated=PROTECTED)
-    # The uninstall plan the fleet review asks of a named installation lists every
-    # other installation and parses each recipe to find dependents of the model
-    # (recipe_operations/action_plans.py::_model_dependents_on_nodes). That is the
-    # same class of cost in another owner and has its own follow-up; it is left
-    # out here so this guard covers the removal's own reads.
-    monkeypatch.setattr(
-        type(alone.lifecycle),
-        "_model_dependents_on_nodes",
-        lambda _self, _session, _model, node_ids, **_kw: {n: () for n in node_ids},
-    )
     try:
         costs = {}
         for name, world in (
