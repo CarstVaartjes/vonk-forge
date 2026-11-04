@@ -60,7 +60,7 @@ from ..recipe_progress import (
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _bound_workload_intent
-from .interfaces import _TERMINAL_JOB_STATES
+from .interfaces import _TERMINAL_JOB_STATES, UndispatchedStopView
 from .observation_helpers import _aware
 from .results import _recorded_result
 
@@ -123,7 +123,7 @@ class OfflineStopMixin:
                 document = service._service_stop_document(candidate)
                 review = document.service_stop_review
                 assert review is not None
-                service.stop(
+                view = service.stop(
                     document.owner_id,
                     plan_digest=document.plan_digest,
                     actor=candidate.actor,
@@ -134,12 +134,7 @@ class OfflineStopMixin:
                 )
                 # A deferral (busy node keys, unsettled route) only moves the
                 # +5 s wake-up; progress is the Stop having been dispatched.
-                if not service._service_stop_pending(
-                    candidate.request_id,
-                    document.plan_digest,
-                    review.profile_target_node_ids,
-                    review.profile_application_id,
-                ):
+                if not isinstance(view, UndispatchedStopView):
                     progressed = True
             except (SecurityRefusalError, InvalidRequestError) as error:
                 # A denied authority, a run that is gone or no longer

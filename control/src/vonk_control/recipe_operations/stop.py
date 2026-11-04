@@ -64,7 +64,7 @@ from .errors import (
     _ServiceStopReplay,
 )
 from .intent import _bound_workload_intent
-from .interfaces import RecipeOperationView
+from .interfaces import RecipeOperationView, UndispatchedStopView
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -237,7 +237,7 @@ class StopMixin:
             service._service_stop_pending(
                 request_id, plan_digest, profile_target_node_ids, profile_application_id
             )
-            return replay
+            return UndispatchedStopView.of(replay)
         workload_intent_ordinal = _bound_workload_intent(accepted)
         assert type(workload_intent_ordinal) is int
 
@@ -307,7 +307,7 @@ class StopMixin:
 
     def _defer_accepted_service_stop(
         self, parent_id: str, error: OSError | UnknownOutcomeError | RecipeRouteError
-    ) -> RecipeOperationView:
+    ) -> UndispatchedStopView:
         # The response was lost after consent was committed. Returning the
         # SAME running child lets RunSwitch retain its phase/request identity;
         # the normal bounded Stop continuation owns the external retry.
@@ -330,7 +330,7 @@ class StopMixin:
             )
             parent.updated_at = now
             session.flush()
-            return service._view(parent, session=session)
+            return UndispatchedStopView.of(service._view(parent, session=session))
 
     @staticmethod
     def _service_stop_document(job: Job) -> RecipeStopParent:

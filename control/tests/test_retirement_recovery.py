@@ -193,8 +193,10 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
     withdrawals = []
 
     def unavailable_once(run_id):
+        # The acceptance pass and the first due pass both find the route
+        # publication unavailable; later passes succeed.
         withdrawals.append(run_id)
-        if len(withdrawals) == 1:
+        if len(withdrawals) <= 2:
             raise OSError("route publication temporarily unavailable")
 
     restarted._route_withdrawer = unavailable_once
@@ -236,6 +238,11 @@ def test_retirement_preserves_uncertain_capacity_until_exact_stop(
             is None
         )
     now[0] += timedelta(seconds=2)
+    # A due pass whose withdrawal is unavailable defers the accepted Stop by
+    # five seconds. That is a wait, not progress.
+    assert restarted.reconcile_pending_service_stops() is False
+    assert len(withdrawals) == 2
+    now[0] += timedelta(seconds=6)
     # Two workers recovering the same durable handoff may race. The bounded
     # accepted Stop continuation retains one original child and request.
     with ThreadPoolExecutor(max_workers=2) as workers:
