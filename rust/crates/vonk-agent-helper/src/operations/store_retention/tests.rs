@@ -27,7 +27,8 @@ impl CommandRunner for Runner {
             let container = inspection.as_ref().unwrap();
             let labels = &container["Config"]["Labels"];
             let mut text = format!(
-                "{}\t{}\n",
+                "{}\t{}\t{}\n",
+                "a".repeat(64),
                 labels["ai.vonkforge.installation-id"].as_str().unwrap(),
                 labels["ai.vonkforge.target-id"].as_str().unwrap()
             );
@@ -35,6 +36,7 @@ impl CommandRunner for Runner {
                 text.push_str(&serde_json::to_string(&mount["Source"]).unwrap());
                 text.push('\n');
             }
+            text.push_str("--\n");
             text.into_bytes()
         } else {
             return Err("unexpected command".into());
@@ -372,19 +374,41 @@ fn managed_containers(count: usize) -> Vec<crate::operations::test_support::Cont
 
 #[test]
 fn owner_collection_completes_however_many_managed_containers_exist() {
-    // The id listing grows with the containers; a total output bound ended
-    // the pass at about sixty, and no owner-dependent store was ever collected.
-    let host = Host::with(&managed_containers(500));
+    // The id listing and every container's owner read grow with the
+    // containers and with their model files (one bind mount per file); a
+    // total output bound ended the pass for any big model.
+    let host = Host {
+        mounts_per_container: 200,
+        ..Host::with(&managed_containers(500))
+    };
     let (_temp, executor) = host_executor(&host);
     let owners = executor
         .helper_store_owners(Instant::now() + Duration::from_secs(600))
         .unwrap();
     assert_eq!(owners.runtimes.len(), 500);
+    assert_eq!(owners.mounts.len(), 500 * 200);
     assert!(
         owners
             .installations
             .contains(crate::operations::test_support::INSTALLATION)
     );
+    // One listing and ceil(500 / OWNER_BATCH) inspections; no re-listing.
+    assert_eq!(
+        host.calls.lock().unwrap().len(),
+        1 + 500_usize.div_ceil(OWNER_BATCH)
+    );
+}
+
+#[test]
+fn a_pass_with_no_time_left_is_busy_before_it_asks_docker_anything_more() {
+    let host = Host::with(&managed_containers(500));
+    let (_temp, executor) = host_executor(&host);
+    let result = executor.helper_store_owners(Instant::now());
+    assert!(matches!(
+        result,
+        Err(OperationError::InstallationReconciliationBusy)
+    ));
+    assert!(host.calls.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -400,6 +424,8 @@ fn a_container_with_no_provable_owner_keeps_every_store_until_it_is_proven() {
         executor.helper_store_owners(deadline),
         Err(OperationError::InstallationReconciliationBusy)
     ));
+    // Listing, one inspection, one re-listing: no call per unproven container.
+    assert_eq!(host.calls.lock().unwrap().len(), 3);
 }
 
 #[test]

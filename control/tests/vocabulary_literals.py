@@ -857,6 +857,14 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
                 match.start(1)
                 for match in re.finditer(r'\.join\(\s*("[^"\n]*")\s*\)', source)
             }
+            # A Docker subcommand (`container inspect`) is the CLI's word, not
+            # the contract's.
+            | {
+                match.start(1)
+                for match in re.finditer(
+                    r'"container"(?:\.to_owned\(\)|\.into\(\))?,\s*("[^"\n]*")', source
+                )
+            }
             if path.endswith(".rs")
             else set()
         )

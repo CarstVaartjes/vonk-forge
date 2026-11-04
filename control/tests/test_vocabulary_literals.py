@@ -30,6 +30,19 @@ def test_rust_path_components_are_not_contract_states() -> None:
     ) == [2]
 
 
+def test_a_docker_subcommand_is_not_a_contract_word() -> None:
+    source = (
+        'let a = ["container".to_owned(), "inspect".to_owned()];\n'
+        'let b = ["container", "inspect"];\n'
+        'let state = "inspect";\n'
+    )
+    assert scan.scan_source(
+        source,
+        path="rust/crates/vonk-agent-helper/src/operations/example.rs",
+        words=frozenset({"inspect"}),
+    ) == [3]
+
+
 def _module(tmp_path: Path, source: str, relative: str = REL) -> Path:
     path = tmp_path / relative
     path.parent.mkdir(parents=True, exist_ok=True)

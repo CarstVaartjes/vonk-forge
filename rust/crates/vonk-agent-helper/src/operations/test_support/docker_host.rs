@@ -59,7 +59,9 @@ pub(in crate::operations) struct Host {
     pub(in crate::operations) images: Arc<Mutex<Vec<(String, String)>>>,
     /// Containers whose owner inspection fails while Docker still lists them.
     pub(in crate::operations) uninspectable: Arc<Mutex<Vec<String>>>,
-    /// Ids the all-containers listing still names after the container is gone.
+    /// Model files each container mounts, one bind mount per file.
+    pub(in crate::operations) mounts_per_container: usize,
+    /// Ids the first all-containers listing names after the container is gone.
     pub(in crate::operations) ghosts: Arc<Mutex<Vec<String>>>,
 }
 
@@ -200,10 +202,9 @@ impl Host {
                         }
                     })
                     .collect();
+                // A ghost is named by the first full listing only.
                 let ghosts: String = if quiet && id_filter.is_none() {
-                    self.ghosts
-                        .lock()
-                        .unwrap()
+                    std::mem::take(&mut *self.ghosts.lock().unwrap())
                         .iter()
                         .map(|id| format!("{id}\n"))
                         .collect()
@@ -283,20 +284,38 @@ impl Host {
                     None => docker_output(false, "", 1),
                 }
             }
-            // The owner read of the store collector: installation and target.
-            ["container", "inspect", "--format", format, _]
+            // The owner read of the store collector: one inspection answers
+            // for many containers. Docker answers for the containers it finds
+            // and exits 1 when it misses any.
+            ["container", "inspect", "--format", format, ids @ ..]
                 if *format == crate::operations::store_retention::OWNERS_FORMAT =>
             {
-                match find(&name) {
-                    Some(index) if !self.uninspectable.lock().unwrap().contains(&name) => {
-                        docker_output(
-                            true,
-                            &format!("{INSTALLATION}\t{}\n", containers[index].target),
-                            0,
-                        )
+                let uninspectable = self.uninspectable.lock().unwrap();
+                let mut records = String::new();
+                let mut missed = false;
+                for id in ids {
+                    match find(id) {
+                        Some(index) if !uninspectable.iter().any(|bad| bad == id) => {
+                            let container = &containers[index];
+                            records.push_str(&format!(
+                                "{}\t{INSTALLATION}\t{}\n",
+                                container.id(),
+                                container.target
+                            ));
+                            for file in 0..self.mounts_per_container {
+                                records.push_str(&format!(
+                                    "\"/var/lib/vonk-forge/models/sha256/{:064x}/snapshots/{:040x}/model-{file:05}-of-{:05}.safetensors\"\n",
+                                    index,
+                                    file,
+                                    self.mounts_per_container
+                                ));
+                            }
+                            records.push_str("--\n");
+                        }
+                        _ => missed = true,
                     }
-                    _ => docker_output(false, "", 1),
                 }
+                docker_output(!missed, &records, i32::from(missed))
             }
             ["inspect", ..] => docker_output(true, &"f".repeat(64), 0),
             ["container", "inspect", ..] => match find(&name) {

@@ -12,9 +12,16 @@ struct Owners {
     mounts: HashSet<PathBuf>,
 }
 
-// Docker emits the two canonical identity labels, then one JSON string per
-// mount source. Its unrelated inspection fields need no parallel wire model.
-pub(super) const OWNERS_FORMAT: &str = "{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}";
+// One record per container: its id and the two canonical identity labels,
+// then one JSON string per mount source (a model with many files has one mount
+// each), then the `--` line that ends the record. The id and the end line let
+// one `docker container inspect` answer for many containers and be read as a
+// stream; Docker's unrelated inspection fields need no parallel wire model.
+pub(super) const OWNERS_FORMAT: &str = "{{.Id}}\t{{index .Config.Labels \"ai.vonkforge.installation-id\"}}\t{{index .Config.Labels \"ai.vonkforge.target-id\"}}{{println}}{{range .Mounts}}{{json .Source}}{{println}}{{end}}--{{println}}";
+const OWNER_RECORD_END: &str = "--";
+/// Containers per `docker container inspect`: a pass costs one listing,
+/// `ceil(n / 100)` inspections and at most one re-listing, whatever `n` is.
+const OWNER_BATCH: usize = 100;
 
 impl<R: CommandRunner> OperationExecutor<R> {
     /// Local retention delegates only an agent-owned scope. Reuse the same
@@ -182,12 +189,66 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 
     /// What every managed container (any state) keeps in use. A container
-    /// whose owner cannot be proven (its fields do not parse, or Docker will
-    /// not inspect it) could use any store, so the pass then reports
+    /// whose owner cannot be proven (its record does not parse, or Docker
+    /// will not inspect it) could use any store, so the pass then reports
     /// `InstallationReconciliationBusy` and every owner-dependent collection
-    /// keeps everything until a later pass proves each owner. A container that
-    /// is gone by the time it is inspected owns nothing.
+    /// keeps everything. It stays that way for as long as the container is
+    /// listed and unreadable. A container that Docker no longer lists owns
+    /// nothing. Every Docker call is capped by what is left of `deadline`.
     fn helper_store_owners(&self, deadline: Instant) -> Result<Owners, OperationError> {
+        let ids = self.managed_container_ids(deadline, Duration::from_secs(10))?;
+        let mut owners = Owners::default();
+        let mut proven = HashSet::new();
+        for batch in ids.chunks(OWNER_BATCH) {
+            let timeout = time_left(deadline, Duration::from_secs(30))?;
+            let mut arguments = vec![
+                "container".to_owned(),
+                "inspect".to_owned(),
+                "--format".to_owned(),
+                OWNERS_FORMAT.to_owned(),
+            ];
+            arguments.extend(batch.iter().cloned());
+            let mut records = OwnerRecords::default();
+            // Whatever the outcome (a missing container makes Docker exit 1
+            // after answering for the others), only complete records count;
+            // the containers without one are judged below.
+            let _ = self.run_docker_lines(&arguments, timeout, &mut |line| records.line(line));
+            for (id, installation, runtime, mounts) in records.done {
+                if batch.contains(&id) && proven.insert(id) {
+                    owners.installations.insert(installation);
+                    owners.runtimes.insert(runtime);
+                    owners.mounts.extend(mounts);
+                }
+            }
+        }
+        let mut unproven: Vec<&String> = ids.iter().filter(|id| !proven.contains(*id)).collect();
+        if !unproven.is_empty() {
+            // One re-listing tells the gone from the unreadable.
+            let listed = self.managed_container_ids(deadline, Duration::from_secs(10))?;
+            let listed: HashSet<_> = listed.iter().collect();
+            unproven.retain(|id| listed.contains(*id));
+        }
+        if unproven.is_empty() {
+            return Ok(owners);
+        }
+        eprintln!(
+            "vonk-agent-helper: {} managed container(s) have no provable owner ({}); owner-dependent collection keeps everything while they stay unreadable",
+            unproven.len(),
+            unproven
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        Err(OperationError::InstallationReconciliationBusy)
+    }
+
+    /// The ids of every managed container, in any state, read as a stream.
+    fn managed_container_ids(
+        &self,
+        deadline: Instant,
+        cap: Duration,
+    ) -> Result<Vec<String>, OperationError> {
         let mut ids = Vec::new();
         let mut malformed = false;
         let output = self.run_docker_lines(
@@ -201,7 +262,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 "label=ai.vonkforge.managed=true",
             ]
             .map(str::to_owned),
-            Duration::from_secs(10),
+            time_left(deadline, cap)?,
             &mut |line| {
                 if lower_hex(line, 64) {
                     ids.push(line.to_owned());
@@ -218,61 +279,7 @@ impl<R: CommandRunner> OperationExecutor<R> {
         if malformed {
             return Err(OperationError::InvalidArtifact);
         }
-        let mut owners = Owners::default();
-        let mut unproven = Vec::new();
-        for id in ids {
-            if Instant::now() >= deadline {
-                return Err(OperationError::InstallationReconciliationBusy);
-            }
-            // Reuse the helper's existing bounded Docker inspection path.
-            if deadline.saturating_duration_since(Instant::now()) < Duration::from_secs(30) {
-                return Err(OperationError::InstallationReconciliationBusy);
-            }
-            let parsed = self
-                .container_fields(&id, OWNERS_FORMAT)
-                .ok()
-                .filter(|output| output.success)
-                .and_then(|output| parse_owners(&output.stdout));
-            match parsed {
-                Some((installation, runtime, mounts)) => {
-                    owners.installations.insert(installation);
-                    owners.runtimes.insert(runtime);
-                    owners.mounts.extend(mounts);
-                }
-                None => unproven.push(id),
-            }
-        }
-        unproven.retain(|id| !self.container_gone(id));
-        if unproven.is_empty() {
-            return Ok(owners);
-        }
-        eprintln!(
-            "vonk-agent-helper: {} managed container(s) have no provable owner ({}); owner-dependent collection keeps everything until they do",
-            unproven.len(),
-            unproven.join(",")
-        );
-        Err(OperationError::InstallationReconciliationBusy)
-    }
-
-    /// Docker lists no container with this id any more. An unavailable answer
-    /// is not an answer: the container stays unproven.
-    fn container_gone(&self, id: &str) -> bool {
-        let mut listed = false;
-        self.run_docker_lines(
-            &[
-                "container".to_owned(),
-                "ls".to_owned(),
-                "--all".to_owned(),
-                "--quiet".to_owned(),
-                "--no-trunc".to_owned(),
-                "--filter".to_owned(),
-                format!("id={id}"),
-            ],
-            Duration::from_secs(10),
-            &mut |line| listed |= !line.trim().is_empty(),
-        )
-        .is_ok_and(|output| output.success)
-            && !listed
+        Ok(ids)
     }
 
     fn helper_record_unused(&self, store: &Store, name: &str, owners: &Owners) -> bool {
@@ -406,26 +413,62 @@ impl<R: CommandRunner> OperationExecutor<R> {
     }
 }
 
-/// The installation and runtime labels, then the mount sources, of one
-/// `OWNERS_FORMAT` inspection; `None` when any field is not what Docker's
-/// format produces.
-fn parse_owners(stdout: &[u8]) -> Option<(String, String, Vec<PathBuf>)> {
-    let text = std::str::from_utf8(stdout).ok()?;
-    let mut lines = text.lines();
-    let (installation, runtime) =
-        lines
-            .next()?
-            .split_once('\t')
-            .filter(|(installation, runtime)| {
-                valid_artifact_id(installation) && valid_artifact_id(runtime)
-            })?;
-    let mounts = lines
-        .map(|line| serde_json::from_str::<PathBuf>(line).ok())
-        .collect::<Option<Vec<_>>>()?;
-    mounts
-        .iter()
-        .all(|source| source.is_absolute())
-        .then(|| (installation.to_owned(), runtime.to_owned(), mounts))
+/// Time left before `deadline`, at most `cap`; none left is a busy pass.
+fn time_left(deadline: Instant, cap: Duration) -> Result<Duration, OperationError> {
+    let left = deadline.saturating_duration_since(Instant::now());
+    if left.is_zero() {
+        return Err(OperationError::InstallationReconciliationBusy);
+    }
+    Ok(left.min(cap))
+}
+
+/// The complete `OWNERS_FORMAT` records of a streamed inspection. A record
+/// whose id, labels or mounts are not what the format produces, or that ends
+/// before its end line, is dropped, so its container stays unproven.
+#[derive(Default)]
+struct OwnerRecords {
+    header: Option<Option<(String, String, String)>>,
+    mounts: Vec<PathBuf>,
+    valid: bool,
+    done: Vec<(String, String, String, Vec<PathBuf>)>,
+}
+
+impl OwnerRecords {
+    fn line(&mut self, line: &str) {
+        if line == OWNER_RECORD_END {
+            if let (Some(Some((id, installation, runtime))), true) =
+                (self.header.take(), self.valid)
+            {
+                self.done
+                    .push((id, installation, runtime, std::mem::take(&mut self.mounts)));
+            }
+            *self = Self {
+                done: std::mem::take(&mut self.done),
+                ..Self::default()
+            };
+            return;
+        }
+        if self.header.is_none() {
+            let mut fields = line.split('\t');
+            let header = match (fields.next(), fields.next(), fields.next(), fields.next()) {
+                (Some(id), Some(installation), Some(runtime), None)
+                    if lower_hex(id, 64)
+                        && valid_artifact_id(installation)
+                        && valid_artifact_id(runtime) =>
+                {
+                    Some((id.to_owned(), installation.to_owned(), runtime.to_owned()))
+                }
+                _ => None,
+            };
+            self.valid = header.is_some();
+            self.header = Some(header);
+            return;
+        }
+        match serde_json::from_str::<PathBuf>(line) {
+            Ok(source) if source.is_absolute() => self.mounts.push(source),
+            _ => self.valid = false,
+        }
+    }
 }
 
 fn absent(path: &Path) -> bool {

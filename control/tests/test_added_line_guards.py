@@ -2809,36 +2809,74 @@ def test_an_exists_inside_a_where_does_not_scope_the_outer_select(body):
 
 
 _LISTING_PATH = "rust/crates/vonk-agent-helper/src/operations/example.rs"
-_CAPTURED_LISTING = (
-    "fn owners(&self) {\n"
-    "    let output = self.run_docker_with_timeout(\n"
-    '        &["container", "ls", "--all", "--quiet"].map(str::to_owned),\n'
-    "        timeout,\n"
-    "    );\n"
-    "}\n"
+
+
+def _call(callee: str, words: str) -> str:
+    return f"fn read(&self) {{\n    let output = self.{callee}(\n        &[{words}],\n        timeout,\n    );\n}}\n"
+
+
+def _docker_listings(source: str, added: set[int]) -> list[str]:
+    return check_source(_LISTING_PATH, source, added, modes=("docker-listings",))
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        '"container", "ls", "--all", "--quiet"',
+        '"images", "--no-trunc"',
+        '"ps", "--all"',
+        '"image", "ls"',
+        # The house style: owned strings.
+        '"container".to_owned(), "ls".to_owned(), "--quiet".to_owned()',
+        '"container".into(), "ls".into(), format!("label=a={x}")',
+        '"container", "inspect", "--format", "{{range .Mounts}}{{.Source}}{{end}}", id',
+    ],
 )
+def test_a_captured_docker_listing_or_ranged_inspection_is_flagged(words: str) -> None:
+    for callee in ("run_docker", "run_docker_with_timeout", "run_with_timeout"):
+        source = _call(callee, words)
+        assert _docker_listings(source, {2})
+        assert not _docker_listings(source, set())
 
 
-def test_a_captured_docker_listing_is_flagged() -> None:
-    assert check_source(
-        _LISTING_PATH, _CAPTURED_LISTING, {3}, modes=("docker-listings",)
+def test_a_ranged_format_held_in_a_constant_is_flagged() -> None:
+    source = (
+        'const OWNERS: &str = "{{.Id}}{{range .Mounts}}{{json .Source}}{{end}}";\n'
+        + _call("container_fields", '"container", "inspect", "--format", OWNERS')
     )
-    assert not check_source(
-        _LISTING_PATH, _CAPTURED_LISTING, set(), modes=("docker-listings",)
+    assert _docker_listings(source, {3})
+
+
+def test_an_argument_vector_built_beside_the_call_is_judged() -> None:
+    source = (
+        "fn read(&self) {\n"
+        '    let arguments = vec!["container".to_owned(), "ls".to_owned(), filter];\n'
+        "    let output = self.run_docker(&arguments)?;\n"
+        "}\n"
     )
-    images = _CAPTURED_LISTING.replace('"container", "ls"', '"images"')
-    assert check_source(_LISTING_PATH, images, {3}, modes=("docker-listings",))
+    assert _docker_listings(source, {3})
+    assert not _docker_listings(source.replace("run_docker", "run_docker_lines"), {3})
+
+
+def test_each_call_is_judged_on_its_own() -> None:
+    source = _call("run_docker_lines", '"container", "ls", "--quiet"') + _call(
+        "run_docker", '"container", "ls", "--quiet"'
+    ).replace("read", "again")
+    assert not _docker_listings(source, {2})
+    assert _docker_listings(source, {8})
 
 
 @pytest.mark.parametrize(
     "source",
     [
-        _CAPTURED_LISTING.replace("run_docker_with_timeout", "run_docker_lines"),
-        _CAPTURED_LISTING.replace('"--quiet"', '"--last", "5"'),
-        _CAPTURED_LISTING.replace(
-            '"container", "ls", "--all", "--quiet"', '"stop", "x"'
-        ),
+        _call("run_docker_lines", '"container", "ls", "--quiet"'),
+        _call("run_docker", '"container", "ls", "--quiet", "--last", "5"'),
+        _call("run_docker", '"container", "ls", "--filter", format!("id={id}")'),
+        _call("run_docker", '"container", "ls", "--filter", format!("name=^/{n}$")'),
+        _call("run_docker", '"container", "inspect", "--format", "{{.Id}}", id'),
+        _call("run_docker", '"stop", "--timeout", "5", name'),
+        _call("run_docker", '"image", "rm", reference'),
     ],
 )
-def test_a_line_read_or_paged_docker_listing_passes(source: str) -> None:
-    assert not check_source(_LISTING_PATH, source, {3}, modes=("docker-listings",))
+def test_a_line_read_exact_target_or_paged_docker_call_passes(source: str) -> None:
+    assert not _docker_listings(source, {2})
