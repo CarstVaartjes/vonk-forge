@@ -66,7 +66,6 @@ from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models import (
     AgentNode,
     ArtifactLifecycleGate,
-    CatalogDocumentHead,
     CatalogDocumentRevision,
     InstallationNode,
     Job,
@@ -219,24 +218,6 @@ def _installation_recipes(
     )
 
 
-def _recipes_being_bound(session: Session) -> frozenset[tuple[str, str]]:
-    """Recipes whose candidate revision names its models only in its document.
-
-    A recipe binds its models when its revision is activated; until then the
-    pending candidate's document is what names them.
-    """
-
-    return frozenset(
-        (publisher, slug)
-        for publisher, slug in session.execute(
-            select(CatalogDocumentHead.publisher, CatalogDocumentHead.slug).where(
-                CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
-                CatalogDocumentHead.candidate_revision_id.is_not(None),
-            )
-        )
-    )
-
-
 class FleetRemovalMixin:
     def _fleet_effects(
         self, session: Session, digest: str, *, shared_objects: set[str] | None = None
@@ -273,14 +254,13 @@ class FleetRemovalMixin:
                 .order_by(RecipeInstallation.id)
             )
         )
-        # Only these recipes can name the model: those bound to it, those its
-        # installations run, and those a catalog sync is about to bind.
+        # Only these recipes can name the model: those bound to it and those
+        # its installations run.
         evidence = _Evidence.read(
             session,
             cache._clock(),
             recipes=recipes_bound_to(session, contents)
-            | _installation_recipes(session, using)
-            | _recipes_being_bound(session),
+            | _installation_recipes(session, using),
         )
         readable = evidence.application_references_readable
         protected = bool(

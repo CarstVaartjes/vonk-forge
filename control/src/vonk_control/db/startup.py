@@ -48,16 +48,16 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_operations(connection)
     if adopted:
         _LOGGER.info("Adopted %d cache operations onto the lifecycle schedule", adopted)
-    from ..reference_facts import fill_reference_facts
-
-    filled = fill_reference_facts(connection)
-    if filled:
-        _LOGGER.info("Filled %d stored reference facts", filled)
     from ..legacy_states import adopt_legacy_states
 
     adopted = adopt_legacy_states(connection)
     if adopted:
         _LOGGER.info("Rewrote %d lifecycle rows onto the core state words", adopted)
+    from ..reference_facts import fill_reference_facts
+
+    filled = fill_reference_facts(connection)
+    if filled:
+        _LOGGER.info("Filled %d stored reference facts", filled)
 
 
 def initialize_database(

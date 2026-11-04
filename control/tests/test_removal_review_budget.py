@@ -52,6 +52,7 @@ from vonk_control.models import (
     ModelCacheSetArtifact,
     RecipeInstallation,
 )
+from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.unused_storage_collection import evidence as collector_evidence
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
@@ -362,7 +363,6 @@ def _unrelated_load(
             digest = models[index][1]
             session.add(
                 RecipeInstallation(
-                    model_artifact_set_sha256=real.model_artifact_set_sha256,
                     id=str(uuid.uuid4()),
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
@@ -382,7 +382,6 @@ def _unrelated_load(
             digest = models[index][1]
             session.add(
                 RecipeInstallation(
-                    model_artifact_set_sha256=real.model_artifact_set_sha256,
                     id=str(uuid.uuid4()),
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
@@ -693,6 +692,13 @@ def test_removal_cost_does_not_grow_with_unrelated_rows(
         protected.cache.close()
 
 
+def plan_using(plan: dict[str, object], set_digest: str) -> dict[str, object]:
+    """``plan`` with every rank running ``set_digest``."""
+    current = parse_stored_installation_plan(plan).model_artifact_set_sha256
+    assert current is not None
+    return json.loads(json.dumps(plan).replace(current, set_digest))
+
+
 def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
     tmp_path: Path,
 ) -> None:
@@ -716,7 +722,6 @@ def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
             damaged_id = str(uuid.uuid4())
             session.add(
                 RecipeInstallation(
-                    model_artifact_set_sha256=_hex("set/target"),
                     id=damaged_id,
                     recipe_revision_id=other.id,
                     model_content_sha256=_hex("elsewhere"),
@@ -725,7 +730,7 @@ def test_a_damaged_plan_of_an_installation_using_the_model_blocks_the_removal(
                     recipe_build_id=real.recipe_build_id,
                     image_digest=real.image_digest,
                     plan_digest=_hex("damaged-plan"),
-                    plan=real.plan,
+                    plan=plan_using(real.plan, _hex("set/target")),
                     state="installed",
                     actor="test",
                     created_at=world.now,

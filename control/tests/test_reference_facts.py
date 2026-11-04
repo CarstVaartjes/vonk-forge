@@ -36,6 +36,7 @@ from .test_removal_review_budget import (
     _hex,
     _noise_models,
     _noise_recipes,
+    plan_using,
 )
 
 TARGET_SET = _hex("set/target")
@@ -113,13 +114,12 @@ def _reused_installation(world: Small) -> str:
                 id=installation_id,
                 recipe_revision_id=world.other_recipe[0],
                 model_content_sha256=_hex("another-model"),
-                model_artifact_set_sha256=TARGET_SET,
                 mapping_id=real.mapping_id,
                 mapping_generation=real.mapping_generation,
                 recipe_build_id=real.recipe_build_id,
                 image_digest=real.image_digest,
                 plan_digest=_hex("reused-plan"),
-                plan=real.plan,
+                plan=plan_using(real.plan, TARGET_SET),
                 state="installed",
                 actor="test",
                 created_at=NOW,

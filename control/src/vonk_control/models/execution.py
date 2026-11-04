@@ -77,9 +77,9 @@ class RecipeInstallation(Base):
         String(64), nullable=True, index=True
     )
     # The model set every rank of the accepted plan runs: the one stored fact
-    # for "which installations use this set", written with the plan at
-    # admission. Rows accepted before the column existed are filled from their
-    # plan at Controller startup.
+    # for "which installations use this set", derived from the plan when the
+    # row is inserted (``_installation_model_set_recorded``). Rows inserted
+    # before the column existed are filled from their plan at startup.
     model_artifact_set_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
@@ -114,9 +114,7 @@ def _installation_model_set_recorded(
     _connection: Connection,
     target: RecipeInstallation,
 ) -> None:
-    """A row inserted without its model set records the one its plan names."""
-    if target.model_artifact_set_sha256 is not None:
-        return
+    """Record the model set the inserted row's plan names: the one writer."""
     from ..reference_facts import plan_model_set
 
     target.model_artifact_set_sha256 = plan_model_set(target.plan)

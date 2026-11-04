@@ -412,7 +412,6 @@ def _unrelated_history(
             plan = _own(real.plan, swaps)
             session.add(
                 RecipeInstallation(
-                    model_artifact_set_sha256=real.model_artifact_set_sha256,
                     id=installation_id,
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
