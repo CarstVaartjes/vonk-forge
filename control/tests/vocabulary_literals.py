@@ -830,6 +830,35 @@ def _structural_field_keys(tree: ast.Module) -> Iterator[ast.Constant]:
             yield key
 
 
+DOCKER_HELPER_SCOPE = "rust/crates/vonk-agent-helper/"
+DOCKER_CONTAINER_SUBCOMMANDS = [
+    "inspect",
+    "ls",
+    "rm",
+    "stop",
+    "kill",
+    "wait",
+    "logs",
+    "start",
+    "create",
+    "exec",
+    "cp",
+    "update",
+    "prune",
+    "stats",
+    "top",
+    "port",
+    "rename",
+    "restart",
+    "pause",
+    "unpause",
+    "attach",
+    "commit",
+    "diff",
+    "export",
+]
+
+
 def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
     """Report literal line numbers; contract definitions and generation are owners."""
     registry = json.loads((REPO_ROOT / "tools/python-model-registry.json").read_text())
@@ -856,6 +885,19 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             {
                 match.start(1)
                 for match in re.finditer(r'\.join\(\s*("[^"\n]*")\s*\)', source)
+            }
+            # A Docker container subcommand (`container inspect`) in the helper
+            # is the CLI's word, not the contract's; any other word after
+            # "container" stays a contract literal.
+            | {
+                match.start(1)
+                for match in re.finditer(
+                    r'"container"(?:\.to_owned\(\)|\.into\(\))?,\s*("(?:'
+                    + "|".join(DOCKER_CONTAINER_SUBCOMMANDS)
+                    + r')")',
+                    source,
+                )
+                if path.startswith(DOCKER_HELPER_SCOPE)
             }
             if path.endswith(".rs")
             else set()

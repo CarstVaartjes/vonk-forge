@@ -17,8 +17,8 @@ from . import collection_continuation as collections
 from . import content_identity_boundaries as identity
 from . import coordination_boundaries as coordination
 from . import deterministic_retries as retries
-from . import document_read_boundaries as document_reads
 from . import (
+    docker_listings,
     legacy_tolerance,
     locked_io,
     repeated_parse,
@@ -27,6 +27,7 @@ from . import (
     shell_trap_waits,
     whole_collection_readers,
 )
+from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
 from . import principle_guards as principles
@@ -93,6 +94,7 @@ MODES = (
     "scratch-names",
     "capacity-refusals",
     "agent-422",
+    "docker-listings",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1511,6 +1513,11 @@ def check_source(
             retries.scan_rust_dispositions(
                 source, path=path, test_lines=rust_test_lines(source)
             )
+        )
+    if "docker-listings" in modes and docker_listings.in_scope(path) and not is_test:
+        hits.extend(
+            (line, docker_listings.KIND)
+            for line in docker_listings.scan_source(source, rust_test_lines(source))
         )
     if "identity" in modes and path.endswith(".rs") and not is_test:
         test_lines = rust_test_lines(source)

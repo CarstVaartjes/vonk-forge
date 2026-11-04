@@ -2806,3 +2806,89 @@ def test_an_exists_inside_a_where_does_not_scope_the_outer_select(body):
     source = "def f(s):\n    " + body + "\n"
     path = "control/src/vonk_control/api/example.py"
     assert check_source(path, source, {2}, modes=("request-scans",)), body
+
+
+_LISTING_PATH = "rust/crates/vonk-agent-helper/src/operations/example.rs"
+
+
+def _call(callee: str, words: str) -> str:
+    return f"fn read(&self) {{\n    let output = self.{callee}(\n        &[{words}],\n        timeout,\n    );\n}}\n"
+
+
+def _docker_listings(source: str, added: set[int]) -> list[str]:
+    return check_source(_LISTING_PATH, source, added, modes=("docker-listings",))
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        '"container", "ls", "--all", "--quiet"',
+        '"images", "--no-trunc"',
+        '"ps", "--all"',
+        '"image", "ls"',
+        # The house style: owned strings.
+        '"container".to_owned(), "ls".to_owned(), "--quiet".to_owned()',
+        '"container".into(), "ls".into(), format!("label=a={x}")',
+        '"container", "inspect", "--format", "{{range .Mounts}}{{.Source}}{{end}}", id',
+    ],
+)
+def test_a_captured_docker_listing_or_ranged_inspection_is_flagged(words: str) -> None:
+    for callee in ("run_docker", "run_docker_with_timeout", "run_with_timeout"):
+        source = _call(callee, words)
+        assert _docker_listings(source, {2})
+        assert not _docker_listings(source, set())
+
+
+def test_a_ranged_format_read_through_container_fields_is_flagged() -> None:
+    constant = (
+        'const OWNERS: &str = "{{.Id}}{{range .Mounts}}{{json .Source}}{{end}}";\n'
+        "fn read(&self) {\n"
+        "    let output = self.container_fields(id, OWNERS);\n"
+        "}\n"
+    )
+    assert _docker_listings(constant, {3})
+    inline = (
+        "fn read(&self) {\n"
+        '    let output = self.container_fields(&id, "{{range .Mounts}}{{.Source}}{{end}}");\n'
+        "}\n"
+    )
+    assert _docker_listings(inline, {2})
+    fixed = inline.replace(
+        "{{range .Mounts}}{{.Source}}{{end}}", "{{.State.StartedAt}}"
+    )
+    assert not _docker_listings(fixed, {2})
+
+
+def test_an_argument_vector_built_beside_the_call_is_judged() -> None:
+    source = (
+        "fn read(&self) {\n"
+        '    let arguments = vec!["container".to_owned(), "ls".to_owned(), filter];\n'
+        "    let output = self.run_docker(&arguments)?;\n"
+        "}\n"
+    )
+    assert _docker_listings(source, {3})
+    assert not _docker_listings(source.replace("run_docker", "run_docker_lines"), {3})
+
+
+def test_each_call_is_judged_on_its_own() -> None:
+    source = _call("run_docker_lines", '"container", "ls", "--quiet"') + _call(
+        "run_docker", '"container", "ls", "--quiet"'
+    ).replace("read", "again")
+    assert not _docker_listings(source, {2})
+    assert _docker_listings(source, {8})
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        _call("run_docker_lines", '"container", "ls", "--quiet"'),
+        _call("run_docker", '"container", "ls", "--quiet", "--last", "5"'),
+        _call("run_docker", '"container", "ls", "--filter", format!("id={id}")'),
+        _call("run_docker", '"container", "ls", "--filter", format!("name=^/{n}$")'),
+        _call("run_docker", '"container", "inspect", "--format", "{{.Id}}", id'),
+        _call("run_docker", '"stop", "--timeout", "5", name'),
+        _call("run_docker", '"image", "rm", reference'),
+    ],
+)
+def test_a_line_read_exact_target_or_paged_docker_call_passes(source: str) -> None:
+    assert not _docker_listings(source, {2})

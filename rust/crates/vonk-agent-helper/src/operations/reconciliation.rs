@@ -312,22 +312,27 @@ impl<R: CommandRunner> OperationExecutor<R> {
             if all {
                 arguments.insert(2, "--all".to_owned());
             }
-            let output = self.run_docker(&arguments)?;
-            // Only a successful empty exact observation proves absence. A
+            // An installation's containers grow with its runs and jobs, so the
+            // listing is read as a stream; only a container id matters.
+            let (mut found, mut malformed) = (false, false);
+            let output =
+                self.run_docker_lines(&arguments, Duration::from_secs(60), &mut |line| {
+                    if lower_hex(line, 64) {
+                        found = true;
+                    } else if !line.trim().is_empty() {
+                        malformed = true;
+                    }
+                })?;
+            // Only a successful exact observation proves absence. A
             // container ID, malformed bytes, or failed observation preserves
             // the cache for a subsequent bounded owning-operation attempt.
-            if !output.success
-                || output.exit_code != Some(0)
-                || output.stdout.len() as u64 > MAX_COMMAND_OUTPUT_BYTES
-            {
+            if !output.success || output.exit_code != Some(0) {
                 return Err(OperationError::InstallationReconciliationStorageUnavailable);
             }
-            let listing =
-                std::str::from_utf8(&output.stdout).map_err(|_| OperationError::InvalidArtifact)?;
-            if !listing.trim().is_empty() {
-                if !listing.lines().all(|id| lower_hex(id, 64)) {
-                    return Err(OperationError::InvalidArtifact);
-                }
+            if malformed {
+                return Err(OperationError::InvalidArtifact);
+            }
+            if found {
                 return Ok(true);
             }
         }

@@ -237,6 +237,26 @@ pub trait CommandRunner: Send + Sync {
     ) -> Result<CommandOutput, String> {
         self.run(executable, arguments)
     }
+
+    /// A listing read line by line: `on_line` receives each line of standard
+    /// output without its newline, and the returned output carries the exit
+    /// status and stderr but no stdout. The listing has no total bound (it
+    /// grows with what the helper must remove); each line is bounded. Lines
+    /// are trusted only when the returned status is successful.
+    fn run_lines(
+        &self,
+        executable: &Path,
+        arguments: &[String],
+        timeout: Duration,
+        on_line: &mut dyn FnMut(&str),
+    ) -> Result<CommandOutput, String> {
+        let mut output = self.run_with_timeout(executable, arguments, timeout)?;
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            on_line(line);
+        }
+        output.stdout.clear();
+        Ok(output)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
