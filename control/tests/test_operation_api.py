@@ -1399,6 +1399,8 @@ def test_agent_upgrade_projection_keeps_raw_reason_and_exact_identity_evidence(
             select(AgentOperation).where(AgentOperation.parent_job_id == job.id)
         )
         assert operation is not None
+        # The order now backs off behind a scheduled retry.
+        operation.state = "backoff"
         operation.next_action_at = operation.updated_at
         attempt = session.scalar(
             select(AgentOperationAttempt).where(
