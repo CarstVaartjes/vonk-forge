@@ -57,6 +57,8 @@ from .shared import (
     _RecipeEndpoint,
 )
 
+_ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)
+
 if TYPE_CHECKING:
     from .service import RecipeRouteService
 
@@ -139,10 +141,7 @@ def _candidate_once(
             require_route_authority(agent, run.id)
         try:
             retained: list[str] = []
-            if (
-                re.fullmatch(ENDPOINT_ALIAS_PATTERN, run.alias) is None
-                or run.alias in aliases
-            ):
+            if _ALIAS.fullmatch(run.alias) is None or run.alias in aliases:
                 raise RecipeRouteNotReady(
                     "recipe run alias is invalid or duplicated", run_id=run.id
                 )

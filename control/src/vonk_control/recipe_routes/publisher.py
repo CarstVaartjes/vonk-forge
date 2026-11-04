@@ -46,6 +46,8 @@ from .shared import (
     _RecipeEndpoint,
 )
 
+_ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)
+
 
 class AtomicRecipeRoutePublisher:
     """Adapt recipe routes to the controller's one atomic live bundle."""
@@ -127,11 +129,7 @@ class AtomicRecipeRoutePublisher:
         if len(found) != 1:
             return None
         alias, raw = found[0]
-        if (
-            re.fullmatch(ENDPOINT_ALIAS_PATTERN, alias) is None
-            or raw.scheme != "http"
-            or raw.path != "/v1"
-        ):
+        if _ALIAS.fullmatch(alias) is None or raw.scheme != "http" or raw.path != "/v1":
             return None
         try:
             policy.validate(raw.address)
