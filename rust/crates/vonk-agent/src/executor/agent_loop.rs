@@ -381,7 +381,7 @@ pub(super) fn record_result_rejection(
     now: DateTime<Utc>,
 ) -> Result<(), LoopError> {
     let rejection = state.reject_result(result, error, now)?;
-    if rejection.invalid_request() {
+    if rejection.refusal().settles() {
         state.discard_rejected_result(result)?;
         eprintln!(
             "vonk-agent: discarded result delivery for fence {} \

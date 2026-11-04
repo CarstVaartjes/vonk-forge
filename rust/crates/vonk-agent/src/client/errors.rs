@@ -115,12 +115,9 @@ impl ControllerError {
         http_status_disposition(self.status)
     }
 
-    /// Whether the Controller refused the request's own bytes (malformed,
-    /// oversized or invalid): the same request can never be accepted.  Other
-    /// definite answers (a missing or no longer current resource) describe
-    /// the Controller's view of an owner that may still be settling.
-    pub fn request_invalid(&self) -> bool {
-        self.disposition() == Disposition::Fail && matches!(self.status, 400 | 413 | 422)
+    /// How this refusal ends the thing it refused (see [`Refusal`]).
+    pub fn refusal(&self) -> Refusal {
+        Refusal::of_status(self.status)
     }
 
     /// Whether this refusal asks its owner to re-observe the same request.
@@ -312,6 +309,38 @@ pub(crate) fn endpoint_name(path: &str) -> Option<String> {
         .collect::<Vec<_>>()
         .join(".");
     (!name.is_empty()).then_some(name)
+}
+
+/// The one disposition of a Controller refusal, for every path that sent
+/// bytes (results, observation pages, renewals).  It is derived from the
+/// status table alone; a path never classifies a refusal by its own predicate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// The request's own bytes (malformed, oversized or invalid): the same
+    /// request can never be accepted.
+    InvalidBytes,
+    /// Definite for this exact request, though the bytes are not at fault (a
+    /// missing, conflicting or gone resource): the owner re-plans a fresh one.
+    Stale,
+    /// Not a definite refusal: a wait, an observe, or a security answer that
+    /// has its own handling.
+    Open,
+}
+
+impl Refusal {
+    pub fn of_status(status: u16) -> Self {
+        match (http_status_disposition(status), status) {
+            (Disposition::Fail, 400 | 413 | 422) => Self::InvalidBytes,
+            (Disposition::Fail, _) => Self::Stale,
+            _ => Self::Open,
+        }
+    }
+
+    /// Whether the refused item is settled: it is never sent again, and fresh
+    /// evidence flows instead of waiting behind it.
+    pub fn settles(self) -> bool {
+        self != Self::Open
+    }
 }
 
 /// The one HTTP status table, mirrored from the shared contract
