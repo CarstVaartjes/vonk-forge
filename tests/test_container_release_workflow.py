@@ -1811,3 +1811,48 @@ def test_every_published_image_build_names_its_source_tree(workflow) -> None:
         if step["with"].get("file") == "control/Dockerfile":
             arguments = step["with"]["build-args"].splitlines()
             assert f"VONK_BUILD_SOURCE_TREE={tree}" in arguments, step["name"]
+
+
+FREE_DISK_ACTION = "./.github/actions/free-runner-disk"
+IMAGE_BUILD_COMMAND = re.compile(r"\bdocker\s+(?:buildx\s+)?build\b")
+
+
+def _builds_images(step: dict[str, object]) -> bool:
+    uses = str(step.get("uses", ""))
+    return uses.startswith("docker/build-push-action@") or bool(
+        IMAGE_BUILD_COMMAND.search(str(step.get("run", "")))
+    )
+
+
+def _on_x86_hosted_runner(runs_on: object) -> bool:
+    """A hosted runner that may be x86: a literal ubuntu label without ``arm``,
+    or a matrix expression (its x86 leg must free the disk too)."""
+
+    label = str(runs_on)
+    return "matrix." in label or (label.startswith("ubuntu") and "arm" not in label)
+
+
+def test_every_image_build_on_an_x86_hosted_runner_first_frees_the_runner_disk() -> (
+    None
+):
+    """A hosted runner's disk fills while buildx builds (no space left on
+    device, buildkit ENOSPC, jobs 126463074055 and the NAS install job); the
+    shared action reclaims the unused preinstalled toolchains first."""
+
+    missing: list[str] = []
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        for name, body in (yaml.safe_load(path.read_text()).get("jobs") or {}).items():
+            steps = body.get("steps") or []
+            if not _on_x86_hosted_runner(body.get("runs-on", "")):
+                continue
+            first_build = next(
+                (index for index, step in enumerate(steps) if _builds_images(step)),
+                None,
+            )
+            if first_build is None:
+                continue
+            if not any(
+                step.get("uses") == FREE_DISK_ACTION for step in steps[:first_build]
+            ):
+                missing.append(f"{path.name}:{name}")
+    assert missing == []
