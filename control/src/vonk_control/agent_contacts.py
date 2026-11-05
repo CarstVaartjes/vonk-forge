@@ -16,18 +16,12 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import ColumnElement, delete, or_
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
 
+from .dialect_insert import dialect_insert
 from .models import AgentNode, AgentNodeContact
 from .repeated_evidence_contract import RepeatedEvidence
-
-
-def _insert(session: Session) -> postgresql.Insert | sqlite.Insert:
-    if session.get_bind().dialect.name == "postgresql":
-        return postgresql.insert(AgentNodeContact)
-    return sqlite.insert(AgentNodeContact)
 
 
 def _forget_loaded(session: Session, node_id: str) -> None:
@@ -70,7 +64,9 @@ def record_contact(
     }
     if not facts:
         return
-    insert = _insert(session).values({AgentNodeContact.node_id: node_id, **facts})
+    insert = dialect_insert(session, AgentNodeContact).values(
+        {AgentNodeContact.node_id: node_id, **facts}
+    )
     session.execute(
         insert.on_conflict_do_update(
             index_elements=[AgentNodeContact.node_id],
@@ -84,7 +80,7 @@ def record_observation_delivery(
     session: Session, node_id: str, status: int, started: datetime
 ) -> None:
     """Keep the newest delivery verdict; a delayed response never overwrites it."""
-    insert = _insert(session).values(
+    insert = dialect_insert(session, AgentNodeContact).values(
         node_id=node_id,
         recipe_observation_http_status=status,
         recipe_observation_status_at=started,
@@ -132,7 +128,7 @@ def ensure_contact(session: Session, node_id: str) -> None:
     Steady-state contact is then an UPDATE: it never inserts a child row of
     the node, so it takes no KEY SHARE on the node row.
     """
-    insert = _insert(session).values(node_id=node_id)
+    insert = dialect_insert(session, AgentNodeContact).values(node_id=node_id)
     session.execute(
         insert.on_conflict_do_nothing(index_elements=[AgentNodeContact.node_id])
     )

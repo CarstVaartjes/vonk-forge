@@ -257,6 +257,7 @@ _UNIQUE_VIOLATIONS = frozenset(
     {"23505", "SQLITE_CONSTRAINT_UNIQUE", "SQLITE_CONSTRAINT_PRIMARYKEY"}
 )
 _SQLITE_UNIQUE = re.compile(r"UNIQUE constraint failed: (.+)")
+_SQLITE_CHECK = re.compile(r"CHECK constraint failed: (\S+)")
 _SAFE_NAME = re.compile(r"[A-Za-z0-9_]{1,128}")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z_]{5,40}")
 _UNKNOWN_CONSTRAINT = "unknown-constraint"
@@ -362,6 +363,9 @@ def _decided(error: IntegrityError) -> tuple[Conflict, str, str | None]:
     sqlite = _SQLITE_UNIQUE.match(str(original))
     if name is None and sqlite is not None:
         name = _sqlite_constraint(sqlite.group(1))
+    check = _SQLITE_CHECK.match(str(original))
+    if name is None and check is not None:
+        name = check.group(1)
     constraint = (
         name
         if isinstance(name, str) and _SAFE_NAME.fullmatch(name)

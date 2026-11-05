@@ -246,3 +246,85 @@ def test_a_running_run_without_a_row_gets_it_from_its_next_sample(tmp_path) -> N
     _report(sessions, node, now + timedelta(seconds=2), _FREE - 120)
     with sessions() as session:
         assert list(observed_role_peaks(session, digest).values()) == [120]
+
+
+def _run_node_events(sessions) -> list[int]:
+    from vonk_control.models import FleetStreamEvent
+
+    with sessions() as session:
+        return [
+            event.payload["observed_memory_bytes"]
+            for event in session.scalars(
+                select(FleetStreamEvent).order_by(FleetStreamEvent.id)
+            )
+            if event.entity_kind == "run-node"
+        ]
+
+
+def _admit_run(sessions, now, node, installation) -> str:
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=_FLOOR
+    )
+    return service.accept_run(
+        service.plan_run(installation, alias="qwen", now=now), actor="admin", now=now
+    )
+
+
+def test_a_raised_peak_emits_one_run_node_event_and_a_lower_one_none(
+    tmp_path,
+) -> None:
+    """Catches the conditional peak UPDATE losing its Fleet event (or doubling it)."""
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    _admit_run(sessions, now, node, installation)
+    _report(sessions, node, now + timedelta(seconds=1), _FREE - 100)
+    assert _run_node_events(sessions) == [100]
+    _report(sessions, node, now + timedelta(seconds=2), _FREE - 100)
+    _report(sessions, node, now + timedelta(seconds=3), _FREE - 40)
+    assert _run_node_events(sessions) == [100]
+    _report(sessions, node, now + timedelta(seconds=4), _FREE - 150)
+    assert _run_node_events(sessions) == [100, 150]
+
+
+def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
+    tmp_path,
+) -> None:
+    """Catches a rank whose stored diagnostics break the payload refusing telemetry."""
+    from vonk_agent_protocol.failure_evidence import FailureLogTail
+    from vonk_control.models import (
+        FleetEventCursor,
+        FleetStreamEvent,
+        NodeTelemetrySample,
+    )
+
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    run_id = _admit_run(sessions, now, node, installation)
+    empty = FailureLogTail(text="", truncated=False, dropped_bytes=0, dropped_lines=0)
+    from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+
+    diagnostics = FailureDiagnostics(
+        collected_at=now.isoformat(),
+        phase="unknown",
+        category="unknown",
+        stdout=empty,
+        stderr=empty,
+        versions=[],
+        sandbox=[],
+        storage=[],
+        preflight=[],
+        collector_errors=[],
+    ).model_dump(mode="json")
+    with sessions.begin() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None
+        rank.observation_failure_diagnostics = diagnostics
+
+    _report(sessions, node, now + timedelta(seconds=1), _FREE - 100)
+
+    with sessions() as session:
+        assert session.scalar(select(NodeTelemetrySample.id)) is not None
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None and rank.observed_memory_bytes == 100
+        events = list(session.scalars(select(FleetStreamEvent.id)))
+        last_id = session.scalar(select(FleetEventCursor.last_id))
+    assert _run_node_events(sessions) == []
+    assert last_id is not None and last_id > max(events)  # the hole

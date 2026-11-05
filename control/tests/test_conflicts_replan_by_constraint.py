@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Index, PrimaryKeyConstraint, UniqueConstraint, event, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_control import profile_capacity
+from vonk_control import profile_capacity, profile_claim_restore
 from vonk_control.admission_locking import (
     CONSTRAINTS,
     Conflict,
@@ -158,7 +158,13 @@ def test_a_released_port_promised_elsewhere_replans_instead_of_resuming(
     with pytest.raises(ConstraintReplan) as taken, sessions.begin() as session:
         application = session.get(FleetProfileApplication, loaded.id)
         assert application is not None
-        profile_capacity.restore_released_profile_claims(session, application)
+        profile_claim_restore.restore_released_profile_claims(
+            session,
+            application,
+            now=NOW,
+            memory_floor_bytes=0,
+            inventory_max_age_seconds=300,
+        )
 
     assert taken.value.constraint == "uq_promised_node_port"
     assert not _promises(sessions, loaded.id)

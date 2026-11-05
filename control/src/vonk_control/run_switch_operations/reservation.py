@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import job_states
+from ..admission_locking import ConstraintReplay, admitting
 from ..agent_jobs import AgentJobService
 from ..bounded_json import require_integer, require_mapping
 from ..failure_classification import error_code, is_security_failure
@@ -52,6 +53,7 @@ from ..stored_json import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )
+from ..workload_intent import allocate_workload_intent
 from .constants import (
     _FINAL_VERIFICATION_MAX_SECONDS,
     _OBSERVING,
@@ -130,111 +132,126 @@ class ReservationMixin:
                 ],
             },
         }
-        with service._sessions.begin() as session:
-            nodes = list(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(target_node_ids))
-                    .order_by(AgentNode.node_id)
-                    .with_for_update()
-                )
-            )
-            if len(nodes) != len(target_node_ids) or (
-                plan.profile_stop_scope is not None
-                and any(
-                    node.revoked_at is not None or node.state != "active"
-                    for node in nodes
-                )
-            ):
+
+        def existing_operation(existing: Job) -> RunSwitchOperation:
+            if existing.kind != kind or not _same_intent(existing, intent):
                 raise RunSwitchRequestInvalid(
-                    "run-switch target Spark scope changed",
+                    RunSwitchCode.REQUEST_KEY_REUSED_DIFFERENTLY,
                     reason=InvalidRequestReason.CONFLICT,
                 )
-            existing = session.scalar(select(Job).where(Job.request_id == request_key))
-            if existing is not None:
-                if existing.kind != kind or not _same_intent(existing, intent):
+            return service._operation_view(existing)
+
+        def winner() -> RunSwitchOperation | None:
+            # Two duplicate applies can both pass the existing-request check:
+            # the unique request key picks one, and the other answers with it.
+            with service._sessions() as session:
+                found = session.scalar(select(Job).where(Job.request_id == request_key))
+                return None if found is None else existing_operation(found)
+
+        try:
+            with admitting(), service._sessions.begin() as session:
+                nodes = list(
+                    session.scalars(
+                        select(AgentNode)
+                        .where(AgentNode.node_id.in_(target_node_ids))
+                        .order_by(AgentNode.node_id)
+                    )
+                )
+                if len(nodes) != len(target_node_ids) or (
+                    plan.profile_stop_scope is not None
+                    and any(
+                        node.revoked_at is not None or node.state != "active"
+                        for node in nodes
+                    )
+                ):
                     raise RunSwitchRequestInvalid(
-                        RunSwitchCode.REQUEST_KEY_REUSED_DIFFERENTLY,
+                        "run-switch target Spark scope changed",
                         reason=InvalidRequestReason.CONFLICT,
                     )
-                return service._operation_view(existing)
-            _reserve_run_switch_assets(
-                session,
-                plan,
-                now=now,
-                admitted_load=profile_application_id is not None,
-            )
-            try:
-                lock_run_switch_build_dependency(session, plan)
-            except BuildConsumerError as error:
-                raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
-            if workload_intent_ordinal is None:
-                workload_intent_ordinal = (
-                    max((node.workload_intent_ordinal for node in nodes), default=0) + 1
+                existing = session.scalar(
+                    select(Job).where(Job.request_id == request_key)
                 )
-                for node in nodes:
-                    node.workload_intent_ordinal = workload_intent_ordinal
-                service.request_superseded_workload_cancellation_in_session(
+                if existing is not None:
+                    return existing_operation(existing)
+                _reserve_run_switch_assets(
                     session,
-                    tuple(node.node_id for node in nodes),
-                    workload_intent_ordinal,
-                    now,
+                    plan,
+                    now=now,
+                    admitted_load=profile_application_id is not None,
                 )
-            elif (
-                type(workload_intent_ordinal) is not int
-                or workload_intent_ordinal < 1
-                or any(
-                    node.workload_intent_ordinal != workload_intent_ordinal
-                    for node in nodes
-                )
-            ):
-                raise RunSwitchRequestInvalid(
-                    f"{RunSwitchCode.SUPERSEDED}: Spark scope has a later workload intent",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            payload["workload_intent_ordinal"] = workload_intent_ordinal
-            payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
-            payload = require_mapping(
-                serialize_json_value(
-                    RunSwitchJobPayload.model_validate_json(canonical_message(payload))
-                ),
-                "run-switch parent",
-            )
-            job = _ADAPTER.new_operation(
-                allowed=plan.allowed,
-                id=str(uuid.uuid4()),
-                request_id=request_key,
-                kind=kind,
-                actor=actor,
-                authority_revision=(plan.recipe_content_sha256 or plan.plan_digest),
-                targets=list(target_node_ids),
-                payload_digest=_digest(payload),
-                payload=payload,
-                result=_persisted_result(_read_progress(payload["progress"])),
-                created_at=now,
-                updated_at=now,
-            )
-            if not plan.allowed:
-                progress = _read_progress(payload["progress"])
-                progress.observation_deadline_at = _aware(job.created_at) + timedelta(
-                    seconds=_FINAL_VERIFICATION_MAX_SECONDS
-                )
-                blocked = "; ".join(reason.code for reason in plan.blockers[:8])
-                _ADAPTER.retry(
-                    job,
-                    progress,
-                    blocked,
-                    now,
-                    visible=_OBSERVING,
-                    record_reason=True,
-                    describe=lambda due: (
-                        f"{blocked}; next re-plan at {due.isoformat()}"
+                try:
+                    lock_run_switch_build_dependency(session, plan)
+                except BuildConsumerError as error:
+                    raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
+                if workload_intent_ordinal is None:
+                    workload_intent_ordinal = allocate_workload_intent(
+                        session, tuple(node.node_id for node in nodes)
+                    )
+                    service.request_superseded_workload_cancellation_in_session(
+                        session,
+                        tuple(node.node_id for node in nodes),
+                        workload_intent_ordinal,
+                        now,
+                    )
+                elif (
+                    type(workload_intent_ordinal) is not int
+                    or workload_intent_ordinal < 1
+                    or any(
+                        node.workload_intent_ordinal != workload_intent_ordinal
+                        for node in nodes
+                    )
+                ):
+                    raise RunSwitchRequestInvalid(
+                        f"{RunSwitchCode.SUPERSEDED}: Spark scope has a later workload intent",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
+                payload["workload_intent_ordinal"] = workload_intent_ordinal
+                payload["progress"]["workload_intent_ordinal"] = workload_intent_ordinal
+                payload = require_mapping(
+                    serialize_json_value(
+                        RunSwitchJobPayload.model_validate_json(
+                            canonical_message(payload)
+                        )
                     ),
+                    "run-switch parent",
                 )
-                job.result = _persisted_result(progress)
-            session.add(job)
-            session.flush()
-            return service._operation_view(job)
+                job = _ADAPTER.new_operation(
+                    allowed=plan.allowed,
+                    id=str(uuid.uuid4()),
+                    request_id=request_key,
+                    kind=kind,
+                    actor=actor,
+                    authority_revision=(plan.recipe_content_sha256 or plan.plan_digest),
+                    targets=list(target_node_ids),
+                    payload_digest=_digest(payload),
+                    payload=payload,
+                    result=_persisted_result(_read_progress(payload["progress"])),
+                    created_at=now,
+                    updated_at=now,
+                )
+                if not plan.allowed:
+                    progress = _read_progress(payload["progress"])
+                    progress.observation_deadline_at = _aware(
+                        job.created_at
+                    ) + timedelta(seconds=_FINAL_VERIFICATION_MAX_SECONDS)
+                    blocked = "; ".join(reason.code for reason in plan.blockers[:8])
+                    _ADAPTER.retry(
+                        job,
+                        progress,
+                        blocked,
+                        now,
+                        visible=_OBSERVING,
+                        record_reason=True,
+                        describe=lambda due: (
+                            f"{blocked}; next re-plan at {due.isoformat()}"
+                        ),
+                    )
+                    job.result = _persisted_result(progress)
+                session.add(job)
+                session.flush()
+                return service._operation_view(job)
+        except ConstraintReplay as duplicate:
+            return duplicate.replay(winner)
 
     def request_superseded_workload_cancellation_in_session(
         self,

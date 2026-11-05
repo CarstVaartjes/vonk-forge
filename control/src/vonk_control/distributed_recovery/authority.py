@@ -453,7 +453,6 @@ def _enqueue_recovery_stop(
             select(AgentNode)
             .where(AgentNode.node_id.in_(targets))
             .order_by(AgentNode.node_id)
-            .with_for_update(of=AgentNode)
         )
     )
     if (

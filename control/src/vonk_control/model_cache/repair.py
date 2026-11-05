@@ -15,11 +15,11 @@ from vonk_agent_protocol import (
 )
 
 from .. import model_cache_states
+from ..admission_locking import admitting
 from ..agent_operation_facts import aware as _aware
 from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
 from ..lifecycle import Reported
-from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     ModelCacheRepairCheckpoint,
     ModelCacheRepairPayload,
@@ -43,6 +43,7 @@ from .errors import (
 from .persistence import _cache_failure, _write_operation_payload
 from .source_helpers import _request_key
 from .storage import RunningTransfers, TransferNeed
+from .transfer_admission import admit_transfer
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -153,14 +154,20 @@ class RepairMixin:
                 operation_id = existing.id
             else:
                 now = cache._clock()
-                cache._require_model_sets_open(session, (digest,), now=now)
-                operation = ModelCacheAdapter.new_operation(
+                admitted = admit_transfer(
+                    cache,
+                    session,
+                    artifact_set_sha256=digest,
+                    now=now,
+                    force=True,
+                    prepare=lambda: cache._require_model_sets_open(
+                        session, (digest,), now=now
+                    ),
                     request_key=request_key,
                     schema_version=SCHEMA_VERSION,
                     kind="repair",
                     next_action_at=wait_until,
                     attempt=1,
-                    artifact_set_sha256=digest,
                     plan_digest=requested_plan,
                     payload=serialize_json_value(payload),
                     progress=progress_document(
@@ -171,11 +178,13 @@ class RepairMixin:
                         )
                     ),
                     actor=actor,
-                    created_at=now,
-                    updated_at=now,
                 )
-                session.add(operation)
-                session.flush()
+                if isinstance(admitted, CacheOperationView):
+                    return admitted
+                operation = admitted
+                with admitting():
+                    session.add(operation)
+                    session.flush()
                 operation_id = operation.id
         return cache.get_operation(operation_id)
 

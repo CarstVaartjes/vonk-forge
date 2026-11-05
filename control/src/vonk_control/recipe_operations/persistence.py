@@ -79,6 +79,7 @@ from ..run_admission import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model
+from ..workload_intent import allocate_workload_intent
 from .constants import _MANIFEST_BOUND_KINDS, _WORKLOAD_INTENT_KINDS
 from .contracts import RecipeOperationContext
 from .errors import RecipeRequestInvalid
@@ -277,11 +278,9 @@ class PersistenceMixin:
                 )
             return shared.pop()
         if workload_intent_ordinal is None:
-            next_ordinal = (
-                max(node.workload_intent_ordinal for node in target_nodes) + 1
+            next_ordinal = allocate_workload_intent(
+                session, tuple(node.node_id for node in target_nodes)
             )
-            for node in target_nodes:
-                node.workload_intent_ordinal = next_ordinal
             try:
                 AgentJobService.request_superseded_workload_cancellation_in_session(
                     session, targets, next_ordinal, now

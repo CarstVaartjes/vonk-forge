@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import select
@@ -15,14 +16,13 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
+from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
     has_pending_removal,
-    lock_reference_gates,
 )
 from ..bounded_json import require_sequence
-from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
@@ -49,6 +49,7 @@ from .errors import (
 )
 from .persistence import _cache_failure, _write_operation_payload
 from .source_helpers import _model_selector, _request_key
+from .transfer_admission import admit_transfer
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -153,7 +154,7 @@ class DownloadAdmissionMixin:
         delay = 0.01
         while True:
             try:
-                with cache._lock, cache._session(write=True) as session:
+                with admitting(), cache._lock, cache._session(write=True) as session:
                     replay = cache._download_replay(
                         session,
                         request_key,
@@ -169,29 +170,34 @@ class DownloadAdmissionMixin:
                         now = cache._clock()
                         # Serialize metadata repair under the exact set gate before
                         # reading derived membership. Byte verification stays in storage.
-                        lock_reference_gates(
+
+                        def prepare(now: datetime = now) -> None:
+                            cache._ensure_set(session, manifest)
+                            session.flush()
+                            cache._require_model_sets_open(
+                                session,
+                                (set_digest,),
+                                now=now,
+                                object_digests=tuple(
+                                    item.sha256 for item in manifest.artifacts
+                                ),
+                                allow_pending_removal=True,
+                            )
+
+                        # An operator request's receipt is read by its own key.
+                        admitted = admit_transfer(
+                            cache,
                             session,
-                            (ArtifactIdentity("model-set", set_digest),),
+                            artifact_set_sha256=set_digest,
                             now=now,
-                        )
-                        cache._ensure_set(session, manifest)
-                        session.flush()
-                        cache._require_model_sets_open(
-                            session,
-                            (set_digest,),
-                            now=now,
-                            object_digests=tuple(
-                                item.sha256 for item in manifest.artifacts
-                            ),
-                            allow_pending_removal=True,
-                        )
-                        operation = ModelCacheAdapter.new_operation(
+                            force=force,
+                            attach=selector is None,
+                            prepare=prepare,
                             request_key=request_key,
                             schema_version=SCHEMA_VERSION,
                             kind="download",
                             next_action_at=wait_until,
                             attempt=1,
-                            artifact_set_sha256=set_digest,
                             plan_digest=requested_plan,
                             payload=serialize_json_value(payload),
                             progress=progress_document(
@@ -202,9 +208,10 @@ class DownloadAdmissionMixin:
                                 )
                             ),
                             actor=actor,
-                            created_at=now,
-                            updated_at=now,
                         )
+                        if isinstance(admitted, CacheOperationView):
+                            return admitted
+                        operation = admitted
                         if has_pending_removal(
                             session,
                             (
@@ -227,11 +234,30 @@ class DownloadAdmissionMixin:
                         session.add(operation)
                         session.flush()
                         operation_id = operation.id
+            except ConstraintReplay as duplicate:
+                # The request key was taken by a concurrent identical request.
+                with cache._session() as session:
+                    return duplicate.replay(
+                        lambda: cache._download_replay(
+                            session,
+                            request_key,
+                            actor=actor,
+                            selector=selector,
+                            force=force,
+                            artifact_set_sha256=set_digest,
+                            plan_digest=requested_plan,
+                        )
+                    )
             except (
                 ArtifactReferenceUnsettled,
                 ModelCacheConflictUnknown,
                 DBAPIError,
             ) as error:
+                # Only contention is retried; any other database error is
+                # deterministic and surfaces at once (a constraint violation
+                # was already typed by ``admitting``).
+                if isinstance(error, DBAPIError) and not is_admission_contention(error):
+                    raise
                 # This service owns every transaction. Rollback and release its
                 # mutex before observing the exact request; never replay effects
                 # inside a failed or caller-owned transaction.

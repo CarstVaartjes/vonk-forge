@@ -530,6 +530,9 @@ def availability_disposition(error: BaseException | BuildUnsettled) -> Dispositi
     )
     if is_security_failure(authority_code) or isinstance(error, SecurityRefusalError):
         return Disposition.SECURITY
+    if isinstance(error, RecipeImageAvailabilityInvalid):
+        # A refused request repeats its refusal when resent: it ends the work.
+        return Disposition.FAIL
     if isinstance(error, BuildUnsettled):
         if error.retryable is False:
             # The child owner has already classified authenticated authority.

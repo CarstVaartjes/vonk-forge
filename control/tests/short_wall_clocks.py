@@ -35,6 +35,7 @@ TIMEOUT_ARGUMENT: dict[str, int | None] = {
     "check_call": None,
     "check_output": None,
     "Barrier": 2,
+    "Rendezvous": None,
     "timeout": 0,
     "fail_after": 0,
 }

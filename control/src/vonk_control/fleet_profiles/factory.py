@@ -43,4 +43,6 @@ def build_production_fleet_profile_service(
         switch_adapter=adapter,
         cache_resolver=cache_resolver,
         assessment_provider=adapter.assess,
+        memory_floor_bytes=run_switch_operations.memory_floor_bytes,
+        inventory_max_age_seconds=run_switch_operations.inventory_max_age_seconds,
     )

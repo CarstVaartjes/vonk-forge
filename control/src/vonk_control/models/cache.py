@@ -174,7 +174,11 @@ class ModelCacheOperation(Base):
             name="ck_model_cache_operations_progress_size",
         ),
         CheckConstraint(
-            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 262144",
+            # The payload carries its manifest (the independent copy that heals
+            # a damaged set row) and the per-artifact transfer ledger: both
+            # grow with the file count, so the cap matches ``progress`` and
+            # the set row's manifest (1 MiB), not a fixed 256 KiB.
+            "length(CAST(payload AS TEXT)) BETWEEN 2 AND 1048576",
             name="ck_model_cache_operations_payload_size",
         ),
     )

@@ -699,9 +699,19 @@ class AdvanceMixin:
                     if isinstance(detail, str) and detail:
                         reason += ": " + detail[:384]
                     kind = _child_failure_kind(child)
-                    if disposition(kind) is Disposition.WAIT and plan.phases[
-                        phase_index
-                    ].kind not in {
+                    # A transfer child (a model download is shared by every
+                    # consumer of its set) can be ended by another consumer's
+                    # cancel. This order did not cancel it: it asks again.
+                    foreign_cancel = (
+                        child is not None
+                        and child.state == LifecycleState.CANCELLED.value
+                        and not checkpoint_cancellation
+                        and plan.phases[phase_index].kind
+                        == ProfileChildPhase.TRANSFER.value
+                    )
+                    if (
+                        disposition(kind) is Disposition.WAIT or foreign_cancel
+                    ) and plan.phases[phase_index].kind not in {
                         ProfileChildPhase.CLEANUP,
                         ProfileChildPhase.STOP,
                         ProfileChildPhase.UNINSTALL,

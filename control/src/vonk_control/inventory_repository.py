@@ -19,9 +19,11 @@ from vonk_agent_protocol.inventory import (
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
 from .categorized_errors import InvalidValue
+from .dialect_insert import dialect_insert
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
+from .inventory_items_contract import InventorySnapshotKind
 from .logging import log_event
-from .models import AgentNode, NodeInventorySnapshot
+from .models import AgentNode, NodeInventorySnapshot, NodeSnapshot
 
 _LOG = logging.getLogger(__name__)
 
@@ -93,41 +95,61 @@ class InventoryRepository:
         digest = hashlib.sha256(
             json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
+        columns = {
+            name: getattr(validated, name)
+            for name in InventoryRequest.model_fields
+            if name != "schema_version"
+        }
+        received_at = self._clock()
         row = NodeInventorySnapshot(
             node_id=value.node_id,
-            received_at=self._clock(),
+            received_at=received_at,
             evidence_digest=digest,
-            **{
-                name: getattr(validated, name)
-                for name in InventoryRequest.model_fields
-                if name != "schema_version"
-            },
+            **columns,
         )
         with self._sessions.begin() as session:
+            # Agent traffic never locks the node row: admission and publication
+            # own it. A deleted node fails the insert's foreign key instead.
             session.execute(
-                select(AgentNode.node_id)
-                .where(AgentNode.node_id == value.node_id)
-                .with_for_update(of=AgentNode)
+                select(AgentNode.node_id).where(AgentNode.node_id == value.node_id)
             ).one()
-            existing = session.scalar(
-                select(NodeInventorySnapshot).where(
-                    NodeInventorySnapshot.node_id == value.node_id,
-                    NodeInventorySnapshot.observed_at == value.observed_at,
-                )
-            )
-            if existing is not None:
-                if existing.evidence_digest != digest:
-                    raise InvalidValue(
-                        "inventory identity already binds different evidence",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                return existing
             latest = session.scalar(
                 select(NodeInventorySnapshot.observed_at)
                 .where(NodeInventorySnapshot.node_id == value.node_id)
                 .order_by(NodeInventorySnapshot.observed_at.desc())
                 .limit(1)
             )
+            inserted = session.execute(
+                dialect_insert(session, NodeSnapshot)
+                .values(
+                    node_id=value.node_id,
+                    received_at=received_at,
+                    evidence_digest=digest,
+                    kind=InventorySnapshotKind.REPORT,
+                    **columns,
+                )
+                .on_conflict_do_nothing(
+                    index_elements=[NodeSnapshot.node_id, NodeSnapshot.observed_at],
+                    index_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+                )
+                .returning(NodeSnapshot.id)
+            ).scalar()
+            if inserted is None:
+                # The identity is already recorded (a replay or a concurrent
+                # twin): identical evidence is the same answer, anything else
+                # is a conflict.
+                existing = session.scalars(
+                    select(NodeInventorySnapshot).where(
+                        NodeInventorySnapshot.node_id == value.node_id,
+                        NodeInventorySnapshot.observed_at == value.observed_at,
+                    )
+                ).one()
+                if existing.evidence_digest != digest:
+                    raise InvalidValue(
+                        "inventory identity already binds different evidence",
+                        reason=InvalidRequestReason.CONFLICT,
+                    )
+                return existing
             retained_report = _validated_inventory(row, observed_at=value.observed_at)
             if latest is None or value.observed_at >= (
                 latest if latest.tzinfo is not None else latest.replace(tzinfo=UTC)
@@ -143,7 +165,8 @@ class InventoryRepository:
                     refresh_installed_bytes(
                         session, value.node_id, row.installation_bytes
                     )
-            session.add(row)
+        # The caller reads the report it sent plus the stored identity.
+        row.id = inserted
         return row
 
     def latest(

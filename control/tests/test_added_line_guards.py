@@ -819,6 +819,7 @@ GATEWAY_WAIT = (
         "process.communicate(timeout=5)\n",
         "subprocess.run(command, check=True, timeout=2)\n",
         "worker.join(timeout=3)\nassert not worker.is_alive()\n",
+        "rendezvous = Rendezvous(2, timeout=1)\n",
         "deadline = time.monotonic() + 2\n",
         "LIMIT = 1\nfuture.result(LIMIT)\n",
         "@pytest.mark.timeout(3)\ndef test_x():\n    pass\n",
@@ -2113,6 +2114,47 @@ def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
     assert not check_source(path, source, lines, modes=("savepoints",))
 
 
+_BARRIER_TEST = "control/tests/test_example.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A patched method the product calls twice strands its thread here.
+        "import threading\nbarrier = threading.Barrier(2, timeout=30)\n",
+        "from threading import Barrier\nboth = Barrier(2)\n",
+        "from threading import Barrier as Gate\nboth = Gate(2)\n",
+        "import threading as t\nboth = t.Barrier(2)\n",
+    ],
+)
+def test_a_raw_barrier_in_a_control_test_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_BARRIER_TEST, source, lines, modes=("barriers",))
+    # Only an added line can fail the change.
+    assert not check_source(_BARRIER_TEST, source, {1}, modes=("barriers",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_BARRIER_TEST, "both = Rendezvous(2)\n"),
+        (_BARRIER_TEST, "import asyncio\nbarrier = asyncio.Barrier(2)\n"),
+        # The rendezvous itself is built on the one raw barrier.
+        (
+            "control/tests/insert_collision_support.py",
+            "import threading\nbarrier = threading.Barrier(2)\n",
+        ),
+        (
+            "control/src/vonk_control/x.py",
+            "import threading\nb = threading.Barrier(2)\n",
+        ),
+    ],
+)
+def test_a_rendezvous_or_an_out_of_scope_barrier_passes(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("barriers",))
+
+
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
 
 
@@ -3203,3 +3245,48 @@ def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
     source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
     assert _lifecycle_sets(source, {1})
     assert not _lifecycle_sets(source, {1}, path=owner)
+
+
+_INTENT_PATH = "control/src/vonk_control/recipe_operations/persistence.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ordinal = max(node.workload_intent_ordinal for node in nodes) + 1\n",
+        "ordinal = 1 + max((n.workload_intent_ordinal for n in nodes), default=0)\n",
+        "for node in nodes:\n    node.workload_intent_ordinal = ordinal\n",
+        "target_node.workload_intent_ordinal += 1\n",
+        "spark.workload_intent_ordinal = 9\n",
+        "n.workload_intent_ordinal = 9\n",
+        "nodes[0].workload_intent_ordinal = 9\n",
+        "a.workload_intent_ordinal, b.workload_intent_ordinal = 1, 2\n",
+        "setattr(node, 'workload_intent_ordinal', 9)\n",
+        "session.execute(text('UPDATE agent_nodes SET workload_intent_ordinal = 9'))\n",
+    ],
+)
+def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
+    assert not check_source(_INTENT_PATH, source, set(), modes=("intent-ordinal",))
+    assert not check_source(
+        "control/src/vonk_control/workload_intent.py",
+        source,
+        lines,
+        modes=("intent-ordinal",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ordinal = allocate_workload_intent(session, ids)\n",
+        "progress.workload_intent_ordinal = ordinal\n",
+        "retry_parent.workload_intent_ordinal = ordinal\n",
+        "seen = {n.workload_intent_ordinal for n in nodes}\n",
+        "later = max(a, b) + 1\n",
+    ],
+)
+def test_reading_or_carrying_a_workload_intent_passes(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
