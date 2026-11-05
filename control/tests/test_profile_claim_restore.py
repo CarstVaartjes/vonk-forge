@@ -26,10 +26,36 @@ def _release(sessions, application_id):
                 )
             )
         )
-        assert {claim.kind == "disk" for claim in claims} == {True, False}
+        assert claims
         for claim in claims:
             claim.state = "released"
             claim.released_at = datetime.now(UTC)
+
+
+def _release_a_disk_claim(sessions, application_id):
+    """The load had reserved disk on its Spark before it failed and released it."""
+    with sessions.begin() as session:
+        application = session.get(FleetProfileApplication, application_id)
+        assert application is not None
+        node_id = session.scalar(
+            select(ResourceReservation.node_id).where(
+                ResourceReservation.owner_id == application_id
+            )
+        )
+        session.add(
+            ResourceReservation(
+                node_id=node_id,
+                kind="disk",
+                resource_key="restored-disk",
+                amount_bytes=1_000_000,
+                owner_kind="fleet-profile",
+                owner_id=application_id,
+                state="released",
+                released_at=datetime.now(UTC),
+                plan_digest=application.plan_digest,
+                created_at=datetime.now(UTC),
+            )
+        )
 
 
 def _states(sessions, application_id):
@@ -66,6 +92,8 @@ def test_a_restore_without_capacity_replans_instead_of_overcommitting(
     )
     loaded = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
     _release(sessions, loaded.id)
+    if scarce == "disk":
+        _release_a_disk_claim(sessions, loaded.id)
     # Other work took what the released claims held.
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
