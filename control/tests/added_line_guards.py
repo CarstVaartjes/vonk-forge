@@ -1494,8 +1494,13 @@ def check_source(
         hits.extend(legacy_tolerance.scan_web_source(source))
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
-        if not is_security_edge(path) and not path.startswith(
-            "control/src/vonk_control/enrollment/"
+        # workload_intent is the one writer of the intent ordinal: a conditional
+        # UPDATE on that column, which locks nothing it does not write (lock plan
+        # step 4). Anywhere else the same update is still refused here.
+        if (
+            not is_security_edge(path)
+            and not path.startswith("control/src/vonk_control/enrollment/")
+            and path != intent_ordinal_writers.OWNER
         ):
             hits.extend(
                 (line, optimistic.NODE_KIND)
