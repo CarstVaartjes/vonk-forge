@@ -216,7 +216,7 @@ class ModelCacheOperation(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     #: When received bytes last advanced; the recovery budget is a stall window
@@ -268,7 +268,8 @@ class ArtifactLifecycleGate(Base):
     artifact_kind: Mapped[str] = mapped_column(String(24), primary_key=True)
     artifact_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     removal_owner_kind: Mapped[str | None] = mapped_column(String(32))
-    removal_owner_id: Mapped[str | None] = mapped_column(String(36))
+    # Indexed: history retention asks whether a removal owner still holds a gate.
+    removal_owner_id: Mapped[str | None] = mapped_column(String(36), index=True)
     removal_fence: Mapped[str | None] = mapped_column(String(36))
     # Maximum remote authority lifetime, retained even if its owner is lost.
     removal_authority_expires_at: Mapped[datetime | None] = mapped_column(
@@ -359,7 +360,9 @@ class RecipeLibrarySyncRun(Base):
     )
     # Last progress of a running sync; a stale one is dead.
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
 
 class RecipeBuild(Base):

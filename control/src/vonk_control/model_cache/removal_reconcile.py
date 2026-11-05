@@ -19,6 +19,7 @@ from ..artifact_lifecycle import (
     ArtifactLifecycleError,
     check_removal_fence_nowait,
     dead_removal_identities,
+    open_gate,
     release_dead_removal_nowait,
     reserve_removal,
     supersede_removal_nowait,
@@ -331,10 +332,7 @@ class RemovalReconcileMixin:
                 # Missing, wrong-kind, damaged or now-terminal owners cannot
                 # execute this exact identity after its lock was acquired.
                 if gate.removal_authority_expires_at is None:
-                    gate.removal_owner_kind = None
-                    gate.removal_owner_id = None
-                    gate.removal_fence = None
-                    gate.updated_at = cache._clock()
+                    open_gate(session, gate, cache._clock())
                 else:
                     release_dead_removal_nowait(
                         session,

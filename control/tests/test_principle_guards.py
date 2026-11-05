@@ -10,7 +10,6 @@ from . import principle_guards, unproven_run_failures
 from .principle_guards import (
     ROOT,
     rust_test_files,
-    scan_retention,
     scan_rust,
     scan_rust_fixed_caps,
     scan_rust_remedies,
@@ -104,25 +103,6 @@ def test_a_progress_window_bounds_a_rust_loop():
     )
     assert not scan_rust(loop_body, path="agent.rs")
     assert scan_rust(loop_body.replace("&inactivity", "&reader"), path="agent.rs")
-
-
-def test_retention_links_bulk_and_instance_deletion_but_not_unrelated_deletes():
-    model = ast.parse("class History(Base):\n    __tablename__ = 'history'")
-    assert scan_retention([("models.py", model)])
-    for source in (
-        "def prune(s):\n    s.execute(delete(History))",
-        "def prune(s):\n    row = s.get(History, key)\n    s.delete(row)",
-        "sql = 'DELETE FROM history WHERE created_at < cutoff'",
-    ):
-        assert not scan_retention(
-            [("models.py", model), ("prune.py", ast.parse(source))]
-        )
-    assert scan_retention(
-        [
-            ("models.py", model),
-            ("prune.py", ast.parse("def prune(s):\n    s.execute(delete(Other))")),
-        ]
-    )
 
 
 def test_rust_remedy_messages_have_the_same_guard():

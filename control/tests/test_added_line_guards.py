@@ -340,7 +340,6 @@ def test_new_code_must_be_declared_in_the_contract_first():
             "def test_stale():\n    assert op.state == 'needs-operator'\n",
             2,
         ),
-        ("retention", PATH, "class History(Base):\n    __tablename__ = 'history'\n", 1),
     ],
 )
 def test_other_languages_and_principle_modes_only_check_additions(

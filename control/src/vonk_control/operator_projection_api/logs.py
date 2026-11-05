@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import ColumnElement, or_, select
@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .. import agent_operation_states
+from ..catalog_revision_collection import GRACE
 from ..failure_evidence import (
     AttemptPhase,
     FailedAttempt,
@@ -35,8 +36,9 @@ from ..models import (
 from ..operation_item_contract import OperationResultFacts
 from .contracts import FleetLogEntry, FleetLogResponse, LogLevel, LogSource
 
-#: How far back the log projection narrates failed agent attempts by default.
-_AGENT_LOG_LOOKBACK = timedelta(days=14)
+#: How far back the log projection narrates failed agent attempts by default:
+#: the history retention window, since older history is collected anyway.
+_AGENT_LOG_LOOKBACK = GRACE
 
 #: A fixed number of Controller job-log blobs per query, matching the previous
 #: bounded read.

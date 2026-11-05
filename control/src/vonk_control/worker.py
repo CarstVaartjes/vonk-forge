@@ -686,6 +686,7 @@ def assemble_production_worker(
     runtime_image_preparer: Callable[..., object] | None = None,
     loop_heartbeat: Callable[[], object] | None = None,
     step_heartbeat: Callable[[str], object] | None = None,
+    process_instance_id: str | None = None,
     capabilities: CapabilityRegistry | None = None,
     catalog_sync: ManagedRecipeCatalogSyncService | None = None,
     enrollment: EnrollmentService | None = None,
@@ -946,7 +947,9 @@ def assemble_production_worker(
         storage_collector.tick,
         recipe_builds.reconcile_source_bundles,
         CatalogRevisionCollector(sessions, clock=clock).tick,
-        TerminalHistoryCollector(sessions, clock=clock).tick,
+        TerminalHistoryCollector(
+            sessions, clock=clock, process_instance_id=process_instance_id
+        ).tick,
     )
     if model_cache is not None:
         from .model_cache.partials_collection import ModelPartialsCollector
@@ -1253,9 +1256,10 @@ if __name__ == "__main__":
         ),
     )
     watchdog = WorkerWatchdog(timeout_seconds=_WORKER_WATCHDOG_TIMEOUT_SECONDS)
+    process_instance_id = current_worker_instance_id()
     heartbeat_recorder = WorkerHeartbeatRecorder(
         sessions,
-        process_instance_id=current_worker_instance_id(),
+        process_instance_id=process_instance_id,
         clock=clock,
     )
     worker = assemble_production_worker(
@@ -1285,6 +1289,7 @@ if __name__ == "__main__":
         runtime_image_preparer=prepare_runtime_image_receipt,
         loop_heartbeat=heartbeat_recorder.completed_loop,
         step_heartbeat=watchdog.beat,
+        process_instance_id=process_instance_id,
     )
     watchdog_stop = threading.Event()
     memory_monitor = WorkerMemoryMonitor(
