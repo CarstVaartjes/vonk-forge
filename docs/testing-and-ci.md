@@ -466,7 +466,7 @@ There are no debt counts, category ledgers, baseline updates, or PR count report
 The guards reject new handwritten contract literals, untyped mapping annotations,
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
-imperative remedy text, missing retention policy, anti-principle
+imperative remedy text, anti-principle
 test assertions, short wall-clock limits on test work, and the existing
 coordination syntax violations. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit

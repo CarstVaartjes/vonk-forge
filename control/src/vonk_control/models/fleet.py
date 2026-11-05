@@ -72,7 +72,9 @@ class AgentNode(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
 
     inventory_snapshot: Mapped[NodeInventoryItemsSnapshot | None] = relationship(
         "NodeInventoryItemsSnapshot",
@@ -314,7 +316,7 @@ class FleetProfileApplication(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
 
     repeated_evidence: Mapped[list[RepeatedEvidence] | Residue | None] = mapped_column(
@@ -381,7 +383,9 @@ class AgentCertificate(Base):
     not_before: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    not_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     fingerprint: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, default="active")
     generation: Mapped[int] = mapped_column(
@@ -439,7 +443,7 @@ class AgentIssuedCertificateRevocation(Base):
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

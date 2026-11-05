@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import gc
 import re
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1360,60 +1359,6 @@ def rust_test_files(src: Path) -> set[Path]:
     return tests
 
 
-def scan_retention(modules: Sequence[tuple[str, ast.Module]]) -> list[Site]:
-    """Inventory mapped tables lacking a syntactically linked delete/prune path.
-
-    ORM deletes, bulk deletes, query.delete and explicit SQL count. A foreign-key
-    cascade alone is not a retention policy for a parent that is never deleted.
-    """
-    tables: list[tuple[str, str, str, int]] = []
-    deleted: set[str] = set()
-    for path, tree in modules:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for statement in node.body:
-                    if (
-                        isinstance(statement, ast.Assign)
-                        and any(
-                            isinstance(t, ast.Name) and t.id == "__tablename__"
-                            for t in statement.targets
-                        )
-                        and isinstance(statement.value, ast.Constant)
-                        and isinstance(statement.value.value, str)
-                    ):
-                        tables.append(
-                            (path, node.name, statement.value.value, node.lineno)
-                        )
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                aliases: dict[str, set[str]] = {}
-                for part in local_nodes(node):
-                    if isinstance(part, ast.Assign):
-                        refs = {
-                            n.id
-                            for n in ast.walk(part.value)
-                            if isinstance(n, ast.Name)
-                        }
-                        for target in part.targets:
-                            if isinstance(target, ast.Name):
-                                aliases[target.id] = refs
-                    if isinstance(part, ast.Call) and name(part.func) == "delete":
-                        refs = {n.id for n in ast.walk(part) if isinstance(n, ast.Name)}
-                        deleted.update(refs)
-                        for ref in refs:
-                            deleted.update(aliases.get(ref, set()))
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                deleted.update(
-                    re.findall(
-                        r"DELETE\s+FROM\s+[\"`]?([\w]+)", node.value, re.IGNORECASE
-                    )
-                )
-    return [
-        Site(path, cls, "table-without-delete-path", line)
-        for path, cls, table, line in tables
-        if cls not in deleted and table not in deleted
-    ]
-
-
 def fixed_cap_sites() -> list[Site]:
     """Every fixed cap that ends work in the covered trees (whole-tree: none)."""
     return [
@@ -1471,7 +1416,6 @@ def scan_sites(mode: str) -> list[Site]:
 
 def _scan_sites(mode: str) -> list[Site]:
     sites: list[Site] = []
-    modules = []
     for path in source_files(mode):
         relative = path.relative_to(ROOT).as_posix()
         source = path.read_text()
@@ -1495,17 +1439,12 @@ def _scan_sites(mode: str) -> list[Site]:
         # Test trees are consumed once by this scanner. Retaining every test
         # AST makes pytest GC repeatedly traverse millions of unused nodes.
         parsed = parse_file(path, cache=mode != "tests")
-        if mode == "retention":
-            modules.append((relative, parsed.tree))
-        else:
-            try:
-                sites.extend(
-                    scan_source(
-                        parsed.source, path=relative, mode=mode, tree=parsed.tree
-                    )
-                )
-            finally:
-                if mode == "tests":
-                    del parsed
-                    gc.collect(0)
-    return scan_retention(modules) if mode == "retention" else sites
+        try:
+            sites.extend(
+                scan_source(parsed.source, path=relative, mode=mode, tree=parsed.tree)
+            )
+        finally:
+            if mode == "tests":
+                del parsed
+                gc.collect(0)
+    return sites

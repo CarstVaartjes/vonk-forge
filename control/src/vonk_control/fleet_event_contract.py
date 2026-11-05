@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 from pydantic import ConfigDict, Field, model_validator
 from vonk_agent_protocol.contracts import canonical_message
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
+from vonk_forge_contracts import EndpointAlias
 
 from .integer_domains import MAX_DATABASE_INTEGER
 from .strict_json import StrictJSONModel
@@ -60,7 +61,7 @@ class RecipeRunPayload(_FleetEventModel):
     installation_id: Annotated[str, Field(min_length=1)]
     mapping_id: Annotated[str, Field(min_length=1)]
     mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, strict=True, ge=1)
-    alias: Annotated[str, Field(min_length=1)]
+    alias: EndpointAlias
     state: Annotated[str, Field(min_length=1)]
     route_state: Annotated[str, Field(min_length=1)]
 

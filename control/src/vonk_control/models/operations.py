@@ -78,8 +78,9 @@ class AgentOperation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+    # Indexed: retention selects and inventories ended history by it.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
 
     repeated_evidence: Mapped[list[RepeatedEvidence] | Residue | None] = mapped_column(
@@ -141,7 +142,7 @@ class ArtifactDistributionAssignment(Base):
         DateTime(timezone=True), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

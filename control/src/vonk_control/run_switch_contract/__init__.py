@@ -132,7 +132,6 @@ from .requests import RunSwitchStopPreviewRequest as RunSwitchStopPreviewRequest
 from .requests import SparkGroup as SparkGroup
 from .requests import SparkGroupNode as SparkGroupNode
 from .vocabulary import _DIGEST_PATTERN as _DIGEST_PATTERN
-from .vocabulary import Alias as Alias
 from .vocabulary import Digest as Digest
 from .vocabulary import PortNumber as PortNumber
 from .vocabulary import RunSwitchAction as RunSwitchAction
@@ -151,7 +150,6 @@ from .vocabulary import RunSwitchRetention as RunSwitchRetention
 from .vocabulary import RunSwitchSubphase as RunSwitchSubphase
 
 __all__ = [
-    "Alias",
     "ArtifactStorageImpact",
     "ArtifactVerificationEvidence",
     "BuildCompatibilityEvidence",

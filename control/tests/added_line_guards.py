@@ -12,12 +12,8 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TypeGuard
 
-from . import claim_registry as claims
-from . import collection_continuation as collections
-from . import content_identity_boundaries as identity
-from . import coordination_boundaries as coordination
-from . import deterministic_retries as retries
 from . import (
+    alias_rules,
     docker_listings,
     legacy_tolerance,
     lifecycle_sets,
@@ -28,6 +24,11 @@ from . import (
     shell_trap_waits,
     whole_collection_readers,
 )
+from . import claim_registry as claims
+from . import collection_continuation as collections
+from . import content_identity_boundaries as identity
+from . import coordination_boundaries as coordination
+from . import deterministic_retries as retries
 from . import document_read_boundaries as document_reads
 from . import lifecycle_reasons as reasons
 from . import optimistic_boundaries as optimistic
@@ -55,7 +56,6 @@ MODES = (
     "waits",
     "reads",
     "remedies",
-    "retention",
     "tests",
     "noexit",
     "causes",
@@ -97,6 +97,7 @@ MODES = (
     "agent-422",
     "docker-listings",
     "lifecycle-sets",
+    "alias-rules",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -147,6 +148,15 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
         "reserve_floor_bytes",
     ): "the collector's headroom floor, defaulted from that setting",
 }
+# The only modules that may lock a whole table: one-time schema adoption at
+# startup (before services run) and user-authority serialization (security).
+TABLE_LOCK_OWNERS = frozenset(
+    {
+        "control/src/vonk_control/exact_integer_adoption.py",
+        "control/src/vonk_control/db/node_facts.py",
+        "control/src/vonk_control/user_authority.py",
+    }
+)
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
@@ -173,6 +183,11 @@ REVISION_NUMBER_ALLOCATORS = frozenset(
         "control/src/vonk_control/catalog_entities.py",
         "control/src/vonk_control/catalog_service.py",
     }
+)
+# Readers that keep each document's newest revision_number, so an allocator
+# (max + 1) never hands one out twice; they never allocate.
+REVISION_NUMBER_KEEPERS = frozenset(
+    {"control/src/vonk_control/catalog_revision_collection.py"}
 )
 
 # The one owner of how a container's exit cause is spelled and read.
@@ -1452,6 +1467,23 @@ def check_source(
                 r"FlockOperation::(?:NonBlocking)?LockExclusive|\bLOCK_EX\b", text
             )
         )
+    if (
+        "locks" in modes
+        and not is_test
+        and path.endswith(".py")
+        and path.startswith("control/src/")
+        and path not in TABLE_LOCK_OWNERS
+    ):
+        # A table-wide lock taken NOWAIT loses to any writer in flight, so a
+        # recurring pass that needs one is refused for as long as traffic
+        # lasts (the catalog collector's 21-table fence, 2026-11-04). Recheck
+        # per row instead: a conditional delete, the foreign keys, and a short
+        # lock_timeout that skips a held row.
+        noexit_hits.extend(
+            f"{path}:{line}: table-wide lock; recheck per row instead"
+            for line, text in enumerate(source.splitlines(), 1)
+            if line in added and re.search(r"\bLOCK\s+TABLE\b", text, re.IGNORECASE)
+        )
     python = path.endswith(".py") or (
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
@@ -1614,7 +1646,7 @@ def check_source(
             # definition may name it.
             if (
                 path.startswith("control/src/vonk_control/")
-                and path not in REVISION_NUMBER_ALLOCATORS
+                and path not in REVISION_NUMBER_ALLOCATORS | REVISION_NUMBER_KEEPERS
                 and not path.startswith("control/src/vonk_control/models/")
             ):
                 hits.extend(
@@ -2065,6 +2097,10 @@ def check_source(
         )
     if python and path.startswith("control/src/") and "locked-io" in modes:
         hits.extend((line, locked_io.KIND) for line in locked_io.scan_source(source))
+    if "alias-rules" in modes and alias_rules.in_scope(path) and not is_test:
+        hits.extend(
+            (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
+        )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(
             (line, scratch_names.KIND)
@@ -2073,11 +2109,6 @@ def check_source(
     if python and is_test and "clocks" in modes:
         hits.extend(
             (line, wall_clocks.KIND) for line in wall_clocks.scan_source(source)
-        )
-    if python and not is_test and "retention" in modes:
-        hits.extend(
-            (site.line, site.kind)
-            for site in principles.scan_retention([(path, ast.parse(source))])
         )
     if python:
         tree = ast.parse(source)
@@ -2227,24 +2258,10 @@ def planner_defect_waits(source: str) -> list[int]:
 def main(*, modes: Sequence[str] = MODES) -> int:
     messages = []
     changes = added_lines(sys.stdin.read())
-    per_file_modes = tuple(mode for mode in modes if mode != "retention")
     for path, lines in changes.items():
         target = ROOT / path
         if target.is_file() and target.resolve().is_relative_to(ROOT):
-            messages.extend(
-                check_source(path, target.read_text(), lines, modes=per_file_modes)
-            )
-    if "retention" in modes and any(
-        lines
-        and path.endswith(".py")
-        and (ROOT / path).is_file()
-        and "__tablename__" in (ROOT / path).read_text()
-        for path, lines in changes.items()
-    ):
-        # Retention policy may live in a different, unchanged producer module.
-        for site in principles.scan_sites("retention"):
-            if site.line in changes.get(site.path, set()):
-                messages.append(f"{site.path}:{site.line}: {site.kind}")
+            messages.extend(check_source(path, target.read_text(), lines, modes=modes))
     for message in messages:
         print(message, file=sys.stderr)
     return int(bool(messages))

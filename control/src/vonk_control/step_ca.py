@@ -59,6 +59,8 @@ _SERIAL = re.compile(r"[1-9][0-9]{0,127}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]{0,127}\Z")
 _KID = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
 _DEFAULT_CERTIFICATE_LIFETIME_SECONDS = 30 * 24 * 60 * 60
+#: The longest any node certificate this Controller issues stays valid.
+CERTIFICATE_LIFETIME = timedelta(seconds=_DEFAULT_CERTIFICATE_LIFETIME_SECONDS)
 _MAX_CRL_WINDOW = timedelta(hours=1)
 
 

@@ -740,11 +740,7 @@ def release_dead_removal_nowait(
             expires_at = min(expires_at, ended_at + STORE_RETENTION_MAX_AGE)
         if now < expires_at:
             return False
-    row.removal_owner_kind = None
-    row.removal_owner_id = None
-    row.removal_fence = None
-    row.removal_authority_expires_at = None
-    row.updated_at = now
+    open_gate(session, row, now)
     return True
 
 
@@ -768,11 +764,23 @@ def clear_removal(
             # A newer owner won. Completion of the old owner cannot release the
             # newer deletion authorization, nor make that owner wait on history.
             continue
-        row.removal_owner_kind = None
-        row.removal_owner_id = None
-        row.removal_fence = None
-        row.removal_authority_expires_at = None
-        row.updated_at = now
+        open_gate(session, row, now)
+
+
+def open_gate(session: Session, row: ArtifactLifecycleGate, now: datetime) -> None:
+    """Release the removal owner; an open gate with no wait is deleted.
+
+    A missing gate reads exactly like an open one (reference acquisition
+    creates it again under the same lock), so an open gate kept no fact.
+    """
+
+    row.removal_owner_kind = None
+    row.removal_owner_id = None
+    row.removal_fence = None
+    row.removal_authority_expires_at = None
+    row.updated_at = now
+    if row.wait_evidence is None and row.next_action_at is None:
+        session.delete(row)
 
 
 __all__ = [
@@ -788,6 +796,7 @@ __all__ = [
     "dead_removal_identities",
     "has_pending_removal",
     "lock_reference_gates",
+    "open_gate",
     "reference_gate_is_open_nowait",
     "release_dead_removal_nowait",
     "removal_fences_match",
