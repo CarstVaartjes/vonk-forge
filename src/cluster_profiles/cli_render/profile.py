@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import shlex
+import json
 from collections.abc import Mapping
 
 from .. import cli_states
@@ -85,6 +85,71 @@ def _profile(payload: Mapping[str, object]) -> None:
     _actions(payload.get("next_actions"))
 
 
+def _shell_quote(text: str) -> str:
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
+def connection_snippets(api_base: str, alias: str) -> dict[str, str]:
+    """The copyable client examples; the web renders the same text.
+
+    tests/fixtures/connection-examples.json is asserted by both renderers.
+    """
+    body = json.dumps(
+        {"model": alias, "messages": [{"role": "user", "content": "Hello"}]},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return {
+        "setup": "\n".join(
+            (
+                "vonkctl key create NAME --output CLIENT_KEY_FILE",
+                'export OPENAI_API_KEY="$(cat CLIENT_KEY_FILE)"',
+                "export OPENAI_BASE_URL=" + _shell_quote(api_base.rstrip("/")),
+            )
+        ),
+        "curl": "\n".join(
+            (
+                'curl "$OPENAI_BASE_URL/chat/completions" \\',
+                '  -H "Authorization: Bearer $OPENAI_API_KEY" \\',
+                '  -H "Content-Type: application/json" \\',
+                "  -d " + _shell_quote(body),
+            )
+        ),
+        "python": "\n".join(
+            (
+                "from openai import OpenAI",
+                "",
+                "client = OpenAI()",
+                "response = client.chat.completions.create(",
+                "    model=" + json.dumps(alias, ensure_ascii=False) + ",",
+                '    messages=[{"role": "user", "content": "Hello"}],',
+                ")",
+                "print(response.choices[0].message.content)",
+            )
+        ),
+    }
+
+
+CONNECTION_NOTE = (
+    "Thinking and sampling are usually set per request "
+    "(for example chat_template_kwargs and temperature), not in the recipe."
+)
+
+
+def _connection_examples(api_base: str, alias: str) -> None:
+    """Print the examples; the key is only ever read from the key file."""
+    snippets = connection_snippets(terminal_text(api_base), terminal_text(alias))
+    for title, name in (
+        ("Client setup", "setup"),
+        ("curl example", "curl"),
+        ("Python example (openai client)", "python"),
+    ):
+        print(title + ":")
+        for line in snippets[name].split("\n"):
+            print(("  " + line) if line else "")
+    print(CONNECTION_NOTE)
+
+
 def _profile_endpoints(payload: Mapping[str, object]) -> None:
     number = payload.get("number")
     application_id = payload.get("application_id")
@@ -121,18 +186,9 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
                 "Freshness",
                 _freshness(endpoint.get("observed_at"), payload.get("observed_at")),
             )
-            _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             if isinstance(api_base, str) and isinstance(alias, str):
-                print("Client configuration:")
-                print(
-                    "  export OPENAI_BASE_URL=" + terminal_text(shlex.quote(api_base))
-                )
-                print('  export OPENAI_API_KEY="$(cat CLIENT_KEY_FILE)"')
-                print("  model: " + terminal_text(alias))
-                print(
-                    "Create a client key with: "
-                    "vonkctl key create NAME --output CLIENT_KEY_FILE"
-                )
+                _connection_examples(api_base, alias)
+            _field("Spark backend (diagnostic)", endpoint.get("backend_api_base"))
             continue
         if alias is not None:
             _field("Client model identifier", alias)
