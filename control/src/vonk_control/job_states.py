@@ -18,10 +18,14 @@ from vonk_agent_protocol import (
     ObservationCause,
     adopt_state,
     is_state,
+    live_words,
     stored_words,
 )
 
 SUBJECT = LifecycleSubject.JOB
+
+#: A job of any kind that has not ended.
+LIVE: tuple[str, ...] = live_words(SUBJECT)
 
 
 def words(*states: LifecycleState) -> tuple[str, ...]:

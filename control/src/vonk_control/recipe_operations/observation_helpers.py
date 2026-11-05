@@ -82,13 +82,7 @@ def wait_for_installation_upkeep(session: Session, installation_id: str) -> None
                     WireAgentOperation.RECIPE_RECONCILE.value,
                 )
             ),
-            Job.state.in_(
-                job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.NEEDS_OPERATOR,
-                )
-            ),
+            Job.state.in_(job_states.LIVE),
             Job.payload["owner_kind"].as_string() == "installation",
             Job.payload["owner_id"].as_string() == installation_id,
         )

@@ -107,9 +107,7 @@ KIND = "run-switch"
 WAITING = LifecycleState.NEEDS_OPERATOR.value
 _MAX_REASON = 512
 #: Stored states an operation can still advance from.
-LIVE_STATES = frozenset(
-    job_states.words(State.QUEUED, State.RUNNING, State.OBSERVING, State.NEEDS_OPERATOR)
-)
+LIVE_STATES = frozenset(job_states.LIVE)
 _STORED = {
     State.QUEUED: "queued",
     State.RUNNING: "running",

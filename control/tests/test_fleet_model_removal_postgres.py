@@ -421,6 +421,78 @@ def test_unused_installation_uninstalls_through_existing_job(
         cache.close()
 
 
+def test_removal_waits_for_an_uninstall_that_waits_and_finishes_once_it_ends(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """An uninstall waiting on its worker has not ended: the removal waits for it.
+
+    It was read as ended and the removal deferred as a failure, while every
+    other reader counts that wait as live.
+    """
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine, nodes=1
+    )
+    first = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, first.owner_id)
+        assert installation is not None
+        selector = installation.model_content_sha256
+    assert selector is not None
+    now = [NOW + timedelta(seconds=1)]
+    cache = ModelCacheService(
+        sessions,
+        tmp_path / "nas",
+        free_fraction=0,
+        fixture_sources=True,
+        clock=lambda: now[0],
+    )
+    cache._fleet_lifecycle = lifecycle
+    try:
+        inventory(sessions, nodes[0], now[0], [])
+        review = cache.review_fleet_model_removal(selector)
+        accepted = cache.remove_fleet_model_selector(
+            selector,
+            actor="admin",
+            request_key=str(uuid4()),
+            review_digest=review.review_digest,
+        )
+        cache.advance_removals()
+        with sessions.begin() as session:
+            child = session.scalar(
+                select(Job).where(Job.kind == AgentOperation.RECIPE_UNINSTALL)
+            )
+            assert child is not None, cache.get_operation(accepted.id).last_error
+            child_id, child_state = child.id, child.state
+            # Its order waits; the parent mirrors that wait.
+            child.state = LifecycleState.NEEDS_OPERATOR.value
+        for _ in range(2):
+            cache.advance_removals()
+        waiting = cache.get_operation(accepted.id)
+        assert waiting.state not in {
+            LifecycleState.FAILED,
+            LifecycleState.CANCELLED,
+        }, waiting.last_error
+        assert "ended" not in (waiting.last_error or "")
+
+        with sessions.begin() as session:
+            healed = session.get(Job, child_id)
+            assert healed is not None
+            healed.state = child_state
+        for node in lifecycle.get(child_id).nodes:
+            lifecycle.record_node_result(child_id, node, succeeded=True, evidence={})
+        now[0] += timedelta(seconds=60)
+        inventory(sessions, nodes[0], now[0], [])
+        for _ in range(4):
+            cache.advance_removals()
+        result = cache.get_operation(accepted.id)
+        assert result.state == LifecycleState.SUCCEEDED, result.last_error
+        submit_model_download(cache, tmp_path)
+    finally:
+        cache.close()
+
+
 @pytest.mark.parametrize("saved_profile", [True, False])
 def test_profile_or_running_workload_retains_model_and_installation(
     postgres_engine, tmp_path: Path, saved_profile: bool

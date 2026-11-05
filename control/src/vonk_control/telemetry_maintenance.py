@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import DateTime, cast, delete, func, select, text, update
+from sqlalchemy import DateTime, cast, delete, exists, func, select, text, update
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
@@ -18,6 +18,7 @@ from .models import (
     AgentCertificate,
     AgentNode,
     FleetStreamEvent,
+    NodeInventoryResourceSnapshot,
     NodeInventorySnapshot,
     NodeSnapshot,
     NodeTelemetryLatest,
@@ -143,6 +144,10 @@ class TelemetryMaintenance:
                 limit=limit,
                 events=events,
                 candidates=raw_candidates,
+            ),
+            # Its own transaction: no node lock is held while it deletes.
+            lambda session: self._prune_measurements(
+                session, cutoff=cutoff, limit=limit
             ),
             lambda session: self._prune_events(session, now=now, limit=limit),
             lambda session: self._prune_inventory(session, cutoff=cutoff, limit=limit),
@@ -354,6 +359,58 @@ class TelemetryMaintenance:
                 .where(NodeTelemetrySample.id.in_(chunk))
                 .execution_options(synchronize_session=False)
             )
+
+    @staticmethod
+    def _prune_measurements(session: Session, *, cutoff: datetime, limit: int) -> None:
+        """Delete measurements whose sample is gone, oldest first.
+
+        A measurement shares its sample's ``observed_at`` and is written with
+        it, so once the sample's day has passed and the sample is deleted the
+        measurement has no reader (memory admission reads the last 30 minutes).
+        This pass does not rely on the database's cascade key: a database that
+        lacks it keeps no orphans, and its backlog drains through the same
+        bounded pass. It runs right after the raw stage in its own transaction,
+        so the samples that stage deleted leave their measurements in the same
+        pass. A measurement whose old sample is still waiting for its own pass
+        keeps the evidence that sample's view needs.
+
+        Each node's candidates come from ``ix_inventory_node_observed``; the
+        nodes are the fleet, so the cost is one indexed range per node, at most
+        ``limit`` rows a pass.
+        """
+
+        remaining = limit
+        for node_id in session.scalars(
+            select(AgentNode.node_id).order_by(AgentNode.node_id)
+        ).all():
+            stale = list(
+                session.scalars(
+                    select(NodeInventoryResourceSnapshot.id)
+                    .where(
+                        NodeInventoryResourceSnapshot.node_id == node_id,
+                        NodeInventoryResourceSnapshot.observed_at < cutoff,
+                        ~exists().where(
+                            NodeTelemetrySample.id
+                            == NodeInventoryResourceSnapshot.source_sample_id
+                        ),
+                    )
+                    .order_by(NodeInventoryResourceSnapshot.observed_at)
+                    .limit(remaining)
+                    .with_for_update(of=NodeInventoryResourceSnapshot, skip_locked=True)
+                )
+            )
+            for chunk in TelemetryMaintenance._chunks(stale):
+                session.execute(
+                    delete(NodeSnapshot)
+                    .where(
+                        NodeSnapshot.id.in_(chunk),
+                        NodeSnapshot.kind == InventorySnapshotKind.MEASUREMENTS,
+                    )
+                    .execution_options(synchronize_session=False)
+                )
+            remaining -= len(stale)
+            if remaining <= 0:
+                return
 
     @staticmethod
     def _chunks(values: list, size: int = _SQL_KEY_CHUNK):

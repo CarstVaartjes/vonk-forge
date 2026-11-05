@@ -218,11 +218,7 @@ def _active_owned_workload_jobs(
         .where(
             Job.kind == kind,
             Job.state.in_(
-                job_states.words(
-                    LifecycleState.QUEUED,
-                    LifecycleState.RUNNING,
-                    LifecycleState.NEEDS_OPERATOR,
-                )
+                job_states.LIVE
                 if include_waiting_cancellation
                 else (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
             ),

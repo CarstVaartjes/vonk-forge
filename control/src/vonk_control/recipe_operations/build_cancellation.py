@@ -142,11 +142,7 @@ class BuildCancellationMixin:
             job = session.get(Job, job_id, with_for_update={"nowait": True})
             if job is None or job.state == LifecycleState.CANCELLED.value:
                 return False
-            if job.state not in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.NEEDS_OPERATOR,
-            ):
+            if job.state not in job_states.LIVE:
                 # A cancel always completes: a build that already ended has
                 # nothing left to cancel.
                 return False
@@ -261,11 +257,7 @@ class BuildCancellationMixin:
                 return False
             if job.state == LifecycleState.CANCELLED.value:
                 return False
-            if job.state not in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.NEEDS_OPERATOR,
-            ):
+            if job.state not in job_states.LIVE:
                 return False
             children = tuple(
                 session.scalars(
@@ -374,13 +366,7 @@ class BuildCancellationMixin:
             .where(
                 Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                 Job.payload["owner_id"].as_string() == build_id,
-                Job.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                ),
+                Job.state.in_(job_states.LIVE),
             )
             .limit(1)
         )

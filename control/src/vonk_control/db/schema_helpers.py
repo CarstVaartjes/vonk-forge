@@ -1,6 +1,7 @@
 """Db: schema helpers."""
 
 import uuid
+from enum import StrEnum
 from typing import Any
 
 from sqlalchemy.engine import Connection
@@ -8,6 +9,7 @@ from sqlalchemy.exc import (
     SQLAlchemyError,
 )
 
+from .connections import _database_sqlstate
 from .constants import _LOGGER
 
 # ``alembic_version`` cannot prove that a live database is the current schema.
@@ -336,3 +338,146 @@ def _release_retired_table_foreign_keys(connection: Connection, ops: Any) -> Non
                     name,
                     error,
                 )
+
+
+class SchemaDriftKind(StrEnum):
+    """What a startup reconciliation left different from the model."""
+
+    MISSING_FOREIGN_KEY = "missing_foreign_key"
+    UNDECLARED_FOREIGN_KEY = "undeclared_foreign_key"
+    MISSING_UNIQUE_CONSTRAINT = "missing_unique_constraint"
+    UNDECLARED_UNIQUE_CONSTRAINT = "undeclared_unique_constraint"
+    DEFERRED_CHECK_CONSTRAINT = "deferred_check_constraint"
+    UNHANDLED_DIFFERENCE = "unhandled_difference"
+
+
+SchemaDrift = dict[SchemaDriftKind, list[str]]
+
+
+# Every Alembic difference kind reconciliation has a rule for. Tables and
+# columns the model no longer declares are kept with their data, and an
+# obsolete index stays until its replacement exists; those are decisions, not
+# drift. Any other kind is reported as unhandled.
+_RECONCILED_DIFFERENCES = frozenset(
+    {
+        "add_table",
+        "remove_table",
+        "add_column",
+        "remove_column",
+        "modify_type",
+        "modify_nullable",
+        "modify_default",
+        "add_index",
+        "remove_index",
+        "add_constraint",
+        "remove_constraint",
+        "add_fk",
+        "remove_fk",
+    }
+)
+
+
+def _constraint_label(constraint: Any) -> str:
+    columns = getattr(constraint, "column_keys", None) or [
+        column.name for column in constraint.columns
+    ]
+    return (
+        f"{constraint.table.name}.{constraint.name or 'unnamed'}({', '.join(columns)})"
+    )
+
+
+def _unhandled_differences(differences: list[tuple[Any, ...]]) -> list[str]:
+    """Differences no reconciliation rule acts on, named for the report."""
+
+    return [
+        "{}:{}".format(*_schema_difference_key(difference))
+        for difference in differences
+        if difference[0] not in _RECONCILED_DIFFERENCES
+    ]
+
+
+def _install_foreign_keys(
+    connection: Connection,
+    ops: Any,
+    differences: list[tuple[Any, ...]],
+    drift: SchemaDrift,
+) -> None:
+    """Install model foreign keys the live catalog lacks or holds differently.
+
+    Alembic reports a missing key as ``add_fk``; a live key on the same columns
+    whose target or delete rule differs comes as a ``remove_fk`` of the old form.
+    The old form is dropped only in the savepoint that installs its
+    replacement. When existing rows violate the key (SQLSTATE 23503, for
+    example measurements left behind by a missing cascade), PostgreSQL gets it
+    ``NOT VALID``: it still checks new rows and still runs its ``ON DELETE``
+    rule, while the owners of the old rows delete them. A busy relation
+    (55P03) is raised to the startup retry; any other refusal is reported as
+    drift and tried again at the next startup.
+    """
+
+    replaced: dict[tuple[str, frozenset[str]], list[Any]] = {}
+    for difference in differences:
+        if difference[0] == "remove_fk":
+            key = (difference[1].table.name, frozenset(difference[1].column_keys))
+            replaced.setdefault(key, []).append(difference[1])
+    installed: set[tuple[str, frozenset[str]]] = set()
+    for difference in differences:
+        if difference[0] != "add_fk":
+            continue
+        constraint = difference[1]
+        key = (constraint.table.name, frozenset(constraint.column_keys))
+        old_names = [old.name for old in replaced.get(key, []) if old.name]
+        label = _constraint_label(constraint)
+        try:
+            _create_foreign_key(connection, ops, constraint, old_names, not_valid=False)
+            _LOGGER.info("Created foreign key %s", label)
+            installed.add(key)
+            continue
+        except SQLAlchemyError as error:
+            if _database_sqlstate(error) == "55P03":
+                raise
+            if _database_sqlstate(error) != "23503":
+                _LOGGER.warning("Could not create foreign key %s: %s", label, error)
+                drift[SchemaDriftKind.MISSING_FOREIGN_KEY].append(label)
+                continue
+            violation = error
+        try:
+            _create_foreign_key(connection, ops, constraint, old_names, not_valid=True)
+        except SQLAlchemyError as error:
+            if _database_sqlstate(error) == "55P03":
+                raise
+            _LOGGER.warning("Could not create foreign key %s: %s", label, error)
+            drift[SchemaDriftKind.MISSING_FOREIGN_KEY].append(label)
+            continue
+        _LOGGER.warning(
+            "Created foreign key %s NOT VALID because existing rows violate it: %s",
+            label,
+            violation,
+        )
+        installed.add(key)
+    for key, olds in replaced.items():
+        if key not in installed:
+            drift[SchemaDriftKind.UNDECLARED_FOREIGN_KEY].extend(
+                _constraint_label(old) for old in olds
+            )
+
+
+def _create_foreign_key(
+    connection: Connection,
+    ops: Any,
+    constraint: Any,
+    old_names: list[str],
+    *,
+    not_valid: bool,
+) -> None:
+    """Replace ``old_names`` with ``constraint`` in one savepoint."""
+
+    from alembic.operations.ops import CreateForeignKeyOp
+
+    operation = CreateForeignKeyOp.from_constraint(constraint)
+    if not_valid:
+        operation.kw["postgresql_not_valid"] = True
+    with connection.begin_nested():
+        for name in old_names:
+            ops.drop_constraint(name, constraint.table.name, type_="foreignkey")
+        ops.invoke(operation)

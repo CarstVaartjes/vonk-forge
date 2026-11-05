@@ -1,6 +1,7 @@
 """Each fixture proves a new violation fails while untouched source is ignored."""
 
 import pytest
+from vonk_agent_protocol import LifecycleState
 
 from .added_line_guards import AGENT_REQUESTS, added_lines, check_source
 
@@ -2892,3 +2893,94 @@ def test_each_call_is_judged_on_its_own() -> None:
 )
 def test_a_line_read_exact_target_or_paged_docker_call_passes(source: str) -> None:
     assert not _docker_listings(source, {2})
+
+
+_STATES_PATH = "control/src/vonk_control/fleet_profiles/example.py"
+
+
+def _lifecycle_sets(
+    source: str, added: set[int], path: str = _STATES_PATH
+) -> list[str]:
+    return check_source(path, source, added, modes=("lifecycle-sets",))
+
+
+@pytest.mark.parametrize(
+    "spelled",
+    [
+        # The shape that left a backing-off load out of "live".
+        (
+            "job_states.words(\n    LifecycleState.QUEUED,\n"
+            "    LifecycleState.RUNNING,\n    LifecycleState.NEEDS_OPERATOR,\n)"
+        ),
+        "{LifecycleState.QUEUED.value, LifecycleState.RUNNING.value}",
+        "(State.RUNNING, State.OBSERVING)",
+        "job_states.means(row.state, LifecycleState.QUEUED, LifecycleState.BACKOFF)",
+        "frozenset({aos.QUEUED, aos.RUNNING})",
+        "('queued', 'running')",
+        # An "ended" set that counted a wait for a person as ended.
+        "{LifecycleState.FAILED, LifecycleState.CANCELLED, LifecycleState.NEEDS_OPERATOR}",
+        "job_states.words(LifecycleState.SUCCEEDED, LifecycleState.FAILED)",
+        "(LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.FAILED)",
+        # Stored words: the same fleet-removal set, string-spelled.
+        "child.state in {'failed', 'cancelled', 'needs-operator'}",
+        "('succeeded', 'failed', 'cancelled')",
+        "('cancelled', 'superseded')",
+        # Composed sets.
+        (
+            "(*job_states.words(LifecycleState.QUEUED),"
+            " *job_states.words(LifecycleState.RUNNING))"
+        ),
+        (
+            "job_states.words(LifecycleState.QUEUED)"
+            " + job_states.words(LifecycleState.BACKOFF)"
+        ),
+        # A comparison chain on one subject.
+        "state == 'queued' or state == 'running'",
+        "state != LifecycleState.SUCCEEDED and state != LifecycleState.CANCELLED",
+    ],
+)
+def test_a_hand_spelled_open_state_set_is_flagged(spelled: str) -> None:
+    source = f"LIVE = {spelled}\n"
+    lines = set(range(1, source.count("\n") + 1))
+    assert _lifecycle_sets(source, lines)
+    # Only an added line can fail the change.
+    assert not _lifecycle_sets(source, set())
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        "fleet_profile_states.LIVE",
+        "job_states.words(LifecycleState.NEEDS_OPERATOR)",
+        # Every lifecycle state: the vocabulary itself.
+        "tuple(LifecycleState)",
+        "(\n    "
+        + ",\n    ".join(f"LifecycleState.{state.name}" for state in LifecycleState)
+        + ",\n)",
+        # Another machine's states.
+        "{RunState.STARTING, RunState.RUNNING, RunState.STOPPING}",
+        # "failed" alone is an installation's word too.
+        "('installed', 'failed')",
+        # Two subjects, one state each.
+        "state == 'queued' or other == 'running'",
+        # A statement around one named predicate.
+        "select(Job).where(Job.state.in_(job_states.LIVE), Job.kind == 'x')",
+        "(*job_states.LIVE, *job_states.words(LifecycleState.FAILED))",
+    ],
+)
+def test_a_named_predicate_or_vocabulary_passes(named: str) -> None:
+    assert not _lifecycle_sets(f"LIVE = {named}\n", {1})
+
+
+@pytest.mark.parametrize(
+    "owner",
+    [
+        "control/src/vonk_control/fleet_profile_states.py",
+        "control/src/vonk_control/model_cache_contract.py",
+        "control/src/vonk_control/run_switch_contract/vocabulary.py",
+    ],
+)
+def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
+    source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
+    assert _lifecycle_sets(source, {1})
+    assert not _lifecycle_sets(source, {1}, path=owner)

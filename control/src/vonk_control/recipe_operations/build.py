@@ -291,13 +291,7 @@ class BuildMixin:
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                     Job.payload["owner_id"].as_string() == plan.build_id,
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    Job.state.in_(job_states.LIVE),
                     _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                 )
             )
