@@ -3,10 +3,12 @@
 A reader accepts the current contract. Data written by an older build is
 migrated by deploy order, and a damaged row is an unknown the caller re-observes
 or refuses, never an alternate shape that parses, or an item that silently
-disappears. Added lines in Controller and protocol source may not introduce
-compatibility words, alias adopters, an ignored ``retire_as_unknown`` answer or
-an ``except`` that turns a malformed value into an absent one. There is no
-allowlist: the stored-JSON readers are where new tolerance would land.
+disappears. Added lines in Controller, protocol, CLI and script source may not
+introduce compatibility words, alias adopters or retired state spellings, an
+ignored ``retire_as_unknown`` answer or an ``except`` that turns a malformed value
+into an absent one; added lines in the web source (TypeScript, CSS) may not
+introduce compatibility words or retired state spellings. There is no allowlist:
+the stored-JSON readers are where new tolerance would land.
 """
 
 from __future__ import annotations
@@ -16,13 +18,34 @@ import io
 import re
 import tokenize
 
-SCOPE = ("control/src/", "agent_protocol/src/")
+SCOPE = ("control/src/", "agent_protocol/src/", "src/cluster_profiles/", "scripts/")
+#: The web client: scanned line by line, for words and spellings only.
+WEB_SCOPE = ("control/web/src/",)
+WEB_SUFFIXES = (".ts", ".tsx", ".css")
 # ``compatibility`` alone is a live contract field; only the phrases are not.
 WORDS = re.compile(
     r"(?i)\blegacy\b|\blegacy_\w+|\w+_legacy\b|\bbackfill\b|\bshim\b"
     r"|\bbackwards?[ _-]compat\w*|older (agent|controller|build|deploy)"
 )
 ADOPTERS = re.compile(r"\b(state_adopter|machine_adopter)\(|\bStateAlias\b")
+#: A retired stored-state spelling, or a table of them, in any language: the word
+#: itself (a string, a CSS class) or the alias tables that carried them.
+RETIRED_SPELLINGS = re.compile(
+    r"waiting-for-operator|\b(STATE_ALIASES|INPUT_ALIASES|STATE_INPUT_ALIASES"
+    r"|JOB_KIND_ALIASES|LEGACY_WAIT_STATE)\b"
+)
+#: A retired stored-state word compared with a ``state`` in the web client.  The
+#: words are ordinary English elsewhere (a ``partial`` coverage, a ``draft``
+#: preparation), so only a comparison with something named ``state`` counts.
+_RETIRED_STATE_WORD = (
+    r"""["'](?:partial|compensated|cancelling|waiting|expired|draft|ready)["']"""
+)
+_STATE = r"(?:[\w?]+\.)*\w*[sS]tate\b[\w.?\])]*"
+RETIRED_STATE_COMPARISON = re.compile(
+    rf"{_STATE}\s*[!=]==?\s*{_RETIRED_STATE_WORD}"
+    rf"|{_RETIRED_STATE_WORD}\s*[!=]==?\s*{_STATE}"
+)
+_WEB_COMMENT = re.compile(r"//.*$|/\*.*?\*/")
 MALFORMED = frozenset(
     {
         "ValidationError",
@@ -37,6 +60,32 @@ MALFORMED = frozenset(
 
 def in_scope(path: str) -> bool:
     return path.startswith(SCOPE)
+
+
+def in_web_scope(path: str) -> bool:
+    return (
+        path.startswith(WEB_SCOPE)
+        and path.endswith(WEB_SUFFIXES)
+        and ".generated." not in path
+    )
+
+
+def scan_web_source(source: str) -> list[tuple[int, str]]:
+    """Web lines that add a compatibility word or a retired spelling.
+
+    Comments are not code: a line comment, a one-line block comment and a line
+    that continues a block comment (``*``) are skipped.
+    """
+    hits: list[tuple[int, str]] = []
+    for line, text in enumerate(source.splitlines(), 1):
+        if text.lstrip().startswith(("*", "/*")):
+            continue
+        code = _WEB_COMMENT.sub("", text)
+        if WORDS.search(code):
+            hits.append((line, "legacy or compatibility path"))
+        if RETIRED_SPELLINGS.search(code) or RETIRED_STATE_COMPARISON.search(code):
+            hits.append((line, "retired state spelling"))
+    return hits
 
 
 def _names(node: ast.expr | None) -> set[str]:
@@ -153,6 +202,8 @@ def scan_source(source: str) -> list[tuple[int, str]]:
             hits.append((line, "legacy or compatibility path"))
         if ADOPTERS.search(text):
             hits.append((line, "state alias or adopter"))
+        if RETIRED_SPELLINGS.search(text):
+            hits.append((line, "retired state spelling"))
     for node in ast.walk(tree):
         if _discarded(node, tree):
             hits.append(

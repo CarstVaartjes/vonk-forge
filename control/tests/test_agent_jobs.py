@@ -592,9 +592,9 @@ def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -
             )
         )
         parent_row.payload = {"owner_kind": "run", "owner_id": run_id}
-        parent_row.state = "waiting-for-operator"
+        parent_row.state = "needs-operator"
         succeeded_row.state = "succeeded"
-        parked_row.state = "waiting-for-operator"
+        parked_row.state = "needs-operator"
         parked_row.current_attempt = 1
         parked_row.status_reason = "claim refused: operator-retry-not-authorized"
         succeeded_row.workload_intent_ordinal = None
@@ -632,7 +632,10 @@ def test_late_old_cancellation_never_retires_a_newer_attempt(service) -> None:
         jobs.request_superseded_workload_cancellation_in_session(
             session, (NODE_A,), 2, clock.now
         )
-        first_attempt.state = "expired"
+        first_attempt.state, first_attempt.observation_cause = (
+            "observing",
+            "lease-lapsed",
+        )
         row.current_attempt = 2
         session.add(
             AgentOperationAttempt(
@@ -1351,7 +1354,7 @@ def test_enqueue_rejects_noncanonical_protocol_payload(service) -> None:
 
 
 @pytest.mark.parametrize(
-    "terminal_state", ("succeeded", "failed", "waiting-for-operator", "expired")
+    "terminal_state", ("succeeded", "failed", "needs-operator", "cancelled")
 )
 def test_sqlite_enqueue_rejects_terminal_parent(service, terminal_state: str) -> None:
     jobs, sessions, clock = service
@@ -1730,8 +1733,8 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
                 AgentOperationAttempt.operation_id == superseded.id
             )
         )
-        attempt_row.state = "expired"
-        parked.state = "waiting-for-operator"
+        attempt_row.state, attempt_row.observation_cause = "observing", "lease-lapsed"
+        parked.state = "backoff"
         AgentOperationAdapter(session).settle(
             parked, attempt_row, None, Reported(Outcome.UNKNOWN), clock.now
         )
@@ -2377,7 +2380,7 @@ def test_spent_start_budget_fails_a_parked_start_instead_of_waiting(service) -> 
     # Lease lapsed and the budget is spent; park it the way the old path did.
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
-        stored.state = "waiting-for-operator"
+        stored.state = "backoff"
         stored.next_action_at = clock.now
         parent_job = session.get(Job, stored.parent_job_id)
         parent_job.result = {"cancel_requested": True}
@@ -2662,7 +2665,7 @@ def test_distribution_retry_records_reobserved_progress_without_a_high_water_cla
     # Resume the same authorized, durable transfer after its prior attempt ended.
     with sessions.begin() as session:
         stored = session.get(AgentOperation, operation.id)
-        stored.state = "waiting-for-operator"
+        stored.state = "backoff"
         stored.next_action_at = clock.now
         prior = session.scalar(
             select(AgentOperationAttempt).where(
@@ -3212,12 +3215,12 @@ def test_distribution_parked_with_a_stale_retry_authorisation_resumes_itself(
         )
         stored.current_attempt = 2
         attempt.attempt = 2
-        attempt.state = "expired"
+        attempt.state, attempt.observation_cause = "observing", "lease-lapsed"
         attempt.result = {**_RESTART_INTERRUPTED, "operation": kind}
-        stored.state = "waiting-for-operator"
+        stored.state = "needs-operator"
         stored.next_action_at = None
         stored.status_reason = "attempt 2 lease expired; the effect is unobserved"
-        session.get(Job, stored.parent_job_id).state = "waiting-for-operator"
+        session.get(Job, stored.parent_job_id).state = "needs-operator"
 
     resumed = _claim_until_due(jobs, sessions, clock, operation.id)
     assert resumed is not None and fenced_attempt(sessions, resumed).attempt == 3
@@ -3565,7 +3568,7 @@ def _supersede_waiting_mutation(
         stored = session.get(AgentOperation, operation.id)
         old_parent = session.get(Job, parent_job.id)
         assert stored is not None and old_parent is not None
-        stored.state = "waiting-for-operator"
+        stored.state = "needs-operator"
         stored.current_attempt = 1
         stored.status_reason = "operation outcome uncertain"
         session.add(
@@ -3575,7 +3578,8 @@ def _supersede_waiting_mutation(
                 fence=str(uuid.uuid4()),
                 lease_deadline=clock.now + timedelta(minutes=1),
                 agent_certificate_serial="serial-a",
-                state="waiting-for-operator",
+                state="observing",
+                observation_cause="reported-unknown",
             )
         )
         old_parent.state = "running"
@@ -3743,7 +3747,7 @@ def test_dead_running_mutation_is_reconciled_and_stops_blocking(
         if dead_attempt == "missing":
             session.delete(attempt)
         else:
-            attempt.state = "expired"
+            attempt.state, attempt.observation_cause = "observing", "lease-lapsed"
     clock.advance(seconds=1)
     new_parent = parent(sessions, clock)
     new = jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -3778,7 +3782,7 @@ def test_reconciled_dead_running_mutation_retains_its_pending_result(service) ->
         )
         assert attempt is not None
         attempt.result = {"reason": "unacknowledged stop receipt"}
-        attempt.state = "expired"
+        attempt.state, attempt.observation_cause = "observing", "lease-lapsed"
     clock.advance(seconds=1)
     new_parent = parent(sessions, clock)
     jobs.enqueue(new_parent.id, NODE_A, "recipe.stop", COMMIT, STOP_PAYLOAD)
@@ -4034,7 +4038,7 @@ def _scenario_operator_retry_not_authorized(
     _set_operation(
         sessions,
         operation,
-        state="waiting-for-operator",
+        state="needs-operator",
         current_attempt=1,
         next_action_at=None,
         wait_evidence=None,
@@ -4048,7 +4052,7 @@ def _scenario_upgrade_safety_not_elapsed(
         sessions,
         operation,
         kind=ProtocolAgentOperation.AGENT_UPGRADE.value,
-        state="waiting-for-operator",
+        state="backoff",
         current_attempt=1,
         next_action_at=clock.now,
     )
@@ -4059,7 +4063,7 @@ def _scenario_operator_retry_not_due(sessions, clock, parent_job, operation) -> 
     _set_operation(
         sessions,
         operation,
-        state="waiting-for-operator",
+        state="backoff",
         current_attempt=1,
         next_action_at=clock.now + timedelta(seconds=60),
     )
@@ -4071,7 +4075,7 @@ def _scenario_operator_retry_attempt_not_ready(
     _set_operation(
         sessions,
         operation,
-        state="waiting-for-operator",
+        state="backoff",
         current_attempt=1,
         next_action_at=clock.now,
     )

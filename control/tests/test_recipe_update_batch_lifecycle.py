@@ -40,10 +40,10 @@ NOW = datetime(2026, 9, 1, tzinfo=UTC)
 STORED = (
     "queued",
     "running",
-    "cancelling",
-    "waiting-for-operator",
+    "observing",
+    "needs-operator",
     "succeeded",
-    "partial",
+    "backoff",
     "failed",
     "cancelled",
 )
@@ -125,13 +125,13 @@ def test_a_batch_with_a_child_that_has_not_settled_does_not_end() -> None:
     adapter = RecipeUpdateBatchAdapter()
     job = _job("running")
     assert adapter.conclude(job, _document("succeeded", "running"), NOW) is None
-    assert adapter.conclude(job, _document("succeeded", "partial"), NOW) is None
+    assert adapter.conclude(job, _document("succeeded", "backoff"), NOW) is None
     assert job.state == "running"
 
 
 def test_a_cancel_ends_when_every_child_settled() -> None:
     adapter = RecipeUpdateBatchAdapter()
-    job = _job("cancelling")
+    job = _job("observing")
     row = adapter.cancel_progress(
         job, None, NOW, settled_children=True, reason="stop it"
     )
@@ -141,7 +141,7 @@ def test_a_cancel_ends_when_every_child_settled() -> None:
 def test_a_cancel_that_cannot_confirm_ends_after_the_stop_budget() -> None:
     adapter = RecipeUpdateBatchAdapter()
     document = _document("running")
-    job = _job("cancelling")
+    job = _job("observing")
     job.updated_at = NOW
     from vonk_control.recipe_lifecycle_contract import (
         RecipeOperationCancellationResult,

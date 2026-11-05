@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol import (
     LifecycleState,
+    OutcomeKind,
 )
 
 from .. import job_states
@@ -101,7 +102,7 @@ class ProjectionMixin:
             )
             if isinstance(retained, RunSwitchJournalRepairPendingState):
                 repair_due = wait_due(job)
-            projected_state = "unknown"
+            projected_state = OutcomeKind.UNKNOWN
             blockers = [
                 make_blocker(
                     REPAIR_WAIT,

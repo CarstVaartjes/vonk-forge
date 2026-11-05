@@ -41,7 +41,6 @@ def cli_words() -> str:
         LifecycleState,
         OutcomeKind,
         ProfileReasonCode,
-        StateAlias,
         StopOutcome,
     )
     from vonk_agent_protocol.agent_words import ProfileEffectState
@@ -68,10 +67,7 @@ def cli_words() -> str:
         "SUCCEEDED": LifecycleState.SUCCEEDED,
         "FAILED": LifecycleState.FAILED,
         "CANCELLED": LifecycleState.CANCELLED,
-        "LEGACY_NEEDS_OPERATOR": StateAlias.WAITING_FOR_OPERATOR,
-        "LEGACY_CANCELLING": StateAlias.CANCELLING,
-        "LEGACY_PARTIAL": StateAlias.PARTIAL,
-        "EXPIRED": StateAlias.EXPIRED,
+        "SUPERSEDED": LifecycleState.SUPERSEDED,
         "DRAFT": ArtifactPreparation.DRAFT,
         "READY": ArtifactPreparation.READY,
         "PUBLISHED": EndpointState.PUBLISHED,

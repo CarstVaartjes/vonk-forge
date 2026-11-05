@@ -14,7 +14,7 @@ from ..cli_outcome import (
 )
 from ..cli_select import SelectorError
 from ..cli_states import (
-    OPERATOR_WAIT_STATES,
+    NEEDS_OPERATOR,
 )
 from ..cli_states_generated import (
     ENDPOINT_UNAVAILABLE,
@@ -588,7 +588,7 @@ def _fleet(
                 observed.get("action") != "upgrade"
                 and (
                     _state(observed) in _TERMINAL_STATES
-                    or _state(observed) in OPERATOR_WAIT_STATES
+                    or _state(observed) == NEEDS_OPERATOR
                 )
             ),
             validate=same_job,

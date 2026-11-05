@@ -545,7 +545,7 @@ class RecordingArtifactExecutor:
         """Mirror the durable executor: only a parked child is closed."""
 
         child = self.children.get(operation_id)
-        if child is None or child.state != "waiting-for-operator":
+        if child is None or child.state != "needs-operator":
             return False
         self.children[operation_id] = replace(
             child,
@@ -5692,7 +5692,7 @@ def test_cancel_closes_a_transfer_parked_for_an_operator_instead_of_waiting(tmp_
     )
     service.tick()
     child_id = _child_operation_id(service.get(operation.operation_id))
-    _replace_child(executor, child_id, state="waiting-for-operator")
+    _replace_child(executor, child_id, state="needs-operator")
     for _ in range(3):
         service.tick()
     assert service.get(operation.operation_id).state == LifecycleState.OBSERVING
@@ -5938,7 +5938,7 @@ def _parked_start_switch(tmp_path: Path, *, healthy: bool):
         # produced may still be serving.
         child = session.get(Job, started.id)
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "needs-operator"
         row = session.get(Job, operation.operation_id)
         assert row is not None
         row.state = "running"
@@ -6016,7 +6016,7 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
 ) -> None:
     """No Run/Switch action exists, so a wait for an operator can never end.
 
-    A legacy ``waiting-for-operator`` row with no observation clock is
+    A ``needs-operator`` row with no observation clock is
     re-evaluated by its first advance (core rules 1 and 3): it is retried at the
     core's bounded backoff, then observes its child again and completes.
     """
@@ -6027,7 +6027,7 @@ def test_legacy_operator_wait_without_a_clock_is_healed_not_left_waiting(
     with service._sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None and isinstance(row.result, dict)
-        row.state = "waiting-for-operator"
+        row.state = "needs-operator"
         result = dict(row.result)
         result.pop("observation_due_at", None)
         row.result = result
@@ -6110,7 +6110,7 @@ def test_restart_retry_due_is_projected_without_replacing_the_child(
             select(AgentOperation).where(AgentOperation.parent_job_id == child_id)
         )
         assert agent_child is not None
-        agent_child.state = "waiting-for-operator"
+        agent_child.state = "backoff"
         agent_child.next_action_at = due
         agent_child.status_reason = "exact lifecycle retry scheduled"
 
@@ -6936,7 +6936,7 @@ def test_parked_switch_observes_recovered_child_after_controller_restart(
     with service._sessions.begin() as session:
         row = session.get(Job, operation.operation_id)
         assert row is not None
-        row.state = "waiting"
+        row.state = "observing"
     restarted = RunSwitchOperationService(
         service._sessions,
         lifecycle=service._lifecycle,

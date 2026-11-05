@@ -39,6 +39,9 @@ from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items
 from .test_agent_upgrades import NODE_A, OLD_IDENTITY, PACKAGE_MODEL, SOURCE
 from .test_profile_load_installed_cli import _https_api_peer, _process_environment
 
+#: The stored word of a rollout parked for a person.
+PARKED = "needs-operator"
+
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
@@ -176,15 +179,14 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
         assert child_attempt_number == 2
         operations.fail(child_attempt, "agent upgrade request is invalid")
         clock_value[0] += timedelta(minutes=2)
-        # Rollouts no longer park, but a rollout parked for an operator by an
-        # earlier Controller survives in upgraded databases. Operator resume of
-        # that row must still recheck the caller at the registered route.
+        # Rollouts no longer park, but a rollout parked for an operator must
+        # still be resumable, and resume must recheck the caller at the route.
         with sessions.begin() as session:
             job = session.get(Job, job_id)
             child = session.get(AgentOperation, child_operation_id)
             assert job is not None and child is not None
             assert job.state == "queued"
-            job.state = "waiting-for-operator"
+            job.state = PARKED
             child.next_action_at = None
 
         with sessions() as session:
@@ -193,7 +195,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                 select(AgentOperation).where(AgentOperation.parent_job_id == job_id)
             )
             assert job is not None and child is not None
-            assert job.state == "waiting-for-operator"
+            assert job.state == PARKED
             assert child.state in aos.PARKED
             assert child.id == child_operation_id
             original_identity = (
@@ -252,7 +254,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
             if method == "GET" and path == f"/api/jobs/{job_id}":
                 document = response.json()
                 assert document["id"] == job_id
-                assert document["state"] == "waiting-for-operator"
+                assert document["state"] == PARKED
             if method == "POST" and path == f"/api/jobs/{job_id}/resume":
                 resume_responses.append(
                     (method, path, response.status_code, response.json())
@@ -315,7 +317,7 @@ def test_installed_fleet_resume_rechecks_role_and_preserves_exact_job_attempt(
                     .order_by(AgentOperationAttempt.attempt)
                 )
             )
-            assert job.state == "waiting-for-operator"
+            assert job.state == PARKED
             assert child.state in aos.PARKED
             assert after_denial == original_identity
             assert denied_attempt_audit == original_attempt_audit

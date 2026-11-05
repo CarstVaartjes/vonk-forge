@@ -14,11 +14,9 @@ from vonk_agent_protocol import (
     DesiredAssignmentState,
     EndpointState,
     LifecycleState,
-    LifecycleSubject,
     ObservedAssignmentState,
     SupersedeCode,
     machine_adopter,
-    state_adopter,
 )
 from vonk_agent_protocol.agent_words import (
     ProfileAction,
@@ -97,22 +95,18 @@ if TYPE_CHECKING:
     FleetProfileOperationState = LifecycleState
     FleetProfileCancellationState = LifecycleState
 else:
-    FleetProfileOperationState = Annotated[
-        Literal[
-            LifecycleState.QUEUED,
-            LifecycleState.RUNNING,
-            LifecycleState.BACKOFF,
-            LifecycleState.NEEDS_OPERATOR,
-            LifecycleState.SUCCEEDED,
-            LifecycleState.FAILED,
-            LifecycleState.CANCELLED,
-            LifecycleState.SUPERSEDED,
-        ],
-        BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
+    FleetProfileOperationState = Literal[
+        LifecycleState.QUEUED,
+        LifecycleState.RUNNING,
+        LifecycleState.BACKOFF,
+        LifecycleState.NEEDS_OPERATOR,
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        LifecycleState.SUPERSEDED,
     ]
-    FleetProfileCancellationState = Annotated[
-        Literal[LifecycleState.OBSERVING, LifecycleState.CANCELLED],
-        BeforeValidator(state_adopter(LifecycleSubject.FLEET_PROFILE_APPLICATION)),
+    FleetProfileCancellationState = Literal[
+        LifecycleState.OBSERVING, LifecycleState.CANCELLED
     ]
 
 FleetProfileSupersedeCode = SupersedeCode

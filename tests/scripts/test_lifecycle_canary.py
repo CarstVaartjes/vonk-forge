@@ -42,7 +42,7 @@ class FakeControl:
             self.current = list(self.walks.pop(0))
             return self._done({"application_id": "app-1", "state": "queued"})
         if tail[:2] == ["profile", "cancel"]:
-            return self._done({"state": "cancelling"})
+            return self._done({"state": "observing"})
         if tail[:2] == ["profile", "progress"]:
             if self.outage_polls:
                 self.outage_polls -= 1
@@ -111,11 +111,12 @@ def test_a_stuck_admission_ends_and_a_fresh_load_completes() -> None:
     assert canary.follow("app-1", label="fresh") == LifecycleState.SUCCEEDED.value
 
 
-def test_an_operator_wait_without_an_action_fails_either_spelling() -> None:
+def test_an_operator_wait_without_an_action_fails() -> None:
     module = _module()
-    for state in ("needs-operator", "waiting-for-operator"):
-        document = {"items": [{"id": "j", "state": state, "supported_actions": []}]}
-        assert module.operator_waits_without_action(document)
+    document = {
+        "items": [{"id": "j", "state": "needs-operator", "supported_actions": []}]
+    }
+    assert module.operator_waits_without_action(document)
     advertised = {
         "items": [{"id": "j", "state": "needs-operator", "supported_actions": ["stop"]}]
     }

@@ -5,7 +5,7 @@ A profile application is a composite over Run/Switch: its state is
 exists), and its cancel always completes.  These tests pin what the migration
 changed:
 
-* a legacy ``waiting-for-operator`` load (the mirror of a child that waited for a
+* a load parked as ``needs-operator`` (the mirror of a child that waited for a
   person) adopts and heals: it runs again and its child is observed, never left
   and never touched;
 * ``needs-operator`` is unreachable for this kind, over the whole state space;
@@ -163,7 +163,7 @@ def test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone(tmp_path) 
         before = session.get(Job, child_id)
         assert before is not None
         snapshot = (before.state, before.status_reason, dict(before.result or {}))
-    world.edit(state="waiting-for-operator", status_reason="the child is parked")
+    world.edit(state="needs-operator", status_reason="the child is parked")
     assert world.service.application(world.id).state == LifecycleState.NEEDS_OPERATOR
 
     assert world.service.tick() is True  # healed
@@ -190,11 +190,11 @@ def test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait(tmp_path) -
 
     def legacy(progress) -> None:
         document = progress["switch_adapter"]
-        document["state"] = "waiting-for-operator"
+        document["state"] = "needs-operator"
         document["status_reason"] = "the child is parked"
 
     world.edit_progress(legacy)
-    world.edit(state="waiting-for-operator")
+    world.edit(state="needs-operator")
     for _ in range(4):
         world.service.tick()
     view = world.service.application(world.id)
@@ -205,7 +205,7 @@ def test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait(tmp_path) -
 
 def test_a_legacy_wait_still_being_admitted_retries_its_admission(tmp_path) -> None:
     world = _World(tmp_path)
-    world.edit(state="waiting-for-operator", current_operation_id=None, current_step=0)
+    world.edit(state="needs-operator", current_operation_id=None, current_step=0)
 
     def pending(progress) -> None:
         progress["admission_pending"] = True
@@ -269,7 +269,7 @@ _EVENTS = (
 )
 
 
-@pytest.mark.parametrize("stored", ["queued", "running", "waiting-for-operator"])
+@pytest.mark.parametrize("stored", ["queued", "running", "needs-operator"])
 @pytest.mark.parametrize("shape", sorted(_SHAPES))
 def test_no_profile_state_can_wait_for_an_operator(stored: str, shape: str) -> None:
     """Rule 3 for this kind, over the whole state space: nothing is irreversible
@@ -290,7 +290,7 @@ def test_no_profile_state_can_wait_for_an_operator(stored: str, shape: str) -> N
 
 def test_the_legacy_wait_is_the_only_needs_operator_and_it_is_read_only() -> None:
     adapter = FleetProfileAdapter()
-    legacy = adapter.adopt(_application_row("waiting-for-operator", dict(_PROGRESS)))
+    legacy = adapter.adopt(_application_row("needs-operator", dict(_PROGRESS)))
     assert legacy.state is State.NEEDS_OPERATOR
     for stored in ("queued", "running", "succeeded", "failed", "cancelled"):
         assert (
@@ -353,7 +353,7 @@ def test_a_cancel_completes_when_the_stop_cannot_be_confirmed(tmp_path) -> None:
             break
     final = world.service.application(world.id)
     assert final.state == "cancelled", states[-5:]
-    assert "waiting-for-operator" not in states
+    assert "needs-operator" not in states
     assert world.now[0] - NOW >= timedelta(0)
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
     # the child kept running on its own lifecycle: it was never aborted
@@ -573,19 +573,19 @@ def _legacy_cancel_parking(world: _World) -> None:
             "request_key": _uuid(720),
             "actor": "admin",
             "requested_at": requested,
-            "state": "cancelling",
+            "state": "observing",
             "cause": "operator",
             "workload_intent_ordinal": (progress.get("workload_intent_ordinal") or 0)
             + 1,
         }
-        progress["switch_adapter"]["state"] = "waiting-for-operator"
+        progress["switch_adapter"]["state"] = "needs-operator"
         progress["switch_adapter"]["status_reason"] = (
             "Cancellation cannot reconcile Run/Switch child state unknown"
         )
 
     world.edit_progress(legacy)
     world.edit(
-        state="waiting-for-operator",
+        state="needs-operator",
         status_reason="Cancellation cannot reconcile Run/Switch child state unknown",
     )
 
@@ -607,7 +607,7 @@ def test_a_legacy_parked_cancel_leaves_the_wait_and_completes(tmp_path) -> None:
         if states[-1] == "cancelled":
             break
     assert states[-1] == "cancelled"
-    assert "waiting-for-operator" not in states
+    assert "needs-operator" not in states
     final = world.service.application(world.id)
     assert final.cancellation is not None and final.cancellation.state == "cancelled"
 
@@ -639,7 +639,7 @@ def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -
         assert child is not None
         child.state = "failed"
         child.status_reason = "run-switch.the-child-ended"
-    world.edit(state="waiting-for-operator", status_reason="the child is parked")
+    world.edit(state="needs-operator", status_reason="the child is parked")
 
     for _ in range(4):
         world.service.tick()
@@ -666,7 +666,7 @@ def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(
         result = dict(child.result)
         result.pop("observation_due_at", None)
         child.result = result
-        child.state = "waiting-for-operator"
+        child.state = "needs-operator"
     for _ in range(3):
         world.service.tick()
         view = world.service.application(world.id)

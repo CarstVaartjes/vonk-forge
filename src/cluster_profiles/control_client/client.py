@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Never, Self
 
 import httpx2
 
-from ..cli_states import FAILED_JOB_STATES, OPERATOR_WAIT_STATES, SUCCEEDED
+from ..cli_states import FAILED_JOB_STATES, NEEDS_OPERATOR, SUCCEEDED
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..control_transport import open_https
 from ..error_reporting import (
@@ -778,7 +778,7 @@ class ControlClient:
                 return result
             if result.state in FAILED_JOB_STATES:
                 raise JobFailed(result, sensitive_values=(self._token,))
-            if result.state in OPERATOR_WAIT_STATES:
+            if result.state == NEEDS_OPERATOR:
                 raise JobWaitingForOperator(result, sensitive_values=(self._token,))
             remaining = deadline - time.monotonic()
             if remaining <= 0:

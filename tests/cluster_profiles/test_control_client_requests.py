@@ -333,7 +333,7 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     result = client.request(
         "GET",
         "/api/operations",
-        query={"cursor": "next page", "state": "waiting-for-operator"},
+        query={"cursor": "next page", "state": "needs-operator"},
     )
 
     assert result == {
@@ -344,7 +344,7 @@ def test_raw_request_encodes_bounded_query_parameters(tmp_path: Path) -> None:
     request = observed[0]
     assert isinstance(request, urllib.request.Request)
     assert request.full_url == (
-        "https://forge.example.test/api/operations?cursor=next+page&state=waiting-for-operator"
+        "https://forge.example.test/api/operations?cursor=next+page&state=needs-operator"
     )
     assert request.get_header("Authorization") == "Bearer private-token"
 

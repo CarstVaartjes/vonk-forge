@@ -44,9 +44,9 @@ def park_for_operator(
 
     The Controller never parks a restart-safe order any more (an uncertain effect
     is retried), so a test that needs an operator wait writes the stored row such a
-    wait leaves behind, exactly as an order written before the lifecycle core
-    would be: ``waiting-for-operator``, no ``next_action_at``, the attempt's own
-    waiting result, and the parent aggregated from it.
+    wait leaves behind: ``needs-operator``, no ``next_action_at``, the attempt
+    observed with the executor's "unknown" and its waiting result, and the parent
+    aggregated from it.
     """
 
     from vonk_control.agent_jobs import (
@@ -66,7 +66,8 @@ def park_for_operator(
         assert attempt is not None
         operation = session.get(AgentOperation, attempt.operation_id)
         assert operation is not None
-        attempt.state = "waiting-for-operator"
+        attempt.state = "observing"
+        attempt.observation_cause = "reported-unknown"
         attempt.result = _document(
             _failure_result(
                 "operation_requires_operator",
@@ -75,7 +76,7 @@ def park_for_operator(
                 failure_kind=FailureKind.INVALID_AUTHORITY,
             )
         )
-        operation.state = "waiting-for-operator"
+        operation.state = "needs-operator"
         operation.next_action_at = None
         operation.status_reason = reason
         jobs._aggregate_parent(  # pyright: ignore[reportPrivateUsage]
