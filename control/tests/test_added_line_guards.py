@@ -1989,12 +1989,37 @@ for _ in range(5):
     service.tick()
 assert service.get_operation(operation.id).attempt == waited.attempt
 """
-# A replanned row waits QUEUED for a slot: no worker ran (pool liveness).
-TICKS_KEEP_QUEUED = """\
+# A worker reports QUEUED too (an access wait, a rate limit): the flake's
+# exact form when only that state is asserted, and its negation.
+TICKS_THEN_QUEUED = """\
+for _ in range(4):
+    service.tick()
+assert service.get_operation(older.id).state == LifecycleState.QUEUED
+"""
+TICKS_THEN_NOT_QUEUED = """\
+for _ in range(4):
+    service.tick()
+assert service.get_operation(newer.id).state != LifecycleState.QUEUED
+"""
+# A count-capped poll without a sleep is the same class.
+SLEEPLESS_POLL = """\
+for _ in range(100):
+    service.tick()
+    if service.get_operation(first.id).state == "queued":
+        break
+"""
+# The operator readers read the same rows.
+TICKS_THEN_OPERATOR_READ = """\
 for _ in range(3):
     service.tick()
-assert service.get_operation(again.id).state == LifecycleState.QUEUED
-assert again.id not in service._background_operations
+assert service.get_operator_operation(operation.id).state == "succeeded"
+"""
+# The read may follow an unrelated assertion.
+TICKS_THEN_LATER_READ = """\
+for _ in range(3):
+    service.tick()
+assert len(requests) == 2
+assert service.get_operation(operation.id).state == LifecycleState.SUCCEEDED
 """
 # A fixed number of cycles around a deadline-bounded wait.
 CYCLES_OF_BOUNDED_WAITS = """\
@@ -2021,7 +2046,18 @@ def _tick_poll_hits(body: str, *, setup: str = TICK_POLL_SETUP) -> list[str]:
     return check_source(TICK_POLL_PATH, source, lines, modes=("tick-polls",))
 
 
-@pytest.mark.parametrize("body", [FIXED_TICKS_THEN_OUTCOME, COUNTED_POLL])
+@pytest.mark.parametrize(
+    "body",
+    [
+        FIXED_TICKS_THEN_OUTCOME,
+        COUNTED_POLL,
+        TICKS_THEN_QUEUED,
+        TICKS_THEN_NOT_QUEUED,
+        SLEEPLESS_POLL,
+        TICKS_THEN_OPERATOR_READ,
+        TICKS_THEN_LATER_READ,
+    ],
+)
 def test_fixed_tick_counts_cannot_wait_for_a_threaded_cache_outcome(body):
     assert _tick_poll_hits(body)
     # Only an added loop is reported, and only in a module that builds the cache.
@@ -2035,7 +2071,6 @@ def test_fixed_tick_counts_cannot_wait_for_a_threaded_cache_outcome(body):
     [
         TICKS_BEFORE_DUE,
         TICKS_KEEP_ATTEMPT,
-        TICKS_KEEP_QUEUED,
         CYCLES_OF_BOUNDED_WAITS,
         SYNCHRONOUS_TICKS,
     ],

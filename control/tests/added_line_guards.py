@@ -2319,13 +2319,16 @@ def background_retry_calls(source: str) -> list[int]:
 
 # Model-cache transfers run on the worker pool and report on a later tick, so a
 # fixed number of ticks cannot know whether a thread has reported (#2076). The
-# scope is a module that builds the cache and a loop or assertion that reads it
-# (``get_operation``): other services' ``tick`` is synchronous. A row stays
-# QUEUED without any worker, so asserting that alone is no thread's outcome.
+# scope is a module that builds the cache and a loop, or the assertions after
+# it, that read the cache: other services' ``tick`` is synchronous. Any state
+# counts: a worker also reports QUEUED (an access wait, a rate limit).
 TICK_POLL_SCOPE = re.compile(r"\bModelCacheService\(|\b_service\(")
 TICK_POLL_MESSAGE = (
     "fixed tick count before a threaded model-cache outcome; wait with "
     "_drain, _drain_until or _wait_for"
+)
+CACHE_READS = frozenset(
+    {"get_operation", "get_operator_operation", "get_operator_request"}
 )
 
 
@@ -2357,45 +2360,29 @@ def _reads_cache(nodes: list[ast.AST]) -> bool:
     return any(
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "get_operation"
+        and node.func.attr in CACHE_READS
         for node in nodes
     )
 
 
 def _asserts_thread_outcome(statements: list[ast.stmt]) -> bool:
-    """Whether the assertions right after a loop read a worker's outcome."""
+    """Whether the asserts and assignments right after a loop read an outcome."""
+    nodes: list[ast.AST] = []
     for statement in statements:
         if not isinstance(statement, (ast.Assert, ast.Assign, ast.AnnAssign)):
-            return False
-        for node in ast.walk(statement):
-            if isinstance(node, ast.Attribute) and node.attr == "failure":
-                return True
-            if not isinstance(node, ast.Compare) or not any(
-                isinstance(part, ast.Attribute) and part.attr == "state"
-                for part in ast.walk(node)
-            ):
-                continue
-            states = {
-                part.attr
-                if isinstance(part, ast.Attribute)
-                else str(part.value).upper()
-                for operand in (node.left, *node.comparators)
-                for part in ast.walk(operand)
-                if isinstance(part, ast.Attribute)
-                and part.attr.isupper()
-                or isinstance(part, ast.Constant)
-                and isinstance(part.value, str)
-            }
-            if states - {"QUEUED"}:
-                return True
-    return False
+            break
+        nodes.extend(ast.walk(statement))
+    return _reads_cache(nodes) and any(
+        isinstance(node, ast.Attribute) and node.attr in {"state", "failure"}
+        for node in nodes
+    )
 
 
 def fixed_tick_polls(source: str) -> list[int]:
     """Fixed-count ``.tick()`` loops that poll for, or assert, a worker outcome.
 
-    With a ``break`` and a sleep the loop is a poll capped by CPU speed; without
-    a ``break`` the assertions after it guess that the threads have reported.
+    With a ``break`` the loop is a poll capped by a count, so by CPU speed;
+    without one the assertions after it guess that the threads have reported.
     """
     sites = []
     for parent in ast.walk(ast.parse(source)):
@@ -2415,21 +2402,10 @@ def fixed_tick_polls(source: str) -> list[int]:
                 ):
                     continue
                 if any(isinstance(node, ast.Break) for node in own):
-                    if _reads_cache(own) and any(
-                        isinstance(node, ast.Call)
-                        and ast.unparse(node.func) in {"time.sleep", "sleep"}
-                        for node in own
-                    ):
-                        sites.append(loop.lineno)
-                    continue
-                following = block[index + 1 :]
-                if _reads_cache(
-                    [
-                        node
-                        for statement in following[:1]
-                        for node in ast.walk(statement)
-                    ]
-                ) and _asserts_thread_outcome(following):
+                    polls = _reads_cache(own)
+                else:
+                    polls = _asserts_thread_outcome(block[index + 1 :])
+                if polls:
                     sites.append(loop.lineno)
     return sites
 
