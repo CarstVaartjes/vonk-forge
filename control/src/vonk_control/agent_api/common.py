@@ -121,8 +121,9 @@ def contract_verdict_or_wait(error: Exception) -> NoReturn:
     """Answer an error from an agent route: 403 security refusal, 422 contract verdict.
 
     A 422 makes the Spark settle and discard the bytes, so only a validation
-    failure of the request's own bytes (a pydantic ValidationError, or a typed
-    InvalidRequestError) may say it. A security refusal keeps its 403 and an
+    failure of the request's own bytes (a pydantic ValidationError, a typed
+    InvalidRequestError, or an AgentProtocolError, the protocol's own verdict on
+    a message) may say it. A security refusal keeps its 403 and an
     unknown outcome keeps its own typed wait. Any other ValueError is this
     Controller's own bug, decode or race: the same bytes can be accepted later,
     so it is a wait the Spark retries.
