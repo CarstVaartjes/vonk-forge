@@ -335,11 +335,7 @@ def test_a_download_that_has_not_started_wins_the_tie_with_a_large_one_between_f
         )
     assert large.id < small.id
 
-    for _ in range(3):
-        service.tick()
-        if service.get_operation(small.id).state == LifecycleState.SUCCEEDED:
-            break
-        time.sleep(0.05)
+    _drain(service, small.id)
     assert service.get_operation(small.id).state == LifecycleState.SUCCEEDED
     assert service.get_operation(large.id).state == LifecycleState.RUNNING
 

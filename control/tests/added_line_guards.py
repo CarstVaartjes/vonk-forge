@@ -94,6 +94,7 @@ MODES = (
     "trap-waits",
     "plan-digests",
     "background-retries",
+    "tick-polls",
     "locked-io",
     "scratch-names",
     "capacity-refusals",
@@ -1893,6 +1894,13 @@ def check_source(
             (line, "agent stamp aged against the Controller clock; use received_at")
             for line in agent_stamp_freshness(source, path)
         )
+    if (
+        python
+        and "tick-polls" in modes
+        and path.startswith("control/tests/")
+        and TICK_POLL_SCOPE.search(source)
+    ):
+        hits.extend((line, TICK_POLL_MESSAGE) for line in fixed_tick_polls(source))
     if python and not is_test and "planner-defects" in modes:
         hits.extend(
             (line, "planner contract defect hidden by broad wait")
@@ -2307,6 +2315,99 @@ def background_retry_calls(source: str) -> list[int]:
             and node.func.id in BACKGROUND_RETRY_CALLS
         )
     ]
+
+
+# Model-cache transfers run on the worker pool and report on a later tick, so a
+# fixed number of ticks cannot know whether a thread has reported (#2076). The
+# scope is a module that builds the cache and a loop, or the assertions after
+# it, that read the cache: other services' ``tick`` is synchronous. Any state
+# counts: a worker also reports QUEUED (an access wait, a rate limit).
+TICK_POLL_SCOPE = re.compile(r"\bModelCacheService\(|\b_service\(")
+TICK_POLL_MESSAGE = (
+    "fixed tick count before a threaded model-cache outcome; wait with "
+    "_drain, _drain_until or _wait_for"
+)
+CACHE_READS = frozenset(
+    {"get_operation", "get_operator_operation", "get_operator_request"}
+)
+
+
+def _literal_range(node: ast.AST) -> bool:
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "range"
+        and bool(node.args)
+        and all(isinstance(argument, ast.Constant) for argument in node.args)
+    )
+
+
+def _own_nodes(loop: ast.For) -> list[ast.AST]:
+    """The loop's nodes, without those of loops or functions nested in it."""
+    nodes: list[ast.AST] = []
+    pending: list[ast.AST] = [*loop.body, *loop.orelse]
+    while pending:
+        node = pending.pop()
+        nodes.append(node)
+        if not isinstance(
+            node, (ast.For, ast.AsyncFor, ast.While, ast.FunctionDef, ast.Lambda)
+        ):
+            pending.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def _reads_cache(nodes: list[ast.AST]) -> bool:
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in CACHE_READS
+        for node in nodes
+    )
+
+
+def _asserts_thread_outcome(statements: list[ast.stmt]) -> bool:
+    """Whether the asserts and assignments right after a loop read an outcome."""
+    nodes: list[ast.AST] = []
+    for statement in statements:
+        if not isinstance(statement, (ast.Assert, ast.Assign, ast.AnnAssign)):
+            break
+        nodes.extend(ast.walk(statement))
+    return _reads_cache(nodes) and any(
+        isinstance(node, ast.Attribute) and node.attr in {"state", "failure"}
+        for node in nodes
+    )
+
+
+def fixed_tick_polls(source: str) -> list[int]:
+    """Fixed-count ``.tick()`` loops that poll for, or assert, a worker outcome.
+
+    With a ``break`` the loop is a poll capped by a count, so by CPU speed;
+    without one the assertions after it guess that the threads have reported.
+    """
+    sites = []
+    for parent in ast.walk(ast.parse(source)):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(parent, field, None)
+            if not isinstance(block, list):
+                continue
+            for index, loop in enumerate(block):
+                if not isinstance(loop, ast.For) or not _literal_range(loop.iter):
+                    continue
+                own = _own_nodes(loop)
+                if not any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "tick"
+                    for node in own
+                ):
+                    continue
+                if any(isinstance(node, ast.Break) for node in own):
+                    polls = _reads_cache(own)
+                else:
+                    polls = _asserts_thread_outcome(block[index + 1 :])
+                if polls:
+                    sites.append(loop.lineno)
+    return sites
 
 
 def planner_defect_waits(source: str) -> list[int]:

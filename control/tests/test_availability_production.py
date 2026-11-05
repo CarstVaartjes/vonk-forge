@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
-import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -71,6 +70,7 @@ from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha
 
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import place_test_image
+from .test_model_cache_availability_regressions import _drain
 from .test_recipe_builds import _write_controller_build_receipt
 from .test_recipe_builds import setup as _build_setup
 from .test_recipe_image_availability import _typed_availability_payload
@@ -2566,13 +2566,9 @@ def test_postgres_connected_source_build_queues_model_child_until_builder_eligib
     assert waiting.next_attempt_at is not None
     assert waiting.model_child is not None
 
-    for _ in range(100):
-        model_cache.tick()
-        child = model_cache.get_operation(str(waiting.model_child["id"]))
-        if child.state == "succeeded":
-            break
-        time.sleep(0.01)
-    assert child.state == "succeeded"
+    child_id = str(waiting.model_child["id"])
+    _drain(model_cache, child_id)
+    assert model_cache.get_operation(child_id).state == "succeeded"
     with sessions() as session:
         session.add(
             AgentNode(
