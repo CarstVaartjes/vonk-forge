@@ -225,6 +225,48 @@ def _keep_end(text: str, limit: int) -> tuple[str, int]:
     return encoded[cut:].decode("utf-8", errors="ignore"), cut
 
 
+# The Rust protocol's `omission_marker`: the line between the cause lines a
+# retained tail kept from above its window and the window itself.
+_OMISSION_MARKER = re.compile(r"\[[0-9]+ bytes omitted\]")
+
+
+def _keep_retained(text: str, limit: int) -> tuple[str, int]:
+    """Bound a retained tail without losing its shape, and report what it dropped.
+
+    The agent's tail may carry cause lines kept from above its window, an
+    omission marker, then the window. Cutting from the front would drop the
+    cause first, so the window's front is cut instead; the causes keep at least
+    half the bound. Text with no marker is one tail and keeps its end.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text, 0
+    start = 0
+    found: tuple[int, int] | None = None
+    for line in encoded.split(b"\n"):
+        if _OMISSION_MARKER.fullmatch(line.decode("utf-8", errors="ignore")):
+            found = (start, start + len(line) + 1)
+            break
+        start += len(line) + 1
+    if found is None:
+        return _keep_end(text, limit)
+    causes, marker, window = (
+        encoded[: found[0]],
+        encoded[found[0] : found[1]],
+        encoded[found[1] :],
+    )
+    budget = limit - len(marker)
+    room = max(budget // 2, budget - len(window))
+    if len(causes) > room:
+        cut = causes.rfind(b"\n", 0, room)
+        causes = causes[: cut + 1] if cut >= 0 else causes[:room]
+    kept_window, _ = _keep_end(
+        window.decode("utf-8", errors="ignore"), budget - len(causes)
+    )
+    kept = causes.decode("utf-8", errors="ignore") + marker.decode() + kept_window
+    return kept, len(encoded) - len(kept.encode("utf-8"))
+
+
 def log_tail(value: str) -> FailureLogTail:
     original = value.encode("utf-8")
     truncated = len(original) > MAX_LOG_BYTES or len(value.splitlines()) > MAX_LOG_LINES
@@ -365,8 +407,11 @@ def sanitize_diagnostics(value: object) -> FailureDiagnostics:
         # The agent already retained this tail from the whole stream, so the
         # Controller only redacts it.  Re-selecting the window here would keep
         # the head of a tail and discard the failure that ended it, and it would
-        # report a bound the agent had already reported.
-        cleaned, dropped = _keep_end(safe_text(document[field]["text"]), MAX_LOG_BYTES)
+        # report a bound the agent had already reported.  Redaction can grow
+        # the text; the bound then keeps the causes ahead of the marker.
+        cleaned, dropped = _keep_retained(
+            safe_text(document[field]["text"]), MAX_LOG_BYTES
+        )
         document[field]["text"] = cleaned
         if dropped:
             document[field]["truncated"] = True

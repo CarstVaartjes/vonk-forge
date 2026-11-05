@@ -106,6 +106,8 @@ impl ExitCause {
 /// above its window and the window itself, naming the source bytes omitted.
 /// A reader that has to shrink such a tail keeps both sides of it: the lines
 /// before it are the cause, the lines after it are how the process ended.
+/// The agent's `clamp_retained` and the Controller's `_keep_retained`
+/// (`control/src/vonk_control/failure_evidence.py`) are those readers.
 pub fn omission_marker(dropped: u64) -> String {
     format!("[{dropped} bytes omitted]")
 }

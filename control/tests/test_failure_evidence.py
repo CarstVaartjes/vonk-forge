@@ -341,6 +341,54 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail(
     assert "token: v" not in cleaned.stderr.text
 
 
+def test_sanitize_diagnostics_keeps_the_cause_ahead_of_the_omission_marker() -> None:
+    """Catches the bound cutting the cause the helper kept above its window.
+
+    The helper retains a native abort's ``what()`` message ahead of the tail
+    (2026-11-05: an LTX job's evidence lost it to C++ frames). When redaction
+    grows that text past the bound, a cut from the front drops the cause and
+    the marker first; the window's front is what gives way instead.
+    """
+
+    cause = (
+        "terminate called after throwing an instance of 'c10::Error'\n"
+        "  what():  CUDA error: an illegal memory access was encountered\n"
+    )
+    window = "token: v\n" * 150 + "the container exited here\n"
+    text = cause + "[7943 bytes omitted]\n" + window
+    assert len(text.encode()) <= 2048
+    diagnostics = FailureDiagnostics.model_validate(
+        {
+            "schema_version": 1,
+            "collected_at": NOW.isoformat(),
+            "phase": "recipe.job.run.v1",
+            "category": "runtime",
+            "stdout": {
+                "text": "",
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "stderr": {
+                "text": text,
+                "truncated": True,
+                "dropped_bytes": 7943,
+                "dropped_lines": 95,
+            },
+            "versions": [],
+            "sandbox": [],
+            "storage": [],
+            "preflight": [],
+            "collector_errors": [],
+        }
+    )
+    cleaned = sanitize_diagnostics(diagnostics).stderr
+    assert cleaned.text.startswith(cause + "[7943 bytes omitted]\n")
+    assert cleaned.text.endswith("the container exited here\n")
+    assert len(cleaned.text.encode()) <= 2048
+    assert (cleaned.dropped_bytes or 0) > 7943
+
+
 def test_ring_buffer_preserves_last_lines_and_reports_loss():
     tail = log_tail("noise\n" * 20000 + "last useful error\n")
     assert tail.text.endswith("last useful error")
