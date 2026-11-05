@@ -77,9 +77,7 @@ def operator_resume_candidates_in_session(
     """
 
     job = session.get(Job, job_id)
-    if job is None or job.state not in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-    ):
+    if job is None or job.state not in job_states.LIVE:
         return ()
     if column_value(job, "result") is not None:
         if not column_is_document(job, "result"):

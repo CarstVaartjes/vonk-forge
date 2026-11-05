@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileProjectionKind,
 )
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..fleet_profile_contract import (
     FleetProfileAdoptedApplicationEffect,
     FleetProfileAdoptedStopEffect,
@@ -258,15 +258,7 @@ class FleetProfileService:
         owned_nodes: set[str] = set()
         for application in session.scalars(
             select(FleetProfileApplication)
-            .where(
-                FleetProfileApplication.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                )
-            )
+            .where(FleetProfileApplication.state.in_(fleet_profile_states.LIVE))
             .order_by(FleetProfileApplication.created_at, FleetProfileApplication.id)
         ):
             if application.id == excluded_application_id:
@@ -430,15 +422,7 @@ class FleetProfileService:
         if not changed_nodes:
             return effects
         for pending in session.scalars(
-            select(Job).where(
-                Job.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                )
-            )
+            select(Job).where(Job.state.in_(job_states.LIVE))
         ):
             if _workload_intent_ordinal(pending) is None:
                 continue
@@ -453,13 +437,7 @@ class FleetProfileService:
                 )
         for pending in session.scalars(
             select(FleetProfileApplication).where(
-                FleetProfileApplication.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                ),
+                FleetProfileApplication.state.in_(fleet_profile_states.LIVE),
             )
         ):
             if pending.id == excluded_application_id:

@@ -33,3 +33,23 @@ test("an unknown setting is said so, and a wait without evidence shows no swap l
   rerender(<WaitingFor blockers={[blocker]} />);
   expect(screen.queryByText(/Swap:/)).toBeNull();
 });
+
+test("the dependency deadline and resume condition are shown from the contract", () => {
+  render(
+    <WaitingFor
+      blockers={[blocker]}
+      dependencyDeadline="2026-11-04T12:00:00Z"
+      resumeCondition="effect-observed"
+    />,
+  );
+  const list = screen.getByRole("list", { name: "Waiting for" });
+  expect(list).toHaveTextContent("Dependency deadline");
+  expect(list).toHaveTextContent("Resumes when effect-observed");
+});
+
+test("without a deadline or resume condition neither line is shown", () => {
+  render(<WaitingFor blockers={[blocker]} dependencyDeadline={null} />);
+  const list = screen.getByRole("list", { name: "Waiting for" });
+  expect(list).not.toHaveTextContent("Dependency deadline");
+  expect(list).not.toHaveTextContent("Resumes when");
+});

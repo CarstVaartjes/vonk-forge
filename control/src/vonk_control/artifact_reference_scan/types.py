@@ -7,27 +7,19 @@ from dataclasses import dataclass
 from typing import Literal
 
 from vonk_agent_protocol import (
-    LifecycleState,
     RunState,
 )
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..artifact_lifecycle import (
     ArtifactIdentity,
 )
 from ..machine_states import INSTALLATION_ACTIVE
 
-_ACTIVE_PROFILE_APPLICATIONS = job_states.words(
-    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-)
+_ACTIVE_PROFILE_APPLICATIONS = fleet_profile_states.LIVE
 
 
-_ACTIVE_RUN_SWITCH_JOBS = job_states.words(
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    LifecycleState.NEEDS_OPERATOR,
-)
+_ACTIVE_RUN_SWITCH_JOBS = job_states.LIVE
 
 
 _ACTIVE_INSTALLATIONS = INSTALLATION_ACTIVE
@@ -36,13 +28,7 @@ _ACTIVE_INSTALLATIONS = INSTALLATION_ACTIVE
 _ACTIVE_RUNS = (RunState.STARTING, RunState.RUNNING, RunState.STOPPING)
 
 
-_ACTIVE_ARTIFACT_JOBS = job_states.words(
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.BACKOFF,
-    LifecycleState.NEEDS_OPERATOR,
-    LifecycleState.OBSERVING,
-)
+_ACTIVE_ARTIFACT_JOBS = job_states.LIVE
 
 
 @dataclass(frozen=True, slots=True)

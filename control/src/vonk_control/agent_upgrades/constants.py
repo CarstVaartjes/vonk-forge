@@ -5,10 +5,6 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
-from vonk_agent_protocol import (
-    LifecycleState,
-)
-
 from .. import job_states
 from ..agent_jobs import (
     AGENT_UPGRADE_RECOVERY_FENCE,
@@ -25,9 +21,7 @@ _ONLINE_WINDOW = timedelta(seconds=150)
 _AGENT_UPGRADE_RECOVERY_FENCE = AGENT_UPGRADE_RECOVERY_FENCE
 
 
-_ACTIVE_ROLLOUT_STATES = job_states.words(
-    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-)
+_ACTIVE_ROLLOUT_STATES = job_states.LIVE
 
 
 _ALREADY_CURRENT = "already runs the requested agent build"
