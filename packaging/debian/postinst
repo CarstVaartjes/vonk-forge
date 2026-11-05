@@ -217,6 +217,8 @@ schedule_permanent_helper_restart() {
             trap '"'"'/usr/bin/systemctl --system start \
                 vonk-forge-agent.service vonk-forge-monitor.service \
                 >/dev/null 2>&1 || true'"'"' EXIT
+            # A kill (RuntimeMaxSec, a hangup) exits through the trap above.
+            trap '"'"'exit 1'"'"' TERM INT HUP
             /usr/bin/systemctl --system stop \
                 vonk-forge-agent.service vonk-forge-monitor.service \
                 >/dev/null 2>&1 || true

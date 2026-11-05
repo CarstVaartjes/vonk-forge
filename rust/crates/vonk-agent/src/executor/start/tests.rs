@@ -191,12 +191,11 @@ async fn collective_readiness_retries_inspection_without_repreparing_a_launched_
         );
         assert_eq!(body.run_generation, Some(request.run_generation));
     }
-    // An unread inspection is a temporary dependency, as for a retained
-    // Start: the Controller issues the attempt again, and nothing stops the rank.
-    assert!(results[..2].iter().all(|result| {
-        result.failure().and_then(|failure| failure.failure_kind)
-            == Some(AgentFailureKind::TemporaryDependency)
-    }));
+    assert!(
+        results[..2]
+            .iter()
+            .all(|result| matches!(result, ExecutionResult::Unknown(_)))
+    );
     assert!(matches!(results.last(), Some(ExecutionResult::Done(_))));
     executor
         .runtime
