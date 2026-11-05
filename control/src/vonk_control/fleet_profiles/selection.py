@@ -30,7 +30,6 @@ from ..models import FleetProfileApplication, FleetProfileSelection, User
 from ..persisted_waits import read_wait
 from ..profile_capacity import release_unassigned_profile_claims
 from ..settings import DATABASE_WAIT_BUDGETS
-from ..user_authority import serialize_user_authority
 from .contracts import (
     FleetProfileAdmissionBusy,
     FleetProfileAdmissionDefect,
@@ -174,11 +173,8 @@ class FleetProfileService:
         *,
         mutation: bool = True,
     ) -> None:
-        # Serialize current authority only when accepting a new user mutation.
         from .service import FleetProfileService
 
-        if mutation:
-            serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
         if not FleetProfileService._user_has_profile_authority(user, mutation=mutation):
             raise FleetProfilePermissionDenied(
