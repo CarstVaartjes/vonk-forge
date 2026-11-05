@@ -64,7 +64,7 @@ def set_measured_peaks(session, peak):
             InstallationNode, InstallationNode.installation_id == RecipeInstallation.id
         )
         .distinct()
-    ).tuples():
+    ):
         session.add(
             MeasuredRolePeak(
                 content_sha256=digest,

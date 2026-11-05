@@ -141,13 +141,12 @@ def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]
     and installations the database holds.
     """
 
-    return dict(
-        session.execute(
-            select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(
-                MeasuredRolePeak.content_sha256 == content_digest
-            )
-        ).tuples()
+    rows = session.execute(
+        select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(
+            MeasuredRolePeak.content_sha256 == content_digest
+        )
     )
+    return {role: peak for role, peak in rows}
 
 
 def recent_best_available(
