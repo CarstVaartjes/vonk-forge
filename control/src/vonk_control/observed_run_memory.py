@@ -20,12 +20,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
 
+from .dialect_insert import dialect_insert
+from .fleet_events import FleetEventRecorder, FleetEventRepository
 from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
     CatalogDocumentRevision,
@@ -44,6 +46,7 @@ def record_observed_run_memory(
     session: Session,
     node_id: str,
     samples: Sequence[tuple[datetime, int | None]],
+    events: FleetEventRepository,
 ) -> None:
     """Raise the sole run's observed peak on ``node_id`` from new samples.
 
@@ -96,8 +99,25 @@ def record_observed_run_memory(
     if lowest is None:
         return
     peak = admitted.available_memory_bytes - lowest
-    if peak > (rank.observed_memory_bytes or 0):
-        rank.observed_memory_bytes = peak
+    # One conditional UPDATE: the rank's peak only rises, whatever order
+    # overlapping batches commit in, and no lock on the node is needed.
+    raised = session.execute(
+        update(RunNode)
+        .where(
+            RunNode.id == rank.id,
+            or_(
+                RunNode.observed_memory_bytes.is_(None),
+                RunNode.observed_memory_bytes < peak,
+            ),
+        )
+        .values(observed_memory_bytes=peak)
+        .execution_options(synchronize_session=False)
+        .returning(RunNode.id)
+    ).scalar()
+    if raised is not None:
+        set_committed_value(rank, "observed_memory_bytes", peak)
+        # A Core UPDATE is invisible to the Fleet event recorder.
+        events.append_in_session(session, FleetEventRecorder._render(rank))
     # Compared with the table, not the rank: a run already serving repopulates
     # a missing row from its next qualifying sample, with no history read.
     _raise_measured_peak(session, run, rank.role, peak)
@@ -117,11 +137,9 @@ def _raise_measured_peak(
     )
     if digest is None:
         return
-    insert = (
-        postgresql.insert(MeasuredRolePeak)
-        if session.get_bind().dialect.name == "postgresql"
-        else sqlite.insert(MeasuredRolePeak)
-    ).values(content_sha256=digest, role=role, peak_bytes=peak)
+    insert = dialect_insert(session, MeasuredRolePeak).values(
+        content_sha256=digest, role=role, peak_bytes=peak
+    )
     session.execute(
         insert.on_conflict_do_update(
             index_elements=[MeasuredRolePeak.content_sha256, MeasuredRolePeak.role],

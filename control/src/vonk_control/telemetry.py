@@ -8,8 +8,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
-from sqlalchemy import literal_column, select
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import (
@@ -19,6 +18,7 @@ from vonk_agent_protocol.telemetry import (
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
+from .dialect_insert import dialect_insert
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .lifecycle.evidence import Residue
@@ -110,12 +110,6 @@ def _read_view(row: NodeTelemetrySample) -> TelemetrySampleView | None:
         return None
 
 
-def _insert(session: Session, model: type) -> postgresql.Insert | sqlite.Insert:
-    if session.get_bind().dialect.name == "postgresql":
-        return postgresql.insert(model)
-    return sqlite.insert(model)
-
-
 def _advance_latest(
     session: Session, node_id: str, sample_id: str, observed_at: datetime
 ) -> bool:
@@ -123,7 +117,7 @@ def _advance_latest(
 
     Returns whether the pointer moved; the caller owns the Fleet event.
     """
-    upsert = _insert(session, NodeTelemetryLatest).values(
+    upsert = dialect_insert(session, NodeTelemetryLatest).values(
         node_id=node_id, sample_id=sample_id
     )
     current = (
@@ -178,7 +172,7 @@ class TelemetryRepository:
                 raise ValueError("telemetry observation times must increase")
             last_observed = value.observed_at
 
-        stored: list[NodeTelemetrySample] = []
+        stored: list[TelemetrySampleView] = []
         with self._sessions.begin() as session:
             # Agent traffic never locks the node row: admission and publication
             # own it. A sample is its own idempotent write (unique per node,
@@ -191,23 +185,20 @@ class TelemetryRepository:
                 is None
             ):
                 raise ValueError("telemetry node ID is unknown")
-            boot_heads: dict[str, NodeTelemetrySample | None] = {}
+            boot_heads: dict[str, datetime | None] = {}
             for value in canonical:
                 boot_id = str(value.boot_id)
                 if value.boot_id not in boot_heads:
                     boot_heads[value.boot_id] = session.scalar(
-                        select(NodeTelemetrySample)
-                        .where(
+                        select(func.max(NodeTelemetrySample.observed_at)).where(
                             NodeTelemetrySample.node_id == node_id,
                             NodeTelemetrySample.boot_id == boot_id,
                         )
-                        .order_by(NodeTelemetrySample.observed_at.desc())
-                        .limit(1)
                     )
                 boot_head = boot_heads[value.boot_id]
                 sample_id = str(uuid.uuid4())
                 inserted = session.execute(
-                    _insert(session, NodeTelemetrySample)
+                    dialect_insert(session, NodeTelemetrySample)
                     .values(
                         id=sample_id,
                         node_id=node_id,
@@ -233,13 +224,10 @@ class TelemetryRepository:
                     ).one()
                     if not _same_sample(existing, value):
                         raise ValueError("telemetry conflicts with stored sample")
-                    stored.append(existing)
+                    stored.append(_view(existing))
                     continue
-                if boot_head is not None and value.observed_at <= _aware_utc(
-                    boot_head.observed_at.replace(tzinfo=UTC)
-                    if boot_head.observed_at.tzinfo is None
-                    else boot_head.observed_at,
-                    label="telemetry observation time",
+                if boot_head is not None and value.observed_at <= _stored_utc(
+                    boot_head
                 ):
                     raise ValueError(
                         "telemetry sample regresses stored observation time"
@@ -283,10 +271,20 @@ class TelemetryRepository:
                             ),
                         ),
                     )
-                row = session.get(NodeTelemetrySample, sample_id)
-                assert row is not None
-                stored.append(row)
-                boot_heads[value.boot_id] = row
+                # The view is built from what was just written, not re-read.
+                stored.append(
+                    TelemetrySampleView.model_validate_json(
+                        canonical_message(
+                            {
+                                **value.model_dump(mode="json"),
+                                "id": sample_id,
+                                "node_id": node_id,
+                                "received_at": now,
+                            }
+                        )
+                    )
+                )
+                boot_heads[value.boot_id] = value.observed_at
             record_observed_run_memory(
                 session,
                 node_id,
@@ -294,8 +292,9 @@ class TelemetryRepository:
                     (value.observed_at, value.memory_available_bytes)
                     for value in canonical
                 ],
+                self._events,
             )
-        return tuple(_view(row) for row in stored)
+        return tuple(stored)
 
     def latest(self, node_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         identities = tuple(dict.fromkeys(node_ids))

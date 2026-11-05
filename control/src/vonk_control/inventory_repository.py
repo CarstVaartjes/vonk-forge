@@ -11,7 +11,6 @@ from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
 from sqlalchemy import func, select
-from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.inventory import (
@@ -19,6 +18,7 @@ from vonk_agent_protocol.inventory import (
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
+from .dialect_insert import dialect_insert
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
 from .inventory_items_contract import InventorySnapshotKind
 from .logging import log_event
@@ -74,12 +74,6 @@ def _validated_inventory(
     return validated
 
 
-def _insert(session: Session) -> postgresql.Insert | sqlite.Insert:
-    if session.get_bind().dialect.name == "postgresql":
-        return postgresql.insert(NodeSnapshot)
-    return sqlite.insert(NodeSnapshot)
-
-
 class InventoryRepository:
     def __init__(
         self,
@@ -125,7 +119,7 @@ class InventoryRepository:
                 .limit(1)
             )
             inserted = session.execute(
-                _insert(session)
+                dialect_insert(session, NodeSnapshot)
                 .values(
                     node_id=value.node_id,
                     received_at=received_at,
@@ -169,9 +163,9 @@ class InventoryRepository:
                     refresh_installed_bytes(
                         session, value.node_id, row.installation_bytes
                     )
-            stored = session.get(NodeInventorySnapshot, inserted)
-            assert stored is not None
-        return stored
+        # The caller reads the report it sent plus the stored identity.
+        row.id = inserted
+        return row
 
     def latest(
         self,

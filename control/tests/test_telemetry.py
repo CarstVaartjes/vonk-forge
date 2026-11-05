@@ -256,6 +256,38 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
         session.add(NodeTelemetryLatest(node_id=NODE_B, sample_id=sample_id))
 
 
+def test_record_batch_does_not_reread_what_it_wrote(telemetry) -> None:
+    repository, _sessions, engine, _ = telemetry
+    statements: list[str] = []
+
+    def capture(_conn, _cursor, statement, *_rest) -> None:
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        views = repository.record_batch(
+            NODE_A, tuple(sample(sequence=n) for n in range(1, 5))
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+
+    assert [view.observed_at for view in views] == [
+        START + timedelta(seconds=n) for n in range(1, 5)
+    ]
+    reads = [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith("SELECT")
+        and "node_telemetry_samples" in statement
+    ]
+    # One head read for the boot; no sample is read back after its insert.
+    assert len(reads) == 1
+    inserts = [
+        s for s in statements if s.startswith("INSERT INTO node_telemetry_samples")
+    ]
+    assert len(inserts) == 4
+
+
 def test_record_batch_rejects_time_window_before_opening_transaction(
     telemetry,
 ) -> None:

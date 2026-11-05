@@ -26,6 +26,7 @@ from vonk_control.admission_locking import (
     set_admission_timeout,
 )
 from vonk_control.agent_contacts import record_contact, record_observation_delivery
+from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
     AgentNode,
     AgentNodeContact,
@@ -128,3 +129,97 @@ def test_open_telemetry_write_blocks_neither_admission_nor_child_inserts(fleet):
 
     with sessions() as session:
         assert session.get(NodeTelemetryLatest, NODE) is not None
+
+
+def _report(observed_at: datetime) -> NodeInventoryReport:
+    return NodeInventoryReport.model_validate_json(
+        canonical_message(
+            {
+                "node_id": NODE,
+                "observed_at": observed_at,
+                "disk_total_bytes": 1000,
+                "disk_free_bytes": 700,
+                "host_memory_total_bytes": 500,
+                "host_memory_free_bytes": 300,
+                "gpu_memory_total_bytes": 400,
+                "gpu_memory_free_bytes": 250,
+                "gpu_count": 1,
+                "artifact_store_read_only": False,
+                "capabilities": ("runtime.vllm.v1",),
+                "memory_pool": "separate",
+                "schema_version": 1,
+                "nvidia_driver_version": "unknown",
+                "container_runtime_version": "unknown",
+            }
+        )
+    )
+
+
+def test_open_inventory_write_blocks_neither_admission_nor_child_inserts(fleet):
+    engine, sessions = fleet
+    repository = InventoryRepository(sessions, clock=lambda: NOW)
+    inserted, release = threading.Event(), threading.Event()
+    writer = threading.local()
+
+    def hold(_connection, _cursor, statement, _parameters, _context, _many) -> None:
+        if getattr(writer, "active", False) and statement.startswith(
+            "INSERT INTO node_inventory_snapshots"
+        ):
+            inserted.set()
+            assert release.wait(30)
+
+    event.listen(engine, "after_cursor_execute", hold)
+
+    def write() -> None:
+        writer.active = True
+        repository.record(_report(NOW))
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(write)
+            assert inserted.wait(30), "inventory write never reached its insert"
+            try:
+                _admit(sessions)
+                assert _child_insert(sessions) < 1.5
+            finally:
+                release.set()
+            future.result(timeout=30)
+    finally:
+        event.remove(engine, "after_cursor_execute", hold)
+
+    assert repository.snapshot_count(NODE) == 1
+
+
+def test_concurrent_identical_inventory_twin_returns_the_stored_row(fleet):
+    engine, sessions = fleet
+    repository = InventoryRepository(sessions, clock=lambda: NOW)
+    inserted, release = threading.Event(), threading.Event()
+    writer = threading.local()
+
+    def hold(_connection, _cursor, statement, _parameters, _context, _many) -> None:
+        if getattr(writer, "first", False) and statement.startswith(
+            "INSERT INTO node_inventory_snapshots"
+        ):
+            inserted.set()
+            assert release.wait(30)
+
+    event.listen(engine, "after_cursor_execute", hold)
+
+    def first() -> str:
+        writer.first = True
+        return repository.record(_report(NOW)).id
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            winner = pool.submit(first)
+            assert inserted.wait(30)
+            twin = pool.submit(repository.record, _report(NOW))
+            time.sleep(0.5)  # the twin now waits on the open identical insert
+            release.set()
+            winner_id = winner.result(timeout=30)
+            twin_row = twin.result(timeout=30)
+    finally:
+        event.remove(engine, "after_cursor_execute", hold)
+
+    assert twin_row.id == winner_id
+    assert repository.snapshot_count(NODE) == 1
