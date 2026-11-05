@@ -5,8 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Select, create_engine, event, func, select
-from sqlalchemy.dialects import postgresql
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -257,31 +256,6 @@ def test_latest_pointer_cannot_reference_a_sample_from_another_node() -> None:
         session.add(NodeTelemetryLatest(node_id=NODE_B, sample_id=sample_id))
 
 
-def test_record_batch_locks_node_before_reading_latest_projection(telemetry) -> None:
-    repository, sessions, _, _ = telemetry
-    observed: list[tuple[type[object], Select]] = []
-
-    def capture_statement(state) -> None:
-        if not state.is_select:
-            return
-        for description in state.statement.column_descriptions:
-            entity = description.get("entity")
-            if entity in {AgentNode, NodeTelemetryLatest}:
-                observed.append((entity, state.statement))
-                break
-
-    event.listen(sessions.class_, "do_orm_execute", capture_statement)
-    try:
-        repository.record_batch(NODE_A, (sample(sequence=1),))
-    finally:
-        event.remove(sessions.class_, "do_orm_execute", capture_statement)
-
-    assert [entity for entity, _ in observed[:2]] == [AgentNode, NodeTelemetryLatest]
-    lock_statement = observed[0][1]
-    compiled = str(lock_statement.compile(dialect=postgresql.dialect()))
-    assert "FOR UPDATE OF agent_nodes" in compiled
-
-
 def test_record_batch_rejects_time_window_before_opening_transaction(
     telemetry,
 ) -> None:
@@ -376,16 +350,19 @@ def test_conflicting_replay_is_rejected(telemetry) -> None:
 def test_sample_and_latest_writes_are_one_transaction(telemetry) -> None:
     repository, sessions, _, _ = telemetry
 
-    def fail_latest(_session, _flush_context, _instances) -> None:
-        if any(isinstance(value, NodeTelemetryLatest) for value in _session.new):
+    # The latest pointer is a Core upsert, the last write of a sample.
+    engine = sessions.kw["bind"]
+
+    def fail_latest(_conn, _cursor, statement, *_rest) -> None:
+        if statement.startswith("INSERT INTO node_telemetry_latest"):
             raise RuntimeError("latest projection failed")
 
-    event.listen(sessions.class_, "before_flush", fail_latest)
+    event.listen(engine, "before_cursor_execute", fail_latest)
     try:
         with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
             repository.record_batch(NODE_A, (sample(sequence=1),))
     finally:
-        event.remove(sessions.class_, "before_flush", fail_latest)
+        event.remove(engine, "before_cursor_execute", fail_latest)
 
     with sessions() as session:
         assert (

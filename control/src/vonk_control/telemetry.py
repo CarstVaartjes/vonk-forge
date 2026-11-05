@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.telemetry import (
@@ -106,6 +108,33 @@ def _read_view(row: NodeTelemetrySample) -> TelemetrySampleView | None:
         return None
 
 
+def _insert(session: Session, model: type) -> postgresql.Insert | sqlite.Insert:
+    if session.get_bind().dialect.name == "postgresql":
+        return postgresql.insert(model)
+    return sqlite.insert(model)
+
+
+def _advance_latest(
+    session: Session, node_id: str, sample_id: str, observed_at: datetime
+) -> None:
+    """Point the node at this sample unless a newer one is already latest."""
+    upsert = _insert(session, NodeTelemetryLatest).values(
+        node_id=node_id, sample_id=sample_id
+    )
+    current = (
+        select(NodeTelemetrySample.observed_at)
+        .where(NodeTelemetrySample.id == NodeTelemetryLatest.sample_id)
+        .scalar_subquery()
+    )
+    session.execute(
+        upsert.on_conflict_do_update(
+            index_elements=[NodeTelemetryLatest.node_id],
+            set_={"sample_id": upsert.excluded.sample_id},
+            where=current < observed_at,
+        )
+    )
+
+
 class TelemetryRepository:
     def __init__(
         self,
@@ -137,34 +166,20 @@ class TelemetryRepository:
 
         stored: list[NodeTelemetrySample] = []
         with self._sessions.begin() as session:
-            node = session.scalar(
-                select(AgentNode)
-                .where(AgentNode.node_id == node_id)
-                .with_for_update(of=AgentNode)
-            )
-            if node is None:
+            # Agent traffic never locks the node row: admission and publication
+            # own it. A sample is its own idempotent write (unique per node,
+            # boot and time) and the latest pointer only moves forward, so
+            # concurrent batches converge without a parent lock.
+            if (
+                session.scalar(
+                    select(AgentNode.node_id).where(AgentNode.node_id == node_id)
+                )
+                is None
+            ):
                 raise ValueError("telemetry node ID is unknown")
-            pointer = session.get(NodeTelemetryLatest, node_id)
-            latest = (
-                None
-                if pointer is None
-                else session.get(NodeTelemetrySample, pointer.sample_id)
-            )
             boot_heads: dict[str, NodeTelemetrySample | None] = {}
             for value in canonical:
                 boot_id = str(value.boot_id)
-                existing = session.scalar(
-                    select(NodeTelemetrySample).where(
-                        NodeTelemetrySample.node_id == node_id,
-                        NodeTelemetrySample.boot_id == boot_id,
-                        NodeTelemetrySample.observed_at == value.observed_at,
-                    )
-                )
-                if existing is not None:
-                    if not _same_sample(existing, value):
-                        raise ValueError("telemetry conflicts with stored sample")
-                    stored.append(existing)
-                    continue
                 if value.boot_id not in boot_heads:
                     boot_heads[value.boot_id] = session.scalar(
                         select(NodeTelemetrySample)
@@ -176,6 +191,36 @@ class TelemetryRepository:
                         .limit(1)
                     )
                 boot_head = boot_heads[value.boot_id]
+                sample_id = str(uuid.uuid4())
+                inserted = session.execute(
+                    _insert(session, NodeTelemetrySample)
+                    .values(
+                        id=sample_id,
+                        node_id=node_id,
+                        received_at=now,
+                        **{name: getattr(value, name) for name in _SAMPLE_FIELDS},
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[
+                            NodeTelemetrySample.node_id,
+                            NodeTelemetrySample.boot_id,
+                            NodeTelemetrySample.observed_at,
+                        ]
+                    )
+                    .returning(NodeTelemetrySample.id)
+                ).scalar()
+                if inserted is None:
+                    existing = session.scalars(
+                        select(NodeTelemetrySample).where(
+                            NodeTelemetrySample.node_id == node_id,
+                            NodeTelemetrySample.boot_id == boot_id,
+                            NodeTelemetrySample.observed_at == value.observed_at,
+                        )
+                    ).one()
+                    if not _same_sample(existing, value):
+                        raise ValueError("telemetry conflicts with stored sample")
+                    stored.append(existing)
+                    continue
                 if boot_head is not None and value.observed_at <= _aware_utc(
                     boot_head.observed_at.replace(tzinfo=UTC)
                     if boot_head.observed_at.tzinfo is None
@@ -185,13 +230,6 @@ class TelemetryRepository:
                     raise ValueError(
                         "telemetry sample regresses stored observation time"
                     )
-                row = NodeTelemetrySample(
-                    node_id=node_id,
-                    received_at=now,
-                    **{name: getattr(value, name) for name in _SAMPLE_FIELDS},
-                )
-                session.add(row)
-                session.flush()
                 resources = HostResourceSample.model_validate_json(
                     canonical_message(
                         value.model_dump(
@@ -199,39 +237,30 @@ class TelemetryRepository:
                         )
                     )
                 )
-                snapshot = NodeInventoryResourceSnapshot(
-                    node_id=node_id,
-                    observed_at=value.observed_at,
-                    received_at=now,
-                    source_sample_id=row.id,
-                    host_resources=resources,
-                    evidence_digest=hashlib.sha256(
-                        canonical_message(
-                            {
-                                "node_id": node_id,
-                                "source_sample_id": row.id,
-                                "host_resources": resources,
-                            }
-                        )
-                    ).hexdigest(),
+                session.add(
+                    NodeInventoryResourceSnapshot(
+                        node_id=node_id,
+                        observed_at=value.observed_at,
+                        received_at=now,
+                        source_sample_id=sample_id,
+                        host_resources=resources,
+                        evidence_digest=hashlib.sha256(
+                            canonical_message(
+                                {
+                                    "node_id": node_id,
+                                    "source_sample_id": sample_id,
+                                    "host_resources": resources,
+                                }
+                            )
+                        ).hexdigest(),
+                    )
                 )
-                session.add(snapshot)
-                row.resource_snapshot = snapshot
+                session.flush()
+                _advance_latest(session, node_id, sample_id, value.observed_at)
+                row = session.get(NodeTelemetrySample, sample_id)
+                assert row is not None
                 stored.append(row)
                 boot_heads[value.boot_id] = row
-                if latest is None:
-                    advances = True
-                elif latest.boot_id == boot_id:
-                    advances = value.observed_at > _stored_utc(latest.observed_at)
-                else:
-                    advances = value.observed_at > _stored_utc(latest.observed_at)
-                if advances:
-                    if pointer is None:
-                        pointer = NodeTelemetryLatest(node_id=node_id, sample_id=row.id)
-                        session.add(pointer)
-                    else:
-                        pointer.sample_id = row.id
-                    latest = row
             record_observed_run_memory(
                 session,
                 node_id,

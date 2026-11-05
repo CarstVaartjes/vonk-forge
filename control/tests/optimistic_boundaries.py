@@ -8,6 +8,7 @@ not a new lock.
 from __future__ import annotations
 
 import ast
+import re
 
 KIND = "versioned owner lock or bulk write; use an optimistic decision or SKIP LOCKED claim"
 
@@ -185,14 +186,49 @@ def scan_agent_node_locks(source: str) -> list[int]:
 
     Agent requests must never hold the identity/intent row admission locks.
     """
-    if "AgentNode" not in source:
-        return []
-    return scan_source(
-        source,
-        frozenset({"AgentNode"}),
-        include_claims=True,
-        include_admission=False,
-    )
+    found: list[int] = []
+    if "AgentNode" in source:
+        found = scan_source(
+            source,
+            frozenset({"AgentNode"}),
+            include_claims=True,
+            include_admission=False,
+        )
+    if "agent_nodes" in source:
+        found = sorted({*found, *_raw_agent_node_lock_lines(source)})
+    return found
+
+
+_RAW_NODE_LOCK = re.compile(
+    r"agent_nodes.*\bFOR\s+(NO\s+KEY\s+)?UPDATE\b|\bLOCK\s+TABLE\s+agent_nodes\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _raw_agent_node_lock_lines(source: str) -> list[int]:
+    """Raw SQL that locks agent_nodes rows or the table (the ORM scan cannot see it).
+
+    Docstrings describe the rule and are not SQL.
+    """
+    tree = ast.parse(source)
+    docstrings = {
+        id(node.body[0].value)
+        for node in ast.walk(tree)
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        )
+        and node.body
+        and isinstance(node.body[0], ast.Expr)
+        and isinstance(node.body[0].value, ast.Constant)
+    }
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and id(node) not in docstrings
+        and _RAW_NODE_LOCK.search(node.value)
+    ]
 
 
 WRITE_KIND = "RecipeRun write outside transition; classify the caller-owned transaction"
