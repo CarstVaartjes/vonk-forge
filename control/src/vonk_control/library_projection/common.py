@@ -27,6 +27,8 @@ from ..catalog_revision_contract import (
     read_catalog_document,
 )
 from ..library_contract import (
+    LibraryCacheState,
+    LibraryLocalState,
     LibraryModelIdentity,
     LibraryRecipeSummary,
     ModelLibraryResponse,
@@ -63,6 +65,10 @@ _ACTIVE_RUN_STATES = RUN_LIVE
 _RUN_STATES = tuple(RunState)
 
 
+# Which evidence wins when facts about one digest are merged (highest wins):
+# a failure or a download in progress is more informative than a miss. This is
+# not readiness; the less-ready order below is a different question, and
+# "failed" sits at opposite ends of the two.
 _LOCAL_STATE_PRIORITY = {
     "unknown": 0,
     "not_cached": 0,
@@ -72,9 +78,66 @@ _LOCAL_STATE_PRIORITY = {
 }
 
 
+# How ready a state is, lowest first, for taking the weaker of two facts. It is
+# a total order: a failure is the least ready, an unknown observation counts as
+# less ready than a known miss, so a tie between them never depends on order.
+_LOCAL_STATE_READINESS = {
+    state.value: rank
+    for rank, state in enumerate(
+        (
+            LibraryCacheState.FAILED,
+            LibraryCacheState.UNKNOWN,
+            LibraryCacheState.NOT_CACHED,
+            LibraryCacheState.PREPARING,
+            LibraryCacheState.CACHED,
+        )
+    )
+}
+
+
 type LibraryControllerState = Literal[
     "cached", "preparing", "not_cached", "failed", "unknown"
 ]
+
+
+def compose_recipe_state(
+    cache: LibraryLocalState, assets: LibraryLocalState
+) -> LibraryLocalState:
+    """A recipe's state: the less ready of its artifact set and its build facts.
+
+    The set carries the download progress, which stays attached; the nodes the
+    recipe runs on come from both.
+    """
+
+    lowest = (
+        cache
+        if _LOCAL_STATE_READINESS[cache.controller]
+        <= _LOCAL_STATE_READINESS[assets.controller]
+        else assets
+    )
+    return LibraryLocalState(
+        controller=lowest.controller,
+        running_on=sorted(set(cache.running_on) | set(assets.running_on)),
+        preparation=cache.preparation or assets.preparation,
+    )
+
+
+def highest_state(
+    first: LibraryLocalState, second: LibraryLocalState
+) -> LibraryLocalState:
+    """The more ready of two facts about a digest that has no recipe split."""
+
+    best = (
+        second
+        if _LOCAL_STATE_PRIORITY[second.controller]
+        > _LOCAL_STATE_PRIORITY[first.controller]
+        else first
+    )
+    return LibraryLocalState(
+        controller=best.controller,
+        running_on=sorted(set(first.running_on) | set(second.running_on)),
+        preparation=second.preparation or first.preparation,
+    )
 
 
 def _wire_json_bytes(value: object) -> bytes:

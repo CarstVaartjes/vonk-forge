@@ -40,6 +40,7 @@ from ..library_contract import (
     LibraryRecipeProjection,
 )
 from ..library_image_presence import ImageKey
+from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache.lineage import verifies_model
 from ..model_cache_contract import (
     CacheManifest,
@@ -64,6 +65,8 @@ from .common import (
     LibraryControllerState,
     _controller_state,
     _note_unreadable,
+    compose_recipe_state,
+    highest_state,
 )
 
 if TYPE_CHECKING:
@@ -205,6 +208,32 @@ def _latest_cache_operations(
         .subquery()
     )
     return select(ranked.c.id).where(ranked.c.position == 1)
+
+
+def _fold_local_facts(
+    cache_facts: Mapping[str, LibraryLocalState],
+    asset_facts: Mapping[str, LibraryLocalState],
+    *,
+    recipe_digests: set[str],
+) -> dict[str, LibraryLocalState]:
+    """One state per digest from its cache facts and its asset facts.
+
+    A recipe is cached only when its own artifact set (every selected file of
+    every bound model) and what was built or installed from it both are: the
+    lower state wins and the set's download progress stays attached. A model
+    digest, which has no such split, keeps the highest state as before.
+    """
+
+    result: dict[str, LibraryLocalState] = {}
+    for digest in cache_facts.keys() | asset_facts.keys():
+        cache, assets = cache_facts.get(digest), asset_facts.get(digest)
+        if cache is None or assets is None:
+            result[digest] = cast(LibraryLocalState, cache or assets).model_copy()
+        elif digest in recipe_digests:
+            result[digest] = compose_recipe_state(cache, assets)
+        else:
+            result[digest] = highest_state(cache, assets)
+    return result
 
 
 def _database_local_state(
@@ -370,7 +399,12 @@ def _database_local_state(
 
     revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
     head_digests = {digest for _, digest, is_head in revisions if is_head}
-    result: dict[str, LibraryLocalState] = {}
+    # Two kinds of fact about a digest. Cache facts are the artifact sets and
+    # download requests that hold its bytes; asset facts are what was built,
+    # installed or run from them. A recipe is as ready as the lower of the two
+    # (see _fold_local_facts); every other digest keeps the highest.
+    cache_facts: dict[str, LibraryLocalState] = {}
+    asset_facts: dict[str, LibraryLocalState] = {}
     for set_id, model_digest, recipe_digest, set_state, _manifest in cache_sets:
         controller = _controller_state(
             {
@@ -384,10 +418,10 @@ def _database_local_state(
             set_state,
             "persisted cache set state is invalid",
         )
-        self._merge_local(result, model_digest, controller=controller)
-        self._merge_local(result, recipe_digest, controller=controller)
+        self._merge_local(cache_facts, model_digest, controller=controller)
+        self._merge_local(cache_facts, recipe_digest, controller=controller)
         for digest in reference_digests[set_id] & set(digests):
-            self._merge_local(result, digest, controller=controller)
+            self._merge_local(cache_facts, digest, controller=controller)
     cache_sets_by_id = {row[0]: row for row in cache_sets}
     for (
         operation_id,
@@ -442,7 +476,7 @@ def _database_local_state(
         )
         for digest in digest_values & requested_digests:
             self._merge_local(
-                result,
+                cache_facts,
                 digest,
                 controller=controller,
                 preparation=preparation,
@@ -459,7 +493,7 @@ def _database_local_state(
             "persisted recipe build state is invalid",
         )
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(build_revision_id),
             controller=controller,
         )
@@ -483,8 +517,15 @@ def _database_local_state(
             "persisted installation state is invalid",
         )
         installation_revision[installation_id] = installation_revision_id
+        if (
+            adopt_machine_state(InstallationState, installation_state)
+            not in INSTALLATION_ACTIVE
+        ):
+            # Only an active installation says what is cached now: the
+            # retention uninstall after 24 h must not pull a recipe down.
+            continue
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(installation_revision_id),
             controller=controller,
         )
@@ -498,20 +539,23 @@ def _database_local_state(
         nodes = nodes_by_run.get(run_id, [])
         if model_digest is not None:
             self._merge_local(
-                result,
+                asset_facts,
                 model_digest,
                 controller="cached",
                 running_on=nodes,
             )
         installed_revision_id = installation_revision.get(installation_id)
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(installed_revision_id)
             if installed_revision_id is not None
             else None,
             controller="cached",
             running_on=nodes,
         )
+    result = _fold_local_facts(
+        cache_facts, asset_facts, recipe_digests=set(revision_digests.values())
+    )
     if self._image_presence is not None:
         self._apply_image_presence(
             result,
