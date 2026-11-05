@@ -647,12 +647,12 @@ class ResolutionMixin:
             # A set is keyed by its bytes and keeps the provenance of the
             # revision that cached it first: a later model revision with the
             # same files is cached under that row, as compilation sees it.
+            recipe_set: ArtifactSetManifest | None
             try:
-                shared = session.get(
-                    ModelCacheSet,
-                    cache.resolve_artifact_set(recipe_revision_id=revision.id).digest,
-                )
+                recipe_set = cache.resolve_artifact_set(recipe_revision_id=revision.id)
+                shared = session.get(ModelCacheSet, recipe_set.digest)
             except ModelCacheError:
+                recipe_set = None
                 shared = None
             if (
                 shared is not None
@@ -661,12 +661,25 @@ class ResolutionMixin:
             ):
                 model_rows.append(shared)
 
+            # The recipe's own set names every selected file of every model it
+            # binds. A set of the first model alone is no proof for a recipe
+            # that also binds a draft or a dependency.
+            recipe_files = (
+                {artifact.sha256 for artifact in recipe_set.artifacts}
+                if recipe_set is not None
+                else set()
+            )
+
             def model_set_available(row: ModelCacheSet) -> bool:
                 manifest = cache._stored_manifest(row)
                 if manifest is None:
                     return False  # unknown: this set is skipped, not a blocker
                 if manifest.digest != row.artifact_set_sha256:
                     return False  # damaged derived metadata is a cache miss
+                if not recipe_files <= {
+                    artifact.sha256 for artifact in manifest.artifacts
+                }:
+                    return False  # does not hold all of the recipe's files
                 required = set(_unique_artifacts(manifest.artifacts))
                 return required <= cache._managed_cached_objects(manifest)
 

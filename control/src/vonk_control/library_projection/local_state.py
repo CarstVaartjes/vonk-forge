@@ -27,7 +27,6 @@ from vonk_agent_protocol import (
     adopt_machine_state,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
@@ -61,11 +60,12 @@ from ..revision_images import revision_images
 from ..stored_json import read_row_column
 from .common import (
     _ACTIVE_RUN_STATES,
-    _LOCAL_STATE_PRIORITY,
     _RUN_STATES,
     LibraryControllerState,
     _controller_state,
     _note_unreadable,
+    compose_recipe_state,
+    highest_state,
 )
 
 if TYPE_CHECKING:
@@ -159,55 +159,6 @@ def _local(
         )
 
 
-def _recipe_local_digests(
-    recipes: Sequence[tuple[str, Sequence[str]]],
-) -> list[str]:
-    """Every digest a recipe's local state reads: its own and its bound models'."""
-
-    digests: dict[str, None] = {}
-    for recipe_digest, model_digests in recipes:
-        digests[recipe_digest] = None
-        digests.update(dict.fromkeys(model_digests))
-    return list(digests)
-
-
-def _recipe_local(
-    self: LibraryProjection,
-    digest: str,
-    model_digests: Sequence[str],
-    *,
-    snapshot: Mapping[str, LibraryLocalState] | None,
-) -> LibraryLocalState:
-    """A recipe's controller state: the lowest of its own and its models' states.
-
-    A recipe is only as ready as its weakest asset, so a cached build or image
-    never outranks a model that is still downloading. The lowest state brings
-    its own preparation (the running download's progress); on a tie the
-    recipe's own state is kept. This is the only place a recipe's ``local`` is
-    built.
-    """
-
-    own = self._local(digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot)
-    lowest = own
-    for model_digest in dict.fromkeys(model_digests):
-        model = self._local(
-            model_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
-        )
-        if (
-            _LOCAL_STATE_PRIORITY[model.controller]
-            < _LOCAL_STATE_PRIORITY[lowest.controller]
-        ):
-            lowest = model
-    if lowest is own:
-        return own
-    return own.model_copy(
-        update={
-            "controller": lowest.controller,
-            "preparation": lowest.preparation,
-        }
-    )
-
-
 def _latest_cache_operations(
     set_members: Sequence[tuple[str, str]],
 ) -> Select[str]:
@@ -256,6 +207,32 @@ def _latest_cache_operations(
         .subquery()
     )
     return select(ranked.c.id).where(ranked.c.position == 1)
+
+
+def _fold_local_facts(
+    cache_facts: Mapping[str, LibraryLocalState],
+    asset_facts: Mapping[str, LibraryLocalState],
+    *,
+    recipe_digests: set[str],
+) -> dict[str, LibraryLocalState]:
+    """One state per digest from its cache facts and its asset facts.
+
+    A recipe is cached only when its own artifact set (every selected file of
+    every bound model) and what was built or installed from it both are: the
+    lower state wins and the set's download progress stays attached. A model
+    digest, which has no such split, keeps the highest state as before.
+    """
+
+    result: dict[str, LibraryLocalState] = {}
+    for digest in cache_facts.keys() | asset_facts.keys():
+        cache, assets = cache_facts.get(digest), asset_facts.get(digest)
+        if cache is None or assets is None:
+            result[digest] = cast(LibraryLocalState, cache or assets).model_copy()
+        elif digest in recipe_digests:
+            result[digest] = compose_recipe_state(cache, assets)
+        else:
+            result[digest] = highest_state(cache, assets)
+    return result
 
 
 def _database_local_state(
@@ -421,7 +398,12 @@ def _database_local_state(
 
     revision_digests = {revision_id: digest for revision_id, digest, _ in revisions}
     head_digests = {digest for _, digest, is_head in revisions if is_head}
-    result: dict[str, LibraryLocalState] = {}
+    # Two kinds of fact about a digest. Cache facts are the artifact sets and
+    # download requests that hold its bytes; asset facts are what was built,
+    # installed or run from them. A recipe is as ready as the lower of the two
+    # (see _fold_local_facts); every other digest keeps the highest.
+    cache_facts: dict[str, LibraryLocalState] = {}
+    asset_facts: dict[str, LibraryLocalState] = {}
     for set_id, model_digest, recipe_digest, set_state, _manifest in cache_sets:
         controller = _controller_state(
             {
@@ -435,10 +417,10 @@ def _database_local_state(
             set_state,
             "persisted cache set state is invalid",
         )
-        self._merge_local(result, model_digest, controller=controller)
-        self._merge_local(result, recipe_digest, controller=controller)
+        self._merge_local(cache_facts, model_digest, controller=controller)
+        self._merge_local(cache_facts, recipe_digest, controller=controller)
         for digest in reference_digests[set_id] & set(digests):
-            self._merge_local(result, digest, controller=controller)
+            self._merge_local(cache_facts, digest, controller=controller)
     cache_sets_by_id = {row[0]: row for row in cache_sets}
     for (
         operation_id,
@@ -493,7 +475,7 @@ def _database_local_state(
         )
         for digest in digest_values & requested_digests:
             self._merge_local(
-                result,
+                cache_facts,
                 digest,
                 controller=controller,
                 preparation=preparation,
@@ -510,7 +492,7 @@ def _database_local_state(
             "persisted recipe build state is invalid",
         )
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(build_revision_id),
             controller=controller,
         )
@@ -535,7 +517,7 @@ def _database_local_state(
         )
         installation_revision[installation_id] = installation_revision_id
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(installation_revision_id),
             controller=controller,
         )
@@ -549,20 +531,23 @@ def _database_local_state(
         nodes = nodes_by_run.get(run_id, [])
         if model_digest is not None:
             self._merge_local(
-                result,
+                asset_facts,
                 model_digest,
                 controller="cached",
                 running_on=nodes,
             )
         installed_revision_id = installation_revision.get(installation_id)
         self._merge_local(
-            result,
+            asset_facts,
             revision_digests.get(installed_revision_id)
             if installed_revision_id is not None
             else None,
             controller="cached",
             running_on=nodes,
         )
+    result = _fold_local_facts(
+        cache_facts, asset_facts, recipe_digests=set(revision_digests.values())
+    )
     if self._image_presence is not None:
         self._apply_image_presence(
             result,

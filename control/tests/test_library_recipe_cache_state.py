@@ -1,10 +1,11 @@
-"""A recipe is cached only when everything it needs is cached.
+"""A recipe is cached only when its own artifact set and its build both are.
 
-The Library shows a recipe's controller state as the lowest of its own digest's
-state and the state of every model it binds. A succeeded build, a draft model
-that is cached, or an installation never outranks a main model that is still
-downloading. The guard ties that state to what admission and load planning
-observe from the same stored facts.
+A recipe download is one artifact set covering the selected files of every model
+the recipe binds, resolved by ``ModelCacheService.resolve_artifact_set``. The
+Library shows the less ready of that set and what was built from it, so a
+succeeded build never outranks a set that is still downloading. The guard ties
+that state to what admission and load planning observe, for recipes of one and
+of several models, over sets the real service resolves.
 """
 
 from __future__ import annotations
@@ -17,15 +18,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, update
+from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import TokenCodec
-from vonk_control.library_contract import LibraryRecipeProjection
+from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
-from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
+from vonk_control.library_projection.common import compose_recipe_state
 from vonk_control.models import (
     AgentNode,
-    Base,
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
@@ -35,7 +35,6 @@ from vonk_control.models import (
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
 from vonk_forge_contracts import RecipeDefinition, document_sha256
-from vonk_forge_contracts.model import ModelReference
 
 from .test_library_local_state_history import _cache_set, _operation
 from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
@@ -134,40 +133,29 @@ class _World:
                 session.flush()
             session.add(AgentNode(node_id="builder", state="active"))
 
-    def set_id(self, index: int) -> str:
-        return f"{index + 1:x}" * 64
+    def recipe_set(self, service, state: str) -> ModelCacheSet:
+        """The set the service resolves for the recipe, as a download stores it."""
 
-    def model_set(self, index: int, state: str, *, size: int = 3) -> ModelCacheSet:
-        digest = self.model_digests[index]
-        artifact = ArtifactSpec(
-            key=f"artifact-{index}-weights",
-            artifact_id="weights",
-            path="weights.safetensors",
-            kind="huggingface.file",
-            repository="https://huggingface.co/vonk-forge/resolver-model",
-            source="https://huggingface.co/vonk-forge/resolver-model/resolve/"
-            + "0" * 40
-            + "/weights.safetensors",
-            revision="0" * 40,
-            sha256=str(index + 1) * 64,
-            expected_bytes=size,
-            roles=("weights",),
-            model_content_sha256=digest,
+        manifest = service.resolve_artifact_set(
+            recipe_revision_id=self.recipe_revision_id
         )
-        manifest = ArtifactSetManifest(
-            model_content_sha256=digest,
-            recipe_revision_sha256=None,
-            model_content_digests=(digest,),
-            artifacts=(artifact,),
-            model_definition_ref=ModelReference(
-                publisher="vonk-forge",
-                slug="resolver-model" if index == 0 else f"draft-model-{index}",
-                content_sha256=digest,
-            ),
+        row = _cache_set(
+            manifest.digest,
+            manifest.model_content_digests[0]
+            if manifest.model_content_sha256 is None
+            else manifest.model_content_sha256,
+            manifest.recipe_revision_sha256,
+            state,
+            manifest.document(),
         )
-        row = _cache_set(manifest.digest, digest, None, state, manifest.document())
-        row.expected_bytes = size
-        row.verified_bytes = size if state == "cached" else 0
+        row.expected_bytes = manifest.expected_bytes
+        row.verified_bytes = manifest.expected_bytes if state == "cached" else 0
+        if state == "cached":
+            for artifact in manifest.artifacts:
+                path = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"one")
+                _write_object_receipt(service, artifact.sha256, artifact.expected_bytes)
         return row
 
     def build(self, state: str = "succeeded") -> RecipeBuild:
@@ -203,102 +191,115 @@ def _recipe(projection: LibraryProjection) -> LibraryRecipeProjection:
     return recipe
 
 
-def test_a_recipe_prepares_while_its_main_model_downloads_then_is_cached(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path / 'recipe-state.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-    world = _World(sessions, count=2)
-    main, draft = world.model_set(0, "downloading"), world.model_set(1, "cached")
-    download = _operation(
-        main.artifact_set_sha256,
-        kind="download",
-        state="running",
-        at=NOW,
-        completed=40,
-    )
-    with sessions.begin() as session:
-        session.add_all([main, draft])
-        session.flush()
-        session.add_all([download, world.build()])
+def _put_image(service, present: bool) -> None:
+    image = service.root.parent / "runtime-images" / ("8" * 64)
+    if present:
+        image.write_bytes(b"x" * 17)
+    else:
+        image.unlink(missing_ok=True)
 
-    recipe = _recipe(_projection(sessions))
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_a_recipe_prepares_while_its_set_downloads_then_is_cached(
+    cache,  # noqa: F811
+    count: int,
+):
+    service, sessions = cache
+    world = _World(sessions, count=count)
+    row = world.recipe_set(service, "downloading")
+    download = _operation(
+        row.artifact_set_sha256, kind="download", state="running", at=NOW, completed=40
+    )
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build()])
+        session.flush()
+        session.add(download)
+    projection = _projection(sessions, archive=service._runtime_archive_available)
+
+    # A succeeded build does not make a recipe whose set is downloading cached.
+    recipe = _recipe(projection)
     assert recipe.local.controller == "preparing"
     assert recipe.local.preparation is not None
     assert recipe.local.preparation.operation_id == download.id
-    assert recipe.local.preparation.state == "running"
     assert recipe.local.preparation.completed_bytes == 40
-    # The detail view reads the same state from the same bound models.
-    detail = _projection(sessions).recipe_detail("vonk-forge/resolver-recipe")
-    assert detail.local.controller == "preparing"
-    assert detail.local.preparation == recipe.local.preparation
+    detail = projection.recipe_detail("vonk-forge/resolver-recipe")
+    assert detail.local == recipe.local
 
+    # The download finishes: the same recipe reads cached, so nothing asks for
+    # it again, and admission agrees.
+    done = world.recipe_set(service, "cached")
     with sessions.begin() as session:
         session.execute(
             update(ModelCacheSet)
-            .where(ModelCacheSet.artifact_set_sha256 == main.artifact_set_sha256)
-            .values(state="cached")
+            .where(ModelCacheSet.artifact_set_sha256 == row.artifact_set_sha256)
+            .values(state="cached", verified_bytes=done.verified_bytes)
         )
         session.execute(
             update(ModelCacheOperation)
             .where(ModelCacheOperation.id == download.id)
             .values(state="succeeded")
         )
-    assert _recipe(_projection(sessions)).local.controller == "cached"
+    assert _recipe(projection).local.controller == "cached"
+    resolution = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert resolution.blockers == []
 
 
-def test_a_bound_model_without_cache_state_keeps_the_recipe_from_reading_cached(
-    tmp_path,
+def test_a_first_model_set_alone_does_not_make_a_two_model_recipe_cached(
+    cache,  # noqa: F811
 ):
-    engine = create_engine(f"sqlite:///{tmp_path / 'recipe-failed.sqlite'}")
-    Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
+    """Admission reads the recipe's own set, not the first model's set alone."""
+
+    service, sessions = cache
     world = _World(sessions, count=2)
+    alone = service.resolve_artifact_set(model_content_sha256=world.model_digests[0])
+    row = _cache_set(
+        alone.digest,
+        world.model_digests[0],
+        None,
+        "cached",
+        alone.document(),
+    )
+    row.expected_bytes = alone.expected_bytes
+    row.verified_bytes = alone.expected_bytes
+    for artifact in alone.artifacts:
+        path = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"one")
+        _write_object_receipt(service, artifact.sha256, artifact.expected_bytes)
     with sessions.begin() as session:
-        session.add_all([world.model_set(0, "cached"), world.build()])
-
-    # The draft model has no cache state at all.
-    assert _recipe(_projection(sessions)).local.controller == "not_cached"
-
-
-_MODEL_STATES = ("cached", "downloading", "absent")
-_IMAGE_STATES = ("present", "missing", "unbuilt")
+        session.add(row)
+    blocked = service.resolve_latest_cached(
+        recipe_identity="vonk-forge/resolver-recipe", model_variant="fp16"
+    )
+    assert "model-not-cached" in blocked.blockers
 
 
 @pytest.mark.parametrize(
-    ("model_state", "image_state"),
-    list(itertools.product(_MODEL_STATES, _IMAGE_STATES)),
+    ("count", "set_state", "image_state"),
+    list(itertools.product([1, 2], ["cached", "downloading"], ["present", "missing"])),
 )
 def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
     cache,  # noqa: F811
-    model_state: str,
+    count: int,
+    set_state: str,
     image_state: str,
 ):
     """Shared fixture states: cached in the Library implies nothing left to fetch."""
 
     service, sessions = cache
-    world = _World(sessions, count=1)
-    model_object = service.root / "objects" / "11" / ("1" * 64)
-    image_object = service.root.parent / "runtime-images" / ("8" * 64)
-    rows: list[object] = []
-    if model_state != "absent":
-        rows.append(
-            world.model_set(0, "cached" if model_state == "cached" else "downloading")
-        )
-    if model_state == "cached":
-        model_object.parent.mkdir(parents=True)
-        model_object.write_bytes(b"one")
-        _write_object_receipt(service, "1" * 64, 3)
-    if image_state != "unbuilt":
-        rows.append(world.build())
-    if image_state == "present":
-        image_object.write_bytes(b"x" * 17)
+    world = _World(sessions, count=count)
+    row = world.recipe_set(service, set_state)
+    _put_image(service, image_state == "present")
     with sessions.begin() as session:
-        session.add_all(rows)
+        session.add_all([row, world.build()])
         session.flush()
-        if model_state == "downloading":
+        if set_state == "downloading":
             session.add(
                 _operation(
-                    world.model_set(0, "downloading").artifact_set_sha256,
+                    row.artifact_set_sha256,
                     kind="download",
                     state="running",
                     at=NOW,
@@ -323,27 +324,31 @@ def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
     if library.local.controller == "cached":
         assert resolution.blockers == []
         assert inspection.missing_nas_bytes == 0
-    if model_state == "cached" and image_state == "present":
+    if set_state == "cached" and image_state == "present":
         assert library.local.controller == "cached"
-    if model_state != "cached":
+    else:
         assert library.local.controller != "cached"
 
 
-def test_a_recipes_local_state_is_built_only_by_the_composing_helper():
-    """Only ``_recipe_local`` reads a recipe's own state through ``self._local``."""
+def test_the_weaker_state_wins_in_one_total_order():
+    local = LibraryLocalState
+    cached, preparing = local(controller="cached"), local(controller="preparing")
+    failed, missing = local(controller="failed"), local(controller="not_cached")
+    unknown = local(controller="unknown")
+    order = [failed, unknown, missing, preparing, cached]
+    for lower, higher in itertools.combinations(order, 2):
+        for first, second in ((lower, higher), (higher, lower)):
+            assert compose_recipe_state(first, second).controller == lower.controller
 
-    offenders = []
-    for path in sorted(LIBRARY_SRC.glob("*.py")):
-        text = path.read_text(encoding="utf-8")
-        for match in re.finditer(r"self\._local\(", text):
-            call = text[match.start() : match.start() + 240]
-            if "ReceiptOwner.RECIPE" not in call:
-                continue
-            before = text[: match.start()]
-            owner = re.findall(r"^def (\w+)", before, flags=re.MULTILINE)[-1]
-            if owner != "_recipe_local":
-                offenders.append(f"{path.name}:{before.count(chr(10)) + 1}")
-    assert offenders == []
-    for name in ("catalog.py", "views.py"):
-        text = (LIBRARY_SRC / name).read_text(encoding="utf-8")
-        assert "self._recipe_local(" in text
+
+def test_a_recipes_facts_reach_the_result_only_through_the_fold():
+    """Sets and requests are cache facts, builds and runs asset facts; no fact is
+    merged into the result directly, so the fold is the one place a recipe's
+    state is decided."""
+
+    source = (LIBRARY_SRC / "local_state.py").read_text(encoding="utf-8")
+    body = source[source.index("def _database_local_state") :]
+    body = body[: body.index("\ndef ")]
+    targets = re.findall(r"_merge_local\(\s*(\w+)", body)
+    assert targets and set(targets) <= {"cache_facts", "asset_facts"}
+    assert "_fold_local_facts(" in body

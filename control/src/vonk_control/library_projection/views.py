@@ -39,12 +39,6 @@ from .common import (
     _note_unreadable,
     _observed_library_page,
 )
-from .local_state import _recipe_local_digests
-
-
-def _bound_digests(item: LibraryRecipeProjection) -> list[str]:
-    return [reference.content_sha256 for reference in item.projected.models]
-
 
 if TYPE_CHECKING:
     from .service import LibraryProjection
@@ -536,22 +530,14 @@ def recipe_library(
     ) -> list[LibraryRecipeProjection]:
         if not cached:
             snapshot = self._local_state_snapshot(
-                _recipe_local_digests(
-                    [
-                        (
-                            item.identity.content_sha256,
-                            _bound_digests(item),
-                        )
-                        for item in candidates
-                    ]
-                )
+                [item.identity.content_sha256 for item in candidates]
             )
             candidates = [
                 item.model_copy(
                     update={
-                        "local": self._recipe_local(
+                        "local": self._local(
                             item.identity.content_sha256,
-                            _bound_digests(item),
+                            kind=ReceiptOwner.RECIPE,
                             snapshot=snapshot,
                         )
                     }
@@ -624,18 +610,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         ],
     ]
     snapshot = self._local_state_snapshot(
-        _recipe_local_digests(
-            [
-                (exact[0].content_digest, model_digests),
-                *[
-                    (
-                        row.content_digest,
-                        [reference.content_sha256 for reference in recipe.models],
-                    )
-                    for row, recipe in recipe_rows[1:]
-                ],
-            ]
-        )
+        [row.content_digest for row, _ in recipe_rows]
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
