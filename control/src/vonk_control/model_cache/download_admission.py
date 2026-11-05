@@ -174,6 +174,14 @@ class DownloadAdmissionMixin:
                             (ArtifactIdentity("model-set", set_digest),),
                             now=now,
                         )
+                        # One live transfer per model set: every caller, whatever
+                        # its request key, attaches to the download or repair
+                        # already running under this gate.
+                        shared = cache.reusable_operation(
+                            artifact_set_sha256=set_digest, include_succeeded=False
+                        )
+                        if shared is not None:
+                            return shared
                         cache._ensure_set(session, manifest)
                         session.flush()
                         cache._require_model_sets_open(
