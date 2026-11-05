@@ -60,6 +60,7 @@ from .test_fleet_profiles import (
     _uuid,
 )
 from .test_profile_adapter_continuity import _running_child
+from .test_profile_claim_restore import seed_idle_spark
 
 
 class _SQLCancellationAdapter(_SwitchAdapter):
@@ -233,6 +234,8 @@ def test_postgres_partial_adoption_preserves_promises_and_waits_exact_issued_cle
         # The order backs off for its retry (its claims released) while its
         # child stays live.
         old.state = LifecycleState.BACKOFF.value
+    for index in (1, 2):
+        seed_idle_spark(sessions, _node_id(index), clock[0])
     assert restarted._resume_live_child(original.id) is not None
     with sessions() as session:
         old = session.get(FleetProfileApplication, original.id)
