@@ -74,7 +74,6 @@ from typing import Any
 from sqlalchemy import (
     Select,
     and_,
-    collate,
     delete,
     exists,
     false,
@@ -915,20 +914,20 @@ def _model_dependencies(
     return frozenset(found)
 
 
-def not_among(column, words: Collection[str], dialect: str):
+def not_among(column, words: Collection[str]):
     """``column NOT IN words`` spelled as ranges between the sorted words.
 
     The same rows (a word outside ``words`` is still selected), but the state
-    index can answer it. The column is compared bytewise (``COLLATE "C"``), the
-    order ``sorted`` uses, whatever collation the database was created with.
+    index can answer it. Ranges follow ``sorted`` only while every word is
+    lowercase letters, whatever the database collation orders; the vocabulary
+    test holds the ended words to that.
     """
 
     ordered = sorted(set(words))
-    ranked = collate(column, "C" if dialect == "postgresql" else "BINARY")
     return or_(
-        ranked < ordered[0],
-        *(and_(ranked > low, ranked < high) for low, high in pairwise(ordered)),
-        ranked > ordered[-1],
+        column < ordered[0],
+        *(and_(column > low, column < high) for low, high in pairwise(ordered)),
+        column > ordered[-1],
     )
 
 
@@ -957,7 +956,7 @@ def operation_tokens(
 
     def live(state, updated, subject=LifecycleSubject.JOB):
         ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
-        unended = not_among(state, ended, session.get_bind().dialect.name)
+        unended = not_among(state, ended)
         return unended if window is None else or_(unended, updated >= window)
 
     selected = session.scalar(select(FleetProfileSelection.application_id))
