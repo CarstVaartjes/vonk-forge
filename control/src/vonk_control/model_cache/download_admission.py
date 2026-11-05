@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
+from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
@@ -153,7 +154,7 @@ class DownloadAdmissionMixin:
         delay = 0.01
         while True:
             try:
-                with cache._lock, cache._session(write=True) as session:
+                with admitting(), cache._lock, cache._session(write=True) as session:
                     replay = cache._download_replay(
                         session,
                         request_key,
@@ -233,11 +234,30 @@ class DownloadAdmissionMixin:
                         session.add(operation)
                         session.flush()
                         operation_id = operation.id
+            except ConstraintReplay as duplicate:
+                # The request key was taken by a concurrent identical request.
+                with cache._session() as session:
+                    return duplicate.replay(
+                        lambda: cache._download_replay(
+                            session,
+                            request_key,
+                            actor=actor,
+                            selector=selector,
+                            force=force,
+                            artifact_set_sha256=set_digest,
+                            plan_digest=requested_plan,
+                        )
+                    )
             except (
                 ArtifactReferenceUnsettled,
                 ModelCacheConflictUnknown,
                 DBAPIError,
             ) as error:
+                # Only contention is retried; any other database error is
+                # deterministic and surfaces at once (a constraint violation
+                # was already typed by ``admitting``).
+                if isinstance(error, DBAPIError) and not is_admission_contention(error):
+                    raise
                 # This service owns every transaction. Rollback and release its
                 # mutex before observing the exact request; never replay effects
                 # inside a failed or caller-owned transaction.
