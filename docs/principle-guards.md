@@ -27,6 +27,15 @@ A wait the test expects to expire (`not done.wait(0.1)`) and a polling interval
 in a loop are not limits on work. A deliberate short limit names its reason on
 the call: `# wall-clock: <reason>` (`control/tests/short_wall_clocks.py`).
 
+A control test holds threads together with
+`insert_collision_support.Rendezvous`, never a raw `threading.Barrier`
+(`control/tests/raw_barriers.py`). A barrier in a patched product method waits
+again when the product re-enters that method on the same thread (a replay after
+a unique-key conflict, a replan), and the test then breaks the barrier at random
+instead of naming the re-entry. Each thread passes a rendezvous once; a second
+wait fails at once. `collide_inserts` holds two real admissions at their INSERT
+so the unique key, not commit timing, decides the race.
+
 One rule is whole-tree rather than added-line: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

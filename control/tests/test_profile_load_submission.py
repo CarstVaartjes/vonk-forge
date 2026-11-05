@@ -56,6 +56,7 @@ from cluster_profiles.control_client import ControlClient
 
 from .consumer_outcomes import not_adopted
 from .display_fixtures import reworded
+from .insert_collision_support import Rendezvous
 from .lock_wait_support import backend_pid, lock_waits_behind
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
@@ -459,14 +460,14 @@ def test_concurrent_duplicate_reconciles_acceptance_before_reporting_stale_revie
     postgres_engine, monkeypatch
 ):
     sessions, api, _codec, headers, _preview = _profile_api(postgres_engine)
-    rendezvous = threading.Barrier(2)
+    rendezvous = Rendezvous(2)
     first_committed = threading.Event()
     second_request = ContextVar("second_request", default=False)
     original = FleetProfileService.preview
     body = {"request_key": str(uuid4())}
 
     def preview_after_lookup(service, *args, **kwargs):
-        rendezvous.wait(timeout=30)
+        rendezvous.wait()
         if second_request.get():
             assert first_committed.wait(timeout=30)
         return original(service, *args, **kwargs)

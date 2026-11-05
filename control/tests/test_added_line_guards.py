@@ -819,6 +819,7 @@ GATEWAY_WAIT = (
         "process.communicate(timeout=5)\n",
         "subprocess.run(command, check=True, timeout=2)\n",
         "worker.join(timeout=3)\nassert not worker.is_alive()\n",
+        "rendezvous = Rendezvous(2, timeout=1)\n",
         "deadline = time.monotonic() + 2\n",
         "LIMIT = 1\nfuture.result(LIMIT)\n",
         "@pytest.mark.timeout(3)\ndef test_x():\n    pass\n",
@@ -2111,6 +2112,47 @@ def test_a_savepoint_outside_a_with_block_is_flagged(source: str) -> None:
 def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(path, source, lines, modes=("savepoints",))
+
+
+_BARRIER_TEST = "control/tests/test_example.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A patched method the product calls twice strands its thread here.
+        "import threading\nbarrier = threading.Barrier(2, timeout=30)\n",
+        "from threading import Barrier\nboth = Barrier(2)\n",
+        "from threading import Barrier as Gate\nboth = Gate(2)\n",
+        "import threading as t\nboth = t.Barrier(2)\n",
+    ],
+)
+def test_a_raw_barrier_in_a_control_test_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_BARRIER_TEST, source, lines, modes=("barriers",))
+    # Only an added line can fail the change.
+    assert not check_source(_BARRIER_TEST, source, {1}, modes=("barriers",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_BARRIER_TEST, "both = Rendezvous(2)\n"),
+        (_BARRIER_TEST, "import asyncio\nbarrier = asyncio.Barrier(2)\n"),
+        # The rendezvous itself is built on the one raw barrier.
+        (
+            "control/tests/insert_collision_support.py",
+            "import threading\nbarrier = threading.Barrier(2)\n",
+        ),
+        (
+            "control/src/vonk_control/x.py",
+            "import threading\nb = threading.Barrier(2)\n",
+        ),
+    ],
+)
+def test_a_rendezvous_or_an_out_of_scope_barrier_passes(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("barriers",))
 
 
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
