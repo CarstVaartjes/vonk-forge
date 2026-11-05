@@ -530,7 +530,7 @@ def availability_disposition(error: BaseException | BuildUnsettled) -> Dispositi
     )
     if is_security_failure(authority_code) or isinstance(error, SecurityRefusalError):
         return Disposition.SECURITY
-    if isinstance(error, InvalidRequestError):
+    if isinstance(error, RecipeImageAvailabilityInvalid):
         # A refused request repeats its refusal when resent: it ends the work.
         return Disposition.FAIL
     if isinstance(error, BuildUnsettled):

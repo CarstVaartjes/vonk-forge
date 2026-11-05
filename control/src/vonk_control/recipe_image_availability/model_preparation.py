@@ -6,7 +6,6 @@ import uuid
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
-    InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
     OperationProgress,
@@ -17,6 +16,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..admission_locking import ConstraintDefect
 from ..job_documents import (
     AvailabilityModelChild,
 )
@@ -171,10 +171,10 @@ def _ensure_model_child(
         raise
     except SecurityRefusalError:
         raise
-    except InvalidRequestError as error:
-        # The cache refused the request itself (a violated constraint, an
-        # out-of-contract plan): resending it repeats the refusal, so it ends
-        # the preparation with its detail instead of becoming a retry.
+    except ConstraintDefect as error:
+        # The database refused the write itself (a violated constraint): resending
+        # repeats the refusal, so it ends the preparation with its detail
+        # instead of becoming a retry.
         raise RecipeImageAvailabilityInvalid(
             RecipeImageCode.MODEL_CACHE_INVALID,
             "exact Model artifact preparation was refused "
