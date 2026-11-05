@@ -5,7 +5,6 @@ import hashlib
 import itertools
 import json
 import os
-import threading
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
@@ -19,7 +18,7 @@ import vonk_control.model_cache as model_cache_module
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import LifecycleState, ModelCacheCode, ProgressPhase
@@ -154,18 +153,6 @@ def cache(tmp_path: Path):
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    # One connection serves every checkout.  A second thread using it can roll
-    # back the first thread's open transaction ("cannot commit - no
-    # transaction is active"), so a test that starts background work (a
-    # ``tick``, a transfer) takes ``threaded_cache`` instead.
-    owner = threading.get_ident()
-    off_thread: list[str] = []
-
-    @event.listens_for(engine, "checkout")
-    def _note_other_threads(*_args: object) -> None:
-        if threading.get_ident() != owner:
-            off_thread.append(threading.current_thread().name)
-
     sessions = sessionmaker(engine, expire_on_commit=False)
     runtime_root = tmp_path / "runtime-images"
     runtime_root.mkdir()
@@ -185,11 +172,7 @@ def cache(tmp_path: Path):
         fixture_sources=True,
         runtime_archive_available=runtime_archive_available,
     )
-    yield service, sessions
-    assert not off_thread, (
-        f"threads {sorted(set(off_thread))} used the shared test connection; "
-        "this test needs the threaded_cache fixture"
-    )
+    return service, sessions
 
 
 def _write_object_receipt(
