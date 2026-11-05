@@ -830,6 +830,58 @@ def test_other_work_on_its_sparks_does_not_restart_a_leftovers_grace(
     assert len(_uninstalls(load, installation_id)) == 1
 
 
+def _unrelated_live_work_on(load, installation_id: str) -> None:
+    """A running job of someone else on the installation's Sparks."""
+
+    with load.sessions.begin() as session:
+        nodes = sorted(
+            session.scalars(
+                select(InstallationNode.node_id).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="recipe.start",
+                state="running",
+                actor="operator",
+                authority_revision="r",
+                targets=nodes,
+                payload_digest="0" * 64,
+                payload={},
+                current_attempt=0,
+                created_at=load.lifecycle._clock(),
+                updated_at=load.lifecycle._clock(),
+            )
+        )
+
+
+def test_a_residue_of_an_ended_attempt_goes_while_other_work_is_live(
+    tmp_path: Path,
+) -> None:
+    """Catches a busy Spark holding an ended attempt's residue until disk pressure."""
+
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="failed")
+    _unrelated_live_work_on(load, installation_id)
+    assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+
+
+def test_a_residue_of_a_live_attempt_is_kept(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="failed")
+    _unrelated_live_work_on(load, installation_id)
+    with load.sessions.begin() as session:
+        job = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert job is not None
+        job.state = "running"  # the attempt that left it is still going
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
+    assert not _uninstalls(load, installation_id)
+
+
 def test_an_installation_short_of_its_payload_is_uninstalled_after_the_grace(
     tmp_path: Path,
 ) -> None:
