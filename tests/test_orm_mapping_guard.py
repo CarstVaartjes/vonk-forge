@@ -290,8 +290,6 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "current_attempt",
             "observe_count",
             "recovery_deadline",
-            "retry_disposition",
-            "retry_disposition_attempt",
             "retry_due_at",
             "created_at",
             "updated_at",

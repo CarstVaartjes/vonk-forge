@@ -34,11 +34,8 @@ class ProjectionMixin:
             LifecycleState.QUEUED,
             LifecycleState.RUNNING,
             LifecycleState.OBSERVING,
-            kind=UPDATE_KIND,
         ) and bool(document.children)
-        partial = job_states.means(
-            job.state, LifecycleState.FAILED, kind=UPDATE_KIND
-        ) and any(
+        partial = job_states.means(job.state, LifecycleState.FAILED) and any(
             child.state == LifecycleState.SUCCEEDED for child in document.children
         )
         return RecipeUpdateResponse(

@@ -886,8 +886,9 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
     engine = create_engine(f"sqlite:///{tmp_path / 'operation-resume-events.sqlite'}")
     models.Base.metadata.create_all(engine)
     production_sessions = session_factory(engine)
+    parked = "needs-operator"
     job = _job("operation-projection-resume")
-    job.state = "waiting-for-operator"
+    job.state = parked
     job.payload = {"workload_intent_ordinal": 1}
     job.payload_digest = hashlib.sha256(canonical_message(job.payload)).hexdigest()
     with production_sessions.begin() as session:
@@ -926,7 +927,7 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
         ).hexdigest()
         operation.workload_intent_ordinal = 1
         operation.current_attempt = 1
-        operation.state = "waiting-for-operator"
+        operation.state = parked
         session.add(operation)
     services = durable_operation_services(
         production_sessions,
@@ -943,7 +944,7 @@ def test_durable_operation_projection_resume_records_waiting_then_queued(
         if row.payload["entity_id"] == job.id
     ]
     assert [(row.event_type, row.payload["state"]) for row in rows] == [
-        ("operation-state", "waiting-for-operator"),
+        ("operation-state", parked),
         ("operation-state", "queued"),
     ]
 

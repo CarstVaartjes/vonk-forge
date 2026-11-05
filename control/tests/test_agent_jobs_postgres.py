@@ -605,7 +605,7 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
         old_row.next_action_at = clock.now
         if exhausted:
             old_row.next_action_at = None
-            old_job.state = "waiting-for-operator"
+            old_job.state = "needs-operator"
         node.workload_intent_ordinal = 2
     new_parent = parent(sessions, clock)
     with sessions.begin() as session:
@@ -633,7 +633,7 @@ def test_postgres_new_stop_supersedes_parked_old_retry_without_starvation(
 
 
 @pytest.mark.parametrize(
-    "terminal_state", ("succeeded", "failed", "waiting-for-operator", "expired")
+    "terminal_state", ("succeeded", "failed", "needs-operator", "cancelled")
 )
 def test_postgres_enqueue_rejects_terminal_parent(service, terminal_state: str) -> None:
     sessions, clock = service

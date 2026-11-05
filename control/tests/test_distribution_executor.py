@@ -878,9 +878,10 @@ def test_abandon_closes_only_a_parked_distribution_child(
         operation = (
             session.query(AgentOperation).filter_by(parent_job_id=child.id).one()
         )
-        operation.state = "running" if running else "waiting-for-operator"
+        parked = "needs-operator"
+        operation.state = "running" if running else parked
         operation.current_attempt = 1
-        child.state = "waiting-for-operator"
+        child.state = parked
         child_id, operation_id = child.id, operation.id
 
     with services.sessions.begin() as session:
@@ -890,9 +891,7 @@ def test_abandon_closes_only_a_parked_distribution_child(
         assert session.get(AgentOperation, operation_id).state == (
             "running" if running else "cancelled"
         )
-        assert session.get(Job, child_id).state == (
-            "waiting-for-operator" if running else "cancelled"
-        )
+        assert session.get(Job, child_id).state == (parked if running else "cancelled")
     if not running:
         cancelled = executor.get(child_id)
         assert cancelled is not None

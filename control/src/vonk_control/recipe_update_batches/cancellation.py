@@ -82,9 +82,7 @@ class CancellationMixin:
                     .where(
                         Job.kind == UPDATE_KIND,
                         Job.id == requested_id if requested_id is not None else true(),
-                        Job.state.in_(
-                            job_states.words(LifecycleState.OBSERVING, kind=UPDATE_KIND)
-                        ),
+                        Job.state.in_(job_states.words(LifecycleState.OBSERVING)),
                     )
                     .order_by(Job.updated_at, Job.id)
                     .limit(limit)
@@ -95,7 +93,7 @@ class CancellationMixin:
             with service.sessions() as session:
                 parent = session.get(Job, operation_id)
                 if parent is None or parent.state not in job_states.words(
-                    LifecycleState.OBSERVING, kind=UPDATE_KIND
+                    LifecycleState.OBSERVING
                 ):
                     continue
                 try:
@@ -175,7 +173,7 @@ class CancellationMixin:
                         .with_for_update(nowait=True)
                     )
                     if parent is None or parent.state not in job_states.words(
-                        LifecycleState.OBSERVING, kind=UPDATE_KIND
+                        LifecycleState.OBSERVING
                     ):
                         continue
                     current = service._document(parent)
@@ -276,7 +274,7 @@ class CancellationMixin:
                     .with_for_update(nowait=True)
                 )
                 if parent is None or parent.state not in job_states.words(
-                    LifecycleState.OBSERVING, kind=UPDATE_KIND
+                    LifecycleState.OBSERVING
                 ):
                     return False
                 service._lifecycle.cancel_unreadable(

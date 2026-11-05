@@ -9,8 +9,7 @@ the **only** projection of a core decision back onto the stored row
 (:meth:`ModelCacheAdapter.apply`).  No other code writes an operation's ``state``.
 
 Stored encoding.  The stored ``state`` is a word of the core vocabulary
-(``vonk_agent_protocol.LifecycleState``); a row written before the rename may still
-say ``partial``, which the contract adopts as ``backoff`` (readers select by
+(``vonk_agent_protocol.LifecycleState``; readers select by
 ``model_cache_states.LIVE`` and friends, never by a hand-spelled word).  The core's
 states are projected onto it:
 

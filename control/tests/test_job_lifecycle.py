@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import OperatorActionName
+from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_control import job_states
 from vonk_control.jobs import JobService
 from vonk_control.lifecycle import Lifecycle, State, transition
@@ -16,6 +16,7 @@ from vonk_control.lifecycle.types import (
     CancelRequested,
     Claimed,
     Effect,
+    Execute,
     Heartbeat,
     LeaseLapsed,
     Observed,
@@ -52,7 +53,7 @@ def env(tmp_path):
 def _park(sessions, job_id: str, *, attempts: int = 1) -> None:
     with sessions.begin() as session:
         job = session.get(Job, job_id)
-        job.state = "waiting-for-operator"
+        job.state = LifecycleState.NEEDS_OPERATOR.value
         job.current_attempt = attempts
 
 
@@ -125,7 +126,7 @@ def test_heartbeat_extends_only_the_current_fence(env) -> None:
     assert jobs.claim("w2", 30, kinds=("probe",)) is None
 
 
-def test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> None:
+def test_a_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> None:
     jobs, sessions, _ = env
     job = jobs.enqueue("probe", "a", "r", ["n"], {})
     _park(sessions, job.id)
@@ -137,6 +138,40 @@ def test_a_legacy_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> No
     # rule 1: a generic job is never irreversible, so the first decision retries it
     decision = transition(row, Tick(), adapter, NOW)
     assert decision.row.state is State.BACKOFF
+
+
+@pytest.mark.parametrize(
+    "word", ["waiting-for-operator", "waiting", "cancelling", "partial", "expired"]
+)
+def test_the_adapter_re_evaluates_a_word_it_does_not_know(word: str) -> None:
+    """A unit test of the adapter's fallback, not of what a table can hold.
+
+    The state CHECK refuses these words (``test_lifecycle_state_checks_postgres``);
+    a row that predates the CHECK reaches this branch: it is not adopted as any
+    state, its first tick retries it and the retry is offered for a fresh claim.
+    """
+
+    job = JobAdapter.new_job(
+        id="job-unknown",
+        state=word,
+        request_id="r-unknown",
+        kind="probe",
+        actor="a",
+        authority_revision="r",
+        targets=["n"],
+        payload_digest="d" * 64,
+        payload={},
+        current_attempt=1,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    assert job_states.core(word) is None
+    adapter = JobAdapter()
+    row = adapter.adopt(job)
+    retried = transition(row, Tick(), adapter, NOW).row
+    assert retried.state is State.BACKOFF and retried.next_action_at is not None
+    due = transition(retried, Tick(), adapter, retried.next_action_at)
+    assert due.row.state is State.QUEUED and Execute() in due.commands
 
 
 def test_resume_queues_a_waiting_job_and_refuses_anything_else(env) -> None:

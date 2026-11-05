@@ -6,7 +6,6 @@ from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, Request, status
 from pydantic import (
-    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -16,12 +15,10 @@ from pydantic import (
 from vonk_agent_protocol import (
     ErrorCategory,
     LifecycleState,
-    LifecycleSubject,
     ProgressPhase,
     UnknownError,
     UnknownOutcomeError,
     WaitReason,
-    state_adopter,
 )
 
 from .auth import MUTATION_ROLES
@@ -64,17 +61,14 @@ from .strict_json import StrictJSONModel, read_stored_model
 # helper that produces the value, so the vocabulary cannot drift apart.
 RecipeImageAvailabilityKind = Literal["recipe.image.availability.v2"]
 RecipeImageAvailabilityChildKind = Literal["model-cache", "runtime-image"]
-RecipeOperatorState = Annotated[
-    Literal[
-        "accepted",
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
+RecipeOperatorState = Literal[
+    "accepted",
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
 ]
 RecipeOperatorAction = Literal["remove"]
 

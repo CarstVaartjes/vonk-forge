@@ -79,7 +79,7 @@ _STORED = {
     State.CANCELLED: "cancelled",
 }
 #: A child that has not been issued yet backs off (it will be); every other child
-#: speaks the core vocabulary, an old spelling adopted by its contract type.
+#: speaks the core vocabulary.
 _PENDING_CHILD = "pending"
 _CANCEL_EFFECT_UNKNOWN = (
     f"{RecipeUpdateCode.CANCEL_EFFECT_UNKNOWN}: a child operation was still being "
@@ -124,8 +124,8 @@ class RecipeUpdateBatchAdapter:
 
         A document that cannot be read still maps (to the stored state, without a
         clock): the core never raises for it, and the owner reports the damage.  A
-        legacy ``waiting-for-operator`` batch is ``needs-operator`` and is
-        re-evaluated by the first decision (nothing advertises an action).
+        word this adapter does not know is ``needs-operator`` and is re-evaluated
+        by the first decision (nothing advertises an action).
         """
 
         now = aware(now)
@@ -145,15 +145,15 @@ class RecipeUpdateBatchAdapter:
                 state = State.RUNNING
             else:
                 state = State.BACKOFF if due is not None and due > now else State.QUEUED
-        elif job_states.means(stored, State.OBSERVING, kind=KIND):
+        elif job_states.means(stored, State.OBSERVING):
             state = State.OBSERVING
         elif stored == "succeeded":
             state = State.SUCCEEDED
-        elif stored in job_states.words(State.FAILED, kind=KIND):
+        elif stored in job_states.words(State.FAILED):
             state = State.FAILED
         elif stored == "cancelled":
             state = State.CANCELLED
-        else:  # waiting-for-operator, or a state this adapter does not know
+        else:  # a word this adapter does not know: re-evaluated as a wait
             state = State.NEEDS_OPERATOR
         issued = job.current_attempt > 0 or (
             document is not None
@@ -173,7 +173,7 @@ class RecipeUpdateBatchAdapter:
             requested_at = aware(cancellation.cancel_requested_at or job.updated_at)
             request_key = cancellation.cancel_request_id
             observe_count = STOP_BUDGET if now >= requested_at + CANCEL_BUDGET else 0
-        elif job_states.means(stored, State.OBSERVING, kind=KIND):
+        elif job_states.means(stored, State.OBSERVING):
             # A cancelling batch whose request cannot be read: the request is
             # still a request (monotonic); see :meth:`cancel_unreadable`.
             requested_at = aware(job.updated_at)

@@ -795,7 +795,8 @@ def test_superseded_lease_lapse_without_a_receipt_is_not_fabricated(tmp_path):
                 fence=str(uuid4()),
                 lease_deadline=NOW,
                 agent_certificate_serial="test-serial",
-                state="expired",
+                state="observing",
+                observation_cause="lease-lapsed",
                 progress={"phase": "copying"},
                 result=None,
             )
@@ -833,7 +834,7 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
                 payload_digest="b" * 64,
                 payload={},
                 authority_revision=COMMIT,
-                state="waiting-for-operator",
+                state="needs-operator",
                 status_reason=reason,
                 current_attempt=1,
                 created_at=NOW,
@@ -848,7 +849,8 @@ def test_a_parked_lease_lapse_is_retained_from_the_controllers_own_reason(tmp_pa
                 fence=str(uuid4()),
                 lease_deadline=NOW,
                 agent_certificate_serial="test-serial",
-                state="expired",
+                state="observing",
+                observation_cause="lease-lapsed",
                 progress={"phase": "copying"},
                 result=None,
             )

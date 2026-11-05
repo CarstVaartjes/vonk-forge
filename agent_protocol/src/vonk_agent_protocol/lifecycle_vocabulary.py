@@ -6,19 +6,16 @@ publishes it through :class:`LifecycleVocabulary` into ``wire.json``, and
 ``scripts/generate-agent-wire`` turns that into Rust types, so no consumer
 spells one of these words by hand.
 
-The stored ``state`` of a lifecycle subject speaks :class:`LifecycleState`.  The
-retired spellings (``waiting-for-operator``, ``cancelling``, ``waiting``,
-``partial``, ``expired``) live in :data:`STATE_ALIASES` and nowhere else: a
-reader of an old row adopts it through :func:`adopt_state`, a caller that still
-sends one is understood through :func:`input_state`, for one release.  The agent
-wire uses :class:`AgentResultState`; unknown effects are ``observing``.
-:data:`LEGACY_WAIT_STATE` names only the retired spelling adopted on read.
+The stored ``state`` of a lifecycle subject speaks :class:`LifecycleState` and
+nothing else: a word outside it is unknown, and the subject's adapter re-evaluates
+the row instead of trusting it.  The agent wire uses :class:`AgentResultState`;
+unknown effects are ``observing``.  :data:`LEGACY_WAIT_STATE` names only the
+retired agent-result spelling adopted on read.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
-from typing import Any, NamedTuple
+from collections.abc import Iterable, Mapping
 
 from .agent_words import (
     AgentClientDecision,
@@ -81,10 +78,7 @@ class LifecycleState(WireEnum):
     """The nine lifecycle states: the one vocabulary a stored ``state`` speaks.
 
     ``superseded`` is a definite, non-failed end: a newer request replaced the
-    work, so nothing is left for anyone to do.  The legacy spellings
-    (``waiting``, ``partial``, ``cancelling``, ``expired``,
-    ``waiting-for-operator``) are *aliases*: see :data:`STATE_ALIASES`, the one
-    table that says what each of them means, per subject.
+    work, so nothing is left for anyone to do.
     """
 
     QUEUED = "queued"
@@ -221,19 +215,14 @@ class LifecycleSubject(WireEnum):
 
 
 class StateAlias(WireEnum):
-    """The retired spellings of a stored lifecycle state.
+    """The retired spelling of an agent result's state, adopted on read only.
 
-    They are accepted as input for one release (API filters, CLI arguments) and
-    adopted when an old row is read; nothing writes them any more.  This is the
-    only place the words may be spelled: the vocabulary ratchet allows them
-    nowhere else.
+    No stored lifecycle state has an alias: a stored word outside
+    :class:`LifecycleState` is unknown.  This is the only place the word may be
+    spelled: the vocabulary ratchet allows it nowhere else.
     """
 
     WAITING_FOR_OPERATOR = "waiting-for-operator"
-    CANCELLING = "cancelling"
-    WAITING = "waiting"
-    PARTIAL = "partial"
-    EXPIRED = "expired"
 
 
 #: Retired result spellings are adopted on reads, never emitted or published as enum members.
@@ -247,9 +236,7 @@ class ObservationCause(WireEnum):
 
     An attempt that ended without a definite answer is ``observing``; this says
     what left it unanswered.  ``reported-unknown``: the executor said it could not
-    confirm the effect.  ``lease-lapsed``: the executor stopped reporting.  The old
-    spellings carried this in the state word itself (``waiting-for-operator`` and
-    ``expired``), which is why an adopted attempt also yields its cause.
+    confirm the effect.  ``lease-lapsed``: the executor stopped reporting.
     """
 
     REPORTED_UNKNOWN = "reported-unknown"
@@ -261,118 +248,12 @@ class ArtifactPreparation(WireEnum):
 
     These are preparation, not execution: a job is ``draft`` while its inputs are
     uploaded and ``ready`` once they are complete.  Its lifecycle ``state`` begins
-    at ``queued`` on submit and is absent until then.  The old spelling kept both
-    in the one ``state`` word, which is why :func:`legacy_preparation` exists.
+    at ``queued`` on submit and is absent until then.
     """
 
     DRAFT = "draft"
     READY = "ready"
 
-
-def legacy_preparation(stored: str | None) -> ArtifactPreparation | None:
-    """The preparation stage an old artifact-job ``state`` word meant, else ``None``."""
-
-    try:
-        return ArtifactPreparation(stored) if stored is not None else None
-    except ValueError:
-        return None
-
-
-class AdoptedState(NamedTuple):
-    """What a stored word means in the core vocabulary.
-
-    ``cancel_requested`` is true for a word that said "a cancel is under way":
-    the row is non-terminal and the kind records the cancel request
-    (``cancel_requested_at``) in its own storage.
-    """
-
-    state: LifecycleState
-    cancel_requested: bool = False
-
-
-_NEEDS_OPERATOR = AdoptedState(LifecycleState.NEEDS_OPERATOR)
-_CANCELLING = AdoptedState(LifecycleState.OBSERVING, cancel_requested=True)
-_WAITING = AdoptedState(LifecycleState.OBSERVING)
-#: Work that stopped part-way and is retried by itself, not yet settled.
-_PARTIAL = AdoptedState(LifecycleState.BACKOFF)
-#: A job that lapsed without an answer is over: nothing will report for it.
-_JOB_EXPIRED = AdoptedState(LifecycleState.FAILED)
-#: An attempt whose lease lapsed was interrupted, not refused: what it did is
-#: unknown, so it is observed, and the operation decides what happens next.  The
-#: same holds for an attempt the agent reported as ``waiting-for-operator`` (its
-#: old word for "I could not confirm the effect"): an attempt is a record of one
-#: try, never a wait for a person, so it too is observed.
-_ATTEMPT_EXPIRED = AdoptedState(LifecycleState.OBSERVING)
-_ATTEMPT_UNKNOWN = AdoptedState(LifecycleState.OBSERVING)
-
-#: What each retired spelling means, per subject whose stored ``state`` the core
-#: owns, and only for the words that subject has ever stored (its CHECK
-#: constraint or its writers).  A word two subjects share may mean different
-#: things (an expired *attempt* is observed, an expired *job* is over), which is
-#: why the table is per subject.  Words outside the core vocabulary that a kind
-#: keeps on purpose (``draft``) are not here, and a subject does not adopt a word
-#: it never stored.
-STATE_ALIASES: Mapping[LifecycleSubject, Mapping[StateAlias, AdoptedState]] = {
-    # The generic job table is shared by many kinds, each of which spelled
-    # "waiting to retry" or "being cancelled" its own way.
-    LifecycleSubject.JOB: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.WAITING: _WAITING,
-        StateAlias.CANCELLING: _CANCELLING,
-        StateAlias.PARTIAL: _PARTIAL,
-        StateAlias.EXPIRED: _JOB_EXPIRED,
-    },
-    LifecycleSubject.JOB_ATTEMPT: {
-        StateAlias.WAITING_FOR_OPERATOR: _ATTEMPT_UNKNOWN,
-        StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
-    },
-    LifecycleSubject.AGENT_OPERATION: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-    },
-    LifecycleSubject.AGENT_OPERATION_ATTEMPT: {
-        StateAlias.WAITING_FOR_OPERATOR: _ATTEMPT_UNKNOWN,
-        StateAlias.EXPIRED: _ATTEMPT_EXPIRED,
-    },
-    LifecycleSubject.MODEL_CACHE_OPERATION: {
-        StateAlias.PARTIAL: _PARTIAL,
-    },
-    LifecycleSubject.ARTIFACT_JOB: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        StateAlias.CANCELLING: _CANCELLING,
-    },
-    LifecycleSubject.FLEET_PROFILE_APPLICATION: {
-        StateAlias.WAITING_FOR_OPERATOR: _NEEDS_OPERATOR,
-        # The state of the application's cancellation intent (its progress document):
-        # a cancel being driven is observed.
-        StateAlias.CANCELLING: _CANCELLING,
-    },
-}
-
-#: The cause an old attempt spelling carried (see :class:`ObservationCause`).
-ATTEMPT_ALIAS_CAUSE: Mapping[StateAlias, ObservationCause] = {
-    StateAlias.WAITING_FOR_OPERATOR: ObservationCause.REPORTED_UNKNOWN,
-    StateAlias.EXPIRED: ObservationCause.LEASE_LAPSED,
-}
-
-
-def legacy_observation_cause(stored: str) -> ObservationCause | None:
-    """The cause an attempt's old state word meant, or ``None`` for any other word."""
-
-    try:
-        return ATTEMPT_ALIAS_CAUSE.get(StateAlias(stored))
-    except ValueError:
-        return None
-
-
-#: What an alias means when the subject is not known (an API filter, a CLI
-#: argument).  Activity lists jobs, so ``expired`` means what it means for a job.
-INPUT_ALIASES: Mapping[StateAlias, LifecycleState] = {
-    StateAlias.WAITING_FOR_OPERATOR: LifecycleState.NEEDS_OPERATOR,
-    StateAlias.CANCELLING: LifecycleState.OBSERVING,
-    StateAlias.WAITING: LifecycleState.OBSERVING,
-    StateAlias.PARTIAL: LifecycleState.BACKOFF,
-    StateAlias.EXPIRED: LifecycleState.FAILED,
-}
 
 #: The core states a row can be in once it ended.
 TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
@@ -385,50 +266,19 @@ TERMINAL_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(
 )
 
 
-#: A kind of the generic job table that spells a word differently from the rest of
-#: the table.  A recipe update batch ends ``partial`` when some of its children
-#: succeeded and some failed: a definite failed outcome, not a retry (which is what
-#: ``partial`` means to the image-availability jobs that share the table).
-JOB_KIND_ALIASES: Mapping[str, Mapping[StateAlias, AdoptedState]] = {
-    "recipe.cache.update.v2": {
-        StateAlias.PARTIAL: AdoptedState(LifecycleState.FAILED),
-    },
-}
+def adopt_state(subject: LifecycleSubject, stored: str) -> LifecycleState | None:
+    """The core state a stored ``state`` word of ``subject`` is, or ``None``.
 
-
-def _aliases(
-    subject: LifecycleSubject, kind: str | None
-) -> Mapping[StateAlias, AdoptedState]:
-    rows = STATE_ALIASES.get(subject, {})
-    if (
-        subject is LifecycleSubject.JOB
-        and kind is not None
-        and kind in JOB_KIND_ALIASES
-    ):
-        return {**rows, **JOB_KIND_ALIASES[kind]}
-    return rows
-
-
-def adopt_state(
-    subject: LifecycleSubject, stored: str, kind: str | None = None
-) -> AdoptedState | None:
-    """The core meaning of a stored ``state`` word, or ``None`` for a foreign word.
-
-    Every reader of a stored lifecycle state goes through this one function: a
-    word of the core vocabulary is itself, a retired spelling is adopted by the
-    subject's alias row, and a word the subject keeps on purpose outside the
-    vocabulary (``draft``) is ``None`` and read by its owner.
+    Every reader of a stored lifecycle state goes through this one function.  A
+    word outside the core vocabulary is ``None``: either a word the subject keeps
+    on purpose outside it, read by its owner, or an unknown word, which the
+    subject's adapter re-evaluates (observes or retries) instead of trusting.
     """
 
     try:
-        return AdoptedState(LifecycleState(stored))
-    except ValueError:
-        pass
-    try:
-        alias = StateAlias(stored)
+        return LifecycleState(stored)
     except ValueError:
         return None
-    return _aliases(subject, kind).get(alias)
 
 
 #: The states of a row that has not ended.
@@ -438,27 +288,15 @@ LIVE_LIFECYCLE_STATES: frozenset[LifecycleState] = frozenset(LifecycleState) - (
 
 
 def stored_words(
-    subject: LifecycleSubject,
-    states: Iterable[LifecycleState],
-    kind: str | None = None,
+    subject: LifecycleSubject, states: Iterable[LifecycleState]
 ) -> tuple[str, ...]:
-    """Every word a row of ``subject`` may carry for any of ``states``.
+    """The stored words of ``subject`` for any of ``states``, in vocabulary order.
 
-    The core words themselves, then the retired spellings that adopt into them.
-    A query that selects rows by state uses this, so a row written before the
-    rename is found as well as one written after it, and nothing spells a word.
-    ``kind`` names the kind of a generic job when the query is scoped to one, whose
-    own spelling of a word may differ (see :data:`JOB_KIND_ALIASES`).
+    A query that selects rows by state uses this, so nothing spells a word.
     """
 
     wanted = frozenset(states)
-    words = [state.value for state in LifecycleState if state in wanted]
-    words.extend(
-        alias.value
-        for alias, adopted in _aliases(subject, kind).items()
-        if adopted.state in wanted
-    )
-    return tuple(words)
+    return tuple(state.value for state in LifecycleState if state in wanted)
 
 
 def live_words(subject: LifecycleSubject) -> tuple[str, ...]:
@@ -468,17 +306,13 @@ def live_words(subject: LifecycleSubject) -> tuple[str, ...]:
 
 
 def is_state(
-    subject: LifecycleSubject,
-    stored: str | None,
-    *states: LifecycleState,
-    kind: str | None = None,
+    subject: LifecycleSubject, stored: str | None, *states: LifecycleState
 ) -> bool:
-    """Whether a stored word means one of ``states`` (adopting an old spelling)."""
+    """Whether a stored word means one of ``states``."""
 
     if stored is None:
         return False
-    adopted = adopt_state(subject, stored, kind)
-    return adopted is not None and adopted.state in states
+    return adopt_state(subject, stored) in states
 
 
 def is_live(subject: LifecycleSubject, stored: str | None) -> bool:
@@ -486,50 +320,23 @@ def is_live(subject: LifecycleSubject, stored: str | None) -> bool:
 
     if stored is None:
         return False
-    adopted = adopt_state(subject, stored)
-    return adopted is not None and adopted.state in LIVE_LIFECYCLE_STATES
+    return adopt_state(subject, stored) in LIVE_LIFECYCLE_STATES
 
 
 def check_words(
     subject: LifecycleSubject, states: Iterable[LifecycleState]
 ) -> tuple[str, ...]:
-    """The words a subject's CHECK constraint admits: its states and their aliases."""
+    """The words a subject's CHECK constraint admits: its states, nothing else."""
 
     return stored_words(subject, states)
 
 
-def state_adopter(
-    subject: LifecycleSubject, kind: str | None = None
-) -> Callable[[Any], Any]:
-    """A pydantic ``BeforeValidator`` that adopts a retired spelling of ``subject``.
-
-    A contract model that carries a stored state (a persisted document, an API
-    view built from a row) validates a row written before the rename as the
-    word it means now; anything else passes through for the field to judge.
-    ``kind`` scopes the adoption to one kind of generic job (see
-    :data:`JOB_KIND_ALIASES`).
-    """
-
-    def adopt(value: Any) -> Any:
-        if isinstance(value, str):
-            adopted = adopt_state(subject, value, kind)
-            if adopted is not None:
-                return adopted.state
-        return value
-
-    return adopt
-
-
 def input_state(word: str) -> LifecycleState | None:
-    """A state named by a caller: a core word, or a retired spelling (one release)."""
+    """A state named by a caller (an API filter, a CLI argument), else ``None``."""
 
     try:
         return LifecycleState(word)
     except ValueError:
-        pass
-    try:
-        return INPUT_ALIASES[StateAlias(word)]
-    except (ValueError, KeyError):
         return None
 
 
@@ -878,7 +685,6 @@ class LifecycleVocabulary(WireModel):
     blocker_category: BlockerCategory
     wait_verdict: WaitVerdict
     lifecycle_subject: LifecycleSubject
-    state_alias: StateAlias
     observation_cause: ObservationCause
     artifact_preparation: ArtifactPreparation
     state_write_kind: StateWriteKind
@@ -927,15 +733,10 @@ class LifecycleVocabulary(WireModel):
 
 
 __all__ = [
-    "ATTEMPT_ALIAS_CAUSE",
-    "INPUT_ALIASES",
-    "JOB_KIND_ALIASES",
     "LEGACY_WAIT_STATE",
     "LIVE_LIFECYCLE_STATES",
     "SECURITY_REFUSAL_SUFFIXES",
-    "STATE_ALIASES",
     "TERMINAL_LIFECYCLE_STATES",
-    "AdoptedState",
     "AgentResultState",
     "ArtifactPreparation",
     "BlockerCategory",
@@ -966,9 +767,6 @@ __all__ = [
     "input_state",
     "is_live",
     "is_state",
-    "legacy_observation_cause",
-    "legacy_preparation",
     "live_words",
-    "state_adopter",
     "stored_words",
 ]

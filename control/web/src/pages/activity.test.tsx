@@ -157,12 +157,13 @@ test("uses honest status labels for active and operator-blocked operations", () 
   expect(activityStatus({ ...base, action: "operation.reconcile.planned" })).toBe("in_progress");
   expect(activityStatus({ ...base, action: "operation.reconcile.waiting" })).toBe("in_progress");
   expect(activityStateLabel("waiting")).toBe("Waiting to recheck");
-  expect(activityStateLabel("waiting-for-operator")).toBe("Waiting for operator");
+  // A retired word is not a wait for a person: it reads as itself.
+  expect(activityStateLabel("waiting-for-operator")).toBe("Waiting For Operator");
   expect(activityStateLabel("needs-operator")).toBe("Waiting for operator");
   expect(activityStateLabel("backoff")).toBe("Retrying automatically");
   expect(activityStateLabel("observing")).toBe("Checking the outcome");
   expect(activityStatus({ ...base, action: "operation.reconcile.waiting-for-operator" })).toBe(
-    "attention",
+    "unknown",
   );
   expect(activityStatus({ ...base, action: "operation.reconcile.needs-operator" })).toBe(
     "attention",
@@ -308,7 +309,7 @@ test("loads truthful operation progress and resumes only an operator-waiting job
   const waiting = {
     id: "operation-1",
     kind: "recipe-install",
-    state: "waiting-for-operator",
+    state: "needs-operator",
     authority_revision: "a".repeat(64),
     targets: [TARGET_ID],
     target_next_cursor: null,
@@ -371,12 +372,12 @@ test("explains an upgrade failure without guessing its missing failure stage", a
   const nextAction =
     "Keep the rollout paused and inspect the Spark package-helper and dpkg recovery state before resuming. When ready, Resume queues the retry behind a new safety delay; it does not dispatch immediately. Do not advance to another Spark until this Spark reports the exact target identity.";
   const loadOperations = operationsOf(
-    jobActivity("upgrade-1", "agent-upgrade", "waiting-for-operator", "2026-08-15T11:58:00Z"),
+    jobActivity("upgrade-1", "agent-upgrade", "needs-operator", "2026-08-15T11:58:00Z"),
   );
   const loadJob = vi.fn().mockResolvedValue({
     id: "upgrade-1",
     kind: "agent-upgrade",
-    state: "waiting-for-operator",
+    state: "needs-operator",
     authority_revision: "a".repeat(64),
     targets: [TARGET_ID],
     target_next_cursor: null,
@@ -388,7 +389,7 @@ test("explains an upgrade failure without guessing its missing failure stage", a
         id: "upgrade-step",
         node_id: TARGET_ID,
         kind: "agent.upgrade.v1",
-        state: "waiting-for-operator",
+        state: "needs-operator",
         attempt: 2,
         progress: null,
         updated_at: "2026-08-15T11:59:30Z",
@@ -406,7 +407,7 @@ test("explains an upgrade failure without guessing its missing failure stage", a
       targets: [
         {
           node_id: TARGET_ID,
-          state: "waiting-for-operator",
+          state: "needs-operator",
           attempts: 2,
           target_proven: false,
           observed_identity: { version: "0.1.0", binary_digest: oldBinary, build_digest: oldBuild },
@@ -461,7 +462,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   const detail = {
     id: "upgrade-1",
     kind: "agent-upgrade",
-    state: "waiting-for-operator",
+    state: "needs-operator",
     authority_revision: "a".repeat(64),
     targets: [TARGET_ID],
     target_next_cursor: null,
@@ -473,7 +474,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
         id: "upgrade-step",
         node_id: TARGET_ID,
         kind: "agent.upgrade.v1",
-        state: "waiting-for-operator",
+        state: "needs-operator",
         attempt: 2,
         progress: null,
         updated_at: "2026-08-15T11:59:30Z",
@@ -491,7 +492,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
       targets: [
         {
           node_id: TARGET_ID,
-          state: "waiting-for-operator",
+          state: "needs-operator",
           attempts: 2,
           target_proven: false,
           observed_identity: {
@@ -511,7 +512,7 @@ test("polls a safety-delayed helper retry and shows specific recovery guidance",
   };
   const loadJob = vi.fn().mockResolvedValue(detail);
   const loadOperations = operationsOf(
-    jobActivity("upgrade-1", "agent-upgrade", "waiting-for-operator", "2026-08-15T11:58:00Z"),
+    jobActivity("upgrade-1", "agent-upgrade", "needs-operator", "2026-08-15T11:58:00Z"),
   );
   const user = userEvent.setup();
   render(<ActivityPage api={api(loadJob, undefined, loadOperations)} now={NOW} />);

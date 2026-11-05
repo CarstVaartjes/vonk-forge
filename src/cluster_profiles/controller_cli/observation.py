@@ -14,9 +14,6 @@ from ..cli_outcome import (
     ObservationStatus,
     operation_state,
 )
-from ..cli_states import (
-    LEGACY_PARTIAL,
-)
 from ..control_client import (
     ControlClientError,
     ControlMalformedResponse,
@@ -40,7 +37,6 @@ _TERMINAL_STATES = {
     "succeeded",
     "completed",
     "failed",
-    LEGACY_PARTIAL,
     "cancelled",
     "superseded",
     "blocked",

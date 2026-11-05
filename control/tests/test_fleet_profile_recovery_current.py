@@ -356,11 +356,11 @@ def _park_exhausted_application(
     with sessions.begin() as session:
         child = session.get(Job, child_id)
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "needs-operator"
         child.status_reason = "interrupted before the exact effect was observed"
         row = session.get(FleetProfileApplication, application.id)
         assert row is not None
-        row.state = "waiting-for-operator"
+        row.state = "needs-operator"
         row.status_reason = "interrupted before the exact effect was observed"
         session.add(
             AgentOperation(
@@ -371,7 +371,7 @@ def _park_exhausted_application(
                 payload_digest="a" * 64,
                 payload={},
                 authority_revision="b" * 64,
-                state="waiting-for-operator",
+                state="needs-operator",
                 status_reason=(
                     f"exact recipe.start retry budget exhausted at attempt {attempt}"
                 ),
@@ -470,7 +470,7 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
         row.progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(progress_data), strict=True
         ).model_dump(mode="json")
-        row.state = "waiting-for-operator"
+        row.state = "needs-operator"
         row.status_reason = "Profile admission is waiting for the active workload owner"
 
     # No action exists for a legacy wait: the first tick heals it (it returns to the

@@ -11,8 +11,8 @@ of its switch-adapter document (the one durable copy of that aggregate the
 Controller mirrors onto the row).
 
 * :meth:`FleetProfileAdapter.lifecycle` (the ``adopt`` hook) maps a stored, possibly
-  legacy, application onto the core.  A legacy ``waiting-for-operator`` row (the
-  mirror of a child that waited for a person) is ``needs-operator`` and is healed
+  legacy, application onto the core.  A row with a word the adapter does not know
+  is ``needs-operator`` and is healed
   by :meth:`FleetProfileAdapter.heal`: no profile action exists, so it is
   re-evaluated (it runs again, observing its child), never left waiting;
 * :meth:`FleetProfileAdapter.children` reads the Run/Switch children recorded in the
@@ -33,7 +33,7 @@ core state                stored application
                           ``backoff`` after a failure the Controller retries by
                           itself (its next attempt is ``next_action_at``), else
                           ``running`` (a cancel being driven keeps the label)
-``needs-operator``        ``waiting-for-operator``: legacy only, read and healed,
+``needs-operator``        a word the adapter does not know: read and healed,
                           never written
 ``succeeded``/``failed``  ``succeeded``/``failed``: ``failed`` only when nothing
                           will try the load again, so a recorded end is final
@@ -916,7 +916,7 @@ class FleetProfileAdapter:
         *,
         session: Session | None = None,
     ) -> Lifecycle:
-        """Re-evaluate a legacy ``waiting-for-operator`` load (rules 1 and 3).
+        """Re-evaluate a load parked as ``needs-operator`` (rules 1 and 3).
 
         No profile action exists and nothing here is irreversible, so it is not
         left waiting for a person: it runs again (its child is observed) or, when

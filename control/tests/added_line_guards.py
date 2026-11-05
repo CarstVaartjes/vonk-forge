@@ -1488,6 +1488,8 @@ def check_source(
         source.startswith("#!") and "python" in source.splitlines()[0]
     )
     hits: list[tuple[int, str]] = []
+    if "legacy" in modes and not is_test and legacy_tolerance.in_web_scope(path):
+        hits.extend(legacy_tolerance.scan_web_source(source))
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
         if not is_security_edge(path) and not path.startswith(

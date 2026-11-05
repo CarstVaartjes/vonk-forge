@@ -246,13 +246,13 @@ def test_a_corrupt_document_never_raises_out_of_the_core(cache, tmp_path):
     "stored",
     [
         {"state": "queued"},
-        {"state": "partial"},
+        {"state": "backoff"},
         {"state": "running", "lease_deadline": datetime(2020, 1, 1, tzinfo=UTC)},
         {"state": "running", "lease_deadline": datetime(2099, 1, 1, tzinfo=UTC)},
         {"state": "queued", "next_action_at": datetime(2099, 1, 1, tzinfo=UTC)},
-        {"state": "partial", "observe_count": 3},
+        {"state": "backoff", "observe_count": 3},
     ],
-    ids=["queued", "partial", "lapsed", "live", "backoff", "observing"],
+    ids=["queued", "retrying", "lapsed", "live", "backoff", "observing"],
 )
 def test_no_event_parks_a_cache_operation_for_an_operator(cache, tmp_path, stored):
     service, sessions = cache
@@ -586,35 +586,6 @@ def test_a_full_disk_queues_the_download_and_it_runs_when_space_returns(
 
 
 # ------------------------------------ the stored vocabulary is the core's
-
-
-def test_a_row_written_as_partial_is_adopted_found_and_served_as_backoff(
-    cache, tmp_path
-):
-    """The retired word is read, selected and shown as the word it means now."""
-
-    from vonk_control import model_cache_states
-
-    service, sessions = cache
-    operation, _artifact_document = _queue(
-        service, tmp_path, "00000000-0000-4000-8000-00000000a020"
-    )
-    _edit(sessions, operation.id, state="partial")
-
-    row = service._lifecycle.adopt(_row(sessions, operation.id))
-    assert row.state is State.BACKOFF
-    assert service.get_operation(operation.id).state == LifecycleState.BACKOFF
-    with sessions() as session:
-        found = session.scalars(
-            select(ModelCacheOperation.id).where(
-                ModelCacheOperation.state.in_(model_cache_states.LIVE)
-            )
-        ).all()
-    assert operation.id in found
-    # An old Activity filter still finds it by either name.
-    for word in ("partial", "backoff"):
-        page = service.activity_operations(state=word)
-        assert [item.id for item in page["operations"]] == [operation.id]
 
 
 def test_the_cache_writes_backoff_never_partial(cache, tmp_path):

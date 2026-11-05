@@ -277,7 +277,7 @@ class RunSwitchAdapter:
 
         A ``running`` operation with no clock is ``running`` (a live child is never
         touched); one holding a clock and a retry reason is in ``backoff``, one
-        holding only a clock is being observed.  A legacy ``waiting-for-operator``
+        holding only a clock is being observed.  A ``needs-operator``
         operation with a clock is observed (what its view already presents); one
         without is ``needs-operator`` and is re-evaluated by the first decision
         (rules 1 and 3: nothing advertises an action, so it is retried).
