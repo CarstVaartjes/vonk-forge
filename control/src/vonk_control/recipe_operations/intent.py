@@ -110,7 +110,6 @@ def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -
             select(AgentNode)
             .where(AgentNode.node_id.in_(targets))
             .order_by(AgentNode.node_id)
-            .with_for_update(of=AgentNode)
         )
     )
     return tuple(node.node_id for node in nodes) == tuple(sorted(set(targets))) and all(
@@ -132,7 +131,6 @@ def _shared_workload_intent(session: Session, targets: Sequence[str]) -> int | N
             select(AgentNode)
             .where(AgentNode.node_id.in_(targets))
             .order_by(AgentNode.node_id)
-            .with_for_update(of=AgentNode)
         )
     )
     ordinals = {node.workload_intent_ordinal for node in nodes}

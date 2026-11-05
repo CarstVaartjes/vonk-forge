@@ -16,6 +16,7 @@ from . import (
     alias_rules,
     bare_savepoints,
     docker_listings,
+    intent_ordinal_writers,
     legacy_tolerance,
     lifecycle_sets,
     locked_io,
@@ -99,6 +100,7 @@ MODES = (
     "docker-listings",
     "lifecycle-sets",
     "alias-rules",
+    "intent-ordinal",
     "savepoints",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
@@ -1544,8 +1546,13 @@ def check_source(
         hits.extend(legacy_tolerance.scan_web_source(source))
     if "optimistic" in modes and python and path.startswith("control/src/"):
         hits.extend((line, optimistic.KIND) for line in optimistic.scan_source(source))
-        if not is_security_edge(path) and not path.startswith(
-            "control/src/vonk_control/enrollment/"
+        # workload_intent is the one writer of the intent ordinal: a conditional
+        # UPDATE on that column, which locks nothing it does not write (lock plan
+        # step 4). Anywhere else the same update is still refused here.
+        if (
+            not is_security_edge(path)
+            and not path.startswith("control/src/vonk_control/enrollment/")
+            and path != intent_ordinal_writers.OWNER
         ):
             hits.extend(
                 (line, optimistic.NODE_KIND)
@@ -2199,6 +2206,15 @@ def check_source(
     if "alias-rules" in modes and alias_rules.in_scope(path) and not is_test:
         hits.extend(
             (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
+        )
+    if (
+        "intent-ordinal" in modes
+        and intent_ordinal_writers.in_scope(path)
+        and not is_test
+    ):
+        hits.extend(
+            (line, intent_ordinal_writers.KIND)
+            for line in intent_ordinal_writers.scan_source(source)
         )
     if (
         python

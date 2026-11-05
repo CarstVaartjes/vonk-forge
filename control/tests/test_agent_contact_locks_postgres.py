@@ -449,39 +449,37 @@ def test_recipe_agent_writes_through_the_production_consumer_leave_admission_fre
     )
 
 
-_STEP_4 = {
-    "failed-start": (
-        "lock plan step 4: _intent_is_current (recipe_operations/intent.py:107) "
-        "and the cleanup Stop's enqueue: terminal_projection.py:369 -> "
-        "persistence.py:432/245 _admit_workload_intent -> lock_admission_rows, "
-        "and persistence.py:536 -> orchestration.py:101 -> scope.py:90"
-    ),
-    "cancelled-stop": (
-        "lock plan step 4: _intent_is_current (recipe_operations/intent.py:107)"
-    ),
-}
-
-
-@pytest.mark.parametrize(
-    "kind",
-    [
-        pytest.param(
-            kind,
-            marks=pytest.mark.xfail(strict=True, raises=NodeLockHeld, reason=reason),
-        )
-        for kind, reason in _STEP_4.items()
-    ],
-)
-def test_recipe_intent_check_in_a_result_leaves_admission_free(
-    recipe_world, postgres_engine, kind
+def test_cancelled_stop_intent_check_leaves_admission_free(
+    recipe_world, postgres_engine
 ):
-    """Known: a failed or cancelled start/stop result still checks the workload
-    intent under FOR UPDATE on its target nodes, and a failed start enqueues its
-    cleanup Stop under admission's node lock (lock plan step 4 flips both)."""
+    """Fails on main: the intent check locked its target nodes FOR UPDATE."""
     sessions, *_, nodes = recipe_world
     _assert_admission_free(
         postgres_engine,
-        _recipe_write(recipe_world, kind),
+        _recipe_write(recipe_world, "cancelled-stop"),
+        _admit_recipe_nodes(sessions, nodes),
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=NodeLockHeld,
+    reason=(
+        "lock plan step 6: the failed start enqueues its cleanup Stop under "
+        "admission's node lock: terminal_projection.py:369 -> "
+        "persistence.py:432/245 _admit_workload_intent -> lock_admission_rows, "
+        "and persistence.py:536 -> orchestration.py:101 -> scope.py:90"
+    ),
+)
+def test_failed_start_cleanup_enqueue_leaves_admission_free(
+    recipe_world, postgres_engine
+):
+    """Known: a failed start enqueues its cleanup Stop under admission's node
+    lock (lock plan step 6 flips it); its intent check no longer locks."""
+    sessions, *_, nodes = recipe_world
+    _assert_admission_free(
+        postgres_engine,
+        _recipe_write(recipe_world, "failed-start"),
         _admit_recipe_nodes(sessions, nodes),
     )
 
