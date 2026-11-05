@@ -68,9 +68,20 @@ from collections.abc import Callable, Collection, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from itertools import pairwise
 from typing import Any
 
-from sqlalchemy import Select, and_, delete, exists, false, or_, select, text, union_all
+from sqlalchemy import (
+    Select,
+    and_,
+    delete,
+    exists,
+    false,
+    or_,
+    select,
+    text,
+    union_all,
+)
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased, sessionmaker
 from vonk_agent_protocol import (
@@ -903,6 +914,23 @@ def _model_dependencies(
     return frozenset(found)
 
 
+def not_among(column, words: Collection[str]):
+    """``column NOT IN words`` spelled as ranges between the sorted words.
+
+    The same rows (a word outside ``words`` is still selected), but the state
+    index can answer it. Ranges follow ``sorted`` only while every word is
+    lowercase letters, whatever the database collation orders; the vocabulary
+    test holds the ended words to that.
+    """
+
+    ordered = sorted(set(words))
+    return or_(
+        column < ordered[0],
+        *(and_(column > low, column < high) for low, high in pairwise(ordered)),
+        column > ordered[-1],
+    )
+
+
 def operation_tokens(
     session: Session,
     now: datetime,
@@ -928,11 +956,8 @@ def operation_tokens(
 
     def live(state, updated, subject=LifecycleSubject.JOB):
         ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
-        return (
-            state.not_in(ended)
-            if window is None
-            else or_(state.not_in(ended), updated >= window)
-        )
+        unended = not_among(state, ended)
+        return unended if window is None else or_(unended, updated >= window)
 
     selected = session.scalar(select(FleetProfileSelection.application_id))
     sources = (

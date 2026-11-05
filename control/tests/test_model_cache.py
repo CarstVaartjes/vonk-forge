@@ -145,15 +145,60 @@ def _canonical_recipe(model_digest: str) -> dict[str, object]:
     return document
 
 
-@pytest.fixture
-def cache(tmp_path: Path):
+def _shared_connection_sessions():
+    """Sessions whose every thread shares one sqlite connection."""
+
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
+    return sessionmaker(engine, expire_on_commit=False)
+
+
+@contextmanager
+def _watch_services_on(sessions):
+    """Close every ``ModelCacheService`` built on ``sessions``; fail if any
+    started background work.
+
+    One connection serves every thread there, so a thread that touches the
+    database can roll back another's open transaction ("cannot commit - no
+    transaction is active").  A service that ticks or schedules a transfer
+    starts pool threads (their entries persist after shutdown), and belongs on
+    ``threaded_cache``.  A second service built on the same sessions (a
+    restart) counts as much as the fixture's own.
+    """
+
+    built: list[ModelCacheService] = []
+    original = ModelCacheService.__init__
+
+    def record(self, session_factory, *args, **kwargs):
+        original(self, session_factory, *args, **kwargs)
+        if session_factory is sessions:
+            built.append(self)
+
+    ModelCacheService.__init__ = record  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        ModelCacheService.__init__ = original  # type: ignore[method-assign]
+        started = [
+            service
+            for service in built
+            if service._storage_observer._pool._threads or service._executor._threads
+        ]
+        for service in built:
+            service.close()
+        assert not started, (
+            "started background work on the shared-connection fixture; "
+            "use threaded_cache"
+        )
+
+
+@pytest.fixture
+def cache(tmp_path: Path):
+    sessions = _shared_connection_sessions()
     runtime_root = tmp_path / "runtime-images"
     runtime_root.mkdir()
 
@@ -165,14 +210,42 @@ def cache(tmp_path: Path):
             and path.stat().st_size == expected_bytes
         )
 
-    service = ModelCacheService(
-        sessions,
-        tmp_path / "nas-cache",
-        free_fraction=0,
-        fixture_sources=True,
-        runtime_archive_available=runtime_archive_available,
-    )
-    return service, sessions
+    with _watch_services_on(sessions):
+        service = ModelCacheService(
+            sessions,
+            tmp_path / "nas-cache",
+            free_fraction=0,
+            fixture_sources=True,
+            runtime_archive_available=runtime_archive_available,
+        )
+        yield service, sessions
+
+
+def test_a_restarted_service_that_ticks_on_the_shared_connection_fails_the_net(
+    tmp_path: Path,
+):
+    """The shape of the flake: a second service on the fixture's sessions ticks."""
+
+    sessions = _shared_connection_sessions()
+    with (
+        pytest.raises(AssertionError, match="use threaded_cache"),
+        _watch_services_on(sessions),
+    ):
+        ModelCacheService(
+            sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
+        )
+        restarted = ModelCacheService(
+            sessions, tmp_path / "first", free_fraction=0, fixture_sources=True
+        )
+        restarted.tick()
+
+
+def test_a_service_that_starts_no_background_work_passes_the_net(tmp_path: Path):
+    sessions = _shared_connection_sessions()
+    with _watch_services_on(sessions):
+        ModelCacheService(
+            sessions, tmp_path / "quiet", free_fraction=0, fixture_sources=True
+        )
 
 
 def _write_object_receipt(

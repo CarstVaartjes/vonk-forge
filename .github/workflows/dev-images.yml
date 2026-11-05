@@ -41,6 +41,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Free runner disk
+        uses: ./.github/actions/free-runner-disk
       - name: Verify the main commit before building
         id: metadata
         shell: bash

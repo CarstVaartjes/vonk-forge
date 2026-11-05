@@ -109,6 +109,8 @@ def _parked_world(world: Catalog, service: ModelCacheService, root: Path):
         assert row is not None
         row.plan = {"model": PARKED}
         row.model_content_sha256 = PARKED
+        # Admission recorded the set the installation runs.
+        row.model_artifact_set_sha256 = parked
 
     operation = service.remove_model_selector(
         PARKED, actor="admin", request_key=str(uuid.uuid4())

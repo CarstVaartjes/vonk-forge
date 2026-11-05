@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
-from sqlalchemy import Table, func, select
+from sqlalchemy import Table, func, select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import (
@@ -19,7 +19,6 @@ from vonk_control.model_cache_contract import (
 )
 from vonk_control.models import (
     Base,
-    FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
@@ -382,7 +381,9 @@ def test_postgres_recipe_review_recovers_from_failed_profile_scan(
     # gates and returns a fail-closed blocker.
     cast(Table, FleetProfileSelection.__table__).drop(postgres_engine)
     cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
-    cast(Table, FleetProfile.__table__).drop(postgres_engine)
+    with postgres_engine.begin() as connection:
+        # The profile recipe projection references the table.
+        connection.execute(text("DROP TABLE fleet_profiles CASCADE"))
     try:
         refused = service.review_removal(recipe.identity.slug, with_model=False)
         assert refused.blockers

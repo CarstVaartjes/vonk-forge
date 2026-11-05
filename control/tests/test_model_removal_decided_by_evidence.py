@@ -126,6 +126,9 @@ def _installation(
         ]
         stored["compiled_execution_plans"] = {NODE: compiled}
         row.plan = installation_plan_document(stored) if plan is None else plan
+        # Admission recorded the set when it inserted the row; a later damage to
+        # the plan leaves the recorded set as it was.
+        row.model_artifact_set_sha256 = set_digest
         row.model_content_sha256 = session.scalar(
             select(ModelCacheSet.model_content_sha256).where(
                 ModelCacheSet.artifact_set_sha256 == set_digest
@@ -285,7 +288,7 @@ def test_an_unreadable_installation_plan_keeps_only_its_own_model(
         _wait_out(service, world, removal)
         waiting = _operation(world.sessions, removal)
         assert waiting.state in model_cache_states.LIVE
-        assert f"installation {damaged} (plan unreadable)" in str(waiting.last_error)
+        assert f"installation {damaged}" in str(waiting.last_error)
         assert kept_path.exists()
         # The unknown never held the other model: it can be fetched afresh.
         assert _request_download(service, tmp_path, "other", other_model) == "succeeded"

@@ -10,7 +10,8 @@ from typing import Any, ClassVar
 
 from sqlalchemy import event, func, insert, select, true, update
 from sqlalchemy import inspect as sqlalchemy_inspect
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 
 from .auth import CursorError
@@ -72,6 +73,7 @@ _FORBIDDEN_PAYLOAD_KEYS = frozenset(
     }
 )
 _PENDING_KEY = "vonk.fleet_event_drafts"
+_STAGED_KEY = "vonk.fleet_events_staged"
 _RECORDER_ATTRIBUTE = "_vonk_fleet_event_recorder"
 
 
@@ -205,21 +207,134 @@ def _database_utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-def _cursor_lock_statement() -> Any:
-    return (
-        select(FleetEventCursor.last_id)
-        .where(FleetEventCursor.singleton_id == 1)
-        .with_for_update()
-    )
-
-
-def _sqlite_cursor_allocation_statement() -> Any:
+def _cursor_allocation_statement(count: int) -> Any:
     return (
         update(FleetEventCursor)
         .where(FleetEventCursor.singleton_id == 1)
-        .values(last_id=FleetEventCursor.last_id + 1)
+        .values(last_id=FleetEventCursor.last_id + count)
         .returning(FleetEventCursor.last_id)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class _EventRow:
+    event_type: str
+    node_id: str | None
+    entity_kind: str
+    entity_id: str
+    payload: object
+    occurred_at: datetime
+    expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class _StagedEvent:
+    """One event of an open transaction, numbered only when it commits.
+
+    ``row`` is ``None`` for a deliberate cursor hole: an id that is allocated
+    but never stored, so replay forces an authoritative capture.
+    """
+
+    savepoint: SessionTransaction | None
+    row: _EventRow | None
+
+
+def _stage(session: Session, row: _EventRow | None) -> None:
+    staged = session.info.setdefault(_STAGED_KEY, [])
+    staged.append(_StagedEvent(session.get_nested_transaction(), row))
+
+
+def _seed_cursor(connection: Connection) -> None:
+    """Recreate a missing cursor row after the newest stored id."""
+
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    dialect_insert = sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
+    last_id = select(func.coalesce(func.max(FleetStreamEvent.id), 0)).scalar_subquery()
+    connection.execute(
+        dialect_insert(FleetEventCursor)
+        .values(singleton_id=1, last_id=last_id)
+        .on_conflict_do_nothing(index_elements=[FleetEventCursor.singleton_id])
+    )
+
+
+def _number_staged_events(session: Session) -> None:
+    """Number and store the transaction's events as its last statements.
+
+    Ids must follow commit order: a capture reads ``last_id`` in the same
+    snapshot as Fleet state, and replay treats any missing id as a hole. So the
+    cursor row stays the one ordering point, but a transaction takes it only
+    here, immediately before COMMIT, and holds it for one UPDATE, one INSERT
+    and the commit itself, never across the transaction's other work or waits.
+    """
+
+    if session.in_nested_transaction():
+        return  # a savepoint release; the outermost commit numbers the events
+    # Commit flushes only after this hook; flush now so the last changes are
+    # staged too. The Core statements below leave the session clean.
+    session.flush()
+    staged: list[_StagedEvent] = session.info.pop(_STAGED_KEY, [])
+    if not staged:
+        return
+    connection = session.connection()
+    allocate = _cursor_allocation_statement(len(staged))
+    last_id = connection.execute(allocate).scalar_one_or_none()
+    if last_id is None:
+        _seed_cursor(connection)
+        last_id = connection.execute(allocate).scalar_one()
+    first_id = last_id - len(staged) + 1
+    rows = [
+        {
+            "id": first_id + offset,
+            "event_type": row.event_type,
+            "node_id": row.node_id,
+            "entity_kind": row.entity_kind,
+            "entity_id": row.entity_id,
+            "payload": row.payload,
+            "occurred_at": row.occurred_at,
+            "expires_at": row.expires_at,
+        }
+        for offset, staged_event in enumerate(staged)
+        if (row := staged_event.row) is not None
+    ]
+    if rows:
+        connection.execute(insert(FleetStreamEvent), rows)
+
+
+def _discard_rolled_back_events(session: Session, previous: SessionTransaction) -> None:
+    # A rolled-back savepoint takes its events with it; the outermost
+    # transaction's end discards everything (_discard_unfinished_events).
+    if not previous.nested:
+        return
+    staged: list[_StagedEvent] = session.info.get(_STAGED_KEY, [])
+    staged[:] = [
+        staged_event
+        for staged_event in staged
+        if not _within(staged_event.savepoint, previous)
+    ]
+
+
+def _within(savepoint: SessionTransaction | None, boundary: SessionTransaction) -> bool:
+    while savepoint is not None:
+        if savepoint is boundary:
+            return True
+        savepoint = savepoint.parent
+    return False
+
+
+def _discard_unfinished_events(
+    session: Session, transaction: SessionTransaction
+) -> None:
+    if transaction.parent is None:
+        session.info.pop(_STAGED_KEY, None)
+
+
+# Every Session, with or without the recorder: an event staged by
+# append_in_session must never outlive or escape its transaction.
+event.listen(Session, "before_commit", _number_staged_events)
+event.listen(Session, "after_soft_rollback", _discard_rolled_back_events)
+event.listen(Session, "after_transaction_end", _discard_unfinished_events)
 
 
 class FleetEventRepository:
@@ -232,71 +347,32 @@ class FleetEventRepository:
         self._sessions = sessions
         self._clock = clock
 
-    def append_in_session(self, session: Session, draft: FleetEventDraft) -> FleetEvent:
+    def append_in_session(self, session: Session, draft: FleetEventDraft) -> None:
+        """Stage one event; it gets its id and row when the transaction commits."""
+
         payload = _stored_payload(draft)
         occurred_at = self._clock()
         if occurred_at.tzinfo is None or occurred_at.utcoffset() is None:
             raise ValueError("Fleet event clock must return a timezone-aware value")
         occurred_at = occurred_at.astimezone(UTC)
-        expires_at = occurred_at + REPLAY_RETENTION
-        event_id = self._allocate_cursor(session)
-        connection = session.connection()
-        values = {
-            "id": event_id,
-            "event_type": draft.event_type,
-            "node_id": draft.node_id,
-            "entity_kind": draft.entity_kind,
-            "entity_id": draft.entity_id,
-            "payload": payload,
-            "occurred_at": occurred_at,
-            "expires_at": expires_at,
-        }
-        connection.execute(insert(FleetStreamEvent).values(**values))
-        return FleetEvent(**{**values, "payload": draft.payload})
+        _stage(
+            session,
+            _EventRow(
+                event_type=draft.event_type,
+                node_id=draft.node_id,
+                entity_kind=draft.entity_kind,
+                entity_id=draft.entity_id,
+                payload=payload,
+                occurred_at=occurred_at,
+                expires_at=occurred_at + REPLAY_RETENTION,
+            ),
+        )
 
     @staticmethod
-    def _ensure_cursor(session: Session) -> None:
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+    def _allocate_cursor(session: Session) -> None:
+        """Reserve one id that is never stored, so replay forces a fresh capture."""
 
-        connection = session.connection()
-        if (
-            connection.scalar(
-                select(FleetEventCursor.singleton_id).where(
-                    FleetEventCursor.singleton_id == 1
-                )
-            )
-            is not None
-        ):
-            return
-        dialect_insert = (
-            sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
-        )
-        last_id = select(
-            func.coalesce(func.max(FleetStreamEvent.id), 0)
-        ).scalar_subquery()
-        connection.execute(
-            dialect_insert(FleetEventCursor)
-            .values(singleton_id=1, last_id=last_id)
-            .on_conflict_do_nothing(index_elements=[FleetEventCursor.singleton_id])
-        )
-
-    def _allocate_cursor(self, session: Session) -> int:
-        self._ensure_cursor(session)
-        connection = session.connection()
-        if connection.dialect.name == "sqlite":
-            event_id = connection.execute(
-                _sqlite_cursor_allocation_statement()
-            ).scalar_one()
-        else:
-            last_id = connection.execute(_cursor_lock_statement()).scalar_one()
-            event_id = last_id + 1
-            connection.execute(
-                update(FleetEventCursor)
-                .where(FleetEventCursor.singleton_id == 1)
-                .values(last_id=event_id)
-            )
-        return event_id
+        _stage(session, None)
 
     def high_watermark(self) -> int:
         with self._sessions() as session:

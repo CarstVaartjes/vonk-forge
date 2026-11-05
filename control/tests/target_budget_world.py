@@ -38,11 +38,13 @@ from vonk_control.models import (
     FleetProfile,
     InstallationNode,
     Job,
+    MeasuredRolePeak,
     ModelCacheSet,
     ModelCacheSetArtifact,
     RecipeBuild,
     RecipeInstallation,
 )
+from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -345,6 +347,15 @@ def _unrelated_history(
         }
         target_revision = session.get(CatalogDocumentRevision, real.recipe_revision_id)
         assert target_revision is not None and target_revision.content_digest
+        # The target recipe's own measured peaks; every other content has one too.
+        session.add_all(
+            MeasuredRolePeak(
+                content_sha256=target_revision.content_digest,
+                role=role,
+                peak_bytes=1000,
+            )
+            for role in ("entrypoint", "worker")
+        )
         for index in range(scale * INSTALLATIONS_PER_UNIT + NODE_LOCAL):
             # The first NODE_LOCAL installations sit on the target's own Spark:
             # what a node holds is the input of a question about that node, so
@@ -352,6 +363,13 @@ def _unrelated_history(
             local = index < NODE_LOCAL
             node = spark if local else other_node
             digest = models[index][1]
+            session.add(
+                MeasuredRolePeak(
+                    content_sha256=_hex(f"peak/{index}"),
+                    role="entrypoint",
+                    peak_bytes=1000,
+                )
+            )
             installation_id, build_id = str(uuid.uuid4()), str(uuid.uuid4())
             mapping_id = str(uuid.uuid4())
             archive = _hex(f"archive/{index}")
@@ -415,6 +433,10 @@ def _unrelated_history(
                     id=installation_id,
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
+                    # Install admission records the set its plan runs.
+                    model_artifact_set_sha256=parse_stored_installation_plan(
+                        plan, for_uninstall=True
+                    ).model_artifact_set_sha256,
                     mapping_id=mapping_id,
                     mapping_generation=real_mapping.generation,
                     recipe_build_id=build_id,

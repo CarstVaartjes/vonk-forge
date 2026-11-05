@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     WaitReason,
@@ -24,6 +24,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
+from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
     revision_images,
@@ -37,7 +38,7 @@ from .intents import (
     _run_switch_plan,
     _run_switch_runtime_image_intent,
 )
-from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions
 from .types import (
     _ACTIVE_ARTIFACT_JOBS,
     _ACTIVE_INSTALLATIONS,
@@ -91,18 +92,23 @@ def runtime_image_reference_findings(
     if not selected:
         return {}
 
-    profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
-    named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
+    named = profiles_naming(session)
     resolved = _selectors_revisions(
-        session, {selector for chosen in named.values() for selector in chosen or ()}
+        session,
+        {
+            f"{publisher}/{slug}"
+            for recipes in named.values()
+            for publisher, slug in recipes
+        },
     )
-    for profile in profiles:
-        selectors = named[profile.id]
-        if selectors is None:
-            _protect_saved(findings, profile, "runtime-image", selected)
-            continue
-        for selector in selectors:
-            revisions = resolved[selector]
+    for profile in session.scalars(
+        select(FleetProfile)
+        .options(load_only(FleetProfile.id))
+        .where(FleetProfile.id.in_(sorted(named)))
+        .order_by(FleetProfile.id)
+    ):
+        for publisher, slug in sorted(named[profile.id]):
+            revisions = resolved[f"{publisher}/{slug}"]
             if not revisions:
                 _protect_saved(findings, profile, "runtime-image", selected)
                 continue

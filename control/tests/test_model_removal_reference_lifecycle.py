@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from sqlalchemy import Engine, Table, select
+from sqlalchemy import Engine, Table, select, text
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.artifact_lifecycle import ArtifactLifecycleGate
 from vonk_control.catalog_entities import CatalogEntityService
@@ -18,7 +18,6 @@ from vonk_control.model_cache import (
 )
 from vonk_control.models import (
     Base,
-    FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
     ModelCacheOperation,
@@ -145,7 +144,9 @@ def test_model_removal_reference_scan_failure_keeps_bytes_and_same_owner_recover
         # typed blocker; it may not treat the unavailable scan as an empty set.
         cast(Table, FleetProfileSelection.__table__).drop(postgres_engine)
         cast(Table, FleetProfileApplication.__table__).drop(postgres_engine)
-        cast(Table, FleetProfile.__table__).drop(postgres_engine)
+        with postgres_engine.begin() as connection:
+            # The profile recipe projection references the table.
+            connection.execute(text("DROP TABLE fleet_profiles CASCADE"))
         accepted = _remove_model(
             service,
             selector,

@@ -393,8 +393,16 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             .f_bavail
             .checked_mul(fragment)
             .ok_or(InventoryError::Parse)?;
+        // The reserve is a best-effort safety net: failing to build or inspect
+        // it means it is not held, never that the capacity report is withheld.
         let state_database_reserve_held =
-            maintain_state_database_reserve(self.store_path, initial_disk_available_bytes)?;
+            match maintain_state_database_reserve(self.store_path, initial_disk_available_bytes) {
+                Ok(held) => held,
+                Err(error) => {
+                    eprintln!("vonk-agent: state database reserve not held: {error}");
+                    false
+                }
+            };
         let filesystem = rustix::fs::statvfs(self.store_path)?;
         let disk_available_bytes = filesystem
             .f_bavail

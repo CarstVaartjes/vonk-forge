@@ -2079,6 +2079,40 @@ def test_private_or_classified_scratch_names_pass(path: str, source: str) -> Non
     assert not check_source(path, source, lines, modes=("scratch-names",))
 
 
+_SAVEPOINT_PATH = "control/src/vonk_control/admission_locking.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # with sessions.begin() exits while this savepoint is still open:
+        # before_commit sees only the savepoint and the staged events drop.
+        "savepoint = session.begin_nested()\n",
+        "session.begin_nested()\n",
+        "with lock(), session.connection().begin_nested().begin():\n    pass\n",
+    ],
+)
+def test_a_savepoint_outside_a_with_block_is_flagged(source: str) -> None:
+    assert check_source(_SAVEPOINT_PATH, source, {1}, modes=("savepoints",))
+    assert not check_source(_SAVEPOINT_PATH, source, set(), modes=("savepoints",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_SAVEPOINT_PATH, "with session.begin_nested():\n    pass\n"),
+        (
+            _SAVEPOINT_PATH,
+            "with admitting(), connection.begin_nested() as savepoint:\n    pass\n",
+        ),
+        ("control/tests/test_x.py", "savepoint = session.begin_nested()\n"),
+    ],
+)
+def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("savepoints",))
+
+
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
 
 
@@ -2169,6 +2203,38 @@ def test_new_agent_facing_422_is_flagged(probe: str) -> None:
     assert check_source(path, probe, {line}, modes=("agent-422",))
 
 
+def test_agent_422_guard_flags_positional_and_split_422() -> None:
+    path = "control/src/vonk_control/agent_api/observations.py"
+    assert check_source(
+        path, "raise HTTPException(422, 'x')\n", {1}, modes=("agent-422",)
+    )
+    split = "raise HTTPException(\n    422,\n    'x',\n)\n"
+    assert check_source(path, split, {1, 2}, modes=("agent-422",))
+
+
+def test_agent_422_guard_flags_any_handler_that_answers_422() -> None:
+    # Wrong implementation: any caught exception, however far down the handler
+    # body, answers 422 and the Spark discards the evidence.
+    path = "control/src/vonk_control/agent_api/observations.py"
+    probe = (
+        "try:\n"
+        "    work()\n"
+        "except ValueError as error:\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    raise HTTPException(status_code=422, detail=str(error)) from None\n"
+    )
+    hits = check_source(path, probe, {3}, modes=("agent-422",))
+    assert any("except handler" in hit for hit in map(str, hits))
+    routed = (
+        "try:\n    work()\n"
+        "except ValueError as error:\n    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
+
+
 def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     marked = "raise HTTPException(status_code=422)  # 422-verdict: body validation\n"
     path = "control/src/vonk_control/agent_api/observations.py"
@@ -2181,10 +2247,73 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
 
 
 @pytest.mark.parametrize(
+    "handler",
+    [
+        (
+            "except (EnrollmentDenied, ValueError) as error:\n"
+            "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+        ),
+        (
+            "except (\n    EnrollmentDenied,\n    ValueError,\n) as error:\n"
+            "    raise SecurityHTTPError(status_code=401, detail='x')\n"
+        ),
+        "except OSError:\n    raise HTTPException(403, 'x')\n",
+    ],
+)
+def test_broad_exception_may_not_answer_401_or_403(handler: str) -> None:
+    # Wrong implementation: an internal ValueError answered 403 and the Spark's
+    # agent exited (fatal 401/403) instead of retrying.
+    path = "control/src/vonk_control/agent_api/authority.py"
+    assert check_source(path, "try:\n    work()\n" + handler, {3}, modes=("agent-422",))
+
+
+def test_comment_after_except_header_does_not_hide_the_handler() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except ValueError:  # internal\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {3}, modes=("agent-422",))
+
+
+def test_a_403_added_into_an_existing_broad_handler_is_flagged_on_its_own_line() -> (
+    None
+):
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except (KeyError, TypeError, ValueError):\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {4}, modes=("agent-422",))
+    assert not check_source(path, source, {1}, modes=("agent-422",))
+
+
+def test_typed_security_refusal_may_answer_403() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    typed = (
+        "try:\n    work()\n"
+        "except EnrollmentDenied as error:\n"
+        "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+    )
+    assert not check_source(path, typed, {3}, modes=("agent-422",))
+    routed = (
+        "try:\n    work()\n"
+        "except (EnrollmentDenied, ValueError) as error:\n"
+        "    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
+
+
+@pytest.mark.parametrize(
     "source,line",
     [
         ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),
         ("def review(s, now):\n    return _CollectorEvidence.read(s, now)\n", 2),
+        ("def review(s, now):\n    return _Evidence.read(s, now, recipes=None)\n", 2),
+        ("def review(s):\n    return profiles_naming(s)\n", 2),
+        ("def review(s):\n    return profiles_naming(s, None)\n", 2),
         ("def review(s, now):\n    return live_tokens(s, now)\n", 2),
         ("def review(s):\n    return operation_tokens(s, recent=True)\n", 2),
         ("def review(s, n, now):\n    return spark_eviction_capacity(s, n, now)\n", 2),
@@ -2218,6 +2347,11 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
         # Target-keyed reads are what a request path does.
         (PATH, "def review(s, a):\n    return unused_for(s, a)\n"),
         (PATH, "def review(s):\n    return operation_tokens(s, recent=False)\n"),
+        (PATH, "def review(s, r):\n    return profiles_naming(s, r)\n"),
+        (
+            PATH,
+            "def review(s, now, r):\n    return _Evidence.read(s, now, recipes=r)\n",
+        ),
         ("control/tests/test_x.py", "def t(s):\n    return live_tokens(s, 1)\n"),
     ],
 )

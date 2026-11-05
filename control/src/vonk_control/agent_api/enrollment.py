@@ -36,6 +36,7 @@ from .common import (
     _json_response,
     _require_enrollment,
     _require_services,
+    contract_verdict_or_wait,
 )
 
 
@@ -148,7 +149,7 @@ def install_enrollment_routes(
         except EnrollmentDenied as error:
             raise HTTPException(status_code=403, detail=str(error)) from None
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(outcome, UnknownError):
             return unknown_response(outcome)
         return _json_response(_issued_response(outcome))

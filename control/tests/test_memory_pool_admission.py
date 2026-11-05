@@ -31,6 +31,7 @@ from vonk_control.run_admission import (
     RunAdmissionService,
 )
 
+from .test_load_phase_swap_admission import set_measured_peaks
 from .test_profile_capacity_admission import _capacity_profile
 from .test_recipe_builds import RecordingQueue
 from .test_recipe_builds import setup as build_setup
@@ -327,7 +328,7 @@ def test_profile_review_and_run_admission_share_the_observed_peak(
         run.state = "stopped"
         for rank in session.scalars(select(RunNode).where(RunNode.run_id == run_id)):
             rank.state = "stopped"
-            rank.observed_memory_bytes = declared + 1
+        set_measured_peaks(session, declared + 1)
         for claim in session.scalars(
             select(ResourceReservation).where(ResourceReservation.owner_id == run_id)
         ):

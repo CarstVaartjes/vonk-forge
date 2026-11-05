@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -140,6 +141,15 @@ class CatalogDocumentRevision(Base):
             name="uq_catalog_document_revision_fk_target",
         ),
         UniqueConstraint("id", "kind", name="uq_catalog_document_revision_kind"),
+        # A document by its content, with its lineage: what every identity
+        # lookup asks, answered from the index alone.
+        Index(
+            "ix_catalog_document_revisions_kind_content_digest",
+            "kind",
+            "content_digest",
+            "publisher",
+            "slug",
+        ),
         ForeignKeyConstraint(
             ["document_id", "kind", "publisher", "slug"],
             [

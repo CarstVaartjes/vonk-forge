@@ -60,6 +60,7 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
 )
+from vonk_control.observed_run_memory import observed_role_peaks
 from vonk_control.operator_projection_api.routes import (
     install_operator_projection_routes,
 )
@@ -190,6 +191,18 @@ def _inventory_record(world: World) -> object:
     )
 
 
+def _admission_measured_peaks(world: World) -> object:
+    """What run admission and the run-switch fit read for the target's recipe."""
+    with world.sessions() as session:
+        installation = session.get(RecipeInstallation, world.target_installation)
+        assert installation is not None
+        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        assert revision is not None
+        peaks = observed_role_peaks(session, revision.content_digest)
+    assert peaks == {"entrypoint": 1000, "worker": 1000}
+    return peaks
+
+
 def _node_keyed_lookup(world: World) -> object:
     """The installations of one Spark and their mapping, by indexed columns only."""
     with world.sessions() as session:
@@ -253,16 +266,13 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     ),
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: which installation uses a set is stored only in its plan, and which"
-        " profile names a recipe only in its assignments JSON, so every plan and profile is read",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: the removal review's plan and profile reads, plus the whole-world"
-        " retention evidence (audit A1)",
     ),
+    # Asks the target's content by key; no run or installation is read (the
+    # history scan it replaced grew with both).
+    "admission_measured_peaks": TargetCheck(_admission_measured_peaks),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.
     "node_keyed_lookup": TargetCheck(_node_keyed_lookup),
@@ -441,6 +451,34 @@ def test_a_whole_profile_read_is_caught_by_the_budget(
             connection.exec_driver_sql(
                 "SELECT count(*) FROM fleet_profiles "
                 "WHERE assignments LIKE '%no-such-recipe%'"
+            ).all()
+        return inner.run(world)
+
+    check = TargetCheck(scanning)
+    small = measure(worlds[SMALL], monkeypatch, check)
+    large = measure(worlds[LARGE], monkeypatch, check)
+    assert small.rows == large.rows
+    with pytest.raises(CostGrew):
+        _require_same_cost("injected", small, large)
+
+
+def test_the_old_history_scan_of_measured_peaks_is_caught_by_the_budget(
+    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: the reader this table replaced fails the same check.
+
+    It selected every installation rank that carried a peak and matched the
+    content digest in Python. Injected beside the keyed read, it returns the
+    same rows at both scales, so only its statement steps grow.
+    """
+    inner = TARGET_CHECKS["admission_measured_peaks"]
+
+    def scanning(world: World) -> object:
+        with world.engine.connect() as connection:
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM installation_nodes n "
+                "JOIN recipe_installations i ON i.id = n.installation_id "
+                "WHERE n.role LIKE '%no-such-role%'"
             ).all()
         return inner.run(world)
 
