@@ -99,6 +99,10 @@ def record_observed_run_memory(
     if lowest is None:
         return
     peak = admitted.available_memory_bytes - lowest
+    if peak <= 0:
+        # The Spark has at least as much free as when the run was admitted
+        # (it has not loaded yet, or it already exited): nothing was used.
+        return
     # One conditional UPDATE: the rank's peak only rises, whatever order
     # overlapping batches commit in, and no lock on the node is needed.
     raised = session.execute(
