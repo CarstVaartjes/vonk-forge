@@ -30,6 +30,12 @@
 //!   The traceback fills the window, so the window is chosen within a smaller
 //!   budget and those lines are retained ahead of it in the same way, and the
 //!   fix can be sized from the evidence.
+//! * The window keeps a native abort's message.  A C++ exception that ends the
+//!   process (PyTorch's `c10::Error`) is reported as `terminate called ...`
+//!   and `what(): <message>`, then a long native stack and often a wrapper's
+//!   traceback.  The message lines are retained ahead of the tail, with the
+//!   omitted middle marked, so the evidence keeps both why the process aborted
+//!   and how it ended.
 
 use std::ops::Range;
 pub use vonk_agent_protocol::failure_evidence::ExitCause;
@@ -39,8 +45,9 @@ use vonk_agent_protocol::generated::{FailureLogTail, HostHelperProcessLogs};
 /// Bytes retained per container stream: the protocol's bound for this field.
 ///
 /// Every later reader keeps it whole: the agent and the Controller each bound
-/// the text to 2048 from its end, and the evidence bundle and the operator log
-/// projection carry it as it arrives.
+/// the text to 2048 after redaction, shrinking the window and keeping the
+/// causes ahead of the omission marker, and the evidence bundle and the
+/// operator log projection carry it as it arrives.
 const RETAINED_BYTES: usize = 2048;
 /// Bytes reserved for the line that marks the output omitted between the
 /// retained failure lines and the tail.
@@ -395,10 +402,8 @@ fn above(stream: &[u8], window: &Range<usize>) -> usize {
 fn failure_window(stream: &[u8], budget: usize) -> (Vec<Range<usize>>, Range<usize>) {
     let Some((header_start, header_end, block_start, cause_above)) = last_failure_line(stream)
     else {
-        return (
-            Vec::new(),
-            stream.len().saturating_sub(budget)..stream.len(),
-        );
+        let end = stream.len();
+        return ahead_of_window(stream, native_abort(stream, end, budget / 2), end, budget);
     };
     // Give way only when the cause above is itself a failure block.  A summary
     // that names its own cause -- "Engine core initialization failed" -- is more
@@ -427,18 +432,89 @@ fn failure_window(stream: &[u8], budget: usize) -> (Vec<Range<usize>>, Range<usi
     let causes = if points_above && cause_above.is_none() {
         first_failure_lines(stream, block_start, budget / 2)
     } else {
-        Vec::new()
+        native_abort(stream, end, budget / 2)
     };
+    ahead_of_window(stream, causes, end, budget)
+}
+
+/// The window ending at `end`, with `causes` retained ahead of it when they lie
+/// above it: the window gives up the bytes the causes and the omission marker
+/// take, so everything retained still fits in `budget`.  Causes the window
+/// already holds are not repeated, and with none left the window keeps the
+/// whole budget.
+fn ahead_of_window(
+    stream: &[u8],
+    causes: Vec<Range<usize>>,
+    end: usize,
+    budget: usize,
+) -> (Vec<Range<usize>>, Range<usize>) {
     let kept: usize = causes.iter().map(Range::len).sum();
     let start = end.saturating_sub(budget - kept - OMISSION_MARKER_BYTES);
     let causes: Vec<_> = causes
         .into_iter()
-        .filter(|line| line.end <= start)
+        .filter(|line| line.end <= above(stream, &(start..end)))
         .collect();
     if causes.is_empty() {
         return (Vec::new(), end.saturating_sub(budget)..end);
     }
     (causes, start..end)
+}
+
+/// How a C++ runtime reports the exception that aborts its process
+/// (libstdc++'s terminate handler, which PyTorch's `c10::Error` goes through):
+/// `terminate called after throwing an instance of 'c10::Error'`, then
+/// `  what():  <message>` over as many lines as the message has.  The stack it
+/// prints next (`Exception raised from ...`, `frame #0: ...`) is long, and any
+/// wrapper's own traceback follows it, so a window at the end keeps frames and
+/// loses the message.
+const NATIVE_ABORT: &[u8] = b"terminate called ";
+/// The opener that a `what()` message follows.  The handler's other reports
+/// (`terminate called without an active exception`, `... recursively`) are one
+/// line each.
+const NATIVE_ABORT_THROWN: &[u8] = b"terminate called after throwing";
+
+/// The last native abort report above `before`: its opening line and, for a
+/// thrown exception, the `what()` message lines after it, whole lines within
+/// `budget` bytes.
+fn native_abort(stream: &[u8], before: usize, budget: usize) -> Vec<Range<usize>> {
+    let above = &stream[..before];
+    let mut offset = 0;
+    let mut opener = None;
+    for line in above.split_inclusive(|byte| *byte == b'\n') {
+        if contains(line, NATIVE_ABORT) {
+            opener = Some(offset);
+        }
+        offset += line.len();
+    }
+    let Some(opener) = opener else {
+        return Vec::new();
+    };
+    let mut kept = Vec::new();
+    let mut used = 0;
+    let mut offset = opener;
+    for line in above[opener..].split_inclusive(|byte| *byte == b'\n') {
+        let range = offset..offset + line.len();
+        offset = range.end;
+        let content = line_content(line);
+        let content = content.trim();
+        // The message ends where the stack, a blank line or another report
+        // begins.
+        let ends = !kept.is_empty()
+            && (content.is_empty()
+                || content.starts_with("Exception raised from")
+                || content.starts_with("frame #")
+                || contains(line, NATIVE_ABORT)
+                || contains(line, TRACEBACK));
+        if ends || !line.ends_with(b"\n") || used + line.len() > budget {
+            break;
+        }
+        used += line.len();
+        kept.push(range);
+        if kept.len() == 1 && !contains(line, NATIVE_ABORT_THROWN) {
+            break;
+        }
+    }
+    kept
 }
 
 /// The lines above `before` that report a failure, within `budget` bytes and in
@@ -1023,6 +1099,156 @@ mod tests {
         let plain = String::from_utf8_lossy(&stream[stream.len() - RETAINED_BYTES..]);
         assert!(!plain.contains("drafter checkpoint is incompatible"));
         assert!(tail.text.contains("drafter checkpoint is incompatible"));
+    }
+
+    /// The live shape of the LTX job that aborted on spark-2297 (2026-11-05):
+    /// the pipeline's own log, PyTorch's native abort report, its C++ stack,
+    /// then the job adapter's traceback for the child that died, whose
+    /// closing line echoes the whole command.
+    fn native_abort_under_a_wrapper(wrapped: bool) -> Vec<u8> {
+        let mut stream = String::new();
+        for step in 0..80 {
+            stream.push_str(&format!(
+                "INFO:ltx_pipelines:loading transformer block {step} of 80 from the checkpoint\n"
+            ));
+        }
+        stream.push_str("terminate called after throwing an instance of 'c10::Error'\n");
+        stream.push_str("  what():  CUDA error: an illegal memory access was encountered\n");
+        stream.push_str("CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\n");
+        stream.push_str("For debugging consider passing CUDA_LAUNCH_BLOCKING=1\n\n");
+        stream.push_str("Exception raised from c10_cuda_check_implementation at /pytorch/c10/cuda/CUDAException.cpp:44 (most recent call first):\n");
+        for frame in 0..9 {
+            stream.push_str(&format!(
+                "frame #{frame}: c10::Error::Error(c10::SourceLocation, std::string) + 0x{frame}c (0xe8472ad284c4 in /usr/local/lib/python3.12/dist-packages/torch/lib/libc10.so)\n"
+            ));
+        }
+        for frame in 9..38 {
+            stream.push_str(&format!("frame #{frame}: python3() [0x4f9e4c]\n"));
+        }
+        if wrapped {
+            stream.push_str("\nTraceback (most recent call last):\n");
+            stream.push_str(
+                "  File \"/opt/vonk/source/pipelines/run.py\", line 267, in <module>\n    main()\n",
+            );
+            stream.push_str("  File \"/opt/vonk/source/pipelines/run.py\", line 259, in main\n");
+            stream.push_str(
+                "    subprocess.run(command, check=True, timeout=args.timeout_seconds)\n",
+            );
+            stream.push_str(&format!(
+                "subprocess.CalledProcessError: Command '['python3', '-m', 'ltx_pipelines.ti2vid_two_stages', {}]' died with <Signals.SIGABRT: 6>.\n",
+                "'--option', 'value', ".repeat(40)
+            ));
+        }
+        stream.into_bytes()
+    }
+
+    #[test]
+    fn a_native_abort_keeps_its_message_above_the_wrappers_traceback() {
+        // Wrong implementation this catches: the window ended on the job
+        // adapter's traceback and spent its whole budget on that and the C++
+        // frames above it, so the evidence of the LTX abort dropped the
+        // `what()` message that said why the process aborted.
+        let stream = native_abort_under_a_wrapper(true);
+        let plain = String::from_utf8_lossy(&stream[stream.len() - RETAINED_BYTES..]);
+        assert!(!plain.contains("what():"));
+        let tail = retain(&stream);
+        let text = &tail.text;
+        let opener = text
+            .find("terminate called after throwing an instance of 'c10::Error'")
+            .expect(text);
+        let message = text
+            .find("  what():  CUDA error: an illegal memory access was encountered\n")
+            .expect(text);
+        let marker = text.find(" bytes omitted]\n").expect(text);
+        assert!(opener < message && message < marker, "{text}");
+        assert_eq!(text.matches(" bytes omitted]").count(), 1, "{text}");
+        assert!(text.contains("For debugging consider passing CUDA_LAUNCH_BLOCKING=1\n"));
+        assert!(!text.contains("loading transformer block"), "{text}");
+        assert!(
+            text.ends_with("died with <Signals.SIGABRT: 6>.\n"),
+            "{text}"
+        );
+        assert!(text.len() <= RETAINED_BYTES, "{}", text.len());
+        let dropped = tail.dropped_bytes.expect("the helper counts what it drops");
+        assert!(dropped > 0 && dropped < stream.len() as u64);
+    }
+
+    #[test]
+    fn a_native_abort_with_no_traceback_keeps_its_message_and_its_last_frames() {
+        // Wrong implementation this catches: with no Python header in the
+        // stream the window was a plain tail of C++ frames.
+        let stream = native_abort_under_a_wrapper(false);
+        let tail = retain(&stream);
+        let text = &tail.text;
+        assert!(
+            text.starts_with("terminate called after throwing"),
+            "{text}"
+        );
+        assert!(text.contains("  what():  CUDA error: an illegal memory access"));
+        assert!(
+            text.ends_with("frame #37: python3() [0x4f9e4c]\n"),
+            "{text}"
+        );
+        assert!(text.len() <= RETAINED_BYTES, "{}", text.len());
+    }
+
+    #[test]
+    fn a_native_abort_inside_the_window_is_not_repeated() {
+        let mut stream = b"terminate called after throwing an instance of 'std::runtime_error'\n  what():  bad shape\n".to_vec();
+        stream.extend_from_slice(b"frame #0: f()\n");
+        let tail = retain(&stream);
+        assert_eq!(tail.text, String::from_utf8_lossy(&stream));
+        assert_eq!(tail.dropped_bytes, Some(0));
+    }
+
+    #[test]
+    fn a_cause_line_the_window_opens_inside_is_kept_whole() {
+        // Wrong implementation this catches: a cause line was kept only when
+        // it ended before the window's first byte, and the window drops the
+        // partial line it opens inside, so a `what()` line straddling that
+        // byte was in neither and the message was lost.
+        let opener = "terminate called after throwing an instance of 'c10::Error'\n";
+        let message = format!("  what():  CUDA error: {}\n", "e".repeat(176));
+        assert_eq!(message.len(), 200);
+        let frames: String = (0..50)
+            .map(|frame| format!("frame #{frame:03}: python3() [0x4f9e4c]\n"))
+            .collect();
+        // The window keeps the bound less the causes and the marker reserve:
+        // 2048 - 260 - 48 = 1740 bytes, which opens inside the message line
+        // (it spans the 1850..1650 bytes before the end).
+        let window = RETAINED_BYTES - opener.len() - message.len() - OMISSION_MARKER_BYTES;
+        assert!(frames.len() < window && window < frames.len() + message.len());
+        let stream = format!("{}{opener}{message}{frames}", "INFO loading\n".repeat(40));
+        let tail = retain(stream.as_bytes());
+        assert!(
+            tail.text.starts_with(&format!("{opener}{message}[")),
+            "{}",
+            tail.text
+        );
+        assert_eq!(tail.text.matches("what():").count(), 1, "{}", tail.text);
+        assert!(tail.text.ends_with("frame #049: python3() [0x4f9e4c]\n"));
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
+    }
+
+    #[test]
+    fn a_terminate_without_an_exception_is_one_line() {
+        // Wrong implementation this catches: every line after any `terminate
+        // called` was read as its message, so a report with no message took
+        // up to half the budget from the window.
+        let stream = format!(
+            "terminate called without an active exception\n{}{}",
+            "worker 3 still holds the device\n".repeat(20),
+            "frame\n".repeat(400)
+        );
+        let tail = retain(stream.as_bytes());
+        let marker = tail.text.find(" bytes omitted]\n").expect(&tail.text);
+        assert_eq!(
+            &tail.text[..tail.text[..marker].rfind('\n').map_or(0, |index| index + 1)],
+            "terminate called without an active exception\n",
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
     }
 
     /// The live vLLM shape of a start that runs out of memory: the engine

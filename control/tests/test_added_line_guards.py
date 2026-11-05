@@ -396,6 +396,24 @@ fn production() { let value = "running"; }
     )
 
 
+def test_a_quote_char_literal_does_not_hide_the_inline_test_module():
+    """Catches `'"'` opening a phantom string that swallowed `#[cfg(test)]`.
+
+    rust/crates/vonk-agent/src/failure_evidence.rs trims `'"'` above its
+    tests, so every `.expect` added there read as production code.
+    """
+    source = """fn production() { let _ = text.trim_matches('"'); }
+#[cfg(test)]
+mod tests {
+    fn t() { let lifetime: &'static str = "x"; state.expect("fixture"); }
+}
+fn later() { state.expect("bookkeeping"); }
+"""
+    path = "rust/crates/vonk-agent/src/example.rs"
+    assert not check_source(path, source, {4}, modes=("noexit",))
+    assert check_source(path, source, {6}, modes=("noexit",))
+
+
 @pytest.mark.parametrize(
     "path,source,line",
     [

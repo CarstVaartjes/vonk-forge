@@ -20,9 +20,11 @@ from vonk_agent_protocol.reason_codes import AgentEvidenceCode
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.failure_evidence import (
+    _OMISSION_MARKER,
     FailedAttempt,
     FailureEvidenceBundle,
     FailureEvidenceService,
+    _keep_retained,
     collect_failure,
     log_tail,
     safe_text,
@@ -339,6 +341,86 @@ def test_sanitize_diagnostics_keeps_the_end_when_redaction_expands_a_tail(
     else:
         assert cleaned.stderr.dropped_bytes is None
     assert "token: v" not in cleaned.stderr.text
+
+
+def test_sanitize_diagnostics_keeps_the_cause_ahead_of_the_omission_marker() -> None:
+    """Catches the bound cutting the cause the helper kept above its window.
+
+    The helper retains a native abort's ``what()`` message ahead of the tail
+    (2026-11-05: an LTX job's evidence lost it to C++ frames). The Controller
+    redacts again with its own, broader rule: ``mytoken=5`` passes the agent
+    (``token`` is not a whole word there) but becomes ``[redacted diagnostic
+    line]`` here, so a tail the agent bounded grows past the bound. A cut from
+    the front then drops the cause and the marker first; the window's front is
+    what gives way instead.
+    """
+
+    cause = (
+        "terminate called after throwing an instance of 'c10::Error'\n"
+        "  what():  CUDA error: an illegal memory access was encountered\n"
+    )
+    window = "mytoken=5\n" * 110 + "the container exited here\n"
+    text = cause + "[7943 bytes omitted]\n" + window
+    assert len(text.encode()) <= 2048
+    assert len(safe_text(text).encode()) > 2048
+    diagnostics = FailureDiagnostics.model_validate(
+        {
+            "schema_version": 1,
+            "collected_at": NOW.isoformat(),
+            "phase": "recipe.job.run.v1",
+            "category": "runtime",
+            "stdout": {
+                "text": "",
+                "truncated": False,
+                "dropped_bytes": 0,
+                "dropped_lines": 0,
+            },
+            "stderr": {
+                "text": text,
+                "truncated": True,
+                "dropped_bytes": 7943,
+                "dropped_lines": 95,
+            },
+            "versions": [],
+            "sandbox": [],
+            "storage": [],
+            "preflight": [],
+            "collector_errors": [],
+        }
+    )
+    cleaned = sanitize_diagnostics(diagnostics).stderr
+    assert cleaned.text.startswith(cause + "[7943 bytes omitted]\n")
+    assert cleaned.text.endswith("the container exited here\n")
+    assert len(cleaned.text.encode()) <= 2048
+    assert (cleaned.dropped_bytes or 0) > 7943
+
+
+_OMISSION_VECTOR = json.loads(
+    (
+        Path(__file__).parents[2] / "agent_protocol/fixtures/log-tail-omission-v1.json"
+    ).read_text("utf-8")
+)
+
+
+@pytest.mark.parametrize(
+    ("line", "valid"),
+    [(line, True) for line in _OMISSION_VECTOR["markers"]["valid"]]
+    + [(line, False) for line in _OMISSION_VECTOR["markers"]["invalid"]],
+)
+def test_the_omission_marker_is_read_as_the_agent_writes_it(
+    line: str, valid: bool
+) -> None:
+    """Catches the Controller's copy of the marker drifting from the agent's."""
+    assert (_OMISSION_MARKER.fullmatch(line) is not None) is valid
+
+
+@pytest.mark.parametrize("case", _OMISSION_VECTOR["clamps"])
+def test_a_retained_tail_is_bounded_as_the_agent_bounds_it(case: dict) -> None:
+    """Catches the Controller's bound drifting from the agent's clamp_retained."""
+    assert _keep_retained(case["text"], case["limit"]) == (
+        case["kept"],
+        case["dropped_bytes"],
+    )
 
 
 def test_ring_buffer_preserves_last_lines_and_reports_loss():
