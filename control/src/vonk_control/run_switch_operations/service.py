@@ -132,6 +132,14 @@ class RunSwitchOperationService(
         self._memory_floor = memory_floor_bytes
         self._tick_cursor: str | None = None
 
+    @property
+    def inventory_max_age_seconds(self) -> int:
+        return self._inventory_max_age
+
+    @property
+    def memory_floor_bytes(self) -> int:
+        return self._memory_floor
+
     def preview(
         self,
         request: RunSwitchPreviewRequest,

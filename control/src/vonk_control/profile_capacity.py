@@ -33,7 +33,6 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import fleet_profile_states, job_states
-from .admission_locking import admitting
 from .content_identity import same_image
 from .fleet_profile_capacity_repair import (
     capacity_document as _capacity_document,
@@ -1146,44 +1145,3 @@ def release_unassigned_profile_claims(
     ):
         claim.state = ReservationState.RELEASED
         claim.released_at = now
-
-
-def restore_released_profile_claims(
-    session: Session,
-    application: FleetProfileApplication,
-    *,
-    node_ids: Sequence[str] | None = None,
-) -> None:
-    """Take back the claims an application released while it was failed.
-
-    The inverse of ``release_unassigned_profile_claims``, for the same
-    application when its live child is advanced again. Only rows that still
-    carry the accepted plan return. A claim consumed by an installation or a
-    run changed owner and is untouched. A port another load promised in the
-    meantime cannot return (the unique promise index refuses it): that raises
-    ``ConstraintReplan``, so the load is planned again instead of resuming a
-    plan whose port it no longer holds.
-    Consumption re-checks real capacity, so a restored claim never admits more
-    than the ordinary admission would.
-    """
-    if application.state not in fleet_profile_states.LIVE:
-        return
-    claims = select(ResourceReservation).where(
-        ResourceReservation.owner_kind == "fleet-profile",
-        ResourceReservation.owner_id == application.id,
-        ResourceReservation.state == ReservationState.RELEASED,
-        ResourceReservation.plan_digest == application.plan_digest,
-    )
-    if node_ids is not None:
-        claims = claims.where(ResourceReservation.node_id.in_(node_ids))
-    for claim in session.scalars(
-        claims.order_by(ResourceReservation.id).with_for_update(nowait=True)
-    ):
-        with admitting(), session.begin_nested():
-            claim.state = (
-                ReservationState.ACTIVE
-                if claim.kind == "disk"
-                else ReservationState.PROMISED
-            )
-            claim.released_at = None
-            session.flush()

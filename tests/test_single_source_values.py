@@ -357,6 +357,45 @@ def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
     )
 
 
+def _hand_rolled_memory_fits(source: str) -> list[int]:
+    """Lines subtracting a reserved or occupied figure and the memory floor."""
+    import ast
+
+    def names(node: ast.AST) -> set[str]:
+        return {
+            item.id if isinstance(item, ast.Name) else item.attr
+            for item in ast.walk(node)
+            if isinstance(item, ast.Name | ast.Attribute)
+        }
+
+    return [
+        node.lineno
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Sub)
+        and any("floor" in name for name in names(node))
+        and any(("reserved" in name or "occupied" in name) for name in names(node))
+    ]
+
+
+def test_no_controller_module_reimplements_the_memory_fit() -> None:
+    # Every admission, restore included, asks the one owner (``plan_capacity``
+    # and ``evaluate_memory_admission``); a copy anywhere in the Controller
+    # drifts from it.
+    owner = "control/src/vonk_control/resource_planning/capacity.py"
+    # Known copy, to be replaced by the owner in its own change: the recipe
+    # build's memory headroom (it already feeds the owner's capacity snapshot).
+    known = {"control/src/vonk_control/recipe_builds/common.py"}
+    copies = {
+        f"{path.relative_to(ROOT)}:{line}"
+        for path in (ROOT / "control/src/vonk_control").rglob("*.py")
+        if str(path.relative_to(ROOT)) not in {owner, *known}
+        for line in _hand_rolled_memory_fits(path.read_text())
+    }
+    assert not copies
+    assert _hand_rolled_memory_fits("fit = reserved_bytes - memory_floor_bytes\n")
+
+
 def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
     """One owner, including stale and future literals, across executable inputs."""
     import re

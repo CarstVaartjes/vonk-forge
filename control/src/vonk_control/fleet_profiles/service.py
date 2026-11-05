@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 
 from ..fleet_profile_contract import FleetProfileSwitchAdapter
 from ..lifecycle.fleet_profile import FleetProfileAdapter
@@ -75,12 +76,17 @@ class FleetProfileService(
         switch_adapter: FleetProfileSwitchAdapter | None = None,
         cache_resolver: Callable[..., CacheResolution] | None = None,
         assessment_provider: _AssessmentProvider | None = None,
+        memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
+        inventory_max_age_seconds: int = 300,
     ) -> None:
         self._sessions = sessions
         self._clock = clock
         self._switch_adapter = switch_adapter
         self._cache_resolver = cache_resolver
         self._assessment_provider = assessment_provider
+        # What a restored claim is admitted against (the Run/Switch settings).
+        self._memory_floor = memory_floor_bytes
+        self._inventory_max_age = inventory_max_age_seconds
         self._preparation_starter: PreparationStarter | None = None
         self._storage_relief: StorageReliefProvider | None = None
         self._preparation_canceller: PreparationCanceller | None = None
