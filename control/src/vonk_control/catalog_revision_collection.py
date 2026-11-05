@@ -62,7 +62,17 @@ from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from typing import Any
 
-from sqlalchemy import Select, and_, delete, exists, false, or_, select, text
+from sqlalchemy import (
+    Select,
+    and_,
+    collate,
+    delete,
+    exists,
+    false,
+    or_,
+    select,
+    text,
+)
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
@@ -749,6 +759,23 @@ def _model_dependencies(
     return frozenset(found)
 
 
+def not_among(column, words: Collection[str], dialect: str):
+    """``column NOT IN words`` spelled as ranges between the sorted words.
+
+    The same rows (a word outside ``words`` is still selected), but the state
+    index can answer it. The column is compared bytewise (``COLLATE "C"``), the
+    order ``sorted`` uses, whatever collation the database was created with.
+    """
+
+    ordered = sorted(set(words))
+    ranked = collate(column, '"C"' if dialect == "postgresql" else "BINARY")
+    return or_(
+        ranked < ordered[0],
+        *(and_(ranked > low, ranked < high) for low, high in pairwise(ordered)),
+        ranked > ordered[-1],
+    )
+
+
 def operation_tokens(
     session: Session,
     now: datetime,
@@ -774,14 +801,7 @@ def operation_tokens(
 
     def live(state, updated, subject=LifecycleSubject.JOB):
         ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
-        # Not ended, spelled as ranges so the state index answers it; a word
-        # outside the vocabulary is still not ended.
-        ordered = sorted(set(ended))
-        unended = or_(
-            state < ordered[0],
-            *(and_(state > low, state < high) for low, high in pairwise(ordered)),
-            state > ordered[-1],
-        )
+        unended = not_among(state, ended, session.get_bind().dialect.name)
         return unended if window is None else or_(unended, updated >= window)
 
     selected = session.scalar(select(FleetProfileSelection.application_id))

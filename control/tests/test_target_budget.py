@@ -37,7 +37,7 @@ import sys
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
@@ -274,6 +274,8 @@ class Cost:
     # without costing rows.
     steps: int
     parses: dict[str, int]
+    # Steps of each statement, in order, fetching its rows included.
+    per_statement: tuple[int, ...] = field(default=(), compare=False)
 
 
 def _count_parses(monkeypatch: pytest.MonkeyPatch, parses: Counter[str]) -> None:
@@ -318,10 +320,12 @@ def measure(world: World, monkeypatch: pytest.MonkeyPatch, check: TargetCheck) -
     if not check.once:
         check.run(world)
     statements = [0]
+    marks: list[int] = []
     parses: Counter[str] = Counter()
 
     def count(*_args: object) -> None:
         statements[0] += 1
+        marks.append(world.steps[0])
 
     _count_parses(monkeypatch, parses)
     event.listen(world.engine, "before_cursor_execute", count)
@@ -330,8 +334,13 @@ def measure(world: World, monkeypatch: pytest.MonkeyPatch, check: TargetCheck) -
         check.run(world)
     finally:
         event.remove(world.engine, "before_cursor_execute", count)
+    ends = [*marks[1:], world.steps[0]]
     return Cost(
-        statements[0], world.fetched[0] - fetched, world.steps[0] - steps, dict(parses)
+        statements[0],
+        world.fetched[0] - fetched,
+        world.steps[0] - steps,
+        dict(parses),
+        tuple(end - start for start, end in zip(marks, ends, strict=True)),
     )
 
 
@@ -384,16 +393,53 @@ def test_cost_of_a_target_does_not_grow_with_unrelated_history(
     check = TARGET_CHECKS[name]
     small = measure(worlds[SMALL], monkeypatch, check)
     large = measure(worlds[LARGE], monkeypatch, check)
-    # A scan that stops at the end of its key range peeks one entry further
-    # when another row follows, so a statement may differ by one step with no
-    # growth in what it reads. A scan that grows with history differs by far
-    # more.
-    boundary = small.statements
+    _require_same_cost(name, small, large)
+
+
+def test_a_whole_profile_read_is_caught_by_the_budget(
+    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a scan of every saved profile hides in no allowance.
+
+    The injected read returns one row at both scales, so only its steps grow.
+    """
+    from vonk_control.artifact_reference_scan import model_references
+
+    original = model_references.profiles_naming
+
+    def scanning(session, *args, **kwargs):
+        session.connection().exec_driver_sql(
+            "SELECT count(*) FROM fleet_profiles WHERE assignments LIKE '%no-such%'"
+        ).all()
+        return original(session, *args, **kwargs)
+
+    monkeypatch.setattr(model_references, "profiles_naming", scanning)
+    check = TARGET_CHECKS["model_removal_review"]
+    small = measure(worlds[SMALL], monkeypatch, check)
+    large = measure(worlds[LARGE], monkeypatch, check)
+    assert small.rows == large.rows
+    with pytest.raises(CostGrew):
+        _require_same_cost("injected", small, large)
+
+
+def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
+    """Equal statements, rows and parses; each statement's steps within one.
+
+    A scan that stops at the end of its key range peeks one entry further when
+    another row follows, so one statement may differ by one step with no
+    growth in what it reads. The allowance is per statement: a scan that grows
+    with history cannot hide in the sum of the others.
+    """
     if (
         large.statements != small.statements
         or large.rows != small.rows
         or large.parses != small.parses
-        or abs(large.steps - small.steps) > boundary
+        or any(
+            abs(after - before) > 1
+            for before, after in zip(
+                small.per_statement, large.per_statement, strict=True
+            )
+        )
     ):
         raise CostGrew(
             f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
