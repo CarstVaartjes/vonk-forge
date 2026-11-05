@@ -65,6 +65,10 @@ _ACTIVE_RUN_STATES = RUN_LIVE
 _RUN_STATES = tuple(RunState)
 
 
+# Which evidence wins when facts about one digest are merged (highest wins):
+# a failure or a download in progress is more informative than a miss. This is
+# not readiness; the less-ready order below is a different question, and
+# "failed" sits at opposite ends of the two.
 _LOCAL_STATE_PRIORITY = {
     "unknown": 0,
     "not_cached": 0,

@@ -29,11 +29,14 @@ from vonk_control.models import (
     CatalogDocument,
     CatalogDocumentHead,
     CatalogDocumentRevision,
+    ClusterMapping,
     ModelCacheOperation,
     ModelCacheSet,
     RecipeBuild,
+    RecipeInstallation,
 )
 from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspector
+from vonk_control.stored_json import write_guard_mode
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .test_library_local_state_history import _cache_set, _operation
@@ -328,6 +331,73 @@ def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
         assert library.local.controller == "cached"
     else:
         assert library.local.controller != "cached"
+
+
+@pytest.mark.parametrize(
+    ("count", "installation", "expected"),
+    [
+        (count, state, expected)
+        for count in (1, 2)
+        for state, expected in (
+            ("planned", "preparing"),
+            ("installing", "preparing"),
+            ("partial", "preparing"),
+            ("installed", "cached"),
+            ("failed", "cached"),
+            ("uninstalled", "cached"),
+        )
+    ],
+)
+def test_an_ended_installation_does_not_pull_a_cached_set_down(
+    cache,  # noqa: F811
+    count: int,
+    installation: str,
+    expected: str,
+):
+    """A head that inherited its image has no build row; its set is cached. The
+    retention uninstall (or a failed install) leaves the recipe cached."""
+
+    service, sessions = cache
+    world = _World(sessions, count=count)
+    row = world.recipe_set(service, "cached")
+    mapping_id = str(uuid.uuid4())
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        session.add_all([row])
+        session.add(
+            ClusterMapping(
+                id=mapping_id,
+                recipe_revision_id=world.recipe_revision_id,
+                topology_name="single",
+                generation=1,
+                node_count=1,
+                state="ready",
+                parameters={},
+                placement_digest="f" * 64,
+                endpoint_owner_node_id="builder",
+                created_by="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+        session.flush()
+        session.add(
+            RecipeInstallation(
+                id=str(uuid.uuid4()),
+                recipe_revision_id=world.recipe_revision_id,
+                model_content_sha256=world.model_digests[0],
+                mapping_id=mapping_id,
+                mapping_generation=1,
+                recipe_build_id=None,
+                image_digest="sha256:" + "e" * 64,
+                plan_digest="1" * 64,
+                plan={"schema_version": 2},
+                state=installation,
+                actor="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    assert _recipe(_projection(sessions)).local.controller == expected
 
 
 def test_the_weaker_state_wins_in_one_total_order():

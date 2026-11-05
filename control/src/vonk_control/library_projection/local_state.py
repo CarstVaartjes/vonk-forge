@@ -209,6 +209,9 @@ def _latest_cache_operations(
     return select(ranked.c.id).where(ranked.c.position == 1)
 
 
+_ENDED_INSTALLATIONS = (InstallationState.UNINSTALLED, InstallationState.FAILED)
+
+
 def _fold_local_facts(
     cache_facts: Mapping[str, LibraryLocalState],
     asset_facts: Mapping[str, LibraryLocalState],
@@ -516,6 +519,13 @@ def _database_local_state(
             "persisted installation state is invalid",
         )
         installation_revision[installation_id] = installation_revision_id
+        if (
+            adopt_machine_state(InstallationState, installation_state)
+            in _ENDED_INSTALLATIONS
+        ):
+            # An ended installation says nothing about what is cached now: the
+            # retention uninstall after 24 h must not pull a recipe down.
+            continue
         self._merge_local(
             asset_facts,
             revision_digests.get(installation_revision_id),
