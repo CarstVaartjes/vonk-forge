@@ -101,7 +101,7 @@ def test_old_shape_job_with_a_starting_run_continues_to_success(tmp_path) -> Non
         # As the interrupted agent left it: the launch parked, its run observed.
         child = session.get(Job, started.id)
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "needs-operator"
         row = session.get(Job, operation.operation_id)
         assert row is not None
         payload: Any = copy.deepcopy(row.payload)

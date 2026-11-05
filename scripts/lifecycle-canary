@@ -34,18 +34,26 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-#: Terminal states, in the contract vocabulary and the legacy spellings a
-#: release that has not renamed its stored states still reports.
-TERMINAL = frozenset(
-    {"succeeded", "failed", "cancelled", "superseded", "partial", "expired"}
+# The contract's words, generated for the CLI (which ships without the contract).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from cluster_profiles.cli_states_generated import (
+    CANCELLED,
+    FAILED,
+    NEEDS_OPERATOR,
+    SUCCEEDED,
+    SUPERSEDED,
 )
+
+#: Terminal states, in the contract vocabulary.
+TERMINAL = frozenset({SUCCEEDED, FAILED, CANCELLED, SUPERSEDED})
 #: A state in which a person has to act.
-OPERATOR_WAIT = frozenset({"needs-operator", "waiting-for-operator"})
-SUCCESS = frozenset({"succeeded"})
+OPERATOR_WAIT = frozenset({NEEDS_OPERATOR})
+SUCCESS = frozenset({SUCCEEDED})
 #: A cancel that arrives after the work finished leaves it succeeded.
-CANCEL_ENDS = frozenset({"cancelled", "succeeded", "superseded"})
+CANCEL_ENDS = frozenset({CANCELLED, SUCCEEDED, SUPERSEDED})
 
 
 class CanaryFailure(Exception):

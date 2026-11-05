@@ -445,16 +445,11 @@ one by hand (the added-line vocabulary guard in
 
 The stored `state` of a lifecycle subject speaks the nine words of
 `LifecycleState` (`queued`, `running`, `observing`, `backoff`, `succeeded`,
-`failed`, `cancelled`, `superseded`, `needs-operator`). The retired spellings
-(`waiting-for-operator`, `cancelling`, `waiting`, `partial`, `expired`) live only
-in the contract's alias table, `STATE_ALIASES` (and `JOB_KIND_ALIASES` for the one
-kind of generic job that spells a word differently), which says what each one means
-per subject. Every reader of a stored state goes through
-`vonk_agent_protocol.adopt_state(subject, stored)` (selections through
-`stored_words`), so a row written before the rename is adopted when it is read, and
-the Controller rewrites such rows once at startup (`legacy_states.py`);
-`input_state(word)` (and the generated `STATE_INPUT_ALIASES`) lets an API filter or
-CLI argument still send a retired word for one release.
+`failed`, `cancelled`, `superseded`, `needs-operator`) and nothing else; the
+state CHECK constraints admit only those words. Every reader of a stored state goes
+through `vonk_agent_protocol.adopt_state(subject, stored)` (selections through
+`stored_words`). A word outside the vocabulary is unknown: the subject's adapter
+re-evaluates the row (it is retried or observed), never trusts or refuses it.
 
 Three things that used to be spelled in a state word are separate typed fields: an
 artifact job's preparation stage (`preparation`: `draft`, `ready`; its state is

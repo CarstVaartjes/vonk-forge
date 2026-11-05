@@ -1,10 +1,8 @@
 """The stored states of a model-cache operation, spoken through the contract.
 
 A row's ``state`` is a word of the core vocabulary (``queued``, ``running``,
-``backoff``, ``succeeded``, ``failed``, ``cancelled``).  A row written before the
-rename may still carry ``partial``, which the contract adopts as ``backoff``; every
-selection by state therefore goes through the words below, so an old row is found
-as well as a new one and no module spells a retired word.
+``backoff``, ``succeeded``, ``failed``, ``cancelled``).  Every selection by state
+goes through the words below, so no module spells one.
 """
 
 from __future__ import annotations
@@ -43,7 +41,7 @@ WAITING_OR_FAILED: tuple[str, ...] = stored_words(
 
 
 def words(*states: LifecycleState) -> tuple[str, ...]:
-    """Every stored word (old spellings included) that means one of ``states``."""
+    """Every stored word that means one of ``states``."""
 
     return stored_words(SUBJECT, states)
 
@@ -61,7 +59,7 @@ def operation_is_backoff(stored: str | None) -> bool:
 
 
 def adopted(stored: str) -> str:
-    """The word a stored state is shown as: an old spelling reads as its new one."""
+    """The word a stored state is shown as: its core word, or the stored word."""
 
     adopt = adopt_state(SUBJECT, stored)
-    return adopt.state.value if adopt is not None else stored
+    return adopt.value if adopt is not None else stored

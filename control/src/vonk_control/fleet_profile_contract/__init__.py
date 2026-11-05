@@ -25,7 +25,6 @@ from vonk_agent_protocol import OperationProgress as OperationProgress
 from vonk_agent_protocol import ProfileReasonCode as ProfileReasonCode
 from vonk_agent_protocol import SupersedeCode as SupersedeCode
 from vonk_agent_protocol import machine_adopter as machine_adopter
-from vonk_agent_protocol import state_adopter as state_adopter
 from vonk_agent_protocol.agent_words import ProfileAction as ProfileAction
 from vonk_agent_protocol.agent_words import ProfileChildPhase as ProfileChildPhase
 from vonk_agent_protocol.agent_words import ProfileEffectState as ProfileEffectState

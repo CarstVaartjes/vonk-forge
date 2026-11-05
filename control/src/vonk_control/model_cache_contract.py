@@ -19,11 +19,9 @@ from pydantic import (
 from vonk_agent_protocol import (
     LifecycleEffect,
     LifecycleState,
-    LifecycleSubject,
     ModelCacheBlockerCode,
     ModelCacheOperatorStatus,
     canonical_message,
-    state_adopter,
 )
 from vonk_forge_contracts.model import ModelReference
 
@@ -66,14 +64,9 @@ ModelCacheOperationStateValues = Literal[
     LifecycleState.FAILED,
     LifecycleState.CANCELLED,
 ]
-ModelCacheOperationState = Annotated[
-    ModelCacheOperationStateValues,
-    # A row written before the rename may still say ``partial`` or ``cancelling``.
-    BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
-]
-ModelCacheOperatorState = Annotated[
-    Literal[ModelCacheOperatorStatus.ACCEPTED, ModelCacheOperationStateValues],
-    BeforeValidator(state_adopter(LifecycleSubject.MODEL_CACHE_OPERATION)),
+ModelCacheOperationState = ModelCacheOperationStateValues
+ModelCacheOperatorState = Literal[
+    ModelCacheOperatorStatus.ACCEPTED, ModelCacheOperationStateValues
 ]
 ModelCacheOperatorAction = Literal[
     CacheOperationKind.DOWNLOAD, CacheOperationKind.REMOVE

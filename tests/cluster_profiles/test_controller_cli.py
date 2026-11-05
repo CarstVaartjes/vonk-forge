@@ -844,7 +844,7 @@ def test_fleet_activity_passes_all_filters_to_one_canonical_page() -> None:
             "--cursor",
             cursor,
             "--state",
-            "waiting-for-operator",
+            "backoff",
             "--target",
             target,
             "--request-id",
@@ -863,7 +863,7 @@ def test_fleet_activity_passes_all_filters_to_one_canonical_page() -> None:
             {
                 "cursor": cursor,
                 "limit": 7,
-                "state": "waiting-for-operator",
+                "state": "backoff",
                 "node_id": target,
                 "request_id": request_id,
             },
@@ -959,7 +959,7 @@ def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None
     job_id = "11111111-1111-4111-8111-111111111111"
     detail = {
         "id": job_id,
-        "state": "waiting-for-operator",
+        "state": "needs-operator",
         "recovery": {"actions": ["inspect", "resume"]},
     }
     accepted = {"id": job_id, "state": "queued"}
@@ -984,7 +984,7 @@ def test_a_successful_fleet_resume_prints_its_outcome_and_exits_zero(capsys) -> 
         {
             ("GET", f"/api/jobs/{job_id}"): {
                 "id": job_id,
-                "state": "waiting-for-operator",
+                "state": "needs-operator",
                 "recovery": {"actions": ["inspect", "resume"]},
             },
             ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
@@ -1082,7 +1082,7 @@ def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
         {
             ("GET", f"/api/jobs/{job_id}"): {
                 "id": job_id,
-                "state": "waiting-for-operator",
+                "state": "needs-operator",
                 "recovery": {"actions": ["inspect"]},
             },
             ("POST", f"/api/jobs/{job_id}/resume"): {"id": job_id, "state": "queued"},
@@ -1102,7 +1102,7 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
     operation = {
         "id": "operation-1",
         "kind": "recipe.stop",
-        "state": "waiting-for-operator",
+        "state": "needs-operator",
         "attempt": 3,
         "created_at": "2026-08-05T12:00:00Z",
         "node_ids": [target],
@@ -1125,7 +1125,7 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
             action="activity",
             activity_filters={
                 "limit": 1,
-                "state": "waiting-for-operator",
+                "state": "needs-operator",
                 "target": target,
                 "request_id": request_id,
             },
@@ -1138,7 +1138,7 @@ def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation()
     assert "More results are available" in rendered
     assert (
         "vonkctl fleet activity --limit 1 --cursor opaque+token --state "
-        f"waiting-for-operator --target {target} --request-id {request_id}"
+        f"needs-operator --target {target} --request-id {request_id}"
     ) in rendered
 
 
@@ -1893,7 +1893,7 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
     cancel_key = "11111111-1111-4111-8111-111111111122"
     path = f"/api/model/operations/{operation_id}/cancel"
     response = {
-        "state": "cancelling",
+        "state": "observing",
         "action": "download",
         "operation_id": operation_id,
         "request_key": "11111111-1111-4111-8111-111111111123",
@@ -1924,7 +1924,7 @@ def test_model_cancel_requires_consent_and_reuses_its_stable_identity() -> None:
         ),
         client,
     )
-    assert status == 0 and payload["state"] == "cancelling"
+    assert status == 0 and payload["state"] == "observing"
     assert client.calls == [
         (
             "POST",
@@ -2183,7 +2183,7 @@ def _accepted_profile_cancellation(
             "request_key": request_key,
             "actor": "administrator",
             "cause": "operator",
-            "state": "cancelling",
+            "state": "observing",
         },
     }
 
@@ -3607,7 +3607,7 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         "id": "recipe-operation",
         "request_id": "22222222-2222-4222-8222-222222222222",
         "kind": "recipe.image.availability.v2",
-        "state": "cancelling",
+        "state": "observing",
         "request": {"kind": "selector", "selector": "qwen-code", "force": False},
         "cancellation": {
             "cancel_requested": True,
@@ -3641,7 +3641,7 @@ def test_recipe_cancel_recovers_accepted_request_after_lost_response() -> None:
         ),
         client,
     )
-    assert status == 0 and result["state"] == "cancelling"
+    assert status == 0 and result["state"] == "observing"
     assert [(method, path) for method, path, _, _ in client.calls] == [
         ("POST", "/api/recipe/operations/recipe-operation/cancel"),
         ("GET", "/api/recipe/operations/recipe-operation"),
@@ -3801,18 +3801,7 @@ def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() 
     assert recipe.calls == []
 
 
-def test_terminal_partial_and_failure_states_have_nonzero_exit_codes() -> None:
-    partial = FakeClient(
-        {
-            ("POST", "/api/model/qwen/download"): {
-                "state": "partial",
-                "operation_id": "download",
-                "request_key": "11111111-1111-4111-8111-111111111111",
-                "action": "download",
-                "selector": "qwen",
-            }
-        }
-    )
+def test_a_terminal_failure_state_has_a_nonzero_exit_code() -> None:
     failed = FakeClient(
         {
             ("POST", "/api/model/qwen/download"): {
@@ -3824,7 +3813,6 @@ def test_terminal_partial_and_failure_states_have_nonzero_exit_codes() -> None:
             }
         }
     )
-    assert run(("model", "download", "qwen", "--json"), partial)[0] == 1
     assert run(("model", "download", "qwen", "--json"), failed)[0] == 2
 
 
@@ -4254,7 +4242,7 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
             },
             ("GET", f"/api/jobs/{job_id}"): {
                 "id": job_id,
-                "state": "waiting-for-operator",
+                "state": "needs-operator",
                 "kind": "agent-upgrade",
                 "targets": [node_a, node_b],
                 "status_reason": f"Spark {node_a} requires operator review",
@@ -4262,7 +4250,7 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
                     {
                         "id": "operation-a",
                         "node_id": node_a,
-                        "state": "waiting-for-operator",
+                        "state": "needs-operator",
                     }
                 ],
                 "progress": {"running": 0, "completed": 0, "failed": 1, "total": 1},
@@ -4286,7 +4274,7 @@ def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None
     )
 
     assert status == 2
-    assert result["state"] == "waiting-for-operator"
+    assert result["status_reason"] == f"Spark {node_a} requires operator review"
     assert [call[1] for call in client.calls] == [
         "/api/fleet/upgrade",
         f"/api/jobs/{job_id}",

@@ -129,11 +129,11 @@ class JobAdapter:
         return self.lifecycle(stored, None)
 
     def lifecycle(self, job: Job, attempt: JobAttempt | None) -> Lifecycle:
-        """Map a stored, possibly legacy, job (and its current attempt) onto the core.
+        """Map a stored job (and its current attempt) onto the core.
 
-        A ``running`` job keeps its lease (a live one is never touched); a state
+        A ``running`` job keeps its lease (a live one is never touched); a word
         the adapter does not know is ``needs-operator`` and re-evaluated by the
-        first decision (rule 3: nothing is irreversible, so it is retried).
+        first decision (rule 1: nothing is irreversible, so it is retried).
         """
 
         state = job_states.core(job.state) or State.NEEDS_OPERATOR
@@ -376,11 +376,8 @@ class JobAdapter:
             job,
             OperatorAction("resume"),
             now,
-            # Compare-and-set on the word the row carries (an old row says
-            # ``waiting-for-operator``), so a concurrent owner write wins.
-            guard=job.state
-            if job_states.means(job.state, State.NEEDS_OPERATOR)
-            else WAITING,
+            # Compare-and-set on the waiting word, so a concurrent owner write wins.
+            guard=WAITING,
             reason="",
         )
         return not settled.stale and settled.changed > 0 and job.state == "queued"

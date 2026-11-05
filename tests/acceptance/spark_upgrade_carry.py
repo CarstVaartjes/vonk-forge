@@ -104,17 +104,9 @@ TOLERATED_PROBE_FAILURES = 1
 OVERLAY_VARIABLE = "VONK_ACCEPTANCE_COMPOSE_OVERLAY"
 
 
-#: A profile application that has not reached a terminal outcome (the Controller
-#: sends the core words; an older one sent ``waiting-for-operator``).
+#: A profile application that has not reached a terminal outcome.
 _LIVE_STATES = frozenset(
-    {
-        "queued",
-        "running",
-        "backoff",
-        "observing",
-        "needs-operator",
-        "waiting-for-operator",
-    }
+    {"queued", "running", "backoff", "observing", "needs-operator"}
 )
 
 

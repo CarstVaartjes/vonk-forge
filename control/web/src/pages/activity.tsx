@@ -13,11 +13,11 @@ import {
   availabilityFailure,
   LibraryAvailabilityFeedback,
 } from "../components/library-availability-feedback";
-import { LEGACY_WAIT_STATE, LifecycleState } from "../api/vocabulary.generated";
+import { LifecycleState } from "../api/vocabulary.generated";
 
-/** A wait for a person, under the core word or the one older Controllers still send. */
+/** A wait for a person. */
 export function isOperatorWait(state: string | undefined): boolean {
-  return state === LifecycleState.NEEDS_OPERATOR || state === LEGACY_WAIT_STATE;
+  return state === LifecycleState.NEEDS_OPERATOR;
 }
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { SyntheticEvent } from "react";
@@ -96,7 +96,6 @@ export function activityActionLabel(action: string): string {
       succeeded: "Completed",
       uncertain: "Needs review",
       waiting: "Waiting to recheck",
-      [LEGACY_WAIT_STATE]: "Waiting for operator",
       [LifecycleState.NEEDS_OPERATOR]: "Waiting for operator",
       [LifecycleState.BACKOFF]: "Retrying",
       [LifecycleState.OBSERVING]: "Checking",
@@ -127,7 +126,6 @@ export function activityStatus(event: ActivitySummary): ActivityStatus {
       failed: "unsuccessful",
       uncertain: "attention",
       waiting: "in_progress",
-      [LEGACY_WAIT_STATE]: "attention",
       [LifecycleState.NEEDS_OPERATOR]: "attention",
       [LifecycleState.BACKOFF]: "in_progress",
       [LifecycleState.OBSERVING]: "in_progress",
@@ -174,7 +172,6 @@ const OPERATION_STATES = [
   LifecycleState.BACKOFF,
   LifecycleState.OBSERVING,
   "waiting",
-  LEGACY_WAIT_STATE,
   LifecycleState.NEEDS_OPERATOR,
   "compensating",
   "uncertain",

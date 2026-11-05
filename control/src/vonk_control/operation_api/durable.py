@@ -19,7 +19,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.route_activation import ActivationMarker
 
-from .. import agent_operation_states, job_states
+from .. import job_states
 from ..agent_jobs import (
     AgentJobService,
     authorize_operator_resume_in_session,
@@ -502,11 +502,7 @@ class _DurableOperationProjection:
                 context={"job_id": job_id},
                 boundary=[_aware(last.created_at).isoformat(), last.id],
             )
-        terminal = {
-            "succeeded",
-            "accepted",
-            agent_operation_states.RETAINED_COMPENSATED,
-        }
+        terminal = {LifecycleState.SUCCEEDED.value, "accepted"}
         failed = {"failed", "uncertain"}
         running = {"queued", "running", "planned", "compensating"}
         return OperationPage(

@@ -16,7 +16,7 @@ core state                stored rollout
 ``queued``                ``queued`` (an order is queued, running or retrying)
 ``running``               ``running``: legacy worker dispatch only, healed
 ``backoff``/``observing`` ``queued``
-``needs-operator``        ``waiting-for-operator``: legacy only, healed and never
+``needs-operator``        any word this adapter does not know: healed and never
                           written (no rollout action exists)
 ``succeeded``/``failed``  ``succeeded``/``failed``
 ``cancelled``             ``cancelled`` (superseded by a newer request)
@@ -82,8 +82,8 @@ class AgentUpgradeAdapter:
     def adopt(self, stored: Job) -> Lifecycle:
         """Map a stored (possibly legacy) rollout onto the core.
 
-        A legacy ``running`` rollout (a worker dispatch) is observed, a legacy
-        ``waiting-for-operator`` one is ``needs-operator`` and is re-evaluated by
+        A legacy ``running`` rollout (a worker dispatch) is observed, one with a
+        word this adapter does not know is ``needs-operator`` and is re-evaluated by
         the first decision (nothing advertises an action, so it is projected from
         its orders).  A superseding request is the monotonic cancel request.
         """
@@ -99,7 +99,7 @@ class AgentUpgradeAdapter:
             state = State.FAILED
         elif stored_state == "cancelled":
             state = State.CANCELLED
-        else:  # waiting-for-operator, or a state this adapter does not know
+        else:  # a word this adapter does not know: re-evaluated as a wait
             state = State.NEEDS_OPERATOR
         result = stored.result if isinstance(stored.result, Mapping) else {}
         superseded = result.get("superseded_by")

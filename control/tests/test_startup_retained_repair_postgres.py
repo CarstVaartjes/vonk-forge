@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
 
-from sqlalchemy import Table, event, select, update
+from sqlalchemy import event, select
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     AgentResult,
@@ -15,7 +15,6 @@ from vonk_agent_protocol import (
     OutcomeDone,
     OutcomeKind,
     RecipeStopResult,
-    StateAlias,
 )
 from vonk_control import db
 from vonk_control.agent_jobs import AgentJobService
@@ -49,16 +48,16 @@ def _claim_snapshot(sessions):
         }
 
 
-def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_stop(
-    postgres_engine, tmp_path: Path, monkeypatch, caplog
+def test_startup_under_a_held_order_lock_retires_journal_and_keeps_original_stop(
+    postgres_engine, tmp_path: Path, monkeypatch
 ) -> None:
     """Catches manual journal repair, global starvation and duplicate Stop dispatch."""
     sessions, lifecycle, switches, accepted, run, stop_id, original, _claims = (
         _retained_stop(tmp_path, postgres_engine)
     )
     # Establish current schema and expose the native Stop through the real
-    # startup converter before planting damage. The later lock fault therefore
-    # belongs to bookkeeping adoption, not an initial migration's DDL.
+    # startup converter before planting damage, so the later startup runs
+    # against a current schema, not an initial migration's DDL.
     db.initialize_database(
         postgres_engine.url.render_as_string(hide_password=False),
         config_path=Path(__file__).resolve().parents[1] / "alembic.ini",
@@ -108,22 +107,15 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
             and row is not None
         )
         assert native.next_action_at is not None
-        # These are retained released-producer bytes, not a second live writer.
-        table = AgentOperation.__table__
-        assert isinstance(table, Table)
-        session.execute(
-            update(table)
-            .where(table.c.id == native_id)
-            .values(state=StateAlias.WAITING_FOR_OPERATOR.value)
-        )
         damaged = deepcopy(original)
         damaged["total_steps"] = "damaged retained count"
         _persist_retained(session, row, damaged)
         retained_plan = deepcopy(row.plan)
 
-    # Hold the actual row that the final legacy-state pass must rewrite. The
-    # test's connection factory only supplies a bounded lock timeout; startup,
-    # adoption SQL, savepoint and schema verification remain production code.
+    # Hold the native order's row lock across startup. The test's connection
+    # factory only supplies a bounded lock timeout, so a startup step that waited
+    # on a workload row would fault instead of hanging; startup, adoption SQL,
+    # savepoint and schema verification remain production code.
     build_engine = db.build_engine
     startup_faults = []
 
@@ -152,12 +144,8 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
                 postgres_engine.url.render_as_string(hide_password=False),
                 config_path=Path(__file__).resolve().parents[1] / "alembic.ini",
             )
-        assert any(
-            statement is not None and "UPDATE agent_operations" in statement
-            for statement in startup_faults
-        )
-        assert "legacy_states.py" in caplog.text
-        assert "Lifecycle bookkeeping adoption deferred" in caplog.text
+        # Startup never waits on a workload row.
+        assert startup_faults == []
         with postgres_engine.connect() as connection:
             db.verify_schema_is_current(connection)
             assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
@@ -196,8 +184,8 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
         holder.rollback()
         holder.close()
 
-    # Releasing the lock lets startup adopt the native Stop's schedule. The
-    # retired application needs no journal repair and stays terminal.
+    # A second startup after the lock is released changes nothing: the retired
+    # application needs no journal repair and stays terminal.
     db.initialize_database(
         postgres_engine.url.render_as_string(hide_password=False),
         config_path=Path(__file__).resolve().parents[1] / "alembic.ini",
@@ -205,7 +193,7 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
     with sessions() as session:
         native = session.get(AgentOperation, native_id)
         assert native is not None
-        assert native.state != StateAlias.WAITING_FOR_OPERATOR.value
+        assert native.next_action_at is not None
     restarted = FleetProfileService(sessions, clock=lambda: due)
     restarted.tick()
     with sessions() as session:
@@ -224,7 +212,7 @@ def test_actual_startup_adoption_fault_retires_journal_and_preserves_original_st
 
     # Resume the exact native Stop after startup, then prove its actual receipt
     # reaches the original SQL child independently of the retired journal.
-    # Retained aliases heal through the ordinary native reconciler.
+    # The adopted retry heals through the ordinary native reconciler.
     fresh_jobs = AgentJobService(sessions, clock=lambda: clock[0])
     fresh_jobs.set_result_consumer(lifecycle.consume_agent_result)
     fresh_jobs.reconcile_orders()

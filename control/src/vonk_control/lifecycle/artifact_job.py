@@ -20,10 +20,7 @@ owns the *projection* and the only writer of an artifact job's ``state``:
 An artifact job has a *preparation* stage before it is submitted (``draft`` while
 its inputs upload, ``ready`` once complete; the lifecycle ``state`` is ``NULL``) and,
 from submit, a lifecycle ``state`` of the core vocabulary stored as itself.  A cancel
-is the monotonic ``cancel_requested_at``; it never changes the state.  Rows written
-before the rename kept this in one word (``draft``, ``ready``, ``cancelling``,
-``waiting-for-operator``); ``artifact_job_states`` reads either shape and the startup
-adoption rewrites them.
+is the monotonic ``cancel_requested_at``; it never changes the state.
 
 ========================  ==========================================
 core state of the order   stored artifact job ``state``
@@ -68,7 +65,6 @@ from vonk_agent_protocol import (
     RunDegradedReason,
     WaitOwnerKind,
     WaitReason,
-    legacy_preparation,
 )
 
 from .. import agent_operation_states as aos
@@ -300,7 +296,7 @@ class ArtifactJobAdapter:
             else self._orders.lifecycle(operation, attempt, parent, now)
         )
         stored = ajs.state_of(job)
-        cancelled_at = ajs.cancel_requested_at(job)
+        cancelled_at = job.cancel_requested_at
         if stored == ajs.RUNNING:
             state = State.RUNNING
         elif stored == ajs.OBSERVING:
@@ -317,7 +313,7 @@ class ArtifactJobAdapter:
             state = State.CANCELLED
         elif stored == "queued" and order is not None and order.state is State.RUNNING:
             state = State.RUNNING  # the Spark claims its own order
-        else:  # draft, ready, queued, or a state this adapter does not know
+        else:  # preparing (no state), queued, or a word this adapter does not know
             state = State.QUEUED
         attempts = 0 if operation is None else operation.current_attempt
         row = Lifecycle(
@@ -497,8 +493,6 @@ class ArtifactJobAdapter:
         now = aware(now)
         if ajs.is_ended(job):
             return False
-        if job.preparation is None and (stage := legacy_preparation(job.state)):
-            job.preparation = stage.value  # a row written before the rename
         lifecycle_wait(
             job,
             identity=job.id,

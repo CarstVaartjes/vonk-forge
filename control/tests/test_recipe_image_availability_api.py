@@ -617,7 +617,7 @@ def test_recipe_cancel_requires_mutation_role_and_returns_durable_request() -> N
         request_id="00000000-0000-4000-8000-000000000219",
         request=RecipeRevisionIntent(recipe_revision_id="revision"),
         kind="recipe.image.availability.v2",
-        state="cancelling",
+        state="observing",
         attempt=1,
         recipe_revision_id="revision",
         recipe_content_sha256="a" * 64,

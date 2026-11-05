@@ -1,10 +1,10 @@
-"""The startup schema reconcile moves a CHECK onto the core state vocabulary.
+"""The startup schema reconcile tightens a state CHECK to the core vocabulary.
 
-A database written before the rename carries ``partial`` in its model-cache
-operations and a CHECK constraint that does not know ``backoff``.  Startup must
-bring the constraint up to date without refusing, losing or rewriting the row,
-and afterwards both spellings are admitted (one release) while an unknown word is
-still refused.
+The previous release admitted the retired ``partial`` in its model-cache
+operations CHECK.  Startup must replace that constraint with the core words
+without refusing to start: with no row carrying the retired word the new CHECK
+is fully valid, and a row that still carries it is kept, untouched, under a
+``NOT VALID`` constraint that refuses every new write of the word.
 """
 
 from __future__ import annotations
@@ -20,7 +20,10 @@ from vonk_control.db import reconcile_schema
 from vonk_control.models import Base, ModelCacheOperation
 
 CHECK = "ck_model_cache_operations_state"
-OLD_CHECK = "state IN ('queued','running','partial','succeeded','failed','cancelled')"
+#: The constraint the previous release created.
+PREVIOUS_CHECK = (
+    "state IN ('queued','running','backoff','succeeded','failed','cancelled','partial')"
+)
 
 
 def _insert(connection, identifier: str, state: str) -> None:
@@ -43,41 +46,52 @@ def _insert(connection, identifier: str, state: str) -> None:
     )
 
 
-def test_a_cache_database_with_partial_rows_is_reconciled_in_place(postgres_engine):
+def _previous_release(connection) -> None:
+    table = cast(Table, ModelCacheOperation.__table__)
+    Base.metadata.create_all(connection)
+    connection.execute(text(f"ALTER TABLE {table.name} DROP CONSTRAINT {CHECK}"))
+    connection.execute(
+        text(
+            f"ALTER TABLE {table.name} ADD CONSTRAINT {CHECK} CHECK ({PREVIOUS_CHECK})"
+        )
+    )
+
+
+def _validated(connection) -> bool:
+    return bool(
+        connection.execute(
+            text("SELECT convalidated FROM pg_constraint WHERE conname = :name"),
+            {"name": CHECK},
+        ).scalar_one()
+    )
+
+
+@pytest.mark.parametrize("retired_row", [False, True], ids=["clean", "retired-row"])
+def test_startup_tightens_the_state_check_and_never_refuses(
+    postgres_engine, retired_row: bool
+):
     table = cast(Table, ModelCacheOperation.__table__)
     with postgres_engine.begin() as connection:
-        Base.metadata.create_all(connection)
-        connection.execute(text(f"ALTER TABLE {table.name} DROP CONSTRAINT {CHECK}"))
-        connection.execute(
-            text(f"ALTER TABLE {table.name} ADD CONSTRAINT {CHECK} CHECK ({OLD_CHECK})")
-        )
-        _insert(connection, "00000000-0000-4000-8000-000000000001", "partial")
-        with pytest.raises(IntegrityError), connection.begin_nested():
-            _insert(connection, "00000000-0000-4000-8000-000000000002", "backoff")
+        _previous_release(connection)
+        _insert(connection, "00000000-0000-4000-8000-000000000001", "backoff")
+        if retired_row:
+            _insert(connection, "00000000-0000-4000-8000-000000000002", "partial")
 
     with postgres_engine.begin() as connection:
-        reconcile_schema(connection)
+        reconcile_schema(connection)  # startup does not refuse either database
 
     with postgres_engine.begin() as connection:
-        # The old row is untouched; both spellings are admitted for one release.
-        states = connection.execute(text(f"SELECT state FROM {table.name}")).scalars()
-        assert list(states) == ["partial"]
-        _insert(connection, "00000000-0000-4000-8000-000000000003", "backoff")
-        _insert(connection, "00000000-0000-4000-8000-000000000004", "partial")
+        # A clean database gets a fully valid constraint; a retired row is kept.
+        assert _validated(connection) is not retired_row
+        states = connection.execute(
+            text(f"SELECT state FROM {table.name} ORDER BY id")
+        ).scalars()
+        assert list(states) == ["backoff", "partial"][: 2 if retired_row else 1]
         with pytest.raises(IntegrityError), connection.begin_nested():
-            _insert(connection, "00000000-0000-4000-8000-000000000005", "waiting")
-
-        fresh_id = "00000000-0000-4000-8000-000000000006"
+            _insert(connection, "00000000-0000-4000-8000-000000000003", "partial")
+        fresh_id = "00000000-0000-4000-8000-000000000004"
         _insert(connection, fresh_id, LifecycleState.BACKOFF)
         recovered = connection.execute(
             table.select().where(table.c.id == fresh_id)
         ).one()
         assert recovered.state == LifecycleState.BACKOFF
-        assert (
-            connection.execute(
-                table.select().where(
-                    table.c.id == "00000000-0000-4000-8000-000000000005"
-                )
-            ).first()
-            is None
-        )

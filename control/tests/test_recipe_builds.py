@@ -1568,7 +1568,7 @@ def test_starting_build_atomically_reserves_temporary_disk_and_memory(
     ("source_state", "outcome"),
     [
         ("running", "success"),
-        ("waiting-for-operator", "success"),
+        ("needs-operator", "success"),
         ("running", "failed"),
     ],
 )
@@ -1692,8 +1692,8 @@ def test_cancelled_build_keeps_capacity_until_cleanup_is_confirmed(
     ("operation_state", "build_state"),
     (
         ("failed", "failed"),
-        ("waiting-for-operator", "building"),
-        ("expired", "building"),
+        ("needs-operator", "building"),
+        ("failed", "building"),
     ),
 )
 def test_terminal_build_can_be_retried_once_with_fresh_fencing_and_capacity(
@@ -1847,12 +1847,12 @@ def test_successful_build_retry_converges_original_and_new_request_keys(
     with sessions.begin() as session:
         job = session.get(Job, first.id)
         assert job is not None
-        job.state = "waiting-for-operator"
+        job.state = "needs-operator"
         child = session.scalar(
             select(AgentOperation).where(AgentOperation.parent_job_id == first.id)
         )
         assert child is not None
-        child.state = "waiting-for-operator"
+        child.state = "needs-operator"
 
     retried = operations.retry(first.id, actor="admin", request_id="retry-build")
     succeeded = operations.record_node_result(

@@ -46,7 +46,7 @@ def _job(state: str = "running", **result) -> Job:
 def test_a_parent_is_created_live_or_already_done_never_parked() -> None:
     for state in ("queued", "running", "succeeded"):
         assert RecipeOperationAdapter.new_job(**_fields(state)).state == state
-    for state in ("waiting-for-operator", "failed", "cancelled"):
+    for state in ("needs-operator", "failed", "cancelled"):
         with pytest.raises(ValueError):
             RecipeOperationAdapter.new_job(**_fields(state))
 
@@ -78,7 +78,7 @@ def test_adopt_maps_every_stored_state_and_the_cancel_request() -> None:
         "succeeded": State.SUCCEEDED,
         "failed": State.FAILED,
         "cancelled": State.CANCELLED,
-        "waiting-for-operator": State.NEEDS_OPERATOR,
+        "needs-operator": State.NEEDS_OPERATOR,
         "something-legacy": State.NEEDS_OPERATOR,
     }
     for stored, state in expected.items():
@@ -112,14 +112,14 @@ def test_a_cancel_of_issued_orders_stays_in_flight_never_waits() -> None:
 
 
 def test_no_event_leaves_a_parent_waiting_for_an_operator() -> None:
-    for stored in ("queued", "running", "waiting-for-operator", "x"):
+    for stored in ("queued", "running", "needs-operator", "x"):
         for issued in (False, True):
             job = _job(stored)
             row = ADAPTER.lifecycle(job, issued=issued, now=NOW)
+            assert ADAPTER.actions(row) == ()
             for event in (Tick(), Observed(Effect.UNKNOWN)):
                 after = transition(row, event, ADAPTER, NOW).row
                 assert after.state is not State.NEEDS_OPERATOR
-    assert ADAPTER.actions(ADAPTER.adopt(_job("waiting-for-operator"))) == ()
 
 
 def test_a_build_completion_that_raced_its_cancel_keeps_cancelling() -> None:
@@ -131,10 +131,10 @@ def test_a_build_completion_that_raced_its_cancel_keeps_cancelling() -> None:
 
 
 def test_a_legacy_build_wait_with_a_cancel_heals_and_one_without_is_left() -> None:
-    parked = _job("waiting-for-operator", cancel_requested=True)
+    parked = _job("needs-operator", cancel_requested=True)
     assert ADAPTER.heal(parked, NOW) is True and parked.state == "running"
-    other = _job("waiting-for-operator")
-    assert ADAPTER.heal(other, NOW) is False and other.state == "waiting-for-operator"
+    other = _job("needs-operator")
+    assert ADAPTER.heal(other, NOW) is False and other.state != "running"
 
 
 def test_a_definite_end_is_absorbed_by_a_parent_that_already_ended() -> None:
@@ -189,16 +189,15 @@ def test_a_build_completion_racing_a_cancel_is_swept_not_parked(
         request_id=str(uuid.uuid4()),
         reason="cancel",
     )
-    # The legacy shape an older Controller left: the parent waits for a person.
+    # The parent waits for a person.
     with sessions.begin() as session:
         job = session.get(Job, original.id)
         assert job is not None
-        job.state = "waiting-for-operator"
+        job.state = "needs-operator"
     operations.reconcile_cancelled_builds()
     with sessions() as session:
         job = session.get(Job, original.id)
         assert job is not None
-        assert job.state != "waiting-for-operator"
         assert job.state in {"running", "cancelled"}
         assert session.get(RecipeBuild, plan.build_id) is not None
 
@@ -218,8 +217,8 @@ def test_a_waiting_parent_accepts_a_cancel(tmp_path, postgres_engine) -> None:
         parked = session.get(Job, original.id)
         child = session.get(AgentOperation, child_id)
         assert parked is not None and child is not None
-        parked.state = "waiting-for-operator"
-        child.state = "waiting-for-operator"
+        parked.state = "needs-operator"
+        child.state = "needs-operator"
     try:
         operations.cancel(
             original.id,

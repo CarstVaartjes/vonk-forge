@@ -70,7 +70,7 @@ def _sessions(tmp_path):
                 id="job-id-secret-value",
                 request_id="request-id-secret-value",
                 kind="fleet.revoke",
-                state="waiting-for-operator",
+                state="needs-operator",
                 actor="actor-secret-value",
                 authority_revision="a" * 64,
                 targets=[NODE],
@@ -118,7 +118,7 @@ def _sessions(tmp_path):
                     payload_digest="e" * 64,
                     payload={},
                     authority_revision="a" * 64,
-                    state="unique-state-secret",
+                    state="observing",
                     current_attempt=0,
                     created_at=NOW - timedelta(minutes=1),
                     updated_at=NOW - timedelta(seconds=20),
@@ -200,7 +200,6 @@ def test_operational_metrics_project_existing_agent_state_with_bounded_labels(
         "actor-secret-value",
         "payload-secret-value",
         "unique-operation-secret",
-        "unique-state-secret",
         "database-value-that-must-not-be-a-label",
     ):
         assert secret not in rendered

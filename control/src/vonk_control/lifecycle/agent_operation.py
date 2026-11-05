@@ -23,10 +23,8 @@ core state                stored order
 ``cancelled``             ``cancelled``
 ========================  ==========================================
 
-A row written before the rename says ``waiting-for-operator`` for all three waits;
-the contract adopts it (``agent_operation_states.PARKED`` selects both spellings)
-and the schedule columns still say which wait it was, so the reconciler classifies it
-on its first pass.  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
+A stored word outside the core vocabulary is unknown: the order is re-evaluated as
+a wait on its first pass (rules 1 to 3 of the core).  An attempt ends ``succeeded``, ``failed``, ``cancelled`` or
 ``observing`` with a typed ``observation_cause`` (``reported-unknown`` or
 ``lease-lapsed``); the agent wire keeps its own four result words and is mapped at
 ingress (``agent_operation_states.record_wire_state``).
@@ -56,9 +54,9 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentOperation,
@@ -120,9 +118,6 @@ from .types import (
     Tick,
 )
 
-if TYPE_CHECKING:
-    from sqlalchemy.engine import Connection
-
 #: The kinds whose repeat could repeat a visible effect (see the module docstring).
 IRREVERSIBLE_OPERATIONS = frozenset(
     {
@@ -145,12 +140,9 @@ ENDED_PARENT_STATES = frozenset(
 )
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
-AGGREGATE_FINAL_STATES = frozenset(
-    {"cancelled", aos.RETAINED_COMPENSATED, "failed", "succeeded", aos.NEEDS_OPERATOR}
-)
+AGGREGATE_FINAL_STATES = frozenset(aos.AGGREGATE_FINAL)
 #: The operator actions of a parked order (the same pair the Job endpoints take).
 OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
-_LEGACY_RETRY = ActionName.RETRY.value
 _MAX_REASON = 512
 
 ResumeCandidates = Callable[[Session, str, datetime], Sequence[StoredOperation]]
@@ -170,17 +162,6 @@ def is_artifact_owned(parent: Job | None) -> bool:
         and isinstance(payload, Mapping)
         and payload.get("owner_kind") == OWNER_KIND
     )
-
-
-def _legacy_retry_due(operation: StoredOperation) -> datetime | None:
-    """The retry instant of a row written before the core, else ``None``."""
-
-    if (
-        operation.retry_disposition == _LEGACY_RETRY
-        and operation.retry_disposition_attempt == operation.current_attempt
-    ):
-        return aware(operation.retry_due_at or operation.updated_at)
-    return None
 
 
 def receipt_effect(attempt: AgentOperationAttempt | None) -> Effect | None:
@@ -212,7 +193,7 @@ def retry_scheduled(operation: StoredOperation) -> datetime | None:
     if operation.next_action_at is not None:
         # Above zero the order is being observed, which is not a retry.
         return aware(operation.next_action_at) if not operation.observe_count else None
-    return _legacy_retry_due(operation)
+    return None
 
 
 def cancel_requested_at(
@@ -549,8 +530,6 @@ class AgentOperationAdapter:
             operation.observe_count = observed
             if reason is not None:
                 operation.status_reason = reason
-            operation.retry_disposition = None
-            operation.retry_disposition_attempt = None
             operation.retry_due_at = None
             operation.updated_at = now
             changed = True
@@ -790,8 +769,6 @@ class AgentOperationAdapter:
         operation.state = "running"
         schedule_wait(operation, None)
         operation.observe_count = 0
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
         operation.retry_due_at = None
         # A live attempt has no interrupted reason: keeping the previous one
         # would describe work that is running again.
@@ -834,8 +811,6 @@ class AgentOperationAdapter:
         operation.current_attempt += 1
         operation.state = "failed"
         schedule_wait(operation, None)
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
         operation.updated_at = now
         attempt = AgentOperationAttempt(
             operation_id=operation.id,
@@ -909,8 +884,6 @@ class AgentOperationAdapter:
         operation.state = aos.OBSERVING
         schedule_wait(operation, None)
         operation.observe_count = 0
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
         operation.retry_due_at = None
         operation.updated_at = aware(now)
 
@@ -924,8 +897,6 @@ class AgentOperationAdapter:
         (a lost job superseded by newer intent) still completes.
         """
 
-        operation.retry_disposition = None
-        operation.retry_disposition_attempt = None
         operation.retry_due_at = None
         if operation.observe_count:
             return
@@ -970,14 +941,13 @@ def aggregate_parent_state(
 
     ``children`` are ``(stored state, retry scheduled)`` pairs.  A parent whose
     every unfinished order is an automatic retry is ``queued``: it is progressing,
-    not waiting for a person (the order label ``waiting-for-operator`` is legacy
-    for a retry).  Otherwise it ends only when every order has, and the worst
+    not waiting for a person.  Otherwise it ends only when every order has, and the worst
     outcome wins: failed, then waiting, then cancelled, then succeeded.
     """
 
     children = [
         (
-            (LifecycleState.BACKOFF.value if scheduled else adopted.state.value)
+            (LifecycleState.BACKOFF.value if scheduled else adopted.value)
             if (adopted := adopt_state(LifecycleSubject.AGENT_OPERATION, state))
             is not None
             else state,
@@ -1072,38 +1042,6 @@ def set_parent_state(
     job.updated_at = aware(now)
 
 
-def adopt_legacy_orders(connection: Connection) -> int:
-    """Startup adoption: move the legacy retry encoding onto ``next_action_at``.
-
-    Idempotent and bounded to waiting orders that still carry the retry
-    disposition of their current attempt.  Everything else is adopted lazily by
-    :meth:`AgentOperationAdapter.adopt` on the row's first transition, and a
-    waiting order with no schedule is re-evaluated by the reconciler on its first
-    pass, so a missed row heals instead of waiting.
-    """
-
-    result = connection.execute(
-        update(StoredOperation)
-        .where(
-            StoredOperation.state.in_(aos.PARKED),
-            StoredOperation.next_action_at.is_(None),
-            StoredOperation.retry_disposition == _LEGACY_RETRY,
-            StoredOperation.retry_disposition_attempt
-            == StoredOperation.current_attempt,
-        )
-        .values(
-            next_action_at=func.coalesce(
-                StoredOperation.retry_due_at, StoredOperation.updated_at
-            ),
-            retry_disposition=None,
-            retry_disposition_attempt=None,
-            retry_due_at=None,
-        )
-        .execution_options(synchronize_session=False)
-    )
-    return int(result.rowcount or 0)
-
-
 def lapsed_running_orders(now: datetime):
     """A SQL predicate: ``running`` orders whose current attempt has no live lease.
 
@@ -1160,7 +1098,6 @@ __all__ = [
     "RESTART_REISSUE_OPERATIONS",
     "STOP_ACTION",
     "AgentOperationAdapter",
-    "adopt_legacy_orders",
     "aggregate_parent_state",
     "cancel_requested_at",
     "is_artifact_owned",

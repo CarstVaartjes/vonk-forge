@@ -22,7 +22,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 from vonk_agent_protocol import (
-    ArtifactPreparation,
     InstallationNodeState,
     InstallationState,
     LifecycleState,
@@ -341,7 +340,6 @@ class ArtifactJob(Base):
             _state_in(
                 LifecycleSubject.ARTIFACT_JOB,
                 *LifecycleState,
-                extra=tuple(stage.value for stage in ArtifactPreparation),
                 nullable=True,
             ),
             name="ck_artifact_jobs_state",
