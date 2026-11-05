@@ -28,7 +28,6 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts.model import ModelReference
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
@@ -161,21 +160,21 @@ def _local(
 
 
 def _recipe_local_digests(
-    recipes: Sequence[tuple[str, Sequence[ModelReference]]],
+    recipes: Sequence[tuple[str, Sequence[str]]],
 ) -> list[str]:
     """Every digest a recipe's local state reads: its own and its bound models'."""
 
     digests: dict[str, None] = {}
-    for recipe_digest, models in recipes:
+    for recipe_digest, model_digests in recipes:
         digests[recipe_digest] = None
-        digests.update(dict.fromkeys(reference.content_sha256 for reference in models))
+        digests.update(dict.fromkeys(model_digests))
     return list(digests)
 
 
 def _recipe_local(
     self: LibraryProjection,
     digest: str,
-    models: Sequence[ModelReference],
+    model_digests: Sequence[str],
     *,
     snapshot: Mapping[str, LibraryLocalState] | None,
 ) -> LibraryLocalState:
@@ -190,7 +189,7 @@ def _recipe_local(
 
     own = self._local(digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot)
     lowest = own
-    for model_digest in dict.fromkeys(reference.content_sha256 for reference in models):
+    for model_digest in dict.fromkeys(model_digests):
         model = self._local(
             model_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
         )

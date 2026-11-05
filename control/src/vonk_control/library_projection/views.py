@@ -41,6 +41,11 @@ from .common import (
 )
 from .local_state import _recipe_local_digests
 
+
+def _bound_digests(item: LibraryRecipeProjection) -> list[str]:
+    return [reference.content_sha256 for reference in item.projected.models]
+
+
 if TYPE_CHECKING:
     from .service import LibraryProjection
 
@@ -535,7 +540,7 @@ def recipe_library(
                     [
                         (
                             item.identity.content_sha256,
-                            item.projected.models,
+                            _bound_digests(item),
                         )
                         for item in candidates
                     ]
@@ -546,7 +551,7 @@ def recipe_library(
                     update={
                         "local": self._recipe_local(
                             item.identity.content_sha256,
-                            item.projected.models,
+                            _bound_digests(item),
                             snapshot=snapshot,
                         )
                     }
@@ -621,11 +626,14 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     snapshot = self._local_state_snapshot(
         _recipe_local_digests(
             [
-                (
-                    row.content_digest,
-                    recipe.models,
-                )
-                for row, recipe in recipe_rows
+                (exact[0].content_digest, model_digests),
+                *[
+                    (
+                        row.content_digest,
+                        [reference.content_sha256 for reference in recipe.models],
+                    )
+                    for row, recipe in recipe_rows[1:]
+                ],
             ]
         )
     )

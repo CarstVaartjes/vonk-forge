@@ -168,7 +168,7 @@ def _recipe_projection(
         resources=resources,
         local=self._recipe_local(
             revision.content_digest,
-            projected.models,
+            [reference.content_sha256 for reference in projected.models],
             snapshot=snapshot,
         ),
         updated_at=_utc(revision.created_at),

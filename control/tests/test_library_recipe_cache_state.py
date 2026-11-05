@@ -227,6 +227,10 @@ def test_a_recipe_prepares_while_its_main_model_downloads_then_is_cached(tmp_pat
     assert recipe.local.preparation.operation_id == download.id
     assert recipe.local.preparation.state == "running"
     assert recipe.local.preparation.completed_bytes == 40
+    # The detail view reads the same state from the same bound models.
+    detail = _projection(sessions).recipe_detail("vonk-forge/resolver-recipe")
+    assert detail.local.controller == "preparing"
+    assert detail.local.preparation == recipe.local.preparation
 
     with sessions.begin() as session:
         session.execute(
