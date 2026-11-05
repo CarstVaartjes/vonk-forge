@@ -60,8 +60,10 @@ def test_agent_reported_unconfirmed_job_is_lost_with_its_reason(
     assert observed.status_reason is not None
     assert _REASON in observed.status_reason and _CAUSE in observed.status_reason
 
-    for _ in range(40):  # past the observation budget and the recovery deadline
-        clock.advance(seconds=120)
+    # Past the observation budget and the recovery deadline, but fewer looks than
+    # the lost-order bound (which ends it failed).
+    for _ in range(10):
+        clock.advance(seconds=480)
         agent_jobs.reconcile_orders()
         assert claim_agent(agent_jobs, node_id, "serial-0") is None  # never re-run
     lost = service.get(submitted.id)
