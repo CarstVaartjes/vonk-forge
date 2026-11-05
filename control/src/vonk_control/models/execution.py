@@ -128,10 +128,35 @@ class InstallationNode(Base):
     installed_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
-    #: The highest memory any run of this installation was observed to use on
-    #: this rank: the run's own peak outlives its terminal history.
-    observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class MeasuredRolePeak(Base):
+    """The most memory a role of one recipe content was observed to use.
+
+    One row per (recipe content digest, role), raised in place by the one
+    writer (``observed_run_memory``) and read by admission as an indexed
+    lookup. It belongs to the content, not to a run or an installation, so
+    collecting either never forgets it.
+    """
+
+    __tablename__ = "measured_role_peaks"
+    __table_args__ = (
+        CheckConstraint(
+            _lower_hex("content_sha256", 64), name="ck_measured_role_peaks_digest"
+        ),
+        CheckConstraint(
+            "peak_bytes>=0 AND length(role) BETWEEN 1 AND 64",
+            name="ck_measured_role_peaks_values",
+        ),
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    role: Mapped[str] = mapped_column(String(64), primary_key=True)
+    #: Whole-run peak: free at admission minus the lowest available since.
+    peak_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
 

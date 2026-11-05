@@ -38,6 +38,11 @@ def adopt_legacy_rows(connection: Connection) -> None:
     adopted = adopt_legacy_operations(connection)
     if adopted:
         _LOGGER.info("Adopted %d cache operations onto the lifecycle schedule", adopted)
+    from ..measured_peak_adoption import adopt_measured_role_peaks
+
+    raised = adopt_measured_role_peaks(connection)
+    if raised:
+        _LOGGER.info("Raised %d measured role peaks from stored rows", raised)
 
 
 def initialize_database(

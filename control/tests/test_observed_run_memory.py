@@ -182,11 +182,11 @@ def test_only_a_sole_active_claim_owner_is_charged_with_the_use(
 
 
 def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
-    """Catches the observed peak leaving with the run's terminal history.
+    """Catches the observed peak leaving with the run's or installation's rows.
 
     Terminal history is collected a day after a run ends (its rank rows go
-    with it), so an over-declaration was forgotten and the next run's load
-    was bounded by the declaration again. The installation keeps the peak.
+    with it), and an uninstalled installation's with its catalog revision. The
+    peak belongs to the recipe content, so it survives both.
     """
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     service, observed = _serve(

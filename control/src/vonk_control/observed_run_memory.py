@@ -5,14 +5,14 @@ single run holds every memory claim on a shared-pool Spark, the memory that
 left the pool since that run's admission inventory is that run's: its observed
 peak is ``free at admission - lowest available since``. The value is kept on
 the run's rank (``RunNode.observed_memory_bytes``) and only ever rises. The
-installation's rank keeps the highest of them too
-(``InstallationNode.observed_memory_bytes``): a run's history is collected a
-day after it ends, its installation's evidence stays while it is installed.
+same write raises the content's row in ``measured_role_peaks``, keyed by
+(recipe content digest, role): the run's history is collected a day after it
+ends and its installation's with the catalog revision, the row is neither.
 
-Admission reads it back by content identity (recipe revision digest and role,
-on shared-pool Sparks). The peak spans the whole run, its load included, and
-``MemAvailable`` leaves out swap, so it bounds only the load phase (what swap
-must carry above the steady demand), never the steady demand itself.
+Admission reads that row by key (``observed_role_peaks``), on shared-pool
+Sparks. The peak spans the whole run, its load included, and ``MemAvailable``
+leaves out swap, so it bounds only the load phase (what swap must carry above
+the steady demand), never the steady demand itself.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.telemetry import HostResourceSample
@@ -28,7 +29,7 @@ from vonk_agent_protocol.telemetry import HostResourceSample
 from .memory_reservations import MEMORY_RESERVATION_KINDS
 from .models import (
     CatalogDocumentRevision,
-    InstallationNode,
+    MeasuredRolePeak,
     NodeInventoryResourceSnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -97,66 +98,56 @@ def record_observed_run_memory(
     peak = admitted.available_memory_bytes - lowest
     if peak > (rank.observed_memory_bytes or 0):
         rank.observed_memory_bytes = peak
-    installed = session.scalar(
-        select(InstallationNode).where(
-            InstallationNode.installation_id == run.installation_id,
-            InstallationNode.node_id == node_id,
+        _raise_measured_peak(session, run, rank.role, peak)
+
+
+def _raise_measured_peak(
+    session: Session, run: RecipeRun, role: str, peak: int
+) -> None:
+    """Raise the content's measured peak for ``role``; it never lowers."""
+    digest = session.scalar(
+        select(CatalogDocumentRevision.content_digest)
+        .join(
+            RecipeInstallation,
+            RecipeInstallation.recipe_revision_id == CatalogDocumentRevision.id,
+        )
+        .where(RecipeInstallation.id == run.installation_id)
+    )
+    if digest is None:
+        return
+    insert = (
+        postgresql.insert(MeasuredRolePeak)
+        if session.get_bind().dialect.name == "postgresql"
+        else sqlite.insert(MeasuredRolePeak)
+    ).values(
+        content_sha256=digest, role=role, peak_bytes=peak, measured_at=datetime.now(UTC)
+    )
+    session.execute(
+        insert.on_conflict_do_update(
+            index_elements=[MeasuredRolePeak.content_sha256, MeasuredRolePeak.role],
+            set_={
+                "peak_bytes": insert.excluded.peak_bytes,
+                "measured_at": insert.excluded.measured_at,
+            },
+            where=MeasuredRolePeak.peak_bytes < insert.excluded.peak_bytes,
         )
     )
-    if installed is not None and peak > (installed.observed_memory_bytes or 0):
-        installed.observed_memory_bytes = peak
 
 
 def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]:
     """The highest observed peak per role of runs of this exact recipe content.
 
-    Revision records are read only for their content digest: every revision
-    with the same content shares the evidence.
+    One indexed read by the content digest: it costs the same whatever runs
+    and installations the database holds.
     """
 
-    rows = [
-        *session.execute(
-            select(
-                RunNode.role,
-                RunNode.observed_memory_bytes,
-                RecipeInstallation.recipe_revision_id,
-            )
-            .join(RecipeRun, RecipeRun.id == RunNode.run_id)
-            .join(
-                RecipeInstallation, RecipeInstallation.id == RecipeRun.installation_id
-            )
-            .where(RunNode.observed_memory_bytes.is_not(None))
-        ).all(),
-        # What runs observed outlives their history on the installation.
-        *session.execute(
-            select(
-                InstallationNode.role,
-                InstallationNode.observed_memory_bytes,
-                RecipeInstallation.recipe_revision_id,
-            )
-            .join(
-                RecipeInstallation,
-                RecipeInstallation.id == InstallationNode.installation_id,
-            )
-            .where(InstallationNode.observed_memory_bytes.is_not(None))
-        ).all(),
-    ]
-    digest_of = dict(
+    return dict(
         session.execute(
-            select(
-                CatalogDocumentRevision.id, CatalogDocumentRevision.content_digest
-            ).where(CatalogDocumentRevision.id.in_({row[2] for row in rows}))
-        ).all()
+            select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(
+                MeasuredRolePeak.content_sha256 == content_digest
+            )
+        ).tuples()
     )
-    peaks: dict[str, int] = {}
-    for role, peak, record in rows:
-        if (
-            peak is not None
-            and digest_of.get(record) == content_digest
-            and peak > peaks.get(role, -1)
-        ):
-            peaks[role] = peak
-    return peaks
 
 
 def recent_best_available(
