@@ -617,15 +617,25 @@ class FleetEventRecorder:
     def _after_flush(self, session: Session, _flush_context: object) -> None:
         candidates = session.info.pop(_PENDING_KEY, ())
         for value in sorted(candidates, key=self._candidate_order):
-            try:
-                draft = self._render(value)
-                _stored_payload(draft)
-            except (TypeError, ValueError):
-                # Preserve source effects. A cursor hole forces an authoritative
-                # capture rather than presenting a fabricated derived event.
-                self._repository._allocate_cursor(session)
-                continue
-            self._repository.append_in_session(session, draft)
+            self.record_change(session, self._repository, value)
+
+    @classmethod
+    def record_change(
+        cls, session: Session, repository: FleetEventRepository, value: object
+    ) -> None:
+        """Stage the event of a tracked row's change, or a cursor hole.
+
+        An unrenderable or invalid payload preserves the source effect: a hole
+        in the cursor forces an authoritative capture rather than presenting a
+        fabricated derived event, and it never refuses the write.
+        """
+        try:
+            draft = cls._render(value)
+            _stored_payload(draft)
+        except (TypeError, ValueError):
+            repository._allocate_cursor(session)
+            return
+        repository.append_in_session(session, draft)
 
     @classmethod
     def _candidate_order(cls, value: object) -> tuple[int, str]:

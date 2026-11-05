@@ -117,7 +117,7 @@ def record_observed_run_memory(
     if raised is not None:
         set_committed_value(rank, "observed_memory_bytes", peak)
         # A Core UPDATE is invisible to the Fleet event recorder.
-        events.append_in_session(session, FleetEventRecorder._render(rank))
+        FleetEventRecorder.record_change(session, events, rank)
     # Compared with the table, not the rank: a run already serving repopulates
     # a missing row from its next qualifying sample, with no history read.
     _raise_measured_peak(session, run, rank.role, peak)
