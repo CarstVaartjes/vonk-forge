@@ -924,7 +924,7 @@ def not_among(column, words: Collection[str], dialect: str):
     """
 
     ordered = sorted(set(words))
-    ranked = collate(column, '"C"' if dialect == "postgresql" else "BINARY")
+    ranked = collate(column, "C" if dialect == "postgresql" else "BINARY")
     return or_(
         ranked < ordered[0],
         *(and_(ranked > low, ranked < high) for low, high in pairwise(ordered)),

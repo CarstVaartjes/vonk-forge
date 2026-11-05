@@ -39,3 +39,16 @@ def test_the_range_spelling_equals_not_in_for_the_whole_vocabulary(subject) -> N
     assert by_ranges == by_not_in
     assert set(unknown) <= by_ranges
     assert not set(ended) & by_ranges
+
+
+def test_postgres_compares_bytewise() -> None:
+    """Catches a database collation deciding where the ranges fall."""
+    from sqlalchemy.dialects import postgresql
+
+    words = table("words", column("state"))
+    sql = str(
+        select(words.c.state)
+        .where(not_among(words.c.state, ["b", "d"], "postgresql"))
+        .compile(dialect=postgresql.dialect())
+    )
+    assert sql.count('COLLATE "C"') == 4
