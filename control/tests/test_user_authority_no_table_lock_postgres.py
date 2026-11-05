@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -59,7 +60,19 @@ def test_the_bootstrap_still_waits_for_another_user_authority_writer(
     with sessions.begin() as holder:
         holder.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
         bootstrap = pool.submit(bootstrap_administrator, sessions, "pw-" + "x" * 20)
-        with pytest.raises(TimeoutError):
-            bootstrap.result(timeout=1)
+        # Prove the wait by behaviour: a backend is blocked on a lock while the
+        # holder still has it, and the bootstrap has not returned.
+        for _ in range(300):
+            if holder.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE wait_event_type = 'Lock' AND datname = current_database()"
+                )
+            ):
+                break
+            time.sleep(0.1)
+        else:
+            pytest.fail("the bootstrap never waited for the users lock")
+        assert not bootstrap.done()
     assert bootstrap.result(timeout=30).status == "created"
     pool.shutdown()
