@@ -93,10 +93,15 @@ def _profile_service(sessions, lifecycle):
 
 def _installed_profile(service, sessions, nodes):
     with sessions() as session:
+        # The profile names the seeded recipe, not the earlier one a test adds
+        # (a read with no order returns either).
         revision = session.scalar(
-            select(CatalogDocumentRevision).where(
-                CatalogDocumentRevision.kind == "recipe"
+            select(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.slug != "earlier-model",
             )
+            .order_by(CatalogDocumentRevision.id)
         )
         assert revision is not None
         selector = f"{revision.publisher}/{revision.slug}"
