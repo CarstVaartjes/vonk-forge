@@ -1,0 +1,20 @@
+name: Free runner disk
+description: >-
+  Delete the hosted runner's preinstalled toolchains that no job here uses
+  (.NET, Android SDK, GHC, CodeQL) before an image build, and report the free
+  disk before and after. A runner that fills its disk dies without a log, so
+  the margin is visible in every run and a low margin raises a warning.
+runs:
+  using: composite
+  steps:
+    - name: Free preinstalled toolchains and report the margin
+      shell: bash
+      run: |
+        set -euo pipefail
+        df -h /
+        sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+        df -h /
+        free_kib=$(df --output=avail -k / | tail -1)
+        if ((free_kib < 10 * 1024 * 1024)); then
+          echo "::warning title=Runner disk margin::$((free_kib / 1024)) MiB free before the image build; the runner dies when the disk fills"
+        fi
