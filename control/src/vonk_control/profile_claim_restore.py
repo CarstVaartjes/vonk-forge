@@ -125,7 +125,7 @@ def _fits(session: Session, node_id: str, kind: str) -> bool:
             observed_at=snapshot.observed_at,
         ),
         memory_pool=pool,
-        evidence_state="fresh",
+        evidence_state="unknown",
     )
     return all(_headroom(part) >= 0 for part in (capacity.components or (capacity,)))
 
