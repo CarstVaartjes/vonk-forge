@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -70,11 +69,15 @@ def test_a_check_violation_during_admission_is_a_typed_failure_at_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service, _sessions = cache
+    attempts: list[object] = []
+
+    def oversized(_progress):
+        attempts.append(_progress)
+        return {"too": "x" * 1_100_000}
+
     monkeypatch.setattr(
-        "vonk_control.model_cache.download_admission.progress_document",
-        lambda _progress: {"too": "x" * 1_100_000},
+        "vonk_control.model_cache.download_admission.progress_document", oversized
     )
-    started = time.monotonic()
     with pytest.raises(ConstraintDefect) as defect:
         _start(
             service,
@@ -83,8 +86,8 @@ def test_a_check_violation_during_admission_is_a_typed_failure_at_once(
         )
     assert defect.value.constraint == "ck_model_cache_operations_progress_size"
     assert "observation budget" not in str(defect.value)
-    # Deterministic: refused on the first attempt, not after the retry budget.
-    assert time.monotonic() - started < 2
+    # Deterministic: refused on the first attempt, never retried.
+    assert len(attempts) == 1
 
 
 def test_a_reference_observation_names_an_integrity_error() -> None:
