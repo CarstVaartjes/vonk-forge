@@ -345,16 +345,19 @@ def test_two_request_keys_for_one_model_set_share_one_download(cache, tmp_path):
 
 
 def test_a_consumer_of_a_cancelled_shared_download_gets_a_fresh_one(cache, tmp_path):
-    service, _sessions = cache
+    service, sessions = cache
     first, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     attached, _ = _queue(service, tmp_path, str(uuid.uuid4()))
     assert attached.id == first.id
     service.cancel_operation(
         first.id, actor="test", request_key=str(uuid.uuid4()), reason="owner left"
     )
-    fresh, _ = _queue(service, tmp_path, str(uuid.uuid4()))
-    assert fresh.id != first.id
-    assert fresh.state == "queued"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        first,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
+    )
 
 
 def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
