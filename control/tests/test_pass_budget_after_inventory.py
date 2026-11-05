@@ -40,9 +40,9 @@ def _catalog_revisions(
     old, _head = _refresh(world, "glm")
     candidates = CatalogRevisionCollector._candidates
 
-    def slow(session: Session, cutoff: datetime) -> object:
+    def slow(session: Session, cutoff: datetime, **kwargs) -> object:
         clock.advance(SWEEP_BUDGET_SECONDS + 1)
-        return candidates(session, cutoff)
+        return candidates(session, cutoff, **kwargs)
 
     monkeypatch.setattr(CatalogRevisionCollector, "_candidates", staticmethod(slow))
     world.collector().collect()
