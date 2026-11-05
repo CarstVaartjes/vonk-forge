@@ -3363,13 +3363,14 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 
 
+_CONNECTION_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "connection-examples.json").read_text()
+)
+
+
 @pytest.mark.parametrize(
     "case",
-    json.loads(
-        (
-            Path(__file__).parents[1] / "fixtures" / "connection-examples.json"
-        ).read_text()
-    )["cases"],
+    _CONNECTION_FIXTURE["cases"],
     ids=lambda case: case["alias"],
 )
 def test_connection_examples_render_the_text_the_web_renders(case, capsys) -> None:
@@ -3378,6 +3379,7 @@ def test_connection_examples_render_the_text_the_web_renders(case, capsys) -> No
     out = capsys.readouterr().out
     for name in ("setup", "curl", "python"):
         assert textwrap.indent(case[name], "  ") in out
+    assert _CONNECTION_FIXTURE["note"] in out
 
 
 def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:
