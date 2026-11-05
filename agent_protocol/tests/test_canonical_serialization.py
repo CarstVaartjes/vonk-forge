@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.host_helper import (
     HOST_HELPER_GRANT_DOMAIN,
     HostHelperGrantClaims,
+    HostRuntimeRequest,
     host_helper_grant_signing_bytes,
 )
 from vonk_agent_protocol.wire_model import OperationProgress, WireModel
@@ -111,6 +112,18 @@ def test_rust_and_python_canonicalize_actual_job_claim_and_build_identically() -
     assert probe("RecipeBuildRequest", canonical_message(build)) == canonical_payload(
         "recipe.build.v1", build
     )
+
+
+def test_rust_reads_every_run_inspect_target_the_python_contract_writes() -> None:
+    vectors = json.loads((VECTORS / "run-inspect-target-requests-v1.json").read_text())
+    for vector in vectors["valid"]:
+        request = HostRuntimeRequest.model_validate(vector["request"])
+        assert probe("HostRuntimeRequest", canonical_message(request)) == (
+            canonical_message(request)
+        ), vector["name"]
+    for vector in vectors["invalid"]:
+        with pytest.raises(subprocess.CalledProcessError):
+            probe("HostRuntimeRequest", canonical_message(vector["request"]))
 
 
 def test_progress_defaults_have_connected_canonical_parity() -> None:

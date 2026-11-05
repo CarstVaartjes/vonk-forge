@@ -45,8 +45,9 @@ use crate::{
 
 use vonk_agent_protocol::generated::{
     AgentFailureKind, AgentInstallResult, AgentOperation, ArtifactDistributionResult,
-    DistributionCode, FailureCode, HelperErrorCode, RecipeReconcileResult, RecipeStartResult,
-    RecipeStopResult, RecipeUninstallResult, RuntimePreflightFindingCode, WaitReason,
+    ContainerRunTarget, DistributionCode, FailureCode, HelperErrorCode, RecipeReconcileResult,
+    RecipeStartResult, RecipeStopResult, RecipeUninstallResult, RuntimePreflightFindingCode,
+    WaitReason,
 };
 
 use vonk_agent_protocol::generated::{FailureStage, ProgressPhase};

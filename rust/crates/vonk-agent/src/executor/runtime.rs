@@ -135,7 +135,7 @@ impl<R> RecipeExecutor<'_, R> {
     pub(super) async fn inspect_start_run(
         &self,
         claim: &AgentClaim,
-        arguments: Vec<String>,
+        target: ContainerRunTarget,
         run_generation: u64,
     ) -> Result<(), crate::host_runtime::HostRuntimeError> {
         self.report_phase(claim, ProgressPhase::Verifying).await;
@@ -145,7 +145,7 @@ impl<R> RecipeExecutor<'_, R> {
             request_root: &request_root,
             helper_socket: self.helper_socket,
         }
-        .inspect_run(claim, arguments, run_generation)
+        .inspect_run(claim, target, run_generation)
         .await
         .and_then(|outcome| {
             if outcome.stop_uncertain {

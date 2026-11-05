@@ -77,9 +77,15 @@ fn scan_overlap_and_expired_copy_release_custody_before_fresh_signed_install() {
     fs::write(malformed.join("retained"), b"unproven").unwrap();
     fs::create_dir_all(&roots.runtime_requests).unwrap();
     let observation = HostRuntimeRequest {
+        inspect_target: Some(RunInspectTarget::RunNameTarget(
+            vonk_agent_protocol::generated::RunNameTarget {
+                kind: vonk_agent_protocol::generated::RunNameTargetKind::RunName,
+                run_id: super::super::test_support::RUN_ID.parse().unwrap(),
+            },
+        )),
         action: HostRuntimeAction::RunInspect,
         fence: uuid::Uuid::new_v4(),
-        arguments: vec![super::super::test_support::RUN_ID.to_owned()],
+        arguments: Vec::new(),
         installation_id: None,
         reconciliation_identity: None,
         job_plan: None,

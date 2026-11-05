@@ -147,18 +147,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     }
                     "it was running".to_owned()
                 }
-                // A helper that cannot re-observe a job: it is stopped, as it
-                // was before re-observation existed, and ends with that.
-                Err(HostRuntimeError::HelperRejected {
-                    code: HelperErrorCode::OperationInvalid,
-                    ..
-                }) => {
-                    let stop = self
-                        .stop_job(job.claim, job.stop_plan, job.job_scope)
-                        .await
-                        .unwrap_or_else(|| "job stopped".to_owned());
-                    return ended(format!("the helper cannot re-observe jobs; {stop}"));
-                }
                 Err(error) => format!("its re-observation was unread: {}", error.cause()),
             };
             let now = Instant::now();

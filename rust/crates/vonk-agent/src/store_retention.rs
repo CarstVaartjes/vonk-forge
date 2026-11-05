@@ -327,7 +327,10 @@ pub fn sweep(
         untracked,
         disk,
         tick,
-        &|id| crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string()),
+        &|id| {
+            let id = uuid::Uuid::parse_str(id).map_err(|error| error.to_string())?;
+            crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string())
+        },
         &crate::host_runtime::remove_agent_store,
     )
 }

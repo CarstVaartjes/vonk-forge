@@ -311,11 +311,12 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // Unread: this attempt runs nothing, and the Controller
                 // issues the job again.
                 Err(error) => {
+                    // A helper that answers invalid-operation is of another
+                    // release (mid-upgrade): unread, like any lost answer.
                     if matches!(
                         &error,
                         crate::host_runtime::HostRuntimeError::HelperRejected {
-                            code: HelperErrorCode::OperationInvalid
-                                | HelperErrorCode::OperationInvalidArtifact,
+                            code: HelperErrorCode::OperationInvalidArtifact,
                             ..
                         }
                     ) {

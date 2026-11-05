@@ -170,7 +170,7 @@ impl<R> RecipeExecutor<'_, R> {
     /// for this Start's.
     pub(super) async fn loading_tail(
         &self,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         run_generation: u64,
     ) -> Result<Option<String>, crate::host_runtime::HostRuntimeError> {
         let request_root = self.runtime_root.join("runtime-requests");
@@ -179,7 +179,7 @@ impl<R> RecipeExecutor<'_, R> {
             request_root: &request_root,
             helper_socket: self.helper_socket,
         }
-        .inspect_start_run_report(arguments.to_vec(), run_generation)
+        .inspect_start_run_report(target.clone(), run_generation)
         .await?;
         Ok(report
             .process_logs

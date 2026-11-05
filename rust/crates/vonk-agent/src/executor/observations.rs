@@ -1,7 +1,16 @@
 //! Observations.
 
 use super::*;
-use vonk_agent_protocol::generated::HostHelperContainerLabels;
+use vonk_agent_protocol::RunInspectTarget;
+use vonk_agent_protocol::generated::{HostHelperContainerLabels, RunNameTarget, RunNameTargetKind};
+
+/// The inspection that asks for a run's container by name alone.
+fn run_name_target(run_id: &str) -> Result<RunInspectTarget, RecipeObservationError> {
+    Ok(RunInspectTarget::RunNameTarget(RunNameTarget {
+        kind: RunNameTargetKind::RunName,
+        run_id: uuid::Uuid::parse_str(run_id).map_err(|_| RecipeObservationError::SkippedRun)?,
+    }))
+}
 
 /// True the first time this process reports on `key`; keeps a permanent
 /// per-run condition from filling the journal every sweep.
@@ -317,7 +326,7 @@ impl<R> RecipeExecutor<'_, R> {
                 };
                 match boundary
                     .inspect_recipe_run_evidence_for_observation(
-                        vec![run_id.to_owned()],
+                        run_name_target(run_id)?,
                         false,
                         None,
                     )
@@ -359,7 +368,7 @@ impl<R> RecipeExecutor<'_, R> {
                 };
                 match boundary
                     .inspect_recipe_run_evidence_for_observation(
-                        vec![run_id.to_owned()],
+                        run_name_target(run_id)?,
                         false,
                         None,
                     )
@@ -482,7 +491,7 @@ impl<R> RecipeExecutor<'_, R> {
                 };
                 let inspection = boundary
                     .inspect_recipe_run_evidence_for_observation(
-                        plan.arguments.clone(),
+                        RunInspectTarget::ContainerRunTarget(plan.target.clone()),
                         false,
                         Some(plan.run_generation),
                     )
@@ -520,7 +529,7 @@ impl<R> RecipeExecutor<'_, R> {
                 let failure_diagnostics = match failure_diagnostics {
                     None if !process_running => boundary
                         .inspect_recipe_run_evidence_for_observation(
-                            plan.arguments,
+                            RunInspectTarget::ContainerRunTarget(plan.target),
                             true,
                             Some(plan.run_generation),
                         )
@@ -616,7 +625,7 @@ impl<R> RecipeExecutor<'_, R> {
     /// typed reason there is none.
     pub(super) async fn running_workload_evidence(
         &self,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         run_generation: u64,
         why: &str,
     ) -> super::failures::WorkloadEvidence {
@@ -627,7 +636,7 @@ impl<R> RecipeExecutor<'_, R> {
             helper_socket: self.helper_socket,
         };
         match boundary
-            .inspect_start_run_report(arguments.to_vec(), run_generation)
+            .inspect_start_run_report(target.clone(), run_generation)
             .await
         {
             Ok(report) => {

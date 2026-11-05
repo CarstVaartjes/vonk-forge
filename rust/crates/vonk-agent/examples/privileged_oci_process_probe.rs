@@ -93,6 +93,7 @@ fn main() {
         Uuid::parse_str("60000000-0000-4000-8000-000000000006").unwrap()
     };
     let request = HostRuntimeRequest {
+        inspect_target: None,
         action,
         fence,
         arguments: arguments.clone(),
@@ -200,15 +201,18 @@ fn observe() {
     let platform_digest = env_required("VONK_HELPER_PLATFORM_DIGEST");
     let (runtime_arguments, _) = production_start_arguments();
     let request = HostRuntimeRequest {
+        inspect_target: Some(vonk_agent_protocol::RunInspectTarget::ContainerRunTarget(
+            vonk_agent::executor::container_run_target(
+                &env_required("VONK_HELPER_ARCHIVE_SHA"),
+                &platform_digest,
+                &platform_digest,
+                &env_required("VONK_HELPER_IMAGE_REF"),
+                &runtime_arguments,
+            ),
+        )),
         action: HostRuntimeAction::RunInspect,
         fence: Uuid::new_v4(),
-        arguments: start_request_arguments(
-            &env_required("VONK_HELPER_ARCHIVE_SHA"),
-            &platform_digest,
-            &platform_digest,
-            &env_required("VONK_HELPER_IMAGE_REF"),
-            runtime_arguments,
-        ),
+        arguments: Vec::new(),
         job_plan: None,
         installation_id: None,
         reconciliation_identity: None,

@@ -127,24 +127,57 @@ def test_runtime_stop_request_binds_exact_stop_plan_and_has_no_argv() -> None:
         )
 
 
-def test_only_an_inspection_may_name_a_generation_without_a_plan() -> None:
-    document = {
-        "action": "run-inspect",
-        "fence": "40000000-0000-4000-8000-000000000004",
-        "arguments": ["run"],
-    }
+RUN_INSPECT_VECTORS = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "src/vonk_agent_protocol/vectors/run-inspect-target-requests-v1.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize(
+    "vector", RUN_INSPECT_VECTORS["valid"], ids=lambda vector: vector["name"]
+)
+def test_every_run_inspect_target_is_one_typed_variant(vector: dict) -> None:
+    """The Rust reader consumes these same vectors byte for byte."""
+    request = HostRuntimeRequest.model_validate(vector["request"])
+    assert canonical_message(request) == canonical_message(vector["request"])
+    assert request.arguments == []
+    assert request.inspect_target is not None
+    assert (
+        request.inspect_target.kind.value == vector["request"]["inspect_target"]["kind"]
+    )
+
+
+@pytest.mark.parametrize(
+    "vector", RUN_INSPECT_VECTORS["invalid"], ids=lambda vector: vector["name"]
+)
+def test_every_refused_run_inspect_shape_is_refused(vector: dict) -> None:
+    with pytest.raises(ValidationError):
+        HostRuntimeRequest.model_validate(vector["request"])
+
+
+def test_only_a_container_inspection_may_name_a_generation_without_a_plan() -> None:
+    by_name = RUN_INSPECT_VECTORS["valid"][1]["request"]
+    container = RUN_INSPECT_VECTORS["valid"][6]["request"]
+    assert "run_generation" not in json.loads(
+        canonical_message(HostRuntimeRequest.model_validate(container))
+    )
     for generation in (1, 2**63 - 1):
         request = HostRuntimeRequest.model_validate(
-            document | {"run_generation": generation}
+            container | {"run_generation": generation}
         )
         assert json.loads(canonical_message(request))["run_generation"] == generation
-    assert "run_generation" not in json.loads(
-        canonical_message(HostRuntimeRequest.model_validate(document))
-    )
     for refused in (
-        document | {"run_generation": 0},
-        document | {"run_generation": 2**63},
-        document | {"action": "image-inspect", "run_generation": 1},
+        container | {"run_generation": 0},
+        container | {"run_generation": 2**63},
+        by_name | {"run_generation": 1},
+        {
+            "action": "image-inspect",
+            "fence": by_name["fence"],
+            "arguments": ["image"],
+            "run_generation": 1,
+        },
     ):
         with pytest.raises(ValidationError):
             HostRuntimeRequest.model_validate(refused)

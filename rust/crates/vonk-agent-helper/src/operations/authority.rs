@@ -52,7 +52,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 .runtime_image_inspect(&request.arguments)
                 .map(|()| RuntimeRequestOutcome::default()),
             HostRuntimeAction::RunInspect => {
-                if !self.runtime_run_inspect(&request.arguments, true, request.run_generation)? {
+                let Some(RunInspectTarget::ContainerRunTarget(target)) =
+                    request.inspect_target.as_ref()
+                else {
+                    return Err(OperationError::InvalidOperation);
+                };
+                if !self.runtime_run_inspect(target, true, request.run_generation)? {
                     return Err(OperationError::InvalidArtifact);
                 }
                 Ok(RuntimeRequestOutcome::default())

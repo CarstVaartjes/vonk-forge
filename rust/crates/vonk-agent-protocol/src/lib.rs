@@ -38,7 +38,7 @@ pub use generated::{
     HostOperation as HostHelperOperation, HostRuntimeRequest,
     HostRuntimeRequestAction as HostRuntimeAction, RecipeReconciliationIdentity,
     RecipeRunInspectionRequest, RecipeRunObservationWire, RecipeRunObservationsWire,
-    SignedHostHelperGrant,
+    RunInspectTarget, SignedHostHelperGrant,
 };
 
 pub mod operation_progress;
@@ -87,12 +87,10 @@ use canonical::{
     valid_reconciliation_identity, valid_role, valid_scalar,
 };
 pub use host_runtime::{
-    CANCEL_STOP_REOBSERVATION_ARGUMENT, HOST_HELPER_AUTHORITY, HOST_RUNTIME_REQUEST_ENVELOPE_BYTES,
-    HOST_RUNTIME_REQUEST_ROOT, HostRuntimeRequestRule, INSTALLATION_REOBSERVATION_ARGUMENT,
-    JOB_REOBSERVATION_ARGUMENT, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
+    HOST_HELPER_AUTHORITY, HOST_RUNTIME_REQUEST_ENVELOPE_BYTES, HOST_RUNTIME_REQUEST_ROOT,
+    HostRuntimeRequestRule, MAX_COMPILED_EXECUTION_PLAN_CLAIM_BYTES,
     MAX_COMPILED_EXECUTION_PLAN_DOCUMENT_BYTES, MAX_DOCUMENT_BYTES, MAX_HELPER_FRAME_BYTES,
-    MAX_HOST_RUNTIME_REQUEST_BYTES, RUNTIME_REOBSERVATION_ARGUMENT, STOP_REOBSERVATION_ARGUMENT,
-    host_helper_grant_signing_bytes,
+    MAX_HOST_RUNTIME_REQUEST_BYTES, host_helper_grant_signing_bytes,
 };
 
 pub use recipe_requests::RecipeOperationRequest;

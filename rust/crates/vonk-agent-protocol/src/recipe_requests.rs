@@ -292,6 +292,7 @@ pub(super) mod recipe_start_tests {
     fn typed_runtime_start_and_exact_stop_require_matching_plan_and_generation() {
         let start = valid_start_plan();
         let request = HostRuntimeRequest {
+            inspect_target: None,
             action: HostRuntimeAction::Start,
             fence: Uuid::new_v4(),
             arguments: vec!["sha256:image".to_owned(), "run".to_owned()],
@@ -319,6 +320,7 @@ pub(super) mod recipe_start_tests {
 
         let stop = parsed_stop(stop_payload()).unwrap();
         let stop_request = HostRuntimeRequest {
+            inspect_target: None,
             action: HostRuntimeAction::Stop,
             fence: Uuid::new_v4(),
             arguments: Vec::new(),
@@ -345,35 +347,79 @@ pub(super) mod recipe_start_tests {
     }
 
     #[test]
-    fn only_an_inspection_may_name_a_generation_without_a_plan() {
-        let request = |action, generation| HostRuntimeRequest {
-            action,
-            fence: Uuid::new_v4(),
-            arguments: vec!["run".to_owned()],
-            job_plan: None,
-            installation_id: None,
-            reconciliation_identity: None,
-            run_generation: generation,
-            start_plan: None,
-            stop_plan: None,
+    fn only_a_container_inspection_may_name_a_generation_without_a_plan() {
+        use crate::generated::{
+            ContainerRunTarget, ContainerRunTargetKind, RunNameTarget, RunNameTargetKind,
         };
+        let container = || {
+            Some(crate::RunInspectTarget::ContainerRunTarget(
+                ContainerRunTarget {
+                    kind: ContainerRunTargetKind::ContainerRun,
+                    archive_sha256: "a".repeat(64),
+                    registry_index_digest: format!("sha256:{}", "b".repeat(64)),
+                    platform_manifest_digest: format!("sha256:{}", "b".repeat(64)),
+                    image_reference: "vonk/image:test".to_owned(),
+                    command: vec!["run".to_owned()],
+                },
+            ))
+        };
+        let request =
+            |action, target: Option<crate::RunInspectTarget>, generation| HostRuntimeRequest {
+                inspect_target: target.clone(),
+                action,
+                fence: Uuid::new_v4(),
+                arguments: if target.is_some() {
+                    Vec::new()
+                } else {
+                    vec!["run".to_owned()]
+                },
+                job_plan: None,
+                installation_id: None,
+                reconciliation_identity: None,
+                run_generation: generation,
+                start_plan: None,
+                stop_plan: None,
+            };
         for generation in [None, Some(1), Some(i64::MAX as u64)] {
             assert!(
-                request(HostRuntimeAction::RunInspect, generation)
+                request(HostRuntimeAction::RunInspect, container(), generation)
                     .validate()
                     .is_ok()
             );
         }
-        for (action, generation) in [
-            (HostRuntimeAction::RunInspect, 0),
-            (HostRuntimeAction::RunInspect, i64::MAX as u64 + 1),
-            (HostRuntimeAction::ImageInspect, 1),
+        let by_name = Some(crate::RunInspectTarget::RunNameTarget(RunNameTarget {
+            kind: RunNameTargetKind::RunName,
+            run_id: Uuid::new_v4(),
+        }));
+        assert!(
+            request(HostRuntimeAction::RunInspect, by_name.clone(), None)
+                .validate()
+                .is_ok()
+        );
+        for (action, target, generation) in [
+            (HostRuntimeAction::RunInspect, container(), 0),
+            (
+                HostRuntimeAction::RunInspect,
+                container(),
+                i64::MAX as u64 + 1,
+            ),
+            (HostRuntimeAction::RunInspect, by_name, 1),
+            (HostRuntimeAction::ImageInspect, None, 1),
         ] {
             assert_eq!(
-                request(action, Some(generation)).validate(),
+                request(action, target, Some(generation)).validate(),
                 Err(HostRuntimeRequestRule::PlanBinding)
             );
         }
+        // An inspection names its target; no other action carries one.
+        assert_eq!(
+            request(HostRuntimeAction::RunInspect, None, None).validate(),
+            Err(HostRuntimeRequestRule::ArgumentsPresence)
+        );
+        assert_eq!(
+            request(HostRuntimeAction::ImageInspect, container(), None).validate(),
+            Err(HostRuntimeRequestRule::ArgumentsPresence)
+        );
     }
 
     #[test]
@@ -386,6 +432,7 @@ pub(super) mod recipe_start_tests {
             panic!("expected canonical JobRun claim");
         };
         let request = HostRuntimeRequest {
+            inspect_target: None,
             action: HostRuntimeAction::Start,
             fence: claim.fence,
             arguments: vec!["sha256:image".to_owned(), "job".to_owned()],

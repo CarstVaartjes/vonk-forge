@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use vonk_agent_protocol::generated::{
-    CompiledExecutionPlan, ConfirmPackageActivationOperation,
+    CompiledExecutionPlan, ConfirmPackageActivationOperation, ContainerRunTarget,
     ExecuteContainerRuntimeRequestOperation, HostHelperContainerLabels, HostHelperProcessLogs,
     HostHelperResponseStatus, InstallVonkDebOperation, InstallationIntentFence,
     RecipeJobRunRequest, RecipeStartPayload, RecipeStopPayload,
@@ -39,7 +39,7 @@ use vonk_agent_protocol::generated::{
 
 use vonk_agent_protocol::{
     HostRuntimeAction, HostRuntimeRequest, PackageRollbackAuthority, RecipeReconciliationIdentity,
-    canonical_json,
+    RunInspectTarget, canonical_json,
     compiled_oci::{
         CompiledOciError, CompiledOciPaths, ExecInvocationLimits, measure_exec_invocation,
         start_arguments_for_paths,

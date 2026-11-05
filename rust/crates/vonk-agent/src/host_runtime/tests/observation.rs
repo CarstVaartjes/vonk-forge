@@ -219,15 +219,33 @@ async fn cancelled_observation_pages_keep_native_slots_and_leave_foreground_work
                 request_root: &requests,
                 helper_socket: &socket,
             };
-            let arguments = vec![Uuid::new_v4().to_string()];
+            let run_id = Uuid::new_v4();
             if background {
                 boundary
-                    .inspect_recipe_run_evidence_for_observation(arguments, false, None)
+                    .inspect_recipe_run_evidence_for_observation(
+                        vonk_agent_protocol::RunInspectTarget::RunNameTarget(
+                            vonk_agent_protocol::generated::RunNameTarget {
+                                kind: vonk_agent_protocol::generated::RunNameTargetKind::RunName,
+                                run_id,
+                            },
+                        ),
+                        false,
+                        None,
+                    )
                     .await
                     .map(|report| report.running)
             } else {
                 boundary
-                    .inspect_start_run_report(arguments, 1)
+                    .inspect_start_run_report(
+                        crate::executor::container_run_target(
+                            &"a".repeat(64),
+                            &format!("sha256:{}", "b".repeat(64)),
+                            &format!("sha256:{}", "b".repeat(64)),
+                            &format!("vonk-{run_id}"),
+                            &[],
+                        ),
+                        1,
+                    )
                     .await
                     .map(|report| report.running)
             }

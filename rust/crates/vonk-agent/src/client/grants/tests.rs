@@ -24,6 +24,7 @@ async fn host_runtime_grant_ttl_fits_inside_renewed_operation_lease() {
         deadline: DateTime::parse_from_rfc3339("2099-01-01T00:00:00+00:00").unwrap(),
     };
     let runtime_request = HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::ImagePull,
         fence: claim.fence,
         arguments: vec!["image-pull".to_owned()],

@@ -48,14 +48,14 @@ fn refused_authority(error: &HostRuntimeError) -> bool {
 impl<R: ProcessRunner> RecipeExecutor<'_, R> {
     /// Settle a Start that answered `error` by what this start's container is
     /// doing: `Ok` when it runs, so the start goes on as if Start answered,
-    /// otherwise the result that ends the start. `arguments` are the start's
-    /// exact inspection arguments, `run_generation` its generation.
+    /// otherwise the result that ends the start. `target` is the start's
+    /// exact inspection target, `run_generation` its generation.
     pub(super) async fn reobserve_failed_start(
         &self,
         claim: &AgentClaim,
         run_id: &str,
         run_generation: u64,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         error: &HostRuntimeError,
     ) -> Result<(), Box<ExecutionResult>> {
         let foreign_name = matches!(
@@ -71,7 +71,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 },
             ));
         }
-        self.reobserve_start(claim, run_id, run_generation, arguments, error)
+        self.reobserve_start(claim, run_id, run_generation, target, error)
             .await
     }
 
@@ -82,7 +82,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         run_id: &str,
         run_generation: u64,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         error: &HostRuntimeError,
     ) -> Result<(), Box<ExecutionResult>> {
         let request_root = self.runtime_root.join("runtime-requests");
@@ -93,7 +93,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         };
         let helper_said = |error: &HostRuntimeError, said: HelperErrorCode| matches!(error, HostRuntimeError::HelperRejected { code, .. } if *code == said);
         let ended = match inspection
-            .inspect_start_run_report(arguments.to_vec(), run_generation)
+            .inspect_start_run_report(target.clone(), run_generation)
             .await
         {
             Ok(report) if report.running => return Ok(()),
@@ -183,11 +183,11 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         claim: &AgentClaim,
         run_id: &str,
         run_generation: u64,
-        arguments: &[String],
+        target: &ContainerRunTarget,
         cancellation: &tokio::sync::watch::Receiver<bool>,
     ) -> Result<(), Box<ExecutionResult>> {
         let Err(error) = self
-            .inspect_start_run(claim, arguments.to_vec(), run_generation)
+            .inspect_start_run(claim, target.clone(), run_generation)
             .await
         else {
             return Ok(());
@@ -197,10 +197,10 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         if inspection_grant_refused(&error) {
             return self
-                .reobserve_start(claim, run_id, run_generation, arguments, &error)
+                .reobserve_start(claim, run_id, run_generation, target, &error)
                 .await;
         }
-        self.reobserve_failed_start(claim, run_id, run_generation, arguments, &error)
+        self.reobserve_failed_start(claim, run_id, run_generation, target, &error)
             .await
     }
 }

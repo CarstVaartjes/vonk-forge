@@ -519,6 +519,7 @@ fn preparation_observation_reads_exact_images_without_pull_tag_or_receipt_writes
     );
     let executor = OperationExecutor::new(roots.clone(), &[0; 32], runner.clone(), None).unwrap();
     let request = HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::ImagePull,
         fence: uuid::Uuid::new_v4(),
         arguments: pull_arguments(&manifest, &config),

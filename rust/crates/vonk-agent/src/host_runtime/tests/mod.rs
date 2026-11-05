@@ -56,6 +56,7 @@ fn start_plan() -> RecipeStartRequest {
 fn start_request() -> super::HostRuntimeRequest {
     let plan = start_plan();
     super::HostRuntimeRequest {
+        inspect_target: None,
         action: HostRuntimeAction::Start,
         fence: Uuid::new_v4(),
         arguments: vec!["sha256:image".to_owned(), "run".to_owned()],

@@ -424,6 +424,7 @@ pub(in crate::operations) fn runtime_request_identity(
     parts: RuntimeRequestTestParts,
 ) -> HostRuntimeRequest {
     HostRuntimeRequest {
+        inspect_target: None,
         action: parts.action,
         fence: *fence,
         arguments: parts.arguments,

@@ -183,12 +183,10 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
             listener.set_nonblocking(true).unwrap();
             let peer_root = root.to_owned();
             let operation = accepted.operation;
-            let stop_marker = match &accepted.payload {
-                AgentClaimPayload::RecipeStopPayload(stop) if stop.cancel_pending_start => {
-                    vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
-                }
-                _ => vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT,
-            };
+            let cancel_pending_start = matches!(
+                &accepted.payload,
+                AgentClaimPayload::RecipeStopPayload(stop) if stop.cancel_pending_start
+            );
             let stop = Arc::new(AtomicBool::new(false));
             let done = stop.clone();
             let peer = thread::spawn(move || {
@@ -225,11 +223,27 @@ async fn runtime_process_death_at_every_custody_seam_recovers_without_new_claims
                         )
                         .unwrap();
                     assert_eq!(request.action, HostRuntimeAction::RunInspect);
-                    assert_eq!(request.arguments.len(), 6);
+                    assert!(request.arguments.is_empty());
                     let effect = peer_root.join("effect").exists();
                     let unfenced_stop = operation == AgentOperation::RecipeStop && !effect;
-                    if operation == AgentOperation::RecipeStop {
-                        assert_eq!(request.arguments[0], stop_marker);
+                    match (
+                        &request.inspect_target,
+                        operation == AgentOperation::RecipeStop,
+                    ) {
+                        (
+                            Some(vonk_agent_protocol::RunInspectTarget::StopIdentityTarget(target)),
+                            true,
+                        ) => {
+                            assert_eq!(target.cancel_pending_start, cancel_pending_start);
+                        }
+                        (
+                            Some(
+                                vonk_agent_protocol::RunInspectTarget::RuntimeIdentityTarget(_)
+                                | vonk_agent_protocol::RunInspectTarget::JobIdentityTarget(_),
+                            ),
+                            false,
+                        ) => {}
+                        other => panic!("unexpected inspection target {other:?}"),
                     }
                     let absent = if operation == AgentOperation::RecipeStop {
                         effect

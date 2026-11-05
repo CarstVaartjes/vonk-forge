@@ -234,6 +234,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         }
         let arguments = runtime_arguments_for_plan(&plan, &plan.main);
         let runtime_guard_arguments = arguments.clone();
+        let runtime_guard_target = container_run_target_for_plan(&plan, &plan.main);
         let mut acl_transition = if collective_readiness || retained_existing {
             None
         } else {
@@ -257,11 +258,6 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         } else {
             HostRuntimeAction::Start
         };
-        let runtime_arguments = if collective_readiness || retained_existing {
-            runtime_guard_arguments.clone()
-        } else {
-            arguments
-        };
         // The load begins: what preparation read stays cached until dropped.
         let load = &*load.insert(
             crate::page_cache::LoadPhases::for_helper(self.helper_socket).begin(request.run_id),
@@ -269,11 +265,15 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         let mut runtime_result = run_until_cancelled(
             async {
                 if runtime_action == HostRuntimeAction::Start {
-                    self.launch_after_drop(load, claim, runtime_arguments, &request)
+                    self.launch_after_drop(load, claim, arguments, &request)
                         .await
                 } else {
-                    self.inspect_start_run(claim, runtime_arguments, request.run_generation)
-                        .await
+                    self.inspect_start_run(
+                        claim,
+                        runtime_guard_target.clone(),
+                        request.run_generation,
+                    )
+                    .await
                 }
             },
             &mut cancellation_observer,
@@ -355,7 +355,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                         claim,
                         &run_id,
                         request.run_generation,
-                        &runtime_guard_arguments,
+                        &runtime_guard_target,
                         &error,
                     )
                     .await
@@ -390,7 +390,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     claim,
                     &run_id,
                     request.run_generation,
-                    &runtime_guard_arguments,
+                    &runtime_guard_target,
                     &cancellation,
                 )
             };
@@ -416,7 +416,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 // Read before the stop removes the container.
                 let evidence = self
                     .running_workload_evidence(
-                        &runtime_guard_arguments,
+                        &runtime_guard_target,
                         request.run_generation,
                         "rank_stability_deadline=true",
                     )
@@ -452,7 +452,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             window,
             accepted,
             &stall_at,
-            || self.loading_tail(&runtime_guard_arguments, request.run_generation),
+            || self.loading_tail(&runtime_guard_target, request.run_generation),
             // The order's heartbeat carries this activity to the Controller on
             // its next renewal; that one post classifies and reports its own
             // failures, so no second, unobserved post exists.
@@ -498,7 +498,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             // Read before any stop removes the container: a workload
             // that never became ready leaves its own account of why.
             let evidence = self
-                .running_workload_evidence(&runtime_guard_arguments, request.run_generation, why)
+                .running_workload_evidence(&runtime_guard_target, request.run_generation, why)
                 .await;
             if !collective_readiness
                 && let Err(uncertain) = self.stop_start_run(claim, &run_id, false).await

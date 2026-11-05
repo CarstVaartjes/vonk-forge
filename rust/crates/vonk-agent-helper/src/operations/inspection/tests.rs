@@ -559,18 +559,19 @@ fn a_job_reobservation_answers_running_its_recorded_exit_or_proven_absence() {
     let inspect = |host: &Host, generation: &str| {
         let (_temp, executor) = host_executor(host);
         let request = HostRuntimeRequest {
+            inspect_target: Some(RunInspectTarget::JobIdentityTarget(
+                vonk_agent_protocol::generated::JobIdentityTarget {
+                    kind: vonk_agent_protocol::generated::JobIdentityTargetKind::JobIdentity,
+                    runtime_id: JOB.parse().unwrap(),
+                    run_id: RUN.parse().unwrap(),
+                    installation_id: INSTALLATION.parse().unwrap(),
+                    run_generation: generation.parse().unwrap(),
+                    plan_digest: PLAN_DIGEST.to_owned(),
+                },
+            )),
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
-            arguments: [
-                vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT,
-                JOB,
-                RUN,
-                INSTALLATION,
-                generation,
-                PLAN_DIGEST,
-            ]
-            .map(str::to_owned)
-            .to_vec(),
+            arguments: Vec::new(),
             job_plan: None,
             installation_id: None,
             reconciliation_identity: None,
@@ -619,10 +620,58 @@ fn a_job_reobservation_answers_running_its_recorded_exit_or_proven_absence() {
         inspect(&with("running", 0), "2"),
         Err(OperationError::CommandFailed { .. })
     ));
-    assert!(matches!(
-        inspect(&with("running", 0), "01"),
-        Err(OperationError::InvalidOperation)
-    ));
+    // A generation spelled "01" is unrepresentable: it is a typed integer now,
+    // and the vectors refuse a text generation at the contract.
+}
+
+/// The upgrade window from the helper's side: an agent of the previous
+/// release still writes argv-shaped inspections. The new helper answers each
+/// as an invalid operation (which the agent reads as unread, not as a verdict)
+/// and touches no container.
+#[test]
+fn an_old_argv_inspection_is_an_invalid_operation_and_touches_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    const RUN: &str = "a0000000-0000-4000-8000-00000000000a";
+    const JOB: &str = "a1000000-0000-4000-8000-0000000000a1";
+    let generation = "1";
+    let legacy: [Vec<&str>; 3] = [
+        vec![
+            "job-identity",
+            JOB,
+            RUN,
+            INSTALLATION,
+            generation,
+            PLAN_DIGEST,
+        ],
+        vec!["installation-in-use", INSTALLATION],
+        vec![RUN],
+    ];
+    for arguments in legacy {
+        let host = Host::with(&[Container {
+            exit: 0,
+            ..job(RUN, JOB, "running")
+        }]);
+        let (_temp, executor) = host_executor(&host);
+        let document = serde_json::json!({
+            "action": "run-inspect",
+            "fence": uuid::Uuid::new_v4(),
+            "arguments": arguments,
+        });
+        let body = serde_json::to_vec(&document).unwrap();
+        let digest = hex_sha256(&body);
+        fs::create_dir_all(&executor.roots.runtime_requests).unwrap();
+        let path = executor
+            .roots
+            .runtime_requests
+            .join(format!("{digest}.json"));
+        fs::write(&path, &body).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(matches!(
+            executor.inspect_recipe_run_with_logs(&digest, true),
+            Err(OperationError::InvalidOperation)
+        ));
+        assert!(host.present(JOB), "a refused inspection removes nothing");
+    }
 }
 
 #[test]
@@ -659,12 +708,15 @@ fn installation_ownership_uses_running_containers_and_mounts_not_metadata() {
         )
         .unwrap();
         let request = HostRuntimeRequest {
+            inspect_target: Some(RunInspectTarget::InstallationInUseTarget(
+                vonk_agent_protocol::generated::InstallationInUseTarget {
+                    kind: vonk_agent_protocol::generated::InstallationInUseTargetKind::InstallationInUse,
+                    installation_id: "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c".parse().unwrap(),
+                },
+            )),
             action: HostRuntimeAction::RunInspect,
             fence: uuid::Uuid::new_v4(),
-            arguments: vec![
-                vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT.to_owned(),
-                "ab69f1ba-1fa2-4283-bdf1-a6d2ed59549c".to_owned(),
-            ],
+            arguments: Vec::new(),
             installation_id: None,
             reconciliation_identity: None,
             job_plan: None,

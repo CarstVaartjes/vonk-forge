@@ -11,12 +11,16 @@ use chrono::{DateTime, FixedOffset, Utc};
 use thiserror::Error;
 use vonk_agent_protocol::generated::HostHelperResponse as HelperResponse;
 use vonk_agent_protocol::generated::{
-    HelperErrorCode, HostHelperResponseStatus, RuntimePreflightFindingCode,
+    ContainerRunTarget, HelperErrorCode, HostHelperResponseStatus, InstallationInUseTarget,
+    InstallationInUseTargetKind, JobIdentityTarget, JobIdentityTargetKind, RuntimeIdentityTarget,
+    RuntimeIdentityTargetKind, RuntimePreflightFindingCode, StopIdentityTarget,
+    StopIdentityTargetKind,
 };
 use vonk_agent_protocol::{
     AgentClaim, HostRuntimeAction, HostRuntimeRequest, HostRuntimeRequestRule, RecipeJobRunRequest,
     RecipeReconciliationIdentity, RecipeRunInspectionRequest, RecipeStartRequest,
-    RecipeStopRequest, canonical_generated_json, canonical_json, hex_sha256, parse_strict,
+    RecipeStopRequest, RunInspectTarget, canonical_generated_json, canonical_json, hex_sha256,
+    parse_strict,
 };
 
 use crate::client::{AgentHttpClient, ClientError};
@@ -233,6 +237,7 @@ fn runtime_request_for_fence(
         action,
         fence,
         arguments,
+        inspect_target: None,
         job_plan,
         installation_id,
         reconciliation_identity,
@@ -245,14 +250,14 @@ fn runtime_request_for_fence(
 /// Read-only ownership evidence for retention, even when a stored plan is invalid.
 /// The caller runs between claims. Unknown/refused evidence protects only this
 /// installation and is retried on the next bounded retention pass.
-pub(crate) fn installation_in_use(installation_id: &str) -> Result<bool, HostRuntimeError> {
+pub(crate) fn installation_in_use(installation_id: uuid::Uuid) -> Result<bool, HostRuntimeError> {
     let response = inspect_runtime(
         Path::new(vonk_agent_protocol::HOST_RUNTIME_REQUEST_ROOT),
         Path::new(HELPER_SOCKET),
-        vec![
-            vonk_agent_protocol::INSTALLATION_REOBSERVATION_ARGUMENT.to_owned(),
-            installation_id.to_owned(),
-        ],
+        RunInspectTarget::InstallationInUseTarget(InstallationInUseTarget {
+            kind: InstallationInUseTargetKind::InstallationInUse,
+            installation_id,
+        }),
         false,
         None,
     )?;
@@ -275,14 +280,15 @@ pub(crate) fn installation_in_use(installation_id: &str) -> Result<bool, HostRun
 fn inspect_runtime(
     request_root: &Path,
     helper_socket: &Path,
-    arguments: Vec<String>,
+    target: RunInspectTarget,
     include_logs: bool,
     run_generation: Option<u64>,
 ) -> Result<HelperResponse, HostRuntimeError> {
     let request = HostRuntimeRequest {
         action: HostRuntimeAction::RunInspect,
         fence: uuid::Uuid::new_v4(),
-        arguments,
+        arguments: Vec::new(),
+        inspect_target: Some(target),
         job_plan: None,
         installation_id: None,
         reconciliation_identity: None,
@@ -357,6 +363,8 @@ struct Binding {
     lifecycle_plan: Option<HostRuntimePlan>,
     /// The generation a granted inspection's container must carry.
     run_generation: Option<u64>,
+    /// What a granted inspection asks about.
+    inspect_target: Option<RunInspectTarget>,
     /// Progress the helper's work makes outside the helper exchange; the
     /// wait for its answer restarts on every step of it.
     progress: Option<Inactivity>,
@@ -377,7 +385,7 @@ impl HostRuntimeBoundary<'_> {
     /// label carries it, so another generation's is never this run's.
     pub async fn inspect_recipe_run_evidence_for_observation(
         &self,
-        arguments: Vec<String>,
+        target: RunInspectTarget,
         include_logs: bool,
         run_generation: Option<u64>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
@@ -389,7 +397,7 @@ impl HostRuntimeBoundary<'_> {
                 process_logs: None,
             })?;
         self.inspect_recipe_run_report_with_permit(
-            arguments,
+            target,
             include_logs,
             Some(permit),
             run_generation,
@@ -403,22 +411,27 @@ impl HostRuntimeBoundary<'_> {
     /// generation.
     pub async fn inspect_start_run_report(
         &self,
-        arguments: Vec<String>,
+        target: ContainerRunTarget,
         run_generation: u64,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
-        self.inspect_recipe_run_report_with_permit(arguments, true, None, Some(run_generation))
-            .await
+        self.inspect_recipe_run_report_with_permit(
+            RunInspectTarget::ContainerRunTarget(target),
+            true,
+            None,
+            Some(run_generation),
+        )
+        .await
     }
 
     async fn inspect_recipe_run_report_with_permit(
         &self,
-        arguments: Vec<String>,
+        target: RunInspectTarget,
         include_logs: bool,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
         run_generation: Option<u64>,
     ) -> Result<RunInspectionReport, HostRuntimeError> {
         let response = self
-            .inspection_response(arguments, include_logs, permit, run_generation)
+            .inspection_response(target, include_logs, permit, run_generation)
             .await?;
         if response.exit_code.is_some() {
             return Err(HostRuntimeError::HelperProtocol(
@@ -469,15 +482,15 @@ impl HostRuntimeBoundary<'_> {
         &self,
         job: &RecipeJobRunRequest,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
-        let arguments = vec![
-            vonk_agent_protocol::JOB_REOBSERVATION_ARGUMENT.to_owned(),
-            job.job_id.to_string(),
-            job.run_id.to_string(),
-            job.installation_id.to_string(),
-            job.run_generation.to_string(),
-            job.plan_digest.clone(),
-        ];
-        self.reobserve_identity(arguments).await
+        self.reobserve_identity(RunInspectTarget::JobIdentityTarget(JobIdentityTarget {
+            kind: JobIdentityTargetKind::JobIdentity,
+            runtime_id: job.job_id,
+            run_id: job.run_id,
+            installation_id: job.installation_id,
+            run_generation: job.run_generation,
+            plan_digest: job.plan_digest.clone(),
+        }))
+        .await
     }
 
     /// Inspect one whole Start identity without consulting a job exit ledger.
@@ -485,8 +498,17 @@ impl HostRuntimeBoundary<'_> {
         &self,
         stop: &RecipeStopRequest,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
-        self.reobserve_runtime_identity(stop, vonk_agent_protocol::RUNTIME_REOBSERVATION_ARGUMENT)
-            .await
+        self.reobserve_identity(RunInspectTarget::RuntimeIdentityTarget(
+            RuntimeIdentityTarget {
+                kind: RuntimeIdentityTargetKind::RuntimeIdentity,
+                runtime_id: stop.target_runtime_id,
+                run_id: stop.run_id,
+                installation_id: stop.installation_id,
+                run_generation: stop.run_generation,
+                plan_digest: stop.plan_digest.clone(),
+            },
+        ))
+        .await
     }
 
     /// Stop also observes its durable generation fence. A cancel-Stop must
@@ -495,35 +517,23 @@ impl HostRuntimeBoundary<'_> {
         &self,
         stop: &RecipeStopRequest,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
-        let marker = if stop.cancel_pending_start {
-            vonk_agent_protocol::CANCEL_STOP_REOBSERVATION_ARGUMENT
-        } else {
-            vonk_agent_protocol::STOP_REOBSERVATION_ARGUMENT
-        };
-        self.reobserve_runtime_identity(stop, marker).await
-    }
-
-    async fn reobserve_runtime_identity(
-        &self,
-        stop: &RecipeStopRequest,
-        marker: &str,
-    ) -> Result<RuntimeReobservation, HostRuntimeError> {
-        self.reobserve_identity(vec![
-            marker.to_owned(),
-            stop.target_runtime_id.to_string(),
-            stop.run_id.to_string(),
-            stop.installation_id.to_string(),
-            stop.run_generation.to_string(),
-            stop.plan_digest.clone(),
-        ])
+        self.reobserve_identity(RunInspectTarget::StopIdentityTarget(StopIdentityTarget {
+            kind: StopIdentityTargetKind::StopIdentity,
+            runtime_id: stop.target_runtime_id,
+            run_id: stop.run_id,
+            installation_id: stop.installation_id,
+            run_generation: stop.run_generation,
+            plan_digest: stop.plan_digest.clone(),
+            cancel_pending_start: stop.cancel_pending_start,
+        }))
         .await
     }
 
     async fn reobserve_identity(
         &self,
-        arguments: Vec<String>,
+        target: RunInspectTarget,
     ) -> Result<RuntimeReobservation, HostRuntimeError> {
-        let response = match self.inspection_response(arguments, true, None, None).await {
+        let response = match self.inspection_response(target, true, None, None).await {
             Err(HostRuntimeError::HelperRejected {
                 code: HelperErrorCode::RuntimeRunMissing,
                 ..
@@ -564,7 +574,7 @@ impl HostRuntimeBoundary<'_> {
     /// the bound, executed reply. The caller reads what the reply says.
     async fn inspection_response(
         &self,
-        arguments: Vec<String>,
+        target: RunInspectTarget,
         include_logs: bool,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
         run_generation: Option<u64>,
@@ -578,7 +588,7 @@ impl HostRuntimeBoundary<'_> {
             inspect_runtime(
                 &request_root,
                 &helper_socket,
-                arguments,
+                target,
                 include_logs,
                 run_generation,
             )
@@ -676,17 +686,18 @@ impl HostRuntimeBoundary<'_> {
     pub async fn inspect_run(
         &self,
         claim: &AgentClaim,
-        arguments: Vec<String>,
+        target: ContainerRunTarget,
         run_generation: u64,
     ) -> Result<HostRuntimeOutcome, HostRuntimeError> {
         let binding = Binding {
             run_generation: Some(run_generation),
+            inspect_target: Some(RunInspectTarget::ContainerRunTarget(target)),
             ..Binding::default()
         };
         self.execute_bound(
             Authority::Attempt(claim),
             HostRuntimeAction::RunInspect,
-            arguments,
+            Vec::new(),
             binding,
         )
         .await
@@ -777,6 +788,7 @@ impl HostRuntimeBoundary<'_> {
             reconciliation_identity,
             lifecycle_plan,
             run_generation,
+            inspect_target,
             progress,
         } = binding;
         // How long the helper may stay silent before its answer is presumed
@@ -822,6 +834,7 @@ impl HostRuntimeBoundary<'_> {
         if run_generation.is_some() {
             request.run_generation = run_generation;
         }
+        request.inspect_target = inspect_target;
         request
             .validate()
             .map_err(HostRuntimeError::request_refusal)?;
