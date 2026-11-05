@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import shlex
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -623,11 +622,11 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
         )
         assert human.returncode == 0, human.stdout + human.stderr
         assert (
-            "  export OPENAI_BASE_URL=" + shlex.quote(endpoint.api_base) in human.stdout
+            "export OPENAI_BASE_URL='" + endpoint.api_base.rstrip("/") + "'"
+            in human.stdout
         )
-        assert f"  model: {loaded_assignment.alias}" in human.stdout
+        assert f'model="{loaded_assignment.alias}"' in human.stdout
         assert "vonkctl key create" in human.stdout
-        assert "Authorization" not in human.stdout
         assert token not in human.stdout + human.stderr
 
         routes.withdraw_run(run_id)

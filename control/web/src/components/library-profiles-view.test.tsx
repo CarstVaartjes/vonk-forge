@@ -281,7 +281,15 @@ test("a loaded profile names the inference gateway and alias as its client endpo
   const endpoint = await screen.findByRole("region", { name: "Qwen Code client endpoint" });
   expect(within(endpoint).getByText("https://vonk-forge.example.ts.net/v1")).toBeVisible();
   expect(within(endpoint).getByText("qwen-code")).toBeVisible();
-  expect(within(endpoint).getByText("Spark backend (diagnostic)")).toBeVisible();
+  const diagnostic = within(endpoint).getByText("Spark backend (diagnostic)").closest("details");
+  expect(diagnostic).not.toHaveAttribute("open");
+  expect(within(endpoint).getByLabelText("setup example").textContent).toContain(
+    "export OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'",
+  );
+  expect(within(endpoint).getByLabelText("Python example").textContent).toContain(
+    'model="qwen-code"',
+  );
+  expect(within(endpoint).getByRole("button", { name: "Copy curl example" })).toBeVisible();
   expect(profileEndpoints).toHaveBeenCalledWith(2, expect.any(AbortSignal));
 });
 

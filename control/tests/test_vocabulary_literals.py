@@ -30,6 +30,13 @@ def test_rust_path_components_are_not_contract_states() -> None:
     ) == [2]
 
 
+def test_model_beside_messages_is_openai_s_request_field_not_a_contract_word() -> None:
+    words = frozenset({"model"})
+    request = 'body = {"model": alias, "messages": []}\n'
+    assert scan.scan_source(request, path=REL, words=words) == []
+    assert scan.scan_source('kind = "model"\n', path=REL, words=words) == [1]
+
+
 def test_a_docker_subcommand_is_not_a_contract_word() -> None:
     source = (
         'let a = ["container".to_owned(), "inspect".to_owned()];\n'

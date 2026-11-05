@@ -829,6 +829,23 @@ def _structural_field_keys(tree: ast.Module) -> Iterator[ast.Constant]:
             yield key
 
 
+def _openai_request_keys(tree: ast.Module) -> Iterator[ast.Constant]:
+    """``model`` in a chat-completions request body is OpenAI's field name.
+
+    The dict is recognised by its ``messages`` key beside it, so a stand-alone
+    ``"model"`` literal stays a contract word.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            keys = [
+                key
+                for key in node.keys
+                if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            ]
+            if any(key.value == "messages" for key in keys):
+                yield from (key for key in keys if key.value == "model")
+
+
 DOCKER_HELPER_SCOPE = "rust/crates/vonk-agent-helper/"
 DOCKER_CONTAINER_SUBCOMMANDS = [
     "inspect",
@@ -918,6 +935,7 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
         and isinstance(node.body[0].value, ast.Constant)
     }
     excluded.update(id(key) for key in _structural_field_keys(tree))
+    excluded.update(id(key) for key in _openai_request_keys(tree))
     if owner:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and any(
