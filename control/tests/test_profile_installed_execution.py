@@ -1196,6 +1196,7 @@ def _another_recipe(sessions, installation_id: str) -> None:
         session.flush()
         installation.recipe_revision_id = copy.id
         installation.model_content_sha256 = "e" * 64
+        installation.model_artifact_set_sha256 = "e" * 64
         plan = parse_stored_installation_plan(installation.plan)
         installation.image_digest = "sha256:" + "e" * 64
         plan.image_digest = installation.image_digest

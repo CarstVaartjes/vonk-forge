@@ -20,12 +20,10 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import InstallationState
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
 from .content_identity import catalog_selector_membership
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .models import (
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileRecipe,
     RecipeInstallation,
@@ -103,30 +101,6 @@ def profiles_naming(
     for owner, publisher, slug in session.execute(statement):
         found.setdefault(owner, set()).add((publisher, slug))
     return {owner: frozenset(names) for owner, names in found.items()}
-
-
-def recipes_without_revision(session: Session) -> frozenset[tuple[str, str]]:
-    """The saved-profile recipes the catalog has no revision of at all.
-
-    A profile naming one cannot be resolved, so it protects what it might use:
-    the reader treats these as bound to every model.
-    """
-    return frozenset(
-        (publisher, slug)
-        for publisher, slug in session.execute(
-            select(FleetProfileRecipe.publisher, FleetProfileRecipe.slug)
-            .where(
-                ~select(CatalogDocumentRevision.id)
-                .where(
-                    CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
-                    CatalogDocumentRevision.publisher == FleetProfileRecipe.publisher,
-                    CatalogDocumentRevision.slug == FleetProfileRecipe.slug,
-                )
-                .exists()
-            )
-            .distinct()
-        )
-    )
 
 
 def fill_reference_facts(connection: Connection) -> int:

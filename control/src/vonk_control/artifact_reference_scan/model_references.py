@@ -16,9 +16,9 @@ from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import recipe_model_digests, recipes_bound_to
+from ..content_identity import recipe_model_digests
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest, ModelCacheSetState
+from ..model_cache_contract import ModelCacheSetState
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -29,8 +29,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
-from ..reference_facts import profiles_naming, recipes_without_revision
-from ..stored_json import read_row_column
+from ..reference_facts import profiles_naming
 from .intents import (
     _profile_plan,
     _run_switch_kinds,
@@ -83,14 +82,11 @@ def model_set_reference_findings(
     # resolved, or whose resolved set is not cached yet (a refresh in flight),
     # holds the selected sets of its models' lineage until the new set is cached.
     #
-    # Only a recipe bound to a catalog model these sets serve can resolve to
-    # one of them, so only the saved profiles naming such a recipe are read.
-    served = _served_contents(session, sets.values())
-    # A saved recipe the catalog has no revision of cannot be resolved: its
-    # profile holds every selected set, as before.
-    named = profiles_naming(
-        session, recipes_bound_to(session, served) | recipes_without_revision(session)
-    )
+    # The saved profiles' recipes come from the projection (no assignments are
+    # parsed). Each is resolved as a download resolves it: a twin model with
+    # identical files resolves to the same set, and a recipe with no revision
+    # at all holds every selected set.
+    named = profiles_naming(session)
     resolved = _selectors_revisions(
         session,
         {
@@ -324,19 +320,3 @@ def model_set_reference_reasons(
     """Project typed model-set findings into existing presentation reasons."""
 
     return _reason_projection(model_set_reference_findings(session, set_digests))
-
-
-def _served_contents(session: Session, sets: Iterable[ModelCacheSet]) -> frozenset[str]:
-    """Every catalog model content these sets serve, with the lineage of each."""
-
-    from ..model_cache.lineage import lineage_contents, set_bindings
-
-    served: set[str] = set()
-    for row in sets:
-        manifest = read_row_column(row, "manifest")
-        verified = (
-            manifest.verified_models if isinstance(manifest, CacheManifest) else ()
-        )
-        for content in set_bindings(row.model_content_sha256, verified):
-            served |= lineage_contents(session, content)
-    return frozenset(served)
