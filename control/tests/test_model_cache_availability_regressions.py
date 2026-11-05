@@ -421,12 +421,7 @@ def test_hf_rate_limit_cooldown_survives_restart_but_local_work_progresses(
         "https://huggingface.co/acme/model/resolve/" + "a" * 40 + "/weights-hf"
     )
     first = _start(service, [hf], "00000000-0000-4000-8000-000000000307")
-    service.tick()
-    for _ in range(100):
-        service.tick()
-        if service.get_operation(first.id).state == "queued":
-            break
-        time.sleep(0.002)
+    _drain(service, first.id, return_on_wait=True)
     limited = service.get_operation(first.id)
     assert limited.state == "queued"
     assert limited.failure is not None

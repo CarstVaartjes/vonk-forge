@@ -1953,6 +1953,97 @@ def test_background_owners_may_not_add_request_retry_calls():
     )
 
 
+TICK_POLL_PATH = "control/tests/test_model_cache_example.py"
+TICK_POLL_SETUP = "service = ModelCacheService(sessions, root)\n"
+# The pre-fix resume-access receipt test (#2076).
+FIXED_TICKS_THEN_OUTCOME = """\
+for _ in range(4):
+    service.tick()
+    now[0] += timedelta(seconds=10)
+assert service.get_operation(older.id).state in {
+    LifecycleState.QUEUED,
+    LifecycleState.BACKOFF,
+}
+failure = service.get_operation(newer.id).failure
+assert failure is not None
+"""
+# A poll capped by a count and a sleep (pool liveness, availability production).
+COUNTED_POLL = """\
+for _ in range(3):
+    service.tick()
+    if service.get_operation(small.id).state == LifecycleState.SUCCEEDED:
+        break
+    time.sleep(0.05)
+assert service.get_operation(small.id).state == LifecycleState.SUCCEEDED
+"""
+# Nothing may happen before the retry is due: the claim decides that
+# synchronously (availability regressions, access recovery postgres).
+TICKS_BEFORE_DUE = """\
+for _ in range(3):
+    service.tick()
+assert len(requests) == attempts
+"""
+# Ticks before the next attempt consume none (pool liveness).
+TICKS_KEEP_ATTEMPT = """\
+for _ in range(5):
+    service.tick()
+assert service.get_operation(operation.id).attempt == waited.attempt
+"""
+# A replanned row waits QUEUED for a slot: no worker ran (pool liveness).
+TICKS_KEEP_QUEUED = """\
+for _ in range(3):
+    service.tick()
+assert service.get_operation(again.id).state == LifecycleState.QUEUED
+assert again.id not in service._background_operations
+"""
+# A fixed number of cycles around a deadline-bounded wait.
+CYCLES_OF_BOUNDED_WAITS = """\
+for cycle in range(5):
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        service.tick()
+        if service.get_operation(waiting.id).failure:
+            break
+        time.sleep(0.01)
+    assert service.get_operation(waiting.id).failure is not None
+"""
+# A synchronous service's ticks, in a module that also builds the cache.
+SYNCHRONOUS_TICKS = """\
+for _ in range(3):
+    switches.tick()
+assert switches.get(operation_id).state == LifecycleState.SUCCEEDED
+"""
+
+
+def _tick_poll_hits(body: str, *, setup: str = TICK_POLL_SETUP) -> list[str]:
+    source = setup + body
+    lines = set(range(1, len(source.splitlines()) + 1))
+    return check_source(TICK_POLL_PATH, source, lines, modes=("tick-polls",))
+
+
+@pytest.mark.parametrize("body", [FIXED_TICKS_THEN_OUTCOME, COUNTED_POLL])
+def test_fixed_tick_counts_cannot_wait_for_a_threaded_cache_outcome(body):
+    assert _tick_poll_hits(body)
+    # Only an added loop is reported, and only in a module that builds the cache.
+    source = TICK_POLL_SETUP + body
+    assert not check_source(TICK_POLL_PATH, source, {1}, modes=("tick-polls",))
+    assert not _tick_poll_hits(body, setup="service = RunSwitchService(sessions)\n")
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        TICKS_BEFORE_DUE,
+        TICKS_KEEP_ATTEMPT,
+        TICKS_KEEP_QUEUED,
+        CYCLES_OF_BOUNDED_WAITS,
+        SYNCHRONOUS_TICKS,
+    ],
+)
+def test_deterministic_tick_loops_pass(body):
+    assert not _tick_poll_hits(body)
+
+
 LOCKED_READ = """\
 def claim(cache, spec):
     with cache._session(write=True) as session:
