@@ -20,7 +20,13 @@ from collections.abc import Mapping, Sequence
 
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, UnknownOutcomeError, WaitReason
+from vonk_agent_protocol import (
+    Disposition,
+    InvalidRequestError,
+    InvalidRequestReason,
+    UnknownOutcomeError,
+    WaitReason,
+)
 
 from .models import AgentNode
 
@@ -30,8 +36,18 @@ from .models import AgentNode
 ALLOCATION_ATTEMPTS = 16
 
 
+class WorkloadIntentTargetGone(InvalidRequestError, RuntimeError):
+    """A target Spark does not exist or is revoked: revocation never clears.
+
+    A definite refusal of the caller's request (CONFLICT), never a wait.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason=InvalidRequestReason.CONFLICT)
+
+
 class WorkloadIntentUnavailable(UnknownOutcomeError, RuntimeError):
-    """A target Spark vanished, was revoked, or kept changing owner."""
+    """The Sparks kept changing owner through every attempt: a typed wait."""
 
     disposition = Disposition.WAIT
 
@@ -40,14 +56,23 @@ class WorkloadIntentUnavailable(UnknownOutcomeError, RuntimeError):
 
 
 def _ordinals(session: Session, node_ids: Sequence[str]) -> dict[str, int]:
-    """The ordinal of every live target Spark; a revoked one is left out."""
+    """The ordinal of every target Spark; raises when one is missing or revoked."""
 
     rows = session.execute(
-        select(AgentNode.node_id, AgentNode.workload_intent_ordinal).where(
-            AgentNode.node_id.in_(node_ids), AgentNode.revoked_at.is_(None)
-        )
+        select(
+            AgentNode.node_id,
+            AgentNode.workload_intent_ordinal,
+            AgentNode.revoked_at,
+        ).where(AgentNode.node_id.in_(node_ids))
     )
-    return {node_id: ordinal for node_id, ordinal in rows}
+    found = {node_id: (ordinal, revoked) for node_id, ordinal, revoked in rows}
+    if len(found) != len(set(node_ids)) or any(
+        revoked is not None for _ordinal, revoked in found.values()
+    ):
+        raise WorkloadIntentTargetGone(
+            "a workload intent target disappeared or was revoked"
+        )
+    return {node_id: ordinal for node_id, (ordinal, _revoked) in found.items()}
 
 
 def take_workload_intent(
@@ -86,10 +111,6 @@ def allocate_workload_intent(session: Session, node_ids: Sequence[str]) -> int:
         return 1
     for _attempt in range(ALLOCATION_ATTEMPTS):
         seen = _ordinals(session, wanted)
-        if len(seen) != len(wanted):
-            raise WorkloadIntentUnavailable(
-                "a workload intent target disappeared or was revoked"
-            )
         ordinal, taken = take_workload_intent(session, seen)
         if len(taken) == len(wanted):
             return ordinal

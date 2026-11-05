@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import Disposition, WaitReason
+from vonk_agent_protocol import Disposition, InvalidRequestReason, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.failure_classification import disposition, wait_reason
 from vonk_control.models import AgentNode, Base
@@ -23,6 +23,7 @@ from vonk_control.recipe_operations.intent import (
     _shared_workload_intent,
 )
 from vonk_control.workload_intent import (
+    WorkloadIntentTargetGone,
     WorkloadIntentUnavailable,
     allocate_workload_intent,
     raise_workload_intent,
@@ -147,12 +148,15 @@ def test_a_workload_intent_that_cannot_be_numbered_is_a_typed_wait():
     assert wait_reason(error) is WaitReason.SCOPE_CHANGED
 
 
-def test_a_revoked_spark_is_not_numbered(sessions):
+def test_a_revoked_spark_is_a_definite_refusal_not_a_wait(sessions):
     with sessions.begin() as session:
         session.get(AgentNode, NODES[1]).revoked_at = datetime(2026, 11, 5, tzinfo=UTC)
     with sessions.begin() as session:
-        with pytest.raises(WorkloadIntentUnavailable):
+        with pytest.raises(WorkloadIntentTargetGone) as refused:
             allocate_workload_intent(session, NODES)
+        error = refused.value
+        assert disposition(error) is not Disposition.WAIT
+        assert error.typed_reason is InvalidRequestReason.CONFLICT
         _, taken = take_workload_intent(session, {node: 3 for node in NODES})
         assert taken == (NODES[0],)
 

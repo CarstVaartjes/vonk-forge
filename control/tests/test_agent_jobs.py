@@ -23,6 +23,8 @@ from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
     FailureCode,
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     OutcomeKind,
     RecipeOperationRequest,
@@ -379,11 +381,12 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(
 def test_an_order_numbered_from_a_stale_read_is_refused_and_a_fresh_intent_admitted(
     service,
 ) -> None:
-    """A plain read at N loses to an intent N+1 that commits meanwhile.
+    """The enqueue check: a plain read at N loses to an intent N+1 that commits.
 
     The numbering is a conditional UPDATE, so the stale writer changes nothing; the
-    order it would have issued at N is refused at enqueue; a fresh read and
-    allocation is admitted and claimable.
+    order it would have issued at N is refused at enqueue with the typed
+    SUPERSEDED refusal (the claim predicate, not tested here, is the second
+    fence); a fresh read and allocation is admitted and claimable.
     """
 
     jobs, sessions, clock = service
@@ -396,7 +399,7 @@ def test_an_order_numbered_from_a_stale_read_is_refused_and_a_fresh_intent_admit
     with sessions.begin() as session:
         _, taken = take_workload_intent(session, {NODE_A: seen})
     assert taken == ()
-    with pytest.raises(Exception):  # noqa: B017 -- the stale order's rejection is the observable
+    with pytest.raises(InvalidRequestError) as refused:
         jobs.enqueue(
             stale_parent.id,
             NODE_A,
@@ -404,6 +407,7 @@ def test_an_order_numbered_from_a_stale_read_is_refused_and_a_fresh_intent_admit
             COMMIT,
             superseded_order_payload(clock),
         )
+    assert refused.value.typed_reason is InvalidRequestReason.SUPERSEDED
     with sessions.begin() as session:
         fresh = allocate_workload_intent(session, (NODE_A,))
     assert fresh == winner + 1

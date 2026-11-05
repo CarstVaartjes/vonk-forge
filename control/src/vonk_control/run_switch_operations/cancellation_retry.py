@@ -419,6 +419,12 @@ class CancellationRetryMixin:
                 )
             except BuildConsumerError as error:
                 raise RunSwitchRetryLater(f"{error.code}: {error}") from error
+            if any(node.revoked_at is not None for node in nodes):
+                # Revocation never clears: refuse the retry, do not wait for it.
+                raise RunSwitchRequestInvalid(
+                    "run-switch retry target Spark is revoked",
+                    reason=InvalidRequestReason.CONFLICT,
+                )
             ordinal, taken = take_workload_intent(
                 session, {node.node_id: node.workload_intent_ordinal for node in nodes}
             )
