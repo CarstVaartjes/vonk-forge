@@ -172,7 +172,15 @@ def cache(tmp_path: Path):
         fixture_sources=True,
         runtime_archive_available=runtime_archive_available,
     )
-    return service, sessions
+    yield service, sessions
+    # One connection serves every thread here, so a thread that touches the
+    # database can roll back another's open transaction ("cannot commit - no
+    # transaction is active").  Background work needs ``threaded_cache``.
+    started = service._storage_observer._pool._threads | service._executor._threads
+    service.close()
+    assert not started, (
+        "started background work on the shared-connection fixture; use threaded_cache"
+    )
 
 
 def _write_object_receipt(
