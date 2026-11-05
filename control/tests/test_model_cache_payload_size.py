@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import Text, cast, func, select
 from sqlalchemy.exc import IntegrityError
 from vonk_control.admission_locking import ConstraintDefect
+from vonk_control.lifecycle.model_cache import ModelCacheAdapter
 from vonk_control.model_cache.download import DownloadMixin
 from vonk_control.models import ModelCacheOperation
 from vonk_control.operation_contract import AvailabilityOperationFailure
@@ -25,7 +26,7 @@ def _files(root: Path, count: int) -> list[dict[str, object]]:
             root,
             f"file {index}".encode(),
             artifact_id=f"file-{index:04d}",
-            path=f"shards/model-{index:05d}-of-{count:05d}.safetensors",
+            path=f"shards/{'d' * 100}/model-{index:05d}-of-{count:05d}.safetensors",
             model_content_sha256=_MODEL,
         )
         for index in range(count)
@@ -43,6 +44,7 @@ def _start(service, artifacts, request_key: str):
     )
 
 
+@pytest.mark.slow(30)  # 400 source files hashed and planned in one admission
 def test_a_model_of_many_files_is_admitted_past_the_old_payload_cap(
     cache,  # noqa: F811
     tmp_path: Path,
@@ -50,7 +52,7 @@ def test_a_model_of_many_files_is_admitted_past_the_old_payload_cap(
     service, sessions = cache
     operation = _start(
         service,
-        _files(tmp_path, 700),
+        _files(tmp_path, 400),
         "00000000-0000-4000-8000-0000000000a1",
     )
     assert operation.state == "queued"
@@ -70,13 +72,14 @@ def test_a_check_violation_during_admission_is_a_typed_failure_at_once(
 ) -> None:
     service, _sessions = cache
     attempts: list[object] = []
+    real = ModelCacheAdapter.new_operation
 
-    def oversized(_progress):
-        attempts.append(_progress)
-        return {"too": "x" * 1_100_000}
+    def below_the_attempt_floor(**fields):
+        attempts.append(fields)
+        return real(**{**fields, "attempt": 0})
 
     monkeypatch.setattr(
-        "vonk_control.model_cache.download_admission.progress_document", oversized
+        ModelCacheAdapter, "new_operation", staticmethod(below_the_attempt_floor)
     )
     with pytest.raises(ConstraintDefect) as defect:
         _start(
@@ -84,7 +87,7 @@ def test_a_check_violation_during_admission_is_a_typed_failure_at_once(
             _files(tmp_path, 1),
             "00000000-0000-4000-8000-0000000000a2",
         )
-    assert defect.value.constraint == "ck_model_cache_operations_progress_size"
+    assert defect.value.constraint == "ck_model_cache_operations_attempt"
     assert "observation budget" not in str(defect.value)
     # Deterministic: refused on the first attempt, never retried.
     assert len(attempts) == 1
