@@ -10,6 +10,7 @@ write outside it (no allowlist).
 
 from .adapter import Dispatch, KindAdapter
 from .core import (
+    LOST_OBSERVATION_BOUND,
     OBSERVE_BUDGET,
     STOP_BUDGET,
     blind_retry_is_safe,
@@ -51,6 +52,7 @@ from .types import (
 )
 
 __all__ = [
+    "LOST_OBSERVATION_BOUND",
     "OBSERVE_BUDGET",
     "STOP_BUDGET",
     "TERMINAL_STATES",
