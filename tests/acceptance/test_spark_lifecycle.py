@@ -283,13 +283,10 @@ def _openssl_compatible_ed25519_private_key(raw: bytes) -> bytes:
     return b"-----BEGIN PRIVATE KEY-----\n" + body + b"\n-----END PRIVATE KEY-----\n"
 
 
-#: A cache operation that has not ended (an older Controller sent ``partial`` for
-#: one that retries).
-_LIVE_CACHE_STATES = frozenset({"queued", "running", "backoff", "observing", "partial"})
+#: A cache operation that has not ended.
+_LIVE_CACHE_STATES = frozenset({"queued", "running", "backoff", "observing"})
 #: A profile application that has not reached a terminal outcome.
-_LIVE_APPLICATION_STATES = frozenset(
-    {"queued", "running", "needs-operator", "waiting-for-operator"}
-)
+_LIVE_APPLICATION_STATES = frozenset({"queued", "running", "needs-operator"})
 
 
 class LifecycleError(RuntimeError):

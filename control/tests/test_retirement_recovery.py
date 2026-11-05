@@ -53,6 +53,9 @@ from .test_recipe_operations import (
     start_evidence,
 )
 
+#: The stored word of an order or job that waits for a person.
+PARKED = "needs-operator"
+
 
 class QuietRoutes:
     def publish_run(self, run_id):
@@ -124,10 +127,10 @@ def _parked_start(tmp_path: Path, engine):
         )
         assert operation is not None and parent is not None and attempt is not None
         operation.current_attempt = RecoveryPolicy().max_failures
-        operation.state = "waiting-for-operator"
+        operation.state = PARKED
         attempt.attempt = operation.current_attempt
         attempt.lease_deadline = NOW - timedelta(seconds=1)
-        parent.state = "waiting-for-operator"
+        parent.state = PARKED
     claim = claim.model_copy(
         update={
             "attempt": RecoveryPolicy().max_failures,
@@ -375,7 +378,7 @@ def test_retirement_refuses_expired_lease_inside_issued_launch_budget(
     with pytest.raises(OperatorRetirementRefused):
         projection.retire_job(started.id)
     with sessions() as session:
-        assert _required(session.get(Job, started.id)).state == "waiting-for-operator"
+        assert _required(session.get(Job, started.id)).state == PARKED
         assert _required(session.get(RecipeRun, started.owner_id)).state == "starting"
 
 
@@ -480,7 +483,7 @@ def test_retired_installation_cleanup_is_reissued_after_a_denial(
         child = _required(
             session.get(AgentOperation, fenced_operation(sessions, claim).id)
         )
-        child.state = "waiting-for-operator"
+        child.state = PARKED
         child.current_attempt = RecoveryPolicy().max_failures
         attempt = _required(
             session.scalar(
@@ -491,7 +494,7 @@ def test_retired_installation_cleanup_is_reissued_after_a_denial(
         )
         attempt.attempt = child.current_attempt
         attempt.lease_deadline = NOW - timedelta(seconds=1)
-        _required(session.get(Job, install.id)).state = "waiting-for-operator"
+        _required(session.get(Job, install.id)).state = PARKED
     projection = durable_operation_services(
         sessions,
         tmp_path / "routes",

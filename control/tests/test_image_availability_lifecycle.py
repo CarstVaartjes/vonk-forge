@@ -62,7 +62,7 @@ from .test_recipe_image_availability import (
 )
 
 NOW = datetime(2026, 10, 5, 12, tzinfo=UTC)
-STORED = ("queued", "running", "partial", "cancelling", "waiting-for-operator")
+STORED = ("queued", "running", "backoff", "observing", "needs-operator")
 
 
 def _job(kind: str = OPERATION_KIND, state: str = "queued", **payload) -> Job:
@@ -113,12 +113,12 @@ def test_every_stored_shape_adopts_without_a_wait() -> None:
         ("running", (("claim_until", live),)): State.RUNNING,
         ("running", (("claim_until", lapsed),)): State.BACKOFF,
         ("running", ()): State.BACKOFF,
-        ("partial", ()): State.BACKOFF,
-        ("cancelling", ()): State.OBSERVING,
+        ("backoff", ()): State.BACKOFF,
+        ("observing", ()): State.OBSERVING,
         ("succeeded", ()): State.SUCCEEDED,
         ("failed", ()): State.FAILED,
         ("cancelled", ()): State.CANCELLED,
-        ("waiting-for-operator", ()): State.NEEDS_OPERATOR,
+        ("needs-operator", ()): State.NEEDS_OPERATOR,
     }
     for (stored, extra), expected in cases.items():
         row = adapter.adopt(_job(state=stored, **dict(extra)))
@@ -143,10 +143,8 @@ def test_the_cancel_budget_is_derived_from_the_recorded_request() -> None:
         "cancel_requested_at": (NOW - CANCEL_BUDGET).isoformat(),
         "cancel_request_id": "k",
     }
-    assert (
-        adapter.adopt(_job(state="cancelling", cancellation=young)).observe_count == 0
-    )
-    spent = adapter.adopt(_job(state="cancelling", cancellation=old))
+    assert adapter.adopt(_job(state="observing", cancellation=young)).observe_count == 0
+    spent = adapter.adopt(_job(state="observing", cancellation=old))
     assert spent.observe_count >= STOP_BUDGET and spent.cancel_requested
 
 
@@ -168,15 +166,14 @@ def test_no_stored_state_and_event_leaves_a_row_waiting_for_a_person(kind: str) 
         row: Lifecycle = adapter.adopt(_job(kind, stored))
         for _ in range(3):
             row = transition(row, event, adapter, NOW).row
-            assert row.state is not State.NEEDS_OPERATOR or stored == (
-                "waiting-for-operator"
-            ), (kind, stored, event)
+            if stored != LifecycleState.NEEDS_OPERATOR:
+                assert row.state is not State.NEEDS_OPERATOR, (kind, stored, event)
     assert adapter.actions(adapter.adopt(_job(kind, "queued"))) == ()
 
 
 def test_a_legacy_operator_wait_is_retried_not_kept() -> None:
     adapter = _adapter()
-    row = adapter.adopt(_job(state="waiting-for-operator"))
+    row = adapter.adopt(_job(state="needs-operator"))
     healed = transition(row, Tick(), adapter, NOW).row
     assert healed.state is State.BACKOFF  # rule 1: idempotent work is retried
 
@@ -234,7 +231,7 @@ def test_a_dependency_wait_is_partial_and_does_not_count_as_a_failure() -> None:
 
 def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:
     adapter = _adapter()
-    for stored in ("running", "partial", "waiting-for-operator", "queued"):
+    for stored in ("running", "backoff", "needs-operator", "queued"):
         job = _job(
             state=stored,
             attempt=1,
@@ -247,7 +244,7 @@ def test_claim_takes_a_lapsed_running_and_a_legacy_parked_row() -> None:
 
 def test_removal_steps_run_and_a_retry_clock_never_blocks_the_next_step() -> None:
     adapter = _adapter()
-    job = _job(REMOVAL_KIND, "partial", attempt=1)
+    job = _job(REMOVAL_KIND, "backoff", attempt=1)
     adapter.advance_removal(job, NOW)
     assert job.state == "running"
     adapter.advance_removal(job, NOW + timedelta(seconds=5))  # a step in a step
@@ -303,7 +300,7 @@ def test_a_spent_cancel_ends_with_the_effect_unknown_and_fences_the_claim() -> N
     adapter = ImageAvailabilityAdapter(clock=lambda: NOW + CANCEL_BUDGET)
     requested = {"cancel_requested_at": NOW.isoformat(), "cancel_request_id": "k"}
     job = _job(
-        state="cancelling",
+        state="observing",
         attempt=1,
         claim_owner="gone",
         claim_until=(NOW + timedelta(hours=1)).isoformat(),
@@ -362,7 +359,7 @@ def test_a_legacy_cancelling_preparation_with_a_stuck_claim_heals(
     with sessions.begin() as session:
         job = session.get(Job, queued.id)
         assert job is not None
-        job.state = "cancelling"
+        job.state = "observing"
         job.current_attempt = 1
         job.payload = dict(job.payload) | {
             "claim_owner": "dead-worker",
@@ -457,7 +454,7 @@ def test_damaged_clock_fields_keep_independent_live_lease_and_cancel_budget() ->
     row = adapter.adopt(job)
     assert row.state is State.RUNNING and row.lease_deadline == live
     assert row.retry_count == 0
-    job.state = "cancelling"
+    job.state = "observing"
     job.payload = dict(job.payload) | {
         "cancellation": {
             "cancel_requested_at": (NOW - CANCEL_BUDGET).isoformat(),

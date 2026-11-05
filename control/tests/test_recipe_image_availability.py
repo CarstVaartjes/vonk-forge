@@ -4114,7 +4114,7 @@ def test_parent_progress_retains_ready_image_while_model_is_incomplete(
         id="availability-progress",
         request_id="p" * 36,
         kind="recipe.image.availability.v2",
-        state="failed" if model_state == "failed" else "partial",
+        state="failed" if model_state == "failed" else "backoff",
         actor="operator",
         authority_revision="revision-progress",
         targets=["revision-progress"],

@@ -1079,7 +1079,7 @@ def test_installation_a_live_operation_names_is_kept(world: Catalog) -> None:
     installation, _ = world.workload(old, run="stopped")
     world.job(
         {"plan": {"installation_id": installation}},
-        state="waiting",
+        state="observing",
         updated=NOW - timedelta(days=3),
     )
     lifecycle = FakeLifecycle(world.sessions)
@@ -1301,7 +1301,7 @@ def test_a_failed_installation_a_retry_names_is_kept(world: Catalog) -> None:
     world.revision("glm", 2, head="active")
     failed, _ = world.workload(old, installation="failed", run="stopped")
     _size(world, failed, 80 * GIB)
-    world.job({"plan": {"installation_id": failed}}, state="waiting", updated=NOW)
+    world.job({"plan": {"installation_id": failed}}, state="observing", updated=NOW)
     lifecycle = FakeLifecycle(world.sessions)
 
     result = _collector(world, lifecycle).collect()
@@ -2263,7 +2263,7 @@ def test_receipt_a_live_operation_names_is_kept_and_a_recent_transfer_only_goes_
     named = _receipt(tmp_path, "1" * 64)
     pulled = _receipt(tmp_path, "2" * 64)
     idle = _receipt(tmp_path, "7" * 64)
-    world.job({"plan": {"image": "1" * 64}}, state="waiting", updated=NOW - GRACE)
+    world.job({"plan": {"image": "1" * 64}}, state="observing", updated=NOW - GRACE)
     with world.sessions.begin() as session:
         session.add(
             ArtifactDistributionAssignment(

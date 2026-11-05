@@ -127,8 +127,8 @@ def test_latest_profile_queues_exact_physical_stop_for_uncertain_job_run(
         # Model a one-shot Start whose executor lost its lease after issuing
         # the effect. The old parent remains diagnostic; its receipt is not a
         # prerequisite for the newer profile's exact Stop.
-        source_job.state = "waiting-for-operator"
-        source_operation.state = "waiting-for-operator"
+        source_job.state = "needs-operator"
+        source_operation.state = "needs-operator"
         source_operation.current_attempt = 1
         artifact_row.state = "failed"
         artifact_row.status_reason = WaitReason.JOB_STOP_UNCONFIRMED
@@ -1178,7 +1178,7 @@ def test_pending_profile_cancellation_is_visible_and_filterable_in_activity(
     )
     cancelling = api.get(
         "/api/operations",
-        params={"state": "cancelling", "request_id": application.request_key},
+        params={"state": "observing", "request_id": application.request_key},
         headers=_headers(tokens, "administrator"),
     )
     running = api.get(
@@ -1245,7 +1245,7 @@ def test_profile_activity_cancellation_filter_compiles_on_postgres(
 
     cancelling = api.get(
         "/api/operations",
-        params={"state": "cancelling", "request_id": application.request_key},
+        params={"state": "observing", "request_id": application.request_key},
         headers=_headers(tokens, "administrator"),
     )
     running = api.get(
@@ -1594,7 +1594,7 @@ def test_latest_selected_profile_supersedes_parked_apps_before_cancellation(
     assert cancellation.pending_effects[0].operation_id == active_child_id
 
 
-@pytest.mark.parametrize("child_job_state", ["failed", "waiting-for-operator"])
+@pytest.mark.parametrize("child_job_state", ["failed", "needs-operator"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
     tmp_path, child_job_state: str
@@ -1690,7 +1690,7 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
                 parent_job_id=child.id,
                 node_id=node_id,
                 kind="artifact.distribution.v1",
-                state="failed" if index == 0 else "waiting-for-operator",
+                state="failed" if index == 0 else "backoff",
                 payload={"plan_digest": "f" * 64},
                 payload_digest="0" * 64,
                 authority_revision="f" * 64,
@@ -1715,7 +1715,8 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
                     fence=str(uuid.uuid4()),
                     lease_deadline=now[0],
                     agent_certificate_serial="serial-0",
-                    state="failed" if index == 0 else "expired",
+                    state="failed" if index == 0 else "observing",
+                    observation_cause=None if index == 0 else "lease-lapsed",
                     result={},
                 )
             )

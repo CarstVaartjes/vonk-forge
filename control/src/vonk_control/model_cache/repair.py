@@ -370,7 +370,6 @@ class RepairMixin:
             raise InvalidValue("operation state filter is invalid")
         if node_id is not None:
             return {"operations": (), "total": 0, "_next_boundary": None}
-        # A filter may still name a retired spelling (one release).
         named = None if state is None else input_state(state)
         if state is not None and named is None:
             return {"operations": (), "total": 0, "_next_boundary": None}

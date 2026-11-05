@@ -8,9 +8,9 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Annotated, Literal, NoReturn
+from typing import Literal, NoReturn
 
-from pydantic import BeforeValidator, ConfigDict, Field, TypeAdapter
+from pydantic import ConfigDict, Field, TypeAdapter
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     AgentProtocolError,
@@ -18,7 +18,6 @@ from vonk_agent_protocol import (
     InvalidRequestError,
     InvalidRequestReason,
     LifecycleState,
-    LifecycleSubject,
     RecipeJobFile,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -29,7 +28,6 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
     recipe_job_manifest_sha256,
-    state_adopter,
 )
 from vonk_agent_protocol.compiled_execution_plan import (
     CompiledExecutionPlan as WireCompiledExecutionPlan,
@@ -68,19 +66,16 @@ MAX_INPUT_TOTAL_BYTES = 1024**3
 _UUID_ID_ADAPTER = TypeAdapter(UuidId)
 
 
-#: The lifecycle states of a submitted artifact job (an old spelling is adopted).
-ArtifactJobState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.NEEDS_OPERATOR,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    BeforeValidator(state_adopter(LifecycleSubject.ARTIFACT_JOB)),
+#: The lifecycle states of a submitted artifact job.
+ArtifactJobState = Literal[
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.NEEDS_OPERATOR,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
 ]
 #: The preparation stages of a job that has not been submitted.
 ArtifactPreparationStage = Literal[ArtifactPreparation.DRAFT, ArtifactPreparation.READY]

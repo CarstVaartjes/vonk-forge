@@ -53,19 +53,16 @@ def _compile_utf8_byte_length(element, compiler, **kwargs) -> str:
 def _state_in(
     subject: LifecycleSubject,
     *states: LifecycleState,
-    extra: tuple[str, ...] = (),
     nullable: bool = False,
 ) -> str:
-    """The CHECK of a lifecycle subject's ``state``: its words, and the old spellings.
+    """The CHECK of a lifecycle subject's ``state``: its core words, nothing else.
 
     Generated from the contract, so the words the column admits cannot drift from
-    the ones the rest of the Controller speaks.  An old spelling stays admitted for
-    one release so a row written before the rename is still valid; ``extra`` names
-    words the kind itself still carries (an artifact job's old ``draft`` and
-    ``ready``) and ``nullable`` admits a row that has no lifecycle state yet.
+    the ones the rest of the Controller speaks.  ``nullable`` admits a row that has
+    no lifecycle state yet.
     """
 
-    words = ",".join(f"'{word}'" for word in (*check_words(subject, states), *extra))
+    words = ",".join(f"'{word}'" for word in check_words(subject, states))
     check = f"state IN ({words})"
     return f"state IS NULL OR {check}" if nullable else check
 

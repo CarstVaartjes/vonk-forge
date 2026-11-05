@@ -290,6 +290,10 @@ def _repair_check_constraints(connection: Connection) -> None:
                 quoted_constraint = connection.dialect.identifier_preparer.quote(name)
                 try:
                     with connection.begin_nested():
+                        # The failed replacement rolled back its drop too: a
+                        # changed CHECK is replaced here, not left behind.
+                        if mismatch:
+                            ops.drop_constraint(name, table_name, type_="check")
                         connection.exec_driver_sql(
                             f"ALTER TABLE {quoted_table} ADD CONSTRAINT {quoted_constraint} "
                             f"CHECK ({expression}) NOT VALID"

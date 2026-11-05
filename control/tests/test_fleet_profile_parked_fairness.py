@@ -69,7 +69,7 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, parked.id)
         assert row is not None
-        row.state = "waiting-for-operator"
+        row.state = "needs-operator"
         row.status_reason = "Waiting for exact interrupted-effect reconciliation"
 
     other_input = _input(revision_id, name="Unrelated node")

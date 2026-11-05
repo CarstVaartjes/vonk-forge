@@ -99,7 +99,6 @@ class FleetProfileService:
                     FleetProfileApplication.id.desc(),
                 )
                 if isinstance(state, str):
-                    # A filter may still name a retired spelling (one release).
                     named = input_state(state)
                     base_statement = base_statement.where(
                         _profile_activity_state_expression().in_(

@@ -1844,7 +1844,7 @@ def test_profile_application_poll_follows_durable_admission_wait(monkeypatch) ->
     pending = _failed_profile_application(
         "Profile admission is waiting for the active workload owner to finish."
     )
-    pending["state"] = "waiting-for-operator"
+    pending["state"] = "needs-operator"
     terminal = _failed_profile_application("")
     terminal.update(
         attempt=2,

@@ -3,8 +3,8 @@
 A database written before the rename has a NOT NULL ``state`` whose CHECK knows
 ``draft``, ``ready``, ``cancelling`` and ``waiting-for-operator``, and neither the
 ``preparation`` nor the ``cancel_requested_at`` column.  Startup adds the columns,
-lets ``state`` be ``NULL`` and rebuilds the CHECK so that both spellings are
-admitted for one release.
+lets ``state`` be ``NULL`` and rebuilds the CHECK so that it admits only the core
+words (the preparation stages live in their own column).
 """
 
 from __future__ import annotations
@@ -58,6 +58,8 @@ def test_an_old_artifact_job_table_is_reconciled_in_place(postgres_engine):
             for item in inspect(connection).get_check_constraints(TABLE)
             if item["name"] == "ck_artifact_jobs_state"
         )
-        for word in ("queued", "observing", "needs-operator", "cancelling", "draft"):
+        for word in ("queued", "observing", "needs-operator"):
             assert f"'{word}'" in check, word
+        for word in ("cancelling", "draft", "ready", "waiting-for-operator"):
+            assert f"'{word}'" not in check, word
         assert "IS NULL" in check.upper()

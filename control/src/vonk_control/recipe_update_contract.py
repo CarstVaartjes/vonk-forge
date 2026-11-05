@@ -8,16 +8,13 @@ from typing import Annotated, Literal
 
 from pydantic import (
     AwareDatetime,
-    BeforeValidator,
     ConfigDict,
     Field,
     model_validator,
 )
 from vonk_agent_protocol import (
     LifecycleState,
-    LifecycleSubject,
     OperationProgress,
-    state_adopter,
 )
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
@@ -37,33 +34,25 @@ RequestKey = Annotated[
     ),
 ]
 Selector = Annotated[str, Field(min_length=1, max_length=256)]
-UpdateState = Annotated[
-    Literal[
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    # A batch that ended ``partial`` (some children succeeded) is ``failed`` with
-    # ``partial`` set on its view; one being cancelled is ``observing``.
-    BeforeValidator(state_adopter(LifecycleSubject.JOB, UPDATE_KIND)),
+UpdateState = Literal[
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
 ]
 #: A child is the image-availability job it froze, or ``pending`` before it exists.
-UpdateChildState = Annotated[
-    Literal[
-        "pending",
-        LifecycleState.QUEUED,
-        LifecycleState.RUNNING,
-        LifecycleState.BACKOFF,
-        LifecycleState.OBSERVING,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.FAILED,
-        LifecycleState.CANCELLED,
-    ],
-    BeforeValidator(state_adopter(LifecycleSubject.JOB)),
+UpdateChildState = Literal[
+    "pending",
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.OBSERVING,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
 ]
 
 
