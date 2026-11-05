@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import InvalidRequestReason, LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import ProfileReasonSeverity
 
+from ..admission_locking import ConstraintReplay, admitting
 from ..categorized_errors import MissingRecord
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -158,109 +159,129 @@ class FleetProfileService:
         pending_preview = preview.model_copy(
             update={"plan_digest": pending_plan_digest}
         )
-        with self._sessions.begin() as session:
-            # A selection precondition binds maintenance to existing accepted
-            # intent; a new user request must still be authorized now.
-            if selection_precondition is None:
-                self._authorize(session, actor)
-            existing = session.scalar(
-                select(FleetProfileApplication).where(
-                    FleetProfileApplication.request_key == request_key
+        try:
+            with admitting(), self._sessions.begin() as session:
+                # A selection precondition binds maintenance to existing accepted
+                # intent; a new user request must still be authorized now.
+                if selection_precondition is None:
+                    self._authorize(session, actor)
+                existing = session.scalar(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.request_key == request_key
+                    )
                 )
-            )
-            if existing is not None:
+                if existing is not None:
+                    return self._matching_application(
+                        existing,
+                        session=session,
+                        profile_id=preview.profile_id,
+                        reviewed_digest=preview.plan_digest,
+                        actor=actor,
+                    )
+                profile = session.get(FleetProfile, preview.profile_id)
+                if profile is None:
+                    raise MissingRecord(
+                        preview.profile_id, reason=InvalidRequestReason.NOT_FOUND
+                    )
+                if selection_precondition is None:
+                    if _digest(_profile_document(profile)) != preview.profile_digest:
+                        raise FleetProfileStalePlanConflict(
+                            "Fleet profile changed before its admission intent was persisted"
+                        )
+                    installation_policy = _INSTALLATION_POLICY_ADAPTER.validate_python(
+                        profile.installation_policy, strict=True
+                    )
+                else:
+                    current = self._selected_profile_snapshot(session)
+                    if (
+                        not select_profile
+                        or current is None
+                        or isinstance(current, Residue)
+                        or current.generation != selection_precondition.generation
+                        or current.application_id
+                        != selection_precondition.application_id
+                        or current.roster_digest != selection_precondition.roster_digest
+                        or selection_precondition.profile_id != preview.profile_id
+                        or preview.profile_digest
+                        != selection_precondition.intended.profile_digest
+                        or preview.profile_revision
+                        != selection_precondition.profile_revision
+                    ):
+                        raise FleetProfileStalePlanConflict(
+                            "Selected profile or fleet membership changed during reconciliation"
+                        )
+                    installation_policy = (
+                        selection_precondition.intended.installation_policy
+                    )
+                intended = FleetProfileIntendedConfiguration(
+                    profile_digest=preview.profile_digest,
+                    reviewed_plan_digest=preview.plan_digest,
+                    reviewed_application_id=application_id,
+                    installation_policy=installation_policy,
+                    scope=FleetProfileScope(node_ids=list(preview.scope.node_ids)),
+                    assignments=list(preview.resolved_assignments),
+                )
+                created_at = _next_profile_acceptance_time(session, now)
+                next_retry = FleetProfileAdapter.next_retry(application_id, 1, now)
+                row = FleetProfileAdapter.new_application(
+                    id=application_id,
+                    request_key=request_key,
+                    profile_id=preview.profile_id,
+                    profile_digest=preview.profile_digest,
+                    plan_digest=pending_plan_digest,
+                    # Keep the short synchronous admission attempt visible as a
+                    # normal queued application.  If it cannot bind, the defer
+                    # path records the next automatic attempt before returning.
+                    state=LifecycleState.QUEUED.value,
+                    plan=pending_preview.model_dump(mode="json"),
+                    selection_generation=(
+                        selection_precondition.generation
+                        if selection_precondition is not None
+                        else None
+                    ),
+                    current_step=0,
+                    current_operation_id=None,
+                    next_action_at=next_retry,
+                    progress=FleetProfileApplicationProgress(
+                        operation_kind=operation_kind,
+                        admission_pending=True,
+                        admission_attempt=0,
+                        intended_profile=intended,
+                        completed_steps=0,
+                        total_steps=len(preview.steps),
+                    ).model_dump(mode="json"),
+                    result=None,
+                    status_reason=(
+                        "Profile admission is busy; reviewed intent was accepted and "
+                        f"will retry automatically after {next_retry.isoformat()}."
+                    )[:512],
+                    actor=actor,
+                    created_at=created_at,
+                    updated_at=now,
+                )
+                session.add(row)
+                session.flush()
+                # Pending applications are not authority. In particular, keeping
+                # the prior selection in place makes failed admission cleanup FK-safe.
+                return self._application_view(row)
+        except ConstraintReplay:
+            # The unique request key arbitrated two concurrent submissions of
+            # one request: the loser replays the winner's committed receipt.
+            with self._sessions.begin() as session:
+                winner = session.scalar(
+                    select(FleetProfileApplication).where(
+                        FleetProfileApplication.request_key == request_key
+                    )
+                )
+                if winner is None:
+                    raise
                 return self._matching_application(
-                    existing,
+                    winner,
                     session=session,
                     profile_id=preview.profile_id,
                     reviewed_digest=preview.plan_digest,
                     actor=actor,
                 )
-            profile = session.get(FleetProfile, preview.profile_id)
-            if profile is None:
-                raise MissingRecord(
-                    preview.profile_id, reason=InvalidRequestReason.NOT_FOUND
-                )
-            if selection_precondition is None:
-                if _digest(_profile_document(profile)) != preview.profile_digest:
-                    raise FleetProfileStalePlanConflict(
-                        "Fleet profile changed before its admission intent was persisted"
-                    )
-                installation_policy = _INSTALLATION_POLICY_ADAPTER.validate_python(
-                    profile.installation_policy, strict=True
-                )
-            else:
-                current = self._selected_profile_snapshot(session)
-                if (
-                    not select_profile
-                    or current is None
-                    or isinstance(current, Residue)
-                    or current.generation != selection_precondition.generation
-                    or current.application_id != selection_precondition.application_id
-                    or current.roster_digest != selection_precondition.roster_digest
-                    or selection_precondition.profile_id != preview.profile_id
-                    or preview.profile_digest
-                    != selection_precondition.intended.profile_digest
-                    or preview.profile_revision
-                    != selection_precondition.profile_revision
-                ):
-                    raise FleetProfileStalePlanConflict(
-                        "Selected profile or fleet membership changed during reconciliation"
-                    )
-                installation_policy = (
-                    selection_precondition.intended.installation_policy
-                )
-            intended = FleetProfileIntendedConfiguration(
-                profile_digest=preview.profile_digest,
-                reviewed_plan_digest=preview.plan_digest,
-                reviewed_application_id=application_id,
-                installation_policy=installation_policy,
-                scope=FleetProfileScope(node_ids=list(preview.scope.node_ids)),
-                assignments=list(preview.resolved_assignments),
-            )
-            created_at = _next_profile_acceptance_time(session, now)
-            next_retry = FleetProfileAdapter.next_retry(application_id, 1, now)
-            row = FleetProfileAdapter.new_application(
-                id=application_id,
-                request_key=request_key,
-                profile_id=preview.profile_id,
-                profile_digest=preview.profile_digest,
-                plan_digest=pending_plan_digest,
-                # Keep the short synchronous admission attempt visible as a
-                # normal queued application.  If it cannot bind, the defer
-                # path records the next automatic attempt before returning.
-                state=LifecycleState.QUEUED.value,
-                plan=pending_preview.model_dump(mode="json"),
-                selection_generation=(
-                    selection_precondition.generation
-                    if selection_precondition is not None
-                    else None
-                ),
-                current_step=0,
-                current_operation_id=None,
-                next_action_at=next_retry,
-                progress=FleetProfileApplicationProgress(
-                    operation_kind=operation_kind,
-                    admission_pending=True,
-                    admission_attempt=0,
-                    intended_profile=intended,
-                    completed_steps=0,
-                    total_steps=len(preview.steps),
-                ).model_dump(mode="json"),
-                result=None,
-                status_reason=(
-                    "Profile admission is busy; reviewed intent was accepted and "
-                    f"will retry automatically after {next_retry.isoformat()}."
-                )[:512],
-                actor=actor,
-                created_at=created_at,
-                updated_at=now,
-            )
-            session.add(row)
-            session.flush()
-            # Pending applications are not authority. In particular, keeping
-            # the prior selection in place makes failed admission cleanup FK-safe.
-            return self._application_view(row)
 
     def _wait_for_conditions(
         self, application_id: str, preview: FleetProfilePreview, actor: str

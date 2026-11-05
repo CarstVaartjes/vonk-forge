@@ -17,7 +17,6 @@ from vonk_agent_protocol.http_failure import TransientReason
 from .. import model_cache_states
 from ..admission_locking import admitting
 from ..lifecycle import Effect, Outcome, Reported
-from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
     ModelCacheAccessRecheck,
     ModelCacheDownloadResult,
@@ -44,6 +43,7 @@ from .persistence import (
     _write_operation_payload,
 )
 from .source_helpers import _request_key
+from .transfer_admission import admit_transfer, refreshes
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -119,7 +119,6 @@ class RetryMixin:
             previous_set = (
                 previous.artifact_set_sha256 or _manifest_of(previous_payload).digest
             )
-            cache._require_model_sets_open(session, (previous_set,), now=now)
             payload = previous_payload.model_copy(
                 update={
                     "retry": previous_payload.retry.model_copy(
@@ -133,12 +132,20 @@ class RetryMixin:
                 }
             )
             previous_progress = _operation_progress(previous)
-            operation = ModelCacheAdapter.new_operation(
+            admitted = admit_transfer(
+                cache,
+                session,
+                artifact_set_sha256=previous_set,
+                now=now,
+                force=refreshes(previous, previous_payload),
+                excluding=previous.id,
+                prepare=lambda: cache._require_model_sets_open(
+                    session, (previous_set,), now=now
+                ),
                 request_key=request_key,
                 schema_version=2,
                 kind=previous.kind,
                 attempt=1,
-                artifact_set_sha256=previous_set,
                 plan_digest=previous.plan_digest,
                 payload=serialize_json_value(
                     _write_operation_payload(previous.kind, payload)
@@ -148,9 +155,10 @@ class RetryMixin:
                 ),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
-                created_at=now,
-                updated_at=now,
             )
+            if isinstance(admitted, CacheOperationView):
+                return admitted
+            operation = admitted
             with admitting():
                 session.add(operation)
                 session.flush()
@@ -248,7 +256,6 @@ class RetryMixin:
             # One durable request row precedes HTTP effects. The normal worker
             # checks the exact retained source using only the configured token.
             now = cache._clock()
-            cache._require_model_sets_open(session, (requested_set,), now=now)
             payload = _updated(
                 previous_payload,
                 failure=None,
@@ -261,12 +268,22 @@ class RetryMixin:
                 ),
                 access_recheck=ModelCacheAccessRecheck(request_key=request_key),
             )
-            operation = ModelCacheAdapter.new_operation(
+            admitted = admit_transfer(
+                cache,
+                session,
+                artifact_set_sha256=requested_set,
+                now=now,
+                force=refreshes(previous, previous_payload),
+                excluding=previous.id,
+                # The operator reads this receipt by its own request key.
+                attach=False,
+                prepare=lambda: cache._require_model_sets_open(
+                    session, (requested_set,), now=now
+                ),
                 request_key=request_key,
                 schema_version=2,
                 kind=previous.kind,
                 attempt=1,
-                artifact_set_sha256=requested_set,
                 plan_digest=requested_plan,
                 payload=serialize_json_value(
                     _write_operation_payload(previous.kind, payload)
@@ -278,9 +295,10 @@ class RetryMixin:
                 ),
                 actor=actor,
                 current_artifact_key=previous.current_artifact_key,
-                created_at=now,
-                updated_at=now,
             )
+            if isinstance(admitted, CacheOperationView):
+                return admitted
+            operation = admitted
             with admitting():
                 session.add(operation)
                 session.flush()

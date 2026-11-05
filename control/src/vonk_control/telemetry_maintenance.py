@@ -15,7 +15,6 @@ from sqlalchemy import (
     or_,
     select,
     text,
-    update,
 )
 from sqlalchemy.engine import Row
 from sqlalchemy.exc import OperationalError
@@ -45,7 +44,7 @@ from .step_ca import CERTIFICATE_LIFETIME
 
 _MAX_MAINTENANCE_LIMIT = 25_000
 #: One pass deletes at most this many rows per table.  Maintenance holds rows
-#: that admission locks (agent nodes, inventory snapshots) for as long as its
+#: that admission locks (inventory snapshots) for as long as its
 #: transaction lives, so a pass is small and frequent instead of one large batch
 #: that kept admission refused for seconds out of every fifteen.
 _DEFAULT_MAINTENANCE_LIMIT = 500
@@ -84,35 +83,6 @@ def _polite(session: Session, name: str) -> None:
         text("SELECT set_config('lock_timeout', :t, true)"),
         {"t": f"{_MAINTENANCE_LOCK_TIMEOUT_MS}ms"},
     )
-
-
-def _lock_nodes(session: Session, node_ids: list[str]) -> set[str]:
-    """Lock the nodes whose samples are pruned; return those that were free.
-
-    A node an admission (or anything else) holds is skipped, never waited for:
-    its samples are simply pruned on a later pass.
-    """
-
-    ordered = sorted(set(node_ids))
-    if session.connection().dialect.name == "sqlite":
-        for node_id in ordered:
-            session.execute(
-                update(AgentNode)
-                .where(AgentNode.node_id == node_id)
-                .values(node_id=AgentNode.node_id)
-            )
-        return set(ordered)
-    locked: set[str] = set()
-    for chunk in TelemetryMaintenance._chunks(ordered):
-        locked.update(
-            session.scalars(
-                select(AgentNode.node_id)
-                .where(AgentNode.node_id.in_(chunk))
-                .order_by(AgentNode.node_id)
-                .with_for_update(of=AgentNode, skip_locked=True)
-            ).all()
-        )
-    return locked
 
 
 def _raw_candidate_statement(
@@ -329,11 +299,6 @@ class TelemetryMaintenance:
         events: FleetEventRepository,
         candidates: Sequence[Row[str, str, datetime]],
     ) -> None:
-        free = _lock_nodes(
-            session,
-            [node_id for _sample_id, node_id, _observed_at in candidates],
-        )
-        candidates = [row for row in candidates if row[1] in free]
         sample_ids = [sample_id for sample_id, _node_id, _observed_at in candidates]
 
         locked_rows = []

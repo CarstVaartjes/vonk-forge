@@ -126,7 +126,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_run_stop.py": {
         "_stop_logical_job_run": (
-            "33f8fe948db25ddcff4206a5f9602a5555f220cda8c324d70b4e399f4fad93ca",
+            "d30099e5589b3f655baf5aaea9e7a7d8a27852c1b62f5bf690c276421e92e8b7",
             "retain: exact logical Stop admission owns run settlement",
         ),
     },

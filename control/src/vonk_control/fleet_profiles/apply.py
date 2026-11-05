@@ -37,6 +37,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..models import AgentNode, FleetProfile, FleetProfileApplication
 from ..strict_json import read_stored_model
+from ..workload_intent import allocate_workload_intent
 from .assessment_support import (
     _deferral_code,
     _profile_preview_is_waitable,
@@ -165,9 +166,9 @@ class FleetProfileService:
                         nodes, ordinal, progress.fenced_node_ids
                     )
                 if ordinal is None:
-                    ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
-                    for node in nodes:
-                        node.workload_intent_ordinal = ordinal
+                    ordinal = allocate_workload_intent(
+                        session, tuple(node.node_id for node in nodes)
+                    )
                 self._switch_adapter.request_superseded_workload_cancellation_in_session(
                     session, fence_nodes, ordinal, now
                 )

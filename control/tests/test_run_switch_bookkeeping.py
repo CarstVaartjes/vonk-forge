@@ -199,3 +199,34 @@ def test_fresh_retry_keeps_verified_progress_but_has_independent_clocks(
     assert fresh.result.observation_deadline_at is None
     assert fresh.next_attempt_at is None
     assert fresh.result.phase_results == progress.phase_results
+
+
+def test_a_retry_over_a_revoked_spark_is_refused_not_waited_on(tmp_path: Path) -> None:
+    """Revocation never clears, so the retry ends as a definite CONFLICT refusal."""
+    from datetime import timedelta
+
+    from vonk_agent_protocol import InvalidRequestReason, LifecycleState
+    from vonk_control.models import AgentNode
+    from vonk_control.run_switch_operations.errors import RunSwitchRequestInvalid
+    from vonk_control.strict_json import serialize_json_value
+
+    accepted = _accepted(tmp_path)
+    with accepted.sessions.begin() as session:
+        job = session.get(Job, accepted.operation.operation_id)
+        assert job is not None
+        progress = RunSwitchOperationResult.model_validate_json(json.dumps(job.result))
+        progress.retryable = True
+        job.next_action_at = NOW - timedelta(seconds=1)
+        job.state = LifecycleState.FAILED
+        job.result = serialize_json_value(progress)
+        for node_id in job.targets:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.revoked_at = NOW
+    with pytest.raises(RunSwitchRequestInvalid) as refused:
+        accepted.service.retry(
+            accepted.operation.operation_id,
+            actor="admin",
+            request_key=str(uuid.uuid4()),
+        )
+    assert refused.value.typed_reason is InvalidRequestReason.CONFLICT

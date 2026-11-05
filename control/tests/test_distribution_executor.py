@@ -1266,12 +1266,11 @@ def test_model_download_uses_real_cache_manifest_and_reports_complete_coverage(
     assert completed.result.coverage == "complete"
     assert completed.result.evidence is not None
     assert completed.result.evidence.coverage == "complete"
-    # The set was completed by the earlier resumable operation before this
-    # child ran, so this operation received no bytes despite its planned
-    # remaining range.
-    assert completed.result.progress.completed_bytes == 0
-    assert completed.result.progress.total_bytes is not None
-    assert completed.result.progress.total_bytes < len(payload)
+    # The earlier resumable operation of this set is still live, so the
+    # child attaches to it instead of starting a second transfer, and its
+    # observed progress covers the whole set.
+    assert first.operation_id == seeded.id
+    assert completed.result.progress.completed_bytes == len(payload)
     executor.close()
     service.close()
 

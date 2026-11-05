@@ -59,6 +59,7 @@ from ..recipe_stop_payloads import (
 )
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
+from ..workload_intent import allocate_workload_intent
 from .errors import (
     RecipeArtifactJobCancellationPending,
     RecipeRequestInvalid,
@@ -234,17 +235,12 @@ class JobRunStopMixin:
                     select(AgentNode)
                     .where(AgentNode.node_id.in_(targets))
                     .order_by(AgentNode.node_id)
-                    .with_for_update(of=AgentNode)
                 )
             )
             if tuple(node.node_id for node in target_nodes) != targets:
                 raise RecipeRequestInvalid("artifact workload target disappeared")
             if workload_intent_ordinal is None:
-                workload_intent_ordinal = (
-                    max(node.workload_intent_ordinal for node in target_nodes) + 1
-                )
-                for node in target_nodes:
-                    node.workload_intent_ordinal = workload_intent_ordinal
+                workload_intent_ordinal = allocate_workload_intent(session, targets)
                 AgentJobService.request_superseded_workload_cancellation_in_session(
                     session, targets, workload_intent_ordinal, now
                 )

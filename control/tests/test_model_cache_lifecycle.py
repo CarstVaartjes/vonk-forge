@@ -336,6 +336,59 @@ def test_cancelling_a_queued_download_ends_it_at_once(cache, tmp_path):
     )
 
 
+def test_two_request_keys_for_one_model_set_share_one_download(cache, tmp_path):
+    service, _sessions = cache
+    first, _ = _queue(service, tmp_path, str(uuid.uuid4()))
+    second, _ = _queue(service, tmp_path, str(uuid.uuid4()))
+    assert second.id == first.id
+    assert second.request_key == first.request_key
+
+
+def test_a_consumer_of_a_cancelled_shared_download_asks_again_and_gets_a_fresh_one(
+    cache, tmp_path
+):
+    service, sessions = cache
+    first, _ = _queue(service, tmp_path, str(uuid.uuid4()))
+    consumer_key = str(uuid.uuid4())
+    attached, _ = _queue(service, tmp_path, consumer_key)
+    assert attached.id == first.id
+    service.cancel_operation(
+        first.id, actor="test", request_key=str(uuid.uuid4()), reason="owner left"
+    )
+    # What the attached consumer observes is the shared operation, ended.
+    assert service.get_operation(attached.id).state == "cancelled"
+    assert_ended_without_blocking(
+        SimpleNamespace(sessions=sessions),
+        first,
+        end=lambda receipt: service.get_operation(receipt.id),
+        fresh=lambda _world: _queue(service, tmp_path, consumer_key)[0],
+    )
+
+
+def _queue_forced(service, tmp_path, *, force: bool):
+    artifact = _artifact(tmp_path, b"x", model_content_sha256=MODEL)
+    preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
+    return service.start_download(
+        actor="test",
+        request_key=str(uuid.uuid4()),
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=MODEL,
+        artifacts=[artifact],
+        force=force,
+    )
+
+
+def test_a_forced_refresh_never_shares_a_plain_download_and_the_reverse(
+    cache, tmp_path
+):
+    service, _sessions = cache
+    plain = _queue_forced(service, tmp_path, force=False)
+    forced = _queue_forced(service, tmp_path, force=True)
+    assert forced.id != plain.id
+    assert _queue_forced(service, tmp_path, force=True).id == forced.id
+    assert _queue_forced(service, tmp_path, force=False).id == plain.id
+
+
 def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
     """Rule 4: after the stop budget the row is cancelled, effect unknown, never waiting."""
 

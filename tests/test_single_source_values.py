@@ -357,6 +357,67 @@ def test_memory_admission_rejects_reimplemented_fit_predicates() -> None:
     )
 
 
+def _hand_rolled_memory_fits(
+    source: str, *, allowed: frozenset[str] = frozenset()
+) -> list[int]:
+    """Lines subtracting a reserved or occupied figure and the memory floor."""
+    import ast
+
+    def names(node: ast.AST) -> set[str]:
+        return {
+            item.id if isinstance(item, ast.Name) else item.attr
+            for item in ast.walk(node)
+            if isinstance(item, ast.Name | ast.Attribute)
+        }
+
+    tree = ast.parse(source)
+    excused = {
+        line
+        for function in ast.walk(tree)
+        if isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef)
+        and function.name in allowed
+        for line in range(function.lineno, (function.end_lineno or function.lineno) + 1)
+    }
+    return [
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Sub)
+        and node.lineno not in excused
+        and any("floor" in name for name in names(node))
+        and any(("reserved" in name or "occupied" in name) for name in names(node))
+    ]
+
+
+def test_no_controller_module_reimplements_the_memory_fit() -> None:
+    # Every admission asks the one owner (``plan_capacity``); a copy anywhere in
+    # the Controller drifts from it.
+    owner = "control/src/vonk_control/resource_planning/capacity.py"
+    # Known copy, named by function: the recipe build's memory headroom. It
+    # feeds the owner's capacity snapshot and is replaced by the owner's rule in
+    # its own follow-up change (build memory admission), not in this one.
+    known = {
+        "control/src/vonk_control/recipe_builds/common.py": frozenset(
+            {"_available_build_memory"}
+        )
+    }
+    copies = {
+        f"{path.relative_to(ROOT)}:{line}"
+        for path in (ROOT / "control/src/vonk_control").rglob("*.py")
+        if str(path.relative_to(ROOT)) != owner
+        for line in _hand_rolled_memory_fits(
+            path.read_text(),
+            allowed=known.get(str(path.relative_to(ROOT)), frozenset()),
+        )
+    }
+    assert not copies
+    assert _hand_rolled_memory_fits("fit = reserved_bytes - memory_floor_bytes\n")
+    assert not _hand_rolled_memory_fits(
+        "def f():\n    return reserved_bytes - memory_floor_bytes\n",
+        allowed=frozenset({"f"}),
+    )
+
+
 def uv_pin_violations(root: Path, files: list[str]) -> list[str]:
     """One owner, including stale and future literals, across executable inputs."""
     import re

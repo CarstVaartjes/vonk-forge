@@ -6,13 +6,11 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import func, select
 from vonk_agent_protocol import ModelCacheCode, WaitReason
 
-from .. import model_cache_states
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue
-from ..models import ModelCacheOperation, ModelCacheSet
+from ..models import ModelCacheSet
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
 from .errors import (
@@ -78,15 +76,9 @@ class AvailabilityMixin:
                         row.state = "needs-repair"
                         row.last_error = "a stored object lost its receipt"
                     row.updated_at = now
-                active = session.scalar(
-                    select(func.count())
-                    .select_from(ModelCacheOperation)
-                    .where(
-                        ModelCacheOperation.artifact_set_sha256 == manifest.digest,
-                        ModelCacheOperation.kind.in_(["download", "repair"]),
-                        ModelCacheOperation.state.in_(model_cache_states.LIVE),
-                    )
-                )
+            active = cache.reusable_operation(
+                artifact_set_sha256=manifest.digest, include_succeeded=False
+            )
             if present or active or row is None:
                 return
             preview = cache._download_preview_for_manifest(manifest)
