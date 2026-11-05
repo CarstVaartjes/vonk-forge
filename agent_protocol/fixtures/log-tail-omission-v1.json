@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "description": "The omission marker a retained log tail carries between its cause lines and its window (Rust omission_marker), and how a reader bounds such a tail (Rust clamp_retained, Controller _keep_retained).",
+  "markers": {
+    "valid": [
+      "[0 bytes omitted]",
+      "[7943 bytes omitted]"
+    ],
+    "invalid": [
+      "[ bytes omitted]",
+      "[12 bytes omitted] x",
+      "[\u0663 bytes omitted]",
+      "x[1 bytes omitted]",
+      "[-1 bytes omitted]",
+      "[12 bytes  omitted]"
+    ]
+  },
+  "clamps": [
+    {
+      "text": "a\n[3 bytes omitted]\nb\n",
+      "limit": 64,
+      "kept": "a\n[3 bytes omitted]\nb\n",
+      "dropped_bytes": 0
+    },
+    {
+      "text": "line one\nline two\nline three\nline four\n",
+      "limit": 20,
+      "kept": "line four\n",
+      "dropped_bytes": 29
+    },
+    {
+      "text": "abcdefghijklmnopqrstuvwxyz\n",
+      "limit": 10,
+      "kept": "rstuvwxyz\n",
+      "dropped_bytes": 17
+    },
+    {
+      "text": "why it failed\n[500 bytes omitted]\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nthe end\n",
+      "limit": 64,
+      "kept": "why it failed\n[500 bytes omitted]\nframe 4\nframe 5\nthe end\n",
+      "dropped_bytes": 24
+    },
+    {
+      "text": "cause one is long\ncause two is long\ncause three is long\ncause four\n[9 bytes omitted]\nend\n",
+      "limit": 64,
+      "kept": "cause one is long\ncause two is long\n[9 bytes omitted]\nend\n",
+      "dropped_bytes": 31
+    },
+    {
+      "text": "why\n[12 bytes omitted] x\nframe 1\nframe 2\nframe 3\nframe 4\nframe 5\nframe 6\nthe end\n",
+      "limit": 40,
+      "kept": "frame 4\nframe 5\nframe 6\nthe end\n",
+      "dropped_bytes": 49
+    },
+    {
+      "text": "first\n[1 bytes omitted]\nsecond\n[2 bytes omitted]\nframe 1\nframe 2\nframe 3\nthe end",
+      "limit": 48,
+      "kept": "first\n[1 bytes omitted]\nframe 2\nframe 3\nthe end",
+      "dropped_bytes": 33
+    }
+  ]
+}

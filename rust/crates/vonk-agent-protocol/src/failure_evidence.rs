@@ -159,7 +159,31 @@ impl FailureDiagnostics {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExitCause, FailureDiagnostics};
+    use super::{ExitCause, FailureDiagnostics, is_omission_marker, omission_marker};
+
+    #[test]
+    fn the_shared_omission_vector_reads_the_marker_as_it_is_written() {
+        // The Controller's copy of the marker is held to this vector too.
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/fixtures/log-tail-omission-v1.json"
+        ))
+        .expect("log-tail omission vector");
+        let lines = |kind: &str| {
+            vector["markers"][kind]
+                .as_array()
+                .expect("marker lines")
+                .iter()
+                .map(|line| line.as_str().expect("marker line").to_owned())
+                .collect::<Vec<_>>()
+        };
+        for line in lines("valid") {
+            assert!(is_omission_marker(&line), "{line}");
+        }
+        for line in lines("invalid") {
+            assert!(!is_omission_marker(&line), "{line}");
+        }
+        assert!(lines("valid").contains(&omission_marker(7943)));
+    }
 
     #[test]
     fn the_shared_exit_cause_vector_names_every_cause_and_token() {

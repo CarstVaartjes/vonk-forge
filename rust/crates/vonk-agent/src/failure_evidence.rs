@@ -915,6 +915,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_retained_tail_is_bounded_as_the_shared_clamp_vector_says() {
+        // The Controller's bound of the same text is held to this vector too.
+        let vector: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/fixtures/log-tail-omission-v1.json"
+        ))
+        .expect("log-tail omission vector");
+        for case in vector["clamps"].as_array().expect("clamp cases") {
+            let text = case["text"].as_str().expect("text").to_owned();
+            let limit = case["limit"].as_u64().expect("limit") as usize;
+            let (kept, dropped) = clamp_retained(text.clone(), limit);
+            assert_eq!(kept, case["kept"].as_str().expect("kept"), "{text:?}");
+            assert_eq!(
+                dropped as u64,
+                case["dropped_bytes"].as_u64().expect("dropped"),
+                "{text:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_podman_crash_header_stays_ahead_of_its_goroutine_dump() {
         // Wrong implementation: keep only the last lines, which are all stack
         // frames, so the evidence never names the crash.

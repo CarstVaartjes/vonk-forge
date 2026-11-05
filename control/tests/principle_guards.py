@@ -1215,8 +1215,10 @@ def scan_rust(source: str, *, path: str) -> list[Site]:
 
 def rust_test_lines(source: str) -> set[int]:
     """Identify cfg(test) items without hiding subsequent production items."""
+    # A char literal is masked too: `'"'` would otherwise open a string that
+    # swallows the rest of the file, `cfg(test)` included.
     masked = re.sub(
-        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"',
+        r"//[^\n]*|/\*.*?\*/|\"(?:\\.|[^\"\\])*\"|'(?:\\u\{[0-9a-fA-F]+\}|\\.|[^'\\\n])'",
         lambda match: re.sub(r"[^\n]", " ", match.group()),
         source,
         flags=re.DOTALL,

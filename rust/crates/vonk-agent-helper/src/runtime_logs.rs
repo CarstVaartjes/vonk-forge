@@ -468,9 +468,14 @@ fn ahead_of_window(
 /// wrapper's own traceback follows it, so a window at the end keeps frames and
 /// loses the message.
 const NATIVE_ABORT: &[u8] = b"terminate called ";
+/// The opener that a `what()` message follows.  The handler's other reports
+/// (`terminate called without an active exception`, `... recursively`) are one
+/// line each.
+const NATIVE_ABORT_THROWN: &[u8] = b"terminate called after throwing";
 
-/// The last native abort report above `before`: its opening line and the
-/// `what()` message lines after it, whole lines within `budget` bytes.
+/// The last native abort report above `before`: its opening line and, for a
+/// thrown exception, the `what()` message lines after it, whole lines within
+/// `budget` bytes.
 fn native_abort(stream: &[u8], before: usize, budget: usize) -> Vec<Range<usize>> {
     let above = &stream[..before];
     let mut offset = 0;
@@ -505,6 +510,9 @@ fn native_abort(stream: &[u8], before: usize, budget: usize) -> Vec<Range<usize>
         }
         used += line.len();
         kept.push(range);
+        if kept.len() == 1 && !contains(line, NATIVE_ABORT_THROWN) {
+            break;
+        }
     }
     kept
 }
@@ -1191,6 +1199,56 @@ mod tests {
         let tail = retain(&stream);
         assert_eq!(tail.text, String::from_utf8_lossy(&stream));
         assert_eq!(tail.dropped_bytes, Some(0));
+    }
+
+    #[test]
+    fn a_cause_line_the_window_opens_inside_is_kept_whole() {
+        // Wrong implementation this catches: a cause line was kept only when
+        // it ended before the window's first byte, and the window drops the
+        // partial line it opens inside, so a `what()` line straddling that
+        // byte was in neither and the message was lost.
+        let opener = "terminate called after throwing an instance of 'c10::Error'\n";
+        let message = format!("  what():  CUDA error: {}\n", "e".repeat(176));
+        assert_eq!(message.len(), 200);
+        let frames: String = (0..50)
+            .map(|frame| format!("frame #{frame:03}: python3() [0x4f9e4c]\n"))
+            .collect();
+        // The window keeps the bound less the causes and the marker reserve:
+        // 2048 - 260 - 48 = 1740 bytes, which opens inside the message line
+        // (it spans the 1850..1650 bytes before the end).
+        let window = RETAINED_BYTES - opener.len() - message.len() - OMISSION_MARKER_BYTES;
+        assert!(frames.len() < window && window < frames.len() + message.len());
+        let stream = format!("{}{opener}{message}{frames}", "INFO loading\n".repeat(40));
+        let tail = retain(stream.as_bytes());
+        assert!(
+            tail.text.starts_with(&format!("{opener}{message}[")),
+            "{}",
+            tail.text
+        );
+        assert_eq!(tail.text.matches("what():").count(), 1, "{}", tail.text);
+        assert!(tail.text.ends_with("frame #049: python3() [0x4f9e4c]\n"));
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
+    }
+
+    #[test]
+    fn a_terminate_without_an_exception_is_one_line() {
+        // Wrong implementation this catches: every line after any `terminate
+        // called` was read as its message, so a report with no message took
+        // up to half the budget from the window.
+        let stream = format!(
+            "terminate called without an active exception\n{}{}",
+            "worker 3 still holds the device\n".repeat(20),
+            "frame\n".repeat(400)
+        );
+        let tail = retain(stream.as_bytes());
+        let marker = tail.text.find(" bytes omitted]\n").expect(&tail.text);
+        assert_eq!(
+            &tail.text[..tail.text[..marker].rfind('\n').map_or(0, |index| index + 1)],
+            "terminate called without an active exception\n",
+            "{}",
+            tail.text
+        );
+        assert!(tail.text.len() <= RETAINED_BYTES, "{}", tail.text.len());
     }
 
     /// The live vLLM shape of a start that runs out of memory: the engine
