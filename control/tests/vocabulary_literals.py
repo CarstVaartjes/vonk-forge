@@ -122,7 +122,9 @@ _SEPARATORS = ("-", "_", ".")
 #: ``waiting-for-operator`` in any context).  No source may spell them as a state;
 #: they are read as a *state* when the statement that holds them also names a state
 #: (``row.state``, ``state=``, ``_STORED_STATES``, ``State.RUNNING``).
-LEGACY_STATE_WORDS = frozenset({"cancelling", "waiting", "partial", "expired"})
+LEGACY_STATE_WORDS = frozenset(
+    {"cancelling", "waiting", "partial", "expired", "compensated"}
+)
 #: The machine words that name nothing but a state of one of those machines: the
 #: lifecycle words and the retired spellings have their own tiers, and a word that
 #: is also ordinary prose or a field value elsewhere (``active``, ``pending``,

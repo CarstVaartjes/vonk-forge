@@ -34,6 +34,17 @@ RETIRED_SPELLINGS = re.compile(
     r"waiting-for-operator|\b(STATE_ALIASES|INPUT_ALIASES|STATE_INPUT_ALIASES"
     r"|JOB_KIND_ALIASES|LEGACY_WAIT_STATE)\b"
 )
+#: A retired stored-state word compared with a ``state`` in the web client.  The
+#: words are ordinary English elsewhere (a ``partial`` coverage, a ``draft``
+#: preparation), so only a comparison with something named ``state`` counts.
+_RETIRED_STATE_WORD = (
+    r"""["'](?:partial|compensated|cancelling|waiting|expired|draft|ready)["']"""
+)
+_STATE = r"(?:[\w?]+\.)*\w*[sS]tate\b[\w.?\])]*"
+RETIRED_STATE_COMPARISON = re.compile(
+    rf"{_STATE}\s*[!=]==?\s*{_RETIRED_STATE_WORD}"
+    rf"|{_RETIRED_STATE_WORD}\s*[!=]==?\s*{_STATE}"
+)
 _WEB_COMMENT = re.compile(r"//.*$|/\*.*?\*/")
 MALFORMED = frozenset(
     {
@@ -72,7 +83,7 @@ def scan_web_source(source: str) -> list[tuple[int, str]]:
         code = _WEB_COMMENT.sub("", text)
         if WORDS.search(code):
             hits.append((line, "legacy or compatibility path"))
-        if RETIRED_SPELLINGS.search(code):
+        if RETIRED_SPELLINGS.search(code) or RETIRED_STATE_COMPARISON.search(code):
             hits.append((line, "retired state spelling"))
     return hits
 

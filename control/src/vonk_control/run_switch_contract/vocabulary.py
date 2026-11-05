@@ -10,6 +10,7 @@ from pydantic import (
 )
 from vonk_agent_protocol import (
     LifecycleState,
+    OutcomeKind,
 )
 
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
@@ -98,7 +99,7 @@ RunSwitchProgressState = Literal[
     LifecycleState.SUCCEEDED,
     LifecycleState.FAILED,
     LifecycleState.CANCELLED,
-    "unknown",
+    OutcomeKind.UNKNOWN,
 ]
 
 RunSwitchOperationKind = Literal[

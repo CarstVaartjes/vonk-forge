@@ -143,23 +143,31 @@ def test_a_waiting_job_adopts_as_a_wait_that_advertises_resume(env) -> None:
 @pytest.mark.parametrize(
     "word", ["waiting-for-operator", "waiting", "cancelling", "partial", "expired"]
 )
-def test_a_row_with_a_retired_word_is_unknown_and_heals(env, word: str) -> None:
-    """Principle 20: an unknown stored word reaches the self-healing branch.
+def test_the_adapter_re_evaluates_a_word_it_does_not_know(word: str) -> None:
+    """A unit test of the adapter's fallback, not of what a table can hold.
 
-    A retired spelling means nothing now: it is not adopted as any state, and the
-    row is re-evaluated (retried) on its first tick, never trusted, refused or
-    left for a person; once its retry is due the job is offered for a fresh claim.
+    The state CHECK refuses these words (``test_lifecycle_state_checks_postgres``);
+    a row that predates the CHECK reaches this branch: it is not adopted as any
+    state, its first tick retries it and the retry is offered for a fresh claim.
     """
 
-    jobs, sessions, _ = env
-    job = jobs.enqueue("probe", "a", "r", ["n"], {})
-    with sessions.begin() as session:
-        stored = session.get(Job, job.id)
-        stored.state, stored.current_attempt = word, 1
+    job = JobAdapter.new_job(
+        id="job-unknown",
+        state=word,
+        request_id="r-unknown",
+        kind="probe",
+        actor="a",
+        authority_revision="r",
+        targets=["n"],
+        payload_digest="d" * 64,
+        payload={},
+        current_attempt=1,
+        created_at=NOW,
+        updated_at=NOW,
+    )
     assert job_states.core(word) is None
     adapter = JobAdapter()
-    with sessions() as session:
-        row = adapter.adopt(session.get(Job, job.id))
+    row = adapter.adopt(job)
     retried = transition(row, Tick(), adapter, NOW).row
     assert retried.state is State.BACKOFF and retried.next_action_at is not None
     due = transition(retried, Tick(), adapter, retried.next_action_at)

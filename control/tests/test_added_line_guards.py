@@ -2385,6 +2385,36 @@ def test_the_stored_json_readers_are_not_exempt_from_the_legacy_guard(path):
 
 
 @pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        ("control/web/src/pages/x.tsx", 'if (job.state === "partial") {\n'),
+        ("control/web/src/pages/x.tsx", 'const old = "cancelling" !== detail.state;\n'),
+        ("control/web/src/pages/x.ts", 'if (row.state?.value == "compensated") {}\n'),
+        ("control/web/src/pages/x.tsx", "const wait = LEGACY_WAIT_STATE;\n"),
+        ("control/web/src/styles.css", ".row-waiting-for-operator{color:red}\n"),
+        ("src/cluster_profiles/x.py", 'WAIT = "waiting-for-operator"\n'),
+        ("scripts/x.py", "from x import STATE_INPUT_ALIASES\n"),
+    ],
+)
+def test_a_retired_state_spelling_is_flagged_in_every_language(path, source):
+    assert check_source(path, source, {1}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        ("control/web/src/pages/x.tsx", 'if (job.preparation === "draft") {\n'),
+        ("control/web/src/pages/x.tsx", 'if (coverage === "partial") {\n'),
+        ("control/web/src/pages/x.tsx", "// the old waiting-for-operator word\n"),
+        ("control/web/src/api/vocabulary.generated.ts", "const legacy = 1;\n"),
+        ("control/web/src/pages/x.test.tsx", 'expect(state === "partial");\n'),
+    ],
+)
+def test_current_web_code_passes_the_legacy_guard(path, source):
+    assert not check_source(path, source, {1}, modes=("legacy",))
+
+
+@pytest.mark.parametrize(
     "path", ["control/tests/test_x.py", "rust/crates/x/src/lib.rs"]
 )
 def test_tests_and_other_languages_are_outside_the_legacy_guard(path):

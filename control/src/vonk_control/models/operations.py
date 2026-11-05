@@ -15,9 +15,14 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
-from vonk_agent_protocol import DistributionAssignmentState, machine_check
+from vonk_agent_protocol import (
+    DistributionAssignmentState,
+    LifecycleState,
+    LifecycleSubject,
+    machine_check,
+)
 
-from ..model_primitives import Base, _lower_hex
+from ..model_primitives import Base, _lower_hex, _state_in
 from ..repeated_evidence_contract import RepeatedEvidence
 from ..stored_json import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
@@ -25,6 +30,12 @@ from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 class AgentOperation(Base):
     __tablename__ = "agent_operations"
+    __table_args__ = (
+        CheckConstraint(
+            _state_in(LifecycleSubject.AGENT_OPERATION, *LifecycleState),
+            name="ck_agent_operations_state",
+        ),
+    )
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__
     )
@@ -144,7 +155,13 @@ class ArtifactDistributionAssignment(Base):
 
 class AgentOperationAttempt(Base):
     __tablename__ = "agent_operation_attempts"
-    __table_args__ = (UniqueConstraint("operation_id", "attempt"),)
+    __table_args__ = (
+        UniqueConstraint("operation_id", "attempt"),
+        CheckConstraint(
+            _state_in(LifecycleSubject.AGENT_OPERATION_ATTEMPT, *LifecycleState),
+            name="ck_agent_operation_attempts_state",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )

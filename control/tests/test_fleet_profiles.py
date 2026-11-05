@@ -2641,7 +2641,7 @@ def test_waiting_switch_child_keeps_the_profile_running(tmp_path: Path) -> None:
     with sessions.begin() as session:
         job = session.get(Job, child_id)
         assert job is not None
-        job.state = "waiting"
+        job.state = "observing"
         job.status_reason = "Runtime image preparation is running in the background"
         job.updated_at = lifecycle._clock()
 

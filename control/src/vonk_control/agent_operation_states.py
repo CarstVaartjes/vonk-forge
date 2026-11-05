@@ -52,6 +52,17 @@ RUNNING_OR_PARKED: tuple[str, ...] = stored_words(
 )
 #: An order that has not ended.
 LIVE: tuple[str, ...] = live_words(ORDER)
+#: An order a parent's aggregate considers finished: ended, or waiting for a
+#: person (the parent then waits with it).
+AGGREGATE_FINAL: tuple[str, ...] = stored_words(
+    ORDER,
+    (
+        LifecycleState.SUCCEEDED,
+        LifecycleState.FAILED,
+        LifecycleState.CANCELLED,
+        LifecycleState.NEEDS_OPERATOR,
+    ),
+)
 
 
 def order_is_parked(stored: str | None) -> bool:

@@ -18,13 +18,19 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
+from vonk_agent_protocol import LifecycleState, LifecycleSubject
 
-from ..model_primitives import Base, _lower_hex
+from ..model_primitives import Base, _lower_hex, _state_in
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        CheckConstraint(
+            _state_in(LifecycleSubject.JOB, *LifecycleState), name="ck_jobs_state"
+        ),
+    )
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__
     )
@@ -60,7 +66,13 @@ class Job(Base):
 
 class JobAttempt(Base):
     __tablename__ = "job_attempts"
-    __table_args__ = (UniqueConstraint("job_id", "attempt"),)
+    __table_args__ = (
+        UniqueConstraint("job_id", "attempt"),
+        CheckConstraint(
+            _state_in(LifecycleSubject.JOB_ATTEMPT, *LifecycleState),
+            name="ck_job_attempts_state",
+        ),
+    )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )

@@ -140,15 +140,7 @@ ENDED_PARENT_STATES = frozenset(
 )
 #: States in which a parent's aggregate considers an order finished (a waiting
 #: order is final for the aggregate: the parent then waits with it).
-AGGREGATE_FINAL_STATES = frozenset(
-    state.value
-    for state in (
-        LifecycleState.CANCELLED,
-        LifecycleState.FAILED,
-        LifecycleState.SUCCEEDED,
-        LifecycleState.NEEDS_OPERATOR,
-    )
-)
+AGGREGATE_FINAL_STATES = frozenset(aos.AGGREGATE_FINAL)
 #: The operator actions of a parked order (the same pair the Job endpoints take).
 OPERATOR_ACTIONS = (ActionName.RESUME.value, ActionName.RETIRE.value)
 _MAX_REASON = 512
