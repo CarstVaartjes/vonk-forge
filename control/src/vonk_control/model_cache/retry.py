@@ -273,6 +273,8 @@ class RetryMixin:
                 now=now,
                 force=refreshes(previous, previous_payload),
                 excluding=previous.id,
+                # The operator reads this receipt by its own request key.
+                attach=False,
                 prepare=lambda: cache._require_model_sets_open(
                     session, (requested_set,), now=now
                 ),

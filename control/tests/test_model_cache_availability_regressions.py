@@ -896,6 +896,95 @@ def test_hf_access_recheck_resumes_the_exact_retained_transfer(
     client.close()
 
 
+def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
+    tmp_path: Path,
+) -> None:
+    from fastapi import Depends, FastAPI
+    from fastapi.testclient import TestClient
+    from vonk_control.auth import Actor
+    from vonk_control.model_cache_api import install_model_operator_routes
+
+    sessions = _database(tmp_path)
+    token_path = tmp_path / "hf-token"
+    token_path.write_text("bad-token\n")
+    data = b"gated model"
+    now = [NOW]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        if request.headers.get("authorization") == "Bearer bad-token":
+            return httpx2.Response(403, request=request)
+        return httpx2.Response(200, request=request, content=data)
+
+    client = httpx2.Client(
+        transport=httpx2.MockTransport(handler), follow_redirects=False
+    )
+    service = ModelCacheService(
+        sessions,
+        tmp_path / "cache",
+        free_fraction=0,
+        fixture_sources=True,
+        http_client=client,
+        huggingface_token_path=token_path,
+        clock=lambda: now[0],
+    )
+    artifacts = [
+        _artifact("z-hf", data, host="huggingface.co")
+        | {
+            "source": "https://huggingface.co/acme/private/resolve/"
+            + "a" * 40
+            + "/weights-z-hf"
+        }
+    ]
+    model = str(artifacts[0]["model_content_sha256"])
+    preview = service.download_preview(model_content_sha256=model, artifacts=artifacts)
+
+    def start(key: str, selector: str):
+        # Selector requests never attach, so two live transfers can exist.
+        return service.start_download(
+            actor="operator",
+            request_key=key,
+            plan_digest=str(preview["plan_digest"]),
+            model_content_sha256=model,
+            artifacts=artifacts,
+            selector=selector,
+            force=True,
+        )
+
+    older = start("00000000-0000-4000-8000-000000000411", "model-one")
+    newer = start("00000000-0000-4000-8000-000000000412", "model-two")
+    assert older.id != newer.id
+    for _ in range(4):  # the older writer fails first, then the newer one runs
+        service.tick()
+        now[0] += timedelta(seconds=10)
+    assert service.get_operation(older.id).state in {
+        LifecycleState.QUEUED,
+        LifecycleState.BACKOFF,
+    }
+    failure = service.get_operation(newer.id).failure
+    assert failure is not None and failure["code"] == "access_denied"
+
+    actor = Actor("operator", "administrator")
+    app = FastAPI()
+    install_model_operator_routes(
+        app, actor_dependency=Depends(lambda: actor), service=service
+    )
+    key = "00000000-0000-4000-8000-000000000413"
+    with TestClient(app) as api:
+        posted = api.post(
+            f"/api/model/operations/{newer.id}/resume-access",
+            json={"request_key": key},
+        )
+        assert posted.status_code == 202, posted.text
+        resumed = posted.json()["operation_id"]
+        assert resumed not in {older.id, newer.id}
+        observed = api.get(f"/api/model/requests/{key}")
+        assert observed.status_code == 200, observed.text
+        assert observed.json()["operation_id"] == resumed
+    assert service.get_operation(newer.id).state == LifecycleState.CANCELLED
+    service.close()
+    client.close()
+
+
 def test_failed_model_cache_detail_redacts_signed_source_url(tmp_path: Path) -> None:
     sessions = _database(tmp_path)
     service, _ = _service(tmp_path, sessions, maximum=1)
