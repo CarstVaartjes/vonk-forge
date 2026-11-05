@@ -40,6 +40,7 @@ from ..library_contract import (
     LibraryRecipeProjection,
 )
 from ..library_image_presence import ImageKey
+from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache.lineage import verifies_model
 from ..model_cache_contract import (
     CacheManifest,
@@ -207,9 +208,6 @@ def _latest_cache_operations(
         .subquery()
     )
     return select(ranked.c.id).where(ranked.c.position == 1)
-
-
-_ENDED_INSTALLATIONS = (InstallationState.UNINSTALLED, InstallationState.FAILED)
 
 
 def _fold_local_facts(
@@ -521,9 +519,9 @@ def _database_local_state(
         installation_revision[installation_id] = installation_revision_id
         if (
             adopt_machine_state(InstallationState, installation_state)
-            in _ENDED_INSTALLATIONS
+            not in INSTALLATION_ACTIVE
         ):
-            # An ended installation says nothing about what is cached now: the
+            # Only an active installation says what is cached now: the
             # retention uninstall after 24 h must not pull a recipe down.
             continue
         self._merge_local(
