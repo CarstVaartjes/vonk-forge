@@ -11,6 +11,7 @@ from vonk_forge_contracts.memory_admission import PLATFORM_MEMORY_FLOOR_BYTES
 from ..fleet_profile_contract import FleetProfileSwitchAdapter
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..model_cache_contract import CacheResolution
+from ..run_switch_operations.service import INVENTORY_MAX_AGE_SECONDS
 from .application_projection import FleetProfileService as _ApplicationProjection
 from .apply import FleetProfileService as _Apply
 from .assessment import FleetProfileService as _Assessment
@@ -77,7 +78,7 @@ class FleetProfileService(
         cache_resolver: Callable[..., CacheResolution] | None = None,
         assessment_provider: _AssessmentProvider | None = None,
         memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
-        inventory_max_age_seconds: int = 300,
+        inventory_max_age_seconds: int = INVENTORY_MAX_AGE_SECONDS,
     ) -> None:
         self._sessions = sessions
         self._clock = clock

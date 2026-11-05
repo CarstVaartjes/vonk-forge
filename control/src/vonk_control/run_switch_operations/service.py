@@ -67,6 +67,9 @@ from .retry_holds import RetryHoldsMixin
 from .run_planning import RunPlanningMixin
 from .stop_planning import StopPlanningMixin
 
+#: How old a Spark's inventory sample may be and still count as current.
+INVENTORY_MAX_AGE_SECONDS = 300
+
 
 class RunSwitchOperationService(
     StopPlanningMixin,
@@ -101,7 +104,7 @@ class RunSwitchOperationService(
         phase_executor: RunSwitchPhaseExecutor | None = None,
         model_cache: ModelCacheService | None = None,
         build_archive_available: Callable[[str, int], bool] | None = None,
-        inventory_max_age_seconds: int = 300,
+        inventory_max_age_seconds: int = INVENTORY_MAX_AGE_SECONDS,
         memory_floor_bytes: int = PLATFORM_MEMORY_FLOOR_BYTES,
     ) -> None:
         if not 1 <= inventory_max_age_seconds <= 86_400:

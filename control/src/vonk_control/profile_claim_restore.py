@@ -10,9 +10,9 @@ rolls the restore back and plans the load again like a fresh request
 (``ConstraintReplan``), which then waits or evicts through the ordinary
 review; nothing blocks.
 
-The commitment half of the rule (pool - reserved - demand - floor) needs no
-observation, so it is enforced even when the Spark's inventory is missing or
-stale; only the observed-free half waits for a current sample.
+Memory goes through ``plan_capacity`` alone: missing or stale inventory is not
+admitted there (CAPACITY_UNKNOWN), so the restore re-plans and the review waits
+for a fresh sample. Disk is likewise judged against a current sample only.
 """
 
 from collections.abc import Sequence
@@ -22,7 +22,6 @@ from typing import get_args
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ReservationState
-from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
 from . import fleet_profile_states
 from .admission_locking import (
@@ -42,7 +41,7 @@ from .resource_planning import (
     memory_reservation_kind,
     plan_capacity,
 )
-from .run_switch_contract import MemoryKind
+from .run_switch_contract import FreshnessEvidence, MemoryKind
 from .run_switch_operations.planning_helpers import PlanInventory
 from .spark_disk import spark_free_bytes
 
@@ -89,7 +88,8 @@ def restore_released_profile_claims(
     ]
     if node_ids is not None:
         conditions.append(ResourceReservation.node_id.in_(node_ids))
-    # Admission order: the node keys first, then the rows.
+    # The caller already holds the application row. Take the node keys, then
+    # the claim rows, as every admission does.
     nodes = tuple(
         session.scalars(
             select(ResourceReservation.node_id)
@@ -141,31 +141,30 @@ def restore_released_profile_claims(
             raise ProfileClaimCapacityShort(node_id, kind)
 
 
+def _fresh(evidence: FreshnessEvidence) -> bool:
+    return (
+        evidence.age_seconds is not None
+        and evidence.maximum_age_seconds is not None
+        and evidence.age_seconds <= evidence.maximum_age_seconds
+    )
+
+
 def _disk_admitted(session: Session, inventory: PlanInventory, node_id: str) -> bool:
+    """Disk is judged against a current sample only, as every disk admission is."""
     snapshot, evidence = inventory.read(node_id)
-    if snapshot is None:
-        return True
-    if snapshot.disk_total_bytes is None or snapshot.disk_free_bytes is None:
-        return True
+    if snapshot is None or not _fresh(evidence) or snapshot.disk_free_bytes is None:
+        return False
     committed = sum(
         charge.amount_bytes
         for charge in outstanding_disk_charges(
             session, node_id, inventory_observed_at=snapshot.observed_at
         )
     )
-    current = (
-        evidence.age_seconds is not None
-        and evidence.maximum_age_seconds is not None
-        and evidence.age_seconds <= evidence.maximum_age_seconds
+    return (
+        spark_free_bytes(snapshot.disk_free_bytes, snapshot.unused_model_bytes)
+        - committed
+        >= 0
     )
-    if current:
-        return (
-            spark_free_bytes(snapshot.disk_free_bytes, snapshot.unused_model_bytes)
-            - committed
-            >= 0
-        )
-    # No current observation: the device size still bounds the commitments.
-    return snapshot.disk_total_bytes - committed >= 0
 
 
 def _memory_admitted(
@@ -175,7 +174,11 @@ def _memory_admitted(
     node_id: str,
     memory_floor_bytes: int,
 ) -> bool:
-    """The load's own memory claims on the node, against everyone else's."""
+    """The load's own memory claims on the node, against everyone else's.
+
+    Stale or missing inventory is ``plan_capacity``'s own CAPACITY_UNKNOWN: not
+    admitted, so the load is planned again and waits there for a fresh sample.
+    """
     own = tuple(
         session.scalars(
             select(ResourceReservation)
@@ -191,9 +194,6 @@ def _memory_admitted(
         )
     )
     snapshot, evidence = inventory.read(node_id)
-    if not own or snapshot is None:
-        return True
-    floor = memory_floor_bytes
     demand = ResourceDemand(
         None,
         None,
@@ -208,16 +208,18 @@ def _memory_admitted(
         for item in get_args(MemoryKind)
         if memory_reservation_kind(item) == own[0].kind
     )
-    pool = snapshot.memory_pool
+    pool = snapshot.memory_pool if snapshot is not None else None
     capacity = memory_capacity_snapshot(
         node_id,
         kind,
         host=(snapshot.host_memory_total_bytes, snapshot.host_memory_free_bytes)
-        if snapshot.host_memory_total_bytes is not None
+        if snapshot is not None
+        and snapshot.host_memory_total_bytes is not None
         and snapshot.host_memory_free_bytes is not None
         else None,
         accelerator=(snapshot.gpu_memory_total_bytes, snapshot.gpu_memory_free_bytes)
-        if snapshot.gpu_memory_total_bytes is not None
+        if snapshot is not None
+        and snapshot.gpu_memory_total_bytes is not None
         and snapshot.gpu_memory_free_bytes is not None
         else None,
         reservations=memory_reservations(
@@ -225,29 +227,11 @@ def _memory_admitted(
             node_id,
             memory_pool=pool,
             excluded_profile_application_ids=(application.id,),
-            observed_at=snapshot.observed_at,
+            observed_at=snapshot.observed_at if snapshot is not None else None,
         ),
         memory_pool=pool,
         evidence_state=evidence.state,
     )
-    current = (
-        evidence.age_seconds is not None
-        and evidence.maximum_age_seconds is not None
-        and evidence.age_seconds <= evidence.maximum_age_seconds
-    )
-    if current:
-        return plan_capacity(
-            {node_id: demand}, [capacity], memory_floor_bytes=floor
-        ).allowed
-    # The pool is static: commitments are checked without the observed half.
-    return all(
-        part.available_bytes is None
-        or evaluate_memory_admission(
-            demand.total_bytes or 0,
-            part.available_bytes,
-            memory_floor_bytes=floor,
-            reserved_bytes=part.reserved_bytes or 0,
-        ).commitment_headroom_bytes
-        >= 0
-        for part in (capacity.components or (capacity,))
-    )
+    return plan_capacity(
+        {node_id: demand}, [capacity], memory_floor_bytes=memory_floor_bytes
+    ).allowed
