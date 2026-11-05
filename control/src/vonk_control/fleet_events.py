@@ -634,8 +634,8 @@ class FleetEventRecorder:
             _stored_payload(draft)
         except (TypeError, ValueError):
             repository._allocate_cursor(session)
-            return
-        repository.append_in_session(session, draft)
+        else:
+            repository.append_in_session(session, draft)
 
     @classmethod
     def _candidate_order(cls, value: object) -> tuple[int, str]:
