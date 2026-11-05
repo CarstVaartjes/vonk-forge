@@ -142,9 +142,10 @@ def test_a_transfer_child_cancelled_by_another_consumer_is_asked_for_again(
     waiting = service.get(accepted.operation_id)
     assert waiting.state != LifecycleState.FAILED.value, waiting.status_reason
     assert waiting.result is not None and waiting.result.child_operation_id is None
-    now[0] += timedelta(hours=2)
-    service = worker()
-    for _ in range(3):
+    # The re-request is due within the dependency window, not after it.
+    for _ in range(6):
+        now[0] += timedelta(minutes=5)
+        service = worker()
         service.tick()
     again = service.get(accepted.operation_id)
     assert again.state != LifecycleState.FAILED.value, again.status_reason
