@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -12,6 +11,8 @@ from vonk_control.browser_auth import bootstrap_administrator
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import Base, User
 from vonk_control.recipe_update_batches import RecipeUpdateBatches
+
+from .lock_wait_support import backend_pid, lock_waits_behind
 
 
 @pytest.fixture
@@ -60,19 +61,10 @@ def test_the_bootstrap_still_waits_for_another_user_authority_writer(
     with sessions.begin() as holder:
         holder.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
         bootstrap = pool.submit(bootstrap_administrator, sessions, "pw-" + "x" * 20)
-        # Prove the wait by behaviour: a backend is blocked on a lock while the
-        # holder still has it, and the bootstrap has not returned.
-        for _ in range(300):
-            if holder.scalar(
-                text(
-                    "SELECT count(*) FROM pg_stat_activity "
-                    "WHERE wait_event_type = 'Lock' AND datname = current_database()"
-                )
-            ):
-                break
-            time.sleep(0.1)
-        else:
-            pytest.fail("the bootstrap never waited for the users lock")
-        assert not bootstrap.done()
+        # Prove the wait by behaviour: the bootstrap's lock request is queued
+        # behind the holder's lock. pg_stat_activity is a per-transaction
+        # snapshot, so the shared helper samples pg_locks in fresh transactions.
+        waits = lock_waits_behind(sessions, backend_pid(holder), bootstrap)
+        assert any(locktype == "relation" for _, locktype, _ in waits), waits
     assert bootstrap.result(timeout=30).status == "created"
     pool.shutdown()
