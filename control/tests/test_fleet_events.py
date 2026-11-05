@@ -8,10 +8,8 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, func, select, text
-from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, RecipeStopPayload, canonical_message
-from vonk_control import fleet_events as fleet_event_module
 from vonk_control import models
 from vonk_control.auth import TokenCodec
 from vonk_control.db import session_factory
@@ -212,15 +210,16 @@ def _telemetry_sample(
 def test_committed_cursor_and_events_survive_repository_recreation(sessions) -> None:
     writer = FleetEventRepository(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
-        first = writer.append_in_session(session, _draft())
+        writer.append_in_session(session, _draft())
     reader = FleetEventRepository(sessions, clock=lambda: NOW)
-    assert reader.high_watermark() == first.id
+    assert reader.high_watermark() == 1
     replay = reader.after(0, NOW, limit=1)
-    assert len(replay) == 1 and replay[0].id == first.id
+    assert len(replay) == 1 and replay[0].id == 1
     with sessions.begin() as session:
-        fresh = reader.append_in_session(session, _draft(entity_id="fresh"))
-    assert fresh.id > first.id
-    assert reader.after(first.id, NOW, limit=1)[0].entity_id == "fresh"
+        reader.append_in_session(session, _draft(entity_id="fresh"))
+    assert [(row.id, row.entity_id) for row in reader.after(1, NOW, limit=2)] == [
+        (2, "fresh")
+    ]
 
 
 def test_database_rejects_payload_over_8192_utf8_bytes(sessions) -> None:
@@ -254,8 +253,8 @@ def test_database_rejects_payload_over_8192_utf8_bytes(sessions) -> None:
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     assert repository.after(0, NOW, limit=1) == ()
     with sessions.begin() as session:
-        fresh = repository.append_in_session(session, _draft())
-    assert repository.after(0, NOW, limit=1)[0].id == fresh.id
+        repository.append_in_session(session, _draft())
+    assert [row.id for row in repository.after(0, NOW, limit=2)] == [1]
 
 
 def test_postgres_payload_byte_limit_ends_without_blocking_fresh_event(
@@ -273,16 +272,22 @@ def test_repository_allocates_increasing_ids_and_exact_semantic_expiry(
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
 
     with sessions.begin() as session:
-        first = repository.append_in_session(session, _draft(entity_id="job-1"))
-        second = repository.append_in_session(session, _draft(entity_id="job-2"))
+        repository.append_in_session(session, _draft(entity_id="job-1"))
+        repository.append_in_session(session, _draft(entity_id="job-2"))
 
-    assert (first.id, second.id) == (1, 2)
+    first, second = repository.after(0, NOW, limit=2)
+    assert (first.id, first.entity_id, second.id, second.entity_id) == (
+        1,
+        "job-1",
+        2,
+        "job-2",
+    )
     assert first.occurred_at == NOW
     assert first.expires_at == NOW + timedelta(hours=24)
     assert repository.high_watermark() == 2
 
 
-def test_sqlite_concurrent_allocations_are_unique_and_monotonic(tmp_path) -> None:
+def test_sqlite_ids_follow_commit_order_not_append_order(tmp_path) -> None:
     engine = create_engine(
         f"sqlite:///{tmp_path / 'fleet-events-concurrent.sqlite'}",
         connect_args={"check_same_thread": False, "timeout": 1},
@@ -291,58 +296,32 @@ def test_sqlite_concurrent_allocations_are_unique_and_monotonic(tmp_path) -> Non
     concurrent_sessions = sessionmaker(engine, expire_on_commit=False)
     repository = FleetEventRepository(concurrent_sessions, clock=lambda: NOW)
     first_appended = threading.Event()
-    second_update_started = threading.Event()
-    writer_role = threading.local()
+    second_committed = threading.Event()
 
-    def observe_second_update(
-        _connection, _cursor, statement, _parameters, _context, _many
-    ) -> None:
-        if getattr(
-            writer_role, "value", None
-        ) == "second" and statement.lstrip().upper().startswith(
-            "UPDATE FLEET_EVENT_CURSOR"
-        ):
-            second_update_started.set()
-
-    def first_writer() -> int:
+    def first_writer() -> None:
         with concurrent_sessions.begin() as session:
-            allocated = repository.append_in_session(
-                session, _draft(entity_id="job-first")
-            )
+            repository.append_in_session(session, _draft(entity_id="job-first"))
             first_appended.set()
-            assert second_update_started.wait(timeout=10)
-        return allocated.id
+            # The open transaction holds no cursor: a later writer commits.
+            assert second_committed.wait(timeout=10)
 
-    def second_writer() -> int:
+    def second_writer() -> None:
         assert first_appended.wait(timeout=10)
-        writer_role.value = "second"
         with concurrent_sessions.begin() as session:
-            return repository.append_in_session(
-                session, _draft(entity_id="job-second")
-            ).id
+            repository.append_in_session(session, _draft(entity_id="job-second"))
+        second_committed.set()
 
-    event.listen(engine, "before_cursor_execute", observe_second_update)
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            first = pool.submit(first_writer)
-            second = pool.submit(second_writer)
-            assert (first.result(timeout=10), second.result(timeout=10)) == (1, 2)
-    finally:
-        event.remove(engine, "before_cursor_execute", observe_second_update)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(first_writer)
+        second = pool.submit(second_writer)
+        second.result(timeout=10)
+        first.result(timeout=10)
 
     assert [(row.id, row.entity_id) for row in _event_rows(concurrent_sessions)] == [
-        (1, "job-first"),
-        (2, "job-second"),
+        (1, "job-second"),
+        (2, "job-first"),
     ]
     assert repository.high_watermark() == 2
-
-
-def test_cursor_allocator_compiles_to_a_postgresql_row_lock() -> None:
-    statement = fleet_event_module._cursor_lock_statement()
-    compiled = str(statement.compile(dialect=postgresql.dialect()))
-
-    assert "FROM fleet_event_cursor" in compiled
-    assert "FOR UPDATE" in compiled
 
 
 def test_repository_rollback_removes_source_event_and_cursor_advance(sessions) -> None:
@@ -966,7 +945,7 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
     assert "observed_memory_bytes" not in payload.model_fields_set
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
-        recorded = repository.append_in_session(
+        repository.append_in_session(
             session,
             FleetEventDraft(
                 event_type="recipe-state",
@@ -976,7 +955,8 @@ def test_outbox_preserves_current_values_without_field_presence(sessions) -> Non
                 payload=payload,
             ),
         )
-        row = session.get(models.FleetStreamEvent, recorded.id)
+    with sessions() as session:
+        row = session.get(models.FleetStreamEvent, 1)
         assert row is not None
         assert row.payload["observed_memory_bytes"] == 0
     replay = repository.replay_after(0, NOW, limit=1)
@@ -1012,17 +992,16 @@ def test_missing_cursor_repairs_without_losing_source_or_next_event(sessions):
 
     repository = FleetEventRepository(sessions, clock=lambda: NOW)
     with sessions.begin() as session:
-        first = repository.append_in_session(session, _draft(entity_id="before-loss"))
+        repository.append_in_session(session, _draft(entity_id="before-loss"))
     with sessions.begin() as session:
         session.execute(delete(models.FleetEventCursor))
-    assert repository.high_watermark() == first.id
+    assert repository.high_watermark() == 1
     with sessions.begin() as session:
-        fresh = repository.append_in_session(session, _draft(entity_id="after-loss"))
-    assert fresh.id == first.id + 1
+        repository.append_in_session(session, _draft(entity_id="after-loss"))
     assert [
-        event.entity_id
-        for event in repository.replay_after(first.id, NOW, limit=128).events
-    ] == ["after-loss"]
+        (event.id, event.entity_id)
+        for event in repository.replay_after(1, NOW, limit=128).events
+    ] == [(2, "after-loss")]
 
 
 def test_recorder_watchers_reference_current_owner_fields() -> None:

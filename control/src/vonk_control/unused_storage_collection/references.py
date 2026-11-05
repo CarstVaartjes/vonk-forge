@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -15,7 +15,6 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, WaitReason
 
 from .. import model_cache_states
-from ..artifact_reference_scan import saved_profile_selectors
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
@@ -34,6 +33,7 @@ from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     parse_stored_installation_plan,
 )
+from ..reference_facts import profiles_naming
 from ..spark_disk import spark_free_bytes
 from .common import _COLLECTABLE_STATES, _DEAD_RUNS, _FINISHED_JOBS, ACTOR
 
@@ -341,37 +341,58 @@ def _model_removal_in_flight(session: Session) -> bool:
 
 
 def _profile_pointers(
-    session: Session, only_profile_id: str | None = None
-) -> dict[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None:
+    session: Session,
+    only_profile_id: str | None = None,
+    *,
+    recipes: Collection[tuple[str, str]] | None = None,
+) -> dict[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]]:
     """The profile name and Spark set each saved profile assigns to each recipe.
 
-    ``None`` when a profile cannot be read as the current contract: nothing is
-    then provably unpointed, so the caller keeps everything an assignment might
-    name.  ``only_profile_id`` restricts it to one profile (the loaded one).
+    Which profiles name which recipes is the stored projection; only the Spark
+    sets are read from those profiles' own assignments. ``only_profile_id``
+    restricts it to one profile (the loaded one), ``recipes`` to these recipes.
     """
 
+    named = profiles_naming(session, recipes, profile_id=only_profile_id)
     found: dict[tuple[str, str], list[tuple[str, frozenset[str]]]] = {}
-    statement = select(FleetProfile)
-    if only_profile_id is not None:
-        statement = statement.where(FleetProfile.id == only_profile_id)
-    for profile in session.scalars(statement):
-        selectors = saved_profile_selectors(profile)
-        if selectors is None:
-            return None
-        for selector, assignment in zip(selectors, profile.assignments, strict=True):
-            try:
-                nodes = TypeAdapter(list[NodeId]).validate_python(
-                    assignment.get("spark_ids"), strict=True
-                )
-            except (TypeError, ValueError):
-                # The recipe scope is known, the damaged node projection is not.
-                # Retain this recipe on every enrolled Spark, not every recipe.
-                nodes = list(session.scalars(select(AgentNode.node_id)))
-            publisher, _, slug = selector.partition("/")
-            found.setdefault((publisher.casefold(), slug.casefold()), []).append(
-                (profile.name, frozenset(nodes))
-            )
+    for profile_id, name, assignments in session.execute(
+        select(FleetProfile.id, FleetProfile.name, FleetProfile.assignments)
+        .where(FleetProfile.id.in_(sorted(named)))
+        .order_by(FleetProfile.id)
+    ):
+        wanted = named[profile_id]
+        for recipe, nodes in _assignment_sparks(session, assignments, wanted):
+            found.setdefault(recipe, []).append((name, nodes))
     return {key: tuple(value) for key, value in found.items()}
+
+
+def _assignment_sparks(
+    session: Session, assignments: object, recipes: frozenset[tuple[str, str]]
+) -> list[tuple[tuple[str, str], frozenset[str]]]:
+    """Each assignment of ``recipes`` with its Sparks.
+
+    A Spark set that cannot be read retains that recipe on every enrolled
+    Spark, never another recipe.
+    """
+
+    by_recipe: dict[tuple[str, str], list[object]] = {}
+    for assignment in assignments if isinstance(assignments, list) else ():
+        if isinstance(assignment, Mapping):
+            publisher, _, slug = str(assignment.get("recipe_selector", "")).partition(
+                "/"
+            )
+            by_recipe.setdefault((publisher, slug), []).append(
+                assignment.get("spark_ids")
+            )
+    found: list[tuple[tuple[str, str], frozenset[str]]] = []
+    for recipe in sorted(recipes):
+        for value in by_recipe.get(recipe) or [None]:
+            try:
+                nodes = TypeAdapter(list[NodeId]).validate_python(value, strict=True)
+            except (TypeError, ValueError):
+                nodes = list(session.scalars(select(AgentNode.node_id)))
+            found.append((recipe, frozenset(nodes)))
+    return found
 
 
 def _mtime(path: Path) -> datetime | None:

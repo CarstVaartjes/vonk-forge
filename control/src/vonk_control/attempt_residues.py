@@ -11,8 +11,8 @@ superseded, possibly by a crash), the record is a residue:
 * a residue that **may have an effect** (installed or partially installed
   files, a running workload) is never released directly here. A leftover
   *incomplete installation* (failed, partial, or installed with a rank not
-  installed or short of its payload) that nothing owns (no active operation on
-  its Sparks, no run that has not stopped) and that nobody has touched for the
+  installed or short of its payload) that nothing owns (no live operation naming
+  it, no run that has not stopped) and that nobody has touched for the
   retention grace, or that a later installation of the same recipe on the same
   Sparks superseded, is queued to the lifecycle's own uninstall, the same path
   the retention sweep uses. Until then, and when the uninstall is refused (for
@@ -27,9 +27,12 @@ runs, or an owner that no longer exists) it is released by owner state, see
 ``reservation_owners``. The installation row and the files it wrote stay for
 the cleanup path; what is on the Spark is what its next inventory reports.
 
-Ownership is decided conservatively and without owner columns: a record is
-owned while any active operation targets one of its Sparks (or, for a grant,
-names its plan).
+Ownership is decided conservatively and without owner columns: a plan is
+owned while any active operation targets one of its Sparks, a grant while an
+active operation names its plan, and a leftover incomplete installation only
+while a live operation names it (its owner fields, its plan's installation, or
+its recorded progress, see ``owner_liveness``); other work on its Sparks does
+not hold it.
 
 An unowned installation plan is first **adoptable**: the next attempt of the
 same recipe on the same Sparks reuses it (same plan digest), and its admission
@@ -62,7 +65,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
-    LifecycleState,
     RunState,
     UnknownOutcomeError,
     WaitReason,
@@ -82,6 +84,11 @@ from .models import (
     RecipeInstallation,
     RecipeRun,
 )
+from .owner_liveness import (
+    OwnerKind,
+    installations_named_by_live_jobs,
+    referencing_active_job,
+)
 from .persisted_waits import schedule_wait
 from .recipe_action_plans import UninstallPlan
 from .reservation_owners import (
@@ -94,12 +101,6 @@ _LOGGER = logging.getLogger(__name__)
 #: removed (the retention grace: a retry or a person may still be using it).
 LEFTOVER_GRACE = timedelta(hours=24)
 _LEFTOVER_ACTOR = "system:residue-sweep"
-_ACTIVE_JOB_STATES = job_states.words(
-    LifecycleState.QUEUED,
-    LifecycleState.RUNNING,
-    LifecycleState.OBSERVING,
-    LifecycleState.NEEDS_OPERATOR,
-)
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
     "recipe.run-switch.v2",
@@ -118,7 +119,7 @@ def _owned_nodes(session: Session) -> set[str]:
         node_id
         for targets in session.scalars(
             select(Job.targets).where(
-                Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(_ACTIVE_JOB_STATES)
+                Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(job_states.LIVE)
             )
         )
         if isinstance(targets, list)
@@ -317,7 +318,7 @@ class AttemptResidueReconciler:
         plans: set[str] = set()
         for job in session.scalars(
             select(Job).where(
-                Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(_ACTIVE_JOB_STATES)
+                Job.kind.in_(_OWNER_JOB_KINDS), Job.state.in_(job_states.LIVE)
             )
         ):
             nodes.update(job.targets if isinstance(job.targets, list) else ())
@@ -390,8 +391,8 @@ class AttemptResidueReconciler:
             incomplete = incomplete_installation_ids(session)
             if not incomplete:
                 return []
-            owned = _owned_nodes(session)
             superseded = superseded_plan_ids(session, incomplete)
+            named = installations_named_by_live_jobs(session, incomplete)
             for installation_id in incomplete:
                 if only_id is not None and installation_id != only_id:
                     continue
@@ -402,7 +403,7 @@ class AttemptResidueReconciler:
                         )
                     )
                 )
-                if not nodes or owned.intersection(nodes):
+                if not nodes or installation_id in named:
                     continue
                 if session.scalar(
                     select(RecipeRun.id)
@@ -417,7 +418,7 @@ class AttemptResidueReconciler:
                     due.append((installation_id, "superseded"))
                 # The grace is the installation's own: other work on its Sparks
                 # (a busy Spark always has some) does not restart it, and an
-                # operation that owns its Sparks now was skipped above.
+                # operation that names the installation was skipped above.
                 elif self._untouched_since(
                     session, installation_id, now - LEFTOVER_GRACE
                 ):
@@ -447,10 +448,11 @@ class AttemptResidueReconciler:
     def _incomplete_installations(self, only_id: str | None = None) -> bool:
         """Queue the lifecycle's uninstall for leftover incomplete installations.
 
-        The uninstall re-proves, under its own locks, that nothing runs or is
-        in flight on those Sparks; a refusal (blocked plan, changed
-        membership, a fault) keeps the installation for the next tick, and the
-        fleet view keeps naming it.
+        Before queuing, the unattended guard re-reads, in the uninstall's own
+        transaction, whether a live operation names the installation (owner
+        fields, plan or recorded progress). The uninstall itself refuses a
+        blocked plan or changed membership; a refusal keeps the installation for
+        the next tick, and the fleet view keeps naming it.
         """
 
         if self._removal is None:
@@ -474,15 +476,8 @@ class AttemptResidueReconciler:
                 def still_unowned(
                     session: Session, owner: str = installation_id
                 ) -> None:
-                    nodes = set(
-                        session.scalars(
-                            select(InstallationNode.node_id).where(
-                                InstallationNode.installation_id == owner
-                            )
-                        )
-                    )
-                    if _owned_nodes(session).intersection(nodes):
-                        raise RuntimeError("an operation now owns these Sparks")
+                    if referencing_active_job(session, OwnerKind.INSTALLATION, owner):
+                        raise RuntimeError("an operation now owns this installation")
 
                 self._removal.uninstall(
                     installation_id,

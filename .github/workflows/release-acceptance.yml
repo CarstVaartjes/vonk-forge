@@ -154,6 +154,9 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - name: Free runner disk
+        if: matrix.platform == 'amd64'
+        uses: ./.github/actions/free-runner-disk
       - uses: ./.github/actions/python-env
       - name: Authenticate CI image mirror reads
         # The mirror is an optional fast path; pulls fall back to upstream.

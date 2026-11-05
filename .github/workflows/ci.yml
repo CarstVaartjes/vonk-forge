@@ -549,6 +549,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Free runner disk
+        uses: ./.github/actions/free-runner-disk
       - name: Prepare the locked Python environment
         uses: ./.github/actions/python-env
         with:
@@ -1049,6 +1051,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Free runner disk
+        uses: ./.github/actions/free-runner-disk
       - name: Provide the canonical recipe library
         uses: ./.github/actions/recipe-library
       - name: Prepare the locked Python environment
@@ -1674,6 +1678,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Free runner disk
+        uses: ./.github/actions/free-runner-disk
       - name: Install uv and Python
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:

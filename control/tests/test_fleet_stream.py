@@ -1224,14 +1224,16 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
     engine, sessions, repository = _production_stream_store()
     try:
         with sessions.begin() as session:
-            event_value = repository.append_in_session(session, _operation_draft(1))
+            repository.append_in_session(session, _operation_draft(1))
+        event_id = 1  # the first event of a fresh store
+        with sessions.begin() as session:
             # Corrupt the optional saved event decoration after a normal write;
             # preserve the real durable event identity/cursor and operation state.
             payload = _operation_draft(1).payload.model_dump(mode="json")
             payload["kind"] = 17
             session.execute(
                 update(FleetStreamEvent)
-                .where(FleetStreamEvent.id == event_value.id)
+                .where(FleetStreamEvent.id == event_id)
                 .values(payload=payload)
             )
         stream = FleetStream(repository, Telemetry({}), clock=lambda: NOW)
@@ -1250,10 +1252,10 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
         frame = asyncio.run(read(expect_closed=True))
         fields, data = _parsed_frame(frame)
         assert fields["event"] == "fleet-refresh"
-        assert fields["id"] == str(event_value.id)
+        assert fields["id"] == str(event_id)
         assert len(frame.encode("utf-8")) <= MAX_CONTROL_DOCUMENT_BYTES
         refresh = FleetRefreshEvent.model_validate(data)
-        assert refresh.event_cursor == event_value.id
+        assert refresh.event_cursor == event_id
         assert refresh.issue is not None
         assert refresh.issue.observed_bytes_at_least is None
         # The row is preserved. A repaired decoration resumes the original
@@ -1261,13 +1263,13 @@ def test_malformed_saved_sparse_payload_becomes_bounded_truthful_refresh_notice(
         with sessions.begin() as session:
             session.execute(
                 update(FleetStreamEvent)
-                .where(FleetStreamEvent.id == event_value.id)
+                .where(FleetStreamEvent.id == event_id)
                 .values(payload=_operation_draft(1).payload.model_dump(mode="json"))
             )
         repaired = asyncio.run(read())
         repaired_fields, repaired_data = _parsed_frame(repaired)
         assert repaired_fields["event"] == "operation-state"
-        assert repaired_fields["id"] == str(event_value.id)
+        assert repaired_fields["id"] == str(event_id)
         operation = FleetChangeEvent.model_validate_json(
             canonical_message(repaired_data), strict=True
         )

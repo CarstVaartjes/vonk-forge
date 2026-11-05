@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.x509.oid import NameOID
 from pydantic import ValidationError
+from vonk_agent_protocol import InvalidRequestReason
 from vonk_agent_protocol.enrollment import (
     EnrollmentEvidence,
 )
@@ -70,6 +71,19 @@ def _load_csr(node_id: str | None, csr: bytes) -> tuple[bytes, bytes, str, str]:
     )
 
 
+EVIDENCE_FIELDS_INVALID = "evidence fields are invalid"
+EVIDENCE_NODE_MISMATCHES_CSR = "evidence node ID does not match CSR"
+EVIDENCE_NODE_MISMATCHES_GRANT = "evidence node ID does not match enrollment grant"
+EVIDENCE_FINGERPRINT_MISMATCH = "evidence CSR public-key fingerprint does not match CSR"
+# The reason each evidence verdict carries when it refuses a submission.
+EVIDENCE_REFUSAL_REASONS = {
+    EVIDENCE_FIELDS_INVALID: InvalidRequestReason.MALFORMED,
+    EVIDENCE_NODE_MISMATCHES_CSR: InvalidRequestReason.CONFLICT,
+    EVIDENCE_NODE_MISMATCHES_GRANT: InvalidRequestReason.CONFLICT,
+    EVIDENCE_FINGERPRINT_MISMATCH: InvalidRequestReason.CONFLICT,
+}
+
+
 def _validate_evidence(
     evidence: Mapping[str, object],
     grant_node_id: str | None,
@@ -79,13 +93,13 @@ def _validate_evidence(
     try:
         values = EnrollmentEvidence.model_validate(evidence).model_dump()
     except ValidationError:
-        return {}, "evidence fields are invalid"
+        return {}, EVIDENCE_FIELDS_INVALID
     if values["node_id"] != csr_node_id:
-        return values, "evidence node ID does not match CSR"
+        return values, EVIDENCE_NODE_MISMATCHES_CSR
     if grant_node_id is not None and values["node_id"] != grant_node_id:
-        return values, "evidence node ID does not match enrollment grant"
+        return values, EVIDENCE_NODE_MISMATCHES_GRANT
     if values["csr_public_key_fingerprint"] != public_key_fingerprint:
-        return values, "evidence CSR public-key fingerprint does not match CSR"
+        return values, EVIDENCE_FINGERPRINT_MISMATCH
     return values, None
 
 

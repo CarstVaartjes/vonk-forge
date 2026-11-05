@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from . import (
     alias_rules,
+    bare_savepoints,
     docker_listings,
     legacy_tolerance,
     lifecycle_sets,
@@ -98,6 +99,7 @@ MODES = (
     "docker-listings",
     "lifecycle-sets",
     "alias-rules",
+    "savepoints",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1286,6 +1288,55 @@ def pairwise_movement_checks(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+def _says_422(text: str, following: str) -> bool:
+    """A line that answers 422, by keyword, positional or split-line status."""
+    return bool(
+        re.search(
+            r"\bstatus_code\s*=\s*422\b|\bHTTP_422_|\bHTTPException\(\s*422\b", text
+        )
+        or (
+            text.rstrip().endswith("HTTPException(")
+            and following.strip().startswith("422")
+        )
+        or (text.strip().startswith("422,") and text.strip() != "")
+    )
+
+
+# A 401/403 is a security verdict: the Spark treats it as fatal (it backs off
+# 30-600 s in the rotation loop instead of retrying soon). Only a typed security
+# refusal may say it, never a handler for a broad exception.
+_SAYS_FATAL_AUTH = re.compile(
+    r"\bstatus_code\s*=\s*40[13]\b|\bHTTPException\(\s*40[13]\b"
+)
+_BROAD_EXCEPT = re.compile(
+    r"\b(?:Exception|ValueError|OSError|PermissionError|RuntimeError|KeyError"
+    r"|TypeError|SQLAlchemyError)\b"
+)
+
+
+def _except_header(lines: list[str], except_line: int) -> tuple[str, int]:
+    """The `except` clause at except_line (may span lines) and its last line."""
+    parts = []
+    for number, text in enumerate(lines[except_line - 1 :], except_line):
+        parts.append(text)
+        if text.split("#", 1)[0].rstrip().endswith(":"):
+            return " ".join(parts), number
+    return " ".join(parts), len(lines)
+
+
+def _handler_body(lines: list[str], except_line: int) -> list[tuple[str, str]]:
+    """The (line, next line) pairs of the block under the `except` at except_line."""
+    header = lines[except_line - 1]
+    indent = len(header) - len(header.lstrip())
+    body = []
+    for index in range(except_line, len(lines)):
+        text = lines[index]
+        if text.strip() and len(text) - len(text.lstrip()) <= indent:
+            break
+        body.append((text, lines[index + 1] if index + 1 < len(lines) else ""))
+    return body
+
+
 def check_source(
     path: str,
     source: str,
@@ -1932,12 +1983,57 @@ def check_source(
         and "agent-422" in modes
         and path.startswith("control/src/vonk_control/agent_api/")
     ):
+        lines = source.splitlines()
         hits.extend(
             (line, "agent-facing 422 outside body validation; answer a wait")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", text)
+            for line, text in enumerate(lines, 1)
+            if _says_422(text, lines[line] if line < len(lines) else "")
             and AGENT_422_VERDICT_MARKER not in text
         )
+        # A caught exception is not a verdict: it is as often this Controller's
+        # own bug or race, and a 422 makes the Spark drop real evidence. Any
+        # handler body that produces an unmarked 422 is refused at its `except`
+        # line; the handler answers through contract_verdict_or_wait instead.
+        hits.extend(
+            (line, "except handler answers 422; use contract_verdict_or_wait")
+            for line, text in enumerate(lines, 1)
+            if re.match(r"\s*except\b", text)
+            and any(
+                _says_422(body, nxt) and AGENT_422_VERDICT_MARKER not in body
+                for body, nxt in _handler_body(lines, line)
+            )
+        )
+    if (
+        python
+        and not is_test
+        and "agent-422" in modes
+        and path.startswith("control/src/vonk_control/agent_api/")
+    ):
+        # A broad exception is as often this Controller's own bug as a denial
+        # (#2061 review: an internal ValueError in renewal killed the agent).
+        lines = source.splitlines()
+        for line, text in enumerate(lines, 1):
+            if not re.match(r"\s*except\b", text):
+                continue
+            header, header_end = _except_header(lines, line)
+            if not _BROAD_EXCEPT.search(header):
+                continue
+            # The except line and every 401/403 body line are flagged, so a
+            # 403 added into an existing handler is caught by its own line.
+            fatal = [
+                number
+                for number, (body, _) in enumerate(
+                    _handler_body(lines, header_end), header_end + 1
+                )
+                if _SAYS_FATAL_AUTH.search(body)
+            ]
+            hits.extend(
+                (
+                    number,
+                    "broad exception answers 401/403; use contract_verdict_or_wait",
+                )
+                for number in (*([line] if fatal else []), *fatal)
+            )
     if (
         python
         and not is_test
@@ -2103,6 +2199,15 @@ def check_source(
     if "alias-rules" in modes and alias_rules.in_scope(path) and not is_test:
         hits.extend(
             (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
+        )
+    if (
+        python
+        and not is_test
+        and "savepoints" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, bare_savepoints.KIND) for line in bare_savepoints.scan_source(source)
         )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(

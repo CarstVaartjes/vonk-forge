@@ -381,8 +381,10 @@ def test_a_cancel_ends_even_when_the_stop_is_never_confirmed(cache, tmp_path):
     )
 
 
-def test_a_cancel_settles_after_a_restart(cache, tmp_path):
-    service, sessions = cache
+def test_a_cancel_settles_after_a_restart(threaded_cache, tmp_path):
+    # ``tick`` starts the storage observer's threads; they need their own
+    # connections, as in the Controller.
+    service, sessions = threaded_cache
     operation, _artifact_document = _queue(
         service, tmp_path, "00000000-0000-4000-8000-00000000a024"
     )
@@ -400,7 +402,10 @@ def test_a_cancel_settles_after_a_restart(cache, tmp_path):
     restarted = ModelCacheService(
         sessions, service.root, free_fraction=0, fixture_sources=True
     )
-    restarted.tick()
+    try:
+        restarted.tick()
+    finally:
+        restarted.close()
     assert _row(sessions, operation.id).state == "cancelled"
 
 

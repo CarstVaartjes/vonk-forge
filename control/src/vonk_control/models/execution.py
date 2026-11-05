@@ -55,6 +55,10 @@ class RecipeInstallation(Base):
             _nullable_lower_hex("model_content_sha256", 64),
             name="ck_recipe_installations_model_content_sha256",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("model_artifact_set_sha256", 64),
+            name="ck_recipe_installations_model_artifact_set_sha256",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -68,6 +72,13 @@ class RecipeInstallation(Base):
     # recipe revision.  This makes model-to-installation ownership explicit
     # without attempting to infer it from mutable catalog display metadata.
     model_content_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    # The model set every rank of the accepted plan runs: the one stored fact
+    # for "which installations use this set", written by install admission
+    # (the one writer) from the stored plan. Rows inserted before the column
+    # existed are filled from their plan once at startup.
+    model_artifact_set_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
     mapping_id: Mapped[str] = mapped_column(
@@ -128,12 +139,34 @@ class InstallationNode(Base):
     installed_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
-    #: The highest memory any run of this installation was observed to use on
-    #: this rank: the run's own peak outlives its terminal history.
-    observed_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class MeasuredRolePeak(Base):
+    """The most memory a role of one recipe content was observed to use.
+
+    One row per (recipe content digest, role), raised in place by the one
+    writer (``observed_run_memory``) and read by admission as an indexed
+    lookup. It belongs to the content, not to a run or an installation, so
+    collecting either never forgets it.
+    """
+
+    __tablename__ = "measured_role_peaks"
+    __table_args__ = (
+        CheckConstraint(
+            _lower_hex("content_sha256", 64), name="ck_measured_role_peaks_digest"
+        ),
+        CheckConstraint(
+            "peak_bytes>=0 AND length(role) BETWEEN 1 AND 64",
+            name="ck_measured_role_peaks_values",
+        ),
+    )
+    content_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    role: Mapped[str] = mapped_column(String(64), primary_key=True)
+    #: Whole-run peak: free at admission minus the lowest available since.
+    peak_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
 #: Stoppable runs that no running-run path (observation, recovery) advances.

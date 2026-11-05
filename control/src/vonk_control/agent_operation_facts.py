@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.orm import object_session
+from sqlalchemy.orm import Session, object_session
 from vonk_agent_protocol import AgentClaim, AgentOperation, RecipeJobRunRequest
 
 from . import agent_operation_states
@@ -380,15 +380,45 @@ def order_recovery_deadline(
     session = object_session(operation)
     if session is None:
         return stored
-    return max(
-        stored,
-        progress_deadline(
-            started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
-            progressed_at=None,
-            window=AGENT_ORDER_RECOVERY_BUDGET,
-            now=now,
-            waiting_on=owner(
-                session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
-            ),
+    window = progress_deadline(
+        started_at=stored - AGENT_ORDER_RECOVERY_BUDGET,
+        progressed_at=None,
+        window=AGENT_ORDER_RECOVERY_BUDGET,
+        now=now,
+        waiting_on=owner(
+            session, OwnerRef(OwnerKind.SPARK_RETURN, operation.node_id), now
         ),
+    )
+    return max(stored, window, job_run_bound(session, operation) or stored)
+
+
+def job_run_bound(session: Session, operation: StoredOperation) -> datetime | None:
+    """The end of a job run's own deadline and stop grace, from its lease.
+
+    The agent's ``job_past_its_bound`` counts from the later of the job's last
+    progress and the lease deadline, plus the job's timeout and its stop
+    timeout; a live job whose lease lapsed (restart, partition) is not in doubt
+    before then, however long the generic recovery budget is.
+    """
+
+    if operation.kind != AgentOperation.RECIPE_JOB_RUN.value:
+        return None
+    payload = read_row_column(operation, "payload")
+    attempt = session.scalar(
+        select(AgentOperationAttempt).where(
+            AgentOperationAttempt.operation_id == operation.id,
+            AgentOperationAttempt.attempt == operation.current_attempt,
+        )
+    )
+    if not isinstance(payload, RecipeJobRunRequest) or attempt is None:
+        return None
+    plan = payload.compiled_execution_plan
+    job = plan.job
+    anchor = aware(attempt.lease_deadline)
+    progressed = last_progress_at(stored_progress(attempt))
+    if progressed is not None:
+        anchor = max(anchor, aware(progressed))
+    return anchor + timedelta(
+        seconds=(0 if job is None else job.timeout_seconds)
+        + plan.lifecycle.stop_timeout_seconds
     )
