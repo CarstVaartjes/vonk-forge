@@ -190,11 +190,16 @@ ARG SKOPEO_AMD64_DIGEST
 ARG SKOPEO_ARM64_DIGEST
 # Keep the updated Debian trust store for Python and Skopeo. The imported
 # Skopeo libraries use /etc/pki/tls/certs/ca-bundle.crt, linked below.
-# Runtime pip is removed because this image installs nothing at startup.
+# Runtime pip is removed because this image installs nothing at startup, and
+# apt is purged for the same reason: the runtime never installs packages, so
+# the package manager is attack surface (and carries its own CVEs) for nothing.
 RUN apt-get update \
     && apt-get upgrade --yes --no-install-recommends \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
+    && dpkg --purge --force-depends apt libapt-pkg7.0 \
+    && ! dpkg-query --show apt libapt-pkg7.0 2>/dev/null \
+    && test ! -e /usr/bin/apt-get \
     && python -m pip uninstall --yes --root-user-action=ignore pip \
     && groupadd --gid 10001 control \
     && useradd --uid 10001 --gid 10001 --no-create-home control \
