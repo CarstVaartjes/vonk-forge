@@ -244,19 +244,12 @@ def _stage(session: Session, row: _EventRow | None) -> None:
     staged.append(_StagedEvent(session.get_nested_transaction(), row))
 
 
-def _ensure_cursor(connection: Connection) -> None:
+def _seed_cursor(connection: Connection) -> None:
+    """Recreate a missing cursor row after the newest stored id."""
+
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
-    if (
-        connection.scalar(
-            select(FleetEventCursor.singleton_id).where(
-                FleetEventCursor.singleton_id == 1
-            )
-        )
-        is not None
-    ):
-        return
     dialect_insert = sqlite_insert if connection.dialect.name == "sqlite" else pg_insert
     last_id = select(func.coalesce(func.max(FleetStreamEvent.id), 0)).scalar_subquery()
     connection.execute(
@@ -285,8 +278,11 @@ def _number_staged_events(session: Session) -> None:
     if not staged:
         return
     connection = session.connection()
-    _ensure_cursor(connection)
-    last_id = connection.execute(_cursor_allocation_statement(len(staged))).scalar_one()
+    allocate = _cursor_allocation_statement(len(staged))
+    last_id = connection.execute(allocate).scalar_one_or_none()
+    if last_id is None:
+        _seed_cursor(connection)
+        last_id = connection.execute(allocate).scalar_one()
     first_id = last_id - len(staged) + 1
     rows = [
         {

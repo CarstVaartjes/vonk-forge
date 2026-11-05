@@ -14,6 +14,7 @@ from typing import TypeGuard
 
 from . import (
     alias_rules,
+    bare_savepoints,
     docker_listings,
     legacy_tolerance,
     lifecycle_sets,
@@ -98,6 +99,7 @@ MODES = (
     "docker-listings",
     "lifecycle-sets",
     "alias-rules",
+    "savepoints",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2102,6 +2104,15 @@ def check_source(
     if "alias-rules" in modes and alias_rules.in_scope(path) and not is_test:
         hits.extend(
             (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
+        )
+    if (
+        python
+        and not is_test
+        and "savepoints" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (line, bare_savepoints.KIND) for line in bare_savepoints.scan_source(source)
         )
     if python and not is_test and "scratch-names" in modes:
         hits.extend(

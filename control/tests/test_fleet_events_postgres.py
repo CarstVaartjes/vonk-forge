@@ -9,7 +9,9 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_control import fleet_events
 from vonk_control.fleet_event_contract import JobPayload
 from vonk_control.fleet_events import (
     FleetEventDraft,
@@ -168,6 +170,48 @@ def test_concurrent_appends_reach_a_live_reader_once_in_order_without_gaps(
     assert sorted(entity for _, entity in seen) == sorted(expected)
     assert _stored(sessions) == seen
     assert repository.high_watermark() == total
+
+
+def test_failed_commit_time_numbering_rolls_back_and_leaves_no_gap(
+    postgres_engine: Engine,
+) -> None:
+    sessions = _fresh_sessions(postgres_engine)
+    FleetEventRecorder.install(sessions, clock=lambda: NOW)
+    repository = FleetEventRepository(sessions, clock=lambda: NOW)
+    refused = sessions()
+    with postgres_engine.connect() as blocker:
+        # Another commit is numbering right now: it holds the cursor row.
+        blocker.execute(
+            text(
+                "SELECT last_id FROM fleet_event_cursor "
+                "WHERE singleton_id = 1 FOR UPDATE"
+            )
+        )
+        with (
+            write_guard_mode(strict=False),
+            pytest.raises(OperationalError, match="lock timeout"),
+            refused.begin(),
+        ):
+            refused.execute(text("SET LOCAL lock_timeout = '200ms'"))
+            refused.add(_job("job-refused"))
+            repository.append_in_session(refused, _draft("draft-refused"))
+        assert not refused.info.get(fleet_events._STAGED_KEY)
+        blocker.rollback()
+    refused.close()
+
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        session.add(_job("job-fresh"))
+
+    assert _stored(sessions) == [(1, "job-fresh")]
+    replay = repository.replay_after(0, NOW, limit=128)
+    assert [(value.id, value.entity_id) for value in replay.events] == [
+        (1, "job-fresh")
+    ]
+    with sessions() as session:
+        assert session.get(Job, "job-refused") is None
+        cursor = session.get(FleetEventCursor, 1)
+        assert cursor is not None
+        assert cursor.last_id == 1
 
 
 def test_savepoint_rollback_discards_only_the_events_it_staged(
