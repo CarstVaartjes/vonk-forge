@@ -175,7 +175,7 @@ measured guarantee of storage throughput. Local shell tests prove timeout and
 execution after staging; hosted Compose tests separately prove Docker restart
 and actual PostgreSQL readiness.
 
-## NAS daemon platform-image retention
+## NAS daemon platform-image retention and network repair
 
 `image-janitor` is an independent, stdlib-only Python service using the reviewed
 slim Python image. It alone mounts the NAS Docker socket; neither Controller
@@ -201,6 +201,41 @@ removes containers or volumes. Logs include every exclusion/grace refusal and
 Docker's exact deletion receipts. Reported image size includes shared layers
 and is not a measurement of freed disk space. Failed scans leave health stale;
 the healthcheck reports unhealthy after two hours without a successful scan.
+
+The same process repairs lost network attachments of its own Compose project
+every 30 seconds. `compose up` does not: it starts a stopped container as-is
+and checks networks only on running ones, and a restart reuses the container
+record. A network recreated under a stopped container (new ID) therefore
+leaves it exited with `network ... not found`; for Caddy that closes `:8443`.
+Losing Docker's network store across a daemon restart produces exactly this.
+
+The janitor reads each container's recorded networks once per tick against
+one inspect per network. An entry is broken when it names an older network ID,
+or when the container runs and the network lists no endpoint for it. The
+repair is journalled in `image-janitor-state` before its first effect, then
+stops a running container, disconnects and re-attaches each broken network by
+name with its recorded aliases, and starts the container if it should run. A
+janitor that dies or is stopped mid-repair leaves the journal to the next
+process, so the container is not left stopped (Docker counts an API stop as a
+manual stop) or short of a network. A container whose last start failed, in
+any non-running state Docker does not own, is started while its restart policy
+is `always` or `unless-stopped`; one stopped after it ran has no start error
+and stays stopped. `restarting`, `paused`, `removing` and `dead` are logged and
+left to Docker. A network that does not exist waits for the next `compose up`.
+Each repair backs off exponentially with jitter (30 s doubling to an hour) while
+it does not converge. Containers sharing another container's network namespace
+are not touched.
+
+This uses more of the Docker API than image collection: the janitor stops and
+starts project containers and disconnects and connects their networks.
+
+Whether this matches the Caddy outages after the 2026-11-03 and 2026-11-05
+NAS OS updates is not established; the state seen there (Caddy running while
+`ingress` listed no container) was not reproduced. If it happens again, the
+janitor log shows which case it was: `network-reattached` for
+`vonk-forge-caddy-1` (covered), `start-retried` (a failed start with intact
+networks), `repair-backoff` repeating (a repair that does not converge), or
+`network-absent-wait-for-compose` (the network is gone until a Redeploy).
 
 **Deployment requires rerunning the accepted NAS installer in the existing bundle
 directory**, preserving `.env`, secrets and volumes, then redeploying Compose.

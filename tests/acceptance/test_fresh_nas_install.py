@@ -934,6 +934,98 @@ def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -
         raise AcceptanceError("enrollment bootstrap is empty")
 
 
+def verify_ingress_heals_after_network_loss(
+    bundle: Path, nas_ip: str, enrollment_hostname: str, services: tuple[str, ...]
+) -> None:
+    """Caddy's ingress network is recreated under it, as after a NAS OS update.
+
+    `compose up` then starts the old container against the old network ID and
+    fails, and a restart reuses it. The janitor must re-attach the same
+    container, with no recreate and no human. It is paused while the fault is
+    set up, so the fault is observed before the repair can race it.
+    """
+    document = json.loads(
+        run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
+    )
+    network = document["networks"]["ingress"]["name"]
+
+    def container(service: str) -> str:
+        return run(
+            [*reference_compose(), "ps", "-q", service], cwd=bundle
+        ).stdout.strip()
+
+    caddy, janitor = container("caddy"), container("image-janitor")
+    run(["docker", "pause", janitor], cwd=bundle)
+    try:
+        run(["docker", "stop", "--timeout", "30", caddy], cwd=bundle, timeout=60)
+        run(["docker", "network", "rm", network], cwd=bundle, timeout=60)
+        # Like the UGREEN Redeploy: recreates the network, then fails to start
+        # the unchanged container. Its exit status is the fault, not the result.
+        subprocess.run(
+            [
+                *reference_compose(),
+                "up",
+                "-d",
+                *(service for service in services if service != "image-janitor"),
+            ],
+            cwd=bundle,
+            env=host_command_environment(),
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+        state = json.loads(
+            run(
+                ["docker", "inspect", "--format", "{{json .State}}", caddy],
+                cwd=bundle,
+            ).stdout
+        )
+        if state["Status"] != "exited" or not state["Error"]:
+            raise AcceptanceError(f"the network fault was not reproduced: {state}")
+        try:
+            socket.create_connection((nas_ip, 8443), timeout=5).close()
+        except ConnectionRefusedError:
+            pass
+        else:
+            raise AcceptanceError(":8443 still answers with the fault in place")
+    finally:
+        run(["docker", "unpause", janitor], cwd=bundle)
+    started = time.monotonic()
+    deadline = started + 180
+    while True:
+        try:
+            verify_controller_tls(bundle, nas_ip, enrollment_hostname)
+            break
+        except AcceptanceError:
+            if time.monotonic() > deadline:
+                raise AcceptanceError(
+                    "Caddy :8443 did not heal after its ingress network was "
+                    f"recreated; {compose_startup_diagnostics(bundle)}"
+                ) from None
+            time.sleep(5)
+    attached = run(
+        ["docker", "network", "inspect", "--format", "{{json .Containers}}", network],
+        cwd=bundle,
+    ).stdout
+    if not any(member.startswith(caddy) for member in json.loads(attached)):
+        raise AcceptanceError("the healed Caddy is not the original container")
+    # The janitor logs to stderr.
+    printed = run(["docker", "logs", janitor], cwd=bundle)
+    logs = (printed.stdout + printed.stderr).splitlines()
+    repairs = [
+        line
+        for line in logs
+        if '"reason": "network-reattached"' in line and "vonk-forge-caddy-1" in line
+    ]
+    if not repairs:
+        raise AcceptanceError("the janitor logged no re-attach of Caddy")
+    print(
+        f"ingress heal: :8443 answered {time.monotonic() - started:.1f}s after "
+        f"the fault; janitor: {repairs[-1]}",
+        flush=True,
+    )
+
+
 def verify_postgres_databases(bundle: Path) -> None:
     result = run(
         [
@@ -1826,6 +1918,9 @@ def exercise_compose(
             # a restart or a second installer run must come back healthy.
             assert_bundle_contract(bundle)
             if tailscale_mode == "disabled":
+                verify_ingress_heals_after_network_loss(
+                    bundle, nas_ip, enrollment_hostname, started
+                )
                 run(
                     [
                         *reference_compose(),
