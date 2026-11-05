@@ -257,6 +257,7 @@ _UNIQUE_VIOLATIONS = frozenset(
     {"23505", "SQLITE_CONSTRAINT_UNIQUE", "SQLITE_CONSTRAINT_PRIMARYKEY"}
 )
 _SQLITE_UNIQUE = re.compile(r"UNIQUE constraint failed: (.+)")
+_SQLITE_CHECK = re.compile(r"CHECK constraint failed: (\S+)")
 _SAFE_NAME = re.compile(r"[A-Za-z0-9_]{1,128}")
 _SAFE_SQLSTATE = re.compile(r"[0-9A-Z_]{5,40}")
 _UNKNOWN_CONSTRAINT = "unknown-constraint"
@@ -344,6 +345,24 @@ def admitting() -> Iterator[None]:
         raise ConstraintDefect(constraint, sqlstate) from None
 
 
+def refuse_defect(error: BaseException) -> None:
+    """Raise ``ConstraintDefect`` when ``error`` is a deterministic violation.
+
+    A check, foreign-key, not-null or unregistered-unique violation (SQLSTATE
+    class 23) repeats on every attempt: a loop that retries database errors
+    until its budget ends calls this first, so the failure names its constraint
+    and SQLSTATE instead of being retried as "observation budget exhausted".
+    A registered unique key (REPLAN or REPLAY) stays with its own caller.
+    Returns for every other error.
+    """
+
+    if not isinstance(error, IntegrityError):
+        return
+    conflict, constraint, sqlstate = _decided(error)
+    if conflict is Conflict.DEFECT:
+        raise ConstraintDefect(constraint, sqlstate) from error
+
+
 def _decided(error: IntegrityError) -> tuple[Conflict, str, str | None]:
     """The decision, with its evidence: constraint name and SQLSTATE.
 
@@ -362,6 +381,9 @@ def _decided(error: IntegrityError) -> tuple[Conflict, str, str | None]:
     sqlite = _SQLITE_UNIQUE.match(str(original))
     if name is None and sqlite is not None:
         name = _sqlite_constraint(sqlite.group(1))
+    check = _SQLITE_CHECK.match(str(original))
+    if name is None and check is not None:
+        name = check.group(1)
     constraint = (
         name
         if isinstance(name, str) and _SAFE_NAME.fullmatch(name)

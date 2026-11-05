@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
+from ..admission_locking import refuse_defect
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactReferenceUnsettled,
@@ -232,6 +233,8 @@ class DownloadAdmissionMixin:
                 ModelCacheConflictUnknown,
                 DBAPIError,
             ) as error:
+                # A constraint violation repeats on every attempt: name it.
+                refuse_defect(error)
                 # This service owns every transaction. Rollback and release its
                 # mutex before observing the exact request; never replay effects
                 # inside a failed or caller-owned transaction.

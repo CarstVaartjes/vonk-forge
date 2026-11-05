@@ -282,6 +282,34 @@ def claim_pending(
     return tuple(claims)
 
 
+def _exhausted(
+    last: AvailabilityOperationFailure | None,
+) -> AvailabilityOperationFailure:
+    """The exhausted-budget failure, naming the last failure of the attempts.
+
+    The budget ending is not the cause; the failure the last attempt recorded is.
+    It stays in the detail and its evidence, instead of being overwritten.
+    """
+
+    detail = "Image preparation observation budget ended"
+    if last is None or last.code == RecipeImageCode.PREPARATION_EXHAUSTED:
+        return last or AvailabilityOperationFailure(
+            code=RecipeImageCode.PREPARATION_EXHAUSTED,
+            detail=detail,
+            retryable=False,
+            recovery_actions=[],
+        )
+    return AvailabilityOperationFailure(
+        code=RecipeImageCode.PREPARATION_EXHAUSTED,
+        detail=f"{detail}; last failure {last.code}: {last.detail}"[:512],
+        retryable=False,
+        recovery_actions=[],
+        log_excerpt=last.log_excerpt,
+        artifact_key=last.artifact_key,
+        build_operation_id=last.build_operation_id,
+    )
+
+
 def _expire_preparation(
     self: RecipeImageAvailabilityService,
     session: Session,
@@ -291,16 +319,7 @@ def _expire_preparation(
 ) -> None:
     """Fence publication, then let bounded cancellation reconcile exact children."""
     operation.payload = serialize_json_value(
-        payload.model_copy(
-            update={
-                "failure": AvailabilityOperationFailure(
-                    code=RecipeImageCode.PREPARATION_EXHAUSTED,
-                    detail="Image preparation observation budget ended",
-                    retryable=False,
-                    recovery_actions=[],
-                ),
-            }
-        )
+        payload.model_copy(update={"failure": _exhausted(payload.failure)})
     )
     self._request_cancellation(
         session,
