@@ -18,7 +18,7 @@ seven rules of the blocker audit (section 5.2), each of which is a test in
    deadline passes, the row stays ``observing`` with its claims and is observed
    again at the bounded backoff's ceiling.  It ends on an observed effect, a
    definite report or a cancel (rule 4), or, after ``LOST_OBSERVATION_BOUND``
-   unknown observations at the ceiling, ``failed`` with its effect unknown and
+   unknown observations past its own recovery deadline, ``failed`` with its effect unknown and
    a residue record (the same bound shape as the identical-exit rule), which
    releases its claims.  It never blindly replays the effect and never waits
    for an operator.
@@ -76,10 +76,10 @@ from .types import (
 #: Observations of an irreversible unknown effect at the backoff rate; after
 #: them it is lost and observed at the backoff's ceiling (rule 3), never ended.
 OBSERVE_BUDGET = 8
-#: Unknown observations of a lost row (budget spent) after which it ends
-#: ``failed`` with its effect unknown and a residue record (rule 3).  The count
-#: lives on ``observe_count`` beyond ``OBSERVE_BUDGET``; one look per ceiling
-#: backoff step bounds the time to this many steps.
+#: Unknown observations past the order's own recovery deadline after which a
+#: lost row ends ``failed`` with its effect unknown and a residue record
+#: (rule 3).  The count lives on ``observe_count`` beyond ``OBSERVE_BUDGET``;
+#: one look per ceiling backoff step bounds the time to this many steps.
 LOST_OBSERVATION_BOUND = 6
 #: How many stops of a cancelled row are issued before it is cancelled with a
 #: residue record (rule 4).  Together with the stop backoff this bounds a cancel
@@ -250,9 +250,13 @@ def _retry(
 
 
 def _observe(row: Lifecycle, now: datetime, reason: str | None) -> Decision:
-    """Rule 2: inspect the effect before anything else."""
+    """Rule 2: inspect the effect before anything else.
 
-    count = row.observe_count + 1
+    Looks past the budget are counted when they are received (``_lost``), so
+    this never raises the count beyond it.
+    """
+
+    count = row.observe_count + int(row.observe_count < OBSERVE_BUDGET)
     return Decision(
         replace(
             row,
@@ -304,9 +308,10 @@ def _lost(
 ) -> Decision:
     """Rule 3: a spent budget stops spending; the unknown effect is kept.
 
-    ``observed`` is a received observation that found the effect still unknown;
-    only those count towards ``LOST_OBSERVATION_BOUND``, so a tick that merely
-    issues the look is not counted twice.  The last one ends the row ``failed``.
+    ``observed`` is an observation received *past the order's own recovery
+    deadline* that found the effect still unknown.  Only those count towards
+    ``LOST_OBSERVATION_BOUND``: looks inside the order's bound (a live job whose
+    lease lapsed) never end it.  The last one ends the row ``failed``.
 
     The row keeps observing at the ceiling of the bounded backoff its spent
     budget reached (``RECOVERY.max_delay_seconds``), not at the short wait
@@ -315,9 +320,7 @@ def _lost(
     the deadline), so it is due at a bounded rate and never on every pass.
     """
 
-    looked = max(row.observe_count - OBSERVE_BUDGET, 0)
-    if observed and row.observe_count >= OBSERVE_BUDGET:
-        looked += 1
+    looked = max(row.observe_count - OBSERVE_BUDGET, 0) + int(observed)
     if looked >= LOST_OBSERVATION_BOUND:
         why = WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         return Decision(
@@ -353,13 +356,11 @@ def _unknown_after_observation(
     now: datetime,
     reason: str | None,
     commands: tuple[Command, ...] = (),
-    *,
-    observed: bool = False,
 ) -> Decision:
     if not adapter.irreversible(row) or blind_retry_is_safe(row, adapter):
         return _retry(row, now, adapter, effect=row.effect, reason=reason)
     if row.observe_count >= OBSERVE_BUDGET:
-        return _lost(row, now, reason, commands, observed=observed)
+        return _lost(row, now, reason, commands)
     return Decision(
         replace(
             row,
@@ -605,9 +606,7 @@ def _observed(
         case Effect.NONE | Effect.STOPPED:
             return _retry(row, now, adapter, effect=Effect.NONE, reason=event.reason)
         case _:
-            return _unknown_after_observation(
-                row, adapter, now, event.reason, observed=True
-            )
+            return _unknown_after_observation(row, adapter, now, event.reason)
 
 
 def _operator(

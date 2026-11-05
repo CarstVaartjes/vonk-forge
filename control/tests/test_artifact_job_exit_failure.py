@@ -152,7 +152,7 @@ def _late_success(claim, job) -> AgentResult:
 def test_a_late_exit_receipt_ends_a_lost_job_without_rerunning_it(
     tmp_path, exit_code: int
 ) -> None:
-    """A job whose lease lapsed is lost, not failed, until its exit is receipted.
+    """A job whose lease lapsed is lost, never failed, until its exit is receipted.
 
     Wrong implementations caught: the spent observation budget or the job's
     own timeout failed a job that may still run; the late exit receipt was
@@ -178,11 +178,9 @@ def test_a_late_exit_receipt_ends_a_lost_job_without_rerunning_it(
     assert claim is not None
 
     # Its agent goes silent for hours: past the budget, the recovery deadline
-    # and the job's own timeout it is observed and never re-run.  Fewer looks
-    # than ``OBSERVE_BUDGET + LOST_OBSERVATION_BOUND`` happen (that bound ends
-    # it failed, see test_agent_operation_lifecycle).
-    for _ in range(10):
-        clock.advance(seconds=2160)
+    # and the job's own timeout it is observed, never failed and never re-run.
+    for _ in range(30):
+        clock.advance(seconds=600)
         agent_jobs.reconcile_orders()
         assert claim_agent(agent_jobs, node_id, "serial-0") is None
     lost = service.get(submitted.id)

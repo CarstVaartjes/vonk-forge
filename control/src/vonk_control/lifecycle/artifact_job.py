@@ -43,7 +43,7 @@ its result evidence (``active_scope_may_remain``) that the run's Stop and the
 retention sweep read.  An unknown effect is never failed by the job's own
 timeout: the job keeps observing until its exit is receipted, its run ends, or a
 cancel or newer intent drives the exact Stop, or until the core's
-``LOST_OBSERVATION_BOUND`` unknown observations end it ``failed`` with its effect
+``LOST_OBSERVATION_BOUND`` unknown observations past its own deadline end it ``failed`` with its effect
 unknown (core rule 3).
 """
 

@@ -40,7 +40,8 @@ attempt (:func:`receipt_effect`): a process exit or a cancel reported under
 that attempt's fence, on time or late, proves it ceased. Restart-safe kinds also
 inspect their exact effect on reissue; an irreversible one that stays unknown is
 lost (observed, its claims kept) and is never failed by its deadline.  Only after
-``LOST_OBSERVATION_BOUND`` unknown observations at the ceiling does it end
+``LOST_OBSERVATION_BOUND`` unknown observations past its own recovery deadline
+(for a job run: its timeout and stop grace from the lapsed lease, ``job_run_bound``) does it end
 ``failed`` with its effect unknown, which releases its claims (core rule 3).
 
 Only ``recipe.job.run.v1`` is irreversible (a user's job may have run).

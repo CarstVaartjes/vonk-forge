@@ -1030,7 +1030,9 @@ def scan_source(
                     # The owner-decided end of a lost irreversible order (core
                     # rule 3): ``failed`` is the proven outcome after
                     # LOST_OBSERVATION_BOUND unknown looks, with this typed reason.
-                    and not re.search(r"RUNTIME_EFFECT_UNCONFIRMED", self.context)
+                    and not re.search(
+                        r"assert[^\n]*RUNTIME_EFFECT_UNCONFIRMED", self.context
+                    )
                 ):
                     self.add(node, "transient-failed-assertion")
                 if values & {"withdrawn", "route_error"} and TRANSIENT.search(

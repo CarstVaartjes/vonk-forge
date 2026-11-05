@@ -257,10 +257,11 @@ def _reconcile_to_next_look(jobs, sessions, clock, operation_id: str) -> AgentOp
 def test_a_lost_job_order_ends_failed_after_the_bound_and_a_fresh_request_runs(
     agent_service,
 ) -> None:
-    """Wrong implementation (main before this fix): the lost order kept its
-    node's lane for ever, so a fresh request for the same Spark never ran.
-    One look short of the bound it still waits; the last look ends it failed
-    with typed evidence and frees the lane."""
+    """Wrong implementation: a lost order stays observing for ever (or ends
+    after looks inside the job's own bound).  Past the job's deadline and stop
+    grace, one look short of the bound it still waits; the last look ends it
+    failed with typed evidence.  (A fresh request is claimable once it ended;
+    that part also holds on main and proves nothing about the bound.)"""
 
     jobs, sessions, clock = agent_service
     kind, payload = _job_run_payload()
@@ -268,20 +269,25 @@ def test_a_lost_job_order_ends_failed_after_the_bound_and_a_fresh_request_runs(
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
     jobs.reconcile_orders()
-    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    # Past the vector job's 3600 s timeout and its stop grace from the lapsed
+    # lease; the Spark is present (it polls), so the order's own deadline applies.
+    clock.advance(seconds=7200)
+    assert claim_agent(jobs, NODE_A, "serial-a") is None
 
     stored = _stored(sessions, operation.id)
     for _ in range(OBSERVE_BUDGET + 2 * LOST_OBSERVATION_BOUND):
         if stored.observe_count >= OBSERVE_BUDGET + LOST_OBSERVATION_BOUND - 1:
             break
         stored = _reconcile_to_next_look(jobs, sessions, clock, operation.id)
-    # One unknown look short of the bound: still lost, still holding its lane.
+        assert claim_agent(jobs, NODE_A, "serial-a") is None
+    # One unknown look short of the bound: still lost.
     assert stored.state == aos.OBSERVING
     assert stored.observe_count == OBSERVE_BUDGET + LOST_OBSERVATION_BOUND - 1
 
     ended = _reconcile_to_next_look(jobs, sessions, clock, operation.id)
     assert ended.state == aos.FAILED
     assert ended.status_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value
+    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1
 
@@ -299,7 +305,7 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
     jobs.reconcile_orders()
-    for _ in range(OBSERVE_BUDGET + 1):
+    for _ in range(OBSERVE_BUDGET + 4):
         due = _stored(sessions, operation.id).next_action_at
         assert due is not None
         clock.now = max(clock.now, due.replace(tzinfo=UTC)) + timedelta(seconds=1)
