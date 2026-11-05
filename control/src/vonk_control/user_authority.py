@@ -1,4 +1,8 @@
-"""Serialization boundary for mutations to user authority."""
+"""Serialization of user-authority *writers* (the administrator bootstrap).
+
+Readers (profile and recipe-update mutations) take no lock: nothing at runtime
+writes ``users``, so a plain read of the acting user is already current.
+"""
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session

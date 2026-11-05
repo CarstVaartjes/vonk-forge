@@ -1140,8 +1140,6 @@ def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    from vonk_control.user_authority import serialize_user_authority
-
     sessions, revision, _, now, fresh = postgres_update_env
     service = fresh()
     parent = _start(service, [revision])
@@ -1161,7 +1159,6 @@ def test_postgres_author_revocation_does_not_revoke_accepted_child_scope(
         try:
             assert entered.wait(30)
             with sessions.begin() as session:
-                serialize_user_authority(session)
                 session.scalar(
                     select(User).where(User.subject == "operator")
                 ).disabled_at = now[0]

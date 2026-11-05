@@ -149,7 +149,8 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
     ): "the collector's headroom floor, defaulted from that setting",
 }
 # The only modules that may lock a whole table: one-time schema adoption at
-# startup (before services run) and user-authority serialization (security).
+# startup (before services run) and the administrator bootstrap's user-authority
+# serialization (security; readers take no lock).
 TABLE_LOCK_OWNERS = frozenset(
     {
         "control/src/vonk_control/exact_integer_adoption.py",

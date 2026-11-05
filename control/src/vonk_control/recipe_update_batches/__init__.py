@@ -186,9 +186,6 @@ from ..state_filters import (
 from ..strict_json import (
     serialize_json_value as serialize_json_value,
 )
-from ..user_authority import (
-    serialize_user_authority as serialize_user_authority,
-)
 from .helpers import _OBSERVATION_INTERVAL as _OBSERVATION_INTERVAL
 from .helpers import _SETTLED as _SETTLED
 from .helpers import RecipeUpdateClaim as RecipeUpdateClaim
