@@ -187,7 +187,7 @@ def _seed_recipe_reference(
                     name=f"acceptance-{recipe_id[:8]}",
                     description="",
                     installation_policy="keep-cached",
-                    assignments=[{"recipe_revision_id": revision_id}],
+                    assignments=[{"recipe_selector": f"{publisher}/{slug}"}],
                     labels={},
                     favorite=False,
                     created_by="acceptance",

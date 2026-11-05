@@ -10,10 +10,12 @@ so it removes the sets the listing shows, never a narrower exact-digest view.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable
+from functools import partial
 from typing import NamedTuple
 
 from sqlalchemy import (
     Exists,
+    and_,
     case,
     func,
     literal,
@@ -23,10 +25,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_forge_contracts import ModelDefinition
 from vonk_forge_contracts.model import ModelReference
 
 from ..model_cache_contract import CacheManifest
-from ..models import CatalogDocumentRevision, ModelCacheSet
+from ..models import CatalogDocumentRevision, ModelCacheSet, ModelCacheSetArtifact
 from ..stored_json import read_row_column
 
 
@@ -116,11 +119,18 @@ class ModelSets(NamedTuple):
 
 
 def model_sets(
-    session: Session, contents: Collection[str], *, among: Collection[str] | None = None
+    session: Session,
+    contents: Collection[str],
+    *,
+    among: Collection[str] | None = None,
+    files: Collection[str] | None = None,
 ) -> ModelSets:
     """The cached sets bound to any of ``contents``, in digest order.
 
-    ``among`` limits the read to these set digests.
+    ``among`` limits the read to these set digests. ``files`` are the files the
+    callers already read from the catalog documents of ``contents`` (read here
+    when not given): a manifest is only read for a set whose membership holds one
+    of them, and not at all narrowed when a document cannot be read.
 
     A set's binding is its first requester's content or a verified binding in
     its stored manifest; a manifest that does not read binds only through its
@@ -131,6 +141,11 @@ def model_sets(
     if not contents:
         return ModelSets((), ())
     wanted = set(contents)
+    # A verified binding is published only for a set that holds a file of the
+    # model, so only those sets' manifests are read.
+    if among is None and files is None:
+        files = catalog_model_files(session, wanted)
+    candidates = None if files is None else _sets_holding(session, files)
     bound: dict[str, frozenset[str]] = {}
     for row in session.scalars(
         select(ModelCacheSet)
@@ -144,7 +159,12 @@ def model_sets(
         .where(
             or_(
                 ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
-                verifies_model(session, wanted),
+                and_(
+                    ModelCacheSet.artifact_set_sha256.in_(candidates),
+                    verifies_model(session, wanted),
+                )
+                if candidates is not None
+                else verifies_model(session, wanted),
             ),
             *(
                 ()
@@ -176,6 +196,51 @@ def model_sets(
     return ModelSets(
         owned=tuple(sorted(d for d, b in bound.items() if not b & catalogued)),
         shared=tuple(sorted(d for d, b in bound.items() if b & catalogued)),
+    )
+
+
+def catalog_model_files(
+    session: Session, contents: Collection[str]
+) -> frozenset[str] | None:
+    """The files the catalog documents of ``contents`` list; ``None`` when one
+    cannot be read (nothing may then be ruled out by files)."""
+
+    from ..catalog_revision_contract import read_catalog_document
+    from ..lifecycle.evidence import Residue, read_or_rebuild
+
+    files: set[str] = set()
+    for revision in session.scalars(
+        select(CatalogDocumentRevision).where(
+            CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
+            CatalogDocumentRevision.content_digest.in_(sorted(contents)),
+        )
+    ):
+        model = read_or_rebuild(
+            kind=CatalogDocumentRevision.__tablename__,
+            subject=revision.id,
+            read=partial(read_catalog_document, revision),
+        )
+        if isinstance(model, Residue):
+            return None
+        if isinstance(model, ModelDefinition):
+            files.update(file.sha256 for file in model.files)
+    return frozenset(files)
+
+
+def _sets_holding(session: Session, files: Collection[str]) -> list[str]:
+    """The cached sets whose membership lists one of ``files``.
+
+    A set whose membership rows are lost is not listed, so it is neither
+    removed nor reported for the model: hiding a set can only keep its bytes,
+    and the next time the set is ensured its membership is written again.
+    """
+
+    return sorted(
+        session.scalars(
+            select(ModelCacheSetArtifact.artifact_set_sha256)
+            .where(ModelCacheSetArtifact.artifact_sha256.in_(sorted(files)))
+            .distinct()
+        )
     )
 
 

@@ -140,6 +140,7 @@ PRODUCERS = {
         paths=(
             *ORCHESTRATION,
             ".dockerignore",
+            ".github/actions/free-runner-disk/**",
             ".github/actions/image-scan/**",
             ".github/actions/image-security/**",
             ".github/workflows/dev-images.yml",

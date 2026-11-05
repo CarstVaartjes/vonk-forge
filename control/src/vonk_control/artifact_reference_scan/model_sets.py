@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable
 from datetime import datetime
 from typing import Literal
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -27,11 +27,6 @@ from ..content_identity import (
     active_recipe_revisions,
     catalog_selector_membership,
 )
-from ..fleet_profile_contract import (
-    FleetProfileAssignmentInput,
-    RecipeSelector,
-)
-from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
 from ..model_cache_contract import CacheManifest
 from ..models import (
     CatalogDocumentRevision,
@@ -188,42 +183,6 @@ def model_set_objects(
             )
         result[set_digest] = tuple(sorted({item[0] for item in observed.values()}))
     return result
-
-
-def saved_profile_selectors(profile: FleetProfile) -> tuple[str, ...] | None:
-    """Recover the protective selector projection independently of draft fields.
-
-    A damaged option, node or variant cannot hide a readable recipe selector.
-    An unreadable selector has unknown scope and protects every candidate;
-    neither the scan nor its caller edits authoring intent to invent certainty.
-    Each collection attempt ends, and the next pass re-reads the owner.
-    """
-    try:
-        assignments = TypeAdapter(list[FleetProfileAssignmentInput]).validate_json(
-            canonical_message(profile.assignments), strict=True
-        )
-        return tuple(assignment.recipe_selector for assignment in assignments)
-    except (TypeError, ValueError):
-        retire_as_unknown(
-            "artifact-reference.recipe-selector",
-            profile.id,
-            BookkeepingReason.PERSISTED_STATE_DAMAGED,
-            "saved profile reference projection is being re-observed",
-        )
-    if not isinstance(profile.assignments, list):
-        return None
-    selectors: list[str] = []
-    for assignment in profile.assignments:
-        if not isinstance(assignment, Mapping):
-            return None
-        try:
-            selector = TypeAdapter(RecipeSelector).validate_python(
-                assignment.get("recipe_selector"), strict=True
-            )
-        except (TypeError, ValueError):
-            return None
-        selectors.append(selector)
-    return tuple(selectors)
 
 
 def _selectors_revisions(

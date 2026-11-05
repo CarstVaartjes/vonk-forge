@@ -37,6 +37,7 @@ from .execution import ArtifactJob as ArtifactJob
 from .execution import ArtifactJobBlob as ArtifactJobBlob
 from .execution import ArtifactJobFile as ArtifactJobFile
 from .execution import InstallationNode as InstallationNode
+from .execution import MeasuredRolePeak as MeasuredRolePeak
 from .execution import RecipeInstallation as RecipeInstallation
 from .execution import RecipeRun as RecipeRun
 from .execution import ResourceReservation as ResourceReservation
@@ -51,6 +52,7 @@ from .fleet import AgentNodeContact as AgentNodeContact
 from .fleet import AgentNodeProfile as AgentNodeProfile
 from .fleet import FleetProfile as FleetProfile
 from .fleet import FleetProfileApplication as FleetProfileApplication
+from .fleet import FleetProfileRecipe as FleetProfileRecipe
 from .fleet import FleetProfileSelection as FleetProfileSelection
 from .fleet import LoginSession as LoginSession
 from .fleet import User as User

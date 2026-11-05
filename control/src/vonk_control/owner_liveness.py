@@ -26,7 +26,7 @@ Kept on purpose by the installation arm:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -485,6 +485,8 @@ def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> 
     records the id in its progress. Either keeps the owner live.
     """
 
+    if owner_kind == OwnerKind.INSTALLATION:
+        return bool(installations_named_by_live_jobs(session, (owner_id,)))
     return (
         session.scalar(
             select(Job.id)
@@ -500,6 +502,61 @@ def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> 
         )
         is not None
     )
+
+
+#: The ``jobs.payload`` fields (dotted paths) a live operation names an
+#: installation in, which ``installations_named_by_live_jobs`` reads.
+#: ``owner_id`` counts when ``owner_kind`` is an installation. A stored payload
+#: contract that holds an installation id elsewhere must be added here or
+#: justified in ``test_installation_naming_contract``.
+INSTALLATION_PAYLOAD_PATHS: frozenset[str] = frozenset(
+    {"owner_id", "plan.installation_id", "intent.installation_id"}
+)
+
+
+def _payload_text(path: str) -> ColumnElement[str]:
+    node = Job.payload
+    for step in path.split("."):
+        node = node[step]
+    return node.as_string()
+
+
+def installations_named_by_live_jobs(
+    session: Session, installation_ids: Collection[str]
+) -> frozenset[str]:
+    """Which of ``installation_ids`` a live operation names: one query, any count.
+
+    The one definition of "a live operation names this installation", for one
+    id (``referencing_active_job``) and for a sweep asking about many. An
+    operation names an installation by its owner fields, by the installation in
+    its plan or intent (a Run/Switch, Stop or Cleanup order names the one it
+    reuses or removes only there), or by recording it in its progress.
+    """
+
+    wanted = frozenset(installation_ids)
+    if not wanted:
+        return frozenset()
+    paths = sorted(INSTALLATION_PAYLOAD_PATHS)
+    named: set[str] = set()
+    for owner_kind, result, *values in session.execute(
+        select(
+            Job.payload["owner_kind"].as_string(),
+            cast(Job.result, Text),
+            *(_payload_text(path) for path in paths),
+        ).where(
+            Job.state.in_(job_states.LIVE),
+            or_(
+                *(_payload_text(path).in_(list(wanted)) for path in paths),
+                *(cast(Job.result, Text).contains(found) for found in wanted),
+            ),
+        )
+    ):
+        for path, value in zip(paths, values, strict=True):
+            if value and (path != "owner_id" or owner_kind == OwnerKind.INSTALLATION):
+                named.add(value)
+        if result:
+            named.update(found for found in wanted if found in result)
+    return wanted & named
 
 
 def run_has_live_operation(session: Session, run_id: str) -> bool:

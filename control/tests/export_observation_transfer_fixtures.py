@@ -50,7 +50,9 @@ def _export_saved_event_recovery(output: Path) -> None:
                     contact=AgentNodeContact(last_seen_at=NOW),
                 )
             )
-            event = repository.append_in_session(session, _operation_draft(1))
+            repository.append_in_session(session, _operation_draft(1))
+        event_id = 1  # the first event of a fresh store
+        with sessions.begin() as session:
             payload = _operation_draft(1).payload.model_dump(mode="json")
             # Keep the SQL size/type/identity constraints enabled. An integer
             # in a string field is valid SQL JSON but invalid canonical payload.
@@ -58,7 +60,7 @@ def _export_saved_event_recovery(output: Path) -> None:
             payload["kind"] = 17
             session.execute(
                 update(FleetStreamEvent)
-                .where(FleetStreamEvent.id == event.id)
+                .where(FleetStreamEvent.id == event_id)
                 .values(payload=payload)
             )
         stream = FleetStream(
@@ -78,21 +80,21 @@ def _export_saved_event_recovery(output: Path) -> None:
         snapshot = FleetProjection(
             sessions, events=repository, clock=lambda: NOW
         ).read()
-        assert snapshot.event_cursor == event.id
+        assert snapshot.event_cursor == event_id
         assert snapshot.nodes[0].id == NODE_ID
         response = observation_response(snapshot, resource="fleet")
         body = asyncio.run(_collect(response))
         with sessions.begin() as session:
             session.execute(
                 update(FleetStreamEvent)
-                .where(FleetStreamEvent.id == event.id)
+                .where(FleetStreamEvent.id == event_id)
                 .values(payload=_operation_draft(1).payload.model_dump(mode="json"))
             )
         repaired_frame = asyncio.run(first_frame())
         document = {
             "notice": notice,
             "repaired_frame": repaired_frame,
-            "event_cursor": event.id,
+            "event_cursor": event_id,
             "path": "/api/fleet",
             "media_type": response.media_type,
             "body": body,

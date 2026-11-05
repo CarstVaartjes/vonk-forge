@@ -25,6 +25,7 @@ vonk_control.models.ControlProcessHeartbeat|control_process_heartbeats|
 vonk_control.models.CoordinatorFailure|coordinator_failures|
 vonk_control.models.FleetEventCursor|fleet_event_cursor|
 vonk_control.models.FleetProfileApplication|fleet_profile_applications|
+vonk_control.models.FleetProfileRecipe|fleet_profile_recipes|
 vonk_control.models.FleetProfileSelection|fleet_profile_selection|
 vonk_control.models.FleetProfile|fleet_profiles|
 vonk_control.models.FleetStreamEvent|fleet_stream_events|
@@ -34,6 +35,7 @@ vonk_control.models.Job|jobs|
 vonk_control.models.LocalCertificateIssuance|local_certificate_issuance|
 vonk_control.models.LocalCertificateRevocation|local_certificate_revocations|
 vonk_control.models.LoginSession|sessions|
+vonk_control.models.MeasuredRolePeak|measured_role_peaks|
 vonk_control.models.ModelCacheOperation|model_cache_operations|
 vonk_control.models.ModelCacheSetArtifact|model_cache_set_artifacts|
 vonk_control.models.ModelCacheSet|model_cache_sets|

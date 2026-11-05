@@ -35,12 +35,19 @@ from vonk_control.models import (
     Job,
     NodeInventorySnapshot,
     RecipeInstallation,
+    RecipeRun,
     ResourceReservation,
+)
+from vonk_control.owner_liveness import (
+    OwnerKind,
+    installations_named_by_live_jobs,
+    referencing_active_job,
 )
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import RecipeRouteService
 from vonk_control.reservation_owners import ADOPTION_WINDOW
+from vonk_control.run_switch_contract import RunSwitchCleanupApplyRequest
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .profile_due_fixtures import next_profile_due
@@ -788,6 +795,7 @@ def test_an_unowned_incomplete_installation_is_uninstalled_after_the_grace(
     assert not _uninstalls(load, installation_id)
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
     assert len(_uninstalls(load, installation_id)) == 1
+    _agree(load, installation_id, named=True)  # by the uninstall's owner fields
     # The queued uninstall owns the Sparks: the sweep does not queue another.
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=2)).tick()
     assert len(_uninstalls(load, installation_id)) == 1
@@ -828,6 +836,165 @@ def test_other_work_on_its_sparks_does_not_restart_a_leftovers_grace(
 
     assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
     assert len(_uninstalls(load, installation_id)) == 1
+
+
+def _unrelated_live_work_on(load, installation_id: str) -> None:
+    """A running job of someone else on the installation's Sparks."""
+
+    with load.sessions.begin() as session:
+        nodes = sorted(
+            session.scalars(
+                select(InstallationNode.node_id).where(
+                    InstallationNode.installation_id == installation_id
+                )
+            )
+        )
+        session.add(
+            Job(
+                request_id=str(uuid.uuid4()),
+                kind="recipe.start",
+                state="running",
+                actor="operator",
+                authority_revision="r",
+                targets=nodes,
+                payload_digest="0" * 64,
+                payload={},
+                current_attempt=0,
+                created_at=load.lifecycle._clock(),
+                updated_at=load.lifecycle._clock(),
+            )
+        )
+
+
+def test_a_residue_of_an_ended_attempt_goes_while_other_work_is_live(
+    tmp_path: Path,
+) -> None:
+    """Catches a busy Spark holding an ended attempt's residue until disk pressure."""
+
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="failed")
+    _unrelated_live_work_on(load, installation_id)
+    assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
+    assert len(_uninstalls(load, installation_id)) == 1
+
+
+def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
+    """A finished load whose installation then falls short of its payload."""
+
+    assert _loop(
+        load,
+        lambda: load.profiles.application(load.application.id).state == "succeeded",
+    )
+    with load.sessions.begin() as session:
+        installation = session.scalar(
+            select(RecipeInstallation).where(RecipeInstallation.state == "installed")
+        )
+        assert installation is not None
+        plan = json.loads(json.dumps(installation.plan))
+        for node in plan["nodes"]:
+            node["required_payload_bytes"] = 10**12
+        installation.plan = plan
+        installation_id = installation.id
+        for run in session.scalars(select(RecipeRun)):
+            run.state = "stopped"
+            run.route_state = "withdrawn"
+    spark_files.missing_spark_bytes = 1024
+    with load.sessions() as session:
+        assert installation_id in incomplete_installation_ids(session)
+    return installation_id
+
+
+def test_a_run_switch_copying_into_a_short_installation_keeps_it(
+    tmp_path: Path,
+) -> None:
+    """Catches the residue tick uninstalling an installation a Run/Switch reuses."""
+
+    spark_files = CompleteArtifactInspector()
+    load = _load(tmp_path, artifacts=spark_files)
+    installation_id = _installed_but_short(load, spark_files)
+    again = load.profiles.apply(
+        load.application.profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    )
+    assert _loop(
+        load,
+        lambda: _at_phase(load, "target-copy"),
+        complete=False,
+        application_id=again.id,
+    )
+    switch = _switch(load)
+    assert switch is not None
+    assert cast(dict, switch.payload["plan"])["installation_id"] == installation_id
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
+    assert not _uninstalls(load, installation_id)
+
+
+def test_a_queued_cleanup_order_keeps_its_installation_from_the_sweep(
+    tmp_path: Path,
+) -> None:
+    """A Cleanup order names its installation only in its plan."""
+
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="partial")
+    with load.sessions.begin() as session:
+        for job in session.scalars(select(Job).where(Job.state == "failed")):
+            job.state = "cancelled"  # nothing else names it
+    operation = load.planner.apply_cleanup(
+        RunSwitchCleanupApplyRequest(
+            installation_id=installation_id,
+            cleanup_mode="uninstall",
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with load.sessions() as session:
+        cleanup = session.get(Job, operation.operation_id)
+        assert cleanup is not None and cleanup.kind == "recipe.cleanup.v2"
+        assert cast(dict, cleanup.payload["plan"])["installation_id"] == installation_id
+    _agree(load, installation_id, named=True)  # by its plan
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
+    assert not _uninstalls(load, installation_id)
+
+
+def _agree(load, installation_id: str, *, named: bool) -> None:
+    """The single-id and batched predicates give the same answer."""
+
+    stranger = str(uuid.uuid4())
+    with load.sessions() as session:
+        assert (
+            referencing_active_job(session, OwnerKind.INSTALLATION, installation_id)
+            is named
+        )
+        assert installations_named_by_live_jobs(
+            session, (installation_id, stranger)
+        ) == (frozenset({installation_id}) if named else frozenset())
+        assert not referencing_active_job(session, OwnerKind.INSTALLATION, stranger)
+
+
+def test_the_predicates_agree_on_an_installation_a_live_order_records(
+    tmp_path: Path,
+) -> None:
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
+    with load.sessions() as session:
+        installation_id = session.scalars(select(RecipeInstallation.id)).one()
+    _agree(load, installation_id, named=True)  # by the order's progress
+    _fail_switch(load)
+    with load.sessions.begin() as session:
+        for job in session.scalars(select(Job).where(Job.state != "failed")):
+            job.state = "cancelled"
+    _agree(load, installation_id, named=False)
+
+
+def test_a_residue_of_a_live_attempt_is_kept(tmp_path: Path) -> None:
+    load = _load(tmp_path)
+    installation_id = _leave_incomplete(load, state="failed")
+    _unrelated_live_work_on(load, installation_id)
+    with load.sessions.begin() as session:
+        job = session.scalar(select(Job).where(Job.kind == "recipe.run-switch.v2"))
+        assert job is not None
+        job.state = "running"  # the attempt that left it is still going
+    _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
+    assert not _uninstalls(load, installation_id)
 
 
 def test_an_installation_short_of_its_payload_is_uninstalled_after_the_grace(
