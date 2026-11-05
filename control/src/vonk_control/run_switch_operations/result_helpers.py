@@ -11,6 +11,7 @@ from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
     OperationProgress,
+    OutcomeKind,
     WaitReason,
     canonical_message,
 )
@@ -95,7 +96,7 @@ def _progress_operation_state(value: object) -> RunSwitchProgressState:
     try:
         return _PROGRESS_STATE_ADAPTER.validate_python(value, strict=True)
     except ValidationError:
-        return "unknown"
+        return OutcomeKind.UNKNOWN
 
 
 def _progress_subphase(value: object) -> RunSwitchSubphase | None:

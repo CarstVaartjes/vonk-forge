@@ -1715,7 +1715,8 @@ def test_profile_cancel_settles_when_a_distribution_sibling_is_parked_for_retry(
                     fence=str(uuid.uuid4()),
                     lease_deadline=now[0],
                     agent_certificate_serial="serial-0",
-                    state="failed" if index == 0 else "expired",
+                    state="failed" if index == 0 else "observing",
+                    observation_cause=None if index == 0 else "lease-lapsed",
                     result={},
                 )
             )

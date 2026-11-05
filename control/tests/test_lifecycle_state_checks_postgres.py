@@ -43,6 +43,7 @@ def _seed(postgres_engine) -> None:
     sessions = sessionmaker(postgres_engine, expire_on_commit=False)
     with sessions.begin() as session:
         session.add(AgentNode(node_id=NODE, state="active"))
+        session.flush()
         session.add(
             AgentCertificate(
                 serial="serial-state-check",
