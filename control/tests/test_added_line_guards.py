@@ -2194,8 +2194,11 @@ def test_agent_422_guard_flags_any_handler_that_answers_422() -> None:
     )
     hits = check_source(path, probe, {3}, modes=("agent-422",))
     assert any("except handler" in hit for hit in map(str, hits))
-    routed = "except ValueError as error:\n    contract_verdict_or_wait(error)\n"
-    assert not check_source(path, routed, {1}, modes=("agent-422",))
+    routed = (
+        "try:\n    work()\n"
+        "except ValueError as error:\n    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
 
 
 def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
@@ -2210,7 +2213,7 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
 
 
 @pytest.mark.parametrize(
-    "probe",
+    "handler",
     [
         (
             "except (EnrollmentDenied, ValueError) as error:\n"
@@ -2223,22 +2226,27 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
         "except OSError:\n    raise HTTPException(403, 'x')\n",
     ],
 )
-def test_broad_exception_may_not_answer_401_or_403(probe: str) -> None:
+def test_broad_exception_may_not_answer_401_or_403(handler: str) -> None:
     # Wrong implementation: an internal ValueError answered 403 and the Spark's
     # agent exited (fatal 401/403) instead of retrying.
     path = "control/src/vonk_control/agent_api/authority.py"
-    assert check_source(path, probe, {1}, modes=("agent-422",))
+    assert check_source(path, "try:\n    work()\n" + handler, {3}, modes=("agent-422",))
 
 
 def test_typed_security_refusal_may_answer_403() -> None:
     path = "control/src/vonk_control/agent_api/authority.py"
     typed = (
+        "try:\n    work()\n"
         "except EnrollmentDenied as error:\n"
         "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
     )
-    assert not check_source(path, typed, {1}, modes=("agent-422",))
-    routed = "except (EnrollmentDenied, ValueError) as error:\n    contract_verdict_or_wait(error)\n"
-    assert not check_source(path, routed, {1}, modes=("agent-422",))
+    assert not check_source(path, typed, {3}, modes=("agent-422",))
+    routed = (
+        "try:\n    work()\n"
+        "except (EnrollmentDenied, ValueError) as error:\n"
+        "    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
 
 
 @pytest.mark.parametrize(
