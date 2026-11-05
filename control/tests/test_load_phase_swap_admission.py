@@ -10,7 +10,7 @@ from importlib.resources import files
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunAdmissionCode,
@@ -23,7 +23,9 @@ from vonk_agent_protocol.swap import GIB, SWAP_POLICY, usable_swap_bytes
 from vonk_control.fleet_profiles.dependencies import ENDING_BLOCKER_CODES
 from vonk_control.inventory_repository import InventoryRepository, NodeInventoryReport
 from vonk_control.models import (
+    CatalogDocumentRevision,
     InstallationNode,
+    MeasuredRolePeak,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -45,6 +47,31 @@ _TOTAL = 120 * GIB
 _FREE = 118 * GIB
 _STEADY = 100 * GIB
 _FLOOR = 4 * GIB
+
+
+def set_measured_peaks(session, peak):
+    """Every installed content's roles measured at ``peak`` (none when ``None``)."""
+    session.execute(delete(MeasuredRolePeak))
+    if peak is None:
+        return
+    for digest, role in session.execute(
+        select(CatalogDocumentRevision.content_digest, InstallationNode.role)
+        .join(
+            RecipeInstallation,
+            RecipeInstallation.recipe_revision_id == CatalogDocumentRevision.id,
+        )
+        .join(
+            InstallationNode, InstallationNode.installation_id == RecipeInstallation.id
+        )
+        .distinct()
+    ):
+        session.add(
+            MeasuredRolePeak(
+                content_sha256=digest,
+                role=role,
+                peak_bytes=peak,
+            )
+        )
 
 
 def _inventory(sessions, at, node, *, free=_FREE, swap=None):
@@ -332,7 +359,7 @@ def test_c_a_second_load_waits_while_the_first_still_loads_and_no_rise_never_wai
             .values(state=RunState.STARTING)
         )
         session.execute(update(RunNode).values(observed_memory_bytes=None))
-        session.execute(update(InstallationNode).values(observed_memory_bytes=None))
+        set_measured_peaks(session, None)
     plan = service.plan_run(installation, alias="c", now=at)
     assert plan.allowed, _codes(plan)
     assert plan.nodes[0].load_memory_bytes is None
@@ -481,9 +508,7 @@ def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0
     if loading:
         # Another load of this content on the Spark is still starting.
         with sessions.begin() as session:
-            session.execute(
-                update(InstallationNode).values(observed_memory_bytes=steady + rise)
-            )
+            set_measured_peaks(session, steady + rise)
         _set_swap(sessions, total_gib=SWAP_POLICY.maximum_gib)
         other = admission.accept_run(
             admission.plan_run(installation_id, "other", now=lifecycle._clock()),
@@ -506,9 +531,7 @@ def _switch_world(tmp_path, postgres_engine, *, rise, total_gib, used, loading=0
         for rank in session.scalars(select(RunNode).where(RunNode.run_id == old)):
             rank.state = "running"
         # This content's load rises ``rise`` above its steady demand.
-        session.execute(
-            update(InstallationNode).values(observed_memory_bytes=steady + rise)
-        )
+        set_measured_peaks(session, steady + rise)
     _set_swap(sessions, total_gib=total_gib, used=used)
     service = _service(
         sessions,
@@ -617,11 +640,7 @@ def test_i_a_job_run_holds_its_rise_while_its_ranks_run_jobs(
     ).owner_id
     steady = operations.preview_run(installation_id, "image-job").nodes[0]
     with sessions.begin() as session:
-        session.execute(
-            update(InstallationNode).values(
-                observed_memory_bytes=steady.required_memory_bytes + 30 * GIB
-            )
-        )
+        set_measured_peaks(session, steady.required_memory_bytes + 30 * GIB)
     _set_swap(sessions, total_gib=64)
     plan = operations.preview_run(installation_id, "image-job")
     assert plan.allowed, _codes(plan)

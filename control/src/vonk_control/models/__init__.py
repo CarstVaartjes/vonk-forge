@@ -37,6 +37,7 @@ from .execution import ArtifactJob as ArtifactJob
 from .execution import ArtifactJobBlob as ArtifactJobBlob
 from .execution import ArtifactJobFile as ArtifactJobFile
 from .execution import InstallationNode as InstallationNode
+from .execution import MeasuredRolePeak as MeasuredRolePeak
 from .execution import RecipeInstallation as RecipeInstallation
 from .execution import RecipeRun as RecipeRun
 from .execution import ResourceReservation as ResourceReservation

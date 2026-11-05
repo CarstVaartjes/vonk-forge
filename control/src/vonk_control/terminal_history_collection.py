@@ -193,6 +193,13 @@ RETAINED: dict[str, tuple[Retained, str]] = {
     "route_publication_owner": (Retained.DESIRED_STATE, "a route's live owner"),
     "fleet_event_cursor": (Retained.OBSERVED_TRUTH, "the stream's one cursor"),
     "node_telemetry_latest": (Retained.OBSERVED_TRUTH, "each node's newest sample"),
+    "measured_role_peaks": (
+        Retained.OBSERVED_TRUTH,
+        (
+            "one raised-in-place row per recipe content and role; bounded by the "
+            "recipes ever run, and kept after its runs and installations go"
+        ),
+    ),
     "coordinator_failures": (
         Retained.OBSERVED_TRUTH,
         "one current failure per source, deleted when it clears",
@@ -209,7 +216,8 @@ RETAINED: dict[str, tuple[Retained, str]] = {
         Retained.OWNED_ELSEWHERE,
         "catalog_revision_collection.CatalogRevisionCollector",
     ),
-    # With their catalog revision; uninstalled rows after a peaks table lands.
+    # With their catalog revision. Measured peaks live in measured_role_peaks,
+    # so no rule needs to keep an installation for them.
     "recipe_installations": (
         Retained.OWNED_ELSEWHERE,
         "catalog_revision_collection.CatalogRevisionCollector",

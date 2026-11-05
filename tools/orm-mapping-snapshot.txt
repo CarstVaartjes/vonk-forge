@@ -35,6 +35,7 @@ vonk_control.models.Job|jobs|
 vonk_control.models.LocalCertificateIssuance|local_certificate_issuance|
 vonk_control.models.LocalCertificateRevocation|local_certificate_revocations|
 vonk_control.models.LoginSession|sessions|
+vonk_control.models.MeasuredRolePeak|measured_role_peaks|
 vonk_control.models.ModelCacheOperation|model_cache_operations|
 vonk_control.models.ModelCacheSetArtifact|model_cache_set_artifacts|
 vonk_control.models.ModelCacheSet|model_cache_sets|
