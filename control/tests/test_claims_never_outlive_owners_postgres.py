@@ -274,7 +274,8 @@ def _removal_gate(tmp_path: Path, engine: Engine, ending: str) -> None:
     with sessions.begin() as session:
         require_reference_open(session, (identity,), now=now)
         gate = session.get(ArtifactLifecycleGate, (identity.kind, identity.sha256))
-        assert gate is not None and gate.removal_owner_id is None
+        # An open gate is deleted where it is released.
+        assert gate is None
 
 
 def _sync_slot(tmp_path: Path, engine: Engine, ending: str) -> None:

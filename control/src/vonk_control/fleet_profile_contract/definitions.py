@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
     ProfileReasonCode,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange, default_gpu_clock
+from vonk_forge_contracts import EndpointAlias
 
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..model_cache_contract import CachedResourceEstimate
@@ -26,7 +27,6 @@ from ..strict_json import StrictModel
 from ..wait_contract import QueueWait
 from .vocabulary import (
     MAX_PROFILE_WARNINGS,
-    Alias,
     Description,
     DesiredAssignmentStateField,
     Digest,
@@ -78,7 +78,7 @@ class FleetProfileAssignmentInput(StrictModel):
     )
     recipe_selector: RecipeSelector
     spark_ids: list[NodeId] = Field(min_length=1, max_length=32)
-    assignment_name: Alias | None = None
+    assignment_name: EndpointAlias | None = None
     model_variant: (
         Annotated[str, StringConstraints(min_length=1, max_length=200)] | None
     ) = None
@@ -107,7 +107,7 @@ class StoredFleetProfileAssignment(StrictModel):
     recipe_revision_id: UuidId
     topology_name: Annotated[str, StringConstraints(min_length=1, max_length=64)]
     desired_state: DesiredAssignmentStateField
-    alias: Alias | None = None
+    alias: EndpointAlias | None = None
     nodes: list[FleetProfileNode] = Field(min_length=1, max_length=32)
     # Effective recipe-option choices; a snapshot from before options existed
     # has none, which reads as every option's default.
@@ -184,7 +184,7 @@ class FleetProfileAssignmentView(StrictModel):
     gpu_clock: GpuClockRange | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
-    selector: Alias
+    selector: EndpointAlias
     display_name: Name
     recipe_selector: RecipeSelector
     recipe_id: UuidId | None = None

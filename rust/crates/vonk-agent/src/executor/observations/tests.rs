@@ -1030,18 +1030,26 @@ fn retain_pending(database_root: &std::path::Path, run_id: Uuid) -> Value {
 
 #[tokio::test]
 async fn refused_pending_observation_does_not_block_fresh_evidence() {
-    // Wrong implementation: a deterministic 422 for the pending page returns
-    // early every cycle, so no newer observation is ever collected or sent.
-    let root = tempdir().unwrap();
-    let pending = retain_pending(root.path(), Uuid::new_v4());
-    let server = ObservationServer::scripted(&[422, 204]);
-    pending_cycle(&server, root.path()).await.unwrap();
-    let reports = server.finish();
-    assert_eq!(reports.len(), 2, "pending page, then fresh evidence");
-    assert_eq!(reports[0], pending);
-    assert_eq!(reports[1]["runs"], json!([]));
-    let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
-    assert!(state.pending_recipe_observation().unwrap().is_none());
+    // Wrong implementation: a deterministic refusal of the pending page
+    // returns early every cycle, so no newer observation is ever collected or
+    // sent. Every definite refusal (invalid bytes, missing, conflicting, gone)
+    // settles the page by the one disposition.
+    for status in [400, 404, 409, 410, 422] {
+        let root = tempdir().unwrap();
+        let pending = retain_pending(root.path(), Uuid::new_v4());
+        let server = ObservationServer::scripted(&[status, 204]);
+        pending_cycle(&server, root.path()).await.unwrap();
+        let reports = server.finish();
+        assert_eq!(
+            reports.len(),
+            2,
+            "HTTP {status}: pending page, then fresh evidence"
+        );
+        assert_eq!(reports[0], pending);
+        assert_eq!(reports[1]["runs"], json!([]));
+        let state = StateStore::open(&root.path().join("state.sqlite"), NODE_ID).unwrap();
+        assert!(state.pending_recipe_observation().unwrap().is_none());
+    }
 }
 
 #[tokio::test]

@@ -31,6 +31,7 @@ from vonk_control.models import (
     User,
 )
 from vonk_control.strict_json import route_endpoint
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from cluster_profiles import cli
 from cluster_profiles.control_client import ControlClient
@@ -183,17 +184,24 @@ def test_profile_request_lookup_is_authenticated_and_reports_missing_key() -> No
     assert client.get(path, headers=_headers(codec)).status_code == 404
 
 
-def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None:
+# The longest alias a profile accepts is discoverable too: a narrower query
+# rule refuses the endpoint of a profile that saved fine.
+@pytest.mark.parametrize(
+    "alias", ["studio-chat", "chat-" + "x" * (ENDPOINT_ALIAS_MAX_LENGTH - 5)]
+)
+def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope(
+    alias: str,
+) -> None:
     from vonk_control.fleet_profile_contract import FleetProfileEndpointsView
 
     calls: list[tuple[int, str | None, str]] = []
 
     def profile_endpoint(
-        number: int, alias: str | None, gateway_api_base: str
+        number: int, requested: str | None, gateway_api_base: str
     ) -> FleetProfileEndpointsView:
-        calls.append((number, alias, gateway_api_base))
-        if alias != "studio-chat":
-            raise KeyError(alias)
+        calls.append((number, requested, gateway_api_base))
+        if requested != alias:
+            raise KeyError(requested)
         return FleetProfileEndpointsView.model_validate(
             {
                 "number": number,
@@ -206,10 +214,10 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
                         "assignment_id": "33333333-3333-4333-8333-333333333333",
                         "recipe_title": "Example Model",
                         "desired_state": "running",
-                        "alias": "studio-chat",
+                        "alias": alias,
                         "state": "published",
                         "endpoint": {
-                            "alias": "studio-chat",
+                            "alias": alias,
                             "api_base": gateway_api_base,
                             "backend_api_base": "http://10.0.0.10:8000/v1",
                             "generation": 8,
@@ -228,9 +236,7 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
     path = "/api/profile/3/endpoints"
     assert client.get(path).status_code == 401
 
-    response = client.get(
-        path, params={"alias": "studio-chat"}, headers=_headers(codec)
-    )
+    response = client.get(path, params={"alias": alias}, headers=_headers(codec))
     assert response.status_code == 200
     endpoint = response.json()["assignments"][0]["endpoint"]
     assert endpoint["generation"] == 8
@@ -242,9 +248,7 @@ def test_profile_endpoint_route_is_authenticated_and_keeps_alias_scope() -> None
         path, params={"alias": "another-profiles-model"}, headers=_headers(codec)
     )
     assert missing.status_code == 404
-    repaired = client.get(
-        path, params={"alias": "studio-chat"}, headers=_headers(codec)
-    )
+    repaired = client.get(path, params={"alias": alias}, headers=_headers(codec))
     assert repaired.status_code == 200
     assert repaired.json()["assignments"][0]["endpoint"] == endpoint
 

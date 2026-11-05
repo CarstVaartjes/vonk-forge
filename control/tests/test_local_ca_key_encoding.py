@@ -2,7 +2,6 @@
 
 import base64
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from cryptography import x509
@@ -116,46 +115,44 @@ def test_key_encoding_signs_or_reports_typed_configuration_failure(
         "provisioner_kid": material["kid"],
     }
     # Real loading/signing; PostgreSQL journal behavior lives in test_local_ca.
-    with patch.object(LocalCertificateAuthority, "_import_revocations"):
-        if encoding in {"old", "password"}:
-            with pytest.raises(
-                CapabilityConfigurationError, match="rerun the NAS installer"
-            ):
-                LocalCertificateAuthority(**options)
-            clock = NOW
-            service = RecoveringService(
-                ControllerCapability.CERTIFICATE_AUTHORITY,
-                LocalCertificateAuthority,
-                lambda: LocalCertificateAuthority(**options),
-                lambda: clock,
-            )
-            with pytest.raises(CapabilityUnavailableError) as failure:
-                service.require_service()
-            assert (
-                failure.value.reply.reason
-                == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
-            )
-            assert service.status.availability == CapabilityAvailability.UNAVAILABLE
-            assert service.status.reason == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
-            assert key_path.read_bytes() == pem
-            # Simulate the installer fixing the secret. The normal capability
-            # retry must recover without restarting or replacing Controller state.
-            key_path.write_bytes(canonical)
-            password_path.write_bytes(b"test-ca-password\n")
-            clock += timedelta(seconds=61)
-            ca = service.require_service()
-            assert service.status.availability == CapabilityAvailability.AVAILABLE
-        elif encoding == "mismatch":
-            with pytest.raises(ValueError, match="does not match certificate"):
-                LocalCertificateAuthority(**options)
-            assert key_path.read_bytes() == pem
-            return
-        else:
-            ca = LocalCertificateAuthority(**options)
-        csr = _csr()
-        request = _binding(ca, csr)
-        leaf = ca._certificate(request, x509.load_pem_x509_csr(csr))
-        leaf.verify_directly_issued_by(material["intermediate"])
-        assert str(leaf.serial_number) == request.serial
-        assert leaf.not_valid_before_utc == NOW
+    if encoding in {"old", "password"}:
+        with pytest.raises(
+            CapabilityConfigurationError, match="rerun the NAS installer"
+        ):
+            LocalCertificateAuthority(**options)
+        clock = NOW
+        service = RecoveringService(
+            ControllerCapability.CERTIFICATE_AUTHORITY,
+            LocalCertificateAuthority,
+            lambda: LocalCertificateAuthority(**options),
+            lambda: clock,
+        )
+        with pytest.raises(CapabilityUnavailableError) as failure:
+            service.require_service()
+        assert (
+            failure.value.reply.reason == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
+        )
+        assert service.status.availability == CapabilityAvailability.UNAVAILABLE
+        assert service.status.reason == CapabilityReason.CA_KEY_ENCODING_UNSUPPORTED
+        assert key_path.read_bytes() == pem
+        # Simulate the installer fixing the secret. The normal capability
+        # retry must recover without restarting or replacing Controller state.
+        key_path.write_bytes(canonical)
+        password_path.write_bytes(b"test-ca-password\n")
+        clock += timedelta(seconds=61)
+        ca = service.require_service()
+        assert service.status.availability == CapabilityAvailability.AVAILABLE
+    elif encoding == "mismatch":
+        with pytest.raises(ValueError, match="does not match certificate"):
+            LocalCertificateAuthority(**options)
+        assert key_path.read_bytes() == pem
+        return
+    else:
+        ca = LocalCertificateAuthority(**options)
+    csr = _csr()
+    request = _binding(ca, csr)
+    leaf = ca._certificate(request, x509.load_pem_x509_csr(csr))
+    leaf.verify_directly_issued_by(material["intermediate"])
+    assert str(leaf.serial_number) == request.serial
+    assert leaf.not_valid_before_utc == NOW
     assert key_path.read_bytes() == canonical

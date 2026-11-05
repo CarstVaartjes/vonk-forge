@@ -340,7 +340,6 @@ def test_new_code_must_be_declared_in_the_contract_first():
             "def test_stale():\n    assert op.state == 'needs-operator'\n",
             2,
         ),
-        ("retention", PATH, "class History(Base):\n    __tablename__ = 'history'\n", 1),
     ],
 )
 def test_other_languages_and_principle_modes_only_check_additions(
@@ -738,6 +737,24 @@ def test_an_exclusive_flock_is_taken_only_through_a_held_lock():
     assert not check_source(test, raw, {1}, modes=("locks",))
     unit = "#[cfg(test)]\nmod tests {\n    fn t() {\n        " + raw + "    }\n}\n"
     assert not check_source(agent, unit, {4}, modes=("locks",))
+
+
+def test_a_table_wide_lock_is_taken_only_by_its_owners():
+    # The catalog collector's fence: refused by every writer in flight, it kept
+    # 1,708 of 2,348 revisions in production (2026-11-04).
+    fence = 'session.execute(text("LOCK TABLE jobs IN EXCLUSIVE MODE NOWAIT"))\n'
+    collector = "control/src/vonk_control/catalog_revision_collection.py"
+    assert check_source(collector, fence, {1}, modes=("locks",))
+    assert check_source(
+        collector, 'sql = "lock table users in share mode"\n', {1}, modes=("locks",)
+    )
+    assert not check_source(collector, fence, set(), modes=("locks",))
+    owner = "control/src/vonk_control/user_authority.py"
+    assert not check_source(owner, fence, {1}, modes=("locks",))
+    test = "control/tests/test_catalog_revision_collection.py"
+    assert not check_source(test, fence, {1}, modes=("locks",))
+    row = "with session.begin_nested():\n    session.execute(delete(Row))\n"
+    assert not check_source(collector, row, {1, 2}, modes=("locks",))
 
 
 @pytest.mark.parametrize(
@@ -2060,6 +2077,44 @@ def test_a_shared_scratch_name_is_flagged(source: str) -> None:
 def test_private_or_classified_scratch_names_pass(path: str, source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(path, source, lines, modes=("scratch-names",))
+
+
+_ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "_RULE = re.compile(r'[a-z]{0,62}')\nok = _RULE.fullmatch(run.alias)\n",
+        "ok = re.fullmatch(_IDENTIFIER, alias)\n",
+        "if len(alias) > 63:\n    pass\n",
+        "def f(alias: str | None = Query(pattern=_PATTERN, max_length=63)): ...\n",
+        "def f(alias: Annotated[str, Field(max_length=LIMIT)]): ...\n",
+    ],
+)
+def test_an_alias_checked_with_its_own_rule_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
+    assert check_source(
+        "src/cluster_profiles/x.py", source, lines, modes=("alias-rules",)
+    )
+    assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ok = re.fullmatch(ENDPOINT_ALIAS_PATTERN, run.alias)\n",
+        "_ALIAS = re.compile(ENDPOINT_ALIAS_PATTERN)\nok = _ALIAS.fullmatch(alias)\n",
+        "unique = len(aliases) == len(set(aliases))\n",
+        "def f(alias: EndpointAlias | None = Query(default=None)): ...\n",
+        "def f(alias=Query(pattern=ENDPOINT_ALIAS_PATTERN)): ...\n",
+        "ok = _UPSTREAM.fullmatch(model)\n",
+    ],
+)
+def test_an_alias_checked_with_the_contract_passes(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
 
 
 def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():

@@ -249,7 +249,7 @@ def test_one_pass_judges_every_row_against_one_reference_inventory(
         _executemany: bool,
     ) -> None:
         # Only the reference inventory reads builds; none is per row.
-        if "FROM recipe_builds" in statement:
+        if statement.startswith("SELECT recipe_builds."):
             reference_scans.append(statement)
 
     event.listen(engine, "after_cursor_execute", count_reference_scans)

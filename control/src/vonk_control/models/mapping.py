@@ -54,7 +54,9 @@ class ClusterMapping(Base):
         String(64), nullable=False, unique=True
     )
     endpoint_owner_node_id: Mapped[str] = mapped_column(
-        ForeignKey("agent_nodes.node_id", ondelete="RESTRICT"), nullable=False
+        ForeignKey("agent_nodes.node_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     created_by: Mapped[str] = mapped_column(String(200), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from statistics import median
 
 from sqlalchemy import and_, select
@@ -33,6 +33,7 @@ from vonk_agent_protocol import LifecycleState, stored_words
 from vonk_agent_protocol.inventory import NetworkInterface
 
 from .agent_operation_states import ORDER
+from .catalog_revision_collection import GRACE
 from .models import AgentOperation, AgentOperationAttempt
 from .operation_progress import stored_progress
 
@@ -40,7 +41,8 @@ _LOGGER = logging.getLogger(__name__)
 #: The transfers a Spark is judged by: its newest ones, of real model size.
 _RECENT = 5
 _MIN_BYTES = 1 << 30
-_LOOKBACK = timedelta(days=7)
+#: The history retention window: older transfers are collected anyway.
+_LOOKBACK = GRACE
 #: Slow means under a quarter of the fastest Spark's median rate.
 _SLOW_FRACTION = 0.25
 

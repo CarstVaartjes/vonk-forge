@@ -14,6 +14,7 @@ from pydantic import (
 )
 from vonk_agent_protocol.compiled_execution_plan import MemoryKind
 from vonk_agent_protocol.inventory import MemoryPool
+from vonk_forge_contracts import EndpointAlias
 from vonk_forge_contracts.recipe import Scalar
 
 from ..integer_domains import MAX_DATABASE_INTEGER
@@ -23,7 +24,6 @@ from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
 from .requests import MemoryUsageUncertainty, SparkGroupNode
 from .vocabulary import (
-    Alias,
     Digest,
     PortNumber,
     RunSwitchBuildEvidenceState,
@@ -242,7 +242,7 @@ class MappingSelection(StrictModel):
 class StopImpact(StrictModel):
     run_id: UuidId
     run_plan_digest: Digest
-    alias: Alias
+    alias: EndpointAlias
     state: Annotated[str, StringConstraints(min_length=1, max_length=24)]
     node_ids: list[NodeId] = Field(min_length=1, max_length=32)
     reserved_bytes: int = Field(ge=0)
