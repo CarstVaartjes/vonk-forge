@@ -8,7 +8,7 @@ from time import monotonic
 from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import (
     AgentOperation as OperationKind,
 )
@@ -265,17 +265,22 @@ class DeliveryMixin:
         if assignment.expires_at <= now:
             if service.sessions is not None:
                 with service.sessions.begin() as session:
-                    row = session.scalar(
-                        select(ArtifactDistributionAssignment)
+                    # Expire only the deadline that was read: a renewal that
+                    # committed meanwhile moved it, and then the row stays active.
+                    session.execute(
+                        update(ArtifactDistributionAssignment)
                         .where(
                             ArtifactDistributionAssignment.plan_digest == plan_digest,
                             ArtifactDistributionAssignment.node_id == node_id,
+                            ArtifactDistributionAssignment.state
+                            == DistributionAssignmentState.ACTIVE,
+                            ArtifactDistributionAssignment.expires_at
+                            == assignment.expires_at,
                         )
-                        .with_for_update()
+                        .values(
+                            state=DistributionAssignmentState.EXPIRED, updated_at=now
+                        )
                     )
-                    if row is not None:
-                        row.state = DistributionAssignmentState.EXPIRED
-                        row.updated_at = now
             raise DistributionError(DistributionCode.EXPIRED, "assignment has expired")
         return assignment
 
