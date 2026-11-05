@@ -5802,8 +5802,8 @@ def _renewal_body() -> dict[str, str]:
 def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
     agent_system, monkeypatch, path, method
 ) -> None:
-    # Wrong implementation: any ValueError answered 403 and the Spark's agent
-    # exited on it (client/errors.rs fatal()) for a Controller-side bug.
+    # Wrong implementation: any ValueError answered 403, a security verdict the
+    # Spark backs off on for 30-600 s, for a Controller-side bug.
     client, services, _, _ = agent_system
     _renewable_source(services)
 

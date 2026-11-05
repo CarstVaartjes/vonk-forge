@@ -2233,6 +2233,29 @@ def test_broad_exception_may_not_answer_401_or_403(handler: str) -> None:
     assert check_source(path, "try:\n    work()\n" + handler, {3}, modes=("agent-422",))
 
 
+def test_comment_after_except_header_does_not_hide_the_handler() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except ValueError:  # internal\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {3}, modes=("agent-422",))
+
+
+def test_a_403_added_into_an_existing_broad_handler_is_flagged_on_its_own_line() -> (
+    None
+):
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except (KeyError, TypeError, ValueError):\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {4}, modes=("agent-422",))
+    assert not check_source(path, source, {1}, modes=("agent-422",))
+
+
 def test_typed_security_refusal_may_answer_403() -> None:
     path = "control/src/vonk_control/agent_api/authority.py"
     typed = (

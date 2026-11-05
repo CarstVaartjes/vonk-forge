@@ -1299,8 +1299,9 @@ def _says_422(text: str, following: str) -> bool:
     )
 
 
-# A 401/403 makes the Spark's agent exit (client/errors.rs fatal()); only a
-# typed security refusal may say it, never a handler for a broad exception.
+# A 401/403 is a security verdict: the Spark treats it as fatal (it backs off
+# 30-600 s in the rotation loop instead of retrying soon). Only a typed security
+# refusal may say it, never a handler for a broad exception.
 _SAYS_FATAL_AUTH = re.compile(
     r"\bstatus_code\s*=\s*40[13]\b|\bHTTPException\(\s*40[13]\b"
 )
@@ -1315,7 +1316,7 @@ def _except_header(lines: list[str], except_line: int) -> tuple[str, int]:
     parts = []
     for number, text in enumerate(lines[except_line - 1 :], except_line):
         parts.append(text)
-        if text.rstrip().endswith(":"):
+        if text.split("#", 1)[0].rstrip().endswith(":"):
             return " ".join(parts), number
     return " ".join(parts), len(lines)
 
@@ -2008,22 +2009,28 @@ def check_source(
         # A broad exception is as often this Controller's own bug as a denial
         # (#2061 review: an internal ValueError in renewal killed the agent).
         lines = source.splitlines()
-        hits.extend(
-            (
-                line,
+        for line, text in enumerate(lines, 1):
+            if not re.match(r"\s*except\b", text):
+                continue
+            header, header_end = _except_header(lines, line)
+            if not _BROAD_EXCEPT.search(header):
+                continue
+            # The except line and every 401/403 body line are flagged, so a
+            # 403 added into an existing handler is caught by its own line.
+            fatal = [
+                number
+                for number, (body, _) in enumerate(
+                    _handler_body(lines, header_end), header_end + 1
+                )
+                if _SAYS_FATAL_AUTH.search(body)
+            ]
+            hits.extend(
                 (
-                    "except handler for a broad exception answers 401/403; "
-                    "use contract_verdict_or_wait"
-                ),
+                    number,
+                    "broad exception answers 401/403; use contract_verdict_or_wait",
+                )
+                for number in (*([line] if fatal else []), *fatal)
             )
-            for line, text in enumerate(lines, 1)
-            if re.match(r"\s*except\b", text)
-            and _BROAD_EXCEPT.search(_except_header(lines, line)[0])
-            and any(
-                _SAYS_FATAL_AUTH.search(body)
-                for body, _ in _handler_body(lines, _except_header(lines, line)[1])
-            )
-        )
     if (
         python
         and not is_test
