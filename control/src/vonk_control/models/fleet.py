@@ -13,12 +13,16 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    event,
+    inspect,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Mapped, Mapper, mapped_column, relationship
 
 if TYPE_CHECKING:
     from .telemetry import NodeInventoryItemsSnapshot
@@ -212,6 +216,36 @@ class FleetProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+
+class FleetProfileRecipe(Base):
+    """One recipe a saved profile names: the indexed answer to "which saved
+    profiles name this recipe?".
+
+    Derived from ``FleetProfile.assignments`` in the flush that writes them
+    (``_profile_recipes_written``), so it can never disagree with a saved
+    profile. Profiles saved before the table existed are filled at startup.
+    """
+
+    __tablename__ = "fleet_profile_recipes"
+    __table_args__ = (Index("ix_fleet_profile_recipes_recipe", "publisher", "slug"),)
+    profile_id: Mapped[str] = mapped_column(
+        ForeignKey("fleet_profiles.id", ondelete="CASCADE"), primary_key=True
+    )
+    publisher: Mapped[str] = mapped_column(String(63), primary_key=True)
+    slug: Mapped[str] = mapped_column(String(63), primary_key=True)
+
+
+@event.listens_for(FleetProfile, "after_insert")
+@event.listens_for(FleetProfile, "after_update")
+def _profile_recipes_written(
+    _mapper: Mapper[FleetProfile], connection: Connection, target: FleetProfile
+) -> None:
+    if not inspect(target).attrs.assignments.history.has_changes():
+        return
+    from ..reference_facts import write_profile_recipes
+
+    write_profile_recipes(connection, target.id, target.assignments)
 
 
 class FleetProfileApplication(Base):

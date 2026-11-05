@@ -183,7 +183,6 @@ from .model_sets import _protect_saved as _protect_saved
 from .model_sets import _selectors_revisions as _selectors_revisions
 from .model_sets import model_set_objects as model_set_objects
 from .model_sets import require_model_sets_open as require_model_sets_open
-from .model_sets import saved_profile_selectors as saved_profile_selectors
 from .types import _ACTIVE_ARTIFACT_JOBS as _ACTIVE_ARTIFACT_JOBS
 from .types import _ACTIVE_INSTALLATIONS as _ACTIVE_INSTALLATIONS
 from .types import _ACTIVE_PROFILE_APPLICATIONS as _ACTIVE_PROFILE_APPLICATIONS

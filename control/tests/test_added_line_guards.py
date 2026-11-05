@@ -2185,6 +2185,9 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     [
         ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),
         ("def review(s, now):\n    return _CollectorEvidence.read(s, now)\n", 2),
+        ("def review(s, now):\n    return _Evidence.read(s, now, recipes=None)\n", 2),
+        ("def review(s):\n    return profiles_naming(s)\n", 2),
+        ("def review(s):\n    return profiles_naming(s, None)\n", 2),
         ("def review(s, now):\n    return live_tokens(s, now)\n", 2),
         ("def review(s):\n    return operation_tokens(s, recent=True)\n", 2),
         ("def review(s, n, now):\n    return spark_eviction_capacity(s, n, now)\n", 2),
@@ -2218,6 +2221,11 @@ def test_a_request_path_may_not_read_the_whole_collection(source, line):
         # Target-keyed reads are what a request path does.
         (PATH, "def review(s, a):\n    return unused_for(s, a)\n"),
         (PATH, "def review(s):\n    return operation_tokens(s, recent=False)\n"),
+        (PATH, "def review(s, r):\n    return profiles_naming(s, r)\n"),
+        (
+            PATH,
+            "def review(s, now, r):\n    return _Evidence.read(s, now, recipes=r)\n",
+        ),
         ("control/tests/test_x.py", "def t(s):\n    return live_tokens(s, 1)\n"),
     ],
 )

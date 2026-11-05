@@ -43,6 +43,7 @@ from vonk_control.models import (
     RecipeBuild,
     RecipeInstallation,
 )
+from vonk_control.recipe_execution_contract import parse_stored_installation_plan
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
@@ -415,6 +416,10 @@ def _unrelated_history(
                     id=installation_id,
                     recipe_revision_id=recipes[index],
                     model_content_sha256=digest,
+                    # Install admission records the set its plan runs.
+                    model_artifact_set_sha256=parse_stored_installation_plan(
+                        plan, for_uninstall=True
+                    ).model_artifact_set_sha256,
                     mapping_id=mapping_id,
                     mapping_generation=real_mapping.generation,
                     recipe_build_id=build_id,

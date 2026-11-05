@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -28,7 +28,6 @@ from vonk_control.models import (
     AgentNode,
     AgentNodeContact,
     CatalogDocumentRevision,
-    FleetProfile,
     FleetProfileApplication,
     FleetProfileSelection,
     Job,
@@ -458,9 +457,12 @@ def test_malformed_failed_profile_does_not_block_unrelated_queued_work(
         actor="admin",
     )
     with sessions.begin() as session:
-        malformed = session.get(FleetProfile, profile.id)
-        assert malformed is not None
-        malformed.assignments = [{"recipe_selector": 7}]
+        # Past the write guard and the recipe projection, as damage reaches a
+        # stored row.
+        session.execute(
+            text("UPDATE fleet_profiles SET assignments = :value WHERE id = :id"),
+            {"value": '[{"recipe_selector": 7}]', "id": profile.id},
+        )
 
     assert service.tick() is True
     assert service.application(queued.id).state == "running"

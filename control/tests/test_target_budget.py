@@ -253,15 +253,9 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
     ),
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: which installation uses a set is stored only in its plan, and which"
-        " profile names a recipe only in its assignments JSON, so every plan and profile is read",
     ),
     "fleet_model_removal_review": TargetCheck(
         lambda world: world.cache.review_fleet_model_removal(world.target_model),
-        "removal-review",
-        "issue #2026: the removal review's plan and profile reads, plus the whole-world"
-        " retention evidence (audit A1)",
     ),
     # Positive control: the seeding admits an implementation that asks the
     # target (a node-keyed lookup through the mapping) at constant cost.

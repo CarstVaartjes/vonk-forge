@@ -5,7 +5,6 @@ from __future__ import annotations
 import ipaddress
 import os
 import uuid
-from collections.abc import Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -117,32 +116,6 @@ def _valid_relative_path(value: str) -> bool:
         and "\x00" not in value
         and all(part not in {"", ".", ".."} for part in value.split("/"))
     )
-
-
-def _contains_digest(
-    value: object, model_digest: str | None, recipe_digest: str | None
-) -> bool:
-    if model_digest is None and recipe_digest is None:
-        return False
-    if isinstance(value, Mapping):
-        return any(
-            _contains_digest(child, model_digest, recipe_digest)
-            for child in value.values()
-        ) or (
-            (
-                model_digest is not None
-                and value.get("model_content_sha256") == model_digest
-            )
-            or (
-                recipe_digest is not None
-                and value.get("recipe_revision_sha256") == recipe_digest
-            )
-        )
-    if isinstance(value, list):
-        return any(
-            _contains_digest(child, model_digest, recipe_digest) for child in value
-        )
-    return False
 
 
 def _fsync_directory(path: Path) -> None:

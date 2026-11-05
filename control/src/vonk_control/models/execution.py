@@ -55,6 +55,10 @@ class RecipeInstallation(Base):
             _nullable_lower_hex("model_content_sha256", 64),
             name="ck_recipe_installations_model_content_sha256",
         ),
+        CheckConstraint(
+            _nullable_lower_hex("model_artifact_set_sha256", 64),
+            name="ck_recipe_installations_model_artifact_set_sha256",
+        ),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
@@ -68,6 +72,13 @@ class RecipeInstallation(Base):
     # recipe revision.  This makes model-to-installation ownership explicit
     # without attempting to infer it from mutable catalog display metadata.
     model_content_sha256: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    # The model set every rank of the accepted plan runs: the one stored fact
+    # for "which installations use this set", written by install admission
+    # (the one writer) from the stored plan. Rows inserted before the column
+    # existed are filled from their plan once at startup.
+    model_artifact_set_sha256: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
     mapping_id: Mapped[str] = mapped_column(

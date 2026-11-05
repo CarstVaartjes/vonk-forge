@@ -328,7 +328,12 @@ def test_saved_profile_identity_never_embeds_a_damaged_column(field, value):
     with sessions.begin() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None
-        setattr(row, field, value)
+        # Past the recipe projection, as damage reaches a stored row.
+        session.execute(
+            update(FleetProfile)
+            .where(FleetProfile.id == created.id)
+            .values({field: value})
+        )
     with sessions() as session:
         row = session.get(FleetProfile, created.id)
         assert row is not None

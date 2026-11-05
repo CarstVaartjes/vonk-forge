@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from itertools import chain
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     canonical_message,
@@ -16,9 +16,9 @@ from .. import model_cache_states
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
 )
-from ..content_identity import recipe_model_digests
+from ..content_identity import recipe_model_digests, recipes_bound_to
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import ModelCacheSetState
+from ..model_cache_contract import CacheManifest, ModelCacheSetState
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -29,13 +29,14 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
+from ..reference_facts import profiles_naming
+from ..stored_json import read_row_column
 from .intents import (
-    _installation_plan,
     _profile_plan,
     _run_switch_kinds,
     _run_switch_plan,
 )
-from .model_sets import _protect_saved, _selectors_revisions, saved_profile_selectors
+from .model_sets import _protect_saved, _selectors_revisions
 from .types import (
     _ACTIVE_INSTALLATIONS,
     _ACTIVE_PROFILE_APPLICATIONS,
@@ -81,34 +82,21 @@ def model_set_reference_findings(
     # whichever model document the recipe names). A revision that cannot be
     # resolved, or whose resolved set is not cached yet (a refresh in flight),
     # holds the selected sets of its models' lineage until the new set is cached.
-    profiles = list(session.scalars(select(FleetProfile).order_by(FleetProfile.id)))
-    named = {profile.id: saved_profile_selectors(profile) for profile in profiles}
+    #
+    # Only a recipe bound to a catalog model these sets serve can resolve to
+    # one of them, so only the saved profiles naming such a recipe are read.
+    served = _served_contents(session, sets.values())
+    named = profiles_naming(session, recipes_bound_to(session, served))
     resolved = _selectors_revisions(
-        session, {selector for chosen in named.values() for selector in chosen or ()}
-    )
-    running = list(
-        session.scalars(
-            select(RecipeInstallation)
-            .where(
-                or_(
-                    RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
-                    select(RecipeRun.id)
-                    .where(
-                        RecipeRun.installation_id == RecipeInstallation.id,
-                        RecipeRun.state.in_(RUN_LIVE),
-                    )
-                    .exists(),
-                )
-            )
-            .order_by(RecipeInstallation.id)
-        )
+        session,
+        {
+            f"{publisher}/{slug}"
+            for recipes in named.values()
+            for publisher, slug in recipes
+        },
     )
     bound = recipe_model_digests(
         session, {revision.id for found in resolved.values() for revision in found}
-    )
-
-    bound_installation = recipe_model_digests(
-        session, {row.recipe_revision_id for row in running}
     )
     lineages: dict[str, frozenset[str]] = {}
     lineage_held: dict[frozenset[str], set[str]] = {}
@@ -142,13 +130,14 @@ def model_set_reference_findings(
             resolves[ident] = digest
         return resolves[ident]
 
-    for profile in profiles:
-        selectors = named[profile.id]
-        if selectors is None:
-            _protect_saved(findings, profile, "model-set", selected)
-            continue
-        for selector in selectors:
-            found = resolved[selector]
+    for profile in session.scalars(
+        select(FleetProfile)
+        .options(load_only(FleetProfile.id))
+        .where(FleetProfile.id.in_(sorted(named)))
+        .order_by(FleetProfile.id)
+    ):
+        for publisher, slug in sorted(named[profile.id]):
+            found = resolved[f"{publisher}/{slug}"]
             held = set() if found else set(selected)
             for revision in found:
                 digest = resolved_set(revision.id)
@@ -221,25 +210,33 @@ def model_set_reference_findings(
                     )
                 )
 
-    for row in running:
-        plan = _installation_plan(row)
-        if plan is not None:
-            held = selected & {
-                compiled.identity.model_artifact_set_sha256
-                for compiled in plan.compiled_execution_plans.values()
-            }
-            detail = "accepted installation uses this model set"
-            label = f"installation {row.id}"
-        else:
-            # Its plan cannot be read: it keeps the sets of the models its rows
-            # name, and every selected set when they name none.
-            models = bound_installation.get(row.recipe_revision_id, frozenset()) | (
-                {row.model_content_sha256} if row.model_content_sha256 else set()
+    # The installation's recorded model set is the fact; its plan is not read.
+    for row in session.scalars(
+        select(RecipeInstallation)
+        .options(
+            load_only(
+                RecipeInstallation.id,
+                RecipeInstallation.state,
+                RecipeInstallation.model_artifact_set_sha256,
             )
-            held = lineage_sets(models) if models else selected
-            detail = "installation plan is unreadable; it keeps the sets it names"
-            label = f"installation {row.id} (plan unreadable)"
-        for set_digest in held:
+        )
+        .where(
+            RecipeInstallation.model_artifact_set_sha256.in_(sorted(selected)),
+            or_(
+                RecipeInstallation.state.in_(_ACTIVE_INSTALLATIONS),
+                select(RecipeRun.id)
+                .where(
+                    RecipeRun.installation_id == RecipeInstallation.id,
+                    RecipeRun.state.in_(RUN_LIVE),
+                )
+                .exists(),
+            ),
+        )
+        .order_by(RecipeInstallation.id)
+    ):
+        detail = "accepted installation uses this model set"
+        label = f"installation {row.id}"
+        for set_digest in selected & {row.model_artifact_set_sha256}:
             findings[set_digest].add(
                 _finding(
                     "model-set",
@@ -323,3 +320,19 @@ def model_set_reference_reasons(
     """Project typed model-set findings into existing presentation reasons."""
 
     return _reason_projection(model_set_reference_findings(session, set_digests))
+
+
+def _served_contents(session: Session, sets: Iterable[ModelCacheSet]) -> frozenset[str]:
+    """Every catalog model content these sets serve, with the lineage of each."""
+
+    from ..model_cache.lineage import lineage_contents, set_bindings
+
+    served: set[str] = set()
+    for row in sets:
+        manifest = read_row_column(row, "manifest")
+        verified = (
+            manifest.verified_models if isinstance(manifest, CacheManifest) else ()
+        )
+        for content in set_bindings(row.model_content_sha256, verified):
+            served |= lineage_contents(session, content)
+    return frozenset(served)

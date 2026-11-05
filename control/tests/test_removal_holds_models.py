@@ -21,6 +21,7 @@ from sqlalchemy.pool import StaticPool
 from vonk_control.artifact_reference_scan import model_set_reference_findings
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_service import CatalogService
+from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.models import (
     Base,
@@ -329,9 +330,13 @@ def test_a_refresh_keeps_the_old_set_until_the_new_set_is_cached(sessions) -> No
 
 
 def test_duplicate_model_documents_with_identical_files_share_one_set(
-    sessions,
+    sessions, tmp_path
 ) -> None:
-    """A profile on model B protects the set first cached under model A."""
+    """A profile on model B protects the set first cached under model A.
+
+    Model B is bound to the set the way the model-cache revision pass binds a
+    current model whose files a cached set holds (eventually, not per request).
+    """
     repo = f"https://huggingface.co/{PUBLISHER}/same"
     with sessions.begin() as s:
         a = model(s, "model-a", ["w"], repository=repo)
@@ -341,6 +346,13 @@ def test_duplicate_model_documents_with_identical_files_share_one_set(
         other = recipe(s, "recipe-b", "model-b", b, ["w"])
         assert resolve_recipe_set(s, other).digest == cached
         profile(s, "recipe-b")
+    cache = ModelCacheService(
+        sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
+    )
+    with sessions.begin() as s:
+        row = s.get(ModelCacheSet, cached)
+        assert row is not None
+        cache._remember_verified_models(s, row, resolve_recipe_set(s, other))
     with sessions() as s:
         assert model_set_reference_findings(s, (cached,))[cached]
 
@@ -393,13 +405,26 @@ def test_an_unresolvable_recipe_holds_only_the_sets_of_its_models(sessions) -> N
     assert not findings[free]
 
 
-def test_a_selector_with_no_revision_at_all_holds_every_set(sessions) -> None:
+def test_a_selector_with_no_revision_holds_nothing_until_the_recipe_exists(
+    sessions,
+) -> None:
+    """A saved selector no catalog revision binds to a model keeps no set.
+
+    Saving a profile requires the recipe to exist, so this is a recipe that was
+    never imported; the scan is keyed by the target's models and cannot ask
+    about a recipe with no binding. Once the recipe exists and binds the model,
+    the profile holds its set.
+    """
     with sessions.begin() as s:
         other = model(s, "other", ["other-weights"])
         free = cache_resolved(
             s, recipe(s, "recipe-other", "other", other, ["other-weights"])
         )
         profile(s, "missing-recipe")
+    with sessions() as s:
+        assert not model_set_reference_findings(s, (free,))[free]
+    with sessions.begin() as s:
+        recipe(s, "missing-recipe", "other", other, ["other-weights"])
     with sessions() as s:
         assert model_set_reference_findings(s, (free,))[free]
 

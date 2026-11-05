@@ -8,7 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
@@ -41,7 +41,7 @@ from ..cache_removal_review import (
 )
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import read_catalog_document
-from ..content_identity import installations_using_models
+from ..content_identity import installations_using_models, recipes_bound_to
 from ..fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     FleetModelRemovalCheckpoint,
@@ -102,8 +102,10 @@ def _model_objects(
     *,
     observation_issues: list[FleetRemovalObservationIssue] | None = None,
     include_shared: bool = True,
-) -> tuple[set[str], set[str]]:
-    """The model's objects, and those among them that a kept set also contains.
+) -> tuple[set[str], set[str], frozenset[str] | None]:
+    """The model's objects, those among them that a kept set also contains, and
+    the files its catalog documents list (``None`` when one cannot be read, so
+    nothing narrows a later set read by them).
 
     Sharing is set membership: an object is kept when a cached set outside the
     model's own sets lists it. A catalog file that no kept set contains is
@@ -113,13 +115,12 @@ def _model_objects(
     issues: list[FleetRemovalObservationIssue] = []
     if include_shared:
         contents = lineage_contents(session, digest)
-        owned = model_sets(session, contents).owned
     else:
         # A profile acquires references only to this exact model. Unrelated
         # damaged evidence matters to deletion, never to acquiring this pin.
         contents = frozenset({digest})
-        owned = first_requested_sets(session, digest)
     target_objects: set[str] = set()
+    documents_readable = True
     for revision, current_head in session.execute(
         select(CatalogDocumentRevision, active_head_revision()).where(
             CatalogDocumentRevision.kind == RunSwitchReasonScopeName.MODEL,
@@ -132,6 +133,7 @@ def _model_objects(
             read=partial(read_catalog_document, revision),
         )
         if isinstance(model, Residue):
+            documents_readable = False
             # Only damage to the requested head makes its objects unknown;
             # cached sets list their own members independently.
             if current_head and revision.content_digest == digest:
@@ -142,7 +144,13 @@ def _model_objects(
     if not include_shared and target_objects:
         # Acquiring a pin needs only this immutable model's files. A readable
         # copy proves the same content even when its cache history is damaged.
-        return target_objects, set()
+        return target_objects, set(), None
+    catalog_files = frozenset(target_objects) if documents_readable else None
+    owned = (
+        model_sets(session, contents, files=catalog_files).owned
+        if include_shared
+        else first_requested_sets(session, digest)
+    )
     for row in session.scalars(
         select(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256.in_(owned))
     ):
@@ -179,7 +187,7 @@ def _model_objects(
             issues[0].detail,
             retryable=True,
         )
-    return target_objects, shared
+    return target_objects, shared, catalog_files
 
 
 def _observation_issue(
@@ -198,17 +206,34 @@ def _observation_issue(
     )
 
 
+def _installation_recipes(
+    session: Session, installations: tuple[RecipeInstallation, ...]
+) -> frozenset[tuple[str, str]]:
+    """The (publisher, slug) of the recipes these installations run."""
+
+    if not installations:
+        return frozenset()
+    return frozenset(
+        (publisher, slug)
+        for publisher, slug in session.execute(
+            select(
+                CatalogDocumentRevision.publisher, CatalogDocumentRevision.slug
+            ).where(
+                CatalogDocumentRevision.id.in_(
+                    sorted({row.recipe_revision_id for row in installations})
+                )
+            )
+        )
+    )
+
+
 class FleetRemovalMixin:
     def _fleet_effects(
         self, session: Session, digest: str, *, shared_objects: set[str] | None = None
     ) -> FleetModelRemovalEffects:
         cache = cast("ModelCacheService", self)
-        evidence = _Evidence.read(session, cache._clock())
-        readable = (
-            evidence.pointers is not None and evidence.application_references_readable
-        )
         issues: list[FleetRemovalObservationIssue] = []
-        target_objects, shared = _model_objects(
+        target_objects, shared, catalog_files = _model_objects(
             session, digest, observation_issues=issues
         )
         if shared_objects is not None:
@@ -218,8 +243,35 @@ class FleetRemovalMixin:
         # a subset of its files and sets first downloaded under an earlier
         # revision of it.
         contents = lineage_contents(session, digest)
-        sets, kept_sets = model_sets(session, contents)
+        sets, kept_sets = model_sets(session, contents, files=catalog_files)
         names = target_objects | contents | set(sets)
+        # An installation uses the model when its recorded model set is one of
+        # the model's sets (a reused set never names the model in the other
+        # columns) or its model columns name it.
+        using = tuple(
+            session.scalars(
+                select(RecipeInstallation)
+                .where(
+                    RecipeInstallation.state != InstallationState.UNINSTALLED,
+                    or_(
+                        RecipeInstallation.model_artifact_set_sha256.in_(sets),
+                        RecipeInstallation.id.in_(
+                            sorted(installations_using_models(session, contents))
+                        ),
+                    ),
+                )
+                .order_by(RecipeInstallation.id)
+            )
+        )
+        # Only these recipes can name the model: those bound to it and those
+        # its installations run.
+        evidence = _Evidence.read(
+            session,
+            cache._clock(),
+            recipes=recipes_bound_to(session, contents)
+            | _installation_recipes(session, using),
+        )
+        readable = evidence.application_references_readable
         protected = bool(
             names & (evidence.operations | evidence.pointed_models | evidence.pinned)
         )
@@ -231,16 +283,7 @@ class FleetRemovalMixin:
             keep_detail = "Model content references are unavailable; review will recheck owner evidence."
         installations: dict[str, list[FleetRemovalInstallation]] = {}
         lifecycle = cache._fleet_lifecycle
-        # An installation uses the model when its columns name it or its plan
-        # names one of the model's sets (a reused set may never record the model
-        # in the columns). Damage to an installation that does neither is not
-        # this model's.
-        named = installations_using_models(session, contents)
-        for installation in session.scalars(
-            select(RecipeInstallation)
-            .where(RecipeInstallation.state != InstallationState.UNINSTALLED)
-            .order_by(RecipeInstallation.id)
-        ):
+        for installation in using:
             plan = read_or_rebuild(
                 kind=RecipeInstallation.__tablename__,
                 subject=installation.id,
@@ -254,11 +297,6 @@ class FleetRemovalMixin:
                 issues.append(_observation_issue(plan))
                 protected = True
                 keep_detail = "Installation model references are unavailable; refresh owner evidence."
-                continue
-            if installation.id not in named and not set(sets) & {
-                compiled.identity.model_artifact_set_sha256
-                for compiled in plan.compiled_execution_plans.values()
-            }:
                 continue
             detail = _installation_kept(session, installation.id, evidence)
             saved = _installation_pointing(

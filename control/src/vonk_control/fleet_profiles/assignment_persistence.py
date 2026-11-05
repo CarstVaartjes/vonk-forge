@@ -106,7 +106,9 @@ class FleetProfileService:
         try:
             objects: set[str] = set()
             for digest in sorted(digests):
-                named, _shared = _model_objects(session, digest, include_shared=False)
+                named, _shared, _files = _model_objects(
+                    session, digest, include_shared=False
+                )
                 objects.update(named)
             identities = tuple(
                 ArtifactIdentity("model-object", digest) for digest in sorted(objects)

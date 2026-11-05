@@ -51,6 +51,7 @@ from .fleet import AgentNodeContact as AgentNodeContact
 from .fleet import AgentNodeProfile as AgentNodeProfile
 from .fleet import FleetProfile as FleetProfile
 from .fleet import FleetProfileApplication as FleetProfileApplication
+from .fleet import FleetProfileRecipe as FleetProfileRecipe
 from .fleet import FleetProfileSelection as FleetProfileSelection
 from .fleet import LoginSession as LoginSession
 from .fleet import User as User

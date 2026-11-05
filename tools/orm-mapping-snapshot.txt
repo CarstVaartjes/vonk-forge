@@ -25,6 +25,7 @@ vonk_control.models.ControlProcessHeartbeat|control_process_heartbeats|
 vonk_control.models.CoordinatorFailure|coordinator_failures|
 vonk_control.models.FleetEventCursor|fleet_event_cursor|
 vonk_control.models.FleetProfileApplication|fleet_profile_applications|
+vonk_control.models.FleetProfileRecipe|fleet_profile_recipes|
 vonk_control.models.FleetProfileSelection|fleet_profile_selection|
 vonk_control.models.FleetProfile|fleet_profiles|
 vonk_control.models.FleetStreamEvent|fleet_stream_events|
