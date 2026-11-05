@@ -27,6 +27,8 @@ from vonk_agent_protocol import (
     adopt_machine_state,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_forge_contracts.model import ModelReference
 
 from .. import model_cache_states
 from ..api_availability import AVAILABILITY_ERRORS
@@ -60,6 +62,7 @@ from ..revision_images import revision_images
 from ..stored_json import read_row_column
 from .common import (
     _ACTIVE_RUN_STATES,
+    _LOCAL_STATE_PRIORITY,
     _RUN_STATES,
     LibraryControllerState,
     _controller_state,
@@ -155,6 +158,55 @@ def _local(
         return LibraryLocalState(
             controller=cast(LibraryControllerState, AssetAvailability.UNKNOWN.value)
         )
+
+
+def _recipe_local_digests(
+    recipes: Sequence[tuple[str, Sequence[ModelReference]]],
+) -> list[str]:
+    """Every digest a recipe's local state reads: its own and its bound models'."""
+
+    digests: dict[str, None] = {}
+    for recipe_digest, models in recipes:
+        digests[recipe_digest] = None
+        digests.update(dict.fromkeys(reference.content_sha256 for reference in models))
+    return list(digests)
+
+
+def _recipe_local(
+    self: LibraryProjection,
+    digest: str,
+    models: Sequence[ModelReference],
+    *,
+    snapshot: Mapping[str, LibraryLocalState] | None,
+) -> LibraryLocalState:
+    """A recipe's controller state: the lowest of its own and its models' states.
+
+    A recipe is only as ready as its weakest asset, so a cached build or image
+    never outranks a model that is still downloading. The lowest state brings
+    its own preparation (the running download's progress); on a tie the
+    recipe's own state is kept. This is the only place a recipe's ``local`` is
+    built.
+    """
+
+    own = self._local(digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot)
+    lowest = own
+    for model_digest in dict.fromkeys(reference.content_sha256 for reference in models):
+        model = self._local(
+            model_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
+        )
+        if (
+            _LOCAL_STATE_PRIORITY[model.controller]
+            < _LOCAL_STATE_PRIORITY[lowest.controller]
+        ):
+            lowest = model
+    if lowest is own:
+        return own
+    return own.model_copy(
+        update={
+            "controller": lowest.controller,
+            "preparation": lowest.preparation,
+        }
+    )
 
 
 def _latest_cache_operations(

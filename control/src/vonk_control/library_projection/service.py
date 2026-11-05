@@ -55,6 +55,7 @@ from .local_state import (
     _database_local_state,
     _local,
     _local_state_snapshot,
+    _recipe_local,
 )
 from .views import (
     authoring_recipe_detail,
@@ -334,6 +335,7 @@ class LibraryProjection:
     _assessed = _assessed
     _local_state_snapshot = _local_state_snapshot
     _local = _local
+    _recipe_local = _recipe_local
     _database_local_state = _database_local_state
     _apply_image_presence = _apply_image_presence
     _library_release = _library_release

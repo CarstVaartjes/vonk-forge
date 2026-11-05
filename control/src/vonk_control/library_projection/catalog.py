@@ -166,8 +166,10 @@ def _recipe_projection(
         model_selectors=model_selectors,
         usage=usage,
         resources=resources,
-        local=self._local(
-            revision.content_digest, kind=ReceiptOwner.RECIPE, snapshot=snapshot
+        local=self._recipe_local(
+            revision.content_digest,
+            projected.models,
+            snapshot=snapshot,
         ),
         updated_at=_utc(revision.created_at),
         alignment=None if text.recipe is None else text.recipe.alignment,

@@ -39,6 +39,7 @@ from .common import (
     _note_unreadable,
     _observed_library_page,
 )
+from .local_state import _recipe_local_digests
 
 if TYPE_CHECKING:
     from .service import LibraryProjection
@@ -530,14 +531,22 @@ def recipe_library(
     ) -> list[LibraryRecipeProjection]:
         if not cached:
             snapshot = self._local_state_snapshot(
-                [item.identity.content_sha256 for item in candidates]
+                _recipe_local_digests(
+                    [
+                        (
+                            item.identity.content_sha256,
+                            item.projected.models,
+                        )
+                        for item in candidates
+                    ]
+                )
             )
             candidates = [
                 item.model_copy(
                     update={
-                        "local": self._local(
+                        "local": self._recipe_local(
                             item.identity.content_sha256,
-                            kind=ReceiptOwner.RECIPE,
+                            item.projected.models,
                             snapshot=snapshot,
                         )
                     }
@@ -610,7 +619,15 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         ],
     ]
     snapshot = self._local_state_snapshot(
-        [row.content_digest for row, _ in recipe_rows]
+        _recipe_local_digests(
+            [
+                (
+                    row.content_digest,
+                    recipe.models,
+                )
+                for row, recipe in recipe_rows
+            ]
+        )
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
