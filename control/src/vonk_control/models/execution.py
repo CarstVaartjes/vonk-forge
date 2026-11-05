@@ -32,6 +32,7 @@ from vonk_agent_protocol import (
     RunState,
     machine_check,
 )
+from vonk_forge_contracts.endpoint_alias import ENDPOINT_ALIAS_MAX_LENGTH
 
 from ..model_primitives import Base, _lower_hex, _nullable_lower_hex, _state_in
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
@@ -211,7 +212,9 @@ class RecipeRun(Base):
     observation_deadline_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
-    alias: Mapped[str] = mapped_column(String(128), nullable=False)
+    alias: Mapped[str] = mapped_column(
+        String(ENDPOINT_ALIAS_MAX_LENGTH), nullable=False
+    )
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
@@ -241,7 +244,7 @@ class RecipeRun(Base):
         DateTime(timezone=True), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
+        DateTime(timezone=True), nullable=False, index=True
     )
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -488,10 +491,12 @@ class ResourceReservation(Base):
     resource_key: Mapped[str] = mapped_column(String(128), nullable=False)
     amount_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     owner_kind: Mapped[str] = mapped_column(String(24), nullable=False)
-    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     plan_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )

@@ -425,9 +425,10 @@ impl<R> RecipeExecutor<'_, R> {
                 .await
             {
                 Ok(()) => {}
-                // The Controller refused these exact bytes for good: a newer
-                // observation supersedes them, so they must not block it.
-                Err(ClientError::Controller(error)) if error.request_invalid() => {
+                // The Controller definitely refused these exact bytes (invalid,
+                // missing, conflicting or gone): a newer observation supersedes
+                // them, so they must not block it.
+                Err(ClientError::Controller(error)) if error.refusal().settles() => {
                     let digest = canonical_generated_json(&report)
                         .map(|body| hex_sha256(&body))
                         .unwrap_or_default();

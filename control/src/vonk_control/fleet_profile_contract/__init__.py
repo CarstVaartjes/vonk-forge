@@ -179,7 +179,6 @@ from .vocabulary import _NODE_PATTERN as _NODE_PATTERN
 from .vocabulary import _UUID_PATTERN as _UUID_PATTERN
 from .vocabulary import FLEET_PROFILE_ENDED_STATES as FLEET_PROFILE_ENDED_STATES
 from .vocabulary import MAX_PROFILE_WARNINGS as MAX_PROFILE_WARNINGS
-from .vocabulary import Alias as Alias
 from .vocabulary import Description as Description
 from .vocabulary import DesiredAssignmentStateField as DesiredAssignmentStateField
 from .vocabulary import Digest as Digest

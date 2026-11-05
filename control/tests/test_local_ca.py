@@ -126,15 +126,12 @@ def test_production_factory_reads_normalized_compose_signing_secrets(
             secrets, normalized, gateway_master_key=tmp_path / "gateway" / "master-key"
         )
     # This portable check exercises real key/certificate loading. The adjacent
-    # PostgreSQL test covers revocation import and enrollment through this factory.
-    with patch.object(LocalCertificateAuthority, "_import_revocations"):
-        service = build_enrollment_service(
-            Settings(
-                database_url="postgresql+psycopg://unused", secrets_root=normalized
-            ),
-            sessionmaker(),
-            lambda: NOW,
-        )
+    # PostgreSQL test covers revocations and enrollment through this factory.
+    service = build_enrollment_service(
+        Settings(database_url="postgresql+psycopg://unused", secrets_root=normalized),
+        sessionmaker(),
+        lambda: NOW,
+    )
     assert isinstance(service, EnrollmentService)
 
 
@@ -489,20 +486,53 @@ def test_local_journal_retention_preserves_recovery_and_live_revocations(local_c
         ]
 
 
-def test_production_factory_enrolls_renews_and_keeps_cutover_revocations(
+def test_a_serial_known_only_from_revocation_evidence_leaves_the_crl(local_ca):
+    """Catches an evidence-only CRL entry (no receipt, no certificate) kept forever.
+
+    Its binding was made before the evidence, so the certificate it could have
+    produced expires within one lifetime of the evidence.
+    """
+    from vonk_control.models import AgentIssuedCertificateRevocation
+    from vonk_control.step_ca import CERTIFICATE_LIFETIME
+    from vonk_control.telemetry_maintenance import TelemetryMaintenance
+
+    ca, _, options = local_ca
+    sessions = options["sessions"]
+    with sessions.begin() as session:
+        session.add(
+            AgentIssuedCertificateRevocation(
+                serial="4321",
+                node_id=NODE_ID,
+                provider_request_id="c" * 64,
+                generation=1,
+                state="revoked",
+                created_at=NOW,
+                updated_at=NOW,
+                ca_revoked_at=NOW,
+            )
+        )
+    ca.revoke_node("4321", NOW)
+    expiry = NOW + CERTIFICATE_LIFETIME
+    TelemetryMaintenance(sessions, clock=lambda: expiry).run_once()
+    with sessions() as session:
+        assert session.get(LocalCertificateRevocation, "4321") is not None
+    TelemetryMaintenance(
+        sessions, clock=lambda: expiry + timedelta(seconds=1)
+    ).run_once()
+    with sessions() as session:
+        assert session.get(LocalCertificateRevocation, "4321") is None
+
+
+def test_production_factory_enrolls_renews_and_keeps_revocations_across_restart(
     local_ca, tmp_path
 ):
-    """Catches old HTTP wiring and losing pre-cutover or uncertain revocations."""
+    """Catches old HTTP wiring and a CRL that loses a confirmed revocation."""
     from vonk_control.agent_services import build_enrollment_service
     from vonk_control.enrollment_contract import EnrollmentGrant
-    from vonk_control.models import (
-        AgentIssuedCertificateRevocation,
-        AgentNode,
-    )
     from vonk_control.pki import IssuedCertificate
     from vonk_control.settings import Settings
 
-    from .test_enrollment import OTHER_NODE_ID, evidence
+    from .test_enrollment import evidence
 
     _ca, material, options = local_ca
     secrets = tmp_path / "production-secrets"
@@ -527,45 +557,9 @@ def test_production_factory_enrolls_renews_and_keeps_cutover_revocations(
     renewed = service.renew(NODE_ID, issued.serial, _csr())
     assert isinstance(renewed, IssuedCertificate)
     service.activate(NODE_ID, renewed.serial, renewed.generation)
-    # Simulate the pre-cutover Controller records, not local signer revocation.
-    with options["sessions"].begin() as session:
-        from sqlalchemy import delete
-
-        session.execute(delete(LocalCertificateRevocation))
-        certificate = session.get(AgentCertificate, issued.serial)
-        assert certificate is not None
-        certificate.revoked_at = NOW
-        certificate.ca_revoked_at = NOW
-        # A certificate issued by the old CA has no local issuance journal row.
-        old_leaf = _leaf(_csr(OTHER_NODE_ID), material, serial=5678)
-        session.add(AgentNode(node_id=OTHER_NODE_ID, state="retired"))
-        session.flush()
-        session.add(
-            AgentCertificate(
-                serial="5678",
-                node_id=OTHER_NODE_ID,
-                not_before=old_leaf.not_valid_before_utc,
-                not_after=old_leaf.not_valid_after_utc,
-                fingerprint=old_leaf.fingerprint(hashes.SHA256()).hex(),
-                certificate_pem=old_leaf.public_bytes(
-                    serialization.Encoding.PEM
-                ).decode("ascii"),
-                generation=1,
-                ca_revoked_at=NOW,
-            )
-        )
-        session.add(
-            AgentIssuedCertificateRevocation(
-                serial="1234",
-                node_id=NODE_ID,
-                provider_request_id="b" * 64,
-                fingerprint=None,
-                generation=1,
-                state="revocation_pending",
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
+    # Activation revokes the superseded credential; the worker confirms it at
+    # the CA, which records it in its own durable journal at that moment.
+    service.reconcile_revocations()
     for _ in range(2):
         restarted = LocalCertificateAuthority(**options)
         bundle = restarted.revocation_bundle(NOW)
@@ -575,6 +569,4 @@ def test_production_factory_enrolls_renews_and_keeps_cutover_revocations(
         assert (
             crl.get_revoked_certificate_by_serial_number(int(issued.serial)) is not None
         )
-        assert crl.get_revoked_certificate_by_serial_number(1234) is not None
-        assert crl.get_revoked_certificate_by_serial_number(5678) is not None
         assert crl.get_revoked_certificate_by_serial_number(int(renewed.serial)) is None

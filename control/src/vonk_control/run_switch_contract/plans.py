@@ -11,6 +11,7 @@ from pydantic import (
     model_validator,
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
+from vonk_forge_contracts import EndpointAlias
 
 from ..preparation_contract import RolloutPreparation
 from ..run_switch_identity_contract import UuidId
@@ -34,13 +35,13 @@ from .requests import (
     RunSwitchReconciliationAuthority,
     SparkGroup,
 )
-from .vocabulary import Alias, Digest, RunSwitchAction
+from .vocabulary import Digest, RunSwitchAction
 
 
 class RunSwitchAssessment(StrictModel):
     """Planner-owned admission and observations shared by operator reviews."""
 
-    alias: Alias | None
+    alias: EndpointAlias | None
     freshness: list[FreshnessEvidence] = Field(default_factory=list, max_length=128)
     fit_current: SparkFit
     fit_after_stop: SparkFit | None

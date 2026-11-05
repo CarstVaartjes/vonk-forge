@@ -6,8 +6,8 @@ import stat
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import ColumnElement, select
+from sqlalchemy.orm import InstrumentedAttribute, Session, aliased
 from vonk_agent_protocol import (
     CacheReferenceReason,
     ModelCacheCode,
@@ -44,6 +44,37 @@ from .source_helpers import _contains_digest
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
+
+
+def holds_unique_objects(
+    set_digest: InstrumentedAttribute[str] | str,
+) -> ColumnElement[bool]:
+    """Whether this set lists an object that no other set lists.
+
+    The cache's answer to "would dropping this set's record free any bytes?":
+    only an object no other set lists is collected with it. Conservative: an
+    object it lists but never stored counts as held. ``set_digest`` may be a
+    column, which makes this a correlated check of each selected set.
+    """
+
+    own = aliased(ModelCacheSetArtifact)
+    other = aliased(ModelCacheSetArtifact)
+    # Explicit correlation: each level reads only its own membership alias, so
+    # a column ``set_digest`` always refers to the enclosing selection's set.
+    shared = (
+        select(other.artifact_sha256)
+        .where(
+            other.artifact_sha256 == own.artifact_sha256,
+            other.artifact_set_sha256 != set_digest,
+        )
+        .correlate_except(other)
+    )
+    return (
+        select(own.artifact_sha256)
+        .where(own.artifact_set_sha256 == set_digest, ~shared.exists())
+        .correlate_except(own)
+        .exists()
+    )
 
 
 class InventoryMixin:
