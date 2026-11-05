@@ -156,9 +156,6 @@ class MeasuredRolePeak(Base):
     role: Mapped[str] = mapped_column(String(64), primary_key=True)
     #: Whole-run peak: free at admission minus the lowest available since.
     peak_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    measured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
 
 
 #: Stoppable runs that no running-run path (observation, recovery) advances.

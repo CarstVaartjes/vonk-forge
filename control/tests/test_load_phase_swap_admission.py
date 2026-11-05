@@ -5,7 +5,7 @@ real inventory repository against PostgreSQL.
 """
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from importlib.resources import files
 from uuid import uuid4
 
@@ -70,7 +70,6 @@ def set_measured_peaks(session, peak):
                 content_sha256=digest,
                 role=role,
                 peak_bytes=peak,
-                measured_at=datetime.now(UTC),
             )
         )
 

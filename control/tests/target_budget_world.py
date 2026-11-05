@@ -352,7 +352,6 @@ def _unrelated_history(
                 content_sha256=target_revision.content_digest,
                 role=role,
                 peak_bytes=1000,
-                measured_at=now,
             )
             for role in ("entrypoint", "worker")
         )
@@ -368,7 +367,6 @@ def _unrelated_history(
                     content_sha256=_hex(f"peak/{index}"),
                     role="entrypoint",
                     peak_bytes=1000,
-                    measured_at=now,
                 )
             )
             installation_id, build_id = str(uuid.uuid4()), str(uuid.uuid4())

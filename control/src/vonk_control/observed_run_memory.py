@@ -98,7 +98,9 @@ def record_observed_run_memory(
     peak = admitted.available_memory_bytes - lowest
     if peak > (rank.observed_memory_bytes or 0):
         rank.observed_memory_bytes = peak
-        _raise_measured_peak(session, run, rank.role, peak)
+    # Compared with the table, not the rank: a run already serving repopulates
+    # a missing row from its next qualifying sample, with no history read.
+    _raise_measured_peak(session, run, rank.role, peak)
 
 
 def _raise_measured_peak(
@@ -119,16 +121,11 @@ def _raise_measured_peak(
         postgresql.insert(MeasuredRolePeak)
         if session.get_bind().dialect.name == "postgresql"
         else sqlite.insert(MeasuredRolePeak)
-    ).values(
-        content_sha256=digest, role=role, peak_bytes=peak, measured_at=datetime.now(UTC)
-    )
+    ).values(content_sha256=digest, role=role, peak_bytes=peak)
     session.execute(
         insert.on_conflict_do_update(
             index_elements=[MeasuredRolePeak.content_sha256, MeasuredRolePeak.role],
-            set_={
-                "peak_bytes": insert.excluded.peak_bytes,
-                "measured_at": insert.excluded.measured_at,
-            },
+            set_={"peak_bytes": insert.excluded.peak_bytes},
             where=MeasuredRolePeak.peak_bytes < insert.excluded.peak_bytes,
         )
     )

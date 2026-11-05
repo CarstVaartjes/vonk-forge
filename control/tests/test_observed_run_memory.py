@@ -15,6 +15,9 @@ import pytest
 from sqlalchemy import delete, select, update
 from vonk_control.models import (
     CatalogDocumentRevision,
+    InstallationNode,
+    MeasuredRolePeak,
+    RecipeInstallation,
     RecipeRun,
     ResourceReservation,
     RunNode,
@@ -41,6 +44,30 @@ _FREE = 300
 _FLOOR = 50
 
 
+def _report(sessions, node, observed_at, lowest_available):
+    """One telemetry sample from the Spark while its run serves."""
+    TelemetryRepository(sessions, clock=lambda: observed_at).record_batch(
+        node,
+        (
+            TelemetrySample.model_validate_json(
+                canonical_message(
+                    {
+                        "boot_id": str(uuid4()),
+                        "observed_at": observed_at,
+                        "memory_total_bytes": 1000,
+                        "memory_available_bytes": lowest_available,
+                        "disk_total_bytes": None,
+                        "disk_free_bytes": None,
+                        "gpu_utilization_percent": None,
+                        "gpu_memory_total_bytes": None,
+                        "gpu_memory_free_bytes": None,
+                    }
+                )
+            ),
+        ),
+    )
+
+
 def _serve(sessions, now, node, installation, *, lowest_available, other_claim=None):
     """Admit one run, report telemetry while it serves, then stop it."""
     service = RunAdmissionService(
@@ -65,27 +92,7 @@ def _serve(sessions, now, node, installation, *, lowest_available, other_claim=N
                     created_at=now,
                 )
             )
-    observed_at = now + timedelta(seconds=1)
-    TelemetryRepository(sessions, clock=lambda: observed_at).record_batch(
-        node,
-        (
-            TelemetrySample.model_validate_json(
-                canonical_message(
-                    {
-                        "boot_id": str(uuid4()),
-                        "observed_at": observed_at,
-                        "memory_total_bytes": 1000,
-                        "memory_available_bytes": lowest_available,
-                        "disk_total_bytes": None,
-                        "disk_free_bytes": None,
-                        "gpu_utilization_percent": None,
-                        "gpu_memory_total_bytes": None,
-                        "gpu_memory_free_bytes": None,
-                    }
-                )
-            ),
-        ),
-    )
+    _report(sessions, node, now + timedelta(seconds=1), lowest_available)
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
@@ -185,25 +192,57 @@ def test_a_runs_real_use_outlives_its_collected_history(tmp_path) -> None:
     """Catches the observed peak leaving with the run's or installation's rows.
 
     Terminal history is collected a day after a run ends (its rank rows go
-    with it), and an uninstalled installation's with its catalog revision. The
-    peak belongs to the recipe content, so it survives both.
+    with it), and an uninstalled installation's with its catalog revision
+    (as catalog_revision_collection deletes them). The peak belongs to the
+    recipe content, so it survives both.
     """
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
     service, observed = _serve(
         sessions, now, node, installation, lowest_available=_FREE - 280
     )
     assert observed == 280
-    with sessions.begin() as session:
-        # As terminal_history_collection removes an ended run.
-        session.execute(delete(RunNode))
-        session.execute(delete(RecipeRun))
-
+    role = service.plan_run(installation, alias="qwen", now=now).nodes[0].role
     with sessions() as session:
         digest = session.scalars(
             select(CatalogDocumentRevision.content_digest).where(
                 CatalogDocumentRevision.kind == "recipe"
             )
         ).one()
-        assert observed_role_peaks(session, digest) == {
-            service.plan_run(installation, alias="qwen", now=now).nodes[0].role: 280
-        }
+    with sessions.begin() as session:
+        session.execute(delete(RunNode))
+        session.execute(delete(RecipeRun))
+        session.execute(delete(InstallationNode))
+        session.execute(delete(RecipeInstallation))
+
+    with sessions() as session:
+        assert observed_role_peaks(session, digest) == {role: 280}
+
+
+def test_a_running_run_without_a_row_gets_it_from_its_next_sample(tmp_path) -> None:
+    """Catches a missing measured row staying missing while its run serves.
+
+    A table that is empty (a fresh deploy) is a miss, not a gap to fill from
+    history: the run's next qualifying sample writes the row.
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=_FLOOR
+    )
+    service.accept_run(
+        service.plan_run(installation, alias="qwen", now=now), actor="admin", now=now
+    )
+    with sessions() as session:
+        digest = session.scalars(
+            select(CatalogDocumentRevision.content_digest).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        ).one()
+        assert observed_role_peaks(session, digest) == {}
+    _report(sessions, node, now + timedelta(seconds=1), _FREE - 120)
+    with sessions() as session:
+        assert list(observed_role_peaks(session, digest).values()) == [120]
+    with sessions.begin() as session:
+        session.execute(delete(MeasuredRolePeak))
+    _report(sessions, node, now + timedelta(seconds=2), _FREE - 120)
+    with sessions() as session:
+        assert list(observed_role_peaks(session, digest).values()) == [120]
