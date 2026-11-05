@@ -36,7 +36,7 @@ instead of naming the re-entry. Each thread passes a rendezvous once; a second
 wait fails at once. `collide_inserts` holds two real admissions at their INSERT
 so the unique key, not commit timing, decides the race.
 
-One rule is whole-tree rather than added-line: a failure's retry follows its
+Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never
 ends work, a `FAIL` ends on its first occurrence with its cause as evidence,
@@ -54,7 +54,7 @@ failed lifecycle report outside `Reported.failed`, sets a retry flag by hand,
 keeps a private `RecoveryPolicy` or failure limit, counts its own `*_attempts`,
 or lets a `*Busy`/`*NotReady` type decide whether a retry is spent.
 
-A second whole-tree rule keeps an unknown effect from becoming a failure: a run
+The second keeps an unknown effect from becoming a failure: a run
 or rank is recorded `RunState.FAILED` only in a function that reads fresh
 absence (`run_node_reports_absent`, `_proves_fresh_absence`, the absence
 settlers, or the Spark report's `process_running` it is applying). A `failed`
@@ -62,6 +62,38 @@ run holds no claim, so an unconfirmed Stop or a Start nobody can stop exactly
 is `lost` instead: stoppable, its claims held, observed until its Spark reports
 it gone or a newer exact Stop ends it (`distributed_recovery.ended_run_state`).
 `test_no_run_or_rank_is_failed_without_fresh_absence_anywhere` owns the rule.
+
+The third: a model download or repair operation is created only by
+`admit_transfer` (`tests/test_transfer_admission_guard.py`). It takes the
+model-set gate and returns the set's live transfer, so exactly one transfer
+exists per set; any source under `control/src` that calls `new_operation(` outside
+the helper must be in the test's reasoned exemption list (a removal, the adapter
+constructors, run-switch job rows). A caller whose receipt is read by its own
+key passes `attach=False`.
+
+Lock and ordering guards:
+
+- `control/tests/intent_ordinal_writers.py` (added-line mode `intent-ordinal`)
+  refuses numbering a workload intent, or writing `workload_intent_ordinal`,
+  outside `workload_intent.py`; use `allocate_workload_intent` or
+  `take_workload_intent`.
+- `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
+  contact and `agent_api` modules never lock `agent_nodes` (the `optimistic`
+  scan, `scan_agent_node_locks`).
+- `fixed_tick_polls` (added-line mode `tick-polls`, in
+  `control/tests/added_line_guards.py`) refuses a test that calls
+  `.tick()` in a fixed-count loop to poll a threaded model-cache outcome, or
+  asserts that outcome after such a loop. Wait with `_drain`, `_drain_until` or
+  `_wait_for`.
+- The target-budget harness (`control/tests/test_target_budget.py`) builds both
+  worlds under `ordered_ids`: ids count down, so the target sorts after its
+  history and rows a check adds sort before it. The SQLite step count is
+  deterministic and must be equal per statement, with no allowance.
+
+The shared vector `agent_protocol/fixtures/log-tail-omission-v1.json` pins, for
+the Rust agent and the Controller, the omission marker a retained log tail
+carries between its cause lines and its window, and how a reader bounds such a
+tail (`clamp_retained`, `_keep_retained`).
 
 These syntax checks do not prove recovery. Behavior tests must demonstrate
 bounded observation and retry, reuse after a fault clears, and fresh admission

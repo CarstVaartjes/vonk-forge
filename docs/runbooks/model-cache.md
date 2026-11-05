@@ -24,7 +24,9 @@ vonkctl recipe update --all
 
 A model can be prepared without a recipe or an online Spark. Recipe preparation
 also prepares its image and downloads a missing model. Repeating an active
-download follows it; repeating a failed transfer resumes it; repeating a
+download follows it (any download or repair of a model set attaches to that
+set's live transfer, whatever the request key; a refresh shares only with a
+refresh); repeating a failed transfer resumes it; repeating a
 completed download refreshes it. No separate repair command or force flag is
 required. A failed refresh must preserve the last verified copy. Profile
 choices may reference only complete, verified Controller/NAS cache entries.

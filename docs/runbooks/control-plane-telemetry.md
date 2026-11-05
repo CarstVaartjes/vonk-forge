@@ -55,6 +55,20 @@ reported separately, so a node can be online while its metrics are stale.
 Inventory is sent at startup, after enrollment or reconnection, and on an
 explicit refresh or change, not on a timer.
 
+### Run memory attribution
+
+While one run holds every active memory claim on a shared-pool Spark, the
+Controller derives that run's observed memory peak from the new samples: free
+memory at the run's admission minus the lowest available memory since. The peak
+only rises, on the run's rank and in `measured_role_peaks`. A peak of zero or
+less (the Spark has as much free as at admission: the run has not loaded or has
+exited) records nothing.
+
+Attribution runs in a savepoint inside the sample-ingest transaction. If it
+fails, only the attribution rolls back; the samples still commit, and the
+failure is logged once per process for each node and failure type (`warn_once`).
+A repeating log line is therefore not a telemetry outage.
+
 ## History and retention
 
 The Controller keeps each node's latest sample for the Fleet view and stream,
