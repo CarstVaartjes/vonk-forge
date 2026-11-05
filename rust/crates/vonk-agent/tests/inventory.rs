@@ -748,3 +748,39 @@ async fn acceptance_device_uses_the_real_inventory_health_contract() {
         inventory.memory_available_bytes
     );
 }
+
+#[test]
+fn failing_state_database_reserve_is_reported_as_not_held_and_the_inventory_is_still_delivered() {
+    let directory = tempdir().unwrap();
+    let meminfo = directory.path().join("meminfo");
+    fs::write(
+        &meminfo,
+        "MemTotal:       123456 kB\nMemAvailable:    65432 kB\n",
+    )
+    .unwrap();
+    // A directory in the reserve's place is not the agent-owned file shape:
+    // the reserve probe errors while every required probe still answers.
+    fs::create_dir(directory.path().join(".state-db-reserve")).unwrap();
+    let runner = FakeRunner {
+        calls: RefCell::new(vec![]),
+        gpu_output: b"NVIDIA H100, 119808, 110000, 590.44\n",
+        cdi_output: b"nvidia.com/gpu=all\n",
+    };
+    let collector = InventoryCollector {
+        runner: &runner,
+        meminfo_path: &meminfo,
+        store_path: directory.path(),
+        egress_binary_path: Path::new("/bin/true"),
+        fabric_address: None,
+        fabric_bandwidth_mbps: None,
+    };
+    let inventory = collector.collect().unwrap();
+    assert!(!inventory.state_database_reserve_held);
+    let wire = serde_json::to_value(inventory.to_request(chrono::Utc::now().into())).unwrap();
+    assert_eq!(wire["host_memory_total_bytes"], 123456 * 1024);
+    assert_eq!(wire["gpu_count"], 1);
+
+    // Healing: once the obstruction is gone the next report is unaffected.
+    fs::remove_dir(directory.path().join(".state-db-reserve")).unwrap();
+    collector.collect().unwrap();
+}
