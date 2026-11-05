@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import textwrap
 import uuid
 from collections.abc import Mapping
 from contextlib import redirect_stdout
@@ -19,6 +20,7 @@ from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
 from cluster_profiles.cli_render import progress_line, render_payload
+from cluster_profiles.cli_render.profile import _connection_examples
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlForbidden,
@@ -3354,8 +3356,30 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
         in presentation.out
     )
     assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in presentation.out
-    assert "Authorization" not in presentation.out
+    assert "export OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'" in (
+        presentation.out
+    )
+    assert 'model="example-model"' in presentation.out
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
+
+
+_CONNECTION_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "connection-examples.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    _CONNECTION_FIXTURE["cases"],
+    ids=lambda case: case["alias"],
+)
+def test_connection_examples_render_the_text_the_web_renders(case, capsys) -> None:
+    # The web test asserts the same fixture, so the two renderers cannot drift.
+    _connection_examples(case["api_base"], case["alias"])
+    out = capsys.readouterr().out
+    for name in ("setup", "curl", "python"):
+        assert textwrap.indent(case[name], "  ") in out
+    assert _CONNECTION_FIXTURE["note"] in out
 
 
 def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> None:

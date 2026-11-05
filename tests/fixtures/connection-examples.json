@@ -1,0 +1,19 @@
+{
+  "note": "Thinking and sampling are usually set per request (for example chat_template_kwargs and temperature), not in the recipe.",
+  "cases": [
+    {
+      "api_base": "https://vonk-forge.example.ts.net/v1",
+      "alias": "qwen-code",
+      "setup": "vonkctl key create NAME --output CLIENT_KEY_FILE\nexport OPENAI_API_KEY=\"$(cat CLIENT_KEY_FILE)\"\nexport OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'",
+      "curl": "curl \"$OPENAI_BASE_URL/chat/completions\" \\\n  -H \"Authorization: Bearer $OPENAI_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"model\":\"qwen-code\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'",
+      "python": "from openai import OpenAI\n\nclient = OpenAI()\nresponse = client.chat.completions.create(\n    model=\"qwen-code\",\n    messages=[{\"role\": \"user\", \"content\": \"Hello\"}],\n)\nprint(response.choices[0].message.content)"
+    },
+    {
+      "api_base": "https://vonk-forge.example.ts.net/v1/",
+      "alias": "it's \"odd\"",
+      "setup": "vonkctl key create NAME --output CLIENT_KEY_FILE\nexport OPENAI_API_KEY=\"$(cat CLIENT_KEY_FILE)\"\nexport OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'",
+      "curl": "curl \"$OPENAI_BASE_URL/chat/completions\" \\\n  -H \"Authorization: Bearer $OPENAI_API_KEY\" \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"model\":\"it'\\''s \\\"odd\\\"\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}'",
+      "python": "from openai import OpenAI\n\nclient = OpenAI()\nresponse = client.chat.completions.create(\n    model=\"it's \\\"odd\\\"\",\n    messages=[{\"role\": \"user\", \"content\": \"Hello\"}],\n)\nprint(response.choices[0].message.content)"
+    }
+  ]
+}

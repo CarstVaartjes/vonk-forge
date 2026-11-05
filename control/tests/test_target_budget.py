@@ -251,7 +251,6 @@ TARGET_CHECKS: dict[str, TargetCheck] = {
         "A7",
         "a node route builds the whole fleet projection to find one node (and A8's parses)",
     ),
-    # Asks the stored facts keyed by the model's sets and recipes (#2026).
     "model_removal_review": TargetCheck(
         lambda world: world.cache.review_model_removal(world.target_model),
     ),
@@ -396,39 +395,15 @@ def test_cost_of_a_target_does_not_grow_with_unrelated_history(
     _require_same_cost(name, small, large)
 
 
-def test_a_whole_profile_read_is_caught_by_the_budget(
-    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Negative control: a scan of every saved profile hides in no allowance.
-
-    The injected read returns one row at both scales, so only its steps grow.
-    """
-    from vonk_control.artifact_reference_scan import model_references
-
-    original = model_references.profiles_naming
-
-    def scanning(session, *args, **kwargs):
-        session.connection().exec_driver_sql(
-            "SELECT count(*) FROM fleet_profiles WHERE assignments LIKE '%no-such%'"
-        ).all()
-        return original(session, *args, **kwargs)
-
-    monkeypatch.setattr(model_references, "profiles_naming", scanning)
-    check = TARGET_CHECKS["model_removal_review"]
-    small = measure(worlds[SMALL], monkeypatch, check)
-    large = measure(worlds[LARGE], monkeypatch, check)
-    assert small.rows == large.rows
-    with pytest.raises(CostGrew):
-        _require_same_cost("injected", small, large)
-
-
 def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
     """Equal statements, rows and parses; each statement's steps within one.
 
     A scan that stops at the end of its key range peeks one entry further when
     another row follows, so one statement may differ by one step with no
-    growth in what it reads. The allowance is per statement: a scan that grows
-    with history cannot hide in the sum of the others.
+    growth in what it reads (random row ids made this flaky: 682 vs 683 steps
+    in ``uninstall_review``; seeding the ids only made it fail the same way
+    every time). The allowance is per statement, so a scan that grows with
+    history cannot hide in the sum of the others.
     """
     if (
         large.statements != small.statements
@@ -444,6 +419,31 @@ def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
         raise CostGrew(
             f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
         )
+
+
+def test_a_whole_profile_read_is_caught_by_the_budget(
+    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: a scan of every saved profile hides in no allowance.
+
+    The injected read returns one row at both scales, so only its steps grow.
+    """
+    inner = TARGET_CHECKS["node_keyed_lookup"]
+
+    def scanning(world: World) -> object:
+        with world.engine.connect() as connection:
+            connection.exec_driver_sql(
+                "SELECT count(*) FROM fleet_profiles "
+                "WHERE assignments LIKE '%no-such-recipe%'"
+            ).all()
+        return inner.run(world)
+
+    check = TargetCheck(scanning)
+    small = measure(worlds[SMALL], monkeypatch, check)
+    large = measure(worlds[LARGE], monkeypatch, check)
+    assert small.rows == large.rows
+    with pytest.raises(CostGrew):
+        _require_same_cost("injected", small, large)
 
 
 @pytest.mark.parametrize("scale", [SMALL, LARGE])
