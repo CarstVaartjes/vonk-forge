@@ -31,6 +31,7 @@ from .models import (
 )
 from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
+from .warn_once import warn_once
 
 
 def _aware_utc(value: datetime, *, label: str) -> datetime:
@@ -298,15 +299,28 @@ class TelemetryRepository:
                     )
                 )
                 boot_heads[value.boot_id] = value.observed_at
-            record_observed_run_memory(
-                session,
-                node_id,
-                [
-                    (value.observed_at, value.memory_available_bytes)
-                    for value in canonical
-                ],
-                self._events,
-            )
+            # Derived bookkeeping never refuses valid samples: a failure rolls
+            # back only the attribution (2026-11-05: a CHECK failure here
+            # refused every upload for 4 h).
+            try:
+                with session.begin_nested():
+                    record_observed_run_memory(
+                        session,
+                        node_id,
+                        [
+                            (value.observed_at, value.memory_available_bytes)
+                            for value in canonical
+                        ],
+                        self._events,
+                    )
+            except Exception as error:  # noqa: BLE001 - derived write, see above
+                warn_once(
+                    f"attribution-skipped:{node_id}:{type(error).__name__}",
+                    "run memory attribution skipped on node %s (%s): samples kept",
+                    node_id,
+                    type(error).__name__,
+                    exc_info=error,
+                )
         return tuple(stored)
 
     def latest(self, node_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:

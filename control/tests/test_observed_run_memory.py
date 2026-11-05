@@ -350,3 +350,107 @@ def test_an_unrenderable_run_node_event_is_a_cursor_hole_not_a_refusal(
         last_id = session.scalar(select(FleetEventCursor.last_id))
     assert _run_node_events(sessions) == []
     assert last_id is not None and last_id > max(events)  # the hole
+
+
+def _batch(sessions, node, start, availables):
+    """One batch of contract-valid samples, one second apart."""
+    boot = str(uuid4())
+    samples = tuple(
+        TelemetrySample.model_validate_json(
+            canonical_message(
+                {
+                    "boot_id": boot,
+                    "observed_at": start + timedelta(seconds=offset),
+                    "memory_total_bytes": 1000,
+                    "memory_available_bytes": available,
+                    "disk_total_bytes": None,
+                    "disk_free_bytes": None,
+                    "gpu_utilization_percent": None,
+                    "gpu_memory_total_bytes": None,
+                    "gpu_memory_free_bytes": None,
+                }
+            )
+        )
+        for offset, available in enumerate(availables)
+    )
+    return TelemetryRepository(
+        sessions, clock=lambda: start + timedelta(seconds=len(samples))
+    ).record_batch(node, samples)
+
+
+def _stored_samples(sessions) -> int:
+    from vonk_control.models import NodeTelemetrySample
+
+    with sessions() as session:
+        return len(session.scalars(select(NodeTelemetrySample)).all())
+
+
+def test_edge_samples_beside_a_sole_claim_are_all_stored(tmp_path) -> None:
+    """Catches a valid edge sample refused because a run holds the only claim.
+
+    Zero, equal to admission, above admission and the contract maximum are all
+    valid reports; only the zero one is also a use (everything was taken).
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    _admit_run(sessions, now, node, installation)
+    views = _batch(
+        sessions, node, now + timedelta(seconds=1), [0, _FREE, _FREE + 1, 1000]
+    )
+    assert len(views) == 4
+    assert _stored_samples(sessions) == 4
+
+
+def test_a_failing_attribution_never_refuses_the_samples(
+    tmp_path, monkeypatch, caplog
+) -> None:
+    """Catches derived memory bookkeeping failing the sample-ingest transaction.
+
+    2026-11-05: a CHECK failure in the attribution refused every upload with
+    HTTP 500 until the Spark dropped the batch. Whatever the attribution
+    raises, the samples commit and only the attribution is lost.
+    """
+    from sqlalchemy import insert
+
+    def violating_peak(session, _run, role, _peak):
+        # The real write order: the rank's peak was raised (and its event
+        # staged) before the measured-peak row hits its CHECK.
+        session.execute(
+            insert(MeasuredRolePeak).values(
+                content_sha256="d" * 64, role=role, peak_bytes=-1
+            )
+        )
+
+    monkeypatch.setattr(
+        "vonk_control.observed_run_memory._raise_measured_peak", violating_peak
+    )
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    run_id = _admit_run(sessions, now, node, installation)
+    _batch(sessions, node, now + timedelta(seconds=1), [_FREE - 100])
+    _batch(sessions, node, now + timedelta(seconds=10), [_FREE - 100])
+    assert _stored_samples(sessions) == 2
+    with sessions() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None and rank.observed_memory_bytes is None
+        assert session.scalars(select(MeasuredRolePeak)).all() == []
+    assert _run_node_events(sessions) == []
+    assert (
+        sum("attribution skipped" in item.getMessage() for item in caplog.records) == 1
+    )
+
+
+def test_a_fresh_sample_after_a_non_positive_one_is_still_attributed(
+    tmp_path,
+) -> None:
+    """Catches a non-positive report poisoning the run's later attribution."""
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    run_id = _admit_run(sessions, now, node, installation)
+    _report(sessions, node, now + timedelta(seconds=1), _FREE + 10)
+    with sessions() as session:
+        assert session.scalars(select(MeasuredRolePeak)).all() == []
+    _report(sessions, node, now + timedelta(seconds=2), _FREE - 120)
+    with sessions() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None and rank.observed_memory_bytes == 120
+        assert [
+            row.peak_bytes for row in session.scalars(select(MeasuredRolePeak))
+        ] == [120]
