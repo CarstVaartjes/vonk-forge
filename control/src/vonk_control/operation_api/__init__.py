@@ -6,7 +6,6 @@ from .constants import _ADMIN_OPERATION_IDS as _ADMIN_OPERATION_IDS
 from .constants import _HTTP_METHODS as _HTTP_METHODS
 from .constants import COMMIT_PATTERN as COMMIT_PATTERN
 from .constants import DIGEST_PATTERN as DIGEST_PATTERN
-from .constants import IDENTIFIER_PATTERN as IDENTIFIER_PATTERN
 from .constants import NODE_PATTERN as NODE_PATTERN
 from .constants import BoundedIdentifier as BoundedIdentifier
 from .constants import DigestIdentifier as DigestIdentifier
