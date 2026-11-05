@@ -307,3 +307,23 @@ def test_a_renewal_that_lands_during_expiry_survives(
     monkeypatch.undo()
     grant = transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
     assert grant.expires_at == renewed_until
+
+
+def test_an_unrenewed_lapsed_grant_is_marked_expired(tmp_path, postgres_engine) -> None:
+    """The deadline read from the row matches the stored one exactly, so the
+    conditional expiry really lands (no timezone or microsecond mismatch)."""
+    from .test_agent_api import make_agent_system
+
+    system = make_agent_system(tmp_path, engine=postgres_engine)
+    transfer = _transfer(system)
+    transfer.execute(transfer.clock.now)
+    transfer.clock.now += timedelta(hours=2)
+    with pytest.raises(DistributionError):
+        transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
+
+    with transfer.services.sessions() as session:
+        states = {
+            row.node_id: row.state
+            for row in session.scalars(select(ArtifactDistributionAssignment))
+        }
+    assert states[NODE_A] == "expired"

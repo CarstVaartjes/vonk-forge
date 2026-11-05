@@ -22,7 +22,7 @@ from ..fleet_profile_contract import FleetProfileApplicationView, FleetProfilePr
 from ..lifecycle.evidence import Residue
 from ..models import FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
-from ..profile_claim_restore import restore_released_profile_claims
+from ..profile_capacity import restore_released_profile_claims
 from ..stall_window import latest_progress
 from ..storage_demands import StorageRelief
 from .assessment_support import (
@@ -107,7 +107,6 @@ class FleetProfileService:
             restore_released_profile_claims(
                 session,
                 row,
-                now=now,
                 node_ids=self._adopted_application_scope(session, row),
             )
             session.flush()
