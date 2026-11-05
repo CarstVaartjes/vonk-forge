@@ -15,13 +15,12 @@ from itertools import count
 from threading import Lock
 from typing import Literal
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .auth import ADMIN_ROLE, Actor
 from .models import LoginSession, User
 from .passwords import hash_password, verify_password
-from .user_authority import serialize_user_authority
 
 _ADMIN_SUBJECT = "admin"
 _ADMIN_ROLE = ADMIN_ROLE
@@ -368,7 +367,10 @@ def bootstrap_administrator(
 ) -> BootstrapResult:
     """Create the sole administrator or verify the persisted password."""
     with sessions.begin() as db:
-        serialize_user_authority(db)
+        # The one fence on user authority: it serializes administrator writers,
+        # including absent rows. Request paths read users without any lock.
+        if db.get_bind().dialect.name == "postgresql":
+            db.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
         users = db.scalars(
             select(User).where(
                 or_(User.subject == _ADMIN_SUBJECT, User.role == _ADMIN_ROLE)

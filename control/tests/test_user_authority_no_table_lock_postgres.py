@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
+from vonk_control.browser_auth import bootstrap_administrator
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import Base, User
 from vonk_control.recipe_update_batches import RecipeUpdateBatches
-from vonk_control.user_authority import serialize_user_authority
 
 
 @pytest.fixture
@@ -47,11 +48,18 @@ def test_mutation_is_not_blocked_by_an_unrelated_users_writer(
         authorize(mutation, "admin")
 
 
-def test_the_writer_fence_still_serializes_administrator_writers(sessions) -> None:
-    """The security fence kept: two user-authority writers (bootstrap) exclude
-    each other, including absent rows."""
-    with sessions.begin() as first, sessions.begin() as second:
-        serialize_user_authority(first)
-        second.execute(text("SET LOCAL lock_timeout = '500ms'"))
-        with pytest.raises(OperationalError):
-            serialize_user_authority(second)
+def test_the_bootstrap_still_waits_for_another_user_authority_writer(
+    sessions,
+) -> None:
+    """The security fence kept: the administrator bootstrap excludes another
+    writer of users, including absent rows."""
+    with sessions.begin() as clear:
+        clear.execute(text("DELETE FROM users"))
+    pool = ThreadPoolExecutor(max_workers=1)
+    with sessions.begin() as holder:
+        holder.execute(text("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE"))
+        bootstrap = pool.submit(bootstrap_administrator, sessions, "pw-" + "x" * 20)
+        with pytest.raises(TimeoutError):
+            bootstrap.result(timeout=1)
+    assert bootstrap.result(timeout=30).status == "created"
+    pool.shutdown()

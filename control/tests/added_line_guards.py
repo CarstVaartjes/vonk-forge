@@ -149,13 +149,13 @@ FIXED_RESERVE_VERDICTS: dict[tuple[str, str], str] = {
     ): "the collector's headroom floor, defaulted from that setting",
 }
 # The only modules that may lock a whole table: one-time schema adoption at
-# startup (before services run) and the administrator bootstrap's user-authority
-# serialization (security; readers take no lock).
+# startup (before services run) and the administrator bootstrap (security;
+# request paths read users without a lock).
 TABLE_LOCK_OWNERS = frozenset(
     {
         "control/src/vonk_control/exact_integer_adoption.py",
         "control/src/vonk_control/db/node_facts.py",
-        "control/src/vonk_control/user_authority.py",
+        "control/src/vonk_control/browser_auth.py",
     }
 )
 # The agent's messages a Controller test may send only as the stand-in pinned
