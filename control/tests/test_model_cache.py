@@ -896,6 +896,25 @@ def test_operator_download_replays_original_before_catalog_or_storage_readmissio
         assert (
             session.scalar(select(func.count()).select_from(ModelCacheOperation)) == 1
         )
+    # A second operator request while a download is live keeps its own receipt,
+    # readable by its own key, instead of attaching to another key's operation.
+    actor = Actor("operator", "administrator")
+    app = FastAPI()
+    install_model_operator_routes(
+        app, actor_dependency=Depends(lambda: actor), service=restarted
+    )
+    with TestClient(app) as api:
+        receipts = []
+        for suffix in ("a1", "a2"):
+            other = f"00000000-0000-4000-8000-0000000000{suffix}"
+            posted = api.post(
+                f"/api/model/{digest}/download", json={"request_key": other}
+            )
+            assert posted.status_code == 202, posted.text
+            observed = api.get(f"/api/model/requests/{other}")
+            assert observed.status_code == 200, observed.text
+            receipts.append(observed.json()["operation_id"])
+        assert receipts[0] != receipts[1]
 
 
 def test_canonical_catalog_revision_resolves_immutable_model_files(cache) -> None:

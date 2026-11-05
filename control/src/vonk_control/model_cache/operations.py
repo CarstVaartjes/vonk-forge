@@ -28,6 +28,7 @@ from .constants import SCHEMA_VERSION
 from .errors import ModelCacheConflictInvalid, ModelCacheNotFoundInvalid
 from .persistence import _cache_failure, _derived_result, _operation_progress
 from .source_helpers import _request_key
+from .transfer_admission import refreshes
 from .views import CacheOperationView
 
 if TYPE_CHECKING:
@@ -163,6 +164,7 @@ class OperationsMixin:
         artifact_set_sha256: str,
         include_succeeded: bool,
         excluding: str | None = None,
+        force_refresh: bool | None = None,
     ) -> CacheOperationView | None:
         """Return the operation a consumer of this artifact set may attach to.
 
@@ -171,7 +173,8 @@ class OperationsMixin:
         no unrelated row is read.  Only download and repair operations qualify,
         never a removal.  Ids are selected first and rows are loaded best first
         until one is usable.  A succeeded operation is preferred, then a live
-        one, then the lowest id.
+        one, then the lowest id.  With ``force_refresh`` set, only an operation
+        of the same refresh intent qualifies (a repair is a full refresh).
         """
         cache = cast("ModelCacheService", self)
         succeeded = model_cache_states.stored_words(
@@ -207,8 +210,13 @@ class OperationsMixin:
                 # A cancellation lives in the payload: the view of an operation
                 # being cancelled says so, and such an operation is not joined.
                 view = cache._operation_view(row)
-                if view.state in usable:
-                    return view
+                if view.state not in usable:
+                    continue
+                if force_refresh is not None:
+                    payload = cache._payload_or_none(row)
+                    if refreshes(row, payload) is not force_refresh:
+                        continue
+                return view
         return None
 
     def operations_page(
