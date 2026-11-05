@@ -409,18 +409,33 @@ def test_a_failing_attribution_never_refuses_the_samples(
     HTTP 500 until the Spark dropped the batch. Whatever the attribution
     raises, the samples commit and only the attribution is lost.
     """
-    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy import insert
 
-    def broken(*_args, **_kwargs):
-        raise IntegrityError("INSERT", {}, Exception("ck_measured_role_peaks_values"))
+    def violating_peak(session, _run, role, _peak):
+        # The real write order: the rank's peak was raised (and its event
+        # staged) before the measured-peak row hits its CHECK.
+        session.execute(
+            insert(MeasuredRolePeak).values(
+                content_sha256="d" * 64, role=role, peak_bytes=-1
+            )
+        )
 
-    monkeypatch.setattr("vonk_control.telemetry.record_observed_run_memory", broken)
+    monkeypatch.setattr(
+        "vonk_control.observed_run_memory._raise_measured_peak", violating_peak
+    )
     sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
-    _admit_run(sessions, now, node, installation)
+    run_id = _admit_run(sessions, now, node, installation)
     _batch(sessions, node, now + timedelta(seconds=1), [_FREE - 100])
     _batch(sessions, node, now + timedelta(seconds=10), [_FREE - 100])
     assert _stored_samples(sessions) == 2
-    assert sum("attribution skipped" in item.message for item in caplog.records) <= 1
+    with sessions() as session:
+        rank = session.scalar(select(RunNode).where(RunNode.run_id == run_id))
+        assert rank is not None and rank.observed_memory_bytes is None
+        assert session.scalars(select(MeasuredRolePeak)).all() == []
+    assert _run_node_events(sessions) == []
+    assert (
+        sum("attribution skipped" in item.getMessage() for item in caplog.records) == 1
+    )
 
 
 def test_a_fresh_sample_after_a_non_positive_one_is_still_attributed(

@@ -23,6 +23,7 @@ from .platform_observation_errors import (
     ObservationCaptureUnavailable,
     observation_capture_unavailable_response,
 )
+from .warn_once import warn_once
 
 if TYPE_CHECKING:
     from .operator_acceptance import OperatorReceiptResolver
@@ -337,19 +338,18 @@ def stored_document_detail(error: Exception) -> str | None:
     return f"stored document is invalid at {location} ({issue.get('type', 'invalid')})"
 
 
-_LOGGED_UNREADABLE: set[str] = set()
 _LOGGER = logging.getLogger(__name__)
 
 
 def warn_unreadable_once(kind: str, record_id: object) -> None:
     """Log a stored record that cannot be read, once per process per record."""
 
-    key = f"{kind}:{record_id}"
-    if key in _LOGGED_UNREADABLE:
-        return
-    if len(_LOGGED_UNREADABLE) < 4096:
-        _LOGGED_UNREADABLE.add(key)
-    _LOGGER.warning("skipping unreadable stored %s %s", kind, record_id)
+    warn_once(
+        f"unreadable:{kind}:{record_id}",
+        "skipping unreadable stored %s %s",
+        kind,
+        record_id,
+    )
 
 
 def _drop_field(document: object, location: Sequence[object]) -> None:

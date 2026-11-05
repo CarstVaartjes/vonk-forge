@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
@@ -32,6 +31,7 @@ from .models import (
 )
 from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
+from .warn_once import warn_once
 
 
 def _aware_utc(value: datetime, *, label: str) -> datetime:
@@ -144,26 +144,6 @@ def _advance_latest(
             ).returning(NodeTelemetryLatest.node_id)
         ).scalar()
         is not None
-    )
-
-
-_LOGGER = logging.getLogger(__name__)
-_WARNED_ATTRIBUTION: set[tuple[str, str]] = set()
-
-
-def _warn_attribution_skipped_once(node_id: str, error: Exception) -> None:
-    """Log a skipped run-memory attribution once per node and failure type."""
-
-    key = (node_id, type(error).__name__)
-    if key in _WARNED_ATTRIBUTION:
-        return
-    if len(_WARNED_ATTRIBUTION) < 4096:
-        _WARNED_ATTRIBUTION.add(key)
-    _LOGGER.warning(
-        "run memory attribution skipped on node %s (%s): samples kept",
-        node_id,
-        type(error).__name__,
-        exc_info=error,
     )
 
 
@@ -334,7 +314,13 @@ class TelemetryRepository:
                         self._events,
                     )
             except Exception as error:  # noqa: BLE001 - derived write, see above
-                _warn_attribution_skipped_once(node_id, error)
+                warn_once(
+                    f"attribution-skipped:{node_id}:{type(error).__name__}",
+                    "run memory attribution skipped on node %s (%s): samples kept",
+                    node_id,
+                    type(error).__name__,
+                    exc_info=error,
+                )
         return tuple(stored)
 
     def latest(self, node_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
