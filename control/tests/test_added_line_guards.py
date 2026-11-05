@@ -2079,6 +2079,40 @@ def test_private_or_classified_scratch_names_pass(path: str, source: str) -> Non
     assert not check_source(path, source, lines, modes=("scratch-names",))
 
 
+_SAVEPOINT_PATH = "control/src/vonk_control/admission_locking.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # with sessions.begin() exits while this savepoint is still open:
+        # before_commit sees only the savepoint and the staged events drop.
+        "savepoint = session.begin_nested()\n",
+        "session.begin_nested()\n",
+        "with lock(), session.connection().begin_nested().begin():\n    pass\n",
+    ],
+)
+def test_a_savepoint_outside_a_with_block_is_flagged(source: str) -> None:
+    assert check_source(_SAVEPOINT_PATH, source, {1}, modes=("savepoints",))
+    assert not check_source(_SAVEPOINT_PATH, source, set(), modes=("savepoints",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_SAVEPOINT_PATH, "with session.begin_nested():\n    pass\n"),
+        (
+            _SAVEPOINT_PATH,
+            "with admitting(), connection.begin_nested() as savepoint:\n    pass\n",
+        ),
+        ("control/tests/test_x.py", "savepoint = session.begin_nested()\n"),
+    ],
+)
+def test_a_savepoint_in_a_with_block_passes(path: str, source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("savepoints",))
+
+
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
 
 
