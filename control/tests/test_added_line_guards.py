@@ -3069,3 +3069,41 @@ def test_a_states_or_contract_module_owns_its_sets(owner: str) -> None:
     source = "LIVE = words(LifecycleState.QUEUED, LifecycleState.RUNNING)\n"
     assert _lifecycle_sets(source, {1})
     assert not _lifecycle_sets(source, {1}, path=owner)
+
+
+_INTENT_PATH = "control/src/vonk_control/recipe_operations/persistence.py"
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ordinal = max(node.workload_intent_ordinal for node in nodes) + 1\n",
+        "ordinal = 1 + max((n.workload_intent_ordinal for n in nodes), default=0)\n",
+        "for node in nodes:\n    node.workload_intent_ordinal = ordinal\n",
+        "target_node.workload_intent_ordinal += 1\n",
+    ],
+)
+def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
+    assert not check_source(_INTENT_PATH, source, set(), modes=("intent-ordinal",))
+    assert not check_source(
+        "control/src/vonk_control/workload_intent.py",
+        source,
+        lines,
+        modes=("intent-ordinal",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "ordinal = allocate_workload_intent(session, ids)\n",
+        "progress.workload_intent_ordinal = ordinal\n",
+        "seen = {n.workload_intent_ordinal for n in nodes}\n",
+        "later = max(a, b) + 1\n",
+    ],
+)
+def test_reading_or_carrying_a_workload_intent_passes(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))

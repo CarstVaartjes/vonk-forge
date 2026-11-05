@@ -45,6 +45,7 @@ from ..persisted_waits import read_wait, schedule_wait, typed_wait_reason
 from ..settings import PROFILE_STALL_WINDOW_SECONDS
 from ..stall_window import stall_deadline
 from ..strict_json import read_stored_model
+from ..workload_intent import take_workload_intent
 from .assessment_support import (
     _deferral_code,
     _preview_blockers,
@@ -204,14 +205,12 @@ class FleetProfileService:
                     else {}
                 )
                 if ordinal is not None or adopted_ordinals:
-                    cancel_ordinal = max([ordinal or 0, *adopted_ordinals.values()]) + 1
                     nodes = (
                         tuple(
                             session.scalars(
                                 select(AgentNode)
                                 .where(AgentNode.node_id.in_(scope))
                                 .order_by(AgentNode.node_id)
-                                .with_for_update(nowait=True)
                             )
                         )
                         if scope
@@ -220,17 +219,19 @@ class FleetProfileService:
                     # A node whose fence is not this application's is owned by a
                     # newer (or an unrecorded) intent: it is left alone, and the
                     # cancel completes for the nodes this application still owns.
-                    cancellable_nodes = tuple(
-                        node.node_id
+                    # The conditional write decides it: a node a newer intent took
+                    # after this read does not take the cancel's ordinal.
+                    owned_by_application = {
+                        node.node_id: node.workload_intent_ordinal
                         for node in nodes
                         if node.workload_intent_ordinal
                         == adopted_ordinals.get(node.node_id, ordinal)
+                    }
+                    cancel_ordinal, cancellable_nodes = take_workload_intent(
+                        session,
+                        owned_by_application,
+                        at_least=max([ordinal or 0, *adopted_ordinals.values()]),
                     )
-                    for node in nodes:
-                        if node.workload_intent_ordinal == adopted_ordinals.get(
-                            node.node_id, ordinal
-                        ):
-                            node.workload_intent_ordinal = cancel_ordinal
                     if cancellable_nodes:
                         adapter = self._switch_adapter
                         if adapter is None:

@@ -52,6 +52,7 @@ from ..stored_json import read_row_column
 from ..strict_json import (
     serialize_json_value,
 )
+from ..workload_intent import allocate_workload_intent
 from .constants import (
     _FINAL_VERIFICATION_MAX_SECONDS,
     _OBSERVING,
@@ -136,7 +137,6 @@ class ReservationMixin:
                     select(AgentNode)
                     .where(AgentNode.node_id.in_(target_node_ids))
                     .order_by(AgentNode.node_id)
-                    .with_for_update()
                 )
             )
             if len(nodes) != len(target_node_ids) or (
@@ -169,11 +169,9 @@ class ReservationMixin:
             except BuildConsumerError as error:
                 raise RunSwitchRequestInvalid(f"{error.code}: {error}") from error
             if workload_intent_ordinal is None:
-                workload_intent_ordinal = (
-                    max((node.workload_intent_ordinal for node in nodes), default=0) + 1
+                workload_intent_ordinal = allocate_workload_intent(
+                    session, tuple(node.node_id for node in nodes)
                 )
-                for node in nodes:
-                    node.workload_intent_ordinal = workload_intent_ordinal
                 service.request_superseded_workload_cancellation_in_session(
                     session,
                     tuple(node.node_id for node in nodes),

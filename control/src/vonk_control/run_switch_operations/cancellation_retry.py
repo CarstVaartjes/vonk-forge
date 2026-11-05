@@ -56,6 +56,7 @@ from ..strict_json import (
     read_stored_model,
     serialize_json_value,
 )
+from ..workload_intent import take_workload_intent
 from .constants import _OPERATION_KINDS
 from .errors import RunSwitchRequestInvalid, RunSwitchRetryLater
 from .identity_helpers import _string_or_none
@@ -359,7 +360,6 @@ class CancellationRetryMixin:
                     select(AgentNode)
                     .where(AgentNode.node_id.in_(previous.targets))
                     .order_by(AgentNode.node_id)
-                    .with_for_update()
                 )
             )
             previous_parent = _run_switch_payload(previous)
@@ -419,9 +419,14 @@ class CancellationRetryMixin:
                 )
             except BuildConsumerError as error:
                 raise RunSwitchRetryLater(f"{error.code}: {error}") from error
-            ordinal = max(node.workload_intent_ordinal for node in nodes) + 1
-            for node in nodes:
-                node.workload_intent_ordinal = ordinal
+            ordinal, taken = take_workload_intent(
+                session, {node.node_id: node.workload_intent_ordinal for node in nodes}
+            )
+            if len(taken) != len(nodes):
+                raise RunSwitchRetryLater(
+                    f"{RunSwitchCode.SUPERSEDED}: retry no longer owns the accepted workload intent",
+                    reason=WaitReason.SCOPE_CHANGED,
+                )
             service.request_superseded_workload_cancellation_in_session(
                 session, tuple(previous.targets), ordinal, now
             )

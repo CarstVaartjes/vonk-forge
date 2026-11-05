@@ -58,6 +58,7 @@ from ..recipe_build_cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )
+from ..workload_intent import allocate_workload_intent, raise_workload_intent
 from .assessment_support import (
     _require_recovery_preparations,
 )
@@ -554,18 +555,20 @@ class FleetProfileService:
                 pending_ordinal = _kept_fence_ordinal(
                     affected_nodes, pending_ordinal, pending_fence
                 )
-            workload_intent_ordinal = (
-                recovery_ordinal
-                if recovery_ordinal is not None
-                else pending_ordinal
-                if pending_ordinal is not None
-                else max(node.workload_intent_ordinal for node in affected_nodes) + 1
-                if affected_nodes
-                else None
+            affected_ids = tuple(node.node_id for node in affected_nodes)
+            kept_ordinal = (
+                recovery_ordinal if recovery_ordinal is not None else pending_ordinal
             )
+            if kept_ordinal is not None:
+                workload_intent_ordinal: int | None = kept_ordinal
+                raise_workload_intent(session, affected_ids, kept_ordinal)
+            elif affected_ids:
+                workload_intent_ordinal = allocate_workload_intent(
+                    session, affected_ids
+                )
+            else:
+                workload_intent_ordinal = None
             if workload_intent_ordinal is not None:
-                for node in affected_nodes:
-                    node.workload_intent_ordinal = workload_intent_ordinal
                 # (With no executor bound yet the older workloads' cancellation is
                 # requested by the load's own worker when its executor is bound:
                 # it requests it again for the same node fence and intent before

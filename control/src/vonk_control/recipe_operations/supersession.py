@@ -199,7 +199,6 @@ class SupersessionMixin:
                     select(AgentNode)
                     .where(AgentNode.node_id.in_(intent_scope))
                     .order_by(AgentNode.node_id)
-                    .with_for_update(of=AgentNode)
                 )
             )
             if tuple(node.node_id for node in nodes) != intent_scope or any(
