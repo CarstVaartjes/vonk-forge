@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import uuid
@@ -162,6 +163,10 @@ def test_corrupt_state_restarts_grace_instead_of_deleting_or_stalling(
     assert json.loads(state.read_text()) == {identity(1): 100_000}
 
 
+class Killed(BaseException):
+    """The janitor process dies (SIGKILL): no `finally` of it runs any more."""
+
+
 class Networks(janitor.Docker):
     """Daemon network semantics the repair relies on, as observed on Docker 29."""
 
@@ -169,7 +174,13 @@ class Networks(janitor.Docker):
         self.networks: dict[str, dict[str, Any]] = {}
         self.containers: dict[str, dict[str, Any]] = {}
         self.mutations: list[tuple[str, str]] = []
+        self.network_reads: list[str] = []
         self.refuse_connect = False
+        self.stop_times_out = False
+        self.start_refusals = 0
+        self.die_after: str | None = None
+        self.dead = False
+        self.endpoint_rebuilt = True
 
     def network(self, name: str) -> None:
         self.networks[name] = {"Id": uuid.uuid4().hex, "Containers": {}}
@@ -181,8 +192,7 @@ class Networks(janitor.Docker):
         self.containers[identity] = {
             "Id": identity,
             "Name": f"/{name}",
-            "Labels": {janitor.PROJECT_LABEL: "vonk-forge"},
-            "State": {"Status": "created", "Running": False, "Error": ""},
+            "State": {"Status": "created", "Error": ""},
             "HostConfig": {
                 "NetworkMode": mode or networks[0],
                 "RestartPolicy": {"Name": "unless-stopped"},
@@ -197,27 +207,32 @@ class Networks(janitor.Docker):
         self.start(identity)
         return identity
 
+    def running(self, identity: str) -> bool:
+        return self.containers[identity]["State"]["Status"] == "running"
+
     def start(self, identity: str) -> None:
         container = self.containers[identity]
         entries = container["NetworkSettings"]["Networks"]
         for name, entry in entries.items():
             current = self.networks.get(name)
             if current is None or entry["NetworkID"] not in ("", current["Id"]):
-                container["State"].update(
-                    Status="exited", Running=False, Error="network not found"
-                )
+                container["State"].update(Status="exited", Error="network not found")
                 raise janitor.DockerError("Docker HTTP 500: network not found")
         for name, entry in entries.items():
             entry["NetworkID"] = self.networks[name]["Id"]
-            self.networks[name]["Containers"][identity] = {}
-        container["State"].update(Status="running", Running=True, Error="")
+            if self.endpoint_rebuilt:
+                self.networks[name]["Containers"][identity] = {}
+        container["State"].update(Status="running", Error="")
 
     def stop(self, identity: str) -> None:
-        self.containers[identity]["State"].update(Status="exited", Running=False)
+        # An API stop is a manual stop: it leaves no error to retry on.
+        self.containers[identity]["State"].update(Status="exited", Error="")
         for network in self.networks.values():
             network["Containers"].pop(identity, None)
 
     def request(self, method: str, path: str, body: Any = None) -> Any:
+        if self.dead:
+            raise Killed
         route = unquote(path.split("?", 1)[0])
         if method == "GET" and route == "/containers/json":
             assert "all=1" in path and "vonk-forge" in unquote(path)
@@ -229,28 +244,52 @@ class Networks(janitor.Docker):
         if method == "GET" and kind == "containers":
             return json.loads(json.dumps(self.containers[name]))
         if method == "GET" and kind == "networks":
+            self.network_reads.append(name)
             if name not in self.networks:
                 raise janitor.DockerNotFound("Docker HTTP 404: network not found")
             return json.loads(json.dumps(self.networks[name]))
         self.mutations.append((action[0], name))
+        try:
+            return self._mutate(kind, name, action[0], body)
+        finally:
+            if self.die_after == action[0]:
+                self.dead = True
+
+    def _mutate(self, kind: str, name: str, action: str, body: Any) -> None:
+        if kind == "containers" and action == "stop":
+            self.stop(name)
+            if self.stop_times_out:
+                raise TimeoutError("timed out")  # The daemon finished anyway.
+            return
         if kind == "containers":
-            (self.start if action == ["start"] else self.stop)(name)
-            return None
+            if self.start_refusals:
+                self.start_refusals -= 1
+                raise janitor.DockerError("Docker HTTP 500: container is stopping")
+            self.start(name)
+            return
         record = self.containers[body["Container"]]
-        assert not record["State"]["Running"]  # A running one cannot leave.
-        if action == ["disconnect"]:
+        assert record["State"]["Status"] != "running"  # A running one cannot leave.
+        if action == "disconnect":
             del record["NetworkSettings"]["Networks"][name]
-            return None
+            return
         if self.refuse_connect:
             raise janitor.DockerError("Docker HTTP 500: connect refused")
         record["NetworkSettings"]["Networks"][name] = {
             "NetworkID": "",
             **body["EndpointConfig"],
         }
-        return None
+        return
 
 
-def fleet() -> tuple[Networks, str, str]:
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1_000_000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def fleet(tmp_path: Path) -> tuple[Networks, Any, Clock, str, str]:
     daemon = Networks()
     for name in ("vonk-forge_ingress", "vonk-forge_agent-proxy", "vonk-forge_data"):
         daemon.network(name)
@@ -260,19 +299,31 @@ def fleet() -> tuple[Networks, str, str]:
     api = daemon.container(
         "vonk-forge-api-1", ["vonk-forge_agent-proxy", "vonk-forge_data"]
     )
-    return daemon, caddy, api
+    clock = Clock()
+    reconciler = janitor.Reconciler(
+        daemon, tmp_path / "repairing.json", clock=clock, jitter=lambda: 1.0
+    )
+    return daemon, reconciler, clock, caddy, api
 
 
-def test_recreated_network_reattaches_the_same_stopped_container_and_runs_it() -> None:
+def ticks(reconciler: Any, clock: Clock, count: int) -> None:
+    for _ in range(count):
+        reconciler.tick("vonk-forge")
+        clock.now += janitor.NETWORK_INTERVAL
+
+
+def test_recreated_network_reattaches_the_same_stopped_container_and_runs_it(
+    tmp_path: Path,
+) -> None:
     """Catches the NAS update fault that only a manual container delete used to clear."""
-    daemon, caddy, api = fleet()
+    daemon, reconciler, clock, caddy, api = fleet(tmp_path)
     daemon.stop(caddy)
     daemon.network("vonk-forge_ingress")  # Recreated with a new ID.
     with pytest.raises(janitor.DockerError):
         daemon.start(caddy)  # What `compose up` and a restart do.
-    janitor.reconcile_networks(daemon, "vonk-forge")
+    ticks(reconciler, clock, 1)
     record = daemon.containers[caddy]
-    assert record["State"]["Running"]
+    assert daemon.running(caddy)
     assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
     assert record["NetworkSettings"]["Networks"]["vonk-forge_ingress"]["Aliases"] == [
         "vonk-forge-caddy-1",
@@ -284,16 +335,16 @@ def test_recreated_network_reattaches_the_same_stopped_container_and_runs_it() -
         ("start", caddy),
     ]
     daemon.mutations.clear()
-    janitor.reconcile_networks(daemon, "vonk-forge")
+    ticks(reconciler, clock, 2)
     assert daemon.mutations == []
-    assert daemon.containers[api]["State"]["Running"]
+    assert daemon.running(api)
 
 
-def test_running_container_without_its_endpoint_is_reattached() -> None:
+def test_running_container_without_its_endpoint_is_reattached(tmp_path: Path) -> None:
     """Catches trusting the container record while the network has no endpoint."""
-    daemon, caddy, _ = fleet()
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
     daemon.networks["vonk-forge_ingress"]["Containers"].clear()
-    janitor.reconcile_networks(daemon, "vonk-forge")
+    ticks(reconciler, clock, 1)
     assert daemon.mutations == [
         ("stop", caddy),
         ("disconnect", "vonk-forge_ingress"),
@@ -301,44 +352,141 @@ def test_running_container_without_its_endpoint_is_reattached() -> None:
         ("start", caddy),
     ]
     assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+    assert json.loads((tmp_path / "repairing.json").read_text()) == {}
 
 
-def test_repair_waits_for_compose_and_respects_intentional_stops() -> None:
-    """Catches inventing networks, starting manual stops, and touching shared netns."""
-    daemon, caddy, api = fleet()
+def test_each_network_is_inspected_once_per_tick(tmp_path: Path) -> None:
+    """Catches one network inspect per container sharing it."""
+    daemon, reconciler, clock, _, _ = fleet(tmp_path)
+    ticks(reconciler, clock, 1)
+    assert sorted(daemon.network_reads) == sorted(daemon.networks)
+
+
+def test_stop_that_times_out_after_the_daemon_stopped_is_started_later(
+    tmp_path: Path,
+) -> None:
+    """Catches a repair stop that Docker records as manual and never restarts."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.networks["vonk-forge_ingress"]["Containers"].clear()
+    daemon.stop_times_out = True
+    daemon.start_refusals = 1  # The daemon is still finishing the stop.
+    ticks(reconciler, clock, 1)
+    assert not daemon.running(caddy)
+    assert daemon.containers[caddy]["State"]["Error"] == ""
+    daemon.stop_times_out = False
+    ticks(reconciler, clock, 1)
+    assert daemon.running(caddy)
+    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+
+
+@pytest.mark.parametrize("death", ["stop", "disconnect", "connect"])
+def test_janitor_killed_mid_repair_leaves_the_next_process_to_start_it(
+    tmp_path: Path, death: str
+) -> None:
+    """Catches a container left stopped when the janitor dies between stop and start."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.networks["vonk-forge_ingress"]["Containers"].clear()
+    daemon.die_after = death
+    with pytest.raises(Killed):
+        ticks(reconciler, clock, 1)
+    assert not daemon.running(caddy)
+    daemon.dead, daemon.die_after = False, None
+    fresh = janitor.Reconciler(daemon, tmp_path / "repairing.json", clock=clock)
+    ticks(fresh, clock, 2)
+    assert daemon.running(caddy)
+    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
+
+
+def test_sigterm_unwinds_through_the_start(tmp_path: Path) -> None:
+    """Catches a Redeploy that stops the janitor between stop and start."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.networks["vonk-forge_ingress"]["Containers"].clear()
+    original = daemon._mutate
+
+    def terminated(kind: str, name: str, action: str, body: Any) -> None:
+        original(kind, name, action, body)
+        if action == "disconnect":
+            janitor.terminate(signal.SIGTERM, None)
+
+    daemon._mutate = terminated  # type: ignore[method-assign]
+    with pytest.raises(SystemExit):
+        ticks(reconciler, clock, 1)
+    assert daemon.running(caddy)
+
+
+def test_failed_first_start_is_retried_and_docker_owned_states_wait(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Catches dropping `created` with an error, and acting on Docker-owned states."""
+    daemon, reconciler, clock, caddy, api = fleet(tmp_path)
+    daemon.containers[caddy]["State"].update(Status="created", Error="no such file")
+    for state in ("restarting", "paused", "dead"):
+        daemon.containers[api]["State"].update(Status=state, Error="boom")
+        with caplog.at_level("INFO", logger=janitor.LOGGER.name):
+            ticks(reconciler, clock, 1)
+        assert ("start", api) not in daemon.mutations
+        assert {
+            "reason": janitor.Reason.STATE_WAIT,
+            "container": "vonk-forge-api-1",
+            "state": state,
+        } in [json.loads(record.message) for record in caplog.records]
+    assert daemon.running(caddy)
+
+
+def test_repair_waits_for_compose_and_respects_stops_of_a_running_container(
+    tmp_path: Path,
+) -> None:
+    """Catches inventing networks, starting ordinary stops, and touching shared netns."""
+    daemon, reconciler, clock, caddy, api = fleet(tmp_path)
     daemon.stop(caddy)
     del daemon.networks["vonk-forge_ingress"]
-    daemon.stop(api)  # Manual stop: no start error.
+    daemon.stop(api)  # Stopped after it ran: no start error.
     configurator = daemon.container(
         "vonk-forge-tailscale-configurator-1", [], mode=f"container:{api}"
     )
     daemon.stop(configurator)
     daemon.containers[configurator]["State"]["Error"] = "netns gone"
-    janitor.reconcile_networks(daemon, "vonk-forge")
+    ticks(reconciler, clock, 1)
     assert daemon.mutations == []
     daemon.network("vonk-forge_ingress")  # The next `compose up` creates it.
     with pytest.raises(janitor.DockerError):
         daemon.start(caddy)
     daemon.containers[api]["State"]["Error"] = "failed to start"
     daemon.containers[api]["HostConfig"]["RestartPolicy"]["Name"] = "no"
-    janitor.reconcile_networks(daemon, "vonk-forge")
-    assert daemon.containers[caddy]["State"]["Running"]
-    assert not daemon.containers[api]["State"]["Running"]
+    ticks(reconciler, clock, 1)
+    assert daemon.running(caddy)
+    assert not daemon.running(api)
     daemon.containers[api]["HostConfig"]["RestartPolicy"]["Name"] = "always"
-    janitor.reconcile_networks(daemon, "vonk-forge")
-    assert daemon.containers[api]["State"]["Running"]
+    ticks(reconciler, clock, 1)
+    assert daemon.running(api)
+
+
+def test_repair_that_never_converges_backs_off_exponentially(tmp_path: Path) -> None:
+    """Catches bouncing a container, and every route through it, on each tick."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.networks["vonk-forge_ingress"]["Containers"].clear()
+    daemon.endpoint_rebuilt = False  # Start does not bring the endpoint back.
+    ticks(reconciler, clock, 64)
+    stops = [index for index, call in enumerate(daemon.mutations) if call[0] == "stop"]
+    # Delays 30, 60, 120, ... seconds: 64 ticks of 30 s hold about six repairs.
+    assert 4 <= len(stops) <= 7
+    assert daemon.running(caddy)
+    daemon.endpoint_rebuilt = True
+    clock.now += janitor.INTERVAL
+    ticks(reconciler, clock, 2)
+    assert caddy in daemon.networks["vonk-forge_ingress"]["Containers"]
 
 
 def test_failed_reattach_never_leaves_the_container_stopped(
-    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Catches a repair that turns a degraded container into a stopped one."""
-    daemon, caddy, _ = fleet()
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
     daemon.networks["vonk-forge_ingress"]["Containers"].clear()
     daemon.refuse_connect = True
     with caplog.at_level("INFO", logger=janitor.LOGGER.name):
-        janitor.reconcile_networks(daemon, "vonk-forge")
-    assert daemon.containers[caddy]["State"]["Running"]
+        ticks(reconciler, clock, 1)
+    assert daemon.running(caddy)
     assert [json.loads(r.message)["reason"] for r in caplog.records] == [
         janitor.Reason.REPAIR_FAILED
     ]

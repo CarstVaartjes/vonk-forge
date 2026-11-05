@@ -1,11 +1,10 @@
 """NAS daemon housekeeping for the platform's own Compose project.
 
-Hourly, non-forcing collection of unused platform images, and a short repair
-loop that re-attaches project containers to networks they lost. The repair
-exists because the daemon can lose an endpoint or recreate a network (seen
-after NAS OS updates) while `compose up` and restarts reuse the broken
-container: a stopped container is started as-is, and only a running one is
-checked for missing networks.
+Hourly, non-forcing collection of unused platform images, and a 30-second
+repair loop that re-attaches project containers to networks they lost (a
+network recreated under them, or an endpoint the network no longer lists).
+`compose up` and restarts reuse such a container: a stopped one is started
+as-is, and only a running one is checked for missing networks.
 """
 
 from __future__ import annotations
@@ -15,13 +14,17 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import sched
+import signal
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from types import FrameType
 from typing import Any
 from urllib.parse import quote
 
@@ -36,6 +39,7 @@ REPOSITORIES = frozenset(
 )
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 STATE = Path("/state/unused.json")
+REPAIRING = Path("/state/repairing.json")
 LOGGER = logging.getLogger("image-janitor")
 
 
@@ -48,9 +52,13 @@ class Reason(StrEnum):
     STATE_INVALID = "state-invalid-grace-restarted"
     REMOVED = "removed"
     NETWORK_WAIT = "network-absent-wait-for-compose"
+    STATE_WAIT = "container-state-owned-by-docker"
+    BACKOFF_WAIT = "repair-backoff"
     NETWORK_REPAIRED = "network-reattached"
-    START_RETRIED = "failed-start-retried"
+    START_RETRIED = "start-retried"
     REPAIR_FAILED = "network-repair-failed"
+    NO_PROJECT = "not-in-a-compose-project"
+    MARKS_INVALID = "repair-journal-invalid-reset"
 
 
 @dataclass(frozen=True)
@@ -189,9 +197,13 @@ def load_state(path: Path) -> dict[str, float]:
 
 
 def save_state(path: Path, unused: dict[str, float]) -> None:
+    publish(path, unused)
+
+
+def publish(path: Path, value: dict[str, float] | dict[str, Pending]) -> None:
     temporary = path.with_suffix(".tmp")
     with temporary.open("w") as stream:
-        json.dump(unused, stream, sort_keys=True, allow_nan=False)
+        json.dump(value, stream, sort_keys=True, allow_nan=False, default=vars)
         stream.flush()
         os.fsync(stream.fileno())
     temporary.replace(path)
@@ -248,11 +260,20 @@ def sweep(docker: Docker, path: Path, now: float) -> None:
     save_state(path, unused)
 
 
-class Status(StrEnum):
-    """The Docker container states a repair acts on; others are left alone."""
+class State(StrEnum):
+    """Every Docker container state."""
 
+    CREATED = "created"
     RUNNING = "running"
+    PAUSED = "paused"
+    RESTARTING = "restarting"
+    REMOVING = "removing"
     EXITED = "exited"
+    DEAD = "dead"
+
+
+# Docker itself owns these: its restart policy, a deliberate pause, a removal.
+DOCKER_OWNED = frozenset({State.PAUSED, State.RESTARTING, State.REMOVING, State.DEAD})
 
 
 class Policy(StrEnum):
@@ -270,10 +291,33 @@ class SharedMode(StrEnum):
 
 
 @dataclass(frozen=True)
+class Network:
+    identity: str
+    members: frozenset[str]
+
+    @classmethod
+    def inspect(cls, docker: Docker, name: str) -> Network | None:
+        try:
+            row = docker.request("GET", f"/networks/{quote(name, safe='')}")
+        except DockerNotFound:
+            return None
+        return cls(str(row["Id"]), frozenset(row.get("Containers") or {}))
+
+
+class Action(StrEnum):
+    NONE = "none"
+    REATTACH = "reattach"
+    START = "start"
+    WAIT_STATE = "wait-state"
+    WAIT_NETWORK = "wait-network"
+    WAIT_BACKOFF = "wait-backoff"
+
+
+@dataclass(frozen=True)
 class Container:
     identity: str
     name: str
-    status: str
+    state: State
     error: str
     policy: str
     mode: str
@@ -294,8 +338,8 @@ class Container:
             networks[name] = (str(endpoint.get("NetworkID") or ""), tuple(aliases))
         return cls(
             identity=str(row["Id"]),
-            name=str(row["Name"]),
-            status=str(row["State"]["Status"]),
+            name=str(row["Name"]).lstrip("/"),
+            state=State(row["State"]["Status"]),
             error=str(row["State"].get("Error") or ""),
             policy=str(row["HostConfig"]["RestartPolicy"]["Name"]),
             mode=str(row["HostConfig"]["NetworkMode"]),
@@ -303,105 +347,296 @@ class Container:
         )
 
     @property
-    def running(self) -> bool:
-        return self.status == Status.RUNNING
+    def own_networks(self) -> bool:
+        return self.mode not in set(SharedMode) and not self.mode.startswith(
+            "container:"
+        )
 
-    @property
-    def should_run(self) -> bool:
-        # A failed start is not retried by the restart policy, and a stop of a
-        # container that ran leaves no error.
-        return self.running or (bool(self.error) and self.policy in set(Policy))
 
-    def broken(self, docker: Docker) -> list[str] | None:
-        """Return the networks whose attachment is lost, or None to wait.
+@dataclass(frozen=True)
+class Pending:
+    """A repair begun and not yet confirmed, journalled before its first effect.
+
+    Docker records an API stop as a manual stop and a disconnect drops the
+    network from the container record, so a janitor that dies mid-repair
+    would otherwise leave the container stopped or short of a network.
+    """
+
+    start: bool
+    # Network name -> aliases to re-attach with.
+    networks: dict[str, tuple[str, ...]]
+
+    @classmethod
+    def parse(cls, raw: object) -> Pending:
+        if not isinstance(raw, dict) or not isinstance(raw.get("start"), bool):
+            raise TypeError("Invalid pending repair")
+        networks = raw.get("networks")
+        if not isinstance(networks, dict) or any(
+            not isinstance(aliases, list)
+            or any(not isinstance(alias, str) for alias in aliases)
+            for aliases in networks.values()
+        ):
+            raise TypeError("Invalid pending repair networks")
+        return cls(raw["start"], {str(k): tuple(v) for k, v in networks.items()})
+
+
+def decide(
+    container: Container,
+    *,
+    broken: list[str] | None,
+    pending: Pending | None,
+    held_until: float,
+    now: float,
+) -> Action:
+    """The one transition: observed container and network facts -> action.
+
+    `broken` is None while a network to attach does not exist (Compose owns
+    networks), else the networks whose attachment is lost or still owed by a
+    `pending` repair. `held_until` is the backoff of the planned repair.
+    """
+    if container.state in DOCKER_OWNED:
+        return Action.WAIT_STATE
+    if broken is None:
+        return Action.WAIT_NETWORK
+    if broken:
+        planned = Action.REATTACH
+    elif should_run(container, pending) and container.state != State.RUNNING:
+        planned = Action.START
+    else:
+        return Action.NONE
+    return Action.WAIT_BACKOFF if now < held_until else planned
+
+
+def should_run(container: Container, pending: Pending | None) -> bool:
+    # A failed start is not retried by the restart policy, and a stop by this
+    # janitor's repair counts as manual to Docker.
+    return (
+        container.state == State.RUNNING
+        or (pending is not None and pending.start)
+        or (bool(container.error) and container.policy in set(Policy))
+    )
+
+
+class Backoff:
+    """Per-repair exponential backoff with equal jitter, in memory.
+
+    A repair that does not converge (the start does not rebuild the endpoint)
+    must not bounce a container, and the routes through it, every tick.
+    """
+
+    def __init__(self, jitter: Callable[[], float]) -> None:
+        self.jitter = jitter
+        self.failures: dict[tuple[str, str], int] = {}
+        self.until: dict[tuple[str, str], float] = {}
+
+    def held_until(self, keys: list[tuple[str, str]]) -> float:
+        return max((self.until.get(key, 0.0) for key in keys), default=0.0)
+
+    def attempted(self, keys: list[tuple[str, str]], now: float) -> float:
+        for key in keys:
+            failures = self.failures.get(key, 0) + 1
+            self.failures[key] = failures
+            delay = min(INTERVAL, NETWORK_INTERVAL * 2 ** (failures - 1))
+            self.until[key] = now + delay / 2 + self.jitter() * delay / 2
+        return self.held_until(keys)
+
+    def healthy(self, identity: str, keep: set[tuple[str, str]]) -> None:
+        for key in [key for key in self.failures if key[0] == identity]:
+            if key not in keep:
+                del self.failures[key]
+                self.until.pop(key, None)
+
+
+class Reconciler:
+    def __init__(
+        self,
+        docker: Docker,
+        journal: Path,
+        *,
+        clock: Callable[[], float] = time.time,
+        jitter: Callable[[], float] = random.random,
+    ) -> None:
+        self.docker = docker
+        self.journal = journal
+        self.clock = clock
+        self.backoff = Backoff(jitter)
+
+    def pending(self) -> dict[str, Pending]:
+        try:
+            raw = json.loads(self.journal.read_text())
+            if not isinstance(raw, dict):
+                raise TypeError("pending repairs are not a mapping")
+            return {str(k): Pending.parse(v) for k, v in raw.items()}
+        except FileNotFoundError:
+            return {}
+        except (ValueError, TypeError) as error:
+            log(Reason.MARKS_INVALID, detail=str(error))
+            return {}
+
+    def record(self, identity: str, entry: Pending | None) -> None:
+        journal = self.pending()
+        if journal.get(identity) == entry:
+            return
+        if entry is None:
+            del journal[identity]
+        else:
+            journal[identity] = entry
+        publish(self.journal, journal)
+
+    def tick(self, project: str) -> None:
+        selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
+        rows = self.docker.request("GET", f"/containers/json?all=1&filters={selector}")
+        # One inspect per network per tick, shared by every container.
+        networks: dict[str, Network | None] = {}
+        for row in rows:
+            try:
+                self.repair(Container.inspect(self.docker, row["Id"]), networks)
+            except (
+                DockerError,
+                OSError,
+                ValueError,
+                KeyError,
+                TypeError,
+                http.client.HTTPException,
+            ) as error:
+                # Re-observe on the next tick; Docker or Compose may be mid-change.
+                log(
+                    Reason.REPAIR_FAILED,
+                    container=row.get("Names"),
+                    detail=str(error),
+                    next_attempt=self.clock() + NETWORK_INTERVAL,
+                )
+        present = {row["Id"] for row in rows}
+        for identity in set(self.pending()) - present:
+            self.record(identity, None)
+
+    def broken(
+        self,
+        container: Container,
+        pending: Pending | None,
+        networks: dict[str, Network | None],
+    ) -> list[str] | None:
+        """Networks to (re-)attach, or None while one of them does not exist.
 
         The container's own network entries are the declared set: the daemon
         keeps them until an explicit disconnect, even when the network or the
         endpoint is gone. An entry is broken when it names an older network ID
         (the network was recreated) or, while running, when the network lists
-        no endpoint for it.
+        no endpoint for it. A pending repair also owes the networks it
+        disconnected and has not yet seen attached again.
         """
+        owed = [
+            n
+            for n in (pending.networks if pending else {})
+            if n not in container.networks
+        ]
         broken = []
-        for name, (recorded, _) in self.networks.items():
-            try:
-                network = docker.request("GET", f"/networks/{quote(name, safe='')}")
-            except DockerNotFound:
-                log(Reason.NETWORK_WAIT, container=self.name, network=name)
+        for name in [*container.networks, *owed]:
+            if name not in networks:
+                networks[name] = Network.inspect(self.docker, name)
+            network = networks[name]
+            if network is None:
                 return None
-            if (recorded and recorded != network["Id"]) or (
-                self.running and self.identity not in (network.get("Containers") or {})
+            recorded = container.networks.get(name, ("", ()))[0]
+            if (
+                name in owed
+                or (recorded and recorded != network.identity)
+                or (
+                    container.state == State.RUNNING
+                    and container.identity not in network.members
+                )
             ):
                 broken.append(name)
         return broken
 
-
-def repair(docker: Docker, identity: str) -> None:
-    """Re-attach one container to its lost networks, then run it if it should."""
-    container = Container.inspect(docker, identity)
-    if container.mode in set(SharedMode) or container.mode.startswith("container:"):
-        return
-    if container.status not in set(Status):
-        return
-    broken = container.broken(docker)
-    if broken is None:
-        return
-    target = quote(identity, safe="")
-    if broken:
-        # A running container cannot leave a network whose endpoint is gone;
-        # stopped, the daemon edits only its record. Start rebuilds endpoints
-        # and the published ports from that record.
-        if container.running:
-            docker.request("POST", f"/containers/{target}/stop?t=10")
+    def repair(self, container: Container, networks: dict[str, Network | None]) -> None:
+        if not container.own_networks:
+            return
+        identity, now = container.identity, self.clock()
+        pending = self.pending().get(identity)
+        broken = self.broken(container, pending, networks)
+        keys = [(identity, network) for network in broken or [""]]
+        action = decide(
+            container,
+            broken=broken,
+            pending=pending,
+            held_until=self.backoff.held_until(keys),
+            now=now,
+        )
+        if action == Action.NONE:
+            self.backoff.healthy(identity, set())
+            self.record(identity, None)
+            return
+        if action == Action.WAIT_STATE:
+            log(Reason.STATE_WAIT, container=container.name, state=container.state)
+            return
+        if action == Action.WAIT_NETWORK:
+            log(Reason.NETWORK_WAIT, container=container.name)
+            return
+        if action == Action.WAIT_BACKOFF:
+            log(
+                Reason.BACKOFF_WAIT,
+                container=container.name,
+                networks=broken,
+                next_attempt=self.backoff.held_until(keys),
+            )
+            return
+        self.backoff.healthy(identity, set(keys))
+        next_attempt = self.backoff.attempted(keys, now)
+        target = f"/containers/{quote(identity, safe='')}"
+        start = should_run(container, pending)
+        if action == Action.START:
+            self.docker.request("POST", f"{target}/start")
+            self.record(identity, None)
+            log(
+                Reason.START_RETRIED,
+                container=container.name,
+                previous_error=container.error,
+                next_attempt_if_unhealed=next_attempt,
+            )
+            return
+        # Journalled before the first effect, so a janitor that dies mid-way
+        # leaves the next one the rest. A running container cannot leave a
+        # network whose endpoint is gone; stopped, the daemon edits only its
+        # record, and start rebuilds endpoints and published ports from it.
+        # The project declares no static addresses; aliases keep the service
+        # name resolvable on the re-attached network.
+        owed = dict(pending.networks) if pending else {}
+        for network in broken or []:
+            owed.setdefault(network, container.networks.get(network, ("", ()))[1])
+        self.record(identity, Pending(start, owed))
         try:
-            for network in broken:
+            if container.state == State.RUNNING:
+                self.docker.request("POST", f"{target}/stop?t=10")
+            for network in broken or []:
                 path = f"/networks/{quote(network, safe='')}"
-                docker.request(
-                    "POST", f"{path}/disconnect", {"Container": identity, "Force": True}
-                )
-                # The project declares no static addresses; aliases keep the
-                # service name resolvable on the re-attached network.
-                aliases = list(container.networks[network][1])
-                docker.request(
+                if network in container.networks:
+                    self.docker.request(
+                        "POST",
+                        f"{path}/disconnect",
+                        {"Container": identity, "Force": True},
+                    )
+                self.docker.request(
                     "POST",
                     f"{path}/connect",
-                    {"Container": identity, "EndpointConfig": {"Aliases": aliases}},
+                    {
+                        "Container": identity,
+                        "EndpointConfig": {"Aliases": list(owed[network])},
+                    },
                 )
         finally:
-            # Never leave a container stopped by this repair. If a re-attach
-            # failed, it runs short of that network, and the next `compose up`
-            # recreates a running container that lacks a declared network.
-            if container.should_run:
-                docker.request("POST", f"/containers/{target}/start")
-        log(Reason.NETWORK_REPAIRED, container=container.name, networks=broken)
-    elif container.should_run and not container.running:
-        docker.request("POST", f"/containers/{target}/start")
+            # Never leave a container stopped by this repair, even short of a
+            # network; the journal still owes that network to the next tick.
+            if start:
+                self.docker.request("POST", f"{target}/start")
+        self.record(identity, None)
         log(
-            Reason.START_RETRIED,
+            Reason.NETWORK_REPAIRED,
             container=container.name,
-            previous_error=container.error,
+            networks=broken,
+            started=start,
+            next_attempt_if_unhealed=next_attempt,
         )
-
-
-def reconcile_networks(docker: Docker, project: str) -> None:
-    selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
-    for row in docker.request("GET", f"/containers/json?all=1&filters={selector}"):
-        try:
-            repair(docker, row["Id"])
-        except (
-            DockerError,
-            OSError,
-            ValueError,
-            KeyError,
-            TypeError,
-            http.client.HTTPException,
-        ) as error:
-            # Re-observe on the next tick; the daemon or Compose may be mid-change.
-            log(
-                Reason.REPAIR_FAILED,
-                container=row.get("Names"),
-                detail=str(error),
-                next_attempt=time.time() + NETWORK_INTERVAL,
-            )
 
 
 def own_project(docker: Docker) -> str | None:
@@ -412,16 +647,25 @@ def own_project(docker: Docker) -> str | None:
     return (labels or {}).get(PROJECT_LABEL)
 
 
+def terminate(signum: int, frame: FrameType | None) -> None:
+    # Unwind through `finally`, so a repair in progress starts its container.
+    raise SystemExit(0)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    signal.signal(signal.SIGTERM, terminate)
     docker = Docker()
+    reconciler = Reconciler(docker, REPAIRING)
     scheduler = sched.scheduler()
 
     def network_tick() -> None:
         try:
             project = own_project(docker)
-            if project is not None:
-                reconcile_networks(docker, project)
+            if project is None:
+                log(Reason.NO_PROJECT, next_attempt=time.time() + NETWORK_INTERVAL)
+            else:
+                reconciler.tick(project)
         except (
             DockerError,
             OSError,
