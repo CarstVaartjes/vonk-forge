@@ -561,7 +561,12 @@ class FleetProfileService:
             )
             if kept_ordinal is not None:
                 workload_intent_ordinal: int | None = kept_ordinal
-                raise_workload_intent(session, affected_ids, kept_ordinal)
+                if raise_workload_intent(session, affected_ids, kept_ordinal) != len(
+                    affected_ids
+                ):
+                    raise _FleetProfileSupersededIntentConflict(
+                        "Pending profile workload intent was superseded before recovery"
+                    )
             elif affected_ids:
                 workload_intent_ordinal = allocate_workload_intent(
                     session, affected_ids

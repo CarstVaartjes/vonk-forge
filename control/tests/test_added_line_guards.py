@@ -3081,6 +3081,12 @@ _INTENT_PATH = "control/src/vonk_control/recipe_operations/persistence.py"
         "ordinal = 1 + max((n.workload_intent_ordinal for n in nodes), default=0)\n",
         "for node in nodes:\n    node.workload_intent_ordinal = ordinal\n",
         "target_node.workload_intent_ordinal += 1\n",
+        "spark.workload_intent_ordinal = 9\n",
+        "n.workload_intent_ordinal = 9\n",
+        "nodes[0].workload_intent_ordinal = 9\n",
+        "a.workload_intent_ordinal, b.workload_intent_ordinal = 1, 2\n",
+        "setattr(node, 'workload_intent_ordinal', 9)\n",
+        "session.execute(text('UPDATE agent_nodes SET workload_intent_ordinal = 9'))\n",
     ],
 )
 def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) -> None:
@@ -3100,6 +3106,7 @@ def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) ->
     [
         "ordinal = allocate_workload_intent(session, ids)\n",
         "progress.workload_intent_ordinal = ordinal\n",
+        "retry_parent.workload_intent_ordinal = ordinal\n",
         "seen = {n.workload_intent_ordinal for n in nodes}\n",
         "later = max(a, b) + 1\n",
     ],

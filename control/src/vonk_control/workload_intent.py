@@ -20,27 +20,34 @@ from collections.abc import Mapping, Sequence
 
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import Disposition, UnknownOutcomeError, WaitReason
 
 from .models import AgentNode
 
 # Every lost race is another request's committed intent, so a loop that keeps
-# losing means the Sparks are churning, not that this request can succeed by
-# waiting. The caller's request fails typed and is asked again.
+# losing means the Sparks are churning. The request ends as a typed wait
+# (SCOPE_CHANGED) and its requester asks again.
 ALLOCATION_ATTEMPTS = 16
 
 
-class WorkloadIntentUnavailable(RuntimeError):
-    """A target Spark vanished, or kept changing owner through every attempt."""
+class WorkloadIntentUnavailable(UnknownOutcomeError, RuntimeError):
+    """A target Spark vanished, was revoked, or kept changing owner."""
+
+    disposition = Disposition.WAIT
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, reason=WaitReason.SCOPE_CHANGED)
 
 
 def _ordinals(session: Session, node_ids: Sequence[str]) -> dict[str, int]:
-    return dict(
-        session.execute(
-            select(AgentNode.node_id, AgentNode.workload_intent_ordinal).where(
-                AgentNode.node_id.in_(node_ids)
-            )
-        ).tuples()
+    """The ordinal of every live target Spark; a revoked one is left out."""
+
+    rows = session.execute(
+        select(AgentNode.node_id, AgentNode.workload_intent_ordinal).where(
+            AgentNode.node_id.in_(node_ids), AgentNode.revoked_at.is_(None)
+        )
     )
+    return {node_id: ordinal for node_id, ordinal in rows}
 
 
 def take_workload_intent(
@@ -61,6 +68,7 @@ def take_workload_intent(
             .where(
                 AgentNode.node_id == node_id,
                 AgentNode.workload_intent_ordinal == owned[node_id],
+                AgentNode.revoked_at.is_(None),
             )
             .values(workload_intent_ordinal=ordinal)
             .execution_options(synchronize_session="fetch")
@@ -79,7 +87,9 @@ def allocate_workload_intent(session: Session, node_ids: Sequence[str]) -> int:
     for _attempt in range(ALLOCATION_ATTEMPTS):
         seen = _ordinals(session, wanted)
         if len(seen) != len(wanted):
-            raise WorkloadIntentUnavailable("a workload intent target disappeared")
+            raise WorkloadIntentUnavailable(
+                "a workload intent target disappeared or was revoked"
+            )
         ordinal, taken = take_workload_intent(session, seen)
         if len(taken) == len(wanted):
             return ordinal
@@ -88,17 +98,23 @@ def allocate_workload_intent(session: Session, node_ids: Sequence[str]) -> int:
 
 def raise_workload_intent(
     session: Session, node_ids: Sequence[str], ordinal: int
-) -> None:
-    """Carry an ordinal the caller already owns onto ``node_ids``, never lowering one."""
+) -> int:
+    """Carry an ordinal the caller already owns onto ``node_ids``, never lowering one.
+
+    Returns how many of the Sparks carry ``ordinal`` afterwards; fewer than
+    ``len(node_ids)`` means a newer intent (or a revocation) took one.
+    """
 
     if not node_ids:
-        return
-    session.execute(
+        return 0
+    result = session.execute(
         update(AgentNode)
         .where(
             AgentNode.node_id.in_(node_ids),
-            AgentNode.workload_intent_ordinal < ordinal,
+            AgentNode.workload_intent_ordinal <= ordinal,
+            AgentNode.revoked_at.is_(None),
         )
         .values(workload_intent_ordinal=ordinal)
         .execution_options(synchronize_session="fetch")
     )
+    return result.rowcount if isinstance(result, CursorResult) else 0

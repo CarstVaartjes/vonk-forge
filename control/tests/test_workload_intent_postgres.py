@@ -9,17 +9,21 @@ its ``agent_nodes`` row, so every intent read and every numbering waited behind
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import event, select, text
 from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import Disposition, WaitReason
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.failure_classification import disposition, wait_reason
 from vonk_control.models import AgentNode, Base
 from vonk_control.recipe_operations.intent import (
     _intent_is_current,
     _shared_workload_intent,
 )
 from vonk_control.workload_intent import (
+    WorkloadIntentUnavailable,
     allocate_workload_intent,
     raise_workload_intent,
     take_workload_intent,
@@ -90,6 +94,8 @@ def test_concurrent_intents_on_one_node_get_distinct_increasing_ordinals(
     assert _ordinals(sessions)[NODES[0]] == 3 + INTENTS
     assert _ordinals(sessions)[NODES[1]] == 3
     assert not [s for s in statements if "FOR UPDATE" in s.upper()]
+    with sessions.begin() as session:
+        assert allocate_workload_intent(session, NODES[:1]) == 4 + INTENTS
 
 
 def test_intent_reads_do_not_wait_for_a_held_agent_node_row(sessions, postgres_engine):
@@ -133,3 +139,30 @@ def test_allocation_updates_the_nodes_already_loaded_in_the_session(sessions):
         nodes = list(session.scalars(select(AgentNode).order_by(AgentNode.node_id)))
         ordinal = allocate_workload_intent(session, NODES)
         assert [node.workload_intent_ordinal for node in nodes] == [ordinal] * 2
+
+
+def test_a_workload_intent_that_cannot_be_numbered_is_a_typed_wait():
+    error = WorkloadIntentUnavailable("kept changing owner")
+    assert disposition(error) is Disposition.WAIT
+    assert wait_reason(error) is WaitReason.SCOPE_CHANGED
+
+
+def test_a_revoked_spark_is_not_numbered(sessions):
+    with sessions.begin() as session:
+        session.get(AgentNode, NODES[1]).revoked_at = datetime(2026, 11, 5, tzinfo=UTC)
+    with sessions.begin() as session:
+        with pytest.raises(WorkloadIntentUnavailable):
+            allocate_workload_intent(session, NODES)
+        _, taken = take_workload_intent(session, {node: 3 for node in NODES})
+        assert taken == (NODES[0],)
+
+
+def test_a_fenced_spark_taken_by_a_newer_intent_is_counted_out_of_a_raise(sessions):
+    """The recovery path raises a kept ordinal and must see a Spark that moved on."""
+    with sessions.begin() as session:
+        session.get(AgentNode, NODES[1]).workload_intent_ordinal = 6
+    with sessions.begin() as session:
+        assert raise_workload_intent(session, NODES, 5) == 1
+    with sessions.begin() as session:
+        assert raise_workload_intent(session, NODES, 6) == 2
+    assert _ordinals(sessions) == {NODES[0]: 6, NODES[1]: 6}

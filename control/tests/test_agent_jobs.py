@@ -76,6 +76,10 @@ from vonk_control.recipe_start_payloads import (
 )
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.workload_intent import (
+    allocate_workload_intent,
+    take_workload_intent,
+)
 
 from .agent_fences import fenced_attempt, fenced_operation
 from .node_contacts import contact_row
@@ -370,6 +374,50 @@ def test_newer_workload_intent_fences_old_enqueues_renewals_and_results(
         jobs.heartbeat(claim, None, 30)
     with pytest.raises(Exception):  # noqa: B017 -- observable effects and recovery establish the rejection
         jobs.succeed(claim, {})
+
+
+def test_an_order_numbered_from_a_stale_read_is_refused_and_a_fresh_intent_admitted(
+    service,
+) -> None:
+    """A plain read at N loses to an intent N+1 that commits meanwhile.
+
+    The numbering is a conditional UPDATE, so the stale writer changes nothing; the
+    order it would have issued at N is refused at enqueue; a fresh read and
+    allocation is admitted and claimable.
+    """
+
+    jobs, sessions, clock = service
+    stale_parent = parent(sessions, clock)
+    with sessions() as session:
+        seen = session.get(AgentNode, NODE_A).workload_intent_ordinal
+    with sessions.begin() as session:
+        winner = allocate_workload_intent(session, (NODE_A,))
+    assert winner == seen + 1
+    with sessions.begin() as session:
+        _, taken = take_workload_intent(session, {NODE_A: seen})
+    assert taken == ()
+    with pytest.raises(Exception):  # noqa: B017 -- the stale order's rejection is the observable
+        jobs.enqueue(
+            stale_parent.id,
+            NODE_A,
+            "recipe.start",
+            COMMIT,
+            superseded_order_payload(clock),
+        )
+    with sessions.begin() as session:
+        fresh = allocate_workload_intent(session, (NODE_A,))
+    assert fresh == winner + 1
+    fresh_parent = parent(sessions, clock)
+    with sessions.begin() as session:
+        session.get(Job, fresh_parent.id).payload = {"workload_intent_ordinal": fresh}
+    jobs.enqueue(
+        fresh_parent.id,
+        NODE_A,
+        "recipe.start",
+        COMMIT,
+        superseded_order_payload(clock),
+    )
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
 
 
 def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) -> None:
