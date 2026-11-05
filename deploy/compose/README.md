@@ -211,7 +211,8 @@ only on running ones) and a restart reuses the record. The janitor compares
 each container's recorded networks with the daemon's networks; a broken entry is
 re-attached by name with its recorded aliases, stopping the container first if
 it runs, then starting it again. A container whose last start failed is started
-again while its restart policy says it should run; a manual stop is left alone.
+again while its restart policy says it should run; stopping a container that
+ran leaves no start error, so it stays stopped.
 A network that does not exist yet waits for the next `compose up` to create it.
 Containers sharing another container's network namespace are not touched.
 

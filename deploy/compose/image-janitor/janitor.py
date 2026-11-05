@@ -28,7 +28,6 @@ from urllib.parse import quote
 INTERVAL = 3600
 NETWORK_INTERVAL = 30
 PROJECT_LABEL = "com.docker.compose.project"
-RUN_POLICIES = frozenset({"always", "unless-stopped"})
 GRACE = 24 * INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
 REPOSITORIES = frozenset(
@@ -249,85 +248,138 @@ def sweep(docker: Docker, path: Path, now: float) -> None:
     save_state(path, unused)
 
 
-def _broken(docker: Docker, container: dict[str, Any]) -> list[str] | None:
-    """Return the container's networks whose attachment is lost, or None to wait.
+class Status(StrEnum):
+    """The Docker container states a repair acts on; others are left alone."""
 
-    The container's own network entries are the declared set: the daemon keeps
-    them until an explicit disconnect, even when the network or the endpoint is
-    gone. An entry is broken when it names an older network ID (the network was
-    recreated) or, while running, when the network lists no endpoint for it.
-    """
-    running = container["State"]["Running"]
-    broken = []
-    for name, endpoint in container["NetworkSettings"]["Networks"].items():
-        try:
-            network = docker.request("GET", f"/networks/{quote(name, safe='')}")
-        except DockerNotFound:
-            log(Reason.NETWORK_WAIT, container=container["Name"], network=name)
-            return None
-        recorded = (endpoint or {}).get("NetworkID") or ""
-        if (recorded and recorded != network["Id"]) or (
-            running and container["Id"] not in (network.get("Containers") or {})
-        ):
-            broken.append(name)
-    return broken
+    RUNNING = "running"
+    EXITED = "exited"
+
+
+class Policy(StrEnum):
+    """Restart policies under which a container should be running."""
+
+    ALWAYS = "always"
+    UNLESS_STOPPED = "unless-stopped"
+
+
+class SharedMode(StrEnum):
+    """Network modes without own attachments; `container:<id>` is the third."""
+
+    HOST = "host"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class Container:
+    identity: str
+    name: str
+    status: str
+    error: str
+    policy: str
+    mode: str
+    # Network name -> (recorded network ID, recorded aliases).
+    networks: dict[str, tuple[str, tuple[str, ...]]]
+
+    @classmethod
+    def inspect(cls, docker: Docker, identity: str) -> Container:
+        row = docker.request("GET", f"/containers/{quote(identity, safe='')}/json")
+        networks = {}
+        for name, endpoint in (row["NetworkSettings"]["Networks"] or {}).items():
+            endpoint = endpoint or {}
+            aliases = endpoint.get("Aliases") or []
+            if not isinstance(name, str) or any(
+                not isinstance(alias, str) for alias in aliases
+            ):
+                raise ValueError("Invalid Docker container networks")
+            networks[name] = (str(endpoint.get("NetworkID") or ""), tuple(aliases))
+        return cls(
+            identity=str(row["Id"]),
+            name=str(row["Name"]),
+            status=str(row["State"]["Status"]),
+            error=str(row["State"].get("Error") or ""),
+            policy=str(row["HostConfig"]["RestartPolicy"]["Name"]),
+            mode=str(row["HostConfig"]["NetworkMode"]),
+            networks=networks,
+        )
+
+    @property
+    def running(self) -> bool:
+        return self.status == Status.RUNNING
+
+    @property
+    def should_run(self) -> bool:
+        # A failed start is not retried by the restart policy, and a stop of a
+        # container that ran leaves no error.
+        return self.running or (bool(self.error) and self.policy in set(Policy))
+
+    def broken(self, docker: Docker) -> list[str] | None:
+        """Return the networks whose attachment is lost, or None to wait.
+
+        The container's own network entries are the declared set: the daemon
+        keeps them until an explicit disconnect, even when the network or the
+        endpoint is gone. An entry is broken when it names an older network ID
+        (the network was recreated) or, while running, when the network lists
+        no endpoint for it.
+        """
+        broken = []
+        for name, (recorded, _) in self.networks.items():
+            try:
+                network = docker.request("GET", f"/networks/{quote(name, safe='')}")
+            except DockerNotFound:
+                log(Reason.NETWORK_WAIT, container=self.name, network=name)
+                return None
+            if (recorded and recorded != network["Id"]) or (
+                self.running and self.identity not in (network.get("Containers") or {})
+            ):
+                broken.append(name)
+        return broken
 
 
 def repair(docker: Docker, identity: str) -> None:
     """Re-attach one container to its lost networks, then run it if it should."""
-    container = docker.request("GET", f"/containers/{identity}/json")
-    mode = container["HostConfig"]["NetworkMode"]
-    if mode in {"host", "none"} or mode.startswith("container:"):
+    container = Container.inspect(docker, identity)
+    if container.mode in set(SharedMode) or container.mode.startswith("container:"):
         return
-    state = container["State"]
-    if state["Status"] not in {"running", "exited"}:
+    if container.status not in set(Status):
         return
-    broken = _broken(docker, container)
+    broken = container.broken(docker)
     if broken is None:
         return
-    name = container["Name"]
-    # A failed start is not retried by the restart policy; a manual stop
-    # leaves no error. Run what the policy says should run.
-    should_run = state["Running"] or (
-        bool(state.get("Error"))
-        and container["HostConfig"]["RestartPolicy"]["Name"] in RUN_POLICIES
-    )
+    target = quote(identity, safe="")
     if broken:
         # A running container cannot leave a network whose endpoint is gone;
         # stopped, the daemon edits only its record. Start rebuilds endpoints
         # and the published ports from that record.
-        if state["Running"]:
-            docker.request("POST", f"/containers/{identity}/stop?t=10")
+        if container.running:
+            docker.request("POST", f"/containers/{target}/stop?t=10")
         try:
             for network in broken:
-                endpoint = container["NetworkSettings"]["Networks"][network] or {}
-                target = f"/networks/{quote(network, safe='')}"
+                path = f"/networks/{quote(network, safe='')}"
                 docker.request(
-                    "POST",
-                    f"{target}/disconnect",
-                    {"Container": identity, "Force": True},
+                    "POST", f"{path}/disconnect", {"Container": identity, "Force": True}
                 )
+                # The project declares no static addresses; aliases keep the
+                # service name resolvable on the re-attached network.
+                aliases = list(container.networks[network][1])
                 docker.request(
                     "POST",
-                    f"{target}/connect",
-                    {
-                        "Container": identity,
-                        "EndpointConfig": {
-                            "Aliases": endpoint.get("Aliases"),
-                            "IPAMConfig": endpoint.get("IPAMConfig"),
-                        },
-                    },
+                    f"{path}/connect",
+                    {"Container": identity, "EndpointConfig": {"Aliases": aliases}},
                 )
         finally:
             # Never leave a container stopped by this repair. If a re-attach
             # failed, it runs short of that network, and the next `compose up`
             # recreates a running container that lacks a declared network.
-            if should_run:
-                docker.request("POST", f"/containers/{identity}/start")
-        log(Reason.NETWORK_REPAIRED, container=name, networks=broken)
-    elif should_run and not state["Running"]:
-        docker.request("POST", f"/containers/{identity}/start")
-        log(Reason.START_RETRIED, container=name, previous_error=state["Error"])
+            if container.should_run:
+                docker.request("POST", f"/containers/{target}/start")
+        log(Reason.NETWORK_REPAIRED, container=container.name, networks=broken)
+    elif container.should_run and not container.running:
+        docker.request("POST", f"/containers/{target}/start")
+        log(
+            Reason.START_RETRIED,
+            container=container.name,
+            previous_error=container.error,
+        )
 
 
 def reconcile_networks(docker: Docker, project: str) -> None:
