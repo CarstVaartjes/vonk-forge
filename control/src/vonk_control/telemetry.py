@@ -8,7 +8,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
-from sqlalchemy import select
+from sqlalchemy import literal_column, select
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import canonical_message
@@ -128,7 +128,12 @@ def _advance_latest(
     )
     current = (
         select(NodeTelemetrySample.observed_at)
-        .where(NodeTelemetrySample.id == NodeTelemetryLatest.sample_id)
+        # The stored row of the conflict; SQLAlchemy cannot correlate a
+        # subquery to the INSERT it sits in, so it names the table itself.
+        .where(
+            NodeTelemetrySample.id
+            == literal_column(f"{NodeTelemetryLatest.__tablename__}.sample_id")
+        )
         .scalar_subquery()
     )
     return (
