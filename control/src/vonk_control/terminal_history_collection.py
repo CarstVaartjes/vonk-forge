@@ -303,7 +303,9 @@ def _newest_sync() -> ColumnElement[bool]:
             newer.id > RecipeLibrarySyncRun.id,
         ),
     )
-    succeeded, failed = LifecycleState.SUCCEEDED.value, LifecycleState.FAILED.value
+    # Two named outcomes kept by recency, not a live or ended set.
+    succeeded = LifecycleState.SUCCEEDED.value
+    failed = LifecycleState.FAILED.value
     return or_(
         and_(
             RecipeLibrarySyncRun.state == succeeded,
