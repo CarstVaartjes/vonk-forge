@@ -809,6 +809,13 @@ def scan_source(
                 fresh = re.compile(
                     r"(?:^|_)(start|install|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
+                # These tests prove a Stop is NOT ended (it was kept, not
+                # dispatched), so there is no ended workload to admit a fresh
+                # request against. Same shape as the assert_ended_without_blocking
+                # exemption below: a named test with a stated reason.
+                not_ending_a_stop = node.name in {
+                    "test_every_non_dispatch_exit_of_stop_returns_an_undispatched_view"
+                }
                 shadowed = {
                     n.id
                     for n in local_nodes(node)
@@ -838,8 +845,12 @@ def scan_source(
                     for n in calls
                     if ending.search(name(n.func)) and not is_instrumentation(n)
                 ]
-                if ends and not any(
-                    name(n.func) == "assert_ended_without_blocking" for n in calls
+                if (
+                    ends
+                    and not not_ending_a_stop
+                    and not any(
+                        name(n.func) == "assert_ended_without_blocking" for n in calls
+                    )
                 ):
                     last_end = max((n.lineno, n.col_offset) for n in ends)
                     if not any(
