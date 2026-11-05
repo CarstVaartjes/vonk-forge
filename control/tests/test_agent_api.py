@@ -5776,3 +5776,109 @@ def test_result_scope_changed_yields_without_outer_replay(
             services.operations.fail("unused-fence", "invalid result")
     assert caught.value is refused
     assert len(calls) == 1
+
+
+_RENEWAL_ROUTES = [
+    ("/agent/renew", "renew"),
+    ("/agent/renew/recover", "recover_rotation"),
+]
+
+
+def _renewal_body() -> dict[str, str]:
+    return {"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()}
+
+
+@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
+def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
+    agent_system, monkeypatch, path, method
+) -> None:
+    # Wrong implementation: any ValueError answered 403 and the Spark's agent
+    # exited on it (client/errors.rs fatal()) for a Controller-side bug.
+    client, services, _, _ = agent_system
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("internal decode failure")
+
+    monkeypatch.setattr(services.enrollment, method, broken)
+    response = client.post(
+        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+    )
+    assert response.status_code == 503
+    assert 0 < int(response.headers["Retry-After"]) <= 300
+
+
+@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
+def test_real_denial_during_renewal_stays_a_403(
+    agent_system, monkeypatch, path, method
+) -> None:
+    from vonk_control.enrollment.types import EnrollmentDenied
+
+    client, services, _, _ = agent_system
+
+    def denied(*_args, **_kwargs):
+        raise EnrollmentDenied("certificate is revoked")
+
+    monkeypatch.setattr(services.enrollment, method, denied)
+    response = client.post(
+        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(("path", "method"), _RENEWAL_ROUTES)
+def test_renewal_heals_after_one_internal_error(
+    agent_system, monkeypatch, path, method
+) -> None:
+    client, services, _, _ = agent_system
+    real = getattr(services.enrollment, method)
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise ValueError("transient internal failure")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(services.enrollment, method, flaky)
+    first = client.post(
+        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+    )
+    assert first.status_code == 503
+    again = client.post(
+        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+    )
+    assert len(calls) == 2
+    assert again.status_code == 200
+
+
+def test_expired_renewal_internal_error_waits_and_heals(tmp_path, monkeypatch) -> None:
+    from .test_enrollment import RecoveryAuthority, csr, enroll, expired_proof
+
+    client, services, _codec, clock = make_agent_system(
+        tmp_path, authority=RecoveryAuthority()
+    )
+    enrollment = services.enrollment
+    assert enrollment is not None
+    key = ed25519.Ed25519PrivateKey.generate()
+    issued = enroll(enrollment, node_id=NODE_C, request=csr(NODE_C, key=key))
+    clock.now = issued.not_after + timedelta(days=1)
+    proof = expired_proof(key, NODE_C, issued.serial, csr(NODE_C), clock.now)
+    real = enrollment.renew_expired
+    calls = []
+
+    def flaky(*args, **kwargs):
+        calls.append(args)
+        if len(calls) == 1:
+            raise ValueError("transient internal failure")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(enrollment, "renew_expired", flaky)
+    headers = {"content-type": "application/json"}
+    first = client.post(
+        "/agent/renew/expired", content=proof.model_dump_json(), headers=headers
+    )
+    assert first.status_code == 503
+    again = client.post(
+        "/agent/renew/expired", content=proof.model_dump_json(), headers=headers
+    )
+    assert again.status_code == 200

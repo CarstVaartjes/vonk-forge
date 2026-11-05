@@ -256,10 +256,6 @@ def install_artifacts_routes(
                 build.oci_layout_sha256 = headers.layout_sha256
                 build.image_bytes = headers.image_bytes
                 build.updated_at = _now(required.clock())
-        except PermissionError:
-            raise HTTPException(
-                status_code=403, detail="upload storage access denied"
-            ) from None
         except OSError:
             raise UnknownOutcomeError(
                 "upload storage observation is unavailable",

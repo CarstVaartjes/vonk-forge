@@ -109,15 +109,15 @@ RANK_UNREADY_GRACE = timedelta(seconds=120)
 _LOGGER = logging.getLogger("vonk_control.agent_api")
 
 
-def is_contract_verdict(error: ValueError) -> bool:
+def is_contract_verdict(error: Exception) -> bool:
     """True when the ValueError refuses the request's own bytes (answered 422)."""
     return isinstance(error, ValidationError | InvalidRequestError) and not isinstance(
         error, SecurityRefusalError | UnknownOutcomeError
     )
 
 
-def contract_verdict_or_wait(error: ValueError) -> NoReturn:
-    """Answer a ValueError from an agent route: 422 only for a contract verdict.
+def contract_verdict_or_wait(error: Exception) -> NoReturn:
+    """Answer an error from an agent route: 403 security refusal, 422 contract verdict.
 
     A 422 makes the Spark settle and discard the bytes, so only a validation
     failure of the request's own bytes (a pydantic ValidationError, or a typed

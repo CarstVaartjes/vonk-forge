@@ -540,7 +540,7 @@ def install_authority_routes(
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
+        except EnrollmentDenied as error:
             code = (
                 error.reason_code
                 if isinstance(error, ExpiredRenewalGraceExhausted)
@@ -552,6 +552,8 @@ def install_authority_routes(
             )
             response.headers["X-Vonk-Error-Code"] = code
             return response
+        except ValueError as error:
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -578,7 +580,7 @@ def install_authority_routes(
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -611,7 +613,7 @@ def install_authority_routes(
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -634,7 +636,7 @@ def install_authority_routes(
                 body.generation,
             )
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(outcome, UnknownError):
             return unknown_response(outcome)
         return Response(status_code=status.HTTP_204_NO_CONTENT)

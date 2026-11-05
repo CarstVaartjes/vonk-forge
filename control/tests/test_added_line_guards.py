@@ -2210,6 +2210,38 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
 
 
 @pytest.mark.parametrize(
+    "probe",
+    [
+        (
+            "except (EnrollmentDenied, ValueError) as error:\n"
+            "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+        ),
+        (
+            "except (\n    EnrollmentDenied,\n    ValueError,\n) as error:\n"
+            "    raise SecurityHTTPError(status_code=401, detail='x')\n"
+        ),
+        "except OSError:\n    raise HTTPException(403, 'x')\n",
+    ],
+)
+def test_broad_exception_may_not_answer_401_or_403(probe: str) -> None:
+    # Wrong implementation: an internal ValueError answered 403 and the Spark's
+    # agent exited (fatal 401/403) instead of retrying.
+    path = "control/src/vonk_control/agent_api/authority.py"
+    assert check_source(path, probe, {1}, modes=("agent-422",))
+
+
+def test_typed_security_refusal_may_answer_403() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    typed = (
+        "except EnrollmentDenied as error:\n"
+        "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+    )
+    assert not check_source(path, typed, {1}, modes=("agent-422",))
+    routed = "except (EnrollmentDenied, ValueError) as error:\n    contract_verdict_or_wait(error)\n"
+    assert not check_source(path, routed, {1}, modes=("agent-422",))
+
+
+@pytest.mark.parametrize(
     "source,line",
     [
         ("def review(s, now):\n    return _Evidence.read(s, now)\n", 2),

@@ -1299,6 +1299,27 @@ def _says_422(text: str, following: str) -> bool:
     )
 
 
+# A 401/403 makes the Spark's agent exit (client/errors.rs fatal()); only a
+# typed security refusal may say it, never a handler for a broad exception.
+_SAYS_FATAL_AUTH = re.compile(
+    r"\bstatus_code\s*=\s*40[13]\b|\bHTTPException\(\s*40[13]\b"
+)
+_BROAD_EXCEPT = re.compile(
+    r"\b(?:Exception|ValueError|OSError|PermissionError|RuntimeError|KeyError"
+    r"|TypeError|SQLAlchemyError)\b"
+)
+
+
+def _except_header(lines: list[str], except_line: int) -> tuple[str, int]:
+    """The `except` clause at except_line (may span lines) and its last line."""
+    parts = []
+    for number, text in enumerate(lines[except_line - 1 :], except_line):
+        parts.append(text)
+        if text.rstrip().endswith(":"):
+            return " ".join(parts), number
+    return " ".join(parts), len(lines)
+
+
 def _handler_body(lines: list[str], except_line: int) -> list[tuple[str, str]]:
     """The (line, next line) pairs of the block under the `except` at except_line."""
     header = lines[except_line - 1]
@@ -1976,6 +1997,31 @@ def check_source(
             and any(
                 _says_422(body, nxt) and AGENT_422_VERDICT_MARKER not in body
                 for body, nxt in _handler_body(lines, line)
+            )
+        )
+    if (
+        python
+        and not is_test
+        and "agent-422" in modes
+        and path.startswith("control/src/vonk_control/agent_api/")
+    ):
+        # A broad exception is as often this Controller's own bug as a denial
+        # (#2061 review: an internal ValueError in renewal killed the agent).
+        lines = source.splitlines()
+        hits.extend(
+            (
+                line,
+                (
+                    "except handler for a broad exception answers 401/403; "
+                    "use contract_verdict_or_wait"
+                ),
+            )
+            for line, text in enumerate(lines, 1)
+            if re.match(r"\s*except\b", text)
+            and _BROAD_EXCEPT.search(_except_header(lines, line)[0])
+            and any(
+                _SAYS_FATAL_AUTH.search(body)
+                for body, _ in _handler_body(lines, _except_header(lines, line)[1])
             )
         )
     if (
