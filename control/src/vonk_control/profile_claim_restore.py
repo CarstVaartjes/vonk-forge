@@ -36,7 +36,6 @@ from .admission_locking import (
 from .disk_reservations import outstanding_disk_charges
 from .memory_reservations import MEMORY_RESERVATION_KINDS, memory_reservations
 from .models import FleetProfileApplication, ResourceReservation
-from .profile_capacity import profile_memory_floor
 from .resource_planning import (
     ResourceDemand,
     memory_capacity_snapshot,
@@ -194,10 +193,7 @@ def _memory_admitted(
     snapshot, evidence = inventory.read(node_id)
     if not own or snapshot is None:
         return True
-    floor = max(
-        (profile_memory_floor(session, claim) for claim in own),
-        default=memory_floor_bytes,
-    )
+    floor = memory_floor_bytes
     demand = ResourceDemand(
         None,
         None,
