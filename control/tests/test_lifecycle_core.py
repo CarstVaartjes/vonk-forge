@@ -16,6 +16,7 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from vonk_agent_protocol import WaitReason
 from vonk_control.lifecycle import (
     LOST_OBSERVATION_BOUND,
     OBSERVE_BUDGET,
@@ -420,10 +421,8 @@ def test_a_lost_irreversible_row_ends_failed_after_the_bound_and_keeps_its_evide
     assert ended.row.state is State.FAILED
     assert ended.row.effect is Effect.UNKNOWN
     assert ended.row.next_action_at is None
-    assert ended.row.reason is not None
-    assert ended.row.reason.startswith("runtime-effect-unconfirmed")
-    assert "lease-lapsed" in ended.row.reason
-    assert ended.commands == (RecordResidue(ended.row.reason),)
+    assert ended.row.reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED
+    assert ended.commands == (RecordResidue(WaitReason.RUNTIME_EFFECT_UNCONFIRMED),)
     # Never replayed, and a terminal row stays put.
     assert Execute() not in ended.commands
     assert transition(ended.row, Tick(), adapter, now) == Decision(ended.row)
@@ -439,6 +438,7 @@ def test_an_unknown_effect_is_observed_until_it_is_proven_and_a_cancel_ends_it()
         # no wait for an operator; the lost row ends only at its bound
         assert State.NEEDS_OPERATOR not in {r.state for r in rows}
         assert rows[-1].state is State.FAILED
+        assert rows[-1].reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         lost = next(
             r for r in rows if r.observe_count == OBSERVE_BUDGET + 1
         )  # the first counted look: lost, still observing

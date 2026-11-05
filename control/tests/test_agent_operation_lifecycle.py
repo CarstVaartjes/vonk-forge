@@ -281,8 +281,7 @@ def test_a_lost_job_order_ends_failed_after_the_bound_and_a_fresh_request_runs(
 
     ended = _reconcile_to_next_look(jobs, sessions, clock, operation.id)
     assert ended.state == aos.FAILED
-    assert ended.status_reason is not None
-    assert ended.status_reason.startswith(WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value)
+    assert ended.status_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     assert _stored(sessions, fresh.id).current_attempt == 1
 

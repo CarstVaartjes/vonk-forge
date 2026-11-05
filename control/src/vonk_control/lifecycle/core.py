@@ -319,12 +319,7 @@ def _lost(
     if observed and row.observe_count >= OBSERVE_BUDGET:
         looked += 1
     if looked >= LOST_OBSERVATION_BOUND:
-        why = (
-            f"{WaitReason.RUNTIME_EFFECT_UNCONFIRMED}: effect still unknown after "
-            f"{looked} observations at the ceiling"
-        )
-        if reason or row.reason:
-            why = f"{why}; {reason or row.reason}"
+        why = WaitReason.RUNTIME_EFFECT_UNCONFIRMED
         return Decision(
             replace(
                 row,
