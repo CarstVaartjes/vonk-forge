@@ -485,22 +485,18 @@ def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> 
     records the id in its progress. Either keeps the owner live.
     """
 
-    named = (Job.payload["owner_kind"].as_string() == owner_kind) & (
-        Job.payload["owner_id"].as_string() == owner_id
-    )
     if owner_kind == OwnerKind.INSTALLATION:
-        # A Run/Switch, Stop or Cleanup order names the installation it reuses
-        # or removes only in its plan, not in the owner fields.
-        named = named | (
-            Job.state.in_(job_states.LIVE)
-            & (Job.payload["plan"]["installation_id"].as_string() == owner_id)
-        )
+        return bool(installations_named_by_live_jobs(session, (owner_id,)))
     return (
         session.scalar(
             select(Job.id)
             .where(
                 Job.state.not_in(JOB_ENDED_STATES),
-                named | cast(Job.result, Text).contains(owner_id),
+                (
+                    (Job.payload["owner_kind"].as_string() == owner_kind)
+                    & (Job.payload["owner_id"].as_string() == owner_id)
+                )
+                | cast(Job.result, Text).contains(owner_id),
             )
             .limit(1)
         )
@@ -513,13 +509,16 @@ def installations_named_by_live_jobs(
 ) -> frozenset[str]:
     """Which of ``installation_ids`` a live operation names: one query, any count.
 
-    The batched form of ``referencing_active_job`` for installations, for a
-    sweep that asks about many: the same three ways an operation names one (its
-    owner fields, its plan, its recorded progress), read once over the live
-    jobs and answered by set lookup.
+    The one definition of "a live operation names this installation", for one
+    id (``referencing_active_job``) and for a sweep asking about many. An
+    operation names an installation by its owner fields, by the installation in
+    its plan (a Run/Switch, Stop or Cleanup order names the one it reuses or
+    removes only there), or by recording it in its progress.
     """
 
     wanted = frozenset(installation_ids)
+    if not wanted:
+        return frozenset()
     named: set[str] = set()
     for owner_kind, owner_id, planned, result in session.execute(
         select(
@@ -527,7 +526,14 @@ def installations_named_by_live_jobs(
             Job.payload["owner_id"].as_string(),
             Job.payload["plan"]["installation_id"].as_string(),
             cast(Job.result, Text),
-        ).where(Job.state.in_(job_states.LIVE))
+        ).where(
+            Job.state.in_(job_states.LIVE),
+            or_(
+                Job.payload["owner_id"].as_string().in_(list(wanted)),
+                Job.payload["plan"]["installation_id"].as_string().in_(list(wanted)),
+                *(cast(Job.result, Text).contains(found) for found in wanted),
+            ),
+        )
     ):
         if owner_kind == OwnerKind.INSTALLATION and owner_id:
             named.add(owner_id)

@@ -38,6 +38,11 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
 )
+from vonk_control.owner_liveness import (
+    OwnerKind,
+    installations_named_by_live_jobs,
+    referencing_active_job,
+)
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_routes import RecipeRouteService
@@ -790,6 +795,7 @@ def test_an_unowned_incomplete_installation_is_uninstalled_after_the_grace(
     assert not _uninstalls(load, installation_id)
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
     assert len(_uninstalls(load, installation_id)) == 1
+    _agree(load, installation_id, named=True)  # by the uninstall's owner fields
     # The queued uninstall owns the Sparks: the sweep does not queue another.
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=2)).tick()
     assert len(_uninstalls(load, installation_id)) == 1
@@ -944,8 +950,39 @@ def test_a_queued_cleanup_order_keeps_its_installation_from_the_sweep(
         cleanup = session.get(Job, operation.operation_id)
         assert cleanup is not None and cleanup.kind == "recipe.cleanup.v2"
         assert cast(dict, cleanup.payload["plan"])["installation_id"] == installation_id
+    _agree(load, installation_id, named=True)  # by its plan
     _reconciler(load, after=LEFTOVER_GRACE + timedelta(days=2)).tick()
     assert not _uninstalls(load, installation_id)
+
+
+def _agree(load, installation_id: str, *, named: bool) -> None:
+    """The single-id and batched predicates give the same answer."""
+
+    stranger = str(uuid.uuid4())
+    with load.sessions() as session:
+        assert (
+            referencing_active_job(session, OwnerKind.INSTALLATION, installation_id)
+            is named
+        )
+        assert installations_named_by_live_jobs(
+            session, (installation_id, stranger)
+        ) == (frozenset({installation_id}) if named else frozenset())
+        assert not referencing_active_job(session, OwnerKind.INSTALLATION, stranger)
+
+
+def test_the_predicates_agree_on_an_installation_a_live_order_records(
+    tmp_path: Path,
+) -> None:
+    load = _load(tmp_path)
+    assert _loop(load, lambda: _at_phase(load, "target-copy"), complete=False)
+    with load.sessions() as session:
+        installation_id = session.scalars(select(RecipeInstallation.id)).one()
+    _agree(load, installation_id, named=True)  # by the order's progress
+    _fail_switch(load)
+    with load.sessions.begin() as session:
+        for job in session.scalars(select(Job).where(Job.state != "failed")):
+            job.state = "cancelled"
+    _agree(load, installation_id, named=False)
 
 
 def test_a_residue_of_a_live_attempt_is_kept(tmp_path: Path) -> None:
