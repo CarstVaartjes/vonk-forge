@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
 from uuid import uuid4
 
 import pytest
@@ -33,6 +32,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
+from .insert_collision_support import Rendezvous
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profiles import (
     NOW,
@@ -213,12 +213,12 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     path = "/api/profile/1/load"
     request_keys = [str(uuid4()), str(uuid4())]
     request_bodies = [{"request_key": key} for key in request_keys]
-    both_reviewed = Barrier(2)
+    both_reviewed = Rendezvous(2, timeout=10)
     original_preview = FleetProfileService.preview
 
     def synchronize_review(service, *args, **kwargs):
         result = original_preview(service, *args, **kwargs)
-        both_reviewed.wait(timeout=10)
+        both_reviewed.wait()
         return result
 
     with monkeypatch.context() as scoped:

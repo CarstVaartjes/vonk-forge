@@ -1,4 +1,12 @@
-"""Make two real admissions collide on the database's unique key."""
+"""Hold concurrent test threads together, and make two real admissions collide.
+
+``Rendezvous`` is the only thread barrier control tests use (the added-line
+guard ``barriers`` flags a raw ``threading.Barrier``). A raw barrier placed in a
+patched product method waits again when the product calls that method a second
+time on the same thread (a replay after a unique-key conflict, a replan); that
+thread then waits alone until the timeout breaks the barrier, and the test fails
+at random with ``BrokenBarrierError`` instead of naming the re-entry.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +18,48 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
 
+class Rendezvous:
+    """A barrier each thread passes once; a second wait on a thread fails at once."""
+
+    def __init__(self, parties: int, *, timeout: float | None = 30) -> None:
+        self._barrier = threading.Barrier(parties, timeout=timeout)
+        self._lock = threading.Lock()
+        self._arrived: set[int] = set()
+
+    def wait(self) -> None:
+        thread = threading.get_ident()
+        with self._lock:
+            if thread in self._arrived:
+                raise AssertionError(
+                    "this thread already passed the rendezvous: the call it "
+                    "holds ran a second time on the same thread"
+                )
+            self._arrived.add(thread)
+        self._barrier.wait()
+
+    @property
+    def arrivals(self) -> int:
+        with self._lock:
+            return len(self._arrived)
+
+    def arrived(self) -> bool:
+        """Whether the calling thread has reached the rendezvous."""
+        with self._lock:
+            return threading.get_ident() in self._arrived
+
+    def abort(self) -> None:
+        """Release every waiting thread with ``BrokenBarrierError``."""
+        self._barrier.abort()
+
+
 def collide_inserts[T](
     engine: Engine,
     table: str,
     request_field: str,
     key: str,
     calls: tuple[Callable[[], T], Callable[[], T]],
+    *,
+    timeout: float | None = 30,
 ) -> list[T]:
     """Run both calls, holding each at its ``INSERT INTO table`` of ``key``.
 
@@ -26,8 +70,7 @@ def collide_inserts[T](
     error is raised instead of the partner's broken barrier.
     """
 
-    barrier = threading.Barrier(2, timeout=30)
-    arrivals: list[int] = []
+    rendezvous = Rendezvous(2, timeout=timeout)
 
     def before_insert(_conn, _cursor, statement, parameters, _context, _many):
         if (
@@ -35,17 +78,16 @@ def collide_inserts[T](
             and isinstance(parameters, Mapping)
             and parameters.get(request_field) == key
         ):
-            arrivals.append(threading.get_ident())
-            barrier.wait()
+            rendezvous.wait()
 
     def run(call: Callable[[], T]) -> T:
         try:
             return call()
         finally:
             # Only a call that never arrived can strand its partner; one that
-            # arrived has passed the barrier together with it.
-            if threading.get_ident() not in arrivals:
-                barrier.abort()
+            # arrived has passed the rendezvous together with it.
+            if not rendezvous.arrived():
+                rendezvous.abort()
 
     event.listen(engine, "before_cursor_execute", before_insert)
     try:
@@ -57,5 +99,7 @@ def collide_inserts[T](
         error = future.exception()
         if error is not None and not isinstance(error, threading.BrokenBarrierError):
             raise error
-    assert len(arrivals) == 2, f"{len(arrivals)} of 2 calls reached INSERT INTO {table}"
+    assert rendezvous.arrivals == 2, (
+        f"{rendezvous.arrivals} of 2 calls reached INSERT INTO {table}"
+    )
     return [future.result() for future in futures]

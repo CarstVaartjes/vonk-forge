@@ -20,6 +20,7 @@ from . import (
     legacy_tolerance,
     lifecycle_sets,
     locked_io,
+    raw_barriers,
     repeated_parse,
     request_path_scans,
     scratch_names,
@@ -102,6 +103,7 @@ MODES = (
     "alias-rules",
     "intent-ordinal",
     "savepoints",
+    "barriers",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2229,6 +2231,10 @@ def check_source(
         hits.extend(
             (line, scratch_names.KIND)
             for line in scratch_names.scan_source(source, path)
+        )
+    if python and "barriers" in modes and raw_barriers.in_scope(path):
+        hits.extend(
+            (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(
