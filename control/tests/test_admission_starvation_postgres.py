@@ -132,7 +132,9 @@ def test_admission_rollback_releases_keys_for_the_next_request(sessions) -> None
         acquire_admission_keys(fresh, (node_admission_key(NODE),))
 
 
-def test_telemetry_maintenance_skips_a_node_an_admission_holds(sessions) -> None:
+def test_telemetry_maintenance_neither_waits_for_nor_locks_a_held_node(
+    sessions,
+) -> None:
     boot = "11111111-1111-4111-8111-111111111111"
     with sessions.begin() as session:
         session.add(
@@ -150,12 +152,8 @@ def test_telemetry_maintenance_skips_a_node_an_admission_holds(sessions) -> None
     with sessions.begin() as holder:
         holder.scalars(select(AgentNode).with_for_update()).all()
         started = time.monotonic()
-        maintenance.run_once()  # must neither wait for the node nor fail
-        # Bounded by the admission lock budget, not the generic 30 s one.
+        maintenance.run_once()  # prunes without touching the node row
         assert time.monotonic() - started < 10
-    with sessions.begin() as session:
-        assert session.get(NodeTelemetrySample, "sample-old") is not None
-    maintenance.run_once()
     with sessions.begin() as session:
         assert session.get(NodeTelemetrySample, "sample-old") is None
 

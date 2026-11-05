@@ -19,6 +19,8 @@ from vonk_agent_protocol.telemetry import (
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
+from .fleet_event_contract import NodeTelemetryPayload
+from .fleet_events import FleetEventDraft, FleetEventRepository
 from .lifecycle.evidence import Residue
 from .models import (
     AgentNode,
@@ -116,8 +118,11 @@ def _insert(session: Session, model: type) -> postgresql.Insert | sqlite.Insert:
 
 def _advance_latest(
     session: Session, node_id: str, sample_id: str, observed_at: datetime
-) -> None:
-    """Point the node at this sample unless a newer one is already latest."""
+) -> bool:
+    """Point the node at this sample unless a newer one is already latest.
+
+    Returns whether the pointer moved; the caller owns the Fleet event.
+    """
     upsert = _insert(session, NodeTelemetryLatest).values(
         node_id=node_id, sample_id=sample_id
     )
@@ -126,12 +131,15 @@ def _advance_latest(
         .where(NodeTelemetrySample.id == NodeTelemetryLatest.sample_id)
         .scalar_subquery()
     )
-    session.execute(
-        upsert.on_conflict_do_update(
-            index_elements=[NodeTelemetryLatest.node_id],
-            set_={"sample_id": upsert.excluded.sample_id},
-            where=current < observed_at,
-        )
+    return (
+        session.execute(
+            upsert.on_conflict_do_update(
+                index_elements=[NodeTelemetryLatest.node_id],
+                set_={"sample_id": upsert.excluded.sample_id},
+                where=current < observed_at,
+            ).returning(NodeTelemetryLatest.node_id)
+        ).scalar()
+        is not None
     )
 
 
@@ -144,6 +152,7 @@ class TelemetryRepository:
     ) -> None:
         self._sessions = sessions
         self._clock = clock
+        self._events = FleetEventRepository(sessions, clock=clock)
 
     def record_batch(
         self, node_id: str, samples: Sequence[TelemetrySample]
@@ -256,7 +265,19 @@ class TelemetryRepository:
                     )
                 )
                 session.flush()
-                _advance_latest(session, node_id, sample_id, value.observed_at)
+                if _advance_latest(session, node_id, sample_id, value.observed_at):
+                    self._events.append_in_session(
+                        session,
+                        FleetEventDraft(
+                            event_type="node-telemetry",
+                            node_id=node_id,
+                            entity_kind="node-telemetry-latest",
+                            entity_id=node_id,
+                            payload=NodeTelemetryPayload(
+                                node_id=node_id, sample_id=sample_id
+                            ),
+                        ),
+                    )
                 row = session.get(NodeTelemetrySample, sample_id)
                 assert row is not None
                 stored.append(row)
