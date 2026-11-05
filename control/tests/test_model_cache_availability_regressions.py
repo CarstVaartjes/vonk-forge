@@ -950,12 +950,15 @@ def test_resume_access_keeps_its_own_receipt_while_an_older_transfer_is_live(
             force=True,
         )
 
+    # Each transfer settles into its access wait before the next one starts:
+    # two parallel writers of one object race for its flock, and a fixed tick
+    # count cannot tell which thread has reported.
     older = start("00000000-0000-4000-8000-000000000411", "model-one")
+    _drain(service, older.id, return_on_wait=True)
+    now[0] += timedelta(seconds=10)
     newer = start("00000000-0000-4000-8000-000000000412", "model-two")
     assert older.id != newer.id
-    for _ in range(4):  # the older writer fails first, then the newer one runs
-        service.tick()
-        now[0] += timedelta(seconds=10)
+    _drain(service, newer.id, return_on_wait=True)
     assert service.get_operation(older.id).state in {
         LifecycleState.QUEUED,
         LifecycleState.BACKOFF,
