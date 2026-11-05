@@ -82,6 +82,7 @@ from .common import (
     _validated_authenticated_source,
     active_agent_identity,
     contract_verdict_or_wait,
+    is_contract_verdict,
 )
 
 
@@ -473,19 +474,21 @@ def install_authority_routes(
                 )
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
-                required.operations.record_boundary_refusal(
-                    str(message.fence),
-                    boundary="result",
-                    check="late-result-invalid",
-                )
+                if is_contract_verdict(invalid):
+                    required.operations.record_boundary_refusal(
+                        str(message.fence),
+                        boundary="result",
+                        check="late-result-invalid",
+                    )
                 contract_verdict_or_wait(invalid)
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
-            required.operations.record_boundary_refusal(
-                str(message.fence),
-                boundary="result",
-                check="invalid-result",
-            )
+            if is_contract_verdict(error):
+                required.operations.record_boundary_refusal(
+                    str(message.fence),
+                    boundary="result",
+                    check="invalid-result",
+                )
             if isinstance(error, AgentResultRefused):
                 # The contract refuses these bytes on every delivery: settle the
                 # authenticated attempt failed (invalid contract) with the

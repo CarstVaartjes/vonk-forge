@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
     InvalidRequestError,
+    SecurityRefusalError,
     SignedHostHelperGrant,
     UnknownOutcomeError,
     WaitReason,
@@ -108,16 +109,28 @@ RANK_UNREADY_GRACE = timedelta(seconds=120)
 _LOGGER = logging.getLogger("vonk_control.agent_api")
 
 
+def is_contract_verdict(error: ValueError) -> bool:
+    """True when the ValueError refuses the request's own bytes (answered 422)."""
+    return isinstance(error, ValidationError | InvalidRequestError) and not isinstance(
+        error, SecurityRefusalError | UnknownOutcomeError
+    )
+
+
 def contract_verdict_or_wait(error: ValueError) -> NoReturn:
     """Answer a ValueError from an agent route: 422 only for a contract verdict.
 
     A 422 makes the Spark settle and discard the bytes, so only a validation
     failure of the request's own bytes (a pydantic ValidationError, or a typed
-    InvalidRequestError) may say it. Any other ValueError is this Controller's
-    own bug, decode or race: the same bytes can be accepted later, so it is a
-    wait the Spark retries.
+    InvalidRequestError) may say it. A security refusal keeps its 403 and an
+    unknown outcome keeps its own typed wait. Any other ValueError is this
+    Controller's own bug, decode or race: the same bytes can be accepted later,
+    so it is a wait the Spark retries.
     """
-    if isinstance(error, ValidationError | InvalidRequestError):
+    if isinstance(error, SecurityRefusalError):
+        raise SecurityHTTPError(status_code=403, detail=str(error)) from None
+    if isinstance(error, UnknownOutcomeError):
+        raise error
+    if is_contract_verdict(error):
         raise HTTPException(
             status_code=422,  # 422-verdict: the request's own bytes are refused
             detail=str(error),

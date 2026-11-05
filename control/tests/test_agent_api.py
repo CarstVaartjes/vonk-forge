@@ -15,7 +15,7 @@ from importlib.resources import files
 from pathlib import Path
 from threading import Event
 from types import SimpleNamespace
-from typing import TypedDict, Unpack
+from typing import Any, TypedDict, Unpack
 
 import pytest
 from cryptography import x509
@@ -100,7 +100,6 @@ from vonk_control.models import (
 from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
-from vonk_control.request_refused import RequestBytesRefused
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_control.telemetry import TelemetryRepository
 from vonk_forge_contracts import RecipeDefinition, document_sha256
@@ -1339,29 +1338,114 @@ def test_internal_value_error_on_observations_is_a_wait_not_a_422(
     assert "retry-after" in response.headers
 
 
-def test_internal_value_error_on_telemetry_is_a_wait_but_a_refusal_is_a_422(
-    agent_system, monkeypatch
-) -> None:
+def _sample(clock, offset_seconds: int, **changes) -> dict[str, object]:
+    samples: Any = telemetry_payload(
+        clock, observed_at=clock.now - timedelta(seconds=offset_seconds)
+    )["samples"]
+    return samples[0] | changes
+
+
+def test_telemetry_refusals_of_the_requests_own_bytes_answer_422(agent_system) -> None:
     client, _services, _, clock = agent_system
-    payload = telemetry_payload(clock)
     headers = agent_headers(NODE_A, "serial-a")
 
-    def broken(*_args, **_kwargs):
-        raise ValueError("internal failure")
+    def post(*samples):
+        return client.post(
+            "/agent/telemetry", headers=headers, json={"samples": list(samples)}
+        ).status_code
 
-    monkeypatch.setattr(TelemetryRepository, "record_batch", broken)
-    response = client.post("/agent/telemetry", headers=headers, json=payload)
-    assert response.status_code == 503
-    assert "retry-after" in response.headers
+    # duplicate sample inside one batch
+    assert post(_sample(clock, 10), _sample(clock, 10)) == 422
+    # observation times that do not increase inside one batch
+    assert post(_sample(clock, 10), _sample(clock, 20)) == 422
+    # accepted, then the same boot and time with different content (conflict)
+    assert post(_sample(clock, 30)) == 204
+    assert post(_sample(clock, 30, disk_free_bytes=1)) == 422
+    # a sample older than the stored head of the same boot (regression)
+    assert post(_sample(clock, 40)) == 422
 
-    def refused(*_args, **_kwargs):
-        raise RequestBytesRefused("telemetry sample is duplicated")
 
-    monkeypatch.setattr(TelemetryRepository, "record_batch", refused)
+def test_inventory_identity_conflict_answers_422(agent_system) -> None:
+    client, _services, _, clock = agent_system
+    headers = agent_headers(NODE_A, "serial-a")
+    payload = {
+        "schema_version": 1,
+        "observed_at": clock.now.isoformat(),
+        "disk_total_bytes": 1000,
+        "disk_free_bytes": 700,
+        "host_memory_total_bytes": 2000,
+        "host_memory_free_bytes": 1500,
+        "gpu_memory_total_bytes": 1000,
+        "gpu_memory_free_bytes": 800,
+        "gpu_count": 1,
+        "gpu_health": GpuHealth.NEEDS_RESET,
+        "memory_pool": "separate",
+        "artifact_store_read_only": False,
+        "capabilities": ["runtime.vonk.v1"],
+    }
     assert (
-        client.post("/agent/telemetry", headers=headers, json=payload).status_code
+        client.post("/agent/inventory", headers=headers, json=payload).status_code
+        == 204
+    )
+    changed = payload | {"disk_free_bytes": 600}
+    assert (
+        client.post("/agent/inventory", headers=headers, json=changed).status_code
         == 422
     )
+
+
+def test_an_internal_fault_waits_and_the_same_bytes_are_accepted_once_it_clears(
+    agent_system, monkeypatch
+) -> None:
+    # Wrong implementation: the fault answered 422, the Spark discarded the
+    # sample, and the evidence was lost for good.
+    client, services, _, clock = agent_system
+    headers = agent_headers(NODE_A, "serial-a")
+    payload = telemetry_payload(clock)
+    original = TelemetryRepository.record_batch
+    failures = [ValueError("internal decode failure")]
+
+    def flaky(self, *args, **kwargs):
+        if failures:
+            raise failures.pop()
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(TelemetryRepository, "record_batch", flaky)
+    waiting = client.post("/agent/telemetry", headers=headers, json=payload)
+    assert waiting.status_code == 503
+    assert "retry-after" in waiting.headers
+    assert (
+        client.post("/agent/telemetry", headers=headers, json=payload).status_code
+        == 204
+    )
+    with services.sessions() as session:
+        assert session.scalars(select(NodeTelemetrySample)).all()
+
+
+def test_claim_security_refusal_stays_403_and_unknown_outcome_keeps_its_wait(
+    agent_system, monkeypatch
+) -> None:
+    from vonk_control.agent_jobs import AgentContactIdentityMismatch
+    from vonk_control.categorized_errors import BookkeepingUnknown
+
+    client, services, _, _clock = agent_system
+    headers = agent_headers(NODE_A, "serial-a")
+
+    def refuse(*_args, **_kwargs):
+        raise AgentContactIdentityMismatch("contact source is not the node")
+
+    monkeypatch.setattr(services.operations, "claim", refuse)
+    response = client.post("/agent/claim", headers=headers)
+    assert response.status_code == 403
+
+    def unknown(*_args, **_kwargs):
+        raise BookkeepingUnknown("bookkeeping damaged")
+
+    monkeypatch.setattr(services.operations, "claim", unknown)
+    # Not a 422: the typed wait (503 with Retry-After) survives.
+    waiting = client.post("/agent/claim", headers=headers)
+    assert waiting.status_code == 503
+    assert "retry-after" in waiting.headers
 
 
 def test_incomplete_observation_warns_with_counts_and_recovers_in_fleet_health(
@@ -3088,6 +3172,28 @@ def test_rust_agent_enrollment_shape_remains_controller_compatible(
 
     assert response.status_code == 200
     assert response.json()["node_id"] == NODE_C
+
+
+def test_enrollment_evidence_verdicts_answer_422_with_the_real_message(
+    agent_system,
+) -> None:
+    # Wrong implementation: the verdicts were plain ValueErrors, so the 422
+    # mapping turned them into a wait and pairing retried forever.
+    client, services, _, _ = agent_system
+    body = json.loads(valid_enrollment_body(enrollment_grant(services)))
+    for field, message in (
+        ("node_id", "evidence node ID does not match CSR"),
+        (
+            "csr_public_key_fingerprint",
+            "evidence CSR public-key fingerprint does not match CSR",
+        ),
+    ):
+        broken = body | {"evidence": body["evidence"] | {field: NODE_A}}
+        if field == "csr_public_key_fingerprint":
+            broken["evidence"][field] = "0" * 64
+        response = client.post("/agent/enroll", json=broken)
+        assert response.status_code == 422
+        assert message in response.text
 
 
 def test_uncertain_enrollment_provider_write_returns_503_without_reissuing(

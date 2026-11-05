@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     EnrollmentGrantState,
     ErrorCategory,
+    InvalidRequestReason,
     LifecycleState,
     WaitReason,
 )
@@ -33,10 +34,14 @@ from vonk_agent_protocol.state_machines import (
     NodeIdentityState,
 )
 
+from ..categorized_errors import InvalidValue
 from ..enrollment_contract import (
     ENROLLMENT_ID_PATTERN,
     EnrollmentGrantStatus,
     EnrollmentObservationOutcome,
+)
+from ..enrollment_validation import (
+    EVIDENCE_REFUSAL_REASONS,
 )
 from ..enrollment_validation import (
     _decode_token as _decode_token,  # noqa: PLC0414 -- shared helper export
@@ -106,12 +111,18 @@ from .types import (
 
 def _submission_input(csr: bytes, evidence_error: str | None = None) -> None:
     """Malformed caller input cannot mutate a bearer grant or an older intent."""
-    if (
-        not isinstance(csr, bytes)
-        or len(csr) > MAX_CSR_BYTES
-        or evidence_error is not None
-    ):
-        raise ValueError(evidence_error or "CSR exceeds the canonical byte budget")
+    if evidence_error is not None:
+        raise InvalidValue(
+            evidence_error,
+            reason=EVIDENCE_REFUSAL_REASONS.get(
+                evidence_error, InvalidRequestReason.MALFORMED
+            ),
+        )
+    if not isinstance(csr, bytes) or len(csr) > MAX_CSR_BYTES:
+        raise InvalidValue(
+            "CSR exceeds the canonical byte budget",
+            reason=InvalidRequestReason.LIMIT_EXCEEDED,
+        )
 
 
 class EnrollmentCore:

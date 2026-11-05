@@ -1285,6 +1285,33 @@ def pairwise_movement_checks(source: str) -> list[tuple[int, str]]:
     return sorted(found.items())
 
 
+def _says_422(text: str, following: str) -> bool:
+    """A line that answers 422, by keyword, positional or split-line status."""
+    return bool(
+        re.search(
+            r"\bstatus_code\s*=\s*422\b|\bHTTP_422_|\bHTTPException\(\s*422\b", text
+        )
+        or (
+            text.rstrip().endswith("HTTPException(")
+            and following.strip().startswith("422")
+        )
+        or (text.strip().startswith("422,") and text.strip() != "")
+    )
+
+
+def _handler_body(lines: list[str], except_line: int) -> list[tuple[str, str]]:
+    """The (line, next line) pairs of the block under the `except` at except_line."""
+    header = lines[except_line - 1]
+    indent = len(header) - len(header.lstrip())
+    body = []
+    for index in range(except_line, len(lines)):
+        text = lines[index]
+        if text.strip() and len(text) - len(text.lstrip()) <= indent:
+            break
+        body.append((text, lines[index + 1] if index + 1 < len(lines) else ""))
+    return body
+
+
 def check_source(
     path: str,
     source: str,
@@ -1931,25 +1958,24 @@ def check_source(
         and "agent-422" in modes
         and path.startswith("control/src/vonk_control/agent_api/")
     ):
-        hits.extend(
-            (line, "agent-facing 422 outside body validation; answer a wait")
-            for line, text in enumerate(source.splitlines(), 1)
-            if re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", text)
-            and AGENT_422_VERDICT_MARKER not in text
-        )
-        # A caught ValueError is not a verdict: it is as often this Controller's
-        # own bug or race, and a 422 makes the Spark drop real evidence. The
-        # handler answers through contract_verdict_or_wait (422 only for a
-        # ValidationError or InvalidRequestError, otherwise a wait).
         lines = source.splitlines()
         hits.extend(
-            (line, "ValueError mapped to 422; use contract_verdict_or_wait")
+            (line, "agent-facing 422 outside body validation; answer a wait")
             for line, text in enumerate(lines, 1)
-            if re.match(r"\s*except\b.*\bValueError\b", text)
+            if _says_422(text, lines[line] if line < len(lines) else "")
+            and AGENT_422_VERDICT_MARKER not in text
+        )
+        # A caught exception is not a verdict: it is as often this Controller's
+        # own bug or race, and a 422 makes the Spark drop real evidence. Any
+        # handler body that produces an unmarked 422 is refused at its `except`
+        # line; the handler answers through contract_verdict_or_wait instead.
+        hits.extend(
+            (line, "except handler answers 422; use contract_verdict_or_wait")
+            for line, text in enumerate(lines, 1)
+            if re.match(r"\s*except\b", text)
             and any(
-                re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", following)
-                and AGENT_422_VERDICT_MARKER not in following
-                for following in lines[line : line + 4]
+                _says_422(body, nxt) and AGENT_422_VERDICT_MARKER not in body
+                for body, nxt in _handler_body(lines, line)
             )
         )
     if (
