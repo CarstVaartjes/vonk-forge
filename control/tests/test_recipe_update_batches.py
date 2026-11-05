@@ -36,6 +36,7 @@ from vonk_control.runtime_image_preparation import (
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .display_fixtures import reworded
+from .insert_collision_support import collide_inserts
 from .non_blocking import assert_ended_without_blocking
 from .runtime_image_fixtures import place_test_image
 from .test_recipe_image_availability import (
@@ -1041,25 +1042,11 @@ def test_postgres_update_cancel_preserves_shared_model_child_for_unrelated_consu
 
 @pytest.mark.parametrize("changed_scope", [False, True])
 def test_postgres_concurrent_parent_acceptance_reconciles_original_key(
-    postgres_update_env, changed_scope
+    postgres_engine, postgres_update_env, changed_scope
 ):
-    import threading
-    from concurrent.futures import ThreadPoolExecutor
-
     sessions, revision, recipe, _, fresh = postgres_update_env
-    barrier = threading.Barrier(2, timeout=30)
     services = [fresh(), fresh()]
     key = str(uuid.uuid4())
-
-    for service in services:
-        actual_replay = service._updates._replay
-
-        def replay(*args, actual=actual_replay):
-            result = actual(*args)
-            barrier.wait()
-            return result
-
-        service._updates._replay = replay
 
     def submit(index):
         try:
@@ -1074,8 +1061,15 @@ def test_postgres_concurrent_parent_acceptance_reconciles_original_key(
         except RecipeImageAvailabilityError as error:
             return error
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(submit, range(2)))
+    # Both parents insert; the unique request key admits one and the other
+    # replays it (or, for another scope, refuses the reused key).
+    results = collide_inserts(
+        postgres_engine,
+        "jobs",
+        "request_id",
+        key,
+        (lambda: submit(0), lambda: submit(1)),
+    )
     errors = [
         result for result in results if isinstance(result, RecipeImageAvailabilityError)
     ]

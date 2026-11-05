@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -22,6 +21,7 @@ from vonk_control.models import (
     ResourceReservation,
 )
 
+from .insert_collision_support import Rendezvous
 from .test_profile_load_submission import _profile_api
 
 _EFFECT_MODELS = (
@@ -49,14 +49,14 @@ def test_concurrent_same_request_key_replays_one_typed_application(
     request_key = str(uuid4())
     body = {"request_key": request_key}
     effects_before = _effect_ids(sessions)
-    both_reviewed = Barrier(2)
+    both_reviewed = Rendezvous(2, timeout=10)
     original_preview = FleetProfileService.preview
 
     def synchronize_review(service, *args, **kwargs):
         result = original_preview(service, *args, **kwargs)
         # `apply` has already checked the request key for replay. Let both
         # callers reach acceptance before either can persist the receipt.
-        both_reviewed.wait(timeout=10)
+        both_reviewed.wait()
         return result
 
     monkeypatch.setattr(FleetProfileService, "preview", synchronize_review)

@@ -7,7 +7,7 @@ import json
 import threading
 import time
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from email.message import Message
@@ -19,7 +19,7 @@ from urllib.request import Request
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -51,44 +51,6 @@ from .test_recipe_image_availability import (
     _runtime,
     _service,
 )
-
-
-def _collide_inserts(
-    engine: Engine,
-    table: str,
-    request_field: str,
-    key: str,
-    calls: tuple[Callable[[], object], Callable[[], object]],
-) -> list[object]:
-    """Hold both real inserts after their absence checks, not a mocked lock."""
-
-    barrier = threading.Barrier(2, timeout=10)
-    arrivals: list[int] = []
-
-    def before_insert(_conn, _cursor, statement, parameters, _context, _many):
-        if (
-            statement.startswith(f"INSERT INTO {table} ")
-            and isinstance(parameters, Mapping)
-            and parameters.get(request_field) == key
-        ):
-            arrivals.append(threading.get_ident())
-            barrier.wait()
-
-    def capture(call: Callable[[], object]) -> object:
-        try:
-            return call()
-        except (ModelCacheConflict, RecipeImageAvailabilityError) as error:
-            return error
-
-    event.listen(engine, "before_cursor_execute", before_insert)
-    try:
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(capture, call) for call in calls]
-            results = [future.result(timeout=20) for future in futures]
-    finally:
-        event.remove(engine, "before_cursor_execute", before_insert)
-    assert len(arrivals) == 2
-    return results
 
 
 def _start_together(
