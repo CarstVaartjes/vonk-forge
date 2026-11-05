@@ -17,14 +17,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, NamedTuple, NoReturn
 
 from fastapi import HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
+    AgentProtocolError,
+    InvalidRequestError,
+    SecurityRefusalError,
     SignedHostHelperGrant,
     UnknownOutcomeError,
     WaitReason,
@@ -105,6 +108,37 @@ RANK_UNREADY_GRACE = timedelta(seconds=120)
 
 
 _LOGGER = logging.getLogger("vonk_control.agent_api")
+
+
+def is_contract_verdict(error: Exception) -> bool:
+    """True when the ValueError refuses the request's own bytes (answered 422)."""
+    return isinstance(
+        error, ValidationError | InvalidRequestError | AgentProtocolError
+    ) and not isinstance(error, SecurityRefusalError | UnknownOutcomeError)
+
+
+def contract_verdict_or_wait(error: Exception) -> NoReturn:
+    """Answer an error from an agent route: 403 security refusal, 422 contract verdict.
+
+    A 422 makes the Spark settle and discard the bytes, so only a validation
+    failure of the request's own bytes (a pydantic ValidationError, a typed
+    InvalidRequestError, or an AgentProtocolError, the protocol's own verdict on
+    a message) may say it. A security refusal keeps its 403 and an
+    unknown outcome keeps its own typed wait. Any other ValueError is this
+    Controller's own bug, decode or race: the same bytes can be accepted later,
+    so it is a wait the Spark retries.
+    """
+    if isinstance(error, SecurityRefusalError):
+        raise SecurityHTTPError(status_code=403, detail=str(error)) from None
+    if isinstance(error, UnknownOutcomeError):
+        raise error
+    if is_contract_verdict(error):
+        raise HTTPException(
+            status_code=422,  # 422-verdict: the request's own bytes are refused
+            detail=str(error),
+        ) from None
+    _LOGGER.exception("agent route failed internally; answering a wait")
+    temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
 
 
 def _log_evidence_dropped(

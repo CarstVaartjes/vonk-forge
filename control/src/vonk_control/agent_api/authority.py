@@ -81,6 +81,8 @@ from .common import (
     _scope_identity,
     _validated_authenticated_source,
     active_agent_identity,
+    contract_verdict_or_wait,
+    is_contract_verdict,
 )
 
 
@@ -472,19 +474,21 @@ def install_authority_routes(
                 )
                 raise HTTPException(status_code=409, detail=str(error)) from None
             except ValueError as invalid:
+                if is_contract_verdict(invalid):
+                    required.operations.record_boundary_refusal(
+                        str(message.fence),
+                        boundary="result",
+                        check="late-result-invalid",
+                    )
+                contract_verdict_or_wait(invalid)
+            return Response(status_code=status.HTTP_202_ACCEPTED)
+        except ValueError as error:
+            if is_contract_verdict(error):
                 required.operations.record_boundary_refusal(
                     str(message.fence),
                     boundary="result",
-                    check="late-result-invalid",
+                    check="invalid-result",
                 )
-                raise HTTPException(status_code=422, detail=str(invalid)) from None
-            return Response(status_code=status.HTTP_202_ACCEPTED)
-        except ValueError as error:
-            required.operations.record_boundary_refusal(
-                str(message.fence),
-                boundary="result",
-                check="invalid-result",
-            )
             if isinstance(error, AgentResultRefused):
                 # The contract refuses these bytes on every delivery: settle the
                 # authenticated attempt failed (invalid contract) with the
@@ -496,7 +500,7 @@ def install_authority_routes(
                         f"agent result refused at input validation: {error}",
                         source=source,
                     )
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         note_result(request, None)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -536,7 +540,7 @@ def install_authority_routes(
             )
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
-        except (EnrollmentDenied, ValueError) as error:
+        except EnrollmentDenied as error:
             code = (
                 error.reason_code
                 if isinstance(error, ExpiredRenewalGraceExhausted)
@@ -548,6 +552,8 @@ def install_authority_routes(
             )
             response.headers["X-Vonk-Error-Code"] = code
             return response
+        except ValueError as error:
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -574,7 +580,7 @@ def install_authority_routes(
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -607,7 +613,7 @@ def install_authority_routes(
         except (EnrollmentIssuanceUncertain, RenewalIssuanceUncertain) as error:
             return unknown_response(error)
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(issued, UnknownError):
             return unknown_response(issued)
         return _json_response(_issued_response(issued))
@@ -630,7 +636,7 @@ def install_authority_routes(
                 body.generation,
             )
         except (EnrollmentDenied, ValueError) as error:
-            raise HTTPException(status_code=403, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if isinstance(outcome, UnknownError):
             return unknown_response(outcome)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
