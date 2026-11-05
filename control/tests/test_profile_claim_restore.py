@@ -36,7 +36,9 @@ def _world(tmp_path, engine):
     loaded = profiles.apply(profile.id, request_key=str(uuid4()), actor="admin")
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
-            # A whole, idle Spark: only commitments can refuse a claim.
+            # A whole, idle Spark with one shared pool: only commitments can
+            # refuse a claim.
+            snapshot.memory_pool = "shared"
             snapshot.host_memory_total_bytes = snapshot.gpu_memory_total_bytes = POOL
             snapshot.host_memory_free_bytes = snapshot.gpu_memory_free_bytes = POOL
         claims = list(
