@@ -30,6 +30,11 @@ is deterministic and must match exactly, statement by statement.
 Blind spot: bytes are not counted and SQLite ignores ``FOR UPDATE``. A read of
 the same rows that loads a 100 KB document where a column would do, or locks
 every row, is not seen here.
+
+Blind spot: a scan that stops early is seen only when the history lies before
+the target in its walk. ``ORDER BY id DESC LIMIT 1`` meets the target first
+(it sorts last under ``ordered_ids``), and so does ``LIMIT 1`` or ``EXISTS``
+without ``ORDER BY`` in rowid order, because the target is inserted first.
 """
 
 from __future__ import annotations
@@ -418,7 +423,8 @@ def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
     """Equal statements, rows and parses, and equal steps in every statement.
 
     There is no allowance: under ``ordered_ids`` a scan of the target's key range
-    takes the same steps at both scales, so one step more is growth.
+    takes the same steps at both scales, so one step more is growth (within the
+    blind spots the module names).
     """
     if large != small:
         raise CostGrew(
@@ -479,15 +485,43 @@ def test_the_old_history_scan_of_measured_peaks_is_caught_by_the_budget(
         _require_same_cost("injected", small, large)
 
 
+def test_a_forward_walk_that_stops_at_the_target_is_caught_by_the_budget(
+    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: an id-index walk that stops at the target is caught.
+
+    ``id || ''`` keeps the index from seeking, so the walk visits every
+    installation that sorts before the target: all of the history. It returns
+    the target's one row at both scales, so only its steps grow.
+    """
+    inner = TARGET_CHECKS["node_keyed_lookup"]
+
+    def walking(world: World) -> object:
+        with world.engine.connect() as connection:
+            connection.exec_driver_sql(
+                "SELECT id FROM recipe_installations "
+                "WHERE id || '' = ? ORDER BY id LIMIT 1",
+                (world.target_installation,),
+            ).all()
+        return inner.run(world)
+
+    check = TargetCheck(walking)
+    small = measure(worlds[SMALL], monkeypatch, check)
+    large = measure(worlds[LARGE], monkeypatch, check)
+    assert small.rows == large.rows
+    with pytest.raises(CostGrew):
+        _require_same_cost("injected", small, large)
+
+
 @pytest.mark.parametrize("scale", [SMALL, LARGE])
-def test_the_target_sorts_before_its_history(
+def test_the_target_sorts_after_its_history(
     scale: int, worlds: dict[int, World]
 ) -> None:
-    """What makes the measure exact: the target's ids come before all history."""
+    """What makes the measure exact: the target's ids come after all history."""
     world = worlds[scale]
     with world.sessions() as session:
-        first = session.scalar(select(func.min(RecipeInstallation.id)))
-    assert first == world.target_installation
+        last = session.scalar(select(func.max(RecipeInstallation.id)))
+    assert last == world.target_installation
 
 
 @pytest.mark.parametrize("scale", [SMALL, LARGE])

@@ -75,17 +75,23 @@ SPARK_OBJECTS = 20
 
 @contextmanager
 def ordered_ids() -> Iterator[None]:
-    """``uuid.uuid4`` hands out increasing ids while the worlds exist.
+    """``uuid.uuid4`` hands out decreasing ids while the worlds exist.
 
-    SQLite steps once more when an index scan stops at the next entry than when
-    it runs off the end of the index. With random ids the target sorts at a
-    random place among the history, so a probe of its key range sometimes finds
-    no following entry: one step per probe, chance-dependent, at either scale.
-    The target is seeded first, so with increasing ids it sorts before all
+    SQLite takes one step more when an index scan stops at a following entry
+    than when it runs off the end of the index. With random ids the target sorts
+    at a random place among the history, so a probe of its key range sometimes
+    finds no following entry: one step per probe, by chance, at either scale.
+    The target is seeded first, so with decreasing ids it sorts after all
     history in every id-keyed index at both scales, and every row a check adds
-    sorts after all earlier rows: the same plan takes the same steps every run.
+    sorts before all earlier rows: the same plan takes the same steps every run.
+
+    The target sorts last rather than first so that a scan that walks an id
+    index forward and stops at the target (``ORDER BY id LIMIT 1``) walks all
+    of the history and is caught. Its mirror, a backward walk (``ORDER BY id
+    DESC LIMIT 1``), reaches the target at once at both scales: that is the
+    blind spot this side leaves.
     """
-    counter = itertools.count(1)
+    counter = itertools.count(2**40, -1)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(counter), version=4))
         yield
