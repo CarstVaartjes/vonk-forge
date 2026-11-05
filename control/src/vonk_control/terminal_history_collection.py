@@ -179,6 +179,10 @@ class Retained(StrEnum):
 RETAINED: dict[str, tuple[Retained, str]] = {
     "users": (Retained.DESIRED_STATE, "operator accounts"),
     "fleet_profiles": (Retained.DESIRED_STATE, "saved profiles"),
+    "fleet_profile_recipes": (
+        Retained.DESIRED_STATE,
+        "projection of the recipes each saved profile names",
+    ),
     "fleet_profile_selection": (Retained.DESIRED_STATE, "the selected application"),
     "catalog_documents": (Retained.DESIRED_STATE, "the recipe library"),
     "catalog_document_heads": (Retained.DESIRED_STATE, "the recipe library heads"),
