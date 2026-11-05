@@ -265,3 +265,45 @@ def test_a_live_grant_for_different_bytes_is_still_refused(
     )
     with pytest.raises(DistributionError):
         transfer.distribution.register(changed)
+
+
+def test_a_renewal_that_lands_during_expiry_survives(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Expiry is decided on a read; a renewal committed since must not be undone."""
+    from .test_agent_api import make_agent_system
+
+    system = make_agent_system(tmp_path, engine=postgres_engine)
+    transfer = _transfer(system)
+    transfer.execute(transfer.clock.now)
+    transfer.clock.now += timedelta(hours=2)
+    renewed_until = transfer.clock.now + timedelta(hours=1)
+    read = transfer.distribution._from_row
+    renewed = False
+
+    def renewal_commits_after_the_read(row):
+        nonlocal renewed
+        value = read(row)
+        if not renewed:
+            renewed = True
+            with transfer.services.sessions.begin() as other:
+                for grant in other.scalars(select(ArtifactDistributionAssignment)):
+                    grant.expires_at = renewed_until
+        return value
+
+    monkeypatch.setattr(
+        transfer.distribution, "_from_row", renewal_commits_after_the_read
+    )
+    with pytest.raises(DistributionError):
+        transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
+
+    with transfer.services.sessions() as session:
+        row = session.scalar(
+            select(ArtifactDistributionAssignment).where(
+                ArtifactDistributionAssignment.node_id == NODE_A
+            )
+        )
+    assert row is not None and row.state == "active"
+    monkeypatch.undo()
+    grant = transfer.distribution.authorize(node_id=NODE_A, plan_digest="f" * 64)
+    assert grant.expires_at == renewed_until
