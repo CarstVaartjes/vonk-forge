@@ -26,7 +26,7 @@ Kept on purpose by the installation arm:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -485,21 +485,57 @@ def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> 
     records the id in its progress. Either keeps the owner live.
     """
 
+    named = (Job.payload["owner_kind"].as_string() == owner_kind) & (
+        Job.payload["owner_id"].as_string() == owner_id
+    )
+    if owner_kind == OwnerKind.INSTALLATION:
+        # A Run/Switch, Stop or Cleanup order names the installation it reuses
+        # or removes only in its plan, not in the owner fields.
+        named = named | (
+            Job.state.in_(job_states.LIVE)
+            & (Job.payload["plan"]["installation_id"].as_string() == owner_id)
+        )
     return (
         session.scalar(
             select(Job.id)
             .where(
                 Job.state.not_in(JOB_ENDED_STATES),
-                (
-                    (Job.payload["owner_kind"].as_string() == owner_kind)
-                    & (Job.payload["owner_id"].as_string() == owner_id)
-                )
-                | cast(Job.result, Text).contains(owner_id),
+                named | cast(Job.result, Text).contains(owner_id),
             )
             .limit(1)
         )
         is not None
     )
+
+
+def installations_named_by_live_jobs(
+    session: Session, installation_ids: Collection[str]
+) -> frozenset[str]:
+    """Which of ``installation_ids`` a live operation names: one query, any count.
+
+    The batched form of ``referencing_active_job`` for installations, for a
+    sweep that asks about many: the same three ways an operation names one (its
+    owner fields, its plan, its recorded progress), read once over the live
+    jobs and answered by set lookup.
+    """
+
+    wanted = frozenset(installation_ids)
+    named: set[str] = set()
+    for owner_kind, owner_id, planned, result in session.execute(
+        select(
+            Job.payload["owner_kind"].as_string(),
+            Job.payload["owner_id"].as_string(),
+            Job.payload["plan"]["installation_id"].as_string(),
+            cast(Job.result, Text),
+        ).where(Job.state.in_(job_states.LIVE))
+    ):
+        if owner_kind == OwnerKind.INSTALLATION and owner_id:
+            named.add(owner_id)
+        if planned:
+            named.add(planned)
+        if result:
+            named.update(found for found in wanted if found in result)
+    return wanted & named
 
 
 def run_has_live_operation(session: Session, run_id: str) -> bool:
