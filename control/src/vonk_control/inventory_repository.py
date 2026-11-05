@@ -21,6 +21,7 @@ from vonk_agent_protocol.wire_model import strict_json_datetime
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
 from .logging import log_event
 from .models import AgentNode, NodeInventorySnapshot
+from .request_refused import RequestBytesRefused
 
 _LOG = logging.getLogger(__name__)
 
@@ -116,7 +117,7 @@ class InventoryRepository:
             )
             if existing is not None:
                 if existing.evidence_digest != digest:
-                    raise ValueError(
+                    raise RequestBytesRefused(
                         "inventory identity already binds different evidence"
                     )
                 return existing

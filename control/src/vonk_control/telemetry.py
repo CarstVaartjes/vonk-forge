@@ -25,6 +25,7 @@ from .models import (
     NodeTelemetrySample,
 )
 from .observed_run_memory import record_observed_run_memory
+from .request_refused import RequestBytesRefused
 from .strict_json import warn_unreadable_once
 
 
@@ -56,7 +57,9 @@ def _canonical_sample(value: TelemetrySample, now: datetime) -> TelemetrySample:
     if validated.observed_at > now + timedelta(
         seconds=30
     ) or now - validated.observed_at > timedelta(minutes=5):
-        raise ValueError("telemetry observation time is outside the accepted window")
+        raise RequestBytesRefused(
+            "telemetry observation time is outside the accepted window"
+        )
     return validated
 
 
@@ -128,11 +131,11 @@ class TelemetryRepository:
         canonical = tuple(_canonical_sample(value, now) for value in values)
         keys = [(value.boot_id, value.observed_at) for value in canonical]
         if len(keys) != len(set(keys)):
-            raise ValueError("telemetry sample is duplicated")
+            raise RequestBytesRefused("telemetry sample is duplicated")
         last_observed: datetime | None = None
         for value in canonical:
             if last_observed is not None and value.observed_at <= last_observed:
-                raise ValueError("telemetry observation times must increase")
+                raise RequestBytesRefused("telemetry observation times must increase")
             last_observed = value.observed_at
 
         stored: list[NodeTelemetrySample] = []
@@ -162,7 +165,9 @@ class TelemetryRepository:
                 )
                 if existing is not None:
                     if not _same_sample(existing, value):
-                        raise ValueError("telemetry conflicts with stored sample")
+                        raise RequestBytesRefused(
+                            "telemetry conflicts with stored sample"
+                        )
                     stored.append(existing)
                     continue
                 if value.boot_id not in boot_heads:
@@ -182,7 +187,7 @@ class TelemetryRepository:
                     else boot_head.observed_at,
                     label="telemetry observation time",
                 ):
-                    raise ValueError(
+                    raise RequestBytesRefused(
                         "telemetry sample regresses stored observation time"
                     )
                 row = NodeTelemetrySample(

@@ -17,14 +17,15 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Annotated, Any, NamedTuple
+from typing import Annotated, Any, NamedTuple, NoReturn
 
 from fastapi import HTTPException, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
+    InvalidRequestError,
     SignedHostHelperGrant,
     UnknownOutcomeError,
     WaitReason,
@@ -105,6 +106,24 @@ RANK_UNREADY_GRACE = timedelta(seconds=120)
 
 
 _LOGGER = logging.getLogger("vonk_control.agent_api")
+
+
+def contract_verdict_or_wait(error: ValueError) -> NoReturn:
+    """Answer a ValueError from an agent route: 422 only for a contract verdict.
+
+    A 422 makes the Spark settle and discard the bytes, so only a validation
+    failure of the request's own bytes (a pydantic ValidationError, or a typed
+    InvalidRequestError) may say it. Any other ValueError is this Controller's
+    own bug, decode or race: the same bytes can be accepted later, so it is a
+    wait the Spark retries.
+    """
+    if isinstance(error, ValidationError | InvalidRequestError):
+        raise HTTPException(
+            status_code=422,  # 422-verdict: the request's own bytes are refused
+            detail=str(error),
+        ) from None
+    _LOGGER.exception("agent route failed internally; answering a wait")
+    temporary_http_answer(TransientReason.DEPENDENCY_UNAVAILABLE)
 
 
 def _log_evidence_dropped(

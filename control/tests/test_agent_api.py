@@ -100,7 +100,9 @@ from vonk_control.models import (
 from vonk_control.operation_api import BoundedErrorResponse
 from vonk_control.pki import IssuedCertificate
 from vonk_control.presence import AgentPresenceService, ManagementAddressPolicy
+from vonk_control.request_refused import RequestBytesRefused
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
+from vonk_control.telemetry import TelemetryRepository
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .agent_fences import fenced_attempt, fenced_operation
@@ -1312,6 +1314,52 @@ def test_agent_posts_authenticated_complete_recipe_run_observation_snapshot(
             headers=agent_headers(NODE_A, "serial-a"),
             json=payload | {"runs": [{"run_id": "not-a-uuid", "ready": True}]},
         ).status_code
+        == 422
+    )
+
+
+def test_internal_value_error_on_observations_is_a_wait_not_a_422(
+    agent_system, monkeypatch
+) -> None:
+    # Wrong implementation: any ValueError answered 422, and the Spark settled
+    # and discarded real evidence over a Controller bug.
+    client, _services, _, clock = agent_system
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("internal decode failure")
+
+    monkeypatch.setattr("vonk_control.agent_api.observations.transition", broken)
+    response = client.post(
+        "/agent/recipe-runs/observations",
+        headers=agent_headers(NODE_A, "serial-a"),
+        json={"observed_at": clock.now.isoformat(), "runs": []},
+    )
+
+    assert response.status_code == 503
+    assert "retry-after" in response.headers
+
+
+def test_internal_value_error_on_telemetry_is_a_wait_but_a_refusal_is_a_422(
+    agent_system, monkeypatch
+) -> None:
+    client, _services, _, clock = agent_system
+    payload = telemetry_payload(clock)
+    headers = agent_headers(NODE_A, "serial-a")
+
+    def broken(*_args, **_kwargs):
+        raise ValueError("internal failure")
+
+    monkeypatch.setattr(TelemetryRepository, "record_batch", broken)
+    response = client.post("/agent/telemetry", headers=headers, json=payload)
+    assert response.status_code == 503
+    assert "retry-after" in response.headers
+
+    def refused(*_args, **_kwargs):
+        raise RequestBytesRefused("telemetry sample is duplicated")
+
+    monkeypatch.setattr(TelemetryRepository, "record_batch", refused)
+    assert (
+        client.post("/agent/telemetry", headers=headers, json=payload).status_code
         == 422
     )
 

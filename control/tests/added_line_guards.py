@@ -1937,6 +1937,21 @@ def check_source(
             if re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", text)
             and AGENT_422_VERDICT_MARKER not in text
         )
+        # A caught ValueError is not a verdict: it is as often this Controller's
+        # own bug or race, and a 422 makes the Spark drop real evidence. The
+        # handler answers through contract_verdict_or_wait (422 only for a
+        # ValidationError or InvalidRequestError, otherwise a wait).
+        lines = source.splitlines()
+        hits.extend(
+            (line, "ValueError mapped to 422; use contract_verdict_or_wait")
+            for line, text in enumerate(lines, 1)
+            if re.match(r"\s*except\b.*\bValueError\b", text)
+            and any(
+                re.search(r"\bstatus_code\s*=\s*422\b|\bHTTP_422_", following)
+                and AGENT_422_VERDICT_MARKER not in following
+                for following in lines[line : line + 4]
+            )
+        )
     if (
         python
         and not is_test

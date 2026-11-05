@@ -2169,6 +2169,21 @@ def test_new_agent_facing_422_is_flagged(probe: str) -> None:
     assert check_source(path, probe, {line}, modes=("agent-422",))
 
 
+def test_agent_422_guard_flags_a_caught_value_error_mapped_to_422() -> None:
+    # Wrong implementation: any ValueError, including an internal one, answers
+    # 422 and the Spark discards the evidence.
+    path = "control/src/vonk_control/agent_api/observations.py"
+    probe = (
+        "except ValueError as error:\n"
+        "    raise HTTPException(\n"
+        "        status_code=422, detail=str(error)\n"
+        "    ) from None\n"
+    )
+    assert check_source(path, probe, {1}, modes=("agent-422",))
+    routed = "except ValueError as error:\n    contract_verdict_or_wait(error)\n"
+    assert not check_source(path, routed, {1}, modes=("agent-422",))
+
+
 def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     marked = "raise HTTPException(status_code=422)  # 422-verdict: body validation\n"
     path = "control/src/vonk_control/agent_api/observations.py"

@@ -81,6 +81,7 @@ from .common import (
     _scope_identity,
     _validated_authenticated_source,
     active_agent_identity,
+    contract_verdict_or_wait,
 )
 
 
@@ -477,7 +478,7 @@ def install_authority_routes(
                     boundary="result",
                     check="late-result-invalid",
                 )
-                raise HTTPException(status_code=422, detail=str(invalid)) from None
+                contract_verdict_or_wait(invalid)
             return Response(status_code=status.HTTP_202_ACCEPTED)
         except ValueError as error:
             required.operations.record_boundary_refusal(
@@ -496,7 +497,7 @@ def install_authority_routes(
                         f"agent result refused at input validation: {error}",
                         source=source,
                     )
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         note_result(request, None)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
