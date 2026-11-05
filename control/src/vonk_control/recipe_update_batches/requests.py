@@ -43,7 +43,6 @@ from ..runtime_image_preparation import (
     RuntimeImagePreparationError,
 )
 from ..strict_json import serialize_json_value
-from ..user_authority import serialize_user_authority
 
 if TYPE_CHECKING:
     from .service import RecipeUpdateBatches
@@ -83,7 +82,6 @@ class RequestsMixin:
 
     @staticmethod
     def _authorize(session: Session, actor: str) -> None:
-        serialize_user_authority(session)
         user = session.scalar(select(User).where(User.subject == actor))
         if (
             user is None
