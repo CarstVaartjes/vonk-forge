@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from vonk_control.lifecycle import (
+    LOST_OBSERVATION_BOUND,
     OBSERVE_BUDGET,
     STOP_BUDGET,
     TERMINAL_STATES,
@@ -372,7 +373,8 @@ def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
     assert decision.row.state is State.OBSERVING
     assert decision.row.effect is Effect.UNKNOWN
     assert decision.row.reason == "latest cause"
-    assert decision.row.observe_count == OBSERVE_BUDGET  # spending stopped
+    # spending stopped; the look is counted towards the lost bound
+    assert decision.row.observe_count == OBSERVE_BUDGET + 1
     # Observed again at the bounded backoff's ceiling: never at once, even past
     # the deadline, and less often than a short wait re-check (a lost row may
     # last for hours and each look rewrites it).
@@ -393,6 +395,40 @@ def test_an_exhausted_unknown_irreversible_effect_is_lost_not_failed(
     assert transition(fresh, Tick(), adapter, NOW).commands == (Execute(),)
 
 
+def test_a_lost_irreversible_row_ends_failed_after_the_bound_and_keeps_its_evidence() -> (
+    None
+):
+    # Wrong implementation: a lost row keeps its claims for ever (never ends),
+    # or a tick that only issues a look is counted as an observation.
+    adapter = FakeAdapter(is_irreversible=True)
+    row = _row(state=State.OBSERVING, observe_count=OBSERVE_BUDGET)
+    now = NOW
+    for seen in range(1, LOST_OBSERVATION_BOUND):
+        now += timedelta(hours=2)
+        issued = transition(row, Tick(), adapter, now)
+        assert issued.commands == (Observe(),)
+        assert issued.row.observe_count == row.observe_count  # a tick counts nothing
+        row = transition(
+            issued.row, Observed(Effect.UNKNOWN, reason="lease-lapsed"), adapter, now
+        ).row
+        assert row.state is State.OBSERVING  # N-1 looks: still waiting
+        assert row.observe_count == OBSERVE_BUDGET + seen
+    now += timedelta(hours=2)
+    ended = transition(
+        row, Observed(Effect.UNKNOWN, reason="lease-lapsed"), adapter, now
+    )
+    assert ended.row.state is State.FAILED
+    assert ended.row.effect is Effect.UNKNOWN
+    assert ended.row.next_action_at is None
+    assert ended.row.reason is not None
+    assert ended.row.reason.startswith("runtime-effect-unconfirmed")
+    assert "lease-lapsed" in ended.row.reason
+    assert ended.commands == (RecordResidue(ended.row.reason),)
+    # Never replayed, and a terminal row stays put.
+    assert Execute() not in ended.commands
+    assert transition(ended.row, Tick(), adapter, now) == Decision(ended.row)
+
+
 def test_an_unknown_effect_is_observed_until_it_is_proven_and_a_cancel_ends_it() -> (
     None
 ):
@@ -400,9 +436,13 @@ def test_an_unknown_effect_is_observed_until_it_is_proven_and_a_cancel_ends_it()
     for advertised in (("resume", "retire"), ()):
         adapter = FakeAdapter(is_irreversible=True, advertised=advertised)
         rows = list(_tick_until(row, adapter, 200, Effect.UNKNOWN))
-        assert {r.state for r in rows} == {State.OBSERVING}  # no end, no wait
-        lost = rows[-1]
-        assert lost.observe_count == OBSERVE_BUDGET
+        # no wait for an operator; the lost row ends only at its bound
+        assert State.NEEDS_OPERATOR not in {r.state for r in rows}
+        assert rows[-1].state is State.FAILED
+        lost = next(
+            r for r in rows if r.observe_count == OBSERVE_BUDGET + 1
+        )  # the first counted look: lost, still observing
+        assert lost.state is State.OBSERVING
         # An observed exit ends it, once, and never repeats the effect.
         due = lost.next_action_at
         assert due is not None

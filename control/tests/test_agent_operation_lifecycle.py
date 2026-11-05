@@ -20,13 +20,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
-from vonk_agent_protocol import LifecycleState, ObservationCause
+from vonk_agent_protocol import LifecycleState, ObservationCause, WaitReason
 from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import (
     AgentJobService,
     operator_resume_candidates_in_session,
 )
 from vonk_control.lifecycle import (
+    LOST_OBSERVATION_BOUND,
     OBSERVE_BUDGET,
     STOP_BUDGET,
     Effect,
@@ -245,6 +246,47 @@ def test_spark_order_observe_reads_its_exact_attempt(agent_service) -> None:
     assert claim_agent(jobs, NODE_A, "serial-a") is None
 
 
+def _reconcile_to_next_look(jobs, sessions, clock, operation_id: str) -> AgentOperation:
+    due = _stored(sessions, operation_id).next_action_at
+    assert due is not None
+    clock.now = max(clock.now, due.replace(tzinfo=UTC)) + timedelta(seconds=1)
+    jobs.reconcile_orders()
+    return _stored(sessions, operation_id)
+
+
+def test_a_lost_job_order_ends_failed_after_the_bound_and_a_fresh_request_runs(
+    agent_service,
+) -> None:
+    """Wrong implementation (main before this fix): the lost order kept its
+    node's lane for ever, so a fresh request for the same Spark never ran.
+    One look short of the bound it still waits; the last look ends it failed
+    with typed evidence and frees the lane."""
+
+    jobs, sessions, clock = agent_service
+    kind, payload = _job_run_payload()
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    clock.advance(seconds=45)
+    jobs.reconcile_orders()
+    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+
+    stored = _stored(sessions, operation.id)
+    for _ in range(OBSERVE_BUDGET + 2 * LOST_OBSERVATION_BOUND):
+        if stored.observe_count >= OBSERVE_BUDGET + LOST_OBSERVATION_BOUND - 1:
+            break
+        stored = _reconcile_to_next_look(jobs, sessions, clock, operation.id)
+    # One unknown look short of the bound: still lost, still holding its lane.
+    assert stored.state == aos.OBSERVING
+    assert stored.observe_count == OBSERVE_BUDGET + LOST_OBSERVATION_BOUND - 1
+
+    ended = _reconcile_to_next_look(jobs, sessions, clock, operation.id)
+    assert ended.state == aos.FAILED
+    assert ended.status_reason is not None
+    assert ended.status_reason.startswith(WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    assert _stored(sessions, fresh.id).current_attempt == 1
+
+
 def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     agent_service,
 ) -> None:
@@ -258,7 +300,7 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
     assert claim_agent(jobs, NODE_A, "serial-a") is not None
     clock.advance(seconds=45)
     jobs.reconcile_orders()
-    for _ in range(OBSERVE_BUDGET + 4):
+    for _ in range(OBSERVE_BUDGET + 1):
         due = _stored(sessions, operation.id).next_action_at
         assert due is not None
         clock.now = max(clock.now, due.replace(tzinfo=UTC)) + timedelta(seconds=1)
@@ -268,7 +310,9 @@ def test_a_lost_job_order_is_observed_at_its_own_cadence_never_ended(
 
     lost = _stored(sessions, operation.id)
     assert lost.state == aos.OBSERVING
-    assert lost.observe_count == OBSERVE_BUDGET
+    assert (
+        OBSERVE_BUDGET <= lost.observe_count < OBSERVE_BUDGET + LOST_OBSERVATION_BOUND
+    )
     assert lost.recovery_deadline is not None
     assert lost.recovery_deadline.replace(tzinfo=UTC) < clock.now
     assert lost.next_action_at is not None
