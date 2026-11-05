@@ -400,6 +400,75 @@
           ]
         }
       }
+    },
+    {
+      "name": "legacy runtime-identity argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "runtime-identity",
+          "a1000000-0000-4000-8000-0000000000a1",
+          "a0000000-0000-4000-8000-00000000000a",
+          "b0000000-0000-4000-8000-0000000000b1",
+          "3",
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ]
+      }
+    },
+    {
+      "name": "legacy stop-identity argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "stop-identity",
+          "a1000000-0000-4000-8000-0000000000a1",
+          "a0000000-0000-4000-8000-00000000000a",
+          "b0000000-0000-4000-8000-0000000000b1",
+          "3",
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ]
+      }
+    },
+    {
+      "name": "legacy cancel-stop-identity argv",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [
+          "cancel-stop-identity",
+          "a1000000-0000-4000-8000-0000000000a1",
+          "a0000000-0000-4000-8000-00000000000a",
+          "b0000000-0000-4000-8000-0000000000b1",
+          "3",
+          "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        ]
+      }
+    },
+    {
+      "name": "uppercase uuid",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "A0000000-0000-4000-8000-00000000000A"
+        }
+      }
+    },
+    {
+      "name": "unhyphenated uuid",
+      "request": {
+        "action": "run-inspect",
+        "fence": "40000000-0000-4000-8000-000000000004",
+        "arguments": [],
+        "inspect_target": {
+          "kind": "run-name",
+          "run_id": "a000000000004000800000000000000a"
+        }
+      }
     }
   ]
 }

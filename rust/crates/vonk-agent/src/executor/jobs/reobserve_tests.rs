@@ -23,7 +23,7 @@ pub(super) enum Answer {
     Progressing,
     Exited(u32),
     Absent,
-    /// A helper that predates job re-observation refuses the request.
+    /// A helper of another release refuses the request as an invalid operation.
     Refused,
 }
 
@@ -299,16 +299,40 @@ async fn a_job_still_running_at_its_deadline_is_stopped() {
     assert_eq!(log, ["running", "grant"]);
 }
 
+/// The upgrade window: the helper already runs the new release and answers the
+/// old agent's argv-shaped inspection as an invalid operation. That answer is
+/// an unread observation, not a verdict: the running job is never stopped, its
+/// real exit is read when the helper answers again, and the next job is
+/// admitted afterwards.
 #[tokio::test]
-async fn a_helper_without_job_reobservation_keeps_the_stop_it_had() {
-    let (settled, log) = settle_broken_call(vec![Answer::Refused], Duration::ZERO).await;
-    let result = settled.err().expect("no exit was observed");
-    assert!(
-        cause(&result).contains("cannot re-observe"),
-        "{}",
-        cause(&result)
+async fn an_old_argv_inspection_stops_no_running_job_and_admits_the_next() {
+    let (settled, log) = settle_broken_call(
+        vec![Answer::Refused, Answer::Refused, Answer::Exited(7)],
+        Duration::ZERO,
+    )
+    .await;
+    let outcome = settled.unwrap_or_else(|result| panic!("the job was ended: {result:?}"));
+    assert_eq!(outcome.exit_code, Some(7));
+    assert_eq!(log[..3], ["refused", "refused", "exited"]);
+    // Only the cleanup of the exited container asks for authority.
+    assert!(log[3..].iter().all(|event| *event == "grant"));
+
+    // A fresh job meeting the same answer waits to be issued again and runs
+    // nothing; once the helper answers, it is dispatched afresh.
+    let (result, log) = claim_without_record(vec![Answer::Refused], true).await;
+    let failure = result.failure().expect("a wait");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
     );
-    assert_eq!(log, ["refused", "grant"]);
+    assert_eq!(failure.stage, Some(FailureStage::RunStorage));
+    assert_eq!(log, ["refused"]);
+    let (result, _) = claim_without_record(vec![Answer::Absent], true).await;
+    assert_eq!(
+        result.failure().and_then(|failure| failure.stage),
+        Some(FailureStage::ArtifactDistribution),
+        "{result:?}"
+    );
 }
 
 #[tokio::test]
@@ -460,18 +484,6 @@ async fn a_progressing_job_survives_a_lost_helper_reply_past_its_original_deadli
     assert_eq!(outcome.exit_code, Some(7));
     assert_eq!(log[..2], ["progressing", "exited"]);
     assert!(log[2..].iter().all(|event| *event == "grant"));
-}
-
-#[tokio::test]
-async fn an_unsupported_probe_never_authorizes_fresh_inference() {
-    let (result, log) = claim_without_record(vec![Answer::Refused], true).await;
-    assert!(matches!(result, ExecutionResult::Failed(_)));
-    assert_ne!(
-        result.failure().and_then(|failure| failure.stage),
-        Some(FailureStage::ArtifactDistribution),
-        "unsupported observation is not proof of absence"
-    );
-    assert_eq!(log, ["refused"]);
 }
 
 /// A restarted agent whose job outlives its lease: the shared observer and a

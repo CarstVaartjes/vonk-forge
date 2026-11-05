@@ -210,6 +210,16 @@ schedule_permanent_helper_restart() {
                     = "$wait_start" ]; then
                 exit 1
             fi
+            # No agent talks to a helper of another release: the old agent
+            # stops before the helper restarts, and the new one starts after
+            # the helper is proven up. Whatever happens in between, the agent
+            # is started again on exit and never left stopped.
+            trap '"'"'/usr/bin/systemctl --system start \
+                vonk-forge-agent.service vonk-forge-monitor.service \
+                >/dev/null 2>&1 || true'"'"' EXIT
+            /usr/bin/systemctl --system stop \
+                vonk-forge-agent.service vonk-forge-monitor.service \
+                >/dev/null 2>&1 || true
             /usr/bin/systemctl --system restart \
                 vonk-forge-package-helper.service >/dev/null
             [ "$(/usr/bin/systemctl --system show --property=ActiveState \

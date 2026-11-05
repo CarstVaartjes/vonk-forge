@@ -161,7 +161,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             }
             return runtime_observation_failure(error);
         }
-        if inspection_grant_refused(error) {
+        if temporary_observation_error(error) || inspection_grant_refused(error) {
             return temporary_preparation_failure(
                 FailureStage::Unknown,
                 "collective_inspect",
