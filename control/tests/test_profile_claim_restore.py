@@ -49,7 +49,12 @@ def _restore(sessions, application_id):
     with sessions.begin() as session:
         application = session.get(FleetProfileApplication, application_id)
         assert application is not None
-        restore_released_profile_claims(session, application)
+        received = session.scalar(select(func.max(NodeInventorySnapshot.received_at)))
+        assert received is not None
+        # The moment the Spark's newest inventory arrived: current evidence.
+        restore_released_profile_claims(
+            session, application, now=received.replace(tzinfo=UTC)
+        )
 
 
 @pytest.mark.parametrize("scarce", ["disk", "memory"])

@@ -9,6 +9,7 @@ evicts through the ordinary review; nothing blocks.
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,9 +19,11 @@ from . import fleet_profile_states
 from .admission_locking import ConstraintReplan, admitting
 from .disk_reservations import outstanding_disk_charges
 from .memory_reservations import memory_reservations
-from .models import FleetProfileApplication, NodeInventorySnapshot, ResourceReservation
+from .models import FleetProfileApplication, ResourceReservation
 from .resource_planning import CapacitySnapshot, memory_capacity_snapshot
+from .run_switch_operations.planning_helpers import PlanInventory
 from .spark_disk import spark_free_bytes
+from .unused_storage_collection.common import INVENTORY_MAX_AGE
 
 #: The restored claims no longer fit the Spark: plan the load again.
 CAPACITY_SHORT_CONSTRAINT = "profile_claim_capacity"
@@ -41,6 +44,7 @@ def restore_released_profile_claims(
     session: Session,
     application: FleetProfileApplication,
     *,
+    now: datetime,
     node_ids: Sequence[str] | None = None,
 ) -> None:
     """Take back the claims an application released while it was failed.
@@ -75,22 +79,29 @@ def restore_released_profile_claims(
             claim.released_at = None
             session.flush()
         restored.append(claim)
+    inventory = PlanInventory(
+        session, now=now, maximum_age_seconds=int(INVENTORY_MAX_AGE.total_seconds())
+    )
     for node_id, kind in sorted(
         {(claim.node_id, claim.kind) for claim in restored if claim.kind != "port"}
     ):
-        if not _fits(session, node_id, kind):
+        if not _fits(session, inventory, node_id, kind):
             raise ProfileClaimCapacityShort(node_id, kind)
 
 
-def _fits(session: Session, node_id: str, kind: str) -> bool:
-    """Whether the ledger, restored claims included, stays within the Spark."""
-    snapshot = session.scalar(
-        select(NodeInventorySnapshot)
-        .where(NodeInventorySnapshot.node_id == node_id)
-        .order_by(NodeInventorySnapshot.observed_at.desc())
-        .limit(1)
-    )
-    if snapshot is None:
+def _fits(session: Session, inventory: PlanInventory, node_id: str, kind: str) -> bool:
+    """Whether the ledger, restored claims included, stays within the Spark.
+
+    Without a current inventory sample the Spark cannot be shown to fit, as in
+    the ordinary review: the load is planned again and waits there.
+    """
+    snapshot, evidence = inventory.read(node_id)
+    if (
+        snapshot is None
+        or evidence.age_seconds is None
+        or evidence.maximum_age_seconds is None
+        or evidence.age_seconds > evidence.maximum_age_seconds
+    ):
         return False
     if kind == "disk":
         if snapshot.disk_free_bytes is None:
@@ -125,7 +136,7 @@ def _fits(session: Session, node_id: str, kind: str) -> bool:
             observed_at=snapshot.observed_at,
         ),
         memory_pool=pool,
-        evidence_state="unknown",
+        evidence_state=evidence.state,
     )
     return all(_headroom(part) >= 0 for part in (capacity.components or (capacity,)))
 

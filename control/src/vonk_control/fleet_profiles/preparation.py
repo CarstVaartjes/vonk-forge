@@ -107,6 +107,7 @@ class FleetProfileService:
             restore_released_profile_claims(
                 session,
                 row,
+                now=now,
                 node_ids=self._adopted_application_scope(session, row),
             )
             session.flush()
