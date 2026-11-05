@@ -5784,6 +5784,16 @@ _RENEWAL_ROUTES = [
 ]
 
 
+def _renewable_source(services) -> None:
+    with services.sessions.begin() as session:
+        source = session.scalar(
+            select(AgentCertificate).where(AgentCertificate.serial == "serial-a")
+        )
+        assert source is not None
+        source.serial = "101"
+        source.fingerprint = "fingerprint-101"
+
+
 def _renewal_body() -> dict[str, str]:
     return {"node_id": NODE_A, "csr": _csr_for(NODE_A).decode()}
 
@@ -5795,13 +5805,14 @@ def test_internal_error_during_renewal_is_a_wait_not_a_fatal_refusal(
     # Wrong implementation: any ValueError answered 403 and the Spark's agent
     # exited on it (client/errors.rs fatal()) for a Controller-side bug.
     client, services, _, _ = agent_system
+    _renewable_source(services)
 
     def broken(*_args, **_kwargs):
         raise ValueError("internal decode failure")
 
     monkeypatch.setattr(services.enrollment, method, broken)
     response = client.post(
-        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert response.status_code == 503
     assert 0 < int(response.headers["Retry-After"]) <= 300
@@ -5814,13 +5825,14 @@ def test_real_denial_during_renewal_stays_a_403(
     from vonk_control.enrollment.types import EnrollmentDenied
 
     client, services, _, _ = agent_system
+    _renewable_source(services)
 
     def denied(*_args, **_kwargs):
         raise EnrollmentDenied("certificate is revoked")
 
     monkeypatch.setattr(services.enrollment, method, denied)
     response = client.post(
-        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert response.status_code == 403
 
@@ -5830,6 +5842,7 @@ def test_renewal_heals_after_one_internal_error(
     agent_system, monkeypatch, path, method
 ) -> None:
     client, services, _, _ = agent_system
+    _renewable_source(services)
     real = getattr(services.enrollment, method)
     calls = []
 
@@ -5841,11 +5854,11 @@ def test_renewal_heals_after_one_internal_error(
 
     monkeypatch.setattr(services.enrollment, method, flaky)
     first = client.post(
-        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert first.status_code == 503
     again = client.post(
-        path, headers=agent_headers(NODE_A, "serial-a"), json=_renewal_body()
+        path, headers=agent_headers(NODE_A, "101"), json=_renewal_body()
     )
     assert len(calls) == 2
     assert again.status_code == 200
