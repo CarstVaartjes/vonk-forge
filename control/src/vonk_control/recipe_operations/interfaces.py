@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Literal, Protocol
 
@@ -62,6 +62,19 @@ class RecipeOperationView:
             if self.lifecycle_result is None
             else serialize_json_value(self.lifecycle_result)
         )
+
+
+@dataclass(frozen=True, slots=True)
+class UndispatchedStopView(RecipeOperationView):
+    """An accepted Stop that was kept, not dispatched, by this call.
+
+    The wake-up it scheduled is the only progress; callers measuring progress
+    read the type instead of re-reading the row.
+    """
+
+    @classmethod
+    def of(cls, view: RecipeOperationView) -> UndispatchedStopView:
+        return cls(**{f.name: getattr(view, f.name) for f in fields(view)})
 
 
 @dataclass(frozen=True, slots=True)
