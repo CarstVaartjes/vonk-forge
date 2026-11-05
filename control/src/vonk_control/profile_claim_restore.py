@@ -26,9 +26,11 @@ from vonk_forge_contracts.memory_admission import evaluate_memory_admission
 
 from . import fleet_profile_states
 from .admission_locking import (
+    AdmissionRowLock,
     ConstraintReplan,
     acquire_admission_keys,
     admitting,
+    lock_admission_rows,
     node_admission_key,
 )
 from .disk_reservations import outstanding_disk_charges
@@ -103,12 +105,17 @@ def restore_released_profile_claims(
         holder="profile-claim-restore",
     )
     restored: list[ResourceReservation] = []
-    for claim in session.scalars(
-        select(ResourceReservation)
-        .where(*conditions)
-        .order_by(ResourceReservation.id)
-        .with_for_update(nowait=True)
-    ):
+    (locked,) = lock_admission_rows(
+        session,
+        (
+            AdmissionRowLock(
+                "claims",
+                ResourceReservation,
+                select(ResourceReservation).where(*conditions),
+            ),
+        ),
+    ).values()
+    for claim in locked:
         with admitting(), session.begin_nested():
             claim.state = (
                 ReservationState.ACTIVE
@@ -174,7 +181,6 @@ def _memory_admitted(
         session.scalars(
             select(ResourceReservation)
             .where(
-                ResourceReservation.owner_kind == "fleet-profile",
                 ResourceReservation.owner_id == application.id,
                 ResourceReservation.node_id == node_id,
                 ResourceReservation.kind.in_(MEMORY_RESERVATION_KINDS),

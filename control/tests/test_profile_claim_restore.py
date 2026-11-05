@@ -5,7 +5,7 @@ from threading import Event, Thread
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import sessionmaker
 from vonk_control.admission_locking import (
     PATIENT_AFTER_RETRIES,
@@ -84,6 +84,18 @@ def _restore(sessions, application_id, now):
             now=now,
             memory_floor_bytes=FLOOR,
             inventory_max_age_seconds=300,
+        )
+
+
+def _waits_on_an_advisory_lock(engine) -> bool:
+    with engine.connect() as connection:
+        return bool(
+            connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_locks "
+                    "WHERE locktype = 'advisory' AND NOT granted"
+                )
+            )
         )
 
 
@@ -168,8 +180,12 @@ def test_a_concurrent_admission_and_a_restore_do_not_overcommit(
 
     restoring = Thread(target=restore)
     restoring.start()
-    restoring.join(timeout=2)
-    assert restoring.is_alive(), "the restore must wait for the node's key"
+    # Proof of waiting is the lock queue itself: the restore is a waiter on
+    # the node's advisory key while the other admission still holds it.
+    idle = Event()
+    while not idle.wait(1):
+        if _waits_on_an_advisory_lock(postgres_engine):
+            break
     may_commit.set()
     thread.join(timeout=30)
     restoring.join(timeout=30)
