@@ -7,21 +7,25 @@ and models in the catalog, cached sets and installations of other recipes.
 Rows are inserted directly; downloading a catalog takes minutes.
 
 Two worlds differ only in ``scale``. Whatever a request asks about the target
-must therefore cost the same in both.
+must therefore cost the same in both, built and asked under ``ordered_ids``.
 """
 
 from __future__ import annotations
 
 import copy
 import hashlib
+import itertools
 import json
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
+import pytest
 from sqlalchemy import create_engine, event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -67,6 +71,24 @@ INSTALLATIONS_PER_UNIT = 3
 CACHED_SETS_PER_UNIT = 13
 # The Spark's own store is node-local input and does not grow with history.
 SPARK_OBJECTS = 20
+
+
+@contextmanager
+def ordered_ids() -> Iterator[None]:
+    """``uuid.uuid4`` hands out increasing ids while the worlds exist.
+
+    SQLite steps once more when an index scan stops at the next entry than when
+    it runs off the end of the index. With random ids the target sorts at a
+    random place among the history, so a probe of its key range sometimes finds
+    no following entry: one step per probe, chance-dependent, at either scale.
+    The target is seeded first, so with increasing ids it sorts before all
+    history in every id-keyed index at both scales, and every row a check adds
+    sorts after all earlier rows: the same plan takes the same steps every run.
+    """
+    counter = itertools.count(1)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(uuid, "uuid4", lambda: uuid.UUID(int=next(counter), version=4))
+        yield
 
 
 def _hex(value: str) -> str:
