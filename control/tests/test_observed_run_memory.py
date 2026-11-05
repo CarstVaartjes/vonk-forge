@@ -167,6 +167,28 @@ def test_real_use_below_the_declaration_never_loosens_admission(tmp_path) -> Non
     assert plan.allowed and plan.nodes[0].required_memory_bytes == 225
 
 
+@pytest.mark.parametrize("freed", [0, 64])
+def test_memory_free_as_at_admission_is_no_use_and_the_upload_succeeds(
+    tmp_path, freed
+) -> None:
+    """Catches telemetry refused with HTTP 500 while a run holds its claim.
+
+    2026-11-05: an LTX job exited on spark-2297 while its claim was still
+    active. The Spark then reported more free memory than at admission, the
+    peak came out negative (-35913728 bytes), and the measured-peak insert hit
+    ``ck_measured_role_peaks_values``: the upload was refused with HTTP 500
+    on every retry until the batch was dropped. Equal or more free memory is
+    no use at all.
+    """
+    sessions, now, node, installation = setup(tmp_path, free_memory=_FREE)
+    _, observed = _serve(
+        sessions, now, node, installation, lowest_available=_FREE + freed
+    )
+    assert observed is None
+    with sessions() as session:
+        assert session.scalars(select(MeasuredRolePeak)).all() == []
+
+
 @pytest.mark.parametrize(
     ("other_claim", "attributed"),
     [(("recipe-build", "active"), False), (("fleet-profile", "promised"), True)],
