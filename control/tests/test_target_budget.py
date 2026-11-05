@@ -23,11 +23,18 @@ finding as a positive control. A new request-path review is added to
 ``TARGET_CHECKS``.
 
 Counted per check: statements, rows handed back by the driver, SQLite VM steps
-(so a scan inside SQL cannot hide behind a small result) and parses.
+of each statement (so a scan inside SQL cannot hide behind a small result) and
+parses. Both worlds are built and asked under ``ordered_ids``, so the measure
+is deterministic and must match exactly, statement by statement.
 
 Blind spot: bytes are not counted and SQLite ignores ``FOR UPDATE``. A read of
 the same rows that loads a 100 KB document where a column would do, or locks
 every row, is not seen here.
+
+Blind spot: a scan that stops early is seen only when the history lies before
+the target in its walk. ``ORDER BY id DESC LIMIT 1`` meets the target first
+(it sorts last under ``ordered_ids``), and so does ``LIMIT 1`` or ``EXISTS``
+without ``ORDER BY`` in rowid order, because the target is inserted first.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ import sys
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,7 +52,7 @@ import pydantic
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import event, select
+from sqlalchemy import event, func, select
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.artifact_reference_scan.image_references import (
     runtime_image_reference_findings,
@@ -72,7 +79,7 @@ from vonk_control.unused_storage_collection.common import spark_eviction_capacit
 from vonk_forge_contracts import read_recipe
 
 from .runtime_image_fixtures import place_test_image
-from .target_budget_world import SPARK_OBJECTS, World, _hex, build_world
+from .target_budget_world import SPARK_OBJECTS, World, _hex, build_world, ordered_ids
 from .test_fleet_model_removal_postgres import inventory
 from .test_recipe_image_availability import _runtime
 
@@ -290,7 +297,7 @@ class Cost:
     steps: int
     parses: dict[str, int]
     # Steps of each statement, in order, fetching its rows included.
-    per_statement: tuple[int, ...] = field(default=(), compare=False)
+    per_statement: tuple[int, ...] = ()
 
 
 def _count_parses(monkeypatch: pytest.MonkeyPatch, parses: Counter[str]) -> None:
@@ -362,16 +369,17 @@ def measure(world: World, monkeypatch: pytest.MonkeyPatch, check: TargetCheck) -
 @pytest.fixture(scope="module")
 def worlds(tmp_path_factory: pytest.TempPathFactory) -> Iterator[dict[int, World]]:
     root: Path = tmp_path_factory.mktemp("target-budget")
-    built = {}
-    for scale in (SMALL, LARGE):
-        home = root / f"x{scale}"
-        home.mkdir()
-        built[scale] = build_world(home, f"x{scale}", scale=scale)
-    try:
-        yield built
-    finally:
-        for world in built.values():
-            world.close()
+    with ordered_ids():
+        built = {}
+        for scale in (SMALL, LARGE):
+            home = root / f"x{scale}"
+            home.mkdir()
+            built[scale] = build_world(home, f"x{scale}", scale=scale)
+        try:
+            yield built
+        finally:
+            for world in built.values():
+                world.close()
 
 
 def _entries() -> list[object]:
@@ -412,26 +420,13 @@ def test_cost_of_a_target_does_not_grow_with_unrelated_history(
 
 
 def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
-    """Equal statements, rows and parses; each statement's steps within one.
+    """Equal statements, rows and parses, and equal steps in every statement.
 
-    A scan that stops at the end of its key range peeks one entry further when
-    another row follows, so one statement may differ by one step with no
-    growth in what it reads (random row ids made this flaky: 682 vs 683 steps
-    in ``uninstall_review``; seeding the ids only made it fail the same way
-    every time). The allowance is per statement, so a scan that grows with
-    history cannot hide in the sum of the others.
+    There is no allowance: under ``ordered_ids`` a scan of the target's key range
+    takes the same steps at both scales, so one step more is growth (within the
+    blind spots the module names).
     """
-    if (
-        large.statements != small.statements
-        or large.rows != small.rows
-        or large.parses != small.parses
-        or any(
-            abs(after - before) > 1
-            for before, after in zip(
-                small.per_statement, large.per_statement, strict=True
-            )
-        )
-    ):
+    if large != small:
         raise CostGrew(
             f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
         )
@@ -440,7 +435,7 @@ def _require_same_cost(name: str, small: Cost, large: Cost) -> None:
 def test_a_whole_profile_read_is_caught_by_the_budget(
     worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Negative control: a scan of every saved profile hides in no allowance.
+    """Negative control: a scan of every saved profile is caught.
 
     The injected read returns one row at both scales, so only its steps grow.
     """
@@ -488,6 +483,45 @@ def test_the_old_history_scan_of_measured_peaks_is_caught_by_the_budget(
     assert small.rows == large.rows
     with pytest.raises(CostGrew):
         _require_same_cost("injected", small, large)
+
+
+def test_a_forward_walk_that_stops_at_the_target_is_caught_by_the_budget(
+    worlds: dict[int, World], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative control: an id-index walk that stops at the target is caught.
+
+    ``id || ''`` keeps the index from seeking, so the walk visits every
+    installation that sorts before the target: all of the history. It returns
+    the target's one row at both scales, so only its steps grow.
+    """
+    inner = TARGET_CHECKS["node_keyed_lookup"]
+
+    def walking(world: World) -> object:
+        with world.engine.connect() as connection:
+            connection.exec_driver_sql(
+                "SELECT id FROM recipe_installations "
+                "WHERE id || '' = ? ORDER BY id LIMIT 1",
+                (world.target_installation,),
+            ).all()
+        return inner.run(world)
+
+    check = TargetCheck(walking)
+    small = measure(worlds[SMALL], monkeypatch, check)
+    large = measure(worlds[LARGE], monkeypatch, check)
+    assert small.rows == large.rows
+    with pytest.raises(CostGrew):
+        _require_same_cost("injected", small, large)
+
+
+@pytest.mark.parametrize("scale", [SMALL, LARGE])
+def test_the_target_sorts_after_its_history(
+    scale: int, worlds: dict[int, World]
+) -> None:
+    """What makes the measure exact: the target's ids come after all history."""
+    world = worlds[scale]
+    with world.sessions() as session:
+        last = session.scalar(select(func.max(RecipeInstallation.id)))
+    assert last == world.target_installation
 
 
 @pytest.mark.parametrize("scale", [SMALL, LARGE])
