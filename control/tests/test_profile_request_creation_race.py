@@ -44,7 +44,7 @@ def _effect_ids(sessions) -> tuple[tuple[str, ...], ...]:
 def test_concurrent_same_request_key_replays_one_typed_application(
     postgres_engine, monkeypatch
 ):
-    """Both requests miss replay before the authority lock serializes acceptance."""
+    """Both requests miss replay before the unique request key arbitrates acceptance."""
     sessions, api, _codec, headers, reviewed = _profile_api(postgres_engine)
     request_key = str(uuid4())
     body = {"request_key": request_key}

@@ -23,6 +23,7 @@ from ..fleet_profile_contract import (
     FleetProfilePreview,
     FleetProfileScope,
 )
+from ..identity_insert import insert_identity
 from ..lifecycle.evidence import Residue
 from ..lifecycle.fleet_profile import FleetProfileAdapter
 from ..lifecycle.types import State as _LifecycleState
@@ -256,8 +257,17 @@ class FleetProfileService:
                 created_at=created_at,
                 updated_at=now,
             )
-            session.add(row)
-            session.flush()
+            # The unique request key arbitrates two concurrent submissions of
+            # one request: the loser replays the winner's committed receipt.
+            row, created = insert_identity(session, row, key=("request_key",))
+            if not created:
+                return self._matching_application(
+                    row,
+                    session=session,
+                    profile_id=preview.profile_id,
+                    reviewed_digest=preview.plan_digest,
+                    actor=actor,
+                )
             # Pending applications are not authority. In particular, keeping
             # the prior selection in place makes failed admission cleanup FK-safe.
             return self._application_view(row)
