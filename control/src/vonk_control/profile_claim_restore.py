@@ -92,8 +92,10 @@ def restore_released_profile_claims(
 def _fits(session: Session, inventory: PlanInventory, node_id: str, kind: str) -> bool:
     """Whether the ledger, restored claims included, stays within the Spark.
 
-    Without a current inventory sample the Spark cannot be shown to fit, as in
-    the ordinary review: the load is planned again and waits there.
+    Only a shortfall the Spark's current inventory shows plans the load again.
+    Without a current sample nothing proves an overcommit, and a load whose
+    child is live is not stopped for want of evidence (the owners re-check
+    real capacity when the claims are consumed).
     """
     snapshot, evidence = inventory.read(node_id)
     if (
@@ -102,10 +104,10 @@ def _fits(session: Session, inventory: PlanInventory, node_id: str, kind: str) -
         or evidence.maximum_age_seconds is None
         or evidence.age_seconds > evidence.maximum_age_seconds
     ):
-        return False
+        return True
     if kind == "disk":
         if snapshot.disk_free_bytes is None:
-            return False
+            return True
         committed = sum(
             charge.amount_bytes
             for charge in outstanding_disk_charges(
@@ -142,13 +144,16 @@ def _fits(session: Session, inventory: PlanInventory, node_id: str, kind: str) -
 
 
 def _headroom(part: CapacitySnapshot) -> int:
-    """What the Spark has left after the claims and what it already holds."""
+    """What the Spark has left after the claims and what it already holds.
+
+    Nothing is shown for a pool it did not report, so that is not a shortfall.
+    """
     if (
         part.available_bytes is None
         or part.occupied_bytes is None
         or part.reserved_bytes is None
     ):
-        return -1
+        return 0
     return min(
         part.available_bytes - part.reserved_bytes,
         part.available_bytes - part.occupied_bytes - (part.unmaterialized_bytes or 0),
