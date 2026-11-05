@@ -314,10 +314,7 @@ def validate_profile_stop_owner(
 
     if require_current and (
         application.state != "running"
-        or profile_operation.state
-        not in job_states.words(
-            LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-        )
+        or profile_operation.state not in job_states.LIVE
         or (
             run.state not in {RunState.RUNNING, RunState.STARTING, RunState.STOPPING}
             and not (switch_stop and run.state == RunState.LOST)

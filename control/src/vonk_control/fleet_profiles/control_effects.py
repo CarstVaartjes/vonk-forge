@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     DesiredAssignmentState,
-    LifecycleState,
     ObservedAssignmentState,
     ProfileReasonCode,
 )
@@ -21,7 +20,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import job_states
+from .. import fleet_profile_states, job_states
 from ..fleet_profile_contract import (
     FleetProfileAssignment,
     FleetProfileEffects,
@@ -194,15 +193,7 @@ class FleetProfileService:
             # that case; the adapter waits for issued cancellation receipts
             # before publishing its final no-workload receipt.
             for pending in session.scalars(
-                select(Job).where(
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    )
-                )
+                select(Job).where(Job.state.in_(job_states.LIVE))
             ):
                 if _workload_intent_ordinal(pending) is None:
                     continue
@@ -222,13 +213,7 @@ class FleetProfileService:
                 changed_nodes.update(members)
             for pending in session.scalars(
                 select(FleetProfileApplication).where(
-                    FleetProfileApplication.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    FleetProfileApplication.state.in_(fleet_profile_states.LIVE),
                 )
             ):
                 if pending.id == excluded_application_id:

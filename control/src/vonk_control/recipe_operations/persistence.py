@@ -593,13 +593,7 @@ class PersistenceMixin:
                     .order_by(AgentOperation.node_id, AgentOperation.id)
                 )
             )
-            if session is not None
-            and job.state
-            in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.NEEDS_OPERATOR,
-            )
+            if session is not None and job.state in job_states.LIVE
             else ()
         )
         retry_due_at = min(

@@ -231,13 +231,7 @@ class RunObservationMixin:
                                 WireAgentOperation.RECIPE_STOP.value,
                             }
                         ),
-                        Job.state.in_(
-                            job_states.words(
-                                LifecycleState.QUEUED,
-                                LifecycleState.RUNNING,
-                                LifecycleState.NEEDS_OPERATOR,
-                            )
-                        ),
+                        Job.state.in_(job_states.LIVE),
                         Job.payload["owner_kind"].as_string() == "run",
                         Job.payload["owner_id"].as_string() == run.id,
                     )
