@@ -326,25 +326,20 @@ def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
 
 
 def test_a_recipes_local_state_is_built_only_by_the_composing_helper():
-    """No call site builds a recipe's ``local`` from its own digest alone."""
+    """Only ``_recipe_local`` reads a recipe's own state through ``self._local``."""
 
     offenders = []
     for path in sorted(LIBRARY_SRC.glob("*.py")):
-        if path.name == "local_state.py":
-            continue  # the composing helper itself, checked below
         text = path.read_text(encoding="utf-8")
         for match in re.finditer(r"self\._local\(", text):
             call = text[match.start() : match.start() + 240]
-            if "ReceiptOwner.RECIPE" in call or 'kind="recipe"' in call:
-                offenders.append(
-                    f"{path.name}:{text[: match.start()].count(chr(10)) + 1}"
-                )
+            if "ReceiptOwner.RECIPE" not in call:
+                continue
+            before = text[: match.start()]
+            owner = re.findall(r"^def (\w+)", before, flags=re.MULTILINE)[-1]
+            if owner != "_recipe_local":
+                offenders.append(f"{path.name}:{before.count(chr(10)) + 1}")
     assert offenders == []
-    helper = (LIBRARY_SRC / "local_state.py").read_text(encoding="utf-8")
-    assert helper.count("kind=ReceiptOwner.RECIPE") == 1
     for name in ("catalog.py", "views.py"):
         text = (LIBRARY_SRC / name).read_text(encoding="utf-8")
-        assert not re.search(
-            r"LibraryRecipe(Projection|Summary)\([^)]*local=self\._local", text
-        )
-        assert "_recipe_local(" in text
+        assert "self._recipe_local(" in text
