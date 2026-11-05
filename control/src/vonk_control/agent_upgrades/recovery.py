@@ -113,13 +113,7 @@ class RecoveryMixin:
                         Job.kind == "agent-upgrade",
                         Job.id == requested_id if requested_id is not None else true(),
                         or_(
-                            Job.state.in_(
-                                job_states.words(
-                                    LifecycleState.NEEDS_OPERATOR,
-                                    LifecycleState.RUNNING,
-                                    LifecycleState.QUEUED,
-                                )
-                            ),
+                            Job.state.in_(job_states.LIVE),
                             and_(
                                 Job.state == "failed",
                                 Job.status_reason == UNSUPPORTED_DISPATCH,

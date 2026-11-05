@@ -12,7 +12,6 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationNodeState,
     InstallationState,
-    LifecycleState,
     ReservationState,
     RunState,
     WaitReason,
@@ -300,13 +299,7 @@ class ActionPlansMixin:
                         WireAgentOperation.RECIPE_RECONCILE.value,
                     )
                 ),
-                Job.state.in_(
-                    job_states.words(
-                        LifecycleState.QUEUED,
-                        LifecycleState.RUNNING,
-                        LifecycleState.NEEDS_OPERATOR,
-                    )
-                ),
+                Job.state.in_(job_states.LIVE),
                 Job.payload["owner_id"].as_string() == installation_id,
             )
             .order_by(Job.id)
@@ -320,13 +313,7 @@ class ActionPlansMixin:
                 select(Job.id)
                 .where(
                     Job.kind == WireAgentOperation.RECIPE_RECONCILE.value,
-                    Job.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED,
-                            LifecycleState.RUNNING,
-                            LifecycleState.NEEDS_OPERATOR,
-                        )
-                    ),
+                    Job.state.in_(job_states.LIVE),
                     Job.payload["owner_id"].as_string() == installation_id,
                 )
                 .limit(1)

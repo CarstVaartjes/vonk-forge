@@ -32,7 +32,7 @@ from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
-from . import job_states
+from . import fleet_profile_states, job_states
 from .admission_locking import admitting
 from .content_identity import same_image
 from .fleet_profile_capacity_repair import (
@@ -297,12 +297,7 @@ def profile_memory_replacements(
         _validate_memory_claim(claim, application, decision.assignment_id, requirement)
         node = session.get(AgentNode, claim.node_id)
         if (
-            application.state
-            not in job_states.words(
-                LifecycleState.QUEUED,
-                LifecycleState.RUNNING,
-                LifecycleState.NEEDS_OPERATOR,
-            )
+            application.state not in fleet_profile_states.LIVE
             or node is None
             or progress.workload_intent_ordinal is None
             or node.workload_intent_ordinal != progress.workload_intent_ordinal
@@ -824,9 +819,7 @@ def _profile_assignment(
     tuple[FleetProfileResourceRequirement, ...],
 ]:
     application = session.get(FleetProfileApplication, application_id)
-    if application is None or application.state not in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-    ):
+    if application is None or application.state not in fleet_profile_states.LIVE:
         raise UnknownOutcomeError(
             "profile capacity owner is no longer active",
             reason=WaitReason.SCOPE_CHANGED,
@@ -1173,9 +1166,7 @@ def restore_released_profile_claims(
     Consumption re-checks real capacity, so a restored claim never admits more
     than the ordinary admission would.
     """
-    if application.state not in job_states.words(
-        LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.NEEDS_OPERATOR
-    ):
+    if application.state not in fleet_profile_states.LIVE:
         return
     claims = select(ResourceReservation).where(
         ResourceReservation.owner_kind == "fleet-profile",

@@ -21,6 +21,7 @@ from vonk_control.profile_capacity import (
     accepted_profile_runtime_image,
     inherited_profile_memory,
     profile_build_memory_claims,
+    release_unassigned_profile_claims,
 )
 from vonk_control.strict_json import read_stored_model
 
@@ -148,6 +149,59 @@ def test_a_missing_runtime_claim_reconstructs_only_the_accepted_requirement(
         assert claims[node_id].owner_id == application_id
         session.flush()
         assert len(claims) == 1
+    fresh = profiles.apply(receipt.profile_id, request_key=str(uuid4()), actor="admin")
+    assert fresh.id != receipt.id
+
+
+def test_the_child_of_a_backing_off_load_retakes_its_released_memory_claim(
+    tmp_path, postgres_engine
+):
+    """A load backing off for its retry is live: its child's run admission takes
+    back the memory promise that backing off released, instead of reading the
+    load as no longer active."""
+    sessions, profiles, _planner, node_id, application_id, selected = (
+        _accepted_build_profile(tmp_path, postgres_engine)
+    )
+    assert application_id is not None
+    receipt = profiles.application(application_id)
+    with sessions() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        accepted = read_stored_model(
+            FleetProfilePreview,
+            canonical_message(row.plan),
+            strict=True,
+            from_json=True,
+        )
+    requirement = accepted.admission_decisions[0].requirements[0]
+    assignment = accepted.resolved_assignments[0]
+    assert assignment.alias is not None
+    assert requirement.memory_kind is not None
+    assert requirement.memory_required_bytes is not None
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application_id)
+        assert row is not None
+        row.state = LifecycleState.BACKOFF.value
+        # Backing off releases what the load holds; the retry is admitted again.
+        release_unassigned_profile_claims(session, row, now=row.updated_at)
+        session.flush()
+        claims = inherited_profile_memory(
+            session,
+            application_id,
+            selected.recipe_revision_id,
+            assignment.alias,
+            {
+                node_id: (
+                    requirement.memory_kind,
+                    requirement.memory_required_bytes,
+                    requirement.memory_pool,
+                )
+            },
+            workload_intent_ordinal=receipt.progress.workload_intent_ordinal,
+        )
+        assert claims[node_id].owner_id == application_id
+        assert claims[node_id].state == ReservationState.PROMISED
+        assert claims[node_id].released_at is None
     fresh = profiles.apply(receipt.profile_id, request_key=str(uuid4()), actor="admin")
     assert fresh.id != receipt.id
 

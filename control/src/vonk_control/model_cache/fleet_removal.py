@@ -23,6 +23,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_forge_contracts import ModelDefinition
 
+from .. import job_states
 from ..admission_locking import (
     AdmissionRowLock,
     ConstraintReplay,
@@ -755,11 +756,12 @@ class FleetRemovalMixin:
                         select(Job).where(Job.request_id == child_key)
                     )
                     if child is not None:
-                        if child.state in {
-                            LifecycleState.FAILED,
-                            LifecycleState.CANCELLED,
-                            LifecycleState.NEEDS_OPERATOR,
-                        }:
+                        # A live uninstall (any state that has not ended) is
+                        # its worker's; a succeeded one shows as uninstalled
+                        # on the next pass.
+                        if child.state not in job_states.LIVE and not (
+                            job_states.means(child.state, LifecycleState.SUCCEEDED)
+                        ):
                             cache._defer_model_removal(
                                 operation_id,
                                 detail=f"Uninstall {child.id} ended {child.state}; inspect its receipt before a fresh request.",

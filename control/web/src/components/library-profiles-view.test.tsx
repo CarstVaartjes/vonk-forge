@@ -673,3 +673,43 @@ test("preserves legitimate wide byte progress while presenting its ratio", async
   expect(completed.value).toBe("9007199254740992");
   expect(total.value).toBe("18014398509481984");
 });
+
+test("a profile in maintenance wait shows the deadline and resume condition the CLI shows", async () => {
+  const maintenance_wait = {
+    owner: { kind: "run-switch", id: "22222222-2222-4222-8222-222222222222" },
+    owner_kind: "run-switch",
+    reason: "run-switch.inventory-unknown",
+    blockers: [
+      {
+        code: "run-switch.inventory-unknown",
+        detail: "No authenticated Spark inventory is available.",
+        severity: "error",
+        node_ids: [nodeA],
+      },
+    ],
+    first_blocked_at: "2026-09-29T11:00:00+00:00",
+    last_progress_at: null,
+    dependency_deadline: "2026-09-29T13:00:00+00:00",
+    resume_condition: "effect-observed",
+    next_check: "2026-09-29T12:00:00+00:00",
+  } satisfies NonNullable<FleetProfile["maintenance_wait"]>;
+  const api = apiFor({
+    profiles: vi.fn(async () => ({
+      generated_at: "2026-09-10T00:00:00Z",
+      profiles: [{ ...profile, maintenance_wait }],
+    })),
+  });
+  render(<LibraryProfilesView api={api} entries={[]} onNavigate={vi.fn()} />);
+  const list = await screen.findByRole("list", { name: "Waiting for" });
+  expect(within(list).getByText("run-switch.inventory-unknown")).toBeVisible();
+  expect(within(list).getByText(/Next attempt/)).toBeVisible();
+  expect(within(list).getByText(/Dependency deadline/)).toBeVisible();
+  expect(within(list).getByText("Resumes when effect-observed")).toBeVisible();
+  expect(screen.getByText("Recovery reason: run-switch.inventory-unknown")).toBeVisible();
+});
+
+test("a profile without a maintenance wait shows no waiting list", async () => {
+  render(<LibraryProfilesView api={apiFor()} entries={[]} onNavigate={vi.fn()} />);
+  expect((await screen.findAllByText("Profile 2 · Coding"))[0]).toBeVisible();
+  expect(screen.queryByRole("list", { name: "Waiting for" })).toBeNull();
+});

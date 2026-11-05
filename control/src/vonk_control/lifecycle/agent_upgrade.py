@@ -56,7 +56,7 @@ from .types import (
 KIND = "agent-upgrade"
 _MAX_REASON = 512
 #: Stored states a rollout can still advance from.
-LIVE_STATES = job_states.words(State.QUEUED, State.RUNNING, State.NEEDS_OPERATOR)
+LIVE_STATES = job_states.LIVE
 _STORED = {
     State.QUEUED: "queued",
     State.RUNNING: "running",

@@ -1343,6 +1343,49 @@ def test_newer_parked_profile_load_retires_older_parked_intent(
     assert second.progress.workload_intent_ordinal == 2
 
 
+def test_newer_parked_profile_load_retires_older_backing_off_load(
+    monkeypatch,
+) -> None:
+    """A load backing off for a retry is live: a newer load on its Sparks retires it.
+
+    Left out of the newer load's view, the older load's retry fires once it is
+    due and contends with the newer intent for the same Sparks (the newest
+    request steers).
+    """
+
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    now = [NOW]
+    service = FleetProfileService(
+        sessions, clock=lambda: now[0], switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    first = service.apply(profile.id, request_key=_uuid(978), actor="admin")
+    assert first.progress.workload_intent_ordinal == 1
+    # Its run failed and the Controller retries it later: it backs off.
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, first.id)
+        assert row is not None
+        row.state = LifecycleState.BACKOFF.value
+        row.next_action_at = NOW + timedelta(hours=1)
+
+    def stay_busy(self, reviewed, **kwargs):
+        raise FleetProfileAdmissionBusy("test admission owner")
+
+    monkeypatch.setattr(FleetProfileService, "_queue_application", stay_busy)
+    now[0] += timedelta(seconds=1)
+    second = service.apply(profile.id, request_key=_uuid(979), actor="admin")
+    assert second.state == "queued"
+    assert service.tick() is True
+
+    first = service.application(first.id)
+    second = service.application(second.id)
+    assert first.state == "superseded", first.state
+    assert first.progress.supersede_code == SupersedeCode.SUPERSEDED_BY_INTENT
+    assert first.next_attempt_at is None
+    assert second.progress.workload_intent_ordinal == 2
+
+
 @pytest.mark.parametrize("old_state", ["failed", "queued", "running"])
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_new_load_is_independent_of_invalid_historical_progress(old_state: str) -> None:
