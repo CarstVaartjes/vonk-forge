@@ -1382,11 +1382,11 @@ def test_inventory_identity_conflict_answers_422(agent_system) -> None:
         "memory_pool": "separate",
         "artifact_store_read_only": False,
         "capabilities": ["runtime.vonk.v1"],
+        "nvidia_driver_version": "580.65.06",
+        "container_runtime_version": "28.3.3",
     }
-    assert (
-        client.post("/agent/inventory", headers=headers, json=payload).status_code
-        == 204
-    )
+    first = client.post("/agent/inventory", headers=headers, json=payload)
+    assert first.status_code == 204, first.text
     changed = payload | {"disk_free_bytes": 600}
     assert (
         client.post("/agent/inventory", headers=headers, json=changed).status_code
@@ -2720,6 +2720,8 @@ def test_persisted_certificate_state_is_checked_on_every_agent_request(
 
 
 def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
+    # A result for another node's fence is an authority edge (403), not a
+    # verdict on the request's own bytes.
     client, services, _, clock = agent_system
     services.operations.enqueue(
         parent(services.sessions, clock).id,
@@ -2737,7 +2739,7 @@ def test_fence_and_cross_node_result_updates_are_denied(agent_system) -> None:
         client.post(
             "/agent/result", headers=agent_headers(NODE_B, "serial-b"), json=foreign
         ).status_code
-        == 422
+        == 403
     )
     stale = {
         **result,

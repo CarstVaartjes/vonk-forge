@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     AgentEvidenceCode,
+    AgentProtocolError,
     InvalidRequestError,
     SecurityRefusalError,
     SignedHostHelperGrant,
@@ -111,9 +112,9 @@ _LOGGER = logging.getLogger("vonk_control.agent_api")
 
 def is_contract_verdict(error: Exception) -> bool:
     """True when the ValueError refuses the request's own bytes (answered 422)."""
-    return isinstance(error, ValidationError | InvalidRequestError) and not isinstance(
-        error, SecurityRefusalError | UnknownOutcomeError
-    )
+    return isinstance(
+        error, ValidationError | InvalidRequestError | AgentProtocolError
+    ) and not isinstance(error, SecurityRefusalError | UnknownOutcomeError)
 
 
 def contract_verdict_or_wait(error: Exception) -> NoReturn:
