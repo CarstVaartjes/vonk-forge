@@ -18,15 +18,18 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.agent_words import ProgressPhase
+from vonk_agent_protocol.http_failure import TransientReason
 
 from ..distribution import DistributionError, DistributionUnknown
 from ..download_contract import download_responses, upload_request_body
+from ..http_errors import temporary_http_answer
 from ..models import RecipeBuild
 from ..operator_acceptance import ReceiptPolicy, operator_acceptance
 from ..runtime_image_preparation import IMAGE_CACHE_DIRECTORY
 from ..strict_json import _retry_later_response
 from .common import (
     _DISTRIBUTION_ERROR_CODE,
+    _LOGGER,
     AgentApiServices,
     RecipeImageUploadHeaders,
     RecipeImageUploadStatus,
@@ -257,9 +260,11 @@ def install_artifacts_routes(
                 build.image_bytes = headers.image_bytes
                 build.updated_at = _now(required.clock())
         except PermissionError:
-            raise HTTPException(
-                status_code=403, detail="upload storage access denied"
-            ) from None
+            _LOGGER.warning(
+                "Controller storage needs operator attention: access denied %s",
+                temporary,
+            )
+            temporary_http_answer(TransientReason.STORAGE_UNAVAILABLE)
         except OSError:
             raise UnknownOutcomeError(
                 "upload storage observation is unavailable",

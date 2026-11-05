@@ -2203,6 +2203,38 @@ def test_new_agent_facing_422_is_flagged(probe: str) -> None:
     assert check_source(path, probe, {line}, modes=("agent-422",))
 
 
+def test_agent_422_guard_flags_positional_and_split_422() -> None:
+    path = "control/src/vonk_control/agent_api/observations.py"
+    assert check_source(
+        path, "raise HTTPException(422, 'x')\n", {1}, modes=("agent-422",)
+    )
+    split = "raise HTTPException(\n    422,\n    'x',\n)\n"
+    assert check_source(path, split, {1, 2}, modes=("agent-422",))
+
+
+def test_agent_422_guard_flags_any_handler_that_answers_422() -> None:
+    # Wrong implementation: any caught exception, however far down the handler
+    # body, answers 422 and the Spark discards the evidence.
+    path = "control/src/vonk_control/agent_api/observations.py"
+    probe = (
+        "try:\n"
+        "    work()\n"
+        "except ValueError as error:\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    log(error)\n"
+        "    raise HTTPException(status_code=422, detail=str(error)) from None\n"
+    )
+    hits = check_source(path, probe, {3}, modes=("agent-422",))
+    assert any("except handler" in hit for hit in map(str, hits))
+    routed = (
+        "try:\n    work()\n"
+        "except ValueError as error:\n    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
+
+
 def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
     marked = "raise HTTPException(status_code=422)  # 422-verdict: body validation\n"
     path = "control/src/vonk_control/agent_api/observations.py"
@@ -2212,6 +2244,66 @@ def test_agent_422_guard_allows_marked_verdicts_and_other_places() -> None:
         "control/src/vonk_control/library_api.py", other, {1}, modes=("agent-422",)
     )
     assert not check_source(path, other, set(), modes=("agent-422",))
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        (
+            "except (EnrollmentDenied, ValueError) as error:\n"
+            "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+        ),
+        (
+            "except (\n    EnrollmentDenied,\n    ValueError,\n) as error:\n"
+            "    raise SecurityHTTPError(status_code=401, detail='x')\n"
+        ),
+        "except OSError:\n    raise HTTPException(403, 'x')\n",
+    ],
+)
+def test_broad_exception_may_not_answer_401_or_403(handler: str) -> None:
+    # Wrong implementation: an internal ValueError answered 403 and the Spark's
+    # agent exited (fatal 401/403) instead of retrying.
+    path = "control/src/vonk_control/agent_api/authority.py"
+    assert check_source(path, "try:\n    work()\n" + handler, {3}, modes=("agent-422",))
+
+
+def test_comment_after_except_header_does_not_hide_the_handler() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except ValueError:  # internal\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {3}, modes=("agent-422",))
+
+
+def test_a_403_added_into_an_existing_broad_handler_is_flagged_on_its_own_line() -> (
+    None
+):
+    path = "control/src/vonk_control/agent_api/authority.py"
+    source = (
+        "try:\n    work()\n"
+        "except (KeyError, TypeError, ValueError):\n"
+        "    raise HTTPException(status_code=403, detail='x')\n"
+    )
+    assert check_source(path, source, {4}, modes=("agent-422",))
+    assert not check_source(path, source, {1}, modes=("agent-422",))
+
+
+def test_typed_security_refusal_may_answer_403() -> None:
+    path = "control/src/vonk_control/agent_api/authority.py"
+    typed = (
+        "try:\n    work()\n"
+        "except EnrollmentDenied as error:\n"
+        "    raise HTTPException(status_code=403, detail=str(error)) from None\n"
+    )
+    assert not check_source(path, typed, {3}, modes=("agent-422",))
+    routed = (
+        "try:\n    work()\n"
+        "except (EnrollmentDenied, ValueError) as error:\n"
+        "    contract_verdict_or_wait(error)\n"
+    )
+    assert not check_source(path, routed, {3}, modes=("agent-422",))
 
 
 @pytest.mark.parametrize(

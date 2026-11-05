@@ -12,12 +12,13 @@ from datetime import UTC, datetime, timedelta
 from pydantic import field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
+from .categorized_errors import InvalidValue
 from .dialect_insert import dialect_insert
 from .installed_bytes import reconcile_missing_installations, refresh_installed_bytes
 from .inventory_items_contract import InventorySnapshotKind
@@ -144,8 +145,9 @@ class InventoryRepository:
                     )
                 ).one()
                 if existing.evidence_digest != digest:
-                    raise ValueError(
-                        "inventory identity already binds different evidence"
+                    raise InvalidValue(
+                        "inventory identity already binds different evidence",
+                        reason=InvalidRequestReason.CONFLICT,
                     )
                 return existing
             retained_report = _validated_inventory(row, observed_at=value.observed_at)

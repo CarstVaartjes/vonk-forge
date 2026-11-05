@@ -81,6 +81,7 @@ from .common import (
     _require_services,
     _scope_identity,
     _validated_authenticated_source,
+    contract_verdict_or_wait,
 )
 from .ended_runs import reopen_ended_runs_still_running
 
@@ -145,7 +146,7 @@ def install_observations_routes(
         except StaleAgentAttempt as error:
             raise HTTPException(status_code=409, detail=str(error)) from None
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         if result is None:
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         encoded_claim = canonical_message(AgentClaim.model_validate(result))
@@ -212,7 +213,7 @@ def install_observations_routes(
                 ),
             )
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         request.state.inventory_acceptance = InventoryAcceptance(
             snapshot.id, snapshot.evidence_digest
         )
@@ -277,7 +278,7 @@ def install_observations_routes(
                 body.samples,
             )
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     @agent.post("/recipe-runs/observations", status_code=status.HTTP_204_NO_CONTENT)
@@ -516,7 +517,7 @@ def install_observations_routes(
             # newer authorized intent supersedes it; the next page replans.
 
         except ValueError as error:
-            raise HTTPException(status_code=422, detail=str(error)) from None
+            contract_verdict_or_wait(error)
         request.state.observation_acceptance = ObservationAcceptance(
             tuple(observed_nodes)
         )
