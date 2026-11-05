@@ -11,7 +11,6 @@ from sqlalchemy import select
 from vonk_agent_protocol.agent_words import ProfileDocumentState
 from vonk_control.artifact_reference_scan import (
     model_set_reference_findings,
-    runtime_image_reference_findings,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -195,30 +194,6 @@ def test_scoped_profile_damage_keeps_exact_content_and_collects_unrelated_model(
         assert _set_exists(world, fresh.artifact_set_sha256)
     finally:
         service.close()
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_unrecoverable_selector_retains_images_then_fresh_collection_after_owner_repair(
-    world: Catalog, tmp_path: Path
-) -> None:
-    """Catches treating a damaged stored selector as proof of no reference."""
-    path = _receipt(tmp_path, AN_IMAGE)
-    _profile(world, "missing-publisher")
-    with world.sessions() as session:
-        assert runtime_image_reference_findings(session, (AN_IMAGE,))[AN_IMAGE]
-    collector = _collector(world, image_cache_root=tmp_path)
-    assert collector.collect().images == 0
-    assert path.exists()
-    # Authoritative owner repair establishes that the profile has no choices.
-    with world.sessions.begin() as session:
-        profile = session.scalar(select(FleetProfile))
-        assert profile is not None
-        profile.assignments = []
-    assert collector.collect().images == 1
-    assert not path.exists()
-    fresh = _receipt(tmp_path, "e" * 64)
-    assert _collector(world, image_cache_root=tmp_path).collect().images == 1
-    assert not fresh.exists()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

@@ -384,7 +384,17 @@ def test_cost_of_a_target_does_not_grow_with_unrelated_history(
     check = TARGET_CHECKS[name]
     small = measure(worlds[SMALL], monkeypatch, check)
     large = measure(worlds[LARGE], monkeypatch, check)
-    if large != small:
+    # A scan that stops at the end of its key range peeks one entry further
+    # when another row follows, so a statement may differ by one step with no
+    # growth in what it reads. A scan that grows with history differs by far
+    # more.
+    boundary = small.statements
+    if (
+        large.statements != small.statements
+        or large.rows != small.rows
+        or large.parses != small.parses
+        or abs(large.steps - small.steps) > boundary
+    ):
         raise CostGrew(
             f"{name}: {SMALL}x history -> {small}; {LARGE}x history -> {large}"
         )

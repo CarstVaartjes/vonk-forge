@@ -53,11 +53,6 @@ COLLECTOR_FUNCTIONS = {
     "control/src/vonk_control/model_cache/inventory.py": frozenset(
         {"_refresh_protection"}
     ),
-    # Resolves each saved profile's recipe, as a download would; the saved
-    # recipes are the protected work the budget lets grow linearly.
-    "control/src/vonk_control/artifact_reference_scan/model_references.py": frozenset(
-        {"model_set_reference_findings"}
-    ),
 }
 # Readers that load or parse the whole collection to answer for any target.
 WHOLE_COLLECTION_READERS = frozenset(

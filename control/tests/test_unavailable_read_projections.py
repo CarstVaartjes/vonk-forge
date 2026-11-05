@@ -7,7 +7,7 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from vonk_agent_protocol import ProfileReasonCode
@@ -85,7 +85,12 @@ def test_profile_mutation_routes_isolate_damaged_saved_definition(
     replacement = service.definition_number(profile.number).definition
     assert replacement is not None
     with sessions.begin() as session:
-        setattr(session.get_one(FleetProfile, profile.id), field, value)
+        # Past the recipe projection, as damage reaches a stored row.
+        session.execute(
+            update(FleetProfile)
+            .where(FleetProfile.id == profile.id)
+            .values({field: value})
+        )
     base = f"/api/profile/{profile.number}"
     path = base
     method = "PUT" if action == "save" else "POST"
@@ -164,7 +169,10 @@ def test_corrupt_saved_definition_does_not_become_empty_or_hide_other_profiles(
         row = session.scalar(select(FleetProfile).where(FleetProfile.number == 1))
         assert row is not None
         row_id = row.id
-        setattr(row, field, value)
+        # Past the recipe projection, as damage reaches a stored row.
+        session.execute(
+            update(FleetProfile).where(FleetProfile.id == row_id).values({field: value})
+        )
 
     definition = client.get("/api/profile/1/definition", headers=headers)
     assert definition.status_code == 200, definition.text

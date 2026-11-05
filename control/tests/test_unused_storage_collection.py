@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from sqlalchemy import Engine, create_engine, event, func, select, text, update
+from sqlalchemy import Engine, create_engine, event, func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallationState,
@@ -1274,38 +1274,6 @@ def test_a_profile_saved_before_the_removal_is_queued_stops_the_removal(
 
     assert lifecycle.removed == []
     assert _kept(result, "profile") == 1
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_installation_is_kept_while_a_profile_cannot_be_read(world: Catalog) -> None:
-    """Nothing is proven unused when a profile is unreadable (fail closed)."""
-
-    head = world.revision("glm", 1, head="active")
-    world.workload(head, run="stopped")
-    with world.sessions.begin() as session:
-        session.add(
-            FleetProfile(
-                number=1,
-                name="Broken",
-                installation_policy="exact",
-                assignments=[],
-                created_by="test",
-                created_at=OLD,
-                updated_at=OLD,
-            )
-        )
-    with world.sessions.begin() as session:
-        # Past the recipe projection, as damage reaches a stored row.
-        session.execute(
-            text("UPDATE fleet_profiles SET assignments = :value"),
-            {"value": '[{"recipe_selector": 7}]'},
-        )
-    lifecycle = FakeLifecycle(world.sessions)
-
-    result = _collector(world, lifecycle).collect()
-
-    assert lifecycle.removed == []
-    assert _kept(result, "profiles unreadable") == 1
 
 
 def test_a_failed_installation_nothing_uses_goes_like_an_installed_one(

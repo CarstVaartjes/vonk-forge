@@ -59,6 +59,7 @@ from collections import Counter
 from collections.abc import Callable, Collection, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import Select, and_, delete, exists, false, or_, select, text
@@ -773,11 +774,15 @@ def operation_tokens(
 
     def live(state, updated, subject=LifecycleSubject.JOB):
         ended = stored_words(subject, TERMINAL_LIFECYCLE_STATES)
-        return (
-            state.not_in(ended)
-            if window is None
-            else or_(state.not_in(ended), updated >= window)
+        # Not ended, spelled as ranges so the state index answers it; a word
+        # outside the vocabulary is still not ended.
+        ordered = sorted(set(ended))
+        unended = or_(
+            state < ordered[0],
+            *(and_(state > low, state < high) for low, high in pairwise(ordered)),
+            state > ordered[-1],
         )
+        return unended if window is None else or_(unended, updated >= window)
 
     selected = session.scalar(select(FleetProfileSelection.application_id))
     sources = (
