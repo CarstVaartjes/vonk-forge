@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 )
 
 from .. import model_cache_states
+from ..admission_locking import admitting
 from ..agent_operation_facts import aware as _aware
 from ..bounded_json import require_integer, require_mapping, require_sequence
 from ..categorized_errors import InvalidValue
@@ -174,8 +175,9 @@ class RepairMixin:
                     created_at=now,
                     updated_at=now,
                 )
-                session.add(operation)
-                session.flush()
+                with admitting():
+                    session.add(operation)
+                    session.flush()
                 operation_id = operation.id
         return cache.get_operation(operation_id)
 

@@ -22,7 +22,6 @@ from vonk_agent_protocol import (
     OperatorActionName,
 )
 
-from ..admission_locking import refuse_defect
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -300,7 +299,6 @@ class DownloadMixin:
     def _reference_unknown(
         error: ArtifactLifecycleError | ModelCacheConflictUnknown | DBAPIError,
     ) -> NoReturn:
-        refuse_defect(error)
         if isinstance(error, ArtifactLifecycleError):
             raise _reference_error_type(error)(
                 error.code,

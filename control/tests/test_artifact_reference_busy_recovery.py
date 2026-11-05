@@ -236,3 +236,5 @@ def test_busy_wait_deadline_survives_restart_and_expires(
     assert ended.state in {LifecycleState.OBSERVING, LifecycleState.CANCELLED}
     assert ended.failure_evidence is not None
     assert ended.failure_evidence.code == RecipeImageCode.PREPARATION_EXHAUSTED
+    # The budget ending is not the cause: the last attempt's failure stays.
+    assert ArtifactLifecycleCode.REFERENCE_BUSY.value in ended.failure_evidence.detail

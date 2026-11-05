@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.http_failure import TransientReason
 
 from .. import model_cache_states
+from ..admission_locking import admitting
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.model_cache import ModelCacheAdapter
 from ..model_cache_contract import (
@@ -150,8 +151,9 @@ class RetryMixin:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(operation)
-            session.flush()
+            with admitting():
+                session.add(operation)
+                session.flush()
             return cache._operation_view(operation)
 
     def check_access_and_resume(
@@ -279,8 +281,9 @@ class RetryMixin:
                 created_at=now,
                 updated_at=now,
             )
-            session.add(operation)
-            session.flush()
+            with admitting():
+                session.add(operation)
+                session.flush()
             cache._lifecycle.reopen(previous, now)
             cache._lifecycle.settle(
                 previous,

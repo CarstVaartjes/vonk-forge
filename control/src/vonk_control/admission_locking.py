@@ -345,24 +345,6 @@ def admitting() -> Iterator[None]:
         raise ConstraintDefect(constraint, sqlstate) from None
 
 
-def refuse_defect(error: BaseException) -> None:
-    """Raise ``ConstraintDefect`` when ``error`` is a deterministic violation.
-
-    A check, foreign-key, not-null or unregistered-unique violation (SQLSTATE
-    class 23) repeats on every attempt: a loop that retries database errors
-    until its budget ends calls this first, so the failure names its constraint
-    and SQLSTATE instead of being retried as "observation budget exhausted".
-    A registered unique key (REPLAN or REPLAY) stays with its own caller.
-    Returns for every other error.
-    """
-
-    if not isinstance(error, IntegrityError):
-        return
-    conflict, constraint, sqlstate = _decided(error)
-    if conflict is Conflict.DEFECT:
-        raise ConstraintDefect(constraint, sqlstate) from error
-
-
 def _decided(error: IntegrityError) -> tuple[Conflict, str, str | None]:
     """The decision, with its evidence: constraint name and SQLSTATE.
 

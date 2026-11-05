@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import Text, cast, func, select
-from sqlalchemy.exc import IntegrityError
-from vonk_control.admission_locking import ConstraintDefect
+from sqlalchemy import Text, cast, create_engine, func, select
+from sqlalchemy.exc import DataError
+from sqlalchemy.orm import sessionmaker
+from vonk_agent_protocol import LifecycleState, RecipeImageCode
+from vonk_control.admission_locking import ConstraintDefect, admitting
 from vonk_control.lifecycle.model_cache import ModelCacheAdapter
-from vonk_control.model_cache.download import DownloadMixin
-from vonk_control.models import ModelCacheOperation
-from vonk_control.operation_contract import AvailabilityOperationFailure
-from vonk_control.recipe_image_availability.scheduling import _exhausted
+from vonk_control.models import Base, ModelCacheOperation
+from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 
 from .test_model_cache import _artifact, cache  # noqa: F401
+from .test_recipe_image_availability import (
+    Transport,
+    _add_revision,
+    _download_preview,
+    _manifest,
+    _recipe,
+    _runtime,
+    _service,
+)
 
 _OLD_PAYLOAD_CAP = 262144
 _MODEL = "b" * 64
@@ -93,18 +105,90 @@ def test_a_check_violation_during_admission_is_a_typed_failure_at_once(
     assert len(attempts) == 1
 
 
-def test_a_reference_observation_names_an_integrity_error() -> None:
-    error = IntegrityError("INSERT", {}, Exception("CHECK constraint failed: x"))
-    with pytest.raises(ConstraintDefect):
-        DownloadMixin._reference_unknown(error)
+def test_a_non_contention_database_error_during_admission_is_not_retried(
+    cache,  # noqa: F811
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _sessions = cache
+    calls: list[object] = []
+
+    def broken(**fields):
+        calls.append(fields)
+        raise DataError("INSERT", {}, Exception("value too long"))
+
+    monkeypatch.setattr(ModelCacheAdapter, "new_operation", staticmethod(broken))
+    with pytest.raises(DataError):
+        _start(
+            service,
+            _files(tmp_path, 1),
+            "00000000-0000-4000-8000-0000000000a3",
+        )
+    assert len(calls) == 1
 
 
-def test_the_exhausted_failure_keeps_the_last_attempts_cause() -> None:
-    last = AvailabilityOperationFailure(
-        code="model_child_failed", detail="payload column refused the manifest"
+def test_a_refused_model_queue_request_ends_the_preparation_with_its_detail(
+    tmp_path: Path,
+) -> None:
+    recipe = _recipe("recipe-source-build.json")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    with sessions.begin() as session:
+        _add_revision(session, "revision-refused", recipe)
+    starts: list[object] = []
+
+    class ModelCache:
+        def download_preview(self, **_: object) -> dict[str, object]:
+            return _download_preview(
+                plan_digest="d" * 64, artifact_set_sha256="c" * 64, new_bytes=100
+            )
+
+        def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
+            return SimpleNamespace(
+                digest="c" * 64,
+                document=lambda: _manifest(model_content_digests=["d" * 64]),
+            )
+
+        def reusable_operation(self, **_: object) -> None:
+            return None
+
+        def start_download(self, **_: object) -> object:
+            # A real check violation, decided by the shared classification.
+            starts.append(object())
+            now = datetime.now(UTC)
+            with admitting(), sessions.begin() as session:
+                session.add(
+                    ModelCacheAdapter.new_operation(
+                        request_key=str(uuid.uuid4()),
+                        schema_version=2,
+                        kind="download",
+                        attempt=0,
+                        payload={},
+                        progress={},
+                        actor="test",
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+            raise AssertionError("the violation must have been raised")
+
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (recipe, _runtime()),
+        transport=Transport(),
+        model_cache=ModelCache(),
+        clock=lambda: datetime.now(UTC),
     )
-    kept = _exhausted(last)
-    assert kept.code != last.code
-    assert "model_child_failed" in kept.detail
-    assert "payload column refused the manifest" in kept.detail
-    assert _exhausted(kept) == kept
+    queued = service.start("revision-refused", actor="operator", request_id="r" * 36)
+    assert service.run_pending() == 1
+    ended = service.get(queued.id)
+    assert ended.state == LifecycleState.FAILED, ended.failure_evidence
+    assert ended.failure_evidence is not None
+    assert ended.failure_evidence.code == RecipeImageCode.MODEL_CACHE_INVALID
+    assert ended.failure_evidence.retryable is False
+    assert "ck_model_cache_operations_attempt" in ended.failure_evidence.detail
+    # It stopped resending: nothing more to run, one request was made.
+    assert service.run_pending() == 0
+    assert len(starts) == 1

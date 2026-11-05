@@ -20,6 +20,7 @@ from vonk_agent_protocol import (
     ModelCacheCode,
 )
 
+from ..admission_locking import admitting
 from ..artifact_lifecycle import (
     ArtifactIdentity,
     ArtifactLifecycleError,
@@ -331,8 +332,9 @@ class RemovalAcceptanceMixin:
             created_at=now,
             updated_at=now,
         )
-        session.add(operation)
-        session.flush()
+        with admitting():
+            session.add(operation)
+            session.flush()
         if not selected and not defer_scope and fleet is None:
             cache._finish_model_removal_in_session(session, operation, now=now)
         return operation

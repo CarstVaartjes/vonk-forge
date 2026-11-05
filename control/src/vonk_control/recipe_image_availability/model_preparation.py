@@ -6,6 +6,8 @@ import uuid
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
+    InvalidRequestError,
+    InvalidRequestReason,
     LifecycleState,
     OperationProgress,
     ProgressPhase,
@@ -37,7 +39,9 @@ from ..recipe_image_availability_reader_contract import (
 from .contracts import (
     ModelCacheOperationHandle,
     RecipeImageAvailabilityError,
+    RecipeImageAvailabilityInvalid,
     RecipeImageAvailabilityUnknown,
+    _failure_detail,
     _ModelQueueFailed,
     _progress,
     _read,
@@ -167,6 +171,17 @@ def _ensure_model_child(
         raise
     except SecurityRefusalError:
         raise
+    except InvalidRequestError as error:
+        # The cache refused the request itself (a violated constraint, an
+        # out-of-contract plan): resending it repeats the refusal, so it ends
+        # the preparation with its detail instead of becoming a retry.
+        raise RecipeImageAvailabilityInvalid(
+            RecipeImageCode.MODEL_CACHE_INVALID,
+            "exact Model artifact preparation was refused "
+            f"({_failure_detail(error)[:200]})",
+            retryable=False,
+            reason=InvalidRequestReason.CONFLICT,
+        ) from error
     except Exception as error:
         raise _ModelQueueFailed(
             error, "exact Model artifact preparation could not be queued"
