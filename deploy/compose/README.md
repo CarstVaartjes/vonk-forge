@@ -175,7 +175,7 @@ measured guarantee of storage throughput. Local shell tests prove timeout and
 execution after staging; hosted Compose tests separately prove Docker restart
 and actual PostgreSQL readiness.
 
-## NAS daemon platform-image retention
+## NAS daemon platform-image retention and network repair
 
 `image-janitor` is an independent, stdlib-only Python service using the reviewed
 slim Python image. It alone mounts the NAS Docker socket; neither Controller
@@ -201,6 +201,19 @@ removes containers or volumes. Logs include every exclusion/grace refusal and
 Docker's exact deletion receipts. Reported image size includes shared layers
 and is not a measurement of freed disk space. Failed scans leave health stale;
 the healthcheck reports unhealthy after two hours without a successful scan.
+
+The same process repairs lost network attachments of its own Compose project
+every 30 seconds. After a NAS OS update the daemon has recreated a network (new
+ID) or lost a container's endpoint while keeping the container's record: Caddy
+then ran without `ingress`, so its published `:8443` was closed. `compose up`
+does not repair this (it starts a stopped container as-is and checks networks
+only on running ones) and a restart reuses the record. The janitor compares
+each container's recorded networks with the daemon's networks; a broken entry is
+re-attached by name with its recorded aliases, stopping the container first if
+it runs, then starting it again. A container whose last start failed is started
+again while its restart policy says it should run; a manual stop is left alone.
+A network that does not exist yet waits for the next `compose up` to create it.
+Containers sharing another container's network namespace are not touched.
 
 **Deployment requires rerunning the accepted NAS installer in the existing bundle
 directory**, preserving `.env`, secrets and volumes, then redeploying Compose.

@@ -1,4 +1,12 @@
-"""Hourly, non-forcing collection of unused NAS platform images only."""
+"""NAS daemon housekeeping for the platform's own Compose project.
+
+Hourly, non-forcing collection of unused platform images, and a short repair
+loop that re-attaches project containers to networks they lost. The repair
+exists because the daemon can lose an endpoint or recreate a network (seen
+after NAS OS updates) while `compose up` and restarts reuse the broken
+container: a stopped container is started as-is, and only a running one is
+checked for missing networks.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +26,9 @@ from typing import Any
 from urllib.parse import quote
 
 INTERVAL = 3600
+NETWORK_INTERVAL = 30
+PROJECT_LABEL = "com.docker.compose.project"
+RUN_POLICIES = frozenset({"always", "unless-stopped"})
 GRACE = 24 * INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
 REPOSITORIES = frozenset(
@@ -37,6 +48,10 @@ class Reason(StrEnum):
     SCAN_FAILED = "scan-failed"
     STATE_INVALID = "state-invalid-grace-restarted"
     REMOVED = "removed"
+    NETWORK_WAIT = "network-absent-wait-for-compose"
+    NETWORK_REPAIRED = "network-reattached"
+    START_RETRIED = "failed-start-retried"
+    REPAIR_FAILED = "network-repair-failed"
 
 
 @dataclass(frozen=True)
@@ -70,16 +85,30 @@ class DockerConnection(http.client.HTTPConnection):
         self.sock.connect("/var/run/docker.sock")
 
 
+class DockerNotFound(DockerError):
+    pass
+
+
 class Docker:
-    def request(self, method: str, path: str) -> Any:
+    def request(self, method: str, path: str, body: Any = None) -> Any:
         connection = DockerConnection()
         try:
-            connection.request(method, path)
+            if body is None:
+                connection.request(method, path)
+            else:
+                connection.request(
+                    method,
+                    path,
+                    json.dumps(body),
+                    {"Content-Type": "application/json"},
+                )
             response = connection.getresponse()
-            body = response.read()
+            raw = response.read()
+            if response.status == 404:
+                raise DockerNotFound(f"Docker HTTP 404: {raw.decode()}")
             if not 200 <= response.status < 300:
-                raise DockerError(f"Docker HTTP {response.status}: {body.decode()}")
-            return json.loads(body)
+                raise DockerError(f"Docker HTTP {response.status}: {raw.decode()}")
+            return json.loads(raw) if raw.strip() else None
         finally:
             connection.close()
 
@@ -220,10 +249,141 @@ def sweep(docker: Docker, path: Path, now: float) -> None:
     save_state(path, unused)
 
 
+def _broken(docker: Docker, container: dict[str, Any]) -> list[str] | None:
+    """Return the container's networks whose attachment is lost, or None to wait.
+
+    The container's own network entries are the declared set: the daemon keeps
+    them until an explicit disconnect, even when the network or the endpoint is
+    gone. An entry is broken when it names an older network ID (the network was
+    recreated) or, while running, when the network lists no endpoint for it.
+    """
+    running = container["State"]["Running"]
+    broken = []
+    for name, endpoint in container["NetworkSettings"]["Networks"].items():
+        try:
+            network = docker.request("GET", f"/networks/{quote(name, safe='')}")
+        except DockerNotFound:
+            log(Reason.NETWORK_WAIT, container=container["Name"], network=name)
+            return None
+        recorded = (endpoint or {}).get("NetworkID") or ""
+        if (recorded and recorded != network["Id"]) or (
+            running and container["Id"] not in (network.get("Containers") or {})
+        ):
+            broken.append(name)
+    return broken
+
+
+def repair(docker: Docker, identity: str) -> None:
+    """Re-attach one container to its lost networks, then run it if it should."""
+    container = docker.request("GET", f"/containers/{identity}/json")
+    mode = container["HostConfig"]["NetworkMode"]
+    if mode in {"host", "none"} or mode.startswith("container:"):
+        return
+    state = container["State"]
+    if state["Status"] not in {"running", "exited"}:
+        return
+    broken = _broken(docker, container)
+    if broken is None:
+        return
+    name = container["Name"]
+    # A failed start is not retried by the restart policy; a manual stop
+    # leaves no error. Run what the policy says should run.
+    should_run = state["Running"] or (
+        bool(state.get("Error"))
+        and container["HostConfig"]["RestartPolicy"]["Name"] in RUN_POLICIES
+    )
+    if broken:
+        # A running container cannot leave a network whose endpoint is gone;
+        # stopped, the daemon edits only its record. Start rebuilds endpoints
+        # and the published ports from that record.
+        if state["Running"]:
+            docker.request("POST", f"/containers/{identity}/stop?t=10")
+        try:
+            for network in broken:
+                endpoint = container["NetworkSettings"]["Networks"][network] or {}
+                target = f"/networks/{quote(network, safe='')}"
+                docker.request(
+                    "POST",
+                    f"{target}/disconnect",
+                    {"Container": identity, "Force": True},
+                )
+                docker.request(
+                    "POST",
+                    f"{target}/connect",
+                    {
+                        "Container": identity,
+                        "EndpointConfig": {
+                            "Aliases": endpoint.get("Aliases"),
+                            "IPAMConfig": endpoint.get("IPAMConfig"),
+                        },
+                    },
+                )
+        finally:
+            # Never leave a container stopped by this repair. If a re-attach
+            # failed, it runs short of that network, and the next `compose up`
+            # recreates a running container that lacks a declared network.
+            if should_run:
+                docker.request("POST", f"/containers/{identity}/start")
+        log(Reason.NETWORK_REPAIRED, container=name, networks=broken)
+    elif should_run and not state["Running"]:
+        docker.request("POST", f"/containers/{identity}/start")
+        log(Reason.START_RETRIED, container=name, previous_error=state["Error"])
+
+
+def reconcile_networks(docker: Docker, project: str) -> None:
+    selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
+    for row in docker.request("GET", f"/containers/json?all=1&filters={selector}"):
+        try:
+            repair(docker, row["Id"])
+        except (
+            DockerError,
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            http.client.HTTPException,
+        ) as error:
+            # Re-observe on the next tick; the daemon or Compose may be mid-change.
+            log(
+                Reason.REPAIR_FAILED,
+                container=row.get("Names"),
+                detail=str(error),
+                next_attempt=time.time() + NETWORK_INTERVAL,
+            )
+
+
+def own_project(docker: Docker) -> str | None:
+    # Docker names the container's hostname after its ID by default.
+    labels = docker.request("GET", f"/containers/{socket.gethostname()}/json")[
+        "Config"
+    ]["Labels"]
+    return (labels or {}).get(PROJECT_LABEL)
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     docker = Docker()
     scheduler = sched.scheduler()
+
+    def network_tick() -> None:
+        try:
+            project = own_project(docker)
+            if project is not None:
+                reconcile_networks(docker, project)
+        except (
+            DockerError,
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            http.client.HTTPException,
+        ) as error:
+            log(
+                Reason.REPAIR_FAILED,
+                detail=str(error),
+                next_attempt=time.time() + NETWORK_INTERVAL,
+            )
+        scheduler.enter(NETWORK_INTERVAL, 2, network_tick)
 
     def tick() -> None:
         now = time.time()
@@ -240,6 +400,7 @@ def main() -> None:
             log(Reason.SCAN_FAILED, detail=str(error), next_attempt=now + INTERVAL)
         scheduler.enter(INTERVAL, 1, tick)
 
+    network_tick()
     tick()
     scheduler.run()
 

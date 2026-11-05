@@ -934,6 +934,52 @@ def verify_controller_tls(bundle: Path, nas_ip: str, enrollment_hostname: str) -
         raise AcceptanceError("enrollment bootstrap is empty")
 
 
+def verify_ingress_heals_after_network_loss(
+    bundle: Path, nas_ip: str, enrollment_hostname: str, services: tuple[str, ...]
+) -> None:
+    """The NAS OS-update fault: Caddy's ingress network is recreated under it.
+
+    `compose up` then starts the old container against the old network ID and
+    fails, and a restart reuses it; only a delete used to bring :8443 back. The
+    janitor must re-attach the same container, with no recreate and no human.
+    """
+    document = json.loads(
+        run([*reference_compose(), "config", "--format", "json"], cwd=bundle).stdout
+    )
+    network = document["networks"]["ingress"]["name"]
+    caddy = run([*reference_compose(), "ps", "-q", "caddy"], cwd=bundle).stdout.strip()
+    run(["docker", "stop", "--timeout", "30", caddy], cwd=bundle, timeout=60)
+    run(["docker", "network", "rm", network], cwd=bundle, timeout=60)
+    # Like the UGREEN Redeploy: recreates the network, then fails to start the
+    # unchanged container. Its exit status is the fault, not the result.
+    subprocess.run(
+        [*reference_compose(), "up", "-d", *services],
+        cwd=bundle,
+        env=host_command_environment(),
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    deadline = time.monotonic() + 180
+    while True:
+        try:
+            verify_controller_tls(bundle, nas_ip, enrollment_hostname)
+            break
+        except AcceptanceError:
+            if time.monotonic() > deadline:
+                raise AcceptanceError(
+                    "Caddy :8443 did not heal after its ingress network was "
+                    f"recreated; {compose_startup_diagnostics(bundle)}"
+                ) from None
+            time.sleep(5)
+    attached = run(
+        ["docker", "network", "inspect", "--format", "{{json .Containers}}", network],
+        cwd=bundle,
+    ).stdout
+    if not any(member.startswith(caddy) for member in json.loads(attached)):
+        raise AcceptanceError("the healed Caddy is not the original container")
+
+
 def verify_postgres_databases(bundle: Path) -> None:
     result = run(
         [
@@ -1826,6 +1872,9 @@ def exercise_compose(
             # a restart or a second installer run must come back healthy.
             assert_bundle_contract(bundle)
             if tailscale_mode == "disabled":
+                verify_ingress_heals_after_network_loss(
+                    bundle, nas_ip, enrollment_hostname, started
+                )
                 run(
                     [
                         *reference_compose(),

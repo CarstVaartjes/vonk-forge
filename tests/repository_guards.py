@@ -81,7 +81,7 @@ SCOPED: tuple[tuple[str, str], ...] = (
     ),
     (
         "tests/scripts/test_nas_image_janitor.py",
-        "NAS daemon platform-image selection, persisted grace and deletion refusal recovery.",
+        "NAS daemon platform-image selection, persisted grace, deletion refusal recovery and lost-network re-attachment.",
     ),
     (
         "tests/cluster_profiles/test_cli_job_receipts.py",
