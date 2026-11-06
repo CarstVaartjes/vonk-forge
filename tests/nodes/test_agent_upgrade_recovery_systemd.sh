@@ -282,9 +282,9 @@ for binary_dir in "$test_root/target-bin" "$test_root/baseline-bin"; do
 done
 openssl genpkey -algorithm ED25519 -out "$test_root/release.pem"
 chmod 0600 "$test_root/release.pem"
-epoch=$(git -C "$repo_root" show -s --format=%ct HEAD)
+epoch=1788260440
 target_source_root=$repo_root
-target_source_revision=$(git -C "$repo_root" rev-parse HEAD)
+target_source_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 target_epoch=$epoch
 VONK_SOURCE_REVISION=$target_source_revision \
 VONK_SOURCE_REPOSITORY=https://github.com/CarstVaartjes/vonk-forge \

@@ -1636,7 +1636,6 @@ def test_image_reuse_rejects_changed_or_unrelated_source(
     "fault",
     [
         None,
-        "legacy",
         "missing",
         "signature",
         "changed",
@@ -1648,18 +1647,16 @@ def test_image_reuse_rejects_changed_or_unrelated_source(
 def test_cached_image_is_reverified_before_current_run_receipt(
     reusable_image_repo, tmp_path, fault
 ):
-    """A cached image names its build tree; one cached before images named
-    trees ("legacy") names its build commit and is still reused by content."""
+    """A cached image names its build tree and is reused by content."""
     repo = reusable_image_repo
     built = _image_commit(repo)
     labels = {
         "org.opencontainers.image.revision": built,
         "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
     }
-    if fault != "legacy":
-        labels["ai.vonkforge.source.tree"] = subprocess.check_output(
-            ["git", "rev-parse", f"{built}^{{tree}}"], cwd=repo, text=True
-        ).strip()
+    labels["ai.vonkforge.source.tree"] = subprocess.check_output(
+        ["git", "rev-parse", f"{built}^{{tree}}"], cwd=repo, text=True
+    ).strip()
     if fault == "changed":
         (repo / "deploy/compose/litellm/config_supervisor.py").write_text(
             "changed smoke input\n"
@@ -1733,11 +1730,9 @@ else:
         text=True,
         check=False,
     )
-    assert (result.returncode == 0) == (fault in (None, "legacy", "missing")), (
-        result.stderr
-    )
-    assert receipt.exists() == (fault in (None, "legacy"))
-    if fault in (None, "legacy"):
+    assert (result.returncode == 0) == (fault in (None, "missing")), result.stderr
+    assert receipt.exists() == (fault is None)
+    if fault is None:
         document = json.loads(receipt.read_text())
         assert document["commit"] == accepted
         assert document["manifest_digest"] == digest
@@ -1750,6 +1745,9 @@ else:
                 "ghcr.io/carstvaartjes/vonk-forge-litellm",
                 digest,
                 "dev-sha-" + accepted,
+                subprocess.check_output(
+                    ["git", "rev-parse", f"{accepted}^{{tree}}"], cwd=repo, text=True
+                ).strip(),
             ],
             cwd=repo,
             env=environment,
