@@ -120,6 +120,11 @@ def _run(
     }
 
 
+# 512 models per page: the bound is far above any library, so only a runaway
+# cursor can reach it.
+_MAX_MODEL_LIBRARY_PAGES = 1024
+
+
 def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:
     """Selector -> published model title, from the paged model library.
 
@@ -130,8 +135,8 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
     titles: dict[str, str] = {}
     cursor: str | None = None
     seen_cursors: set[str] = set()
-    while True:
-        query: dict[str, object] = {"limit": 512, "sort": "name"}
+    for _ in range(_MAX_MODEL_LIBRARY_PAGES):
+        query = {"limit": 512, "sort": "name"}
         if cursor is not None:
             query["cursor"] = cursor
         page = client.request(
@@ -166,6 +171,7 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
             raise ControlMalformedResponse("model library cursor repeated")
         seen_cursors.add(next_cursor)
         cursor = next_cursor
+    raise ControlMalformedResponse("model library has more pages than expected")
 
 
 def _resolve_run_recipe(
