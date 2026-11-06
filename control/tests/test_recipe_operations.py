@@ -79,7 +79,7 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
 )
 from vonk_control.job_documents import RecipeStopParent
-from vonk_control.litellm import LiteLlmGeneration
+from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -218,7 +218,7 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
         self.aliases: list[tuple[str, ...]] = []
 
     def served_model_info(self):
-        return {}
+        return ServedModelInfo()
 
     def publish_recipe(self, candidate):
         state = candidate.state
@@ -5445,7 +5445,7 @@ def test_expired_recovery_route_never_needs_compensating_withdrawal(
             self.fail_withdrawal = True
 
         def served_model_info(self):
-            return {}
+            return ServedModelInfo()
 
         def publish_recipe(self, candidate):
             generation = atomic.publish_recipe(candidate)
@@ -5570,7 +5570,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
             self.fail_withdrawal = True
 
         def served_model_info(self):
-            return {}
+            return ServedModelInfo()
 
         def publish_recipe(self, candidate):
             return atomic.publish_recipe(candidate)
