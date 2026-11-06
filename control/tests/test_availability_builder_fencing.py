@@ -316,3 +316,77 @@ def test_builder_contention_names_its_owner_and_replans_after_release(
             select(Job).where(Job.kind == AgentOperation.RECIPE_BUILD)
         ).one()
         assert child.targets == [node]
+
+
+def _same_identity_waiter(tmp_path, postgres_engine):
+    sessions, builds, operations, _storage, now, node, revision, plan = _services(
+        tmp_path, postgres_engine
+    )
+    clock = [now]
+    service = build_recipe_image_availability(
+        sessions,
+        artifact_root=tmp_path / "images",
+        storage=FilesystemRuntimeImageStorage(tmp_path / "images"),
+        managed_catalog_sync=None,
+        recipe_builds=builds,
+        recipe_operations=operations,
+        clock=lambda: clock[0],
+    ).service
+    with sessions.begin() as session:
+        session.add(User(subject="operator", role="operator"))
+    parent = service.start(revision.id, actor="operator", request_id=str(uuid.uuid4()))
+    with sessions.begin() as session:
+        row = session.get(Job, parent.id)
+        assert row is not None
+        row.payload = dict(row.payload) | {
+            "runtime": dict(require_mapping(row.payload["runtime"], "runtime"))
+            | {"builder_node_id": node, "build_input_sha256": plan.build_input_sha256},
+            "build_input_sha256": plan.build_input_sha256,
+            "identity_key": plan.build_input_sha256,
+        }
+    return service, parent, clock, plan, sessions
+
+
+def test_same_identity_wait_outlives_the_no_progress_window(tmp_path, postgres_engine):
+    # Catches BUILDER_BUSY behind an identical in-flight build spending the
+    # 15-minute no-progress window: the owner works for this load, which waits.
+    from vonk_control.lifecycle.image_availability import PREPARATION_STALL_WINDOW
+
+    service, parent, clock, plan, _sessions = _same_identity_waiter(
+        tmp_path, postgres_engine
+    )
+    owner_lock = service._identity_lock(plan.build_input_sha256)
+    assert owner_lock.acquire(blocking=False)
+    try:
+        started = clock[0]
+        step = PREPARATION_STALL_WINDOW / 3
+        while clock[0] - started <= PREPARATION_STALL_WINDOW * 2:
+            service.run_pending(limit=1)
+            waiting = service.get(parent.id)
+            assert waiting.state == LifecycleState.QUEUED
+            clock[0] += step
+        service.run_pending(limit=1)
+        assert service.get(parent.id).state == LifecycleState.QUEUED
+    finally:
+        owner_lock.release()
+
+
+def test_same_identity_waiter_takes_over_when_owner_ends(tmp_path, postgres_engine):
+    # Existing semantics: the lock holds no result. When the owner ends (success
+    # or failure) the waiter's next attempt acquires the lock and prepares for
+    # itself (reusing a verified archive if one exists), recording its own
+    # evidence; it does not inherit the owner's failure.
+    service, parent, clock, plan, _sessions = _same_identity_waiter(
+        tmp_path, postgres_engine
+    )
+    owner_lock = service._identity_lock(plan.build_input_sha256)
+    assert owner_lock.acquire(blocking=False)
+    service.run_pending(limit=1)
+    blocked = service.get(parent.id)
+    assert blocked.state == LifecycleState.QUEUED
+    assert any(b.code == "recipe_image.builder_busy" for b in blocked.blockers)
+    owner_lock.release()
+    clock[0] += timedelta(seconds=30)
+    service.run_pending(limit=1)
+    resumed = service.get(parent.id)
+    assert not any(b.code == "recipe_image.builder_busy" for b in resumed.blockers)

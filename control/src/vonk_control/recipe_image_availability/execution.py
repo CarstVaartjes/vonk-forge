@@ -250,6 +250,9 @@ def _run(
                     "Exact image content is being prepared by another owner",
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                     retry_after_seconds=1,
+                    # The owner builds this exact content identity, so this
+                    # preparation waits on live progress; it has not stalled.
+                    dependency_active=True,
                 ),
             )
             return
