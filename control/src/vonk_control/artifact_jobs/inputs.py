@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterable
 
 from vonk_agent_protocol import InvalidRequestReason, UnknownOutcomeError, WaitReason
@@ -74,15 +75,19 @@ class ArtifactJobService(StorageService):
         content_length: int,
         chunks: AsyncIterable[bytes],
     ) -> ArtifactJobView:
-        expected_bytes = self.input_upload_size(
-            job_id, name=name, media_type=media_type, expected_sha256=expected_sha256
+        expected_bytes = await asyncio.to_thread(
+            self.input_upload_size,
+            job_id,
+            name=name,
+            media_type=media_type,
+            expected_sha256=expected_sha256,
         )
         if content_length != expected_bytes:
             raise ArtifactJobInvalid(
                 "artifact input Content-Length does not match",
                 reason=InvalidRequestReason.CONFLICT,
             )
-        with self._blob_store.reference_attachment():
+        async with self._blob_store.reference_attachment_async():
             try:
                 stored = await self._blob_store.put_stream(
                     expected_sha256,
@@ -94,8 +99,12 @@ class ArtifactJobService(StorageService):
                 raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
-            return self._attach_input(
-                job_id, name=name, media_type=media_type, stored=stored
+            return await asyncio.to_thread(
+                self._attach_input,
+                job_id,
+                name=name,
+                media_type=media_type,
+                stored=stored,
             )
 
     def input_upload_size(
