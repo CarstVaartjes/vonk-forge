@@ -66,6 +66,7 @@ from vonk_control.models import (
     RecipeBuild,
     User,
 )
+from vonk_control.operation_blockers import make_blocker
 from vonk_control.operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -2603,6 +2604,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         _add_head(session, revision)
 
     child = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000301",
         request_key="00000000-0000-4000-8000-000000000302",
         state="running",
@@ -2647,6 +2649,7 @@ def test_postgres_model_child_lock_contention_resumes_same_preparation(
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             assert recipe_revision_id == revision.id
             return SimpleNamespace(
+                blockers=(),
                 digest=child.artifact_set_sha256,
                 document=lambda: _manifest(
                     model_content_digests=[model_content_sha256]
@@ -3069,6 +3072,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
     now = datetime.now(UTC)
 
     child = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000101",
         request_key="00000000-0000-4000-8000-000000000102",
         state="succeeded",
@@ -3112,6 +3116,7 @@ def test_model_child_and_image_complete_through_one_sql_operation(
 
         def resolve_artifact_set(self, *, recipe_revision_id: str) -> SimpleNamespace:
             return SimpleNamespace(
+                blockers=(),
                 digest="c" * 64,
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
@@ -3183,6 +3188,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
         _add_revision(session, "revision-overlap", recipe)
     now = datetime.now(UTC)
     child = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000201",
         request_key="00000000-0000-4000-8000-000000000202",
         state="running",
@@ -3222,6 +3228,7 @@ def test_model_and_image_children_advance_independently_and_reuse_image(
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
+                blockers=(),
                 digest="c" * 64,
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
@@ -3305,6 +3312,7 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine)
     failed = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000501",
         request_key="00000000-0000-4000-8000-000000000502",
         state="failed",
@@ -3390,6 +3398,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
         _add_revision(session, "revision-integrity-repair", recipe)
 
     failed = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000301",
         request_key="00000000-0000-4000-8000-000000000302",
         state="running",
@@ -3413,6 +3422,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
         failure=None,
     )
     repaired = SimpleNamespace(
+        blockers=(),
         id="00000000-0000-4000-8000-000000000303",
         request_key="00000000-0000-4000-8000-000000000304",
         state="succeeded",
@@ -3456,6 +3466,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
 
         def resolve_artifact_set(self, **_: object) -> SimpleNamespace:
             return SimpleNamespace(
+                blockers=(),
                 digest="c" * 64,
                 document=lambda: _manifest(model_content_digests=["d" * 64]),
             )
@@ -4428,7 +4439,7 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
 
     class ModelCache:
         def get_operation(self, operation_id: str) -> SimpleNamespace:
-            return SimpleNamespace(state="running")
+            return SimpleNamespace(state="running", blockers=())
 
     service = _service(
         sessions,
@@ -4450,6 +4461,60 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
         ]
     # Parked waiters are not re-examined until their poll is due.
     assert service.claim_pending(limit=4) == ()
+
+
+def test_parked_operation_carries_the_model_childs_typed_wait(tmp_path: Path) -> None:
+    """A gated model's access wait reaches the parent; the stale build wait is gone."""
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    now = datetime(2026, 10, 2, 1, 10, tzinfo=UTC)
+    url = "https://huggingface.co/org/gated"
+    with sessions.begin() as session:
+        waiter = _parked_operation("gated", now=now, model_child=True, updated=now)
+        payload = AvailabilityJobPayload.model_validate(waiter.payload).model_copy(
+            update={
+                "failure": AvailabilityOperationFailure(
+                    code="recipe_image.build_wait",
+                    detail="waiting for build",
+                    retryable=True,
+                    recovery_actions=[],
+                )
+            }
+        )
+        waiter.payload = serialize_json_value(payload)
+        session.add(waiter)
+
+    class ModelCache:
+        def get_operation(self, operation_id: str) -> SimpleNamespace:
+            return SimpleNamespace(
+                state="backoff",
+                blockers=(
+                    make_blocker(
+                        "access_denied",
+                        f"Hugging Face access is required: accept the terms at {url}",
+                    ),
+                ),
+            )
+
+    service = _service(
+        sessions,
+        storage=FilesystemRuntimeImageStorage(tmp_path),
+        authority=lambda recipe_revision_id, *, force=False: (None, {}),
+        model_cache=ModelCache(),
+        clock=lambda: now,
+    )
+    service.claim_pending(limit=4)
+    with sessions() as session:
+        parked = session.get(Job, "gated")
+        assert parked is not None
+        blockers = require_sequence(parked.payload["blockers"], "blockers")
+        assert [require_mapping(item, "blocker")["code"] for item in blockers] == [
+            "access_denied"
+        ]
+        assert url in str(require_mapping(blockers[0], "blocker")["detail"])
+        assert parked.payload.get("failure") is None
 
 
 def test_live_download_survives_a_parent_observation_gap_and_resumes(

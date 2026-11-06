@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
@@ -18,6 +19,7 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import ConstraintDefect
 from ..job_documents import (
+    AvailabilityJobPayload,
     AvailabilityModelChild,
 )
 from ..model_cache_contract import (
@@ -26,6 +28,7 @@ from ..model_cache_contract import (
     ModelCacheRepairPreviewResponse,
 )
 from ..model_cache_progress import project_cache_progress
+from ..operation_blockers import OperationBlocker
 from ..operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -49,6 +52,29 @@ from .contracts import (
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
+
+
+def _settled_image_failure(
+    payload: AvailabilityJobPayload,
+) -> AvailabilityJobPayload:
+    """Drop the build-wait failure once the image is prepared."""
+
+    failure = payload.failure
+    if (
+        payload.image_result is not None
+        and failure is not None
+        and failure.code == RecipeImageCode.BUILD_WAIT
+    ):
+        return payload.model_copy(update={"failure": None})
+    return payload
+
+
+def _model_wait_blockers(
+    blockers: Sequence[OperationBlocker], default: OperationBlocker
+) -> list[OperationBlocker]:
+    """The child's own typed wait (access denied, space, ...), else ``default``."""
+
+    return list(blockers) or [default]
 
 
 def _model_progress(

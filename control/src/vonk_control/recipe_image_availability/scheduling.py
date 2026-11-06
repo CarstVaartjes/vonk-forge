@@ -53,6 +53,7 @@ from .contracts import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
 )
+from .model_preparation import _settled_image_failure
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -344,7 +345,8 @@ def _park_for_model(
     if self._model_cache is None or child is None or payload.image_result is None:
         return False
     try:
-        state = self._model_cache.get_operation(child.id).state
+        view = self._model_cache.get_operation(child.id)
+        state = view.state
     except Exception:  # noqa: BLE001 - a normal claim refreshes unclear evidence
         return False
     if state not in model_cache_states.ACTIVE:
@@ -356,21 +358,16 @@ def _park_for_model(
             "progress_advanced_at": now,
         }
     )
-    if not any(
-        item.code == RecipeImageCode.WAITING_FOR_MODEL
-        for item in payload.blockers or []
-    ):
-        updated = self._record_blockers(
-            operation,
-            updated,
-            [
-                make_blocker(
-                    RecipeImageCode.WAITING_FOR_MODEL,
-                    "Waiting for the model download to finish; the runtime image is already prepared.",
-                    severity="info",
-                )
-            ],
-        )
+    generic = make_blocker(
+        RecipeImageCode.WAITING_FOR_MODEL,
+        "Waiting for the model download to finish; the runtime image is already prepared.",
+        severity="info",
+    )
+    updated = self._record_blockers(
+        operation,
+        _settled_image_failure(updated),
+        self._model_wait_blockers(view.blockers, generic),
+    )
     schedule_wait(
         operation,
         now + timedelta(seconds=_MODEL_WAIT_POLL_SECONDS),
