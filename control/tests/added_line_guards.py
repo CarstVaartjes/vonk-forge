@@ -16,6 +16,7 @@ from . import (
     alias_rules,
     bare_savepoints,
     docker_listings,
+    git_free_test_lines,
     intent_ordinal_writers,
     legacy_tolerance,
     lifecycle_sets,
@@ -107,6 +108,7 @@ MODES = (
     "savepoints",
     "barriers",
     "sync-in-async",
+    "git-free-tests",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2252,6 +2254,20 @@ def check_source(
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
             (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
+        )
+    if "git-free-tests" in modes:
+        # A Rust file under tests/ is all test; elsewhere only cfg(test) items.
+        every_line = set(range(1, source.count("\n") + 2))
+        hits.extend(
+            (line, git_free_test_lines.KIND)
+            for line in git_free_test_lines.scan_path(
+                path,
+                source,
+                is_test=is_test,
+                test_lines=every_line
+                if is_test
+                else (rust_test_lines(source) if path.endswith(".rs") else set()),
+            )
         )
     if python and is_test and "clocks" in modes:
         hits.extend(
