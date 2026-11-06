@@ -2349,12 +2349,57 @@ def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
     assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
-    # The shared predicate and the stop-authority sites compare freely.
+    # Only the rename module reads and compares the name.
     for site in (
         "control/src/vonk_control/profile_capacity.py",
         "control/src/vonk_control/profile_stop_authority.py",
     ):
-        assert not check_source(site, source, lines, modes=("alias-rules",))
+        assert check_source(site, source, lines, modes=("alias-rules",))
+    assert not check_source(
+        "control/src/vonk_control/run_route_name.py",
+        source,
+        lines,
+        modes=("alias-rules",),
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "run.alias = alias\n",
+        "run.alias += '-x'\n",
+        "stmt = update(RecipeRun).where(RecipeRun.id == x).values(alias=alias)\n",
+        "run = RecipeRun(alias=alias, plan_digest=d)\n",
+    ],
+)
+def test_a_run_alias_written_outside_the_rename_module_is_flagged(
+    source: str,
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
+    assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
+    assert not check_source(
+        "control/src/vonk_control/run_route_name.py",
+        source,
+        lines,
+        modes=("alias-rules",),
+    )
+
+
+def test_a_run_is_created_with_its_name_only_in_run_admission() -> None:
+    source = "run = RecipeRun(alias=alias, plan_digest=d)\n"
+    assert not check_source(
+        "control/src/vonk_control/run_admission.py",
+        source,
+        {1},
+        modes=("alias-rules",),
+    )
+    assert check_source(
+        "control/src/vonk_control/run_admission.py",
+        "run.alias = alias\n",
+        {1},
+        modes=("alias-rules",),
+    )
 
 
 def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():

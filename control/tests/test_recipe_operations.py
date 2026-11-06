@@ -2810,6 +2810,17 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     assert queue.available == 2
 
 
+def test_the_plan_digest_does_not_depend_on_the_route_name(tmp_path: Path) -> None:
+    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "7"
+    )
+    first = service.preview_run(installation.owner_id, "qwen")
+    second = service.preview_run(installation.owner_id, "another-name")
+    assert first.alias != second.alias
+    assert first.plan_digest == second.plan_digest
+
+
 def test_start_and_activate_replay_require_the_same_installation(
     tmp_path: Path,
 ) -> None:

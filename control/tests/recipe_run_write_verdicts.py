@@ -38,7 +38,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "bf8ea87e8746ea4fa6e76f6cdf992b1c3507f5b5db6b900a0d2bbbfe26260026",
+            "db7e15afb012b1ee98652c50f17eef200a8b9bbad4df182e2993509af6113a3e",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
@@ -142,13 +142,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_activation.py": {
         "_activate_job_run_once": (
-            "0c0627137bd0bad785689a696583bbdab51e71e953afd54015aee5f6a082bd44",
+            "df303f026c3847af285787fba50627945c3fc261c874654ede86d13ebb5b822a",
             "retain: activation admission binds accepted run intent",
         ),
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "b09518a0f10c15a325fd5d81fde19fbf0dbf9220ef124293052114702682760e",
+            "f858901c454e27821f87f9ce151fa5a688c2e88484fa76ee3d4926b230715456",
             "retain: Start admission binds run and capacity",
         ),
     },
@@ -162,6 +162,12 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
         "_project_terminal_result": (
             "381aab92244881ed24e907acca256e794897dd9442bdcdd3228a65b36385efe1",
             "caller-owned: queue result transaction owns terminal projection",
+        ),
+    },
+    "run_route_name.py": {
+        "rename_run": (
+            "d28af1decdfe0fea513ed8d69e1560a596a140bbaee47ae0d563cf9f2c85f105",
+            "caller-owned: the profile admission transaction owns the rename; the next route publication pass fences the republish",
         ),
     },
     "recipe_operations/offline_stop.py": {

@@ -118,7 +118,6 @@ def _stopped_run(now: datetime, node_id: str) -> RecipeRun:
         observation_schema_version=2,
         run_generation=2,
         installation_id=installation_id,
-        alias="demo",
         mapping_id=mapping_id,
         mapping_generation=1,
         recipe_revision_id=revision_id,

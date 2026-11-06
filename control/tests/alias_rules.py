@@ -22,25 +22,19 @@ KIND = "alias checked with its own rule; use vonk_forge_contracts EndpointAlias"
 ALIAS_NAME = re.compile(r"(?:^|_)alias(?:es)?$")
 
 RUN_ALIAS_KIND = (
-    "run alias compared by hand; use profile_capacity.serving_run for the run "
-    "serving an assignment"
+    "run alias compared by hand; use run_route_name.carries_alias for the name "
+    "a run is routed under"
 )
+RUN_ALIAS_WRITE_KIND = (
+    "run alias written outside the rename module; a live run's route name "
+    "changes only through run_route_name.rename_run"
+)
+#: The name is routing metadata. The rename module owns reading and changing it
+#: on a live run; a run is created with its name only in run admission.
+RUN_ALIAS_SITES = frozenset({"control/src/vonk_control/run_route_name.py"})
+RUN_CREATION_SITES = frozenset({"control/src/vonk_control/run_admission.py"})
 #: The run named by a comparison side: ``run.alias``, ``RecipeRun.alias``.
 _RUN_NAME = re.compile(r"(?i)run$")
-#: The one predicate, and the sites that compare a run with the alias its own
-#: stored plan, stop or request-key replay recorded (authority checks, not the
-#: question "which run serves this assignment").
-RUN_ALIAS_SITES = frozenset(
-    {
-        "control/src/vonk_control/profile_capacity.py",
-        "control/src/vonk_control/profile_stop_authority.py",
-        "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
-        "control/src/vonk_control/distributed_recovery/singleton.py",
-        "control/src/vonk_control/distributed_recovery/authority.py",
-        "control/src/vonk_control/recipe_operations/persistence.py",
-        "control/src/vonk_control/recipe_operations/run_observation.py",
-    }
-)
 
 
 def in_scope(path: str) -> bool:
@@ -166,4 +160,54 @@ def scan_run_alias(source: str) -> list[int]:
             ):
                 hits.add(node.lineno)
         # ``RecipeRun.alias == x`` inside a query filter is a Compare as well.
+    return sorted(hits)
+
+
+def run_alias_write_in_scope(path: str) -> bool:
+    return (
+        path.endswith(".py")
+        and path.startswith("control/src/vonk_control/")
+        and path not in RUN_ALIAS_SITES
+    )
+
+
+def _updates_run(node: ast.AST) -> bool:
+    """``update(RecipeRun)...`` somewhere down a call chain."""
+    while isinstance(node, ast.Call | ast.Attribute):
+        if (
+            isinstance(node, ast.Call)
+            and _name(node.func) == "update"
+            and node.args
+            and _name(node.args[0]) == "RecipeRun"
+        ):
+            return True
+        node = node.func if isinstance(node, ast.Call) else node.value
+    return False
+
+
+def scan_run_alias_write(source: str, path: str) -> list[int]:
+    """Lines that write a run's alias: assignment, bulk update, construction."""
+    hits: set[int] = set()
+    creates = path in RUN_CREATION_SITES
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "alias"
+                    and _RUN_NAME.search(_name(target.value))
+                ):
+                    hits.add(node.lineno)
+        elif isinstance(node, ast.Call):
+            named = any(keyword.arg == "alias" for keyword in node.keywords)
+            if not named:
+                continue
+            if (
+                _name(node.func) == "RecipeRun"
+                and not creates
+                or _name(node.func) == "values"
+                and _updates_run(node.func)
+            ):
+                hits.add(node.lineno)
     return sorted(hits)

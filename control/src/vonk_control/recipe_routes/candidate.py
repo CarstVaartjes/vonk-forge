@@ -98,12 +98,16 @@ def _candidate_once(
     if lock:
         for run in runs:
             run.version += 1
-    # The newest accepted intent owns an alias. An explicit publication takes
+    # The newest accepted intent (creation or rename) owns an alias. An explicit publication takes
     # precedence over older persisted projections, including damaged ones.
     owners: dict[str, RecipeRun] = {}
     for run in sorted(
         runs,
-        key=lambda item: (item.id == include_run_id, item.created_at, item.id),
+        key=lambda item: (
+            item.id == include_run_id,
+            item.renamed_at or item.created_at,
+            item.id,
+        ),
         reverse=True,
     ):
         if run.id not in exclude_run_ids:

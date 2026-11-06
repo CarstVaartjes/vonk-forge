@@ -306,7 +306,6 @@ class Catalog:
                 observation_schema_version=2,
                 run_generation=1,
                 installation_id=installed.id,
-                alias="chat",
                 mapping_id=mapping.id,
                 mapping_generation=1,
                 recipe_revision_id=revision_id,

@@ -385,7 +385,7 @@ class FleetProfileService:
                 run=None,
                 build=build,
             )
-        run = serving_run(rows.runs, installation.id, assignment)
+        run = serving_run(rows.runs, installation.id)
         if run is None:
             return cls._AssignmentState(
                 current_state=ObservedAssignmentState.INSTALLED,

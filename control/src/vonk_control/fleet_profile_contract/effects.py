@@ -28,6 +28,12 @@ class FleetProfileRunEffect(StrictModel):
     run_id: UuidId
     installation_id: UuidId
     alias: EndpointAlias
+    # A kept run is routed under the name its assignment chose (``alias``).
+    # When it is routed under another name now, this is that name: the load
+    # renames the run and restarts nothing.
+    previous_alias: EndpointAlias | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     # node_ids always names the full stored topology.  For a profile-owned
     # cleanup after fleet removal, this separately binds the live Stop targets
     # and missing ranks; ordinary Stops keep this field absent.
@@ -39,6 +45,10 @@ class FleetProfileRunEffect(StrictModel):
     def partial_scope_matches_effect(self) -> FleetProfileRunEffect:
         if self.node_ids != sorted(set(self.node_ids)):
             raise ValueError("profile run effect node IDs must be sorted and unique")
+        if self.previous_alias is not None and (
+            self.action != "keep" or self.previous_alias == self.alias
+        ):
+            raise ValueError("only a kept run can be renamed to a different name")
         scope = self.profile_stop_scope
         if scope is not None and (
             self.action != "stop"
