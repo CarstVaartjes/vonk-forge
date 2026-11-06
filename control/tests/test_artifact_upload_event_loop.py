@@ -89,9 +89,9 @@ def test_cancel_while_waiting_for_the_reference_lock_leaves_it_free(
         waiting = asyncio.create_task(attach())
         await asyncio.sleep(0.05)  # parked on the flock
         waiting.cancel()
+        release.set()  # the parked acquire can now finish, then release
         with pytest.raises(asyncio.CancelledError):
             await waiting
-        release.set()
         holder.join(HANG_GUARD_SECONDS)
 
     asyncio.run(scenario())

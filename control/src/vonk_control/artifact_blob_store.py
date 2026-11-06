@@ -7,11 +7,10 @@ import fcntl
 import hashlib
 import os
 import tempfile
-import threading
 import time
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager, suppress
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -37,7 +36,6 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 # reconciliation.
 _REFERENCE_LOCK_BUDGET_SECONDS = 30.0
 _REFERENCE_LOCK_RETRY_SECONDS = 0.05
-_RELEASE_POLL_SECONDS = 1.0
 
 
 class BlobStoreUsage(BaseModel):
@@ -145,57 +143,28 @@ class ArtifactBlobStore:
     async def reference_attachment_async(self) -> AsyncIterator[None]:
         """``reference_attachment`` for async callers.
 
-        One worker thread takes the flock, holds it until released, and drops
-        it, so the acquire wait never runs on the event loop and a cancel at
-        any point (even during the acquire) cannot leave the lock held: the
-        release flag is set on every exit and the thread honours it as soon as
-        it holds the lock.
+        The flock belongs to the open file description, not to a thread, so the
+        acquire (which may wait on a reconciler) and the release each run in a
+        worker thread and the event loop never waits on the lock. A cancel
+        during the acquire lets it finish, releases the lock, then re-raises, so
+        no cancelled caller leaves the fence held. Errors from the acquire
+        (including the unsafe-path security refusal) reach the caller as is.
         """
-        loop = asyncio.get_running_loop()
-        acquired: asyncio.Future[None] = loop.create_future()
-        release = threading.Event()
-
-        def settle(error: BaseException | None) -> None:
-            if acquired.done():
-                return
-            if error is None:
-                acquired.set_result(None)
-            else:
-                acquired.set_exception(error)
-
-        def hold() -> None:
-            try:
-                with self.reference_attachment():
-                    with suppress(RuntimeError):  # loop closed
-                        loop.call_soon_threadsafe(settle, None)
-                    # The release flag always ends the hold; the poll only
-                    # keeps the wait interruptible.
-                    while not release.wait(_RELEASE_POLL_SECONDS):
-                        pass
-            except BaseException as error:  # noqa: BLE001 - handed to the waiter
-                with suppress(RuntimeError):
-                    loop.call_soon_threadsafe(settle, error)
-            finally:
-                # Never leave the waiter parked, whatever ended the thread.
-                with suppress(RuntimeError):
-                    loop.call_soon_threadsafe(
-                        settle, RuntimeError("reference lock thread ended")
-                    )
-
-        holder = threading.Thread(target=hold, name="artifact-reference-lock")
-        holder.start()
-        holding = False
+        guard = self.reference_attachment()
+        acquire = asyncio.ensure_future(asyncio.to_thread(guard.__enter__))
         try:
-            await acquired
-            holding = True
+            await asyncio.shield(acquire)
+        except asyncio.CancelledError:
+            if not acquire.cancelled() and (
+                await asyncio.gather(acquire, return_exceptions=True)
+            ) == [None]:
+                await asyncio.to_thread(guard.__exit__, None, None, None)
+            raise
+        try:
             yield
         finally:
-            release.set()
-            if holding:
-                # Shielded: the thread finishes releasing even if this is
-                # cancelled. A cancel during the acquire does not wait for it:
-                # the thread drops the lock the moment it gets it.
-                await asyncio.shield(asyncio.to_thread(holder.join))
+            # Shielded: a cancelled caller still releases the fence.
+            await asyncio.shield(asyncio.to_thread(guard.__exit__, None, None, None))
 
     @contextmanager
     def reference_reconciliation(self) -> Iterator[None]:
