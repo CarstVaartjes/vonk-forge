@@ -699,6 +699,15 @@ def _edge_body_bound(site: object, method: str, path: str) -> int | None:
 
 
 _UUID = str(uuid4())
+#: The largest inference body the browser edge must admit: a 180 MB media upload
+#: as a base64 data URI is 240 MB, under 256 MiB. LiteLLM sets no limit itself.
+_INFERENCE_BODY_BYTES = 256 * 1024 * 1024
+_INFERENCE_POSTS = (
+    "/v1/chat/completions",
+    "/v1/completions",
+    "/v1/responses",
+    "/v1/messages",
+)
 #: Each request the Controller bounds, on the edge site that carries it, with the
 #: Controller's own maximum. The large-body paths are proven against the
 #: Controller's route patterns, so the sample is the route the boundary bounds.
@@ -722,6 +731,7 @@ _CONTROLLER_BODY_BOUNDS = {
             MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
         ),
         ("POST", "/api/fleet-profiles", MAX_CONTROL_DOCUMENT_BYTES),
+        *(("POST", path, _INFERENCE_BODY_BYTES) for path in _INFERENCE_POSTS),
     ),
 }
 
@@ -778,8 +788,27 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
                 edge_bound = _edge_body_bound(sites[name], method, path)
                 assert edge_bound is not None, (name, method, path)
                 assert edge_bound >= controller_bound, (name, method, path)
+                if controller_bound == _INFERENCE_BODY_BYTES:
+                    assert edge_bound == _INFERENCE_BODY_BYTES, (name, path)
                 if controller_bound == MAX_CONTROL_DOCUMENT_BYTES:
                     assert edge_bound == MAX_CONTROL_DOCUMENT_BYTES, (name, path)
+            # A 2 MiB chat body (an image) passes; any other path, and a GET of
+            # an inference path, still meets the 1 MiB default.
+            browser = sites["browser"]
+            two_mib = 2 * 1024 * 1024
+            chat_bound = _edge_body_bound(browser, "POST", "/v1/chat/completions")
+            assert chat_bound is not None and chat_bound >= two_mib
+            for method, path in (
+                ("POST", "/v1/embeddings"),
+                ("POST", "/v1/chat/completions/extra"),
+                ("GET", "/v1/chat/completions"),
+                ("POST", "/litellm/chat/completions"),
+                ("POST", "/api/fleet-profiles"),
+            ):
+                assert (
+                    _edge_body_bound(browser, method, path)
+                    == MAX_CONTROL_DOCUMENT_BYTES
+                ), (method, path)
 
 
 def test_caddy_adapts_three_sni_boundaries_for_admin_enrollment_and_mtls_agents() -> (
