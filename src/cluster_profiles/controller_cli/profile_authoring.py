@@ -159,7 +159,6 @@ def _profile_authoring(
             if selection_deadline is not None
             else _skipped_read
         ),
-        deadline=deadline,
     )
     current = cast(dict, definition_outcome.get())
     if args.observation.status != "complete":

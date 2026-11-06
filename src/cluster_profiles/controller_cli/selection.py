@@ -75,6 +75,7 @@ class _ReadOutcome:
 
 
 _MAX_CONCURRENT_READS = 3
+_WAIT_SLICE_SECONDS = 0.1
 
 
 def _skipped_read() -> None:
@@ -88,20 +89,18 @@ def _run_read(read: Callable[[], object]) -> _ReadOutcome:
         return _ReadOutcome(error=error)
 
 
-def _read_concurrently(
-    *reads: Callable[[], object], deadline: float
-) -> list[_ReadOutcome]:
-    """Run independent reads at once; each keeps its own deadline and outcome.
+def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
+    """Run independent reads at once; each keeps its own outcome.
 
-    One failing or slow read never cancels or hides the others. The outcomes
-    come back in the order given, so a caller that consumes them in the order
-    it used to run the reads meets the same first error as before.
+    Every read caps itself at its own deadline, so this helper never invents
+    an error or a timeout for a read: it waits until each read has finished
+    and returns that read's own value or error. The outcomes come back in the
+    order given, so a caller that consumes them in the order it used to run
+    the reads meets the same first error as before.
 
     A single real read runs inline. Several run in daemon threads while the
-    caller waits on each up to ``deadline`` (an interruptible wait on the main
-    thread), so Ctrl-C interrupts at once instead of after every read reaches
-    its own deadline. A read still running at ``deadline`` is that read's
-    "deadline reached" outcome; its thread ends with its own request timeout.
+    caller waits in short slices, so Ctrl-C still raises KeyboardInterrupt on
+    the main thread at once.
     """
     real = [read for read in reads if read is not _skipped_read]
     if len(real) > _MAX_CONCURRENT_READS:
@@ -124,14 +123,12 @@ def _read_concurrently(
 
     for index in finished:
         threading.Thread(target=work, args=(index, reads[index]), daemon=True).start()
+    for done in finished.values():
+        while not done.wait(_WAIT_SLICE_SECONDS):
+            pass
     outcomes = [_ReadOutcome() for _ in reads]
-    for index, done in finished.items():
-        if done.wait(max(0.0, deadline - time.monotonic())):
-            outcomes[index] = slots[index]
-        else:
-            outcomes[index] = _ReadOutcome(
-                error=ControlMalformedResponse("selection observation deadline reached")
-            )
+    for index in finished:
+        outcomes[index] = slots[index]
     return outcomes
 
 

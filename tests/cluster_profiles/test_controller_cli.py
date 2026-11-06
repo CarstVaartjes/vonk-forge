@@ -6,7 +6,6 @@ import re
 import signal
 import textwrap
 import threading
-import time
 import uuid
 from collections.abc import Mapping
 from contextlib import redirect_stdout
@@ -35,7 +34,7 @@ from cluster_profiles.control_client import (
     _operation,
     validate_control_document,
 )
-from cluster_profiles.controller_cli import selection
+from cluster_profiles.controller_cli import profile_authoring, selection
 from cluster_profiles.controller_cli.selection import _read_concurrently
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
@@ -2133,10 +2132,10 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     ambiguous_error = payload["error"]
     assert isinstance(ambiguous_error, str)
     assert "ambiguous spark selector" in ambiguous_error
-    assert [call[1] for call in client.calls] == [
+    assert {call[1] for call in client.calls} == {
         "/api/profile/1/definition",
         "/api/fleet",
-    ]
+    }
 
 
 def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
@@ -5126,10 +5125,6 @@ def _barrier(parties: int) -> threading.Barrier:
     return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
 
 
-def _far() -> float:
-    return time.monotonic() + 60
-
-
 def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
     def read() -> object:
         barrier.wait()
@@ -5147,7 +5142,6 @@ def test_independent_reads_are_in_flight_together() -> None:
         _meeting(barrier, "a"),
         _meeting(barrier, "b"),
         _meeting(barrier, "c"),
-        deadline=_far(),
     )
 
     assert [outcome.get() for outcome in outcomes] == ["a", "b", "c"]
@@ -5160,7 +5154,6 @@ def test_one_failing_read_does_not_hide_the_others() -> None:
         _meeting(barrier, "a"),
         _meeting(barrier, "b", fail=True),
         _meeting(barrier, "c"),
-        deadline=_far(),
     )
 
     assert first.get() == "a"
@@ -5169,30 +5162,61 @@ def test_one_failing_read_does_not_hide_the_others() -> None:
         failed.get()
 
 
-def test_a_read_past_its_deadline_is_that_reads_outcome_only(monkeypatch) -> None:
-    release = threading.Event()
-    first_done = threading.Event()
-    # The clock passes the deadline once the first read has returned.
-    monkeypatch.setattr(
-        selection.time, "monotonic", lambda: 100.0 if first_done.is_set() else 0.0
-    )
+class _InjectedClock:
+    """A clock the test owns: sleeping advances it, nothing waits in real time."""
 
-    def quick() -> object:
-        first_done.set()
-        return "ok"
+    def __init__(self) -> None:
+        self.now = 0.0
 
-    def hanging() -> object:
-        release.wait(30)  # wall-clock: hang guard
-        return "late"
+    def monotonic(self) -> float:
+        return self.now
 
-    try:
-        done, stuck = _read_concurrently(quick, hanging, deadline=50.0)
-    finally:
-        release.set()
+    def sleep(self, delay: float) -> None:
+        self.now += max(delay, 0.01)
 
-    assert done.get() == "ok"
-    with pytest.raises(ControlMalformedResponse, match="deadline reached"):
-        stuck.get()
+
+def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The definition read's own typed outcome reaches the operator, every run.
+
+    The concurrency helper must never put a generic error in its place, so the
+    run is repeated to prove no scheduling order changes the answer.
+    """
+    for _ in range(50):
+        clock = _InjectedClock()
+        for module in (controller_cli.observation, selection, profile_authoring):
+            monkeypatch.setattr(module, "time", clock)
+        responses = dict(_ADD_RESPONSES)
+        responses[("GET", "/api/profile/2/definition")] = ControlUnavailable(
+            503, "control API unavailable"
+        )
+        client = FakeClient(responses)
+
+        status, payload = run(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "add",
+                "Recipe UUID",
+                "--spark",
+                "Atlas",
+                "--timeout-seconds",
+                "1",
+                "--json",
+            ),
+            client,
+        )
+
+        assert status == 2
+        observation = payload["observation"]
+        assert isinstance(observation, dict)
+        assert observation["status"] == "timed_out"
+        assert observation["path"] == "/api/profile/2/definition"
+        assert observation["reconnect_command"]
+        assert "deadline reached" not in json.dumps(payload)
+        assert not any(call[0] == "PUT" for call in client.calls)
 
 
 def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
@@ -5204,7 +5228,7 @@ def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
         seen.append(threading.current_thread())
         raise OSError("down")
 
-    outcome, skipped = _read_concurrently(broken, _skipped_read, deadline=_far())
+    outcome, skipped = _read_concurrently(broken, _skipped_read)
 
     assert seen == [threading.current_thread()]
     assert skipped.get() is None
@@ -5224,7 +5248,7 @@ def test_ctrl_c_interrupts_at_once_while_reads_hang() -> None:
     sender.start()
     try:
         with pytest.raises(KeyboardInterrupt):
-            _read_concurrently(hanging, hanging, deadline=_far())
+            _read_concurrently(hanging, hanging)
     finally:
         release.set()
 

@@ -69,7 +69,6 @@ def _run(
         _skipped_read
         if spark_names
         else lambda: _observe_selection(roster, deadline=deadline),
-        deadline=deadline,
     )
     selector = cast(str, recipe.get())
     if not spark_names:
