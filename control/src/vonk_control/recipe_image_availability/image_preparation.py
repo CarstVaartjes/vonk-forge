@@ -244,9 +244,18 @@ def _persist_receipt(
                     error=None,
                 )
             )
+        # The image the build wait was about is now prepared.
+        stale_wait = (
+            operation_payload.failure is not None
+            and operation_payload.failure.code == RecipeImageCode.BUILD_WAIT
+        )
         operation.payload = serialize_json_value(
             operation_payload.model_copy(
-                update={"image_result": receipt, "image_reference_intent": None}
+                update={
+                    "image_result": receipt,
+                    "image_reference_intent": None,
+                    **({"failure": None} if stale_wait else {}),
+                }
             )
         )
         self._set_progress(

@@ -23,13 +23,17 @@ from vonk_control.failure_classification import disposition
 from vonk_control.job_documents import AvailabilityJobPayload
 from vonk_control.lifecycle.image_availability import preparation_deadline
 from vonk_control.models import Base, Job
-from vonk_control.operation_contract import AvailabilityRecoveryAction
+from vonk_control.operation_contract import (
+    AvailabilityOperationFailure,
+    AvailabilityRecoveryAction,
+)
 from vonk_control.recipe_image_availability import (
     RecipeImageAvailabilityService,
     image_preparation,
 )
 from vonk_control.recipe_image_availability.contracts import availability_disposition
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
+from vonk_control.strict_json import serialize_json_value
 from vonk_control.unused_storage_collection import UnusedStorageCollector
 from vonk_control.unused_storage_collection.common import InstallationRemoval, _Kept
 
@@ -108,6 +112,38 @@ def test_every_reference_busy_or_ownership_conflict_stays_transient(
     assert availability_disposition(raised.value) is Disposition.WAIT
     assert isinstance(raised.value, ArtifactReferenceUnsettled)
     assert raised.value.retryable is True
+
+
+def test_prepared_image_clears_the_stale_build_wait(tmp_path: Path) -> None:
+    """A build wait names an image that is now prepared; it must not linger."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'control.sqlite'}")
+    sessions, _, _, _, service, _ = _download(tmp_path, engine)
+    claim = service.claim_pending()[0]
+    with sessions.begin() as session:
+        job = session.get(Job, claim.operation_id)
+        assert job is not None
+        payload = AvailabilityJobPayload.model_validate(job.payload)
+        job.payload = serialize_json_value(
+            payload.model_copy(
+                update={
+                    "failure": AvailabilityOperationFailure(
+                        code="recipe_image.build_wait",
+                        detail="waiting for build",
+                        retryable=True,
+                        recovery_actions=[],
+                    )
+                }
+            )
+        )
+
+    service._persist_receipt(claim, _reference_receipt())
+
+    with sessions() as session:
+        job = session.get(Job, claim.operation_id)
+        assert job is not None
+        stored = AvailabilityJobPayload.model_validate(job.payload)
+    assert stored.image_result is not None
+    assert stored.failure is None
 
 
 def test_collection_racing_download_converges_after_restart(
