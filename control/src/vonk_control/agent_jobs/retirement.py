@@ -25,6 +25,7 @@ from ..agent_operation_facts import (
 )
 from ..agent_operation_facts import aware as _aware
 from ..categorized_errors import InvalidValue, MissingRecord
+from ..installation_transitions import end_unfinished_installation
 from ..lifecycle import CancelRequested, OperatorAction, Reported
 from ..lifecycle.agent_operation import (
     AgentOperationAdapter,
@@ -404,14 +405,10 @@ def _release_retired_owner_in_session(
             installation = session.get(
                 RecipeInstallation, owner_id, with_for_update=True
             )
-            if installation is not None and installation.state in {
-                InstallationState.PLANNED,
-                InstallationState.INSTALLING,
-            }:
+            if installation is not None:
                 # Ending an unfinished installer releases its busy marker;
                 # verified installations and serving runs remain unchanged.
-                installation.state = InstallationState.PARTIAL
-                installation.updated_at = now
+                end_unfinished_installation(installation, now)
             if (
                 installation is not None
                 and installation.state == InstallationState.UNINSTALLED

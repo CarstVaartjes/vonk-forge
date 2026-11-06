@@ -107,7 +107,8 @@ _HOLDING_STATES = (
 
 
 #: Holding states an unused installation is removed from. An installing one
-#: is in flight, and a partial one is the incomplete-installation sweep's
+#: is in flight while a live operation names it (otherwise ``attempt_residues``
+#: ends it), and a partial one is the incomplete-installation sweep's
 #: (``attempt_residues``); a failed one is ended and only holds disk.
 _COLLECTABLE_STATES = (InstallationState.INSTALLED, InstallationState.FAILED)
 
