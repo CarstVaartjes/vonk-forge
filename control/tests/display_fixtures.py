@@ -60,6 +60,14 @@ def model_display_denying(
     return published_json(display_of_model(document, license=license_document))
 
 
+def legacy_model_display(document: Mapping[str, object]) -> dict[str, object]:
+    """The display a 3.x library published for a Model: no modalities, capabilities or license."""
+    stored = published_json(display_of_model(document))
+    for fact in ("modalities", "capabilities", "license"):
+        del stored[fact]
+    return stored
+
+
 def display_of(document: Mapping[str, object]) -> RecipeDisplay | ModelDisplay:
     return (
         display_of_model(document)

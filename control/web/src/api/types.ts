@@ -114,7 +114,6 @@ export type LibraryViewModel = {
   model_file_count: WireNumber;
   model_bytes: WireNumber | null;
   cache_usage?: components["schemas"]["ModelCacheUsage"] | null;
-  model_capabilities?: string[];
   local: components["schemas"]["LibraryLocalState"];
   // Projected facets, named exactly as the CLI filter flags and the
   // /api/model/library query parameters: --usage --family --version

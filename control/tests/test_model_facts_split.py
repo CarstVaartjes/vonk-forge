@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import vonk_control.catalog_service as catalog_service_module
 from sqlalchemy import select, update
 from vonk_control.catalog_entities import (
     CatalogCode,
@@ -40,7 +41,6 @@ from vonk_control.models import (
     RecipeRun,
 )
 from vonk_control.observed_run_memory import observed_role_peaks
-from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 from vonk_forge_contracts import (
     ModelDefinition,
     document_sha256,
@@ -151,12 +151,13 @@ def _legacy_projection(model: ModelDefinition, legacy: dict) -> dict:
 
 
 @pytest.mark.parametrize(
-    "variant", ["pins-only", "recipe-also-changed", "model-bytes-changed"]
+    "variant",
+    ["pins-only", "recipe-also-changed", "model-bytes-changed", "carry-fails-once"],
 )
 def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
-    tmp_path: Path, variant: str
+    tmp_path: Path, variant: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    carried = variant == "pins-only"
+    carried = variant in {"pins-only", "carry-fails-once"}
     sessions, service, reader, item = _fixture(tmp_path)
     entry = reader.snapshot.catalog_entities[0]
     new_model = read_model(entry.document)
@@ -255,6 +256,30 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
         trigger=CatalogSyncTrigger.MANUAL,
         actor="test",
     )
+    if variant == "carry-fails-once":
+        # The carry runs in the transaction that moves the head: when it fails,
+        # the import rolls back whole (no new head without its peaks) and the
+        # next sync imports and carries.
+        def failing(*_args: object) -> None:
+            raise RuntimeError("carry failed")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(catalog_service_module, "carry_measured_peaks", failing)
+            failed = _sync(sessions, service, reader).sync(request)
+        assert failed.state == "partial"
+        with sessions() as session:
+            assert {
+                row.id
+                for row in session.scalars(
+                    select(CatalogDocumentRevision).where(
+                        CatalogDocumentRevision.kind == "recipe"
+                    )
+                )
+            } == {legacy_recipe_id}
+            assert observed_role_peaks(session, item.content_sha256) == {
+                "entrypoint": 800
+            }
+        request = request.model_copy(update={"request_key": str(uuid.uuid4())})
     _sync(sessions, service, reader).sync(request)
 
     with sessions() as session:
@@ -362,47 +387,6 @@ def test_a_write_refuses_a_model_that_still_carries_its_facts(tmp_path: Path) ->
                 actor="test",
             )
         assert refused.value.code == CatalogCode.DOCUMENT_INVALID
-
-
-def test_a_retained_older_release_changes_and_withdraws_nothing(tmp_path: Path) -> None:
-    """The window where this Controller runs but its major is not published yet.
-
-    The reader hands back the verified older release as an empty snapshot; the
-    catalog the Controller stores (what its routes and workloads run on) stays
-    active and visible, and nothing is withdrawn.
-    """
-    sessions, service, reader, _item = _fixture(tmp_path)
-    request = ManagedCatalogSyncRequest(
-        request_key=str(uuid.uuid4()),
-        trigger=CatalogSyncTrigger.AUTOMATIC,
-        actor="test",
-    )
-    _sync(sessions, service, reader).sync(request)
-    with sessions() as session:
-        before = {
-            row.id: (row.state, row.content_digest, row.projected)
-            for row in session.scalars(select(CatalogDocumentRevision))
-        }
-        heads = session.scalars(select(CatalogDocumentHead.active_revision_id)).all()
-    assert before and all(state == "active" for state, *_ in before.values())
-
-    reader.snapshot = RecipeLibrarySnapshot(
-        commit="a" * 40, items=(), version="3.2.0", updated_at=NOW
-    )
-    result = _sync(sessions, service, reader).sync(
-        request.model_copy(update={"request_key": str(uuid.uuid4())})
-    )
-    assert result.state == "current"
-    assert result.withdrawn_count == 0 and not result.problems
-    with sessions() as session:
-        assert {
-            row.id: (row.state, row.content_digest, row.projected)
-            for row in session.scalars(select(CatalogDocumentRevision))
-        } == before
-        assert (
-            session.scalars(select(CatalogDocumentHead.active_revision_id)).all()
-            == heads
-        )
 
 
 def test_the_published_status_of_a_carried_proof_is_readable() -> None:

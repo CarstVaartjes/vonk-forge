@@ -43,7 +43,7 @@ from vonk_forge_contracts import (
     read_recipe,
 )
 
-from .display_fixtures import model_display_denying
+from .display_fixtures import legacy_model_display, model_display_denying
 from .inventory_artifact_support import (
     clear_inventory_artifacts,
     replace_inventory_artifact,
@@ -639,6 +639,30 @@ def test_territorial_license_install_admission_is_informational(tmp_path) -> Non
     assert [warning.code for warning in unconfigured.nodes[0].warnings] == [
         "install.license_territorial_restrictions_informational"
     ]
+
+
+def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> None:
+    sessions, now, _node, mapping, build = setup(tmp_path)
+    with sessions.begin() as session:
+        root = session.get(CatalogDocument, MODEL_DOCUMENT_ID)
+        revision = session.get(CatalogDocumentRevision, MODEL_REVISION_ID)
+        assert root is not None and revision is not None
+        session.execute(
+            update(CatalogDocument)
+            .where(CatalogDocument.id == root.id)
+            .values(display=legacy_model_display(revision.document))
+        )
+
+    plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
+        mapping, build, now=now
+    )
+
+    assert plan.allowed is True
+    assert not any(
+        warning.code.endswith("license_territorial_restrictions_informational")
+        for node in plan.nodes
+        for warning in node.warnings
+    )
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:

@@ -164,7 +164,7 @@ export type LibraryRecipeRecord = {
   model?: LibraryViewModel["model"];
   modelDocument?: LibraryViewModel["model_document"];
   modelDisplay?: LibraryViewModel["model_display"];
-  modelCapabilities?: LibraryViewModel["model_capabilities"];
+  modelCapabilities?: LibraryViewModel["usage"];
   modelKey: string;
   modelTitle: string;
   modelFileCount: WireNumber;
@@ -296,7 +296,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
     const title = modelTitle(model);
     const fileCount = model.model_file_count;
     const bytes = model.model_bytes;
-    const capabilities = model.model_capabilities ?? [];
+    const capabilities = model.usage;
     const modelCached = isModelCached(model);
     if (model.recipes.length === 0)
       return [
@@ -306,7 +306,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
           model: model.model,
           modelDocument: model.model_document,
           modelDisplay: model.model_display,
-          modelCapabilities: model.model_capabilities,
+          modelCapabilities: model.usage,
           modelKey: key,
           modelTitle: title,
           modelFileCount: fileCount,
@@ -323,7 +323,7 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       model: model.model,
       modelDocument: model.model_document,
       modelDisplay: model.model_display,
-      modelCapabilities: model.model_capabilities,
+      modelCapabilities: model.usage,
       modelKey: key,
       modelTitle: title,
       modelFileCount: fileCount,

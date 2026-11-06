@@ -459,15 +459,6 @@ class CatalogService:
             images, qualifications
         )
 
-    def carry_measured_role_peaks(
-        self, publisher: str, slug: str, old_digest: str, new_digest: str
-    ) -> bool:
-        """Carry a recipe's measured peaks across a Model-pins-only re-key."""
-        with self._sessions.begin() as session:
-            return carry_measured_peaks(
-                session, publisher, slug, old_digest, new_digest
-            )
-
     def import_recipe_library(
         self,
         actor: str,
@@ -531,6 +522,20 @@ class CatalogService:
             )
         actor = _actor(actor)
         with self._sessions.begin() as session:
+            identity = captured.definition.identity
+            previous_digest = session.scalar(
+                select(CatalogDocumentRevision.content_digest)
+                .join(
+                    CatalogDocumentHead,
+                    CatalogDocumentHead.active_revision_id
+                    == CatalogDocumentRevision.id,
+                )
+                .where(
+                    CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                    CatalogDocumentHead.publisher == identity.publisher,
+                    CatalogDocumentHead.slug == identity.slug,
+                )
+            )
             for value in dependencies:
                 self._upsert_canonical_document(session, value, actor=actor)
             revision, head_selected = self._upsert_canonical_document(
@@ -538,6 +543,16 @@ class CatalogService:
             )
             if not head_selected:
                 self._select_imported_recipe_head(session, revision)
+            if previous_digest is not None:
+                # Measured wins: in the transaction that moves the head, so the
+                # new head never exists without the peaks its execution earned.
+                carry_measured_peaks(
+                    session,
+                    identity.publisher,
+                    identity.slug,
+                    previous_digest,
+                    revision.content_digest,
+                )
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )

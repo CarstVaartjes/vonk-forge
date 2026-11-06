@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import ProjectionCode, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -38,7 +38,7 @@ from vonk_control.run_admission import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
-from .display_fixtures import model_display_denying
+from .display_fixtures import legacy_model_display, model_display_denying
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
@@ -454,6 +454,34 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
     assert unconfigured.allowed is True
     assert "run.license_territorial_restrictions_informational" in [
         warning.code for node in unconfigured.nodes for warning in node.warnings
+    ]
+
+
+def test_a_3x_model_display_row_does_not_break_run_planning(tmp_path) -> None:
+    sessions, now, _node, installation = setup(tmp_path, free_memory=300)
+    with sessions.begin() as session:
+        root = session.scalar(
+            select(CatalogDocument).where(CatalogDocument.kind == "model")
+        )
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "model"
+            )
+        )
+        assert root is not None and revision is not None
+        session.execute(
+            update(CatalogDocument)
+            .where(CatalogDocument.id == root.id)
+            .values(display=legacy_model_display(revision.document))
+        )
+
+    plan = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    ).plan_run(installation, alias="hunyuan", now=now)
+
+    assert plan.allowed is True
+    assert "run.license_territorial_restrictions_informational" not in [
+        warning.code for node in plan.nodes for warning in node.warnings
     ]
 
 

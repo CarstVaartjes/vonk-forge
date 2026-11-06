@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     CatalogSyncState,
     RecipeBuildCode,
     RecipePackageCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_control import recipe_packages
@@ -44,7 +45,7 @@ from vonk_control.recipe_packages import (
     RecipePackageClient,
     RecipePackageError,
 )
-from vonk_control.recipe_packages import contracts as recipe_packages_contracts
+from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_forge_contracts import (
@@ -895,63 +896,43 @@ def test_signed_content_is_prepared_despite_different_source_provenance(
         client.close()
 
 
-def test_a_stored_older_major_is_kept_while_no_newer_major_is_published(
-    tmp_path: Path, signed_releases: list[bytes], monkeypatch: pytest.MonkeyPatch
+def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_tick(
+    tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """A Controller on a new major, deployed before its release exists, goes on.
+    """The window where this Controller runs but its contract major is unpublished.
 
-    The persisted generation is a verified v3 release and no v4 is published:
-    the reader keeps serving it as the release this Controller already stores
-    (an empty snapshot, so the sync withdraws and changes nothing) instead of
-    failing the whole observation. Once a v4 release appears it is adopted.
+    Only an older major exists: the read is a typed, visible wait
+    (UNAVAILABLE, an unavailable observation), never a refusal of the stored
+    catalog. The same client adopts the major on the tick after it appears.
     """
-    index_bytes, _row, package = _canonical_package_fixture()
-    index = json.loads(index_bytes)
-    index["contract_version"] = "3.2.0"
-    cache = tmp_path / "packages"
-    older = _release_for(json.dumps(index).encode(), package, tag="v3.2.0")
-    modules = (recipe_packages, recipe_packages_contracts)
-    for module in modules:
-        monkeypatch.setattr(module, "CONTRACT_MAJOR", 3)
-    first = _client(older, cache)
-    first.prepare(first.list())
-    first.close()
-    for module in modules:
-        monkeypatch.setattr(module, "CONTRACT_MAJOR", 4)
+    index, _row, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    older_only = True
 
-    def only_older(request: httpx2.Request) -> httpx2.Response:
-        # The listing names no release of this major at all.
-        if request.url.path == RELEASES:
+    def transport(request: httpx2.Request) -> httpx2.Response:
+        if older_only and request.url.path == RELEASES:
             return httpx2.Response(
                 200, json=[{"tag_name": "v3.2.0", "draft": False, "assets": []}]
             )
-        return older.handler(request)
+        return release.handler(request)
 
-    restarted = RecipePackageClient(
+    client = RecipePackageClient(
         api_url="http://127.0.0.1",
-        cache_root=cache,
-        transport=httpx2.MockTransport(only_older),
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(transport),
     )
     try:
-        snapshot = restarted.list()
-        assert snapshot.items == () and snapshot.catalog_entities == ()
-        assert snapshot.problems == ()
-        assert snapshot.version == "3.2.0"
-        assert snapshot.commit == "a" * 40
-        restarted.prepare(snapshot)
-        # Nothing newer appeared: the next read keeps it.
-        assert restarted.list().version == "3.2.0"
+        for _tick in range(2):  # retried every tick, with the same typed answer
+            with pytest.raises(RecipePackageUnsettled) as waiting:
+                client.list()
+            assert waiting.value.code == RecipePackageCode.UNAVAILABLE
+            assert waiting.value.typed_reason == WaitReason.OBSERVATION_UNAVAILABLE
+            assert "contract v4" in waiting.value.detail
+        older_only = False
+        snapshot = client.list()
+        assert snapshot.version == "4.0.0" and snapshot.items
     finally:
-        restarted.close()
-
-    # A v4 release appears: it is adopted (the bundle, not the retained one).
-    current = _release_for(index_bytes, package)
-    adopted = _client(current, cache)
-    try:
-        assert adopted.list().version == "4.0.0"
-        assert adopted.list().items
-    finally:
-        adopted.close()
+        client.close()
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)

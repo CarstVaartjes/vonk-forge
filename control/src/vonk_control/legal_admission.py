@@ -7,12 +7,16 @@ and all technical admission checks remain authoritative for execution.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import ModelDisplay
 
 from .models import CatalogDocument, CatalogDocumentRevision
+
+_LOGGER = logging.getLogger(__name__)
+_NOTED: set[str] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,16 +29,29 @@ def stored_model_display(
 ) -> ModelDisplay | None:
     """The published display of a Model revision's document, or None.
 
-    The license is a display fact, not part of the hashed Model document. The
-    display is written only from a validated published display, so it is read as
-    stored; a document without one declares nothing. The warning built from it
-    is informational and never blocks anything.
+    The license is a display fact, not part of the hashed Model document. A
+    display that is missing, or stored by an older contract and unreadable now,
+    declares nothing (read, and noted once, the way the library reads it): the
+    warning built from it is informational and never blocks anything.
     """
 
     if revision is None:
         return None
     row = session.get(CatalogDocument, revision.document_id)
-    return None if row is None else row.model_display()
+    if row is None:
+        return None
+    try:
+        return row.model_display()
+    except ValueError as error:
+        return _unreadable_display(row, error)
+
+
+def _unreadable_display(row: CatalogDocument, error: ValueError) -> None:
+    """Note a stored display this contract cannot read; it declares nothing."""
+    marker = f"{row.kind}/{row.slug}"
+    if marker not in _NOTED:
+        _NOTED.add(marker)
+        _LOGGER.warning("ignoring unreadable catalog display %s: %s", marker, error)
 
 
 def territorial_admission(

@@ -138,7 +138,6 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
     model_document: document,
     model_file_count: document.files.length,
     model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
-    model_capabilities: [...usage],
     local,
     ...facets,
     usage,
