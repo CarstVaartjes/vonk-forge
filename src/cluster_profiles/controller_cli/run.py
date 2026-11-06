@@ -15,7 +15,7 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
-from .common import ControllerClient, _profile_number, _quoted, _request_key
+from .common import ControllerClient, _profile_number, _request_key
 from .confirmation import ActionDeclined, _require_confirmation
 from .profile import _profile
 from .profile_authoring import _profile_authoring
@@ -120,6 +120,54 @@ def _run(
     }
 
 
+def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:
+    """Selector -> published model title, from the paged model library.
+
+    A model without a published display has no title to match and is omitted.
+    """
+    from ..generated_control.models.model_display import ModelDisplay
+
+    titles: dict[str, str] = {}
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    while True:
+        query: dict[str, object] = {"limit": 512, "sort": "name"}
+        if cursor is not None:
+            query["cursor"] = cursor
+        page = client.request(
+            "GET",
+            "/api/model/library",
+            query=query,
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        models = page.get("models")
+        if not isinstance(models, list):
+            raise ControlMalformedResponse(
+                "model library response does not contain models"
+            )
+        for row in models:
+            if not isinstance(row, Mapping) or not isinstance(row.get("selector"), str):
+                raise ControlMalformedResponse(
+                    "model library response contains an invalid model"
+                )
+            display = row.get("model_display")
+            if display is not None:
+                titles[cast(str, row["selector"])] = ModelDisplay.from_dict(
+                    validate_control_document("ModelDisplay", display)
+                ).model_title
+        next_cursor = page.get("next_cursor")
+        if next_cursor is None:
+            return titles
+        if not isinstance(next_cursor, str) or not next_cursor:
+            raise ControlMalformedResponse(
+                "model library response contains an invalid cursor"
+            )
+        if next_cursor in seen_cursors:
+            raise ControlMalformedResponse("model library cursor repeated")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+
+
 def _resolve_run_recipe(
     client: ControllerClient, requested: str, *, deadline: float
 ) -> str:
@@ -162,30 +210,12 @@ def _resolve_run_recipe(
             }:
                 model_matches.add(selector)
     if not matches and not model_matches:
-        from ..generated_control.models.model_display import ModelDisplay
-
+        # One paged library read carries every model's published title.
+        titles = _observe_selection(
+            lambda: _model_titles(client, deadline=deadline), deadline=deadline
+        )
         for model_selector, recipes in model_recipes.items():
-
-            def model_title(selected: str = model_selector):
-                detail = client.request(
-                    "GET",
-                    f"/api/model/{_quoted(selected)}",
-                    timeout_seconds=_selection_remaining(deadline),
-                )
-                if detail.get("selector") != selected:
-                    raise ControlMalformedResponse(
-                        "model title observation identifies another selection"
-                    )
-                display = detail.get("model_display")
-                if display is None:
-                    # No published display yet: there is no title to match.
-                    return ""
-                return ModelDisplay.from_dict(
-                    validate_control_document("ModelDisplay", display)
-                ).model_title
-
-            title = _observe_selection(model_title, deadline=deadline)
-            if title.casefold() == needle:
+            if titles.get(model_selector, "").casefold() == needle:
                 model_matches.update(recipes)
     candidates = matches or model_matches
     if len(candidates) == 1:
