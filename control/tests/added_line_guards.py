@@ -2221,6 +2221,11 @@ def check_source(
         hits.extend(
             (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
         )
+    if "alias-rules" in modes and alias_rules.run_alias_in_scope(path) and not is_test:
+        hits.extend(
+            (line, alias_rules.RUN_ALIAS_KIND)
+            for line in alias_rules.scan_run_alias(source)
+        )
     if (
         "intent-ordinal" in modes
         and intent_ordinal_writers.in_scope(path)
