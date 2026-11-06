@@ -8,12 +8,13 @@ through this edge, ``IN_FLIGHT`` -> ``ENDED_AS``, written one way
 cannot prove nothing reached the Spark, so the retention sweep removes whatever
 it left, and the next attempt may adopt it.
 
-Callers: the operator's retirement and an agent-reported cancel (both lock the
-row), and the residue sweep for an ``installing`` row no live operation names
-(supersession or a cancel before any claim). A ``planned`` row with no owner is
+Callers: the operator's retirement (it locks the row), and the residue sweep
+for an ``installing`` row no live operation names (supersession or a cancel
+before any claim). A ``planned`` row with no owner is
 released by the residue sweep's never-installed path instead. The agent-result
-projection in ``terminal_projection`` writes ``installed`` as well as
-``partial`` and stays separate.
+projections (``terminal_projection``, and the cancel receipt in
+``result_consumption``, which also ends an installed row's cancelled uninstall
+or reconcile as ``partial``) write other sources and stay separate.
 """
 
 from __future__ import annotations
