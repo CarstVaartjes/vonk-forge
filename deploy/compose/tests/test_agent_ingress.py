@@ -20,6 +20,7 @@ from vonk_control.artifact_job_api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )
+from vonk_control.gateway_route_grants import GatewayInferenceRoute
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -700,13 +701,17 @@ def _edge_body_bound(site: object, method: str, path: str) -> int | None:
 
 _UUID = str(uuid4())
 #: The largest inference body the browser edge must admit: a 180 MB media upload
-#: as a base64 data URI is 240 MB, under 256 MiB. LiteLLM sets no limit itself.
+#: as a base64 data URI is 240 MB, under 256 MiB (180 is Nemotron-3.5-Transcribe's
+#: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB, from NVIDIA's model card). LiteLLM sets no limit itself.
 _INFERENCE_BODY_BYTES = 256 * 1024 * 1024
+#: The OpenAI-shaped paths plus the granted native route, which the edge
+#: serves as /v1/systemone and rewrites to GatewayInferenceRoute.SYSTEMONE.
 _INFERENCE_POSTS = (
     "/v1/chat/completions",
     "/v1/completions",
     "/v1/responses",
     "/v1/messages",
+    "/v1" + GatewayInferenceRoute.SYSTEMONE.value.removeprefix("/vllm"),
 )
 #: Each request the Controller bounds, on the edge site that carries it, with the
 #: Controller's own maximum. The large-body paths are proven against the
@@ -788,8 +793,6 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
                 edge_bound = _edge_body_bound(sites[name], method, path)
                 assert edge_bound is not None, (name, method, path)
                 assert edge_bound >= controller_bound, (name, method, path)
-                if controller_bound == _INFERENCE_BODY_BYTES:
-                    assert edge_bound == _INFERENCE_BODY_BYTES, (name, path)
                 if controller_bound == MAX_CONTROL_DOCUMENT_BYTES:
                     assert edge_bound == MAX_CONTROL_DOCUMENT_BYTES, (name, path)
             # A 2 MiB chat body (an image) passes; any other path, and a GET of

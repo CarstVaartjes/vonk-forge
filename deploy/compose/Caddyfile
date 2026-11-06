@@ -32,14 +32,15 @@
 	# and enforces this same 512 MiB bound. Inference POSTs that LiteLLM serves
 	# carry base64 image/audio data URIs; 256 MiB admits the largest media
 	# upload a recipe declares (180 MB, base64 inflates it by a third) and
-	# LiteLLM sets no body limit of its own. Nothing else exceeds 1 MiB.
+	# LiteLLM sets no body limit of its own. The owner accepts these bodies
+	# reaching LiteLLM before its key check. Nothing else exceeds 1 MiB.
 	@artifact_input_upload {
 		method PUT
 		path /api/artifact-jobs/*/inputs/*
 	}
 	@inference_request {
 		method POST
-		path /v1/chat/completions /v1/completions /v1/responses /v1/messages
+		path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone
 	}
 	@ordinary_browser_request {
 		not {
@@ -48,7 +49,7 @@
 		}
 		not {
 			method POST
-			path /v1/chat/completions /v1/completions /v1/responses /v1/messages
+			path /v1/chat/completions /v1/completions /v1/responses /v1/messages /v1/systemone
 		}
 	}
 	request_body @ordinary_browser_request {
