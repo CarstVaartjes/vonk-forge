@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 
 from pydantic import (
+    AwareDatetime,
     Field,
     StringConstraints,
     model_validator,
@@ -17,6 +18,7 @@ from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..distribution_assignment import NodeDistributionAssignment
 from ..model_cache_contract import ModelCacheDownloadResult
+from ..operation_blockers import MAX_BLOCKERS, OperationBlocker
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..runtime_image_preparation import RuntimeImageReceipt
 from ..strict_json import StrictModel
@@ -139,6 +141,11 @@ class RunSwitchModelDownloadPendingResult(_RunSwitchPhaseBase):
     total_bytes: int | None = Field(default=None, ge=0)
     progress: RunSwitchChildProgress
     reason: Annotated[str, StringConstraints(max_length=512)] | None = None
+    #: The model cache's typed wait (access denied, space, ...) and its next check.
+    blockers: list[OperationBlocker] = Field(
+        default_factory=list, max_length=MAX_BLOCKERS
+    )
+    next_attempt_at: AwareDatetime | None = None
 
 
 class RunSwitchTargetTransferResult(_RunSwitchPhaseBase):

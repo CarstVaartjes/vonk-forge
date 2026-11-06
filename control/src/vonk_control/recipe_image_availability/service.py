@@ -703,6 +703,11 @@ class RecipeImageAvailabilityService:
             self, limit=limit, owner_id=owner_id, requested_operation_id=operation_id
         )
 
+    def _model_wait_blockers(
+        self, blockers: Sequence[OperationBlocker], default: OperationBlocker
+    ) -> list[OperationBlocker]:
+        return model_preparation._model_wait_blockers(blockers, default)
+
     def _park_for_model(
         self, operation: Job, payload: AvailabilityJobPayload, now: datetime
     ) -> bool:
