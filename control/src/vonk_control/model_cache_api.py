@@ -21,7 +21,6 @@ from .api_availability import AVAILABILITY_ERRORS
 from .auth import MUTATION_ROLES, Actor, CursorCodec
 from .bounded_json import require_integer, require_sequence
 from .cache_removal_review import CacheRemovalReview
-from .http_errors import DEFAULT_RETRY_AFTER
 from .model_cache import (
     ModelCacheConflict,
     ModelCacheError,
@@ -29,7 +28,7 @@ from .model_cache import (
     ModelCacheResolutionError,
     ModelCacheService,
 )
-from .model_cache.errors import ModelCacheConflictUnknown, ModelCacheSelectorAmbiguous
+from .model_cache.errors import ModelCacheSelectorAmbiguous
 from .model_cache_contract import (
     UUID_PATTERN,
     CacheOperationKind,
@@ -124,6 +123,10 @@ def _model_operator_response(
 
 
 def model_cache_http_error(error: BaseException) -> HTTPException:
+    if isinstance(error, UnknownOutcomeError):
+        # A busy owner or unconfirmed bookkeeping: the route's retry-later
+        # answer (503, Retry-After, error code) says to ask again.
+        raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
         from .library_api import SelectorAmbiguityHTTPError
         from .library_projection import LibrarySelectorAmbiguous
@@ -135,16 +138,6 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
         )
     if isinstance(error, ModelCacheNotFound):
         return HTTPException(status_code=404, detail=error.detail)
-    if isinstance(error, ModelCacheConflictUnknown):
-        # A busy owner: the same request succeeds once it lets go.
-        return HTTPException(
-            status_code=409,
-            detail=error.detail,
-            headers={
-                "x-vonk-error-code": error.code,
-                "retry-after": str(error.retry_after_seconds or DEFAULT_RETRY_AFTER),
-            },
-        )
     if isinstance(error, ModelCacheConflict):
         return HTTPException(status_code=409, detail=error.detail)
     if isinstance(error, ModelCacheResolutionError):
@@ -155,8 +148,6 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
             detail=error.detail,
             headers={"x-vonk-error-code": error.code},
         )
-    if isinstance(error, UnknownOutcomeError):
-        raise error
     if isinstance(error, ModelCacheError):
         if error.disposition != Disposition.OBSERVE:
             return HTTPException(

@@ -1,32 +1,53 @@
-"""A busy-owner 409 names its code and tells the caller to retry."""
+"""A busy-owner conflict is answered as a wait the client reads as a wait."""
 
 from __future__ import annotations
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from vonk_control.model_cache.errors import (
     ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
 )
 from vonk_control.model_cache_api import model_cache_http_error
+from vonk_control.strict_json import ControllerAPIRoute
 
+from cluster_profiles.control_client.common import (
+    DISPOSITION_WAIT,
+    observation_disposition,
+)
 from cluster_profiles.control_client.errors import ControlHTTPError
 
 
-def test_busy_owner_conflict_carries_code_and_retry() -> None:
-    reply = model_cache_http_error(
+def _app(error: BaseException) -> TestClient:
+    app = FastAPI()
+    app.router.route_class = ControllerAPIRoute
+
+    @app.get("/busy")
+    def busy() -> None:
+        raise model_cache_http_error(error)
+
+    return TestClient(app)
+
+
+def test_busy_owner_conflict_is_a_wait_for_the_client() -> None:
+    response = _app(
         ModelCacheConflictUnknown("artifact.deletion_busy", "has another removal owner")
-    )
+    ).get("/busy")
 
-    assert reply.status_code == 409
-    assert reply.headers is not None
-    assert reply.headers["x-vonk-error-code"] == "artifact.deletion_busy"
-    after = int(reply.headers["retry-after"])
+    assert response.status_code == 503
+    assert response.headers["x-vonk-error-code"] == "artifact.deletion_busy"
+    after = int(response.headers["retry-after"])
     assert after > 0
-    client_error = ControlHTTPError(409, str(reply.detail), after, code="x")
-    assert client_error.retryable is True
+    client_error = ControlHTTPError(
+        response.status_code,
+        response.json()["detail"],
+        after,
+        code=response.headers["x-vonk-error-code"],
+    )
+    assert observation_disposition(client_error) == DISPOSITION_WAIT
 
 
-def test_invalid_conflict_stays_terminal() -> None:
-    reply = model_cache_http_error(ModelCacheConflictInvalid("model.bad", "no"))
+def test_invalid_conflict_stays_a_409() -> None:
+    response = _app(ModelCacheConflictInvalid("model.bad", "no")).get("/busy")
 
-    assert "retry-after" not in (reply.headers or {})
-    assert ControlHTTPError(409, "no", None).retryable is False
+    assert response.status_code == 409

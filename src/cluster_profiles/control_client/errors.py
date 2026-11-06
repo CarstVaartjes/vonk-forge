@@ -231,11 +231,7 @@ class ControlHTTPError(ControlClientError):
         request_id: str | None = None,
     ) -> None:
         if status_code != 500 or retryable is None:
-            retryable = (
-                status_code == 429
-                or 500 <= status_code <= 599
-                or (status_code == 409 and retry_after_seconds is not None)
-            )
+            retryable = status_code == 429 or 500 <= status_code <= 599
         self.status_code = status_code
         self.code = safe_code(code, f"http.{status_code}")
         self.recovery = recovery
