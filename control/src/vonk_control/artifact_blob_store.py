@@ -37,9 +37,7 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 # reconciliation.
 _REFERENCE_LOCK_BUDGET_SECONDS = 30.0
 _REFERENCE_LOCK_RETRY_SECONDS = 0.05
-# An async attachment holds the shared fence for one upload at most this long;
-# the bound only keeps a lost release flag from pinning the reconciler.
-_REFERENCE_HOLD_SECONDS = 3600.0
+_RELEASE_POLL_SECONDS = 1.0
 
 
 class BlobStoreUsage(BaseModel):
@@ -170,8 +168,11 @@ class ArtifactBlobStore:
                 with self.reference_attachment():
                     with suppress(RuntimeError):  # loop closed
                         loop.call_soon_threadsafe(settle, None)
-                    release.wait(_REFERENCE_HOLD_SECONDS)
-            except (ArtifactBlobBusy, OSError) as error:  # the acquire failed
+                    # The release flag always ends the hold; the poll only
+                    # keeps the wait interruptible.
+                    while not release.wait(_RELEASE_POLL_SECONDS):
+                        pass
+            except BaseException as error:  # noqa: BLE001 - handed to the waiter
                 with suppress(RuntimeError):
                     loop.call_soon_threadsafe(settle, error)
             finally:

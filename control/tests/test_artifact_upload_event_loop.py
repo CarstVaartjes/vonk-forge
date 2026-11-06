@@ -9,7 +9,11 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
-from vonk_control.artifact_blob_store import ArtifactBlobStore, StoredArtifactBlob
+from vonk_control.artifact_blob_store import (
+    ArtifactBlobStore,
+    ArtifactBlobUnsafePath,
+    StoredArtifactBlob,
+)
 
 TICKS = 20
 HANG_GUARD_SECONDS = 60
@@ -96,3 +100,21 @@ def test_cancel_while_waiting_for_the_reference_lock_leaves_it_free(
     # claim succeeds at once instead of running out its budget.
     with store.reference_reconciliation():
         pass
+
+
+def test_a_symlinked_blob_root_reaches_the_async_caller_as_a_security_refusal(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    store = ArtifactBlobStore(tmp_path / "blobs", max_stored_bytes=1024**2)
+    store.usage()  # creates the root
+    (tmp_path / "blobs").rename(tmp_path / "moved")
+    (tmp_path / "blobs").symlink_to(real)
+
+    async def attach() -> None:
+        async with store.reference_attachment_async():
+            pass
+
+    with pytest.raises(ArtifactBlobUnsafePath):
+        asyncio.run(attach())
