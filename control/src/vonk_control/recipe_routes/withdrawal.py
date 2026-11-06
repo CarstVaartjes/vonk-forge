@@ -524,7 +524,8 @@ def _maintenance_step_in_session(
         and publication is not None
         and publication.state == RoutePublicationState.COMPLETED
         and publication.generation == owner.owner_generation
-        # A missing, replaced or unreadable live marker is republished.
+        # A missing, replaced or unreadable live marker or bundle is republished.
+        and not served.unreadable
         and self._publisher.active_marker_digest()
         == publication.activation_marker_digest
     )

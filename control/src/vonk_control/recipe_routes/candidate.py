@@ -270,7 +270,7 @@ def _candidate_once(
                 # with: new facts would rewrite litellm.json, and the supervisor
                 # restarts LiteLLM on any byte change, cutting every route's
                 # in-flight requests. They apply when the route next changes.
-                frozen = served.get(run.alias)
+                frozen = served.routes.get(run.alias)
             else:
                 frozen = None
             model_info = (

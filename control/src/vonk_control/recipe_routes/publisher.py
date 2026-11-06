@@ -104,7 +104,7 @@ class AtomicRecipeRoutePublisher:
     ) -> _RecipeCandidate | None:
         """Reuse only the checksum-verified immutable route owned by this run."""
         active = self._active_published_bundle()
-        if active is None:
+        if active is None or isinstance(active, UnknownError):
             return None
         bundle, routes, runtime = active
         found = [
@@ -177,26 +177,37 @@ class AtomicRecipeRoutePublisher:
         change, which would cut every route's in-flight requests).
         """
         active = self._active_published_bundle()
+        if isinstance(active, UnknownError):
+            return ServedModelInfo(unreadable=True)
         if active is None:
-            return {}
+            return ServedModelInfo()
         _, routes, runtime = active
         info = {item.model_name: item.model_info for item in runtime.model_list}
-        return {
-            alias: (run_id, info[alias])
-            for alias, endpoint in routes.routes.items()
-            if alias in info
-            and (run_id := recipe_route_run_id(endpoint.operation_id)) is not None
-        }
+        return ServedModelInfo(
+            {
+                alias: (run_id, info[alias])
+                for alias, endpoint in routes.routes.items()
+                if alias in info
+                and (run_id := recipe_route_run_id(endpoint.operation_id)) is not None
+            }
+        )
 
     def _active_published_bundle(
         self,
-    ) -> tuple[VerifiedRouteBundle, RouteBundleDocument, LiteLlmConfig] | None:
-        """The verified active bundle this authority published, with its documents."""
+    ) -> (
+        tuple[VerifiedRouteBundle, RouteBundleDocument, LiteLlmConfig]
+        | UnknownError
+        | None
+    ):
+        """The verified active bundle this authority published, with its documents.
+
+        ``UnknownError``: a live bundle exists and does not verify or parse.
+        """
         if not (self._publisher._root / "activation.json").exists():
             return None
         bundle = verify_active_route_bundle(self._publisher._root)
         if isinstance(bundle, UnknownError):
-            return None
+            return bundle
         if (
             bundle.marker.authority_id != self._AUTHORITY_ID
             or bundle.marker.state != GatewayRouteState.PUBLISHED

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
@@ -322,5 +322,17 @@ def render_empty_config() -> bytes:
     return _document([])
 
 
-# What the active bundle publishes per alias: the run serving it and its facts.
-ServedModelInfo = Mapping[str, tuple[str, LiteLlmModelInfo | None]]
+@dataclass(frozen=True)
+class ServedModelInfo:
+    """What the active bundle publishes, read once before a transaction opens.
+
+    ``routes`` maps an alias to the run serving it and its facts. ``unreadable``
+    is set when a live bundle exists but does not verify or parse (for example
+    an earlier Controller's file): the maintenance pass then republishes it,
+    like any other unreadable live marker.
+    """
+
+    routes: Mapping[str, tuple[str, LiteLlmModelInfo | None]] = field(
+        default_factory=dict
+    )
+    unreadable: bool = False

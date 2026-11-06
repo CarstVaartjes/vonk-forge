@@ -47,6 +47,7 @@ from ..lifecycle.evidence import (
     retire_as_unknown,
 )
 from ..lifecycle.recipe_operation import RecipeOperationAdapter
+from ..litellm import ServedModelInfo
 from ..models import (
     Job,
     RecipeRun,
@@ -104,7 +105,7 @@ class StopDispatchMixin:
         served = (
             service._route_publications.served_model_info()
             if service._route_publications is not None
-            else {}
+            else ServedModelInfo()
         )
         try:
             transaction = (

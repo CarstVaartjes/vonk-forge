@@ -127,7 +127,7 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
         self.aliases: list[tuple[str, ...]] = []
 
     def served_model_info(self):
-        return {}
+        return ServedModelInfo()
 
     def publish_recipe(self, candidate):
         return self._record(

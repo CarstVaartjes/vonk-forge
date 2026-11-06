@@ -15,11 +15,12 @@ import json
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
-from vonk_agent_protocol import GatewayRouteState, UnknownError
+from vonk_agent_protocol import GatewayRouteState, RoutePublicationState, UnknownError
 from vonk_control import route_model_info as module
 from vonk_control.litellm import (
     LiteLlmConfig,
@@ -251,7 +252,7 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
     )
     assert accepted is not None
     assert accepted.policy.models["model"].model_info == info
-    assert publisher.served_model_info() == {"model": (run_id, info)}
+    assert publisher.served_model_info().routes == {"model": (run_id, info)}
 
 
 def test_ingress_reads_the_index_entrys_facts_once_and_fails_open() -> None:
@@ -485,6 +486,26 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     assert _published_entries(tmp_path / "live")["qwen"]["model_info"]["mode"] == "chat"
 
 
+def _endpoint_read_fails(base, root: Path) -> bool:
+    """Whether the durable endpoint projection cannot verify the live bundle."""
+    from vonk_control.operation_api.durable import _DurableOperationProjection
+
+    projection = _DurableOperationProjection(
+        base.sessions,
+        root,
+        clock=lambda: datetime.now(UTC),
+        stale_after_seconds=60,
+        cursors=None,  # type: ignore[arg-type]
+    )
+    with base.sessions() as session:
+        snapshot = projection._publication_snapshot(session)
+    try:
+        projection._verified_routes(snapshot)
+    except RuntimeError:
+        return True
+    return False
+
+
 def test_an_earlier_bundle_is_republished_once_by_maintenance(
     tmp_path: Path,
 ) -> None:
@@ -543,10 +564,23 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
             litellm=earlier_bytes,
         )
     assert not isinstance(marker, UnknownError)
+    # The database records exactly what the earlier Controller recorded for
+    # that publication: its generation, marker and file digests.
+    with service.sessions.begin() as session:
+        service.projection_in_session(
+            session,
+            SimpleNamespace(activation_marker=marker),  # type: ignore[arg-type]
+            state=RoutePublicationState.COMPLETED,
+        )
     assert isinstance(verify_active_route_bundle(live), UnknownError)
-    assert service._publisher.served_model_info() == {}
+    assert service._publisher.active_marker_digest() == marker.digest
+    served = service._publisher.served_model_info()
+    assert served.routes == {} and served.unreadable
+    # Every endpoint read fails until the bundle is republished.
+    assert _endpoint_read_fails(base, live)
 
-    # One maintenance pass republishes under the current policy.
+    # One maintenance pass republishes under the current policy, though the
+    # candidate digest and the durable marker are unchanged.
     assert service.maintain() is True
     entries = _published_entries(live)
     assert set(entries) == {"qwen"}
@@ -555,6 +589,7 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     after = verify_active_route_bundle(live)
     assert not isinstance(after, UnknownError) and after.litellm is not None
     assert after.litellm.router_settings.enable_pre_call_checks is False
+    assert not _endpoint_read_fails(base, live)
 
     # Healed: the next pass has nothing to publish and no byte moves.
     assert service.maintain() is False
