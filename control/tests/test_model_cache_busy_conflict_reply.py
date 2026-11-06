@@ -22,7 +22,7 @@ def _app(error: BaseException) -> TestClient:
     app = FastAPI()
     app.router.route_class = ControllerAPIRoute
 
-    @app.get("/busy")
+    @app.post("/busy")
     def busy() -> None:
         raise model_cache_http_error(error)
 
@@ -32,7 +32,7 @@ def _app(error: BaseException) -> TestClient:
 def test_busy_owner_conflict_is_a_wait_for_the_client() -> None:
     response = _app(
         ModelCacheConflictUnknown("artifact.deletion_busy", "has another removal owner")
-    ).get("/busy")
+    ).post("/busy")
 
     assert response.status_code == 503
     assert response.headers["x-vonk-error-code"] == "artifact.deletion_busy"
@@ -48,6 +48,6 @@ def test_busy_owner_conflict_is_a_wait_for_the_client() -> None:
 
 
 def test_invalid_conflict_stays_a_409() -> None:
-    response = _app(ModelCacheConflictInvalid("model.bad", "no")).get("/busy")
+    response = _app(ModelCacheConflictInvalid("model.bad", "no")).post("/busy")
 
     assert response.status_code == 409
