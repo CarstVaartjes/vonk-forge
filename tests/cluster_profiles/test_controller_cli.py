@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import signal
 import textwrap
+import threading
 import time
 import uuid
 from collections.abc import Mapping
@@ -33,6 +35,7 @@ from cluster_profiles.control_client import (
     _operation,
     validate_control_document,
 )
+from cluster_profiles.controller_cli import selection
 from cluster_profiles.controller_cli.selection import _read_concurrently
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
@@ -5115,32 +5118,50 @@ def test_profile_list_traverses_the_server_continuation():
 
 
 # Independent CLI selection reads run at once and keep their own outcomes.
-_DELAY = 0.3
+# Every fake read waits on a barrier that opens only when all of them are in
+# flight together, so concurrency is proven by ordering, not by elapsed time.
 
 
-def _slow(value: object):
+def _barrier(parties: int) -> threading.Barrier:
+    return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
+
+
+def _far() -> float:
+    return time.monotonic() + 60
+
+
+def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
     def read() -> object:
-        time.sleep(_DELAY)
+        barrier.wait()
+        if fail:
+            raise ValueError("fleet is unavailable")
         return value
 
     return read
 
 
-def test_independent_reads_finish_in_about_one_delay() -> None:
-    started = time.monotonic()
-    outcomes = _read_concurrently(_slow("a"), _slow("b"), _slow("c"))
-    elapsed = time.monotonic() - started
+def test_independent_reads_are_in_flight_together() -> None:
+    barrier = _barrier(3)
+
+    outcomes = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b"),
+        _meeting(barrier, "c"),
+        deadline=_far(),
+    )
 
     assert [outcome.get() for outcome in outcomes] == ["a", "b", "c"]
-    assert elapsed < _DELAY * 2
 
 
 def test_one_failing_read_does_not_hide_the_others() -> None:
-    def broken() -> object:
-        time.sleep(_DELAY)
-        raise ValueError("fleet is unavailable")
+    barrier = _barrier(3)
 
-    first, failed, last = _read_concurrently(_slow("a"), broken, _slow("c"))
+    first, failed, last = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b", fail=True),
+        _meeting(barrier, "c"),
+        deadline=_far(),
+    )
 
     assert first.get() == "a"
     assert last.get() == "c"
@@ -5148,9 +5169,186 @@ def test_one_failing_read_does_not_hide_the_others() -> None:
         failed.get()
 
 
-def test_a_single_read_keeps_its_error() -> None:
+def test_a_read_past_its_deadline_is_that_reads_outcome_only(monkeypatch) -> None:
+    release = threading.Event()
+    first_done = threading.Event()
+    # The clock passes the deadline once the first read has returned.
+    monkeypatch.setattr(
+        selection.time, "monotonic", lambda: 100.0 if first_done.is_set() else 0.0
+    )
+
+    def quick() -> object:
+        first_done.set()
+        return "ok"
+
+    def hanging() -> object:
+        release.wait(30)  # wall-clock: hang guard
+        return "late"
+
+    try:
+        done, stuck = _read_concurrently(quick, hanging, deadline=50.0)
+    finally:
+        release.set()
+
+    assert done.get() == "ok"
+    with pytest.raises(ControlMalformedResponse, match="deadline reached"):
+        stuck.get()
+
+
+def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
+    from cluster_profiles.controller_cli.selection import _skipped_read
+
+    seen: list[threading.Thread] = []
+
     def broken() -> object:
+        seen.append(threading.current_thread())
         raise OSError("down")
 
+    outcome, skipped = _read_concurrently(broken, _skipped_read, deadline=_far())
+
+    assert seen == [threading.current_thread()]
+    assert skipped.get() is None
     with pytest.raises(OSError):
-        _read_concurrently(broken)[0].get()
+        outcome.get()
+
+
+def test_ctrl_c_interrupts_at_once_while_reads_hang() -> None:
+    release = threading.Event()
+
+    def hanging() -> object:
+        release.wait(30)  # wall-clock: hang guard
+        return "late"
+
+    main = threading.get_ident()
+    sender = threading.Timer(0.2, lambda: signal.pthread_kill(main, signal.SIGINT))
+    sender.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _read_concurrently(hanging, hanging, deadline=_far())
+    finally:
+        release.set()
+
+
+class _MeetingClient(FakeClient):
+    """Holds the first GET of each named path until all of them are in flight."""
+
+    def __init__(self, responses, meet: set[str], failing: str | None = None):
+        super().__init__(responses)
+        self._barrier = _barrier(len(meet))
+        self._meet = meet
+        self._failing = failing
+        self._first: set[str] = set()
+        self._lock = threading.Lock()
+        self.completed: set[str] = set()
+
+    def request(self, method, path, *args, **kwargs):
+        with self._lock:
+            first = path in self._meet and path not in self._first
+            self._first.add(path)
+        if first:
+            self._barrier.wait()
+        if path == self._failing:
+            raise ControlMalformedResponse("peer is down")
+        result = super().request(method, path, *args, **kwargs)
+        self.completed.add(path)
+        return result
+
+
+_ATLAS = {"id": "spk_" + "a" * 32, "display_name": "Atlas", "hostname": "atlas"}
+_ADD_RESPONSES = {
+    ("GET", "/api/profile/2/definition"): {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "number": 2,
+        "revision": 7,
+        "definition": {"name": "Coding", "assignments": []},
+    },
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    ("PUT", "/api/profile/2"): {"number": 2, "revision": 8},
+}
+_ADD_PATHS = {"/api/profile/2/definition", "/api/recipe/library", "/api/fleet"}
+
+
+def _profile_add(client: FakeClient) -> tuple[int, dict[str, object]]:
+    return run(
+        (
+            "--profile",
+            "2",
+            "profile",
+            "add",
+            "Recipe UUID",
+            "--spark",
+            "Atlas",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+
+def test_profile_add_reads_definition_recipe_and_sparks_together() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS)
+
+    status, _ = _profile_add(client)
+
+    assert status == 0
+    assert _ADD_PATHS <= client.completed
+
+
+def test_profile_add_failing_peer_leaves_the_other_reads_intact() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS, failing="/api/fleet")
+
+    status, _ = _profile_add(client)
+
+    assert status != 0
+    assert {"/api/profile/2/definition", "/api/recipe/library"} <= client.completed
+    assert not any(call[0] == "PUT" for call in client.calls)
+
+
+def _run_command(client: FakeClient) -> None:
+    args = cli._parser().parse_args(
+        ["--profile", "1", "run", "Qwen Code", "--yes", "--json"]
+    )
+    controller_cli._run(
+        args,
+        cast(controller_cli.ControllerClient, client),
+        lambda: "11111111-1111-4111-8111-111111111111",
+    )
+
+
+class _StopAfterReads(RuntimeError):
+    pass
+
+
+_RUN_RESPONSES = {
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    # Ends the command right after the two reads under test.
+    ("GET", "/api/profile/1/definition"): _StopAfterReads(),
+}
+_RUN_PATHS = {"/api/recipe/library", "/api/fleet"}
+
+
+def test_run_reads_the_library_and_the_fleet_together() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS)
+
+    with pytest.raises(_StopAfterReads):
+        _run_command(client)
+
+    assert _RUN_PATHS <= client.completed
+
+
+def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS, failing="/api/fleet")
+
+    with pytest.raises(ControlMalformedResponse):
+        _run_command(client)
+
+    assert "/api/profile/1/definition" not in client.completed
+    assert "/api/recipe/library" in client.completed
