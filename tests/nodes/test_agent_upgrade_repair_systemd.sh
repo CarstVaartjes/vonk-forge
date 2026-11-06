@@ -30,7 +30,7 @@ binary_revision=$packaging_revision
 source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}
 repair_version=${source_version}+repair.spk${node_suffix}.1
 ordinary_version=0.1.1~dev.1788260441+g0123456789ab
-epoch="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" show -s --format=%ct HEAD)"
+epoch=1788260440
 
 repair_crash_phases=(armed installing configured helper-proven agent-proven)
 repair_boot_crashpoints=(
