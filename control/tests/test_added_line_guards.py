@@ -3454,8 +3454,7 @@ def _all_lines(source: str) -> set[int]:
         (_GIT_TEST_PATH, 'subprocess.run("git status", shell=True)\n'),
         (_GIT_TEST_PATH, 'subprocess.run(["bash", "-c", "cd x && git add ."])\n'),
         (_GIT_TEST_PATH, 'os.system("git init")\n'),
-        (_GIT_TEST_PATH, 'git(repo, "commit", "-m", "x")\n'),
-        (_GIT_TEST_PATH, 'helpers._git(repo, "init")\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["/usr/bin/git", "init"])\n'),
         (_GIT_TEST_PATH, 'env = {"GIT_AUTHOR_NAME": "a"}\n'),
         ("tests/test_example.py", 'subprocess.run(["git", "init"])\n'),
         (
@@ -3465,6 +3464,9 @@ def _all_lines(source: str) -> set[int]:
         ("web/scripts/check.test.mjs", "spawnSync('git', ['add', '.']);\n"),
         ("tests/nodes/test_example.sh", 'rev="$(git rev-parse HEAD)"\n'),
         ("tests/nodes/test_example.sh", "cd repo && git init -q\n"),
+        ("tests/nodes/test_example.sh", "if git diff --quiet; then echo clean; fi\n"),
+        ("tests/nodes/test_example.sh", "while ! git fetch -q; do :; done\n"),
+        ("tests/nodes/test_example.sh", "exec git status\n"),
         ("control/tests/example.rs", 'let out = Command::new("git").output();\n'),
     ],
 )
@@ -3478,6 +3480,10 @@ def test_a_test_that_runs_git_is_flagged(path: str, source: str) -> None:
     [
         # A stub file named git, a patch target and argv data are not git runs.
         (_GIT_TEST_PATH, 'stub = tmp_path / "git"\n'),
+        # A faked git is allowed: the helper is monkeypatched, nothing spawns.
+        (_GIT_TEST_PATH, 'monkeypatch.setattr(module, "_git_source", fake)\n'),
+        (_GIT_TEST_PATH, 'git(repo, "commit", "-m", "x")\n'),
+        (_GIT_TEST_PATH, 'result = helpers._git(repo, "init")\n'),
         (_GIT_TEST_PATH, 'monkeypatch.setattr(module, "git", fake)\n'),
         (_GIT_TEST_PATH, 'argv = ["git", "push"]\nassert plan(argv)\n'),
         (_GIT_TEST_PATH, 'subprocess.run(["echo", "git status"])\n'),

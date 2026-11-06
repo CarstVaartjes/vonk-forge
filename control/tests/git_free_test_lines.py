@@ -7,8 +7,11 @@ whatever checkout it runs in, which differs between a laptop, a worktree and a
 shallow CI clone.
 
 Python is scanned by AST, so a ``"git"`` in a string constant, a stub filename or
-a ``patch`` target is not a hit; only a subprocess call, a ``git`` helper call
-or a ``GIT_*`` environment key is. TS/MJS, shell and Rust tests use a line scan.
+a ``patch`` target is not a hit; only a subprocess call whose argv or shell string runs git,
+or a ``GIT_*`` environment key, is. A faked git (a monkeypatched local helper, a
+stub on PATH) is allowed: a local helper is caught at its own spawn line. The
+scan is per call, so ``cmd = ["git", ...]`` followed by ``run(cmd)`` is a known
+gap. TS/MJS, shell and Rust tests use a line scan.
 """
 
 from __future__ import annotations
@@ -18,11 +21,6 @@ import re
 
 KIND = "test runs git; pass the revision, tree or paths as arguments (git only at the CI edge)"
 
-# Guard code lives under control/tests/ but is not a test: its helpers are named
-# for the git programs they recognise and never run one.
-VERDICTS: dict[str, str] = {
-    "control/tests/git_free_test_lines.py": "the guard names git helpers, runs none",
-}
 _SPAWNERS = frozenset(
     {
         "run",
@@ -36,7 +34,7 @@ _SPAWNERS = frozenset(
         "create_subprocess_shell",
     }
 )
-_HELPER = re.compile(r"(?:^|_)git(?:$|_)", re.IGNORECASE)
+_PREFIX_NAME = re.compile(r"(?:^|_)git(?:$|_)", re.IGNORECASE)
 _ENV_KEY = re.compile(r"^GIT_[A-Z_]+$")
 _GIT_STRING = re.compile(r"^\s*git(?:\s|$)")
 _SHELL_STRING = re.compile(r"(?:^|[\s;&|(])git\s+[a-z]")
@@ -44,7 +42,9 @@ _SHELLS = frozenset({"bash", "sh", "zsh", "dash"})
 _TS = re.compile(
     r"\b(?:execFileSync|execFile|spawnSync|spawn|execSync|exec)\(\s*[\"'`]git\b"
 )
-_SHELL = re.compile(r"(?:^|[;&|(]|\$\()\s*git\s")
+_SHELL = re.compile(
+    r"(?:^|[;&|(]|\$\(|\b(?:if|then|do|while|until|exec|command)\s|!\s*)\s*git\s"
+)
 _RUST = re.compile(r"Command::new\(\s*\"git\"\s*\)")
 
 
@@ -54,7 +54,7 @@ def _string(node: ast.expr) -> str | None:
     return None
 
 
-def _git_prefix(node: ast.expr) -> bool:
+def _spawned_program(node: ast.expr) -> bool:
     """An argv (or command string) whose program is git."""
     text = _string(node)
     if text is not None:
@@ -70,10 +70,11 @@ def _git_prefix(node: ast.expr) -> bool:
         head = node.elts[0]
         if isinstance(head, ast.Starred):
             head = head.value
-            return isinstance(head, ast.Name) and bool(_HELPER.search(head.id))
-        return _string(head) == "git"
+            return isinstance(head, ast.Name) and bool(_PREFIX_NAME.search(head.id))
+        text = _string(head)
+        return text is not None and text.rsplit("/", 1)[-1] == "git"
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        return _git_prefix(node.left)
+        return _spawned_program(node.left)
     if isinstance(node, ast.Name):
         return node.id.upper() == "GIT"
     return False
@@ -101,8 +102,6 @@ def scan_python(source: str) -> list[int]:
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Call):
             name = _call_name(node)
-            if _HELPER.search(name):
-                hits.add(node.lineno)
             if name not in _SPAWNERS:
                 continue
             arguments = [*node.args[:1]] + [
@@ -117,7 +116,7 @@ def scan_python(source: str) -> list[int]:
             for argument in arguments:
                 text = _string(argument)
                 if (
-                    _git_prefix(argument)
+                    _spawned_program(argument)
                     or _shell_command(argument)
                     or (shell and text is not None and _SHELL_STRING.search(text))
                     or (
@@ -167,8 +166,6 @@ def scan_path(
     path: str, source: str, *, is_test: bool, test_lines: set[int]
 ) -> list[int]:
     """Lines of ``source`` that run git, for a test file of any language."""
-    if path in VERDICTS:
-        return []
     name = path.rsplit("/", 1)[-1]
     if path.endswith(".py"):
         return scan_python(source) if is_test else []
