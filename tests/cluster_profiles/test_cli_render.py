@@ -1160,36 +1160,21 @@ def test_library_list_shared_vector_renders_without_documents(capsys):
     assert "Last passed: 2026-09-04 12:00:00+00:00 on 1 Spark" in rendered
 
 
-def test_library_detail_shows_why_a_preparation_waits(capsys):
-    """A queued download names its blocker and next check, not only "queued"."""
-    from cluster_profiles.cli_render import _library_item
+def test_library_shared_vector_shows_why_a_preparation_waits(capsys):
+    """The producer's waiting preparation renders its blocker and next check."""
+    import json
+    from pathlib import Path
 
-    item = {
-        "selector": "org/gated",
-        "identity": {"slug": "org/gated"},
-        "usage": [],
-        "resources": {"disk_bytes": 6120},
-        "local": {
-            "controller": "preparing",
-            "running_on": [],
-            "preparation": {
-                "operation_id": "96c1a078-ffec-413d-83ab-1a82b04cc4c1",
-                "state": "queued",
-                "completed_bytes": 0,
-                "reason": "access_denied",
-                "blockers": [
-                    {
-                        "code": "access_denied",
-                        "detail": "waiting for Hugging Face access: accept terms at https://huggingface.co/org/gated",
-                        "severity": "warning",
-                        "node_ids": [],
-                    }
-                ],
-                "next_attempt_at": "2026-11-06T14:04:51+00:00",
-            },
-        },
-    }
-    _library_item(item, "model", detail=True)
+    from cluster_profiles.cli_render import _library_item
+    from cluster_profiles.generated_control.models.recipe_library_response import (
+        RecipeLibraryResponse,
+    )
+
+    raw = json.loads(
+        (Path(__file__).resolve().parents[1] / "fixtures/library-list.json").read_text()
+    )
+    page = RecipeLibraryResponse.from_dict(raw)
+    _library_item(page.recipes[0].to_dict(), "recipe", detail=True)
     output = capsys.readouterr().out
     assert "access_denied: waiting for Hugging Face access" in output
     assert "https://huggingface.co/org/gated" in output
