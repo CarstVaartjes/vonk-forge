@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (($# < 4 || $# > 5)); then
-  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG [REVISION]" >&2
+if (($# != 5)); then
+  echo "usage: verify-published-image IDENTITY IMAGE DIGEST IMMUTABLE_TAG|- TREE" >&2
   exit 64
 fi
 
@@ -10,6 +10,8 @@ identity=$1
 image=$2
 digest=$3
 immutable_tag=$4
+# The Git tree the image must be built from; the CI step resolves it.
+tree=$5
 
 case "$identity" in
   api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
@@ -20,21 +22,13 @@ case "$identity" in
 esac
 [[ "$image" == "$expected_image" ]]
 [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 if [[ "$immutable_tag" == - ]]; then
-  (($# == 5))
-  revision=$5
-  [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
   reference="$image@$digest"
 else
-  (($# == 4))
   [[ "$immutable_tag" =~ ^dev-sha-[0-9a-f]{40}$ ]]
-  revision=${immutable_tag#dev-sha-}
   reference="$image:$immutable_tag"
 fi
-# A development image is bound to the Git tree it was built from, not to a
-# commit: identical content built for a pull request and for main is one image.
-tree=$(git rev-parse --verify "$revision^{tree}")
-[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 
 scratch=$(mktemp -d "${RUNNER_TEMP:?RUNNER_TEMP must be set}/${identity}.verification.XXXXXX")
 cleanup() {
@@ -72,11 +66,7 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
     '.inspection.image[$platform].config.Labels | select(."org.opencontainers.image.source" == "https://github.com/CarstVaartjes/vonk-forge")' \
     "$inspection")
   observed_revision=$(jq -er '."org.opencontainers.image.revision" | select(test("^[0-9a-f]{40}$"))' <<< "$labels")
-  observed_tree=$(jq -r '."ai.vonkforge.source.tree" // empty' <<< "$labels")
-  if [[ -z "$observed_tree" ]]; then
-    # An image built before the tree label names only its main commit.
-    observed_tree=$(git rev-parse --verify "$observed_revision^{tree}")
-  fi
+  observed_tree=$(jq -er '."ai.vonkforge.source.tree"' <<< "$labels")
   [[ "$observed_tree" =~ ^[0-9a-f]{40}$ ]]
   if [[ -z "$build_revision" ]]; then
     build_revision=$observed_revision
