@@ -278,12 +278,9 @@ record of every row; `model detail` shows one. The overview combines
 downloading, cached, and running variants. Reusing the
 same download request key returns its original operation. A new request has
 its own identity; the cache owner reuses verified assets and compatible partial
-work and refreshes completed work when requested. Exactly one live transfer
-exists per model set, created only through `admit_transfer`: any other download
-or repair of that set, whatever its request key, attaches to it, and a refresh
-shares only with a refresh. The exceptions are the operator receipts read by
-their own key: a selector download and `resume-access` create their own
-operation (`attach=False`).
+work and refreshes completed work when requested. Whether a request attaches
+to a live transfer of the set is described in
+[model-cache.md](model-cache.md).
 
 Gated or access-restricted Hugging Face downloads retain their exact identity and
 partial files while waiting. Request or accept access on the model's Hugging Face
@@ -301,8 +298,7 @@ The command uses only the configured credential and cannot override a denial.
 Cancel an exact download with `model cancel`; use `--detach` to return after
 acceptance. The cancellation has its own request UUID and reason. Retain both
 for recovery after response or process loss. The same cancellation request is
-idempotent; a different request cannot replace it. Cancelling a transfer ends
-it for every request attached to it. Cancellation may remain
+idempotent; a different request cannot replace it. Cancellation may remain
 `observing` (with its cancellation intent) while an issued writer settles. Verified assets and compatible
 partial files are retained; cancellation does not evict them. Reconnect with
 `model progress OPERATION_ID --follow` to observe settlement.
@@ -513,9 +509,9 @@ work remains observable. Each failure stays attached to its recipe while
 other children continue. Activity shows the parent; `recipe progress` shows
 its complete child detail. `recipe cancel OPERATION_ID --yes` targets this exact
 preparation or update parent; retain its cancellation request key and reason.
-A model download child is its set's one live transfer, so cancelling it ends it
-for every attached request; a profile load whose transfer child was cancelled
-by someone else asks again.
+It cancels only a download child it issued and that no other live preparation
+links; that cancel ends the transfer like `model cancel` does (see
+[model-cache.md](model-cache.md)).
 The command follows by default, or returns the accepted receipt with `--detach`.
 When preparation owns a model download, cancellation waits for that exact
 child and any active writer to settle. Restart retains the cancellation intent
@@ -905,8 +901,9 @@ The Controller persists the reviewed request before admission. A restart at that
 boundary resumes the same request, including requests still marked queued;
 recovery keeps the reviewed digest separate from the execution digest. A late
 observer cannot reopen cancelled work or overwrite completed admission. A
-database constraint violation (SQLSTATE class 23) ends the request at once and
-names the constraint and SQLSTATE; only contention or a busy reference owner is
+registered database constraint violation replays the existing record or
+re-plans; an unregistered one (SQLSTATE class 23) ends the request at once and
+names the constraint and SQLSTATE. Only contention or a busy reference owner is
 retried. An exhausted image preparation keeps the last attempt's failure in its
 message. Startup
 checks the actual constraint expressions; it does not silently change an

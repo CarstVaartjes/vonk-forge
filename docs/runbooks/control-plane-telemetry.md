@@ -67,7 +67,7 @@ exited) records nothing.
 Attribution runs in a savepoint inside the sample-ingest transaction. If it
 fails, only the attribution rolls back; the samples still commit, and the
 failure is logged once per process for each node and failure type (`warn_once`).
-A repeating log line is therefore not a telemetry outage.
+The attribution warning is therefore not a telemetry outage.
 
 ## History and retention
 

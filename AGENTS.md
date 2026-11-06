@@ -144,12 +144,14 @@ Pydantic contract per item in a typed column of `node_inventory_snapshots` or
 `agent_node_contacts`, written only through `agent_contacts.py`. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
-child row's foreign-key KEY SHARE never blocks. Nothing locks an `agent_nodes`
-row to read or number a workload intent: `workload_intent.py` is the only
+child row's foreign-key KEY SHARE never blocks. The recipe intent check reads the
+ordinal without a lock; numbering goes through `workload_intent.py`, the only
 writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `allocate_workload_intent` / `take_workload_intent`), guarded by
-`control/tests/intent_ordinal_writers.py`. Telemetry, inventory and contact
-writes never lock `agent_nodes` (`test_agent_node_lock_tree.py`). Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+`control/tests/intent_ordinal_writers.py`. Admission still locks target nodes
+through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
+does too until lock-plan step 6. Telemetry, inventory and contact writes never
+lock `agent_nodes` (`test_agent_node_lock_tree.py`). Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The

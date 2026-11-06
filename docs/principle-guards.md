@@ -65,11 +65,10 @@ it gone or a newer exact Stop ends it (`distributed_recovery.ended_run_state`).
 
 The third: a model download or repair operation is created only by
 `admit_transfer` (`tests/test_transfer_admission_guard.py`). It takes the
-model-set gate and returns the set's live transfer, so exactly one transfer
-exists per set; any source under `control/src` that calls `new_operation(` outside
+model-set gate and attaches to a live transfer where the rule in
+[model-cache.md](runbooks/model-cache.md) says so; any source under `control/src` that calls `new_operation(` outside
 the helper must be in the test's reasoned exemption list (a removal, the adapter
-constructors, run-switch job rows). A caller whose receipt is read by its own
-key passes `attach=False`.
+constructors, run-switch job rows).
 
 Lock and ordering guards:
 
@@ -78,7 +77,7 @@ Lock and ordering guards:
   outside `workload_intent.py`; use `allocate_workload_intent` or
   `take_workload_intent`.
 - `control/tests/test_agent_node_lock_tree.py` proves telemetry, inventory,
-  contact and `agent_api` modules never lock `agent_nodes` (the `optimistic`
+  contact, `installed_bytes.py` and `agent_api` modules never lock `agent_nodes` (the `optimistic`
   scan, `scan_agent_node_locks`).
 - `fixed_tick_polls` (added-line mode `tick-polls`, in
   `control/tests/added_line_guards.py`) refuses a test that calls

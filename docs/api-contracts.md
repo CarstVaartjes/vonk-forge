@@ -681,8 +681,8 @@ they do not skip because a temporary receipt from an earlier run is missing.
   an option. Keep secrets out of errors.
 
 Telemetry preserves complete valid samples: `vonk-monitor` uploads each sample
-whole, as its own batch. A failed upload is logged and not retried; the next
-tick takes a fresh sample. The authenticated endpoint and shared parser use the same 16 MiB
+whole, as its own batch; upload failure handling is in the
+[telemetry runbook](runbooks/control-plane-telemetry.md). The authenticated endpoint and shared parser use the same 16 MiB
 transport memory ceiling; there is no separate serialized metrics-size limit.
 
 ## Verify the handoff
