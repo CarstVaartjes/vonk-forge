@@ -158,16 +158,20 @@ class ResourceAdmissionMixin:
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
+        own_run_id: str | None = None,
     ) -> _ResourceFits:
         """Fit the request now and after its stops.
 
         The runs the plan keeps are already on their Sparks: they add no new
-        demand (``kept_runs``). An assignment the plan keeps is never fitted: the
-        profile planner skips it, because nothing starts.
+        demand (``kept_runs``). A request whose own workload is one of them
+        adds no demand either: nothing new starts. The profile planner names
+        that run (``own_run_id``, the run serving the assignment); it is never
+        re-matched here.
         """
         service = typing_cast("RunSwitchOperationService", self)
         kept = kept_runs(session, kept_run_ids, profile_application_id)
-        serving = request.action != "install"
+        already_kept = own_run_id is not None and own_run_id in kept
+        serving = request.action != "install" and not already_kept
         (
             freshness,
             current,
@@ -311,6 +315,7 @@ class ResourceAdmissionMixin:
             warnings,
             conditional,
             kept,
+            already_kept,
         )
 
 

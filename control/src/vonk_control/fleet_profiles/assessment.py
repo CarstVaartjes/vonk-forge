@@ -320,13 +320,6 @@ class FleetProfileService:
                     # Any reachable rank cleanup was already reviewed in the
                     # profile effects above.
                     preparation = None
-                elif (
-                    assignment.desired_state == DesiredAssignmentState.RUNNING
-                    and state.current_state == ObservedAssignmentState.RUNNING
-                ):
-                    # The assignment's own run serves it: nothing starts, so
-                    # there is no start to fit and no preparation to observe.
-                    preparation = None
                 elif self._assessment_provider is None:
                     if not preparation_unavailable_reported:
                         reasons.append(
@@ -362,6 +355,7 @@ class FleetProfileService:
                                 assignment,
                                 lambda item: control.states[item.id].run,
                             ),
+                            own_run_id=state.run.id if state.run else None,
                             replaced_run_ids=frozenset(
                                 effect.run_id
                                 for effect in run_effects
