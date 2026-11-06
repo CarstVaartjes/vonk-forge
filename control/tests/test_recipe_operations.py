@@ -217,6 +217,9 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
         self._generation = 0
         self.aliases: list[tuple[str, ...]] = []
 
+    def served_model_info(self):
+        return {}
+
     def publish_recipe(self, candidate):
         state = candidate.state
         with self._guard:
@@ -5441,6 +5444,9 @@ def test_expired_recovery_route_never_needs_compensating_withdrawal(
             self.withdrawal_attempts = 0
             self.fail_withdrawal = True
 
+        def served_model_info(self):
+            return {}
+
         def publish_recipe(self, candidate):
             generation = atomic.publish_recipe(candidate)
             current["now"] = _recovery_deadline(restart)
@@ -5562,6 +5568,9 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
         def __init__(self) -> None:
             self.withdrawal_attempts = 0
             self.fail_withdrawal = True
+
+        def served_model_info(self):
+            return {}
 
         def publish_recipe(self, candidate):
             return atomic.publish_recipe(candidate)
