@@ -212,7 +212,7 @@ Losing Docker's network store across a daemon restart produces exactly this.
 The janitor reads each container's recorded networks once per tick against
 one inspect per network. An entry is broken when it names an older network ID,
 or when the container runs and the network lists no endpoint for it. The
-repair is journalled in `image-janitor-state` before its first effect, then
+repair is journalled in `image-janitor-state` (`/state/repairing.json`) before its first effect, then
 stops a running container, disconnects and re-attaches each broken network by
 name with its recorded aliases, and starts the container if it should run. A
 janitor that dies or is stopped mid-repair leaves the journal to the next

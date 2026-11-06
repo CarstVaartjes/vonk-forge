@@ -232,9 +232,8 @@ Pending profile cancellation appears as `observing`, with its cancellation
 request key, actor, and completed, pending, or unissued effects. Filtering Activity
 by `--state observing` uses that same owner state. States are the words of the
 core vocabulary (`queued`, `running`, `observing`, `backoff`, `needs-operator`,
-`succeeded`, `failed`, `cancelled`, `superseded`); the retired spellings
-(`waiting-for-operator`, `cancelling`, `waiting`, `partial`, `expired`) are still
-accepted as `--state` input for one release.
+`succeeded`, `failed`, `cancelled`, `superseded`); any other `--state` word
+matches only rows that carry exactly that word.
 
 `fleet locks` (administrator only, read only, never blocks) lists the admission
 locks held now with their holder, state and transaction age, and the open
@@ -279,7 +278,9 @@ record of every row; `model detail` shows one. The overview combines
 downloading, cached, and running variants. Reusing the
 same download request key returns its original operation. A new request has
 its own identity; the cache owner reuses verified assets and compatible partial
-work and refreshes completed work when requested.
+work and refreshes completed work when requested. Whether a request attaches
+to a live transfer of the set is described in
+[model-cache.md](model-cache.md).
 
 Gated or access-restricted Hugging Face downloads retain their exact identity and
 partial files while waiting. Request or accept access on the model's Hugging Face
@@ -508,7 +509,9 @@ work remains observable. Each failure stays attached to its recipe while
 other children continue. Activity shows the parent; `recipe progress` shows
 its complete child detail. `recipe cancel OPERATION_ID --yes` targets this exact
 preparation or update parent; retain its cancellation request key and reason.
-Shared children needed by another accepted request must survive cancellation.
+It cancels only a download child it issued and that no other live preparation
+links; that cancel ends the transfer like `model cancel` does (see
+[model-cache.md](model-cache.md)).
 The command follows by default, or returns the accepted receipt with `--detach`.
 When preparation owns a model download, cancellation waits for that exact
 child and any active writer to settle. Restart retains the cancellation intent
@@ -897,9 +900,12 @@ and the same operation continues automatically.
 The Controller persists the reviewed request before admission. A restart at that
 boundary resumes the same request, including requests still marked queued;
 recovery keeps the reviewed digest separate from the execution digest. A late
-observer cannot reopen cancelled work or overwrite completed admission. Database
-constraint failures name the constraint and SQLSTATE, retain the request, and
-schedule a bounded retry after the database contract is corrected. Startup
+observer cannot reopen cancelled work or overwrite completed admission. A
+registered database constraint violation replays the existing record or
+re-plans; an unregistered one (SQLSTATE class 23) ends the request at once and
+names the constraint and SQLSTATE. Only contention or a busy reference owner is
+retried. An exhausted image preparation keeps the last attempt's failure in its
+message. Startup
 checks the actual constraint expressions; it does not silently change an
 incompatible database or discard its data.
 

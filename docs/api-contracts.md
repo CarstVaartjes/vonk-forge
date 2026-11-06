@@ -680,9 +680,9 @@ they do not skip because a temporary receipt from an earlier run is missing.
   structure, provider authentication, transport failure, and an engine rejecting
   an option. Keep secrets out of errors.
 
-Telemetry preserves complete valid samples. The agent batches toward 1 MiB,
-sends a larger sample on its own, and retries without dropping or reordering
-metrics. The authenticated endpoint and shared parser use the same 16 MiB
+Telemetry preserves complete valid samples: `vonk-monitor` uploads each sample
+whole, as its own batch; upload failure handling is in the
+[telemetry runbook](runbooks/control-plane-telemetry.md). The authenticated endpoint and shared parser use the same 16 MiB
 transport memory ceiling; there is no separate serialized metrics-size limit.
 
 ## Verify the handoff
@@ -936,7 +936,10 @@ never proves a running workload stopped or releases its resource claims.
 ### Subprocess failure evidence
 
 `FailureDiagnostics.process_exit_code` retains an observed numeric subprocess
-exit status alongside its bounded stdout/stderr tails. It is omitted when no
+exit status alongside its stdout/stderr tails, each bounded to 2048 bytes after
+redaction. The helper keeps a native abort report (`terminate called ...` and
+its `what()` message) ahead of the tail, marks the omitted middle, and stays
+within that bound. The status is omitted when no
 numeric status was observed (including spawn failure or signal termination).
 The helper carries that status in `HostHelperProcessLogs.exit_code`; the agent
 preserves it while sanitizing and projecting the failure. Classification never

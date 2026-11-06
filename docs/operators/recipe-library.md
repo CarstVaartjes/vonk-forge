@@ -88,7 +88,7 @@ against the release's exact commit. The local controller resolves every recipe
 dependency by `kind`, `publisher`, `slug`, and content digest; it never turns
 a branch, display name, or `latest` tag directly into execution authority.
 
-The Controller refreshes the managed catalog automatically every 15 minutes.
+The Controller refreshes the managed catalog automatically every minute (an unchanged release answers 304 to a conditional request).
 Opening Library also offers
 **Update from Vonk Forge remote** for an immediate administrator-triggered
 refresh. Both paths use the same durable, idempotent operation and exact commit
