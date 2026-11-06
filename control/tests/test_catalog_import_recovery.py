@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from datetime import UTC, datetime
+from importlib.resources import files
 
 import pytest
 import vonk_control.catalog_entities as entities
@@ -24,7 +26,7 @@ from vonk_control.models import (
     RecipeInstallation,
     RecipeRun,
 )
-from vonk_forge_contracts import RecipeDefinition, document_sha256
+from vonk_forge_contracts import RecipeApi, RecipeDefinition, document_sha256
 
 from .display_fixtures import reword
 from .test_catalog_entities import (
@@ -296,6 +298,41 @@ def test_partial_pin_observation_preserves_omitted_revisions(catalog: CatalogSer
     assert _request_import(
         catalog, _recipe(_model(), slug="fresh-after-pin-withdrawal")
     ).id
+
+
+def test_published_api_facts_belong_to_their_exact_revision(catalog: CatalogService):
+    views = [
+        _request_import(catalog, _recipe(_model(), slug=slug))
+        for slug in ("api-one", "api-two")
+    ]
+    keys = [
+        (
+            str(RecipeDefinition.model_validate(view.document).identity.publisher),
+            view.slug,
+            str(view.content_sha256),
+        )
+        for view in views
+    ]
+    api = RecipeApi.model_validate(
+        json.loads(
+            files("vonk_forge_contracts")
+            .joinpath("examples", "recipe-api-decision.json")
+            .read_text(encoding="utf-8")
+        )
+    )
+
+    def stored() -> list[RecipeApi | None]:
+        with catalog._sessions() as session:
+            return [_projection(session, view.id).api for view in views]
+
+    catalog.record_published_facts({}, {}, dict.fromkeys(keys, api))
+    assert stored() == [api, api]
+    # An omitted key is unknown and keeps its facts; an observed None withdraws
+    # them from that exact revision only.
+    catalog.record_published_facts({}, {}, {keys[0]: None})
+    assert stored() == [None, api]
+    catalog.record_published_facts({}, {})
+    assert stored() == [None, api]
 
 
 def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(

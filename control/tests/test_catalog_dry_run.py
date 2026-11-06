@@ -26,6 +26,7 @@ from vonk_control.prebuilt_images import (
     package_build_intent,
 )
 from vonk_control.revision_images import revision_source_bundle
+from vonk_control.route_bundle_contract import RouteAcceptedModelPolicy
 from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeOpenAIInterface
 
@@ -201,11 +202,9 @@ def test_gateway_forwards_a_model_name_the_engine_serves(
             RouteState(aliases={alias: "http://100.100.20.30:8000/v1"}, digest="0"),
             LiteLlmPolicy(
                 models={
-                    alias: {
-                        "requests_per_minute": 60,
-                        "tokens_per_minute": 1_000_000,
-                        "upstream_model": upstream,
-                    }
+                    alias: RouteAcceptedModelPolicy(
+                        upstream_model=upstream,
+                    )
                 }
             ),
         )

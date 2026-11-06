@@ -14,6 +14,7 @@ from vonk_agent_protocol import UnknownOutcomeError, canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import (
     ModelDefinition,
+    RecipeApi,
     RecipeDefinition,
     document_sha256,
     read_model,
@@ -184,6 +185,9 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     prebuilt_image: PrebuiltImage | None = None
     # The signed catalog's qualification status for this revision; informative.
     qualification: PublishedQualificationStatusView | None = None
+    # The signed catalog's gateway API facts for this revision (a sibling of the
+    # recipe, never part of its content identity); none when it publishes none.
+    api: RecipeApi | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection
