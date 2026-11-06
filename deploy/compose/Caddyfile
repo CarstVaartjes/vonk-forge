@@ -28,21 +28,36 @@
 }
 
 (browser_edge_guards) {
-	# Artifact-job inputs are the only large browser body. The API streams,
-	# hashes, and enforces this same 512 MiB bound.
+	# Artifact-job inputs and speech-to-text uploads are the only large browser
+	# bodies. The API streams, hashes, and enforces the same 512 MiB artifact
+	# bound. A transcription upload gets MAX_AUDIO_FILE_BYTES (vonk_forge_contracts),
+	# the largest limit a recipe may declare; the engine enforces its own.
 	@artifact_input_upload {
 		method PUT
 		path /api/artifact-jobs/*/inputs/*
 	}
-	@ordinary_browser_request not {
-		method PUT
-		path /api/artifact-jobs/*/inputs/*
+	@audio_transcription_upload {
+		method POST
+		path /v1/audio/transcriptions
+	}
+	@ordinary_browser_request {
+		not {
+			method PUT
+			path /api/artifact-jobs/*/inputs/*
+		}
+		not {
+			method POST
+			path /v1/audio/transcriptions
+		}
 	}
 	request_body @ordinary_browser_request {
 		max_size 1MiB
 	}
 	request_body @artifact_input_upload {
 		max_size 536870912
+	}
+	request_body @audio_transcription_upload {
+		max_size 268435456
 	}
 	import edge_headers
 }

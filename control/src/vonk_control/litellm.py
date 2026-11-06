@@ -11,7 +11,12 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, model_validator
 from vonk_forge_contracts import EndpointAlias
-from vonk_forge_contracts.api import ReasoningDefault, RequestPlacement
+from vonk_forge_contracts.api import (
+    AudioInputFormat,
+    ReasoningDefault,
+    RequestPlacement,
+    TranscriptionResponseFormat,
+)
 from vonk_forge_contracts.recipe import Scalar
 
 from .strict_json import StrictModel
@@ -180,9 +185,11 @@ class LiteLlmUpstreamParams(_ConfigModel):
 class OpenAiRequestParameter(StrEnum):
     """The one owner of OpenAI request parameter names the gateway publishes."""
 
+    LANGUAGE = "language"
     MAX_COMPLETION_TOKENS = "max_completion_tokens"
     MAX_TOKENS = "max_tokens"
     PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    PROMPT = "prompt"
     REASONING_EFFORT = "reasoning_effort"
     RESPONSE_FORMAT = "response_format"
     STOP = "stop"
@@ -216,6 +223,16 @@ class VonkThinking(_ConfigModel):
     default: ReasoningDefault
 
 
+class VonkAudioTranscription(_ConfigModel):
+    """What the route's transcription endpoint takes; LiteLLM has no fields for it."""
+
+    input_formats: list[AudioInputFormat] = Field(min_length=1)
+    max_file_bytes: int = Field(ge=1)
+    max_audio_seconds: int | None = Field(default=None, ge=1)
+    languages: list[str] = Field(min_length=1)
+    response_formats: list[TranscriptionResponseFormat] = Field(min_length=1)
+
+
 class LiteLlmModelInfo(_ConfigModel):
     """The ``model_info`` of one route: LiteLLM v1.103.0 field names verbatim.
 
@@ -224,7 +241,7 @@ class LiteLlmModelInfo(_ConfigModel):
     ``vonk_`` keys carry what LiteLLM has no field for.
     """
 
-    mode: Literal["chat", "decision"]
+    mode: Literal["chat", "decision", "audio_transcription"]
     max_tokens: int | None = Field(default=None, ge=1)
     max_input_tokens: int = Field(ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
@@ -248,11 +265,16 @@ class LiteLlmModelInfo(_ConfigModel):
     vonk_thinking: VonkThinking | None = None
     vonk_reasoning_effort: VonkReasoningEffort | None = None
     vonk_default_output_tokens: int | None = Field(default=None, ge=1)
+    vonk_audio_transcription: VonkAudioTranscription | None = None
 
     @model_validator(mode="after")
     def _max_tokens_is_the_output_cap(self) -> LiteLlmModelInfo:
         if self.max_tokens != self.max_output_tokens:
             raise ValueError("max_tokens must equal max_output_tokens")
+        if (self.mode == "audio_transcription") != (
+            self.vonk_audio_transcription is not None
+        ):
+            raise ValueError("transcription facts belong to a transcription route")
         return self
 
 

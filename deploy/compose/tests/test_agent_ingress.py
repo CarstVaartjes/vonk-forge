@@ -20,6 +20,7 @@ from vonk_control.artifact_job_api import (
     MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )
+from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -722,6 +723,8 @@ _CONTROLLER_BODY_BOUNDS = {
             MAX_ARTIFACT_INPUT_UPLOAD_BYTES,
         ),
         ("POST", "/api/fleet-profiles", MAX_CONTROL_DOCUMENT_BYTES),
+        # A speech-to-text upload, up to the largest limit a recipe may declare.
+        ("POST", "/v1/audio/transcriptions", MAX_AUDIO_FILE_BYTES),
     ),
 }
 

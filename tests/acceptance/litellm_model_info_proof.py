@@ -12,12 +12,15 @@ gateway does:
 * a prompt far beyond a route's ``max_input_tokens`` is forwarded, not rejected
   by the gateway (the engine is the one gate);
 * a request with tools, a response format and sampling reaches the upstream
-  identically through a route with facts and a route without them.
+  identically through a route with facts and a route without them;
+* a speech-to-text upload to a ``mode: "audio_transcription"`` route reaches the
+  upstream once, at ``/v1/audio/transcriptions``, with its file and language.
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -25,6 +28,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
@@ -45,10 +49,18 @@ PORT = 4000
 
 class Upstream(BaseHTTPRequestHandler):
     received: ClassVar[list[dict[str, object]]] = []
+    uploads: ClassVar[list[tuple[str, str, bytes]]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
-        body = json.loads(self.rfile.read(length))
+        raw = self.rfile.read(length)
+        if self.path.endswith("/audio/transcriptions"):
+            Upstream.uploads.append(
+                (self.path, self.headers.get("Content-Type", ""), raw)
+            )
+            self._answer(json.dumps({"text": "ok"}).encode())
+            return
+        body = json.loads(raw)
         Upstream.received.append(body)
         answer = json.dumps(
             {
@@ -70,6 +82,9 @@ class Upstream(BaseHTTPRequestHandler):
                 },
             }
         ).encode()
+        self._answer(answer)
+
+    def _answer(self, answer: bytes) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(answer)))
@@ -114,6 +129,36 @@ def call(path: str, body: dict[str, object] | None = None) -> tuple[int, object]
         headers={
             "Authorization": f"Bearer {MASTER_KEY}",
             "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return response.status, json.load(response)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode(errors="replace")
+
+
+def upload(path: str, fields: dict[str, str], audio: bytes) -> tuple[int, object]:
+    """One multipart form POST, as an OpenAI client sends a transcription."""
+
+    boundary = "vonk-proof-boundary"
+    parts = [
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+        f"{value}\r\n".encode()
+        for name, value in fields.items()
+    ]
+    parts.append(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="file"; '
+        'filename="clip.wav"\r\nContent-Type: audio/wav\r\n\r\n'.encode()
+        + audio
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{PORT}{path}",
+        data=b"".join(parts),
+        headers={
+            "Authorization": f"Bearer {MASTER_KEY}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
         },
     )
     try:
@@ -170,6 +215,35 @@ def prove() -> None:
         and decision["supported_endpoints"] == ["/v1/systemone"],
         "the decision route does not show its mode and endpoint",
     )
+
+    transcription = entries[alias_of("transcription")]["model_info"]
+    check(
+        transcription["mode"] == "audio_transcription"
+        and transcription["supported_endpoints"] == ["/v1/audio/transcriptions"],
+        "the transcription route does not show its mode and endpoint",
+    )
+
+    # A speech-to-text upload reaches the upstream's transcription endpoint.
+    clip = io.BytesIO()
+    with wave.open(clip, "wb") as sound:
+        sound.setnchannels(1)
+        sound.setsampwidth(2)
+        sound.setframerate(16000)
+        sound.writeframes(bytes(3200))  # 0.1 s of silence
+    audio = clip.getvalue()
+    Upstream.uploads.clear()
+    status, answer = upload(
+        "/v1/audio/transcriptions",
+        {"model": alias_of("transcription"), "language": "nl"},
+        audio,
+    )
+    check(status == 200, f"the transcription answered {status}: {answer}")
+    check(isinstance(answer, dict) and answer.get("text") == "ok", f"lost: {answer}")
+    check(len(Upstream.uploads) == 1, "the upload was not forwarded once")
+    path, content_type, body = Upstream.uploads[0]
+    check(path == "/v1/audio/transcriptions", f"forwarded to {path}")
+    check(content_type.startswith("multipart/form-data"), content_type)
+    check(audio in body and b'name="language"' in body, "file or language dropped")
 
     # A prompt far beyond max_input_tokens is the engine's to refuse.
     long_prompt = "word " * 6000

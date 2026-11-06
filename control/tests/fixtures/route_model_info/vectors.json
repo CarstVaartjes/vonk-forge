@@ -263,5 +263,56 @@
     "name": "decision",
     "parameters": {},
     "recipe": "recipe-decision.json"
+  },
+  {
+    "api": "recipe-api-transcription.json",
+    "model_info": {
+      "max_input_tokens": 1024,
+      "mode": "audio_transcription",
+      "supported_endpoints": [
+        "/v1/audio/transcriptions"
+      ],
+      "supported_openai_params": [
+        "language",
+        "prompt",
+        "response_format",
+        "temperature"
+      ],
+      "supports_audio_input": true,
+      "supports_audio_output": false,
+      "supports_function_calling": false,
+      "supports_native_streaming": false,
+      "supports_parallel_function_calling": false,
+      "supports_pdf_input": false,
+      "supports_reasoning": false,
+      "supports_response_schema": false,
+      "supports_system_messages": false,
+      "supports_tool_choice": false,
+      "supports_video_input": false,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_audio_transcription": {
+        "input_formats": [
+          "flac",
+          "mp3",
+          "ogg",
+          "wav"
+        ],
+        "languages": [
+          "en",
+          "nl"
+        ],
+        "max_audio_seconds": 600,
+        "max_file_bytes": 26214400,
+        "response_formats": [
+          "json",
+          "text",
+          "verbose_json"
+        ]
+      }
+    },
+    "name": "transcription",
+    "parameters": {},
+    "recipe": "recipe-transcription.json"
   }
 ]

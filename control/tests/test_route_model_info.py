@@ -158,6 +158,15 @@ def test_max_tokens_is_the_output_cap() -> None:
         LiteLlmModelInfo.model_validate({**fields, "max_tokens": 5})
 
 
+def test_transcription_facts_belong_only_to_a_transcription_route() -> None:
+    [vector] = [v for v in VECTORS if v["name"] == "transcription"]
+    fields = _built(vector).model_dump()
+    with pytest.raises(ValidationError, match="transcription facts"):
+        LiteLlmModelInfo.model_validate({**fields, "mode": "chat"})
+    with pytest.raises(ValidationError, match="transcription facts"):
+        LiteLlmModelInfo.model_validate({**fields, "vonk_audio_transcription": None})
+
+
 def _identity(info: LiteLlmModelInfo | None) -> RouteRunIdentity:
     return RouteRunIdentity(
         run_id="run",

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import (
+    AudioTranscriptionApi,
     ChatApi,
     DecisionApi,
     RecipeApi,
@@ -45,6 +46,7 @@ from .catalog_revision_contract import (
 from .litellm import (
     LiteLlmModelInfo,
     OpenAiRequestParameter,
+    VonkAudioTranscription,
     VonkReasoningEffort,
     VonkThinking,
 )
@@ -72,6 +74,16 @@ _CHAT_PARAMETERS = (
     OpenAiRequestParameter.TOP_P,
 )
 _DECISION_ENDPOINT = "/v1/systemone"
+_TRANSCRIPTION_ENDPOINT = "/v1/audio/transcriptions"
+# The transcription parameters every OpenAI-compatible route reads; LiteLLM
+# forwards exactly these (whisper_transformation.get_supported_openai_params),
+# minus timestamp_granularities, which no fact states yet.
+_TRANSCRIPTION_PARAMETERS = (
+    OpenAiRequestParameter.LANGUAGE,
+    OpenAiRequestParameter.PROMPT,
+    OpenAiRequestParameter.RESPONSE_FORMAT,
+    OpenAiRequestParameter.TEMPERATURE,
+)
 
 
 class ModelInfoError(ValueError):
@@ -194,6 +206,33 @@ def build_model_info(
         if isinstance(override, int) and not isinstance(override, bool)
         else recipe_settings.context_tokens.value
     )
+    if isinstance(block, AudioTranscriptionApi):
+        return LiteLlmModelInfo(
+            mode="audio_transcription",
+            max_input_tokens=context,
+            supports_vision=False,
+            supports_audio_input=True,
+            supports_audio_output=False,
+            supports_pdf_input=False,
+            supports_video_input=False,
+            supports_reasoning=False,
+            thinking_always_on=False,
+            supports_function_calling=False,
+            supports_tool_choice=False,
+            supports_parallel_function_calling=False,
+            supports_response_schema=False,
+            supports_system_messages=False,
+            supports_native_streaming=False,
+            supported_endpoints=[_TRANSCRIPTION_ENDPOINT],
+            supported_openai_params=sorted(_TRANSCRIPTION_PARAMETERS),
+            vonk_audio_transcription=VonkAudioTranscription(
+                input_formats=list(block.input_formats),
+                max_file_bytes=block.max_file_bytes,
+                max_audio_seconds=block.max_audio_seconds,
+                languages=list(block.languages),
+                response_formats=list(block.response_formats),
+            ),
+        )
     modalities = block.input_modalities
     max_input = (
         context
