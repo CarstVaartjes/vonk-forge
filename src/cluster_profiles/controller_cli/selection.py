@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from ..cli_select import SelectorError
@@ -56,6 +58,45 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
     raise ControlMalformedResponse(
         f"selection observation is unavailable; last error {cause}"
     ) from last_error
+
+
+@dataclass(frozen=True)
+class _ReadOutcomes:
+    """Each read's own outcome: a value or the error that read ended with."""
+
+    values: dict[str, object]
+    errors: dict[str, Exception]
+
+    def get(self, name: str) -> object:
+        """The read's value; raises that read's own error."""
+        if name in self.errors:
+            raise self.errors[name]
+        return self.values[name]
+
+
+_MAX_CONCURRENT_READS = 3
+
+
+def _read_concurrently(reads: Mapping[str, Callable[[], object]]) -> _ReadOutcomes:
+    """Run independent reads at once; each keeps its own deadline and outcome.
+
+    One failing or slow read never cancels or hides the others. The caller
+    consumes outcomes in the order it needs them, so the first error it meets
+    is the one it would have met reading them one after another.
+    """
+    values: dict[str, object] = {}
+    errors: dict[str, Exception] = {}
+    with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_READS) as pool:
+        futures = {name: pool.submit(read) for name, read in reads.items()}
+        for name, future in futures.items():
+            error = future.exception()
+            if error is None:
+                values[name] = future.result()
+            elif isinstance(error, Exception):
+                errors[name] = error
+            else:
+                raise error
+    return _ReadOutcomes(values, errors)
 
 
 def _recipe_rows(

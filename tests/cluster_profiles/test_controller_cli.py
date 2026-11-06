@@ -2045,15 +2045,22 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     )
     assert status == 0
     assert payload["revision"] == 8
-    assert client.calls == [
-        ("GET", "/api/profile/2/definition", None, None),
-        (
-            "GET",
-            "/api/recipe/library",
-            None,
-            {"limit": 512, "sort": "name", "assess": False},
-        ),
-        ("GET", "/api/fleet", None, None),
+    # The definition, recipe and Spark reads are independent and run at once.
+    reads, writes = client.calls[:3], client.calls[3:]
+    assert sorted(reads, key=lambda call: call[1]) == sorted(
+        [
+            ("GET", "/api/profile/2/definition", None, None),
+            (
+                "GET",
+                "/api/recipe/library",
+                None,
+                {"limit": 512, "sort": "name", "assess": False},
+            ),
+            ("GET", "/api/fleet", None, None),
+        ],
+        key=lambda call: call[1],
+    )
+    assert writes == [
         (
             "PUT",
             "/api/profile/2",
