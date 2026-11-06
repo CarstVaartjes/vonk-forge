@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationNodeState,
-    InstallationState,
     LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
@@ -31,6 +30,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..installation_transitions import end_unfinished_installation
 from ..job_documents import (
     RecipeBuildCleanupParent,
 )
@@ -234,8 +234,7 @@ class ResultConsumptionMixin:
                     node.state = _RANK_FAILED
                     node.updated_at = now
                 if installation is not None:
-                    installation.state = InstallationState.PARTIAL
-                    installation.updated_at = now
+                    end_unfinished_installation(installation, now)
             elif job.kind in {
                 WireAgentOperation.RECIPE_START.value,
                 WireAgentOperation.RECIPE_STOP.value,

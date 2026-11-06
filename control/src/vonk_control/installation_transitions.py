@@ -1,11 +1,19 @@
 """The one edge that ends an unfinished installation.
 
-An installation in ``planned`` or ``installing`` is in flight only while a live
-operation names it. Whichever path ends that operation (an agent result, the
-operator's retirement, a supersession or a cancel before any claim), the
-installation leaves the in-flight states through this edge to ``partial``:
-the Controller cannot prove nothing reached the Spark, so the existing
-retention sweep removes whatever it left, and the next attempt may adopt it.
+An installation in ``planned`` or ``installing`` is waiting on its owning
+operation. Ending that operation without finishing the install leaves it
+through this edge, ``IN_FLIGHT`` -> ``ENDED_AS``, written one way
+(``end_unfinished_installation``) or as a compare-and-set
+(``end_orphaned_installation``); both read the same definition. The Controller
+cannot prove nothing reached the Spark, so the retention sweep removes whatever
+it left, and the next attempt may adopt it.
+
+Callers: the operator's retirement and an agent-reported cancel (both lock the
+row), and the residue sweep for an ``installing`` row no live operation names
+(supersession or a cancel before any claim). A ``planned`` row with no owner is
+released by the residue sweep's never-installed path instead. The agent-result
+projection in ``terminal_projection`` writes ``installed`` as well as
+``partial`` and stays separate.
 """
 
 from __future__ import annotations
@@ -26,6 +34,10 @@ IN_FLIGHT: tuple[InstallationState, ...] = (
 )
 
 
+#: Where an unfinished installation goes: possibly written, so removable.
+ENDED_AS = InstallationState.PARTIAL
+
+
 def end_unfinished_installation(
     installation: RecipeInstallation, now: datetime
 ) -> bool:
@@ -33,7 +45,7 @@ def end_unfinished_installation(
 
     if installation.state not in IN_FLIGHT:
         return False
-    installation.state = InstallationState.PARTIAL
+    installation.state = ENDED_AS
     installation.updated_at = now
     return True
 
@@ -52,12 +64,17 @@ def end_orphaned_installation(
         update(RecipeInstallation)
         .where(
             RecipeInstallation.id == installation_id,
-            RecipeInstallation.state == InstallationState.INSTALLING,
+            RecipeInstallation.state.in_(IN_FLIGHT),
             RecipeInstallation.updated_at == seen,
         )
-        .values(state=InstallationState.PARTIAL, updated_at=now)
+        .values(state=ENDED_AS, updated_at=now)
     )
     return cast(CursorResult[Any], result).rowcount == 1
 
 
-__all__ = ["IN_FLIGHT", "end_orphaned_installation", "end_unfinished_installation"]
+__all__ = [
+    "ENDED_AS",
+    "IN_FLIGHT",
+    "end_orphaned_installation",
+    "end_unfinished_installation",
+]

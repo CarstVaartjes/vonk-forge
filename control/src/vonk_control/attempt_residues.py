@@ -349,15 +349,12 @@ class AttemptResidueReconciler:
         now = self._clock()
         ended: list[str] = []
         with self._sessions.begin() as session:
-            rows = {
-                installation.id: installation.updated_at
-                for installation in session.scalars(
-                    select(RecipeInstallation).where(
-                        RecipeInstallation.state == InstallationState.INSTALLING
-                    )
-                )
-                if only_id in (None, installation.id)
-            }
+            query = select(RecipeInstallation.id, RecipeInstallation.updated_at).where(
+                RecipeInstallation.state == InstallationState.INSTALLING
+            )
+            if only_id is not None:
+                query = query.where(RecipeInstallation.id == only_id)
+            rows = {row.id: row.updated_at for row in session.execute(query)}
             named = installations_named_by_live_jobs(session, rows)
             for installation_id, seen in rows.items():
                 if installation_id in named:
