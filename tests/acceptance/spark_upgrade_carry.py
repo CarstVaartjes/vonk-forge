@@ -506,6 +506,8 @@ def release_library_root(
     if not (root / "catalog-index.json").is_file():
         root.mkdir(parents=True, exist_ok=True)
         fetch_library(revision, root)
+        # An unpacked archive has no history: its files carry the commit time.
+        epoch = int((root / "tools/build-catalog-index").stat().st_mtime)
         subprocess.run(
             [
                 str(
@@ -513,6 +515,7 @@ def release_library_root(
                 ),
                 str(root),
                 revision,
+                str(epoch),
             ],
             check=True,
             timeout=1800,

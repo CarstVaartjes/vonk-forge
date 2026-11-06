@@ -138,7 +138,9 @@ scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
 ```
 
 `scripts/build-recipe-library` runs the recipe checkout's own
-`tools/build-catalog-index`, which writes the ignored `catalog-index.json`,
+`tools/build-catalog-index` with `--source-commit` and `--source-date-epoch`
+taken from the checkout's `HEAD` (pass both after the path for a tree without
+history), which writes the ignored `catalog-index.json`,
 `qualification/qualification-index.json` and `packages/` build outputs in
 place. Platform CI, the reusable recipe validator, `scripts/qualify-recipe`,
 the campaign runner and the tests read those outputs; run the command again
