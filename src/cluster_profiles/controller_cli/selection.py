@@ -61,42 +61,44 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
 
 
 @dataclass(frozen=True)
-class _ReadOutcomes:
-    """Each read's own outcome: a value or the error that read ended with."""
+class _ReadOutcome:
+    """One read's own outcome: its value or the error it ended with."""
 
-    values: dict[str, object]
-    errors: dict[str, Exception]
+    value: object = None
+    error: Exception | None = None
 
-    def get(self, name: str) -> object:
+    def get(self) -> object:
         """The read's value; raises that read's own error."""
-        if name in self.errors:
-            raise self.errors[name]
-        return self.values[name]
+        if self.error is not None:
+            raise self.error
+        return self.value
 
 
 _MAX_CONCURRENT_READS = 3
 
 
-def _read_concurrently(reads: Mapping[str, Callable[[], object]]) -> _ReadOutcomes:
+def _skipped_read() -> None:
+    """A read that is not needed for this action."""
+
+
+def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
     """Run independent reads at once; each keeps its own deadline and outcome.
 
-    One failing or slow read never cancels or hides the others. The caller
-    consumes outcomes in the order it needs them, so the first error it meets
-    is the one it would have met reading them one after another.
+    One failing or slow read never cancels or hides the others. The outcomes
+    come back in the order given, so a caller that consumes them in the order
+    it used to run the reads meets the same first error as before.
     """
-    values: dict[str, object] = {}
-    errors: dict[str, Exception] = {}
+    outcomes: list[_ReadOutcome] = []
     with ThreadPoolExecutor(max_workers=_MAX_CONCURRENT_READS) as pool:
-        futures = {name: pool.submit(read) for name, read in reads.items()}
-        for name, future in futures.items():
+        for future in [pool.submit(read) for read in reads]:
             error = future.exception()
             if error is None:
-                values[name] = future.result()
+                outcomes.append(_ReadOutcome(value=future.result()))
             elif isinstance(error, Exception):
-                errors[name] = error
+                outcomes.append(_ReadOutcome(error=error))
             else:
                 raise error
-    return _ReadOutcomes(values, errors)
+    return outcomes
 
 
 def _recipe_rows(

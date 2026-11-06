@@ -26,6 +26,7 @@ from .selection import (
     _recipe_rows,
     _resolve_recipe_selector,
     _selection_remaining,
+    _skipped_read,
 )
 
 
@@ -63,15 +64,15 @@ def _run(
         return [str(node["id"]) for node in nodes]
 
     # The library scan and the fleet roster are independent reads.
-    reads: dict[str, Callable[[], object]] = {
-        "recipe": lambda: _resolve_run_recipe(client, args.selector, deadline=deadline)
-    }
+    recipe, fleet = _read_concurrently(
+        lambda: _resolve_run_recipe(client, args.selector, deadline=deadline),
+        _skipped_read
+        if spark_names
+        else lambda: _observe_selection(roster, deadline=deadline),
+    )
+    selector = cast(str, recipe.get())
     if not spark_names:
-        reads["roster"] = lambda: _observe_selection(roster, deadline=deadline)
-    outcomes = _read_concurrently(reads)
-    selector = cast(str, outcomes.get("recipe"))
-    if not spark_names:
-        spark_names = cast(list[str], outcomes.get("roster"))
+        spark_names = cast(list[str], fleet.get())
 
     edit_args = argparse.Namespace(
         command="profile",

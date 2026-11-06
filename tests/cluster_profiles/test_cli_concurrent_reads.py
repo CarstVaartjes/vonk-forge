@@ -21,10 +21,10 @@ def _slow(value: object):
 
 def test_independent_reads_finish_in_about_one_delay() -> None:
     started = time.monotonic()
-    outcomes = _read_concurrently({name: _slow(name) for name in ("a", "b", "c")})
+    outcomes = _read_concurrently(_slow("a"), _slow("b"), _slow("c"))
     elapsed = time.monotonic() - started
 
-    assert [outcomes.get(name) for name in ("a", "b", "c")] == ["a", "b", "c"]
+    assert [outcome.get() for outcome in outcomes] == ["a", "b", "c"]
     assert elapsed < _DELAY * 2
 
 
@@ -33,12 +33,12 @@ def test_one_failing_read_does_not_hide_the_others() -> None:
         time.sleep(_DELAY)
         raise ValueError("fleet is unavailable")
 
-    outcomes = _read_concurrently({"a": _slow("a"), "b": broken, "c": _slow("c")})
+    first, failed, last = _read_concurrently(_slow("a"), broken, _slow("c"))
 
-    assert outcomes.get("a") == "a"
-    assert outcomes.get("c") == "c"
+    assert first.get() == "a"
+    assert last.get() == "c"
     with pytest.raises(ValueError, match="fleet is unavailable"):
-        outcomes.get("b")
+        failed.get()
 
 
 def test_a_single_read_keeps_its_error() -> None:
@@ -46,4 +46,4 @@ def test_a_single_read_keeps_its_error() -> None:
         raise OSError("down")
 
     with pytest.raises(OSError):
-        _read_concurrently({"only": broken}).get("only")
+        _read_concurrently(broken)[0].get()

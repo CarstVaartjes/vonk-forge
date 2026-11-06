@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import cast
 
 from ..cli_files import read_json_document, write_private_document
@@ -23,6 +23,7 @@ from .selection import (
     _resolve_recipe_selector,
     _resolve_spark_selectors,
     _selection_remaining,
+    _skipped_read,
 )
 from .submission import _known_http_refusal_status
 
@@ -122,7 +123,7 @@ def _profile_authoring(
                 "saved profile definition is unavailable"
             ) from None
 
-    def read_definition() -> dict[str, object]:
+    def read_definition():
         return _poll_path(
             client,
             f"/api/profile/{_profile_number(args)}/definition",
@@ -137,18 +138,29 @@ def _profile_authoring(
     # The definition read and the selector resolutions only need `args`, so
     # they run at once, each with its own deadline and outcome. `remove` keeps
     # its recipe resolution sequential: it is needed only when the definition
-    # has no assignment of that name.
-    reads: dict[str, Callable[[], object]] = {"definition": read_definition}
-    if action == "add":
-        reads["recipe"] = lambda: _resolve_recipe_selector(
-            client, args.recipe_selector, deadline=selection_deadline
-        )
-    if action in {"add", "remove"}:
-        reads["sparks"] = lambda: _resolve_spark_selectors(
-            client, list(args.spark), deadline=selection_deadline
-        )
-    outcomes = _read_concurrently(reads)
-    current = cast(dict[str, object], outcomes.get("definition"))
+    # has no assignment of that name (it uses the previous result).
+    definition_outcome, recipe_outcome, spark_outcome = _read_concurrently(
+        read_definition,
+        (
+            (
+                lambda: _resolve_recipe_selector(
+                    client, args.recipe_selector, deadline=selection_deadline
+                )
+            )
+            if action == "add"
+            else _skipped_read
+        ),
+        (
+            (
+                lambda: _resolve_spark_selectors(
+                    client, list(args.spark), deadline=selection_deadline
+                )
+            )
+            if selection_deadline is not None
+            else _skipped_read
+        ),
+    )
+    current = cast(dict, definition_outcome.get())
     if args.observation.status != "complete":
         return current
     current_revision = cast(int, current["revision"])
@@ -226,8 +238,8 @@ def _profile_authoring(
         labels.update(edits)
         definition["labels"] = labels
     elif action == "add":
-        recipe_selector = cast(str, outcomes.get("recipe"))
-        spark_ids = cast(list[str], outcomes.get("sparks"))
+        recipe_selector = cast(str, recipe_outcome.get())
+        spark_ids = cast(list[str], spark_outcome.get())
         matching = [
             assignment
             for assignment in assignments
@@ -268,7 +280,7 @@ def _profile_authoring(
                 for assignment in assignments
                 if assignment["recipe_selector"] == recipe
             ]
-        spark_ids = cast(list[str], outcomes.get("sparks"))
+        spark_ids = cast(list[str], spark_outcome.get())
         if spark_ids:
             matching = [
                 assignment
