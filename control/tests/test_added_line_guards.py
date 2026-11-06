@@ -3434,3 +3434,79 @@ def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) ->
 def test_reading_or_carrying_a_workload_intent_passes(source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
+
+
+_GIT_TEST_PATH = "control/tests/test_example.py"
+_GIT_FREE = ("git-free-tests",)
+
+
+def _all_lines(source: str) -> set[int]:
+    return set(range(1, source.count("\n") + 2))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_GIT_TEST_PATH, 'subprocess.run(["git", "rev-parse", "HEAD"], check=True)\n'),
+        (_GIT_TEST_PATH, 'out = subprocess.check_output(("git", "log"))\n'),
+        (_GIT_TEST_PATH, 'subprocess.run([*GIT, "init"], check=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(GIT + ["init"], check=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run("git status", shell=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["bash", "-c", "cd x && git add ."])\n'),
+        (_GIT_TEST_PATH, 'os.system("git init")\n'),
+        (_GIT_TEST_PATH, 'git(repo, "commit", "-m", "x")\n'),
+        (_GIT_TEST_PATH, 'helpers._git(repo, "init")\n'),
+        (_GIT_TEST_PATH, 'env = {"GIT_AUTHOR_NAME": "a"}\n'),
+        ("tests/test_example.py", 'subprocess.run(["git", "init"])\n'),
+        (
+            "control/web/src/staged-code.test.ts",
+            'execFileSync("git", ["init"], { cwd });\n',
+        ),
+        ("web/scripts/check.test.mjs", "spawnSync('git', ['add', '.']);\n"),
+        ("tests/nodes/test_example.sh", 'rev="$(git rev-parse HEAD)"\n'),
+        ("tests/nodes/test_example.sh", "cd repo && git init -q\n"),
+        ("control/tests/example.rs", 'let out = Command::new("git").output();\n'),
+    ],
+)
+def test_a_test_that_runs_git_is_flagged(path: str, source: str) -> None:
+    assert check_source(path, source, _all_lines(source), modes=_GIT_FREE)
+    assert not check_source(path, source, set(), modes=_GIT_FREE)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # A stub file named git, a patch target and argv data are not git runs.
+        (_GIT_TEST_PATH, 'stub = tmp_path / "git"\n'),
+        (_GIT_TEST_PATH, 'monkeypatch.setattr(module, "git", fake)\n'),
+        (_GIT_TEST_PATH, 'argv = ["git", "push"]\nassert plan(argv)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["echo", "git status"])\n'),
+        (_GIT_TEST_PATH, 'env = {"VONK_GIT_SIGNING_KEY_FILE": "k"}\n'),
+        (_GIT_TEST_PATH, 'text = "git show -s --format=%ct"\n'),
+        (
+            "tests/nodes/test_example.sh",
+            "# git is only the CI edge\necho digit status\n",
+        ),
+        ("control/web/src/staged-code.test.ts", '// execFileSync("git")\n'),
+        # Production code is not a test.
+        ("control/src/vonk_control/example.py", 'subprocess.run(["git", "init"])\n'),
+        ("scripts/example.sh", "git rev-parse HEAD\n"),
+        ("control/src/example.rs", 'let out = Command::new("git").output();\n'),
+        ("control/web/src/staged-code.ts", 'execFileSync("git", ["init"]);\n'),
+    ],
+)
+def test_git_free_guard_leaves_other_lines_alone(path: str, source: str) -> None:
+    assert not check_source(path, source, _all_lines(source), modes=_GIT_FREE)
+
+
+def test_rust_git_is_flagged_only_inside_cfg_test_items() -> None:
+    source = (
+        'fn production() { Command::new("git"); }\n'
+        "#[cfg(test)]\n"
+        "mod tests {\n"
+        '    fn t() { Command::new("git"); }\n'
+        "}\n"
+    )
+    path = "control/src/example.rs"
+    assert check_source(path, source, {4}, modes=_GIT_FREE)
+    assert not check_source(path, source, {1}, modes=_GIT_FREE)
