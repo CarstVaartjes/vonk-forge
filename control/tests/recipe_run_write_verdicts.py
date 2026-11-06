@@ -38,7 +38,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "bf8ea87e8746ea4fa6e76f6cdf992b1c3507f5b5db6b900a0d2bbbfe26260026",
+            "f33e4e0400c468a3642e2a77cc2c3d4498184a1a6bd76e900c1a3b2aa6a8f9fc",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
