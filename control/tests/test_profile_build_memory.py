@@ -324,7 +324,6 @@ def _run_on_spark(tmp_path, engine, *, run_state):
             "observation_schema_version": 2,
             "run_generation": 1,
             "installation_id": run_plan.installation_id,
-            "alias": run_plan.alias,
             "mapping_id": run_plan.mapping_id,
             "mapping_generation": run_plan.mapping_generation,
             "recipe_revision_id": run_plan.recipe_revision_id,

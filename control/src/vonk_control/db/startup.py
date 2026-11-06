@@ -45,6 +45,26 @@ def adopt_legacy_rows(connection: Connection) -> None:
         _LOGGER.info("Filled %d stored reference facts", filled)
 
 
+def strip_run_plan_alias(connection: Connection) -> int:
+    """Remove the route name from every stored run plan; the rows changed.
+
+    The route name is ``recipe_runs.alias`` alone.  Run plans written before
+    that carry a second copy that the strict plan contract refuses.  The
+    statement is idempotent and covers every row, history included, so no
+    reader accepts the old shape.  Digests are never recomputed: the stored
+    ``plan_digest`` is an admission token that the Sparks' container labels and
+    stop payloads carry.  A failure raises, so startup aborts and the running
+    workloads and the published bundle stay as they are rather than meeting
+    readers that refuse their plans.
+    """
+    return connection.execute(
+        text(
+            "UPDATE recipe_runs SET plan = (plan::jsonb - 'alias')::json "
+            "WHERE jsonb_exists(plan::jsonb, 'alias')"
+        )
+    ).rowcount
+
+
 def initialize_database(
     database_url: str,
     *,
@@ -82,6 +102,14 @@ def initialize_database(
                     try:
                         with lock_connection.begin():
                             verify_schema_is_current(lock_connection)
+                            # Not best-effort: strict readers refuse a plan that
+                            # still carries the old key, so a failure aborts.
+                            stripped = strip_run_plan_alias(lock_connection)
+                            if stripped:
+                                _LOGGER.info(
+                                    "Removed the route name from %d stored run plans",
+                                    stripped,
+                                )
                             # Adoption is derived bookkeeping, not schema authority.
                             # A savepoint keeps a damaged historical row from undoing
                             # current schema reconciliation; readers heal rows lazily.

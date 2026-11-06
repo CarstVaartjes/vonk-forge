@@ -102,7 +102,6 @@ class PersistenceMixin:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
-        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         service = typing_cast("RecipeOperationService", self)
@@ -115,7 +114,6 @@ class PersistenceMixin:
                 owner_kind=owner_kind,
                 owner_id=owner_id,
                 installation_id=installation_id,
-                run_alias=run_alias,
                 install_identity=install_identity,
             )
 
@@ -129,7 +127,6 @@ class PersistenceMixin:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
-        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> RecipeOperationView | None:
         service = typing_cast("RecipeOperationService", self)
@@ -141,7 +138,6 @@ class PersistenceMixin:
             owner_kind=owner_kind,
             owner_id=owner_id,
             installation_id=installation_id,
-            run_alias=run_alias,
             install_identity=install_identity,
         )
         return service._view(existing) if existing is not None else None
@@ -156,7 +152,6 @@ class PersistenceMixin:
         owner_kind: str | None = None,
         owner_id: str | None = None,
         installation_id: str | None = None,
-        run_alias: str | None = None,
         install_identity: tuple[str, str | None] | None = None,
     ) -> Job | None:
         existing = session.scalar(select(Job).where(Job.request_id == request_id))
@@ -190,11 +185,7 @@ class PersistenceMixin:
                     reason=InvalidRequestReason.CONFLICT,
                 )
             run = session.get(RecipeRun, _parent_identity(existing, "owner_id"))
-            if (
-                run is None
-                or run.installation_id != installation_id
-                or (run_alias is not None and run.alias != run_alias)
-            ):
+            if run is None or run.installation_id != installation_id:
                 raise RecipeRequestInvalid(
                     "request key was already used differently",
                     reason=InvalidRequestReason.CONFLICT,
