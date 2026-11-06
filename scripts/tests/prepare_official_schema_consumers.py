@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Official mathematical-schema cases for the actual browser compiler.
 
-This selects pinned upstream tests, not a replacement schema or JSON parser.
+This selects tests from the upstream suite the workflow checks out at its pinned
+ref (the one owner of the pin), not a replacement schema or JSON parser.
 Wire lexeme restrictions are exercised separately by the consumer corpus.
 """
 
@@ -12,7 +13,6 @@ import json
 import subprocess
 from pathlib import Path
 
-PIN = "5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8"
 FILES = (
     "type",
     "required",
@@ -52,11 +52,6 @@ def raw_json(value) -> str:
 
 
 def prepare(repository: Path, suite: Path) -> None:
-    actual = subprocess.check_output(
-        ["git", "-C", str(suite), "rev-parse", "HEAD"], text=True, timeout=30
-    ).strip()
-    if actual != PIN:
-        raise SystemExit(f"official schema suite must be pinned at {PIN}, got {actual}")
     api = repository / "control/web/src/api"
     imports = [
         'import {test, expect} from "vitest";',
@@ -105,7 +100,6 @@ def prepare(repository: Path, suite: Path) -> None:
     print(
         json.dumps(
             {
-                "suite_sha": PIN,
                 "draft": "2020-12",
                 "files": FILES,
                 "groups": groups,
