@@ -8,6 +8,9 @@ superseded, possibly by a crash), the record is a residue:
 
 * a residue with **no proven effect on a Spark** is released here, the same
   way whichever attempt left it behind;
+* an installation still ``installing`` that no live operation names (its
+  owner was superseded or cancelled before any claim) is moved to ``partial``
+  by ``installation_transitions``, which makes it a leftover as below;
 * a residue that **may have an effect** (installed or partially installed
   files, a running workload) is never released directly here. A leftover
   *incomplete installation* (failed, partial, or installed with a rank not
@@ -74,6 +77,7 @@ from . import job_states
 from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
 from .fleet_projection import _installation_payload_expectations
+from .installation_transitions import end_orphaned_installation
 from .logging import log_event
 from .machine_states import DISTRIBUTION_HELD
 from .models import (
@@ -85,6 +89,7 @@ from .models import (
     RecipeRun,
 )
 from .owner_liveness import (
+    OWNER_SETTLE_GRACE,
     OwnerKind,
     installations_named_by_live_jobs,
     referencing_active_job,
@@ -100,6 +105,7 @@ _LOGGER = logging.getLogger(__name__)
 #: How long an unowned incomplete installation is left alone before it is
 #: removed (the retention grace: a retry or a person may still be using it).
 LEFTOVER_GRACE = timedelta(hours=24)
+_OWNER_ENDED = "owner-ended"
 _LEFTOVER_ACTOR = "system:residue-sweep"
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
@@ -304,7 +310,8 @@ class AttemptResidueReconciler:
     def tick(self, installation_id: str | None = None) -> bool:
         """Release every current residue; True when anything was released."""
 
-        released = self._never_installed_plans(installation_id)
+        released = self._orphaned_installing(installation_id)
+        released = self._never_installed_plans(installation_id) or released
         released = self._incomplete_installations(installation_id) or released
         if installation_id is not None:
             return released
@@ -328,6 +335,39 @@ class AttemptResidueReconciler:
             if isinstance(digest, str):
                 plans.add(digest)
         return nodes, plans
+
+    def _orphaned_installing(self, only_id: str | None = None) -> bool:
+        """End the in-flight installations whose owning operation has ended.
+
+        An ``installing`` row is in flight only while a live operation names it.
+        Other paths end that operation (a supersession or a cancel before any
+        claim) without an agent result, so this finds the row by its state. It
+        moves to ``partial`` and the leftover sweep and the next attempt take
+        over; the move is a compare-and-set, so a re-launch is never undone.
+        """
+
+        now = self._clock()
+        ended: list[str] = []
+        with self._sessions.begin() as session:
+            query = select(RecipeInstallation.id, RecipeInstallation.updated_at).where(
+                RecipeInstallation.state == InstallationState.INSTALLING
+            )
+            if only_id is not None:
+                query = query.where(RecipeInstallation.id == only_id)
+            rows = {row.id: row.updated_at for row in session.execute(query)}
+            named = installations_named_by_live_jobs(session, rows)
+            for installation_id, seen in rows.items():
+                if installation_id in named:
+                    continue
+                if _aware(seen) + OWNER_SETTLE_GRACE > now:
+                    continue  # a reader may still be racing the owner's commit
+                if end_orphaned_installation(session, installation_id, seen, now):
+                    ended.append(installation_id)
+        for installation_id in ended:
+            self._log(
+                "in-flight-installation", installation_id, "moved", reason=_OWNER_ENDED
+            )
+        return bool(ended)
 
     def _never_installed_plans(self, only_id: str | None = None) -> bool:
         """Release plans nobody adopted within the adoption window."""

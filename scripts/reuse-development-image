@@ -30,6 +30,10 @@ def main() -> int:
         if not isinstance(built, str) or re.fullmatch(r"[a-f0-9]{40}", built) is None:
             raise ValueError("invalid cached image source")
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
+        tree = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{built}^{{tree}}"],
+            check=True, capture_output=True, text=True, timeout=30,
+        ).stdout.strip()
         commands = [
             ["scripts/dev-image-inputs", "matches", role, built, commit],
             ["gh", "attestation", "verify", f"oci://{image}@{digest}",
@@ -37,7 +41,7 @@ def main() -> int:
              "--signer-workflow", "CarstVaartjes/vonk-forge/.github/workflows/dev-images.yml",
              "--signer-digest", built, "--source-digest", built,
              "--source-ref", "refs/heads/main", "--deny-self-hosted-runners"],
-            ["scripts/verify-published-image", role, image, digest, "-", built],
+            ["scripts/verify-published-image", role, image, digest, "-", tree],
             ["scripts/dev-image-acceptance-receipt", "create-role", receipt,
              commit, run_id, attempt, role, image, digest],
         ]

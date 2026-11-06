@@ -109,41 +109,15 @@ def test_a_damaged_record_is_refused(tmp_path: Path) -> None:
     assert result.returncode != 0
 
 
-def test_a_set_without_a_record_follows_its_source_commit(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "-c",
-            "user.name=T",
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "--allow-empty",
-            "-qm",
-            "main",
-        ],
-        check=True,
-        env={**os.environ, "GIT_COMMITTER_DATE": "@1792000000 +0000"},
-    )
-    sha = subprocess.check_output(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], text=True
-    ).strip()
+def test_a_set_without_a_record_is_refused(tmp_path: Path) -> None:
     environment = _fake_gh(tmp_path, None)
     result = subprocess.run(
-        [str(SCRIPT), "read", "42", sha],
-        cwd=repo,
+        [str(SCRIPT), "read", "42", SHA],
+        cwd=ROOT,
         env=environment,
         capture_output=True,
         text=True,
         check=False,
     )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == METADATA["metadata"](
-        ["development", "branch", "main", sha, "1792000000"]
-    )
+    assert result.returncode != 0
+    assert "record is missing" in result.stderr

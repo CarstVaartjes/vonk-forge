@@ -1666,6 +1666,12 @@ def test_list_shared_vector_preserves_sweep_inputs_without_executable_documents(
     assert recipe.qualification is not None
     assert recipe.qualification.status == "Working"
     assert recipe.qualification.last_pass is not None
+    # A waiting preparation crosses the boundary with its typed wait.
+    preparation = recipe.local.preparation
+    assert preparation is not None
+    assert preparation.reason == "access_denied"
+    assert [item.code for item in preparation.blockers] == ["access_denied"]
+    assert preparation.next_attempt_at is not None
 
 
 @pytest.mark.needs_recipe_library

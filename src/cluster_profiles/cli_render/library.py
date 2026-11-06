@@ -30,6 +30,7 @@ from .common import (
     _table,
     _text,
     _time,
+    _waiting,
     _words,
 )
 from .progress import progress_line
@@ -147,6 +148,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     if preparation:
         _field("Preparation", preparation.get("state"))
         _field("Progress", progress_line({"progress": preparation}))
+        _waiting(preparation)
         if preparation.get("operation_id"):
             _field(
                 "Next",
@@ -257,7 +259,9 @@ def _library_row(item: Mapping[str, object], noun: str) -> list[object]:
     preparation = _optional(local.get("preparation"), "preparation")
     cache = _cache_word(local.get("controller"))
     if preparation.get("state") in _ACTIVE_PREPARATION:
-        cache = progress_line({"progress": preparation}).replace(" | ", ": ")
+        cache = progress_line(
+            {"progress": preparation, "blockers": preparation.get("blockers")}
+        ).replace(" | ", ": ")
     running = local.get("running_on")
     row: list[object] = [
         item.get("selector"),

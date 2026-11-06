@@ -819,7 +819,10 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
     assert step["if"] == (
         "steps.tested-ci.outputs.run_id != '' && steps.select.outputs.setups == ''"
     )
-    assert 'scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"' in step["run"]
+    assert (
+        'scripts/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"'
+        in step["run"]
+    )
 
 
 @pytest.mark.parametrize(
