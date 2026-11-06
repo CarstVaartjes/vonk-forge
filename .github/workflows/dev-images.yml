@@ -142,7 +142,7 @@ jobs:
         run: |
           set -euo pipefail
           scripts/reuse-pr-candidate-images "$RUNNER_TEMP/pr-images" \
-            "$REUSE_RUN_ID" "$GITHUB_SHA" > "$RUNNER_TEMP/pr-images.out"
+            "$REUSE_RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")" > "$RUNNER_TEMP/pr-images.out"
           cat "$RUNNER_TEMP/pr-images.out" >> "$GITHUB_OUTPUT"
           if grep -qx 'reused=true' "$RUNNER_TEMP/pr-images.out"; then
             echo "Images reuse pull request run $REUSE_RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
@@ -536,7 +536,7 @@ jobs:
         run: >-
           scripts/verify-published-image api
           "${{ steps.metadata.outputs.api_image }}"
-          "${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}" - "$GITHUB_SHA"
+          "${{ steps.pr_images.outputs.api_digest || steps.build_api.outputs.digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify exact digest-only worker manifest and attestations
         # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
@@ -545,7 +545,7 @@ jobs:
         run: >-
           scripts/verify-published-image worker
           "${{ steps.metadata.outputs.worker_image }}"
-          "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" - "$GITHUB_SHA"
+          "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify exact digest-only Hermes manifest and attestations
         # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
@@ -554,7 +554,7 @@ jobs:
         run: >-
           scripts/verify-published-image hermes
           ghcr.io/carstvaartjes/vonk-forge-hermes
-          "${{ steps.images.outputs.hermes_digest }}" - "$GITHUB_SHA"
+          "${{ steps.images.outputs.hermes_digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify exact digest-only LiteLLM manifest and attestations
         # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
@@ -563,7 +563,7 @@ jobs:
         run: >-
           scripts/verify-published-image litellm
           ghcr.io/carstvaartjes/vonk-forge-litellm
-          "${{ steps.images.outputs.litellm_digest }}" - "$GITHUB_SHA"
+          "${{ steps.images.outputs.litellm_digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Confirm accepted inputs
         shell: bash
@@ -670,7 +670,7 @@ jobs:
           DIGEST: ${{ steps.publish.outputs.api_digest }}
           IMAGE: ${{ steps.metadata.outputs.api_image }}
           IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: scripts/verify-published-image api "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+        run: scripts/verify-published-image api "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify immutable worker manifest and attestations
         shell: bash
@@ -678,7 +678,7 @@ jobs:
           DIGEST: ${{ steps.publish.outputs.worker_digest }}
           IMAGE: ${{ steps.metadata.outputs.worker_image }}
           IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: scripts/verify-published-image worker "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+        run: scripts/verify-published-image worker "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify immutable Hermes manifest and attestations
         shell: bash
@@ -686,7 +686,7 @@ jobs:
           DIGEST: ${{ steps.publish.outputs.hermes_digest }}
           IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
           IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+        run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify immutable LiteLLM manifest and attestations
         shell: bash
@@ -694,7 +694,7 @@ jobs:
           DIGEST: ${{ steps.publish.outputs.litellm_digest }}
           IMAGE: ghcr.io/carstvaartjes/vonk-forge-litellm
           IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: scripts/verify-published-image litellm "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG"
+        run: scripts/verify-published-image litellm "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Recheck main before signing
         shell: bash

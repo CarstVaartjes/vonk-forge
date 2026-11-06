@@ -143,7 +143,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if evidence=$(scripts/resolve-pr-setups "$RUN_ID" "$GITHUB_SHA"); then
+          if evidence=$(scripts/resolve-pr-setups "$RUN_ID" "$(git rev-parse "$GITHUB_SHA^{tree}")"); then
             printf 'setups=%s\n' "$evidence" >> "$GITHUB_OUTPUT"
             echo "Setup programs reuse pull request run $RUN_ID for the identical Git tree" >> "$GITHUB_STEP_SUMMARY"
           else

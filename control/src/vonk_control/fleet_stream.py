@@ -145,7 +145,9 @@ class FleetStream:
         try:
             if last_event_id is None:
                 try:
-                    current_cursor = self._events.high_watermark()
+                    current_cursor = await asyncio.to_thread(
+                        self._events.high_watermark
+                    )
                 except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
                     yield self._unavailable_frame(0, retry=retry)
                     return
@@ -171,7 +173,9 @@ class FleetStream:
                 now = self._clock()
                 last_poll = self._monotonic()
                 try:
-                    replay = self._events.replay_after(current_cursor, now, limit=128)
+                    replay = await asyncio.to_thread(
+                        self._events.replay_after, current_cursor, now, limit=128
+                    )
                 except _FleetStoredEventGap as error:
                     yield self._unavailable_frame(error.event_cursor, retry=retry)
                     # This notice is not applied-state authority. End replay at
@@ -198,7 +202,9 @@ class FleetStream:
                 if replay.events:
                     try:
                         self._validate_order(replay.events, current_cursor)
-                        samples = self._hydrate_telemetry(replay.events)
+                        samples = await asyncio.to_thread(
+                            self._hydrate_telemetry, replay.events
+                        )
                         if samples is None:
                             yield self._unavailable_frame(
                                 replay.high_watermark, retry=retry
