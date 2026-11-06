@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import hashlib
 import os
 import tempfile
 import time
 import uuid
-from collections.abc import AsyncIterable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
 from vonk_agent_protocol import (
@@ -137,6 +139,18 @@ class ArtifactBlobStore:
         with self._reference_lock(exclusive=False):
             yield
 
+    @asynccontextmanager
+    async def reference_attachment_async(self) -> AsyncIterator[None]:
+        """``reference_attachment`` for async callers: the flock wait and its
+        release run on a worker thread, never on the event loop."""
+        guard = self.reference_attachment()
+        await asyncio.to_thread(guard.__enter__)
+        try:
+            yield
+        finally:
+            # Shielded so a cancelled upload still releases its flock.
+            await asyncio.shield(asyncio.to_thread(guard.__exit__, None, None, None))
+
     @contextmanager
     def reference_reconciliation(self) -> Iterator[None]:
         """Exclude new database attachments while references are reconciled."""
@@ -160,7 +174,9 @@ class ArtifactBlobStore:
         unavailable: UnknownOutcomeError | None = None
         async for _attempt in bounded_async_attempts():
             try:
-                reservation, existing = self._reserve(expected_sha256, expected_bytes)
+                reservation, existing = await asyncio.to_thread(
+                    self._reserve, expected_sha256, expected_bytes
+                )
                 break
             except UnknownOutcomeError as error:
                 unavailable = error
@@ -199,13 +215,15 @@ class ArtifactBlobStore:
         digest = hashlib.sha256()
         observed = 0
         try:
-            descriptor, temporary_name = tempfile.mkstemp(
+            descriptor, temporary_name = await asyncio.to_thread(
+                tempfile.mkstemp,
                 prefix=f".{expected_sha256}.{reservation.token}.",
                 suffix=".part",
                 dir=self._root / ".tmp",
             )
             temporary = Path(temporary_name)
-            with os.fdopen(descriptor, "wb") as stream:
+            stream = os.fdopen(descriptor, "wb")
+            try:
                 async for chunk in chunks:
                     if not isinstance(chunk, bytes):
                         raise ArtifactBlobInvalid(
@@ -219,9 +237,10 @@ class ArtifactBlobStore:
                             reason=InvalidRequestReason.LIMIT_EXCEEDED,
                         )
                     digest.update(chunk)
-                    stream.write(chunk)
-                stream.flush()
-                os.fsync(stream.fileno())
+                    await asyncio.to_thread(stream.write, chunk)
+                await asyncio.to_thread(self._flush_and_sync, stream)
+            finally:
+                await asyncio.to_thread(stream.close)
             if observed != expected_bytes:
                 raise ArtifactBlobInvalid(
                     "artifact upload size does not match",
@@ -234,7 +253,9 @@ class ArtifactBlobStore:
                 )
             async for _attempt in bounded_async_attempts():
                 try:
-                    stored = self._commit(temporary, expected_sha256, observed)
+                    stored = await asyncio.to_thread(
+                        self._commit, temporary, expected_sha256, observed
+                    )
                     temporary = Path()
                     return stored
                 except UnknownOutcomeError as error:
@@ -247,7 +268,12 @@ class ArtifactBlobStore:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         finally:
-            self._cleanup_upload(temporary, reservation)
+            await asyncio.to_thread(self._cleanup_upload, temporary, reservation)
+
+    @staticmethod
+    def _flush_and_sync(stream: BinaryIO) -> None:
+        stream.flush()
+        os.fsync(stream.fileno())
 
     def put_bytes(
         self,

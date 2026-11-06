@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterable, Mapping
 from datetime import datetime
 from pathlib import Path
@@ -168,8 +169,10 @@ class ArtifactJobService(InputService):
             },
             maximum_bytes=1024**3,
         )
-        self._validate_output_upload(job_id, node_id=node_id, parsed=parsed)
-        with self._blob_store.reference_attachment():
+        await asyncio.to_thread(
+            self._validate_output_upload, job_id, node_id=node_id, parsed=parsed
+        )
+        async with self._blob_store.reference_attachment_async():
             try:
                 stored = await self._blob_store.put_stream(
                     expected_sha256,
@@ -181,7 +184,13 @@ class ArtifactJobService(InputService):
                 raise
             except ArtifactBlobStoreError as error:
                 _translate_blob_error(error)
-            self._attach_output(job_id, node_id=node_id, parsed=parsed, stored=stored)
+            await asyncio.to_thread(
+                self._attach_output,
+                job_id,
+                node_id=node_id,
+                parsed=parsed,
+                stored=stored,
+            )
 
     def _validate_output_upload(
         self, job_id: str, *, node_id: str, parsed: RecipeJobFile
