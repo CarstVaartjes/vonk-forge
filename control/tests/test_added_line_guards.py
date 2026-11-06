@@ -3434,3 +3434,98 @@ def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) ->
 def test_reading_or_carrying_a_workload_intent_passes(source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
+
+
+_ASYNC_SRC = "control/src/vonk_control/example.py"
+_ASYNC_REPOSITORY = (
+    "class Stream:\n"
+    "    def __init__(self, events: EventRepository) -> None:\n"
+    "        self._events = events\n"
+    "    async def run(self):\n"
+    "        return {body}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "async def f(session):\n    return session.get(Row, 1)\n",
+        "async def f(self):\n    with self._sessions() as session:\n        pass\n",
+        "async def f(sessions):\n    with sessions.begin() as session:\n        pass\n",
+        "async def f(repository):\n    return repository.list()\n",
+        "async def f(path):\n    return open(path).read()\n",
+        "async def f():\n    time.sleep(0.05)\n",
+        "async def f(fd):\n    os.fsync(fd)\n",
+        "async def f(fd):\n    fcntl.flock(fd, fcntl.LOCK_EX)\n",
+        "async def f():\n    return httpx2.Client(base_url='x')\n",
+        "async def f():\n    async def g():\n        time.sleep(1)\n",
+        (
+            "async def f(session, repository):\n"
+            "    await asyncio.to_thread(repository.get, session.get(Row, 1))\n"
+        ),
+        _ASYNC_REPOSITORY.format(body="self._events.high_watermark()"),
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: because\n",
+        "async def f(session):\n    return session.get(Row, 1)  # sequential:\n",
+    ],
+)
+def test_sync_io_inside_async_def_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ASYNC_SRC, source, lines, modes=("sync-in-async",))
+    # Only an added line can fail the change.
+    assert not check_source(_ASYNC_SRC, source, set(), modes=("sync-in-async",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    await asyncio.to_thread(session.get, Row, 1)\n",
+        ),
+        (_ASYNC_SRC, "async def f(r):\n    return await run_in_threadpool(r.read)\n"),
+        (_ASYNC_SRC, "async def f(repository):\n    return await repository.list()\n"),
+        (_ASYNC_SRC, "def f(session):\n    return session.get(Row, 1)\n"),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    def g():\n        return session.get(Row, 1)\n    return await asyncio.to_thread(g)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    await asyncio.to_thread(lambda: session.get(Row, 1))\n",
+        ),
+        (_ASYNC_SRC, "async def f():\n    await asyncio.sleep(1)\n"),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    return session.get(Row, 1)  # sequential: one-session\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    # sequential: not-hot\n    return session.get(Row, 1)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    return session.get(\n        Row, 1\n    )  # sequential: data-dependency\n",
+        ),
+        (
+            "control/tests/test_example.py",
+            "async def f(session):\n    return session.get(Row, 1)\n",
+        ),
+        (
+            "src/cluster_profiles/x.py",
+            "async def f(session):\n    return session.get(Row, 1)\n",
+        ),
+    ],
+)
+def test_threaded_nested_marked_or_out_of_scope_io_passes(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("sync-in-async",))
+
+
+@pytest.mark.parametrize(
+    "reason", ["data-dependency", "ordering", "one-session", "one-resource", "not-hot"]
+)
+def test_every_closed_set_sequential_reason_is_accepted(reason: str) -> None:
+    source = f"async def f(session):\n    return session.get(Row, 1)  # sequential: {reason}\n"
+    assert not check_source(_ASYNC_SRC, source, {1, 2}, modes=("sync-in-async",))
