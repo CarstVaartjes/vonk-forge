@@ -132,7 +132,9 @@ def install_artifacts_routes(
         },
     )
     async def recipe_image_upload_status(build_id: str, request: Request) -> Response:
-        required, _, headers, key = image_upload_context(build_id, request)
+        required, _, headers, key = await asyncio.to_thread(
+            image_upload_context, build_id, request
+        )
 
         def observe_complete() -> bool:
             with required.sessions() as session:
@@ -185,7 +187,9 @@ def install_artifacts_routes(
     )
     @operator_acceptance(ReceiptPolicy.AGENT_IMAGE)
     async def upload_recipe_image(build_id: str, request: Request) -> Response:
-        required, identity, headers, key = image_upload_context(build_id, request)
+        required, identity, headers, key = await asyncio.to_thread(
+            image_upload_context, build_id, request
+        )
         media_type = request.headers.get("content-type", "").partition(";")[0].strip()
         if media_type.lower() != "application/x-tar":
             raise HTTPException(
