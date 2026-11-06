@@ -4529,6 +4529,7 @@ def test_live_download_survives_a_parent_observation_gap_and_resumes(
     @dataclass
     class ModelOwner:
         state: LifecycleState = LifecycleState.RUNNING
+        blockers: tuple[()] = ()
 
         def get_operation(self, operation_id: str) -> ModelOwner:
             assert operation_id == child_id
