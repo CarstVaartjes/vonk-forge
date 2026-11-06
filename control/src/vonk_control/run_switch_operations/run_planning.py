@@ -407,8 +407,6 @@ class RunPlanningMixin:
                 request.action != "install"
                 and installation.state == InstallationState.INSTALLED
                 and service._lifecycle is not None
-                # A workload the plan keeps already serves: nothing starts.
-                and not resource_fits.already_kept
             ):
                 # The runs this plan stops release their reservations in the
                 # Stop phase, so admission must not count that capacity against

@@ -2337,6 +2337,26 @@ def test_an_alias_checked_with_the_contract_passes(source: str) -> None:
     assert not check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "same = run.alias == assignment.alias\n",
+        "q = select(RecipeRun.id).where(RecipeRun.alias == alias)\n",
+        "other = assignment.alias != run.alias\n",
+    ],
+)
+def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
+    assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
+    # The shared predicate and the stop-authority sites compare freely.
+    for site in (
+        "control/src/vonk_control/profile_capacity.py",
+        "control/src/vonk_control/profile_stop_authority.py",
+    ):
+        assert not check_source(site, source, lines, modes=("alias-rules",))
+
+
 def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
     for probe in (
         "code = ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY\n",

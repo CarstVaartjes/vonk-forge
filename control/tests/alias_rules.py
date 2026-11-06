@@ -21,6 +21,27 @@ import re
 KIND = "alias checked with its own rule; use vonk_forge_contracts EndpointAlias"
 ALIAS_NAME = re.compile(r"(?:^|_)alias(?:es)?$")
 
+RUN_ALIAS_KIND = (
+    "run alias compared by hand; use profile_capacity.serving_run for the run "
+    "serving an assignment"
+)
+#: The run named by a comparison side: ``run.alias``, ``RecipeRun.alias``.
+_RUN_NAME = re.compile(r"(?i)run$")
+#: The one predicate, and the sites that compare a run with the alias its own
+#: stored plan, stop or request-key replay recorded (authority checks, not the
+#: question "which run serves this assignment").
+RUN_ALIAS_SITES = frozenset(
+    {
+        "control/src/vonk_control/profile_capacity.py",
+        "control/src/vonk_control/profile_stop_authority.py",
+        "control/src/vonk_control/fleet_profiles/switch_dispatch.py",
+        "control/src/vonk_control/distributed_recovery/singleton.py",
+        "control/src/vonk_control/distributed_recovery/authority.py",
+        "control/src/vonk_control/recipe_operations/persistence.py",
+        "control/src/vonk_control/recipe_operations/run_observation.py",
+    }
+)
+
 
 def in_scope(path: str) -> bool:
     return path.endswith(".py") and path.startswith(("control/src/", "src/"))
@@ -119,3 +140,30 @@ def _hand_rules(node: ast.AST) -> list[int]:
         and _name(keyword.value)
         not in {"ENDPOINT_ALIAS_PATTERN", "ENDPOINT_ALIAS_MAX_LENGTH"}
     ]
+
+
+def run_alias_in_scope(path: str) -> bool:
+    return (
+        path.endswith(".py")
+        and path.startswith("control/src/vonk_control/")
+        and path not in RUN_ALIAS_SITES
+    )
+
+
+def scan_run_alias(source: str) -> list[int]:
+    """Lines that compare a run's alias with ``==`` / ``!=``."""
+    hits: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Compare) or not any(
+            isinstance(op, ast.Eq | ast.NotEq) for op in node.ops
+        ):
+            continue
+        for side in (node.left, *node.comparators):
+            if (
+                isinstance(side, ast.Attribute)
+                and side.attr == "alias"
+                and _RUN_NAME.search(_name(side.value))
+            ):
+                hits.add(node.lineno)
+        # ``RecipeRun.alias == x`` inside a query filter is a Compare as well.
+    return sorted(hits)
