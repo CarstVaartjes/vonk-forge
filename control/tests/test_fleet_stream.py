@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import time
 import uuid
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass
@@ -1354,3 +1355,73 @@ def test_wrong_node_hydration_ends_then_correct_hydration_replays():
             await fresh.aclose()
 
     asyncio.run(scenario())
+
+
+class _SlowEvents(Events):
+    """A repository whose every call blocks its thread, as a slow database does."""
+
+    def __init__(self, delay: float, *, fail: bool = False) -> None:
+        super().__init__(high_watermark=0, first_retained_id=None)
+        self.delay = delay
+        self.fail = fail
+        self.polls = 0
+
+    def replay_after(
+        self, last_id: int, now: datetime, *, limit: int
+    ) -> FleetReplayBatch:
+        time.sleep(self.delay)
+        self.polls += 1
+        if self.fail:
+            raise RuntimeError("database unavailable")
+        return super().replay_after(last_id, now, limit=limit)
+
+
+def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None:
+    delay = 0.2
+    healthy = [_SlowEvents(delay) for _ in range(4)]
+    broken = _SlowEvents(delay, fail=True)
+
+    async def fast_sleep(_seconds: float) -> None:
+        await asyncio.sleep(0.001)
+
+    def stream_for(events: Events) -> FleetStream:
+        return FleetStream(events, Telemetry(), sleep=fast_sleep)
+
+    async def consume(events: Events) -> list[str]:
+        generator = _events(stream_for(events), 0)
+        frames: list[str] = []
+        try:
+            async for frame in generator:
+                frames.append(frame)
+        finally:
+            await generator.aclose()
+        return frames
+
+    async def drain(events: Events) -> None:
+        generator = _events(stream_for(events), 0)
+        try:
+            async for _frame in generator:
+                pass
+        finally:
+            await generator.aclose()
+
+    async def scenario() -> float:
+        tasks = [asyncio.create_task(drain(events)) for events in healthy]
+        broken_task = asyncio.create_task(consume(broken))
+        worst = 0.0
+        # Stand-in for /health: a coroutine that must keep getting the loop.
+        for _ in range(10):
+            started = time.monotonic()
+            await asyncio.sleep(0.01)
+            worst = max(worst, time.monotonic() - started)
+        frames = await broken_task
+        assert len(frames) == 1  # the broken stream ended with its own notice
+        assert all(not task.done() for task in tasks)
+        assert all(events.polls >= 1 for events in healthy)
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return worst
+
+    worst = asyncio.run(scenario())
+    assert worst < delay / 2, f"event loop stalled for {worst:.3f}s"
