@@ -3464,7 +3464,35 @@ _ASYNC_REPOSITORY = (
             "    await asyncio.to_thread(repository.get, session.get(Row, 1))\n"
         ),
         _ASYNC_REPOSITORY.format(body="self._events.high_watermark()"),
+        "async def f():\n    return subprocess.run(['ls'])\n",
+        "async def f(path):\n    return path.read_text()\n",
+        "async def f(path):\n    path.write_bytes(b'x')\n",
+        "async def f(path):\n    return tempfile.mkstemp(dir=path)\n",
+        "async def f(a, b):\n    os.replace(a, b)\n",
         "async def f(session):\n    return session.get(Row, 1)  # sequential: because\n",
+        # Only startup/shutdown/one-off code is exempt; the sequencing reasons
+        # justify an order, not a blocked event loop.
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: one-session\n",
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: ordering\n",
+        # A same-module sync helper (or context manager) with I/O is I/O.
+        "def load(path):\n    return path.read_text()\nasync def f(path):\n    return load(path)\n",
+        "def load(path):\n    return path.read_text()\ndef mid(path):\n    return load(path)\nasync def f(path):\n    return mid(path)\n",
+        (
+            "class S:\n"
+            "    def read(self, path):\n"
+            "        return open(path).read()\n"
+            "    async def f(self, path):\n"
+            "        return self.read(path)\n"
+        ),
+        (
+            "@contextmanager\n"
+            "def locked(fd):\n"
+            "    fcntl.flock(fd, 1)\n"
+            "    yield\n"
+            "async def f(fd):\n"
+            "    with locked(fd):\n"
+            "        pass\n"
+        ),
         "async def f(session):\n    return session.get(Row, 1)  # sequential:\n",
     ],
 )
@@ -3496,7 +3524,15 @@ def test_sync_io_inside_async_def_is_flagged(source: str) -> None:
         (_ASYNC_SRC, "async def f():\n    await asyncio.sleep(1)\n"),
         (
             _ASYNC_SRC,
-            "async def f(session):\n    return session.get(Row, 1)  # sequential: one-session\n",
+            "async def f(session):\n    return session.get(Row, 1)  # sequential: not-hot\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "def load(path):\n    return path.read_text()  # sequential: not-hot\nasync def f(path):\n    return load(path)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "def load(path):\n    return path.read_text()\nasync def f(path):\n    return await asyncio.to_thread(load, path)\n",
         ),
         (
             _ASYNC_SRC,
@@ -3504,7 +3540,7 @@ def test_sync_io_inside_async_def_is_flagged(source: str) -> None:
         ),
         (
             _ASYNC_SRC,
-            "async def f(session):\n    return session.get(\n        Row, 1\n    )  # sequential: data-dependency\n",
+            "async def f(session):\n    return session.get(\n        Row, 1\n    )  # sequential: not-hot\n",
         ),
         (
             "control/tests/test_example.py",
@@ -3524,8 +3560,24 @@ def test_threaded_nested_marked_or_out_of_scope_io_passes(
 
 
 @pytest.mark.parametrize(
-    "reason", ["data-dependency", "ordering", "one-session", "one-resource", "not-hot"]
+    "reason", ["data-dependency", "ordering", "one-session", "one-resource", "other"]
 )
-def test_every_closed_set_sequential_reason_is_accepted(reason: str) -> None:
+def test_only_not_hot_exempts_io_on_the_event_loop(reason: str) -> None:
     source = f"async def f(session):\n    return session.get(Row, 1)  # sequential: {reason}\n"
-    assert not check_source(_ASYNC_SRC, source, {1, 2}, modes=("sync-in-async",))
+    assert check_source(_ASYNC_SRC, source, {1, 2}, modes=("sync-in-async",))
+
+
+def test_adding_the_async_keyword_alone_carries_the_bodys_findings() -> None:
+    # Turning `def f` into `async def f` adds only line 1; the body's sync I/O
+    # is reported on that line.
+    source = "async def f(path):\n    return path.read_text()\n"
+    assert check_source(_ASYNC_SRC, source, {1}, modes=("sync-in-async",))
+    # An untouched async def with a clean body stays quiet.
+    assert not check_source(
+        _ASYNC_SRC,
+        "async def f(path):\n    return await asyncio.to_thread(path.read_text)\n",
+        {1},
+        modes=("sync-in-async",),
+    )
+    # An untouched async def does not fail for old findings.
+    assert not check_source(_ASYNC_SRC, source, set(), modes=("sync-in-async",))
