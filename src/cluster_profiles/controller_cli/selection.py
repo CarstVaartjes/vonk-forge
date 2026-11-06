@@ -6,6 +6,7 @@ import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -75,7 +76,6 @@ class _ReadOutcome:
 
 
 _MAX_CONCURRENT_READS = 3
-_WAIT_SLICE_SECONDS = 0.1
 
 
 def _skipped_read() -> None:
@@ -99,8 +99,8 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
     the reads meets the same first error as before.
 
     A single real read runs inline. Several run in daemon threads while the
-    caller waits in short slices, so Ctrl-C still raises KeyboardInterrupt on
-    the main thread at once.
+    caller waits on each read's result in order; that wait is interruptible, so Ctrl-C
+    still raises KeyboardInterrupt on the main thread at once.
     """
     real = [read for read in reads if read is not _skipped_read]
     if len(real) > _MAX_CONCURRENT_READS:
@@ -110,26 +110,19 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
             _ReadOutcome() if read is _skipped_read else _run_read(read)
             for read in reads
         ]
-    slots: dict[int, _ReadOutcome] = {}
-    finished = {
-        index: threading.Event()
-        for index, read in enumerate(reads)
-        if read is not _skipped_read
+    pending: dict[int, Future[_ReadOutcome]] = {
+        index: Future() for index, read in enumerate(reads) if read is not _skipped_read
     }
 
-    def work(index: int, read: Callable[[], object]) -> None:
-        slots[index] = _run_read(read)
-        finished[index].set()
+    def work(future: Future[_ReadOutcome], read: Callable[[], object]) -> None:
+        future.set_result(_run_read(read))
 
-    for index in finished:
-        threading.Thread(target=work, args=(index, reads[index]), daemon=True).start()
-    for done in finished.values():
-        while not done.wait(_WAIT_SLICE_SECONDS):
-            pass
-    outcomes = [_ReadOutcome() for _ in reads]
-    for index in finished:
-        outcomes[index] = slots[index]
-    return outcomes
+    for index, future in pending.items():
+        threading.Thread(target=work, args=(future, reads[index]), daemon=True).start()
+    return [
+        _ReadOutcome() if index not in pending else pending[index].result()
+        for index in range(len(reads))
+    ]
 
 
 def _recipe_rows(
