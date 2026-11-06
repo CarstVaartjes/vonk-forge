@@ -40,8 +40,6 @@ def test_accepted_projection_miss_is_repaired_without_unverified_reuse(
         {
             "model": RouteAcceptedModelPolicy(
                 upstream_model="model",
-                requests_per_minute=10,
-                tokens_per_minute=100,
             )
         }
     )

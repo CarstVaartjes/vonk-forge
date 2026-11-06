@@ -20,10 +20,7 @@ def _snapshot():
 def _policy(models=("deepseek",)):
     return LiteLlmPolicy(
         models={
-            model: RouteAcceptedModelPolicy(
-                requests_per_minute=30, tokens_per_minute=10000, upstream_model=model
-            )
-            for model in models
+            model: RouteAcceptedModelPolicy(upstream_model=model) for model in models
         }
     )
 
@@ -56,8 +53,6 @@ def test_public_model_name_can_target_a_distinct_local_upstream() -> None:
     policy = LiteLlmPolicy(
         models={
             "deepseek": RouteAcceptedModelPolicy(
-                requests_per_minute=30,
-                tokens_per_minute=10_000,
                 upstream_model="deepseek-v4-flash-dspark",
             )
         }
@@ -76,8 +71,6 @@ def test_upstream_model_must_be_a_bounded_local_identifier() -> None:
     policy = LiteLlmPolicy(
         models={
             "deepseek": RouteAcceptedModelPolicy(
-                requests_per_minute=30,
-                tokens_per_minute=10_000,
                 upstream_model="../remote model",
             )
         }
@@ -134,8 +127,6 @@ def test_native_decision_policy_keeps_alias_quota_and_credential_reference() -> 
     policy = LiteLlmPolicy(
         models={
             "deepseek": RouteAcceptedModelPolicy(
-                requests_per_minute=30,
-                tokens_per_minute=10000,
                 upstream_model="d3-edge",
                 upstream_provider="hosted_vllm",
             )
@@ -146,12 +137,10 @@ def test_native_decision_policy_keeps_alias_quota_and_credential_reference() -> 
     assert entry["model_name"] == "deepseek"
     assert entry["litellm_params"]["model"] == "hosted_vllm/d3-edge"
     assert entry["litellm_params"]["api_key"] == "os.environ/LITELLM_UPSTREAM_KEY"
-    assert entry["litellm_params"]["rpm"] == 30
-    assert entry["litellm_params"]["tpm"] == 10000
+    assert "rpm" not in entry["litellm_params"]
+    assert "tpm" not in entry["litellm_params"]
     with pytest.raises(ValidationError, match="upstream_provider"):
         RouteAcceptedModelPolicy(
-            requests_per_minute=30,
-            tokens_per_minute=10000,
             upstream_model="d3-edge",
             upstream_provider="external-provider",  # type: ignore[arg-type]
         )

@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, model_validator
@@ -169,8 +170,36 @@ class LiteLlmUpstreamParams(_ConfigModel):
     api_key: Literal["os.environ/LITELLM_UPSTREAM_KEY"] = (
         "os.environ/LITELLM_UPSTREAM_KEY"
     )
-    rpm: int = Field(ge=1, le=100_000)
-    tpm: int = Field(ge=1, le=100_000_000)
+    # Bundles an earlier Controller published carry a per-deployment count cap.
+    # They are read as they are; nothing here sets one: the gateway does not
+    # ration, the engine's own admission does.
+    rpm: int | None = Field(default=None, ge=1, le=100_000)
+    tpm: int | None = Field(default=None, ge=1, le=100_000_000)
+
+
+class OpenAiRequestParameter(StrEnum):
+    """The one owner of OpenAI request parameter names the gateway publishes."""
+
+    MAX_COMPLETION_TOKENS = "max_completion_tokens"
+    MAX_TOKENS = "max_tokens"
+    PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    REASONING_EFFORT = "reasoning_effort"
+    RESPONSE_FORMAT = "response_format"
+    STOP = "stop"
+    STREAM = "stream"
+    TEMPERATURE = "temperature"
+    TOOL_CHOICE = "tool_choice"
+    TOOLS = "tools"
+    TOP_P = "top_p"
+
+
+class VonkReasoningEffort(_ConfigModel):
+    """Where a request sets the reasoning effort, and the levels it accepts."""
+
+    via: RequestPlacement
+    key: str
+    levels: list[str] = Field(min_length=1)
+    default: str
 
 
 class VonkThinking(_ConfigModel):
@@ -203,6 +232,7 @@ class LiteLlmModelInfo(_ConfigModel):
     supports_audio_input: bool
     supports_audio_output: bool
     supports_pdf_input: bool
+    supports_video_input: bool
     supports_reasoning: bool
     thinking_always_on: bool
     reasoning_effort_levels: list[str] | None = None
@@ -214,8 +244,9 @@ class LiteLlmModelInfo(_ConfigModel):
     supports_system_messages: bool
     supports_native_streaming: bool
     supported_endpoints: list[str] = Field(min_length=1)
-    supported_openai_params: list[str]
+    supported_openai_params: list[OpenAiRequestParameter]
     vonk_thinking: VonkThinking | None = None
+    vonk_reasoning_effort: VonkReasoningEffort | None = None
     vonk_default_output_tokens: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
@@ -232,7 +263,9 @@ class LiteLlmModelEntry(_ConfigModel):
 
 
 class LiteLlmRouterSettings(_ConfigModel):
-    enable_pre_call_checks: bool = True
+    # The gateway reports a route's limits; it never rations or rejects on its
+    # own count. The engine's admission is the one gate.
+    enable_pre_call_checks: bool = False
     routing_strategy: Literal["simple-shuffle"] = "simple-shuffle"
 
 
@@ -281,8 +314,6 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
                 litellm_params=LiteLlmUpstreamParams(
                     model=f"{accepted.upstream_provider}/{accepted.upstream_model}",
                     api_base=routes.aliases[alias].rstrip("/"),
-                    rpm=accepted.requests_per_minute,
-                    tpm=accepted.tokens_per_minute,
                 ),
                 model_info=accepted.model_info,
             )

@@ -69,8 +69,6 @@ class RouteRunIdentity(StrictModel):
 
 
 class RouteAcceptedModelPolicy(StrictModel):
-    requests_per_minute: int = Field(ge=1, le=100_000)
-    tokens_per_minute: int = Field(ge=1, le=100_000_000)
     upstream_model: str = Field(min_length=1, max_length=256)
     upstream_provider: Literal["openai", "hosted_vllm"] = "openai"
     model_info: LiteLlmModelInfo | None = None

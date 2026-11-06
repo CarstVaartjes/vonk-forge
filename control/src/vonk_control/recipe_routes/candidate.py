@@ -20,6 +20,7 @@ from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
 from ..interface_adapters import InterfaceAdapterError, interface_adapter
 from ..litellm import (
+    LiteLlmModelInfo,
     LiteLlmPolicy,
     RouteState,
 )
@@ -45,7 +46,7 @@ from ..route_bundle_contract import (
     RouteRankIdentity,
     RouteRunIdentity,
 )
-from ..route_model_info import route_model_info
+from ..route_model_info import RouteModelInfoReader
 from ..security.route_authority import require_route_authority
 from .shared import (
     _UPSTREAM_MODEL,
@@ -121,6 +122,10 @@ def _candidate_once(
     if candidate_runs:
         for node in session.scalars(node_statement):
             nodes_by_run[node.run_id].append(node)
+    model_infos = RouteModelInfoReader(session, candidate_runs, self._note_model_info)
+    read_served = getattr(self._publisher, "served_model_info", None)
+    served: dict[str, tuple[str, LiteLlmModelInfo | None]] = {}
+    served_read = False
     for run in candidate_runs:
         nodes = tuple(nodes_by_run[run.id])
         # A route that already serves stays published while its ranks
@@ -262,7 +267,23 @@ def _candidate_once(
                 # only that route instead of blocking every other one.
                 error.run_id = run.id
                 raise
-            model_info = route_model_info(session, run, mapping)
+            if serving:
+                # A route that already serves keeps the facts it was published
+                # with: new facts would rewrite litellm.json, and the supervisor
+                # restarts LiteLLM on any byte change, cutting every route's
+                # in-flight requests. They apply when the route next changes.
+                if not served_read:
+                    served_read = True
+                    if read_served is not None:
+                        served = read_served()
+                frozen = served.get(run.alias)
+            else:
+                frozen = None
+            model_info = (
+                frozen[1]
+                if frozen is not None and frozen[0] == run.id
+                else model_infos.for_run(run, mapping)
+            )
             identity = RouteRunIdentity(
                 run_id=run.id,
                 alias=run.alias,
@@ -279,8 +300,6 @@ def _candidate_once(
                 ],
             )
             model_policies[run.alias] = RouteAcceptedModelPolicy(
-                requests_per_minute=60,
-                tokens_per_minute=1_000_000,
                 upstream_model=upstream_model,
                 upstream_provider=upstream_provider,
                 model_info=model_info,
@@ -348,7 +367,11 @@ def _candidate_once(
     identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
     digest = hashlib.sha256(
         json.dumps(
-            identity.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            # An absent fact is not part of the identity, so a route without
+            # model_info keeps the digest it had before the field existed.
+            identity.model_dump(mode="json", exclude_none=True),
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode()
     ).hexdigest()
     state = RouteState(aliases=aliases, digest=digest)

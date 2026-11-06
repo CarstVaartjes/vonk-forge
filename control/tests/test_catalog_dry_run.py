@@ -203,8 +203,6 @@ def test_gateway_forwards_a_model_name_the_engine_serves(
             LiteLlmPolicy(
                 models={
                     alias: RouteAcceptedModelPolicy(
-                        requests_per_minute=60,
-                        tokens_per_minute=1_000_000,
                         upstream_model=upstream,
                     )
                 }

@@ -126,6 +126,9 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
         self._second_publish = threading.Event()
         self.aliases: list[tuple[str, ...]] = []
 
+    def served_model_info(self):
+        return {}
+
     def publish_recipe(self, candidate):
         return self._record(
             tuple(sorted(candidate.state.aliases)), candidate.state.digest

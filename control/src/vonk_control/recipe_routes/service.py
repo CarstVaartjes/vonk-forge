@@ -94,6 +94,7 @@ class RecipeRouteService:
         self._clock = clock
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
         self._retained: dict[str, str] = {}
+        self._degraded: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
         """Observe acquisition in fresh transactions, then reconcile the exact effect."""
@@ -836,6 +837,23 @@ class RecipeRouteService:
         log_event(
             _LOGGER,
             "recipe.route.kept_without_current_evidence",
+            service="control-routes",
+            run_id=run_id,
+            reason=reason,
+        )
+
+    def _note_model_info(self, run_id: str, reason: str | None) -> None:
+        """Say once, when it starts or changes, why a route has no model_info."""
+
+        if self._degraded.get(run_id) == reason:
+            return
+        if reason is None:
+            self._degraded.pop(run_id, None)
+            return
+        self._degraded[run_id] = reason
+        log_event(
+            _LOGGER,
+            "recipe.route.model_info_unavailable",
             service="control-routes",
             run_id=run_id,
             reason=reason,

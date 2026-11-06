@@ -2,23 +2,24 @@
 
 The facts are the signed catalog's ``RecipeApi`` document (stored once beside
 the recipe revision at ingress; it is not checked again here). The option
-choices and setting overrides the run's mapping carries decide which block
-applies and what ``{setting: context_tokens}`` means. A route whose recipe
-revision has no readable facts publishes no ``model_info`` and stays up.
+choices and setting values the run's mapping carries decide which block applies
+and what ``{setting: context_tokens}`` means. A route whose recipe revision has
+no usable facts publishes no ``model_info`` and stays up.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Iterable
 
+from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import (
     ChatApi,
     DecisionApi,
     RecipeApi,
     RecipeDefinition,
-    read_recipe,
 )
 from vonk_forge_contracts.api import (
     ApiReasoningAlwaysOn,
@@ -32,64 +33,145 @@ from vonk_forge_contracts.api import (
 from vonk_forge_contracts.recipe import (
     RecipeDecisionSettings,
     RecipeGenerationSettings,
+    RecipeOptionError,
     Scalar,
 )
 
-from .catalog_revision_contract import read_recipe_projection
-from .litellm import LiteLlmModelInfo, VonkThinking
+from .catalog_revision_contract import (
+    CatalogRevisionContractError,
+    read_catalog_document,
+    read_recipe_projection,
+)
+from .litellm import (
+    LiteLlmModelInfo,
+    OpenAiRequestParameter,
+    VonkReasoningEffort,
+    VonkThinking,
+)
 from .models import (
     CatalogDocumentRevision,
     ClusterMapping,
     RecipeInstallation,
     RecipeRun,
 )
-from .recipe_runtime_specs import split_option_choices
+from .recipe_runtime_specs import (
+    RecipeRuntimeSpecError,
+    _compiled_arguments,
+    split_option_choices,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-# Sampling and length controls every OpenAI-compatible chat route reads; the
+# Length and sampling controls every OpenAI-compatible chat route reads; the
 # rest of ``supported_openai_params`` follows from the typed facts.
 _CHAT_PARAMETERS = (
-    "max_completion_tokens",
-    "max_tokens",
-    "temperature",
-    "top_p",
+    OpenAiRequestParameter.MAX_COMPLETION_TOKENS,
+    OpenAiRequestParameter.MAX_TOKENS,
+    OpenAiRequestParameter.STOP,
+    OpenAiRequestParameter.TEMPERATURE,
+    OpenAiRequestParameter.TOP_P,
 )
 _DECISION_ENDPOINT = "/v1/systemone"
 
 
-def route_model_info(
-    session: Session, run: RecipeRun, mapping: ClusterMapping | None
-) -> LiteLlmModelInfo | None:
-    """The run's ``model_info``, or None when its facts are not published.
+class ModelInfoError(ValueError):
+    """The facts cannot describe this run's route; the route publishes none."""
 
-    Fail open: whatever is missing or unreadable here (no installation, a
-    revision stored without facts, an option the recipe no longer has) only
-    means the route publishes no ``model_info``. It never blocks or drops a
-    route.
+
+class RouteModelInfoReader:
+    """The ``model_info`` of every run of one candidate observation.
+
+    The installation and revision rows of all runs come from two queries made
+    before the loop, and a (revision, mapping generation) pair is derived once.
+    The per-run reads that remain are sequential on purpose: the candidate holds
+    one session, and a session is not shared across threads (P21).
     """
 
-    try:
-        installation = session.get(RecipeInstallation, run.installation_id)
-        revision = (
-            session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-            if installation is not None
-            else None
-        )
+    def __init__(
+        self,
+        session: Session,
+        runs: Iterable[RecipeRun],
+        degraded: Callable[[str, str | None], None],
+    ) -> None:
+        installations = {
+            row.id: row
+            for row in session.scalars(
+                select(RecipeInstallation).where(
+                    RecipeInstallation.id.in_({run.installation_id for run in runs})
+                )
+            )
+        }
+        revisions = {
+            row.id: row
+            for row in session.scalars(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.id.in_(
+                        {row.recipe_revision_id for row in installations.values()}
+                    )
+                )
+            )
+        }
+        self._revision_of = {
+            installation_id: revisions.get(row.recipe_revision_id)
+            for installation_id, row in installations.items()
+        }
+        self._degraded = degraded
+        self._derived: dict[
+            tuple[str, str, int], LiteLlmModelInfo | ModelInfoError | None
+        ] = {}
+
+    def for_run(
+        self, run: RecipeRun, mapping: ClusterMapping | None
+    ) -> LiteLlmModelInfo | None:
+        """The run's ``model_info``; None when its facts are absent or unusable.
+
+        Fail open: facts that are absent are silent; facts that exist but cannot
+        be used are reported once per change through ``degraded``. Nothing here
+        blocks or drops a route.
+        """
+
+        revision = self._revision_of.get(run.installation_id)
         if revision is None:
             return None
-        api = read_recipe_projection(revision).api
-        if api is None:
+        key = (revision.id, run.mapping_id, run.mapping_generation)
+        if key not in self._derived:
+            self._derived[key] = self._derive(revision, mapping)
+        derived = self._derived[key]
+        if isinstance(derived, ModelInfoError):
+            self._degraded(run.id, str(derived)[:200])
             return None
-        choices, settings = split_option_choices(mapping.parameters if mapping else {})
-        return build_model_info(read_recipe(revision.document), api, choices, settings)
-    except (TypeError, ValueError, KeyError) as error:
-        _LOGGER.warning(
-            "route model_info unavailable; the route publishes none: run=%s error=%s",
-            run.id,
-            type(error).__name__,
-        )
-    return None
+        self._degraded(run.id, None)
+        return derived
+
+    @staticmethod
+    def _derive(
+        revision: CatalogDocumentRevision, mapping: ClusterMapping | None
+    ) -> LiteLlmModelInfo | ModelInfoError | None:
+        try:
+            api = read_recipe_projection(revision).api
+            if api is None:
+                return None
+            recipe = read_catalog_document(revision)
+            if not isinstance(recipe, RecipeDefinition):
+                raise ModelInfoError("the revision is not a recipe")
+            choices, settings = split_option_choices(
+                mapping.parameters if mapping is not None else {}
+            )
+            return build_model_info(recipe, api, choices, settings)
+        except (
+            CatalogRevisionContractError,
+            RecipeOptionError,
+            RecipeRuntimeSpecError,
+            ValidationError,
+            ModelInfoError,
+        ) as error:
+            _LOGGER.warning(
+                "route model_info unavailable; the route publishes none: "
+                "revision=%s error=%s",
+                revision.id,
+                str(error)[:200],
+            )
+            return ModelInfoError(f"{type(error).__name__}: {str(error)[:160]}")
 
 
 def build_model_info(
@@ -104,7 +186,7 @@ def build_model_info(
     if not isinstance(
         recipe_settings, RecipeGenerationSettings | RecipeDecisionSettings
     ):
-        raise TypeError("the recipe does not serve a generation or decision route")
+        raise ModelInfoError("the recipe does not serve a generation or decision route")
     block = api.for_choices(recipe, choices)
     override = settings.get("context_tokens")
     context = (
@@ -126,6 +208,7 @@ def build_model_info(
             supports_audio_input=modalities.audio,
             supports_audio_output=False,
             supports_pdf_input=modalities.pdf,
+            supports_video_input=modalities.video,
             supports_reasoning=False,
             thinking_always_on=False,
             supports_function_calling=False,
@@ -148,14 +231,24 @@ def build_model_info(
     tools = block.tools
     tool_choice = tools.tool_choice if isinstance(tools, ApiToolsSupported) else []
     parallel = isinstance(tools, ApiToolsSupported) and tools.parallel_calls
+    # The standard name shows only where the request really sets it at top level.
+    top_level_effort = (
+        effort is not None
+        and effort.via == "top_level"
+        and effort.key == OpenAiRequestParameter.REASONING_EFFORT
+    )
     parameters_supported = {
         *_CHAT_PARAMETERS,
-        *(["stream"] if block.streaming else []),
-        *(["tools"] if isinstance(tools, ApiToolsSupported) else []),
-        *(["tool_choice"] if tool_choice else []),
-        *(["parallel_tool_calls"] if parallel else []),
-        *(["response_format"] if block.structured_output else []),
-        *(["reasoning_effort"] if effort is not None else []),
+        *([OpenAiRequestParameter.STREAM] if block.streaming else []),
+        *(
+            [OpenAiRequestParameter.TOOLS]
+            if isinstance(tools, ApiToolsSupported)
+            else []
+        ),
+        *([OpenAiRequestParameter.TOOL_CHOICE] if tool_choice else []),
+        *([OpenAiRequestParameter.PARALLEL_TOOL_CALLS] if parallel else []),
+        *([OpenAiRequestParameter.RESPONSE_FORMAT] if block.structured_output else []),
+        *([OpenAiRequestParameter.REASONING_EFFORT] if top_level_effort else []),
     }
     return LiteLlmModelInfo(
         mode="chat",
@@ -166,6 +259,7 @@ def build_model_info(
         supports_audio_input=modalities.audio,
         supports_audio_output=block.audio_output,
         supports_pdf_input=modalities.pdf,
+        supports_video_input=modalities.video,
         supports_reasoning=not isinstance(reasoning, ApiReasoningNone),
         thinking_always_on=isinstance(reasoning, ApiReasoningAlwaysOn),
         reasoning_effort_levels=None if effort is None else list(effort.levels),
@@ -189,6 +283,16 @@ def build_model_info(
             if isinstance(reasoning, ApiReasoningSwitch)
             else None
         ),
+        vonk_reasoning_effort=(
+            None
+            if effort is None
+            else VonkReasoningEffort(
+                via=effort.via,
+                key=effort.key,
+                levels=list(effort.levels),
+                default=effort.default,
+            )
+        ),
         vonk_default_output_tokens=_default_output_tokens(
             recipe, block, choices, settings
         ),
@@ -198,7 +302,7 @@ def build_model_info(
 def _default_output_tokens(
     recipe: RecipeDefinition,
     block: ChatApi,
-    choices: Mapping[str, str],
+    choices: dict[str, str],
     settings: dict[str, Scalar],
 ) -> int | None:
     """The server's default output cap; None when the request may use the rest."""
@@ -208,18 +312,13 @@ def _default_output_tokens(
         return None
     if not isinstance(default, ApiTokenArgument):
         return default.value
-    for argument in recipe.with_option_choices(choices).runtime.arguments:
-        if argument.name != default.argument:
-            continue
-        if argument.setting is None:
-            value = argument.value
-        elif argument.setting in settings:
-            value = settings[argument.setting]
-        else:
-            bound = recipe.settings.knobs.get(argument.setting) or getattr(
-                recipe.settings, argument.setting, None
-            )
-            value = bound.value if bound is not None else None
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-    raise ValueError("default_output_tokens names an argument without an integer")
+    try:
+        arguments = _compiled_arguments(recipe.with_option_choices(choices), settings)
+    except KeyError as error:
+        raise ModelInfoError("an argument names a setting the recipe lacks") from error
+    for argument in arguments:
+        if argument.name == default.argument:
+            if isinstance(argument.value, int) and not isinstance(argument.value, bool):
+                return argument.value
+            break
+    raise ModelInfoError("default_output_tokens names an argument without an integer")
