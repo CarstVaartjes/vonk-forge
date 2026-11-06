@@ -123,6 +123,10 @@ def _model_operator_response(
 
 
 def model_cache_http_error(error: BaseException) -> HTTPException:
+    if isinstance(error, UnknownOutcomeError):
+        # A busy owner or unconfirmed bookkeeping: the route's retry-later
+        # answer (503, Retry-After, error code) says to ask again.
+        raise error
     if isinstance(error, ModelCacheSelectorAmbiguous):
         from .library_api import SelectorAmbiguityHTTPError
         from .library_projection import LibrarySelectorAmbiguous
@@ -144,8 +148,6 @@ def model_cache_http_error(error: BaseException) -> HTTPException:
             detail=error.detail,
             headers={"x-vonk-error-code": error.code},
         )
-    if isinstance(error, UnknownOutcomeError):
-        raise error
     if isinstance(error, ModelCacheError):
         if error.disposition != Disposition.OBSERVE:
             return HTTPException(

@@ -12,53 +12,23 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _source_commit(tmp_path: Path) -> tuple[Path, str, str]:
-    """A one-commit repository: its git dir, commit and tree."""
-    repo = tmp_path / "source"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    (repo / "file").write_text("content\n")
-    subprocess.run(["git", "-C", str(repo), "add", "file"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "-c",
-            "commit.gpgsign=false",
-            "commit",
-            "-qm",
-            "source",
-        ],
-        check=True,
-    )
-
-    def rev(name: str) -> str:
-        return subprocess.check_output(
-            ["git", "-C", str(repo), "rev-parse", name], text=True
-        ).strip()
-
-    return repo / ".git", rev("HEAD"), rev("HEAD^{tree}")
-
-
-@pytest.mark.parametrize("fault", ["transient", "legacy", "digest", "tree", "sbom"])
+@pytest.mark.parametrize(
+    "fault", ["transient", "missing_tree", "digest", "tree", "sbom"]
+)
 def test_published_image_fetch_recovery_still_verifies_identity_and_attestations(
     tmp_path, fault
 ):
-    """An exact-source image must be bound to the verified commit's tree. Its
-    revision label may name another commit with that tree; an image built
-    before the tree label ("legacy") is bound through its commit's tree."""
-    git_dir, commit, tree = _source_commit(tmp_path)
+    """An exact-source image must carry the expected tree label. Its revision
+    label may name another commit with that tree; an image without the tree
+    label is refused."""
+    commit = "a" * 40
+    tree = "d" * 40
     revision = commit
     labels = {
         "org.opencontainers.image.source": "https://github.com/CarstVaartjes/vonk-forge",
         "org.opencontainers.image.revision": revision,
     }
-    if fault != "legacy":
+    if fault != "missing_tree":
         labels["ai.vonkforge.source.tree"] = "1" * 40 if fault == "tree" else tree
     digest = "sha256:" + "b" * 64
     documents = json.loads(
@@ -102,6 +72,7 @@ print(json.dumps({documents!r}))
             "ghcr.io/carstvaartjes/vonk-forge-api",
             digest,
             "dev-sha-" + commit,
+            tree,
         ],
         cwd=ROOT,
         capture_output=True,
@@ -111,10 +82,9 @@ print(json.dumps({documents!r}))
             **os.environ,
             "PATH": f"{tool_bin}:{os.environ['PATH']}",
             "RUNNER_TEMP": str(tmp_path),
-            "GIT_DIR": str(git_dir),
         },
     )
-    assert (result.returncode == 0) == (fault in ("transient", "legacy")), result.stderr
+    assert (result.returncode == 0) == (fault == "transient"), result.stderr
     calls = requests.read_text().splitlines()
     if fault == "transient":
         assert len(calls) == 2

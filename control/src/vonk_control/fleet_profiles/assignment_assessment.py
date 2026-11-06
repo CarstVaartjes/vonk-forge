@@ -36,6 +36,7 @@ from ..models import (
     RunNode,
 )
 from ..preparation_contract import RuntimeImageIdentity
+from ..profile_capacity import serving_run
 from ..recipe_execution_contract import (
     installation_matches_runtime_image,
     installation_serves_authorised_ports,
@@ -384,10 +385,7 @@ class FleetProfileService:
                 run=None,
                 build=build,
             )
-        run = next(
-            (item for item in rows.runs if item.installation_id == installation.id),
-            None,
-        )
+        run = serving_run(rows.runs, installation.id, assignment)
         if run is None:
             return cls._AssignmentState(
                 current_state=ObservedAssignmentState.INSTALLED,

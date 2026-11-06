@@ -32,6 +32,7 @@ from ..model_cache_contract import (
     ModelCacheUsage,
 )
 from ..models import CatalogDocumentRevision
+from ..wait_contract import QueueWait
 from .catalog import (
     _catalog_documents,
     _document_texts,
@@ -167,6 +168,7 @@ class LibraryProjection:
         phase: object,
         completed: object,
         total: object,
+        wait: QueueWait | None = None,
     ) -> LibraryLocalProgress | None:
         """The progress of one cache operation, or ``None`` when its stored
         state does not read: the asset then shows no progress (unknown)."""
@@ -194,6 +196,9 @@ class LibraryProjection:
             phase=phase if isinstance(phase, str) else None,
             completed_bytes=completed,
             total_bytes=total,
+            reason=wait.reason if wait else None,
+            blockers=list(wait.blockers) if wait else [],
+            next_attempt_at=wait.next_check if wait else None,
         )
 
     @staticmethod

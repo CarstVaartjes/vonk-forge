@@ -154,8 +154,23 @@
         "image_bytes": 1000
       },
       "local": {
-        "controller": "not_cached",
-        "running_on": []
+        "controller": "preparing",
+        "running_on": [],
+        "preparation": {
+          "operation_id": "96c1a078-ffec-413d-83ab-1a82b04cc4c1",
+          "state": "queued",
+          "completed_bytes": 0,
+          "reason": "access_denied",
+          "blockers": [
+            {
+              "code": "access_denied",
+              "detail": "waiting for Hugging Face access: accept terms at https://huggingface.co/org/gated",
+              "severity": "warning",
+              "node_ids": []
+            }
+          ],
+          "next_attempt_at": "2026-11-06T14:04:51Z"
+        }
       },
       "updated_at": "2026-09-05T12:00:00Z",
       "node_count": 1,

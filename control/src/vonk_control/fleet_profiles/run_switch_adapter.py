@@ -472,6 +472,7 @@ class RunSwitchFleetProfileAdapter(
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: frozenset[str] = frozenset(),
         replaced_run_ids: frozenset[str] = frozenset(),
+        own_run_id: str | None = None,
     ) -> RunSwitchAssessment | Residue:
         """Project admission and preparation from the same workload planner.
 
@@ -502,6 +503,7 @@ class RunSwitchFleetProfileAdapter(
             planned_ports=planned_ports,
             kept_run_ids=kept_run_ids,
             replaced_run_ids=replaced_run_ids,
+            own_run_id=own_run_id,
         )
         return plan.assessment()
 
