@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -150,15 +150,20 @@ class ArtifactBlobStore:
         no cancelled caller leaves the fence held. Errors from the acquire
         (including the unsafe-path security refusal) reach the caller as is.
         """
-        guard = self.reference_attachment()
-        acquire = asyncio.ensure_future(asyncio.to_thread(guard.__enter__))
+
+        def enter() -> AbstractContextManager[None]:
+            guard = self.reference_attachment()
+            guard.__enter__()
+            return guard
+
+        acquire = asyncio.ensure_future(asyncio.to_thread(enter))
         try:
-            await asyncio.shield(acquire)
+            guard = await asyncio.shield(acquire)
         except asyncio.CancelledError:
-            if not acquire.cancelled() and (
-                await asyncio.gather(acquire, return_exceptions=True)
-            ) == [None]:
-                await asyncio.to_thread(guard.__exit__, None, None, None)
+            # Let the acquire finish, then give back what it took.
+            (taken,) = await asyncio.gather(acquire, return_exceptions=True)
+            if isinstance(taken, AbstractContextManager):
+                await asyncio.to_thread(taken.__exit__, None, None, None)
             raise
         try:
             yield
