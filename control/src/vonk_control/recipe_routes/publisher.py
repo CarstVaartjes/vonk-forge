@@ -25,6 +25,7 @@ from ..litellm import (
 )
 from ..presence import ManagementAddressPolicy, PresenceError
 from ..route_bundle_contract import (
+    RouteAcceptedModelPolicy,
     RouteBundleDocument,
 )
 from ..route_runtime import (
@@ -159,14 +160,19 @@ class AtomicRecipeRoutePublisher:
             or params.api_key != "os.environ/LITELLM_UPSTREAM_KEY"
         ):
             return None
+        # The entry parsed as a LiteLlmConfig and the checks above hold, so the
+        # typed policy accepts exactly what the bundle carries.
         quota = LiteLlmPolicy(
             {
-                alias: {
-                    "upstream_model": upstream_model,
-                    "upstream_provider": provider,
-                    "requests_per_minute": rpm,
-                    "tokens_per_minute": tpm,
-                }
+                alias: RouteAcceptedModelPolicy.model_validate(
+                    {
+                        "upstream_model": upstream_model,
+                        "upstream_provider": provider,
+                        "requests_per_minute": rpm,
+                        "tokens_per_minute": tpm,
+                        "model_info": entries[0].model_info,
+                    }
+                )
             }
         )
         # The renderer owns policy validation, including resource bounds.

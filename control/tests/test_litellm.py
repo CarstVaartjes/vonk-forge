@@ -3,12 +3,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from vonk_control.litellm import (
     LiteLlmPolicy,
     RouteState,
     render_config,
     render_empty_config,
 )
+from vonk_control.route_bundle_contract import RouteAcceptedModelPolicy
 
 
 def _snapshot():
@@ -18,7 +20,9 @@ def _snapshot():
 def _policy(models=("deepseek",)):
     return LiteLlmPolicy(
         models={
-            model: {"requests_per_minute": 30, "tokens_per_minute": 10000}
+            model: RouteAcceptedModelPolicy(
+                requests_per_minute=30, tokens_per_minute=10000, upstream_model=model
+            )
             for model in models
         }
     )
@@ -51,11 +55,11 @@ def test_rendered_config_contains_secret_references_not_values() -> None:
 def test_public_model_name_can_target_a_distinct_local_upstream() -> None:
     policy = LiteLlmPolicy(
         models={
-            "deepseek": {
-                "requests_per_minute": 30,
-                "tokens_per_minute": 10_000,
-                "upstream_model": "deepseek-v4-flash-dspark",
-            }
+            "deepseek": RouteAcceptedModelPolicy(
+                requests_per_minute=30,
+                tokens_per_minute=10_000,
+                upstream_model="deepseek-v4-flash-dspark",
+            )
         }
     )
 
@@ -71,11 +75,11 @@ def test_public_model_name_can_target_a_distinct_local_upstream() -> None:
 def test_upstream_model_must_be_a_bounded_local_identifier() -> None:
     policy = LiteLlmPolicy(
         models={
-            "deepseek": {
-                "requests_per_minute": 30,
-                "tokens_per_minute": 10_000,
-                "upstream_model": "../remote model",
-            }
+            "deepseek": RouteAcceptedModelPolicy(
+                requests_per_minute=30,
+                tokens_per_minute=10_000,
+                upstream_model="../remote model",
+            )
         }
     )
 
@@ -129,12 +133,12 @@ def test_every_rendered_config_enables_bounded_prometheus_metrics() -> None:
 def test_native_decision_policy_keeps_alias_quota_and_credential_reference() -> None:
     policy = LiteLlmPolicy(
         models={
-            "deepseek": {
-                "requests_per_minute": 30,
-                "tokens_per_minute": 10000,
-                "upstream_model": "d3-edge",
-                "upstream_provider": "hosted_vllm",
-            }
+            "deepseek": RouteAcceptedModelPolicy(
+                requests_per_minute=30,
+                tokens_per_minute=10000,
+                upstream_model="d3-edge",
+                upstream_provider="hosted_vllm",
+            )
         }
     )
     config = json.loads(render_config(_snapshot(), policy))
@@ -144,13 +148,10 @@ def test_native_decision_policy_keeps_alias_quota_and_credential_reference() -> 
     assert entry["litellm_params"]["api_key"] == "os.environ/LITELLM_UPSTREAM_KEY"
     assert entry["litellm_params"]["rpm"] == 30
     assert entry["litellm_params"]["tpm"] == 10000
-    policy = LiteLlmPolicy(
-        models={
-            "deepseek": {
-                **policy.models["deepseek"],
-                "upstream_provider": "external-provider",
-            }
-        }
-    )
-    with pytest.raises(ValueError, match="provider"):
-        render_config(_snapshot(), policy)
+    with pytest.raises(ValidationError, match="upstream_provider"):
+        RouteAcceptedModelPolicy(
+            requests_per_minute=30,
+            tokens_per_minute=10000,
+            upstream_model="d3-edge",
+            upstream_provider="external-provider",  # type: ignore[arg-type]
+        )

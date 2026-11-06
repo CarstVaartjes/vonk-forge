@@ -6,12 +6,17 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from vonk_forge_contracts import EndpointAlias
+from vonk_forge_contracts.api import ReasoningDefault, RequestPlacement
+from vonk_forge_contracts.recipe import Scalar
 
 from .strict_json import StrictModel
+
+if TYPE_CHECKING:
+    from .route_bundle_contract import RouteAcceptedModelPolicy
 
 _UPSTREAM_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,119}\Z")
 
@@ -30,7 +35,7 @@ class RouteState:
 
 @dataclass(frozen=True)
 class LiteLlmPolicy:
-    models: Mapping[str, Mapping[str, int | str]]
+    models: Mapping[str, RouteAcceptedModelPolicy]
 
 
 @dataclass(frozen=True)
@@ -168,9 +173,62 @@ class LiteLlmUpstreamParams(_ConfigModel):
     tpm: int = Field(ge=1, le=100_000_000)
 
 
+class VonkThinking(_ConfigModel):
+    """How a request turns thinking on or off; the recipe's switch, as stated.
+
+    ``keys`` are alternatives (any one works); ``default`` is what the route
+    does when the request says nothing, ``model`` when the checkpoint decides.
+    """
+
+    via: RequestPlacement
+    keys: list[str] = Field(min_length=1)
+    on: Scalar
+    off: Scalar
+    default: ReasoningDefault
+
+
+class LiteLlmModelInfo(_ConfigModel):
+    """The ``model_info`` of one route: LiteLLM v1.103.0 field names verbatim.
+
+    Built only from the recipe's API facts (``route_model_info``). A field that
+    does not apply is absent from the rendered file (``None`` here), never a guess. The
+    ``vonk_`` keys carry what LiteLLM has no field for.
+    """
+
+    mode: Literal["chat", "decision"]
+    max_tokens: int | None = Field(default=None, ge=1)
+    max_input_tokens: int = Field(ge=1)
+    max_output_tokens: int | None = Field(default=None, ge=1)
+    supports_vision: bool
+    supports_audio_input: bool
+    supports_audio_output: bool
+    supports_pdf_input: bool
+    supports_reasoning: bool
+    thinking_always_on: bool
+    reasoning_effort_levels: list[str] | None = None
+    default_reasoning_effort: str | None = None
+    supports_function_calling: bool
+    supports_tool_choice: bool
+    supports_parallel_function_calling: bool
+    supports_response_schema: bool
+    supports_system_messages: bool
+    supports_native_streaming: bool
+    supported_endpoints: list[str] = Field(min_length=1)
+    supported_openai_params: list[str]
+    vonk_thinking: VonkThinking | None = None
+    vonk_default_output_tokens: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def _max_tokens_is_the_output_cap(self) -> LiteLlmModelInfo:
+        if self.max_tokens != self.max_output_tokens:
+            raise ValueError("max_tokens must equal max_output_tokens")
+        return self
+
+
 class LiteLlmModelEntry(_ConfigModel):
     model_name: EndpointAlias
     litellm_params: LiteLlmUpstreamParams
+    model_info: LiteLlmModelInfo | None = None
 
 
 class LiteLlmRouterSettings(_ConfigModel):
@@ -188,7 +246,9 @@ class LiteLlmConfig(_ConfigModel):
 
 
 def _document(model_list: list[LiteLlmModelEntry]) -> bytes:
-    document = LiteLlmConfig(model_list=model_list).model_dump(mode="json")
+    document = LiteLlmConfig(model_list=model_list).model_dump(
+        mode="json", exclude_none=True
+    )
     return (json.dumps(document, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
@@ -210,40 +270,21 @@ def render_config(routes: RouteState, policy: LiteLlmPolicy) -> bytes:
         raise LiteLlmPolicyError("LiteLLM policy must publish at least one model")
     model_list: list[LiteLlmModelEntry] = []
     for alias in sorted(models):
-        quota = dict(models[alias])
-        required = {"requests_per_minute", "tokens_per_minute"}
-        fields = set(quota)
-        if not required <= fields or not fields <= required | {
-            "upstream_model",
-            "upstream_provider",
-        }:
-            raise LiteLlmPolicyError("LiteLLM model quota fields are invalid")
-        upstream_model = quota.pop("upstream_model", alias)
-        provider = quota.pop("upstream_provider", "openai")
-        if provider not in {"openai", "hosted_vllm"}:
-            raise LiteLlmPolicyError("LiteLLM upstream provider is invalid")
-        if (
-            not isinstance(upstream_model, str)
-            or _UPSTREAM_MODEL.fullmatch(upstream_model) is None
-        ):
+        # The typed policy owns the field set, provider and quota bounds; the
+        # renderer only refuses an upstream name the gateway pattern rejects.
+        accepted = models[alias]
+        if _UPSTREAM_MODEL.fullmatch(accepted.upstream_model) is None:
             raise LiteLlmPolicyError("LiteLLM upstream model is invalid")
-        rpm, tpm = quota["requests_per_minute"], quota["tokens_per_minute"]
-        if (
-            not isinstance(rpm, int)
-            or not isinstance(tpm, int)
-            or not 1 <= rpm <= 100_000
-            or not 1 <= tpm <= 100_000_000
-        ):
-            raise LiteLlmPolicyError("LiteLLM model quotas are outside allowed bounds")
         model_list.append(
             LiteLlmModelEntry(
                 model_name=alias,
                 litellm_params=LiteLlmUpstreamParams(
-                    model=f"{provider}/{upstream_model}",
+                    model=f"{accepted.upstream_provider}/{accepted.upstream_model}",
                     api_base=routes.aliases[alias].rstrip("/"),
-                    rpm=rpm,
-                    tpm=tpm,
+                    rpm=accepted.requests_per_minute,
+                    tpm=accepted.tokens_per_minute,
                 ),
+                model_info=accepted.model_info,
             )
         )
     return _document(model_list)

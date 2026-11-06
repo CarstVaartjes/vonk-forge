@@ -17,6 +17,7 @@ from vonk_agent_protocol.state_machines import GatewayRouteState
 from vonk_forge_contracts import EndpointAlias
 
 from .integer_domains import MAX_DATABASE_BIGINT
+from .litellm import LiteLlmModelInfo
 from .strict_json import StrictModel
 
 
@@ -61,6 +62,9 @@ class RouteRunIdentity(StrictModel):
     run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=0)
     upstream_model: str = Field(min_length=1, max_length=256)
     upstream_provider: Literal["openai", "hosted_vllm"] = "openai"
+    # What the gateway publishes about this route; a changed fact is a new
+    # bundle digest. None: the recipe declares no API facts.
+    model_info: LiteLlmModelInfo | None = None
     ranks: list[RouteRankIdentity]
 
 
@@ -69,6 +73,7 @@ class RouteAcceptedModelPolicy(StrictModel):
     tokens_per_minute: int = Field(ge=1, le=100_000_000)
     upstream_model: str = Field(min_length=1, max_length=256)
     upstream_provider: Literal["openai", "hosted_vllm"] = "openai"
+    model_info: LiteLlmModelInfo | None = None
 
 
 class RouteAcceptedRunIdentity(StrictModel):

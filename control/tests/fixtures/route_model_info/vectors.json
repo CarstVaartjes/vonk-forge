@@ -1,0 +1,183 @@
+[
+  {
+    "api": "rich-chat.api.json",
+    "model_info": {
+      "default_reasoning_effort": "high",
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "reasoning_effort_levels": [
+        "low",
+        "high"
+      ],
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "response_format",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "rich-chat-base",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "rich-chat.api.json",
+    "model_info": {
+      "default_reasoning_effort": "high",
+      "max_input_tokens": 2048,
+      "max_output_tokens": 2048,
+      "max_tokens": 2048,
+      "mode": "chat",
+      "reasoning_effort_levels": [
+        "low",
+        "high"
+      ],
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "response_format",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "rich-chat-context-override",
+    "parameters": {
+      "context_tokens": 2048
+    },
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "rich-chat.api.json",
+    "model_info": {
+      "max_input_tokens": 512,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "response_format",
+        "stream",
+        "temperature",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": false,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": false,
+      "supports_vision": true,
+      "thinking_always_on": true
+    },
+    "name": "rich-chat-option-images",
+    "parameters": {
+      "option_choices": {
+        "vision": "images"
+      }
+    },
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-decision.json",
+    "model_info": {
+      "max_input_tokens": 1024,
+      "mode": "decision",
+      "supported_endpoints": [
+        "/v1/systemone"
+      ],
+      "supported_openai_params": [],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": false,
+      "supports_native_streaming": false,
+      "supports_parallel_function_calling": false,
+      "supports_pdf_input": false,
+      "supports_reasoning": false,
+      "supports_response_schema": false,
+      "supports_system_messages": false,
+      "supports_tool_choice": false,
+      "supports_vision": true,
+      "thinking_always_on": false
+    },
+    "name": "shipped-decision",
+    "parameters": {},
+    "recipe": "recipe-decision.json"
+  }
+]

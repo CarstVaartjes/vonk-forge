@@ -45,6 +45,7 @@ from ..route_bundle_contract import (
     RouteRankIdentity,
     RouteRunIdentity,
 )
+from ..route_model_info import route_model_info
 from ..security.route_authority import require_route_authority
 from .shared import (
     _UPSTREAM_MODEL,
@@ -74,7 +75,7 @@ def _candidate_once(
     now = _aware(self._clock())
     aliases: dict[str, str] = {}
     upstream_models: dict[str, str] = {}
-    model_policies: dict[str, Mapping[str, int | str]] = {}
+    model_policies: dict[str, RouteAcceptedModelPolicy] = {}
     endpoints: dict[str, _RecipeEndpoint] = {}
     included: set[str] = set()
     run_identities: list[RouteRunIdentity | RouteAcceptedRunIdentity] = []
@@ -261,6 +262,7 @@ def _candidate_once(
                 # only that route instead of blocking every other one.
                 error.run_id = run.id
                 raise
+            model_info = route_model_info(session, run, mapping)
             identity = RouteRunIdentity(
                 run_id=run.id,
                 alias=run.alias,
@@ -268,6 +270,7 @@ def _candidate_once(
                 run_generation=run.run_generation,
                 upstream_model=upstream_model,
                 upstream_provider=upstream_provider,
+                model_info=model_info,
                 ranks=[
                     RouteRankIdentity(
                         node_id=node.node_id, rank=node.rank, role=node.role
@@ -275,12 +278,13 @@ def _candidate_once(
                     for node in nodes
                 ],
             )
-            model_policies[run.alias] = {
-                "requests_per_minute": 60,
-                "tokens_per_minute": 1_000_000,
-                "upstream_model": upstream_model,
-                "upstream_provider": upstream_provider,
-            }
+            model_policies[run.alias] = RouteAcceptedModelPolicy(
+                requests_per_minute=60,
+                tokens_per_minute=1_000_000,
+                upstream_model=upstream_model,
+                upstream_provider=upstream_provider,
+                model_info=model_info,
+            )
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model
             included.add(run.id)
@@ -320,9 +324,7 @@ def _candidate_once(
                     # already selected from current authorized intent.
                     continue
                 try:
-                    accepted_policy = RouteAcceptedModelPolicy.model_validate_json(
-                        json.dumps(dict(accepted.policy.models[accepted_alias]))
-                    )
+                    accepted_policy = accepted.policy.models[accepted_alias]
                     accepted_identity = RouteAcceptedRunIdentity(
                         run_id=run.id,
                         alias=accepted_alias,
@@ -335,7 +337,7 @@ def _candidate_once(
                     self._note_retained(run.id, [str(error)])
                     continue
                 retained_aliases.append(accepted_alias)
-                model_policies[accepted_alias] = accepted.policy.models[accepted_alias]
+                model_policies[accepted_alias] = accepted_policy
                 aliases[accepted_alias] = endpoint.api_base
                 endpoints[accepted_alias] = endpoint
                 upstream_models[accepted_alias] = accepted_policy.upstream_model
