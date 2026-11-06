@@ -57,6 +57,7 @@ from ..models import (
     RunNode,
 )
 from ..operator_receipt_contract import ReceiptOwner
+from ..persisted_waits import read_wait
 from ..revision_images import revision_images
 from ..stored_json import read_row_column
 from .common import (
@@ -302,12 +303,17 @@ def _database_local_state(
                 (model_digest, recipe_digest, *reference_digests[set_id])
             )
         )
-        cache_operations = session.execute(
-            select(
-                ModelCacheOperation.id,
-                ModelCacheOperation.state,
-                ModelCacheOperation.artifact_set_sha256,
-                ModelCacheOperation.progress,
+        cache_operations = session.scalars(
+            select(ModelCacheOperation)
+            .options(
+                load_only(
+                    ModelCacheOperation.id,
+                    ModelCacheOperation.state,
+                    ModelCacheOperation.artifact_set_sha256,
+                    ModelCacheOperation.progress,
+                    ModelCacheOperation.wait_evidence,
+                    ModelCacheOperation.next_action_at,
+                )
             )
             .where(ModelCacheOperation.id.in_(_latest_cache_operations(set_members)))
             .order_by(ModelCacheOperation.created_at, ModelCacheOperation.id)
@@ -423,12 +429,11 @@ def _database_local_state(
         for digest in reference_digests[set_id] & set(digests):
             self._merge_local(cache_facts, digest, controller=controller)
     cache_sets_by_id = {row[0]: row for row in cache_sets}
-    for (
-        operation_id,
-        state,
-        artifact_set_sha256,
-        stored_progress,
-    ) in cache_operations:
+    for cache_operation in cache_operations:
+        operation_id = cache_operation.id
+        state = cache_operation.state
+        artifact_set_sha256 = cache_operation.artifact_set_sha256
+        stored_progress = cache_operation.progress
         digest_values: set[str] = set()
         if artifact_set_sha256:
             digest_values.update(reference_digests.get(artifact_set_sha256, ()))
@@ -468,6 +473,7 @@ def _database_local_state(
                 phase=progress.measurement.phase,
                 completed=progress.measurement.completed_bytes,
                 total=progress.measurement.total_bytes,
+                wait=read_wait(cache_operation),
             )
         controller = (
             "preparing"
