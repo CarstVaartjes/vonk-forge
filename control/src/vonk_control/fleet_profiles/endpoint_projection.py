@@ -171,7 +171,6 @@ class FleetProfileService:
                     continue
                 if (
                     run is not None
-                    and run.alias == assignment.alias
                     and run.state == RunState.RUNNING
                     and run.route_state == RouteState.PUBLISHED
                 ):

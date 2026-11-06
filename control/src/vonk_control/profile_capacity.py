@@ -747,6 +747,28 @@ def profile_replaced_runs(session: Session, application_id: str) -> frozenset[st
     )
 
 
+def serving_run(
+    runs: Sequence[RecipeRun],
+    installation_id: str,
+    assignment: FleetProfileAssignment,
+) -> RecipeRun | None:
+    """The run serving this assignment: its installation's run under its alias.
+
+    The one predicate for "this assignment's workload already runs". The planner,
+    the endpoint projection and the plan's keep decision all read it, so an
+    identical run published under another alias is not this assignment's: the
+    plan replaces it, instead of keeping a run whose route is not the endpoint.
+    """
+    return next(
+        (
+            run
+            for run in runs
+            if run.installation_id == installation_id and run.alias == assignment.alias
+        ),
+        None,
+    )
+
+
 def sibling_runs(
     assignments: Sequence[FleetProfileAssignment],
     own: FleetProfileAssignment | None,
