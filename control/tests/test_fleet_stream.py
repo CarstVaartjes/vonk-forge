@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
+import threading
 import uuid
 from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass
@@ -1358,18 +1358,18 @@ def test_wrong_node_hydration_ends_then_correct_hydration_replays():
 
 
 class _SlowEvents(Events):
-    """A repository whose every call blocks its thread, as a slow database does."""
+    """A repository whose every call blocks its thread until the gate opens."""
 
-    def __init__(self, delay: float, *, fail: bool = False) -> None:
+    def __init__(self, gate: threading.Event, *, fail: bool = False) -> None:
         super().__init__(high_watermark=0, first_retained_id=None)
-        self.delay = delay
+        self.gate = gate
         self.fail = fail
         self.polls = 0
 
     def replay_after(
         self, last_id: int, now: datetime, *, limit: int
     ) -> FleetReplayBatch:
-        time.sleep(self.delay)
+        assert self.gate.wait(60)  # hang guard, not a limit on the work
         self.polls += 1
         if self.fail:
             raise RuntimeError("database unavailable")
@@ -1377,9 +1377,9 @@ class _SlowEvents(Events):
 
 
 def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None:
-    delay = 0.2
-    healthy = [_SlowEvents(delay) for _ in range(4)]
-    broken = _SlowEvents(delay, fail=True)
+    gate = threading.Event()
+    healthy = [_SlowEvents(gate) for _ in range(4)]
+    broken = _SlowEvents(gate, fail=True)
 
     async def fast_sleep(_seconds: float) -> None:
         await asyncio.sleep(0.001)
@@ -1405,23 +1405,25 @@ def test_open_streams_with_slow_repository_do_not_block_the_event_loop() -> None
         finally:
             await generator.aclose()
 
-    async def scenario() -> float:
+    async def scenario() -> int:
         tasks = [asyncio.create_task(drain(events)) for events in healthy]
         broken_task = asyncio.create_task(consume(broken))
-        worst = 0.0
-        # Stand-in for /health: a coroutine that must keep getting the loop.
-        for _ in range(10):
-            started = time.monotonic()
+        # Stand-in for /health: it is served while every repository call is
+        # blocked in its thread. A loop blocked by the calls would never get
+        # here (the gate would not open until the hang guard fails the call).
+        ticks = 0
+        for _ in range(20):
             await asyncio.sleep(0.01)
-            worst = max(worst, time.monotonic() - started)
+            ticks += 1
+        gate.set()
         frames = await broken_task
         assert len(frames) == 1  # the broken stream ended with its own notice
+        await asyncio.sleep(0.05)
         assert all(not task.done() for task in tasks)
         assert all(events.polls >= 1 for events in healthy)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        return worst
+        return ticks
 
-    worst = asyncio.run(scenario())
-    assert worst < delay / 2, f"event loop stalled for {worst:.3f}s"
+    assert asyncio.run(scenario()) == 20
