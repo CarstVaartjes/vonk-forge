@@ -31,7 +31,8 @@
 	# Two large browser bodies. Artifact-job inputs: the API streams, hashes,
 	# and enforces this same 512 MiB bound. Inference POSTs that LiteLLM serves
 	# carry base64 image/audio data URIs; 256 MiB admits the largest media
-	# upload a recipe declares (180 MB, base64 inflates it by a third) and
+	# upload a recipe declares (180 MB: Nemotron-3.5-Transcribe's
+	# VLLM_MAX_AUDIO_CLIP_FILESIZE_MB; base64 adds a third) and
 	# LiteLLM sets no body limit of its own. The owner accepts these bodies
 	# reaching LiteLLM before its key check. Nothing else exceeds 1 MiB.
 	@artifact_input_upload {
