@@ -76,29 +76,14 @@ def _scan_recipe_rows(
         LibraryRecipeProjection,
     )
 
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
     seen_selectors: set[str] = set()
-    while True:
-        query: dict[str, object] = {
-            "limit": 512,
-            "sort": "name",
-            "assess": False,
-        }
-        if cursor is not None:
-            query["cursor"] = cursor
-        payload = client.request(
-            "GET",
-            "/api/recipe/library",
-            query=query,
-            timeout_seconds=_selection_remaining(deadline),
-        )
-        _selection_remaining(deadline)
-        raw_recipes = payload.get("recipes")
-        if not isinstance(raw_recipes, list):
-            raise ControlMalformedResponse(
-                "recipe library response does not contain recipes"
-            )
+    for raw_recipes in _library_pages(
+        client,
+        "/api/recipe/library",
+        "recipes",
+        {"limit": 512, "sort": "name", "assess": False},
+        deadline=deadline,
+    ):
         for row in raw_recipes:
             _selection_remaining(deadline)
             if not isinstance(row, Mapping) or not isinstance(
@@ -119,15 +104,44 @@ def _scan_recipe_rows(
             )
             seen_selectors.add(selector.casefold())
             yield decoded
-        next_cursor = payload.get("next_cursor")
+
+
+def _library_pages(
+    client: ControllerClient,
+    path: str,
+    key: str,
+    query: Mapping,
+    *,
+    deadline: float,
+) -> Iterator[list[object]]:
+    """The item list of every page of a cursor-paged library read, in order.
+
+    The read ends with the Controller's last page; a repeated or malformed
+    cursor is a malformed response, so the loop is bounded by the data.
+    """
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    while True:
+        page = client.request(
+            "GET",
+            path,
+            query=query if cursor is None else {**query, "cursor": cursor},
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        _selection_remaining(deadline)
+        items = page.get(key)
+        if not isinstance(items, list):
+            raise ControlMalformedResponse(f"{path} response does not contain {key}")
+        yield items
+        next_cursor = page.get("next_cursor")
         if next_cursor is None:
             return
         if not isinstance(next_cursor, str) or not next_cursor:
             raise ControlMalformedResponse(
-                "recipe library response contains an invalid cursor"
+                f"{path} response contains an invalid cursor"
             )
         if next_cursor in seen_cursors:
-            raise ControlMalformedResponse("recipe library cursor repeated")
+            raise ControlMalformedResponse(f"{path} cursor repeated")
         seen_cursors.add(next_cursor)
         cursor = next_cursor
 
