@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Find the installer setup programs a pull request built for this exact tree.
 
-usage: resolve-pr-setups RUN_ID SOURCE_SHA
+usage: resolve-pr-setups RUN_ID TREE
 
 RUN_ID is the successful pull request CI run that scripts/resolve-tested-ci
-proved tested SOURCE_SHA's exact Git tree. When that run's candidate built the
+proved tested the source whose Git tree is TREE (the step resolves it). When that run's candidate built the
 setup programs (``installer-setup-<sha>-<platform>`` for every setup platform
 from one source), print the release producer evidence ``RUN_ID 0 <sha>`` and
 exit 0; the release then uses them as it uses an ancestor's. Exit 2 when the
@@ -18,9 +18,7 @@ import os
 import re
 import subprocess
 import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
 SETUP_PLATFORMS = ("nas", "linux-arm64")
 ARTIFACT = re.compile(r"installer-setup-([0-9a-f]{40})-(nas|linux-arm64)\Z")
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -37,8 +35,8 @@ def gh(endpoint: str) -> object:
     return json.loads(output)
 
 
-def resolve(run_id: str, source: str, repository: str) -> str | None:
-    if re.fullmatch(r"[1-9][0-9]*", run_id) is None or SHA.fullmatch(source) is None:
+def resolve(run_id: str, tree: str, repository: str) -> str | None:
+    if re.fullmatch(r"[1-9][0-9]*", run_id) is None or SHA.fullmatch(tree) is None:
         raise ValueError("pull request setup evidence is invalid")
     pages = gh(f"/repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100")
     built: dict[str, set[str]] = {}
@@ -55,14 +53,6 @@ def resolve(run_id: str, source: str, repository: str) -> str | None:
     if len(complete) != 1 or len(built) != 1:
         raise ValueError("the pull request run built setups from several sources")
     built_from = complete[0]
-    tree = subprocess.run(
-        ["git", "rev-parse", "--verify", f"{source}^{{tree}}"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        cwd=ROOT,
-    ).stdout.strip()
     built_tree = gh(f"/repos/{repository}/git/commits/{built_from}")
     if (
         not isinstance(built_tree, list)
