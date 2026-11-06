@@ -25,7 +25,7 @@ standard_residue=${REPAIR_STANDARD_RESIDUE:-none}
 node_id=spk_2818d189042b4c77aefa7796f4befd23
 node_suffix=${node_id#spk_}
 installed_version=0.1.1~dev.335+g2eaaf4d9b2b5
-packaging_revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+packaging_revision="$(git -c safe.directory="$repo_root" --no-replace-objects -C "$repo_root" rev-parse HEAD)"
 binary_revision=$packaging_revision
 source_version=0.1.1~dev.1788260440+g${binary_revision:0:12}
 repair_version=${source_version}+repair.spk${node_suffix}.1
