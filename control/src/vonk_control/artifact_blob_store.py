@@ -7,10 +7,11 @@ import fcntl
 import hashlib
 import os
 import tempfile
+import threading
 import time
 import uuid
 from collections.abc import AsyncIterable, AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -36,6 +37,9 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 # reconciliation.
 _REFERENCE_LOCK_BUDGET_SECONDS = 30.0
 _REFERENCE_LOCK_RETRY_SECONDS = 0.05
+# An async attachment holds the shared fence for one upload at most this long;
+# the bound only keeps a lost release flag from pinning the reconciler.
+_REFERENCE_HOLD_SECONDS = 3600.0
 
 
 class BlobStoreUsage(BaseModel):
@@ -141,15 +145,56 @@ class ArtifactBlobStore:
 
     @asynccontextmanager
     async def reference_attachment_async(self) -> AsyncIterator[None]:
-        """``reference_attachment`` for async callers: the flock wait and its
-        release run on a worker thread, never on the event loop."""
-        guard = self.reference_attachment()
-        await asyncio.to_thread(guard.__enter__)
+        """``reference_attachment`` for async callers.
+
+        One worker thread takes the flock, holds it until released, and drops
+        it, so the acquire wait never runs on the event loop and a cancel at
+        any point (even during the acquire) cannot leave the lock held: the
+        release flag is set on every exit and the thread honours it as soon as
+        it holds the lock.
+        """
+        loop = asyncio.get_running_loop()
+        acquired: asyncio.Future[None] = loop.create_future()
+        release = threading.Event()
+
+        def settle(error: BaseException | None) -> None:
+            if acquired.done():
+                return
+            if error is None:
+                acquired.set_result(None)
+            else:
+                acquired.set_exception(error)
+
+        def hold() -> None:
+            try:
+                with self.reference_attachment():
+                    with suppress(RuntimeError):  # loop closed
+                        loop.call_soon_threadsafe(settle, None)
+                    release.wait(_REFERENCE_HOLD_SECONDS)
+            except (ArtifactBlobBusy, OSError) as error:  # the acquire failed
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(settle, error)
+            finally:
+                # Never leave the waiter parked, whatever ended the thread.
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(
+                        settle, RuntimeError("reference lock thread ended")
+                    )
+
+        holder = threading.Thread(target=hold, name="artifact-reference-lock")
+        holder.start()
+        holding = False
         try:
+            await acquired
+            holding = True
             yield
         finally:
-            # Shielded so a cancelled upload still releases its flock.
-            await asyncio.shield(asyncio.to_thread(guard.__exit__, None, None, None))
+            release.set()
+            if holding:
+                # Shielded: the thread finishes releasing even if this is
+                # cancelled. A cancel during the acquire does not wait for it:
+                # the thread drops the lock the moment it gets it.
+                await asyncio.shield(asyncio.to_thread(holder.join))
 
     @contextmanager
     def reference_reconciliation(self) -> Iterator[None]:
@@ -268,7 +313,12 @@ class ArtifactBlobStore:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         finally:
-            await asyncio.to_thread(self._cleanup_upload, temporary, reservation)
+            # Shielded: a cancelled upload still removes its temp file and
+            # reservation (a cancel before they were named leaves only files
+            # the reconciler sweeps).
+            await asyncio.shield(
+                asyncio.to_thread(self._cleanup_upload, temporary, reservation)
+            )
 
     @staticmethod
     def _flush_and_sync(stream: BinaryIO) -> None:

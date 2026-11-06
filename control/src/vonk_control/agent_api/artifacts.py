@@ -133,17 +133,21 @@ def install_artifacts_routes(
     )
     async def recipe_image_upload_status(build_id: str, request: Request) -> Response:
         required, _, headers, key = image_upload_context(build_id, request)
-        with required.sessions() as session:
-            build = session.get(RecipeBuild, build_id)
-            if build is None:
-                raise HTTPException(
-                    status_code=404, detail="recipe build does not exist"
+
+        def observe_complete() -> bool:
+            with required.sessions() as session:
+                build = session.get(RecipeBuild, build_id)
+                if build is None:
+                    raise HTTPException(
+                        status_code=404, detail="recipe build does not exist"
+                    )
+                return (
+                    build.image_digest == headers.image_digest
+                    and build.oci_layout_sha256 == headers.layout_sha256
+                    and build.image_bytes == headers.image_bytes
                 )
-            complete = (
-                build.image_digest == headers.image_digest
-                and build.oci_layout_sha256 == headers.layout_sha256
-                and build.image_bytes == headers.image_bytes
-            )
+
+        complete = await asyncio.to_thread(observe_complete)
         destination = (
             required.artifact_root / IMAGE_CACHE_DIRECTORY / headers.layout_sha256
         )
@@ -245,20 +249,24 @@ def install_artifacts_routes(
                 destination,
                 expected_bytes=headers.image_bytes,
             )
-            with required.sessions.begin() as session:
-                build = session.get(RecipeBuild, build_id, with_for_update=True)
-                if (
-                    build is None
-                    or build.builder_node_id != identity.node_id
-                    or build.state != ProgressPhase.BUILDING
-                ):
-                    raise HTTPException(
-                        status_code=409, detail="recipe build authority changed"
-                    )
-                build.image_digest = headers.image_digest
-                build.oci_layout_sha256 = headers.layout_sha256
-                build.image_bytes = headers.image_bytes
-                build.updated_at = _now(required.clock())
+
+            def adopt_image() -> None:
+                with required.sessions.begin() as session:
+                    build = session.get(RecipeBuild, build_id, with_for_update=True)
+                    if (
+                        build is None
+                        or build.builder_node_id != identity.node_id
+                        or build.state != ProgressPhase.BUILDING
+                    ):
+                        raise HTTPException(
+                            status_code=409, detail="recipe build authority changed"
+                        )
+                    build.image_digest = headers.image_digest
+                    build.oci_layout_sha256 = headers.layout_sha256
+                    build.image_bytes = headers.image_bytes
+                    build.updated_at = _now(required.clock())
+
+            await asyncio.to_thread(adopt_image)
         except PermissionError:
             _LOGGER.warning(
                 "Controller storage needs operator attention: access denied %s",
