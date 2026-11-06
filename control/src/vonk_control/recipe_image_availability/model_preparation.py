@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from vonk_agent_protocol import (
@@ -26,6 +27,7 @@ from ..model_cache_contract import (
     ModelCacheRepairPreviewResponse,
 )
 from ..model_cache_progress import project_cache_progress
+from ..operation_blockers import OperationBlocker
 from ..operation_contract import (
     AvailabilityOperationFailure,
     AvailabilityRecoveryAction,
@@ -49,6 +51,14 @@ from .contracts import (
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
+
+
+def _model_wait_blockers(
+    blockers: Sequence[OperationBlocker], default: OperationBlocker
+) -> list[OperationBlocker]:
+    """The child's own typed wait (access denied, space, ...), else ``default``."""
+
+    return list(blockers) or [default]
 
 
 def _model_progress(
