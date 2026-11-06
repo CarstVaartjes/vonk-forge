@@ -20,6 +20,7 @@ from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
 
 from ..litellm import (
     LiteLlmGeneration,
+    ServedModelInfo,
 )
 from ..logging import log_event
 from ..models import (
@@ -116,8 +117,9 @@ def _withdrawn_after_backoff(
     self: RecipeRouteService, run_ids: frozenset[str], attempt: int
 ) -> bool:
     time.sleep(random.uniform(0.0, _WITHDRAWAL_BACKOFF_SECONDS) * (attempt + 1))
+    served = self.served_model_info()
     return self.decide_publication(
-        lambda session: self.withdrawal_complete_in_session(session, run_ids)
+        lambda session: self.withdrawal_complete_in_session(session, run_ids, served)
     )
 
 
@@ -127,6 +129,8 @@ def _withdraw_runs_once(
     reason: str | None = None,
     before_withdrawal: Callable[[Session], None] | None = None,
 ) -> LiteLlmGeneration:
+    served = self.served_model_info()
+
     def decide(session: Session) -> _Publication:
 
         def record_reason(session: Session) -> None:
@@ -137,7 +141,7 @@ def _withdraw_runs_once(
                 if run is not None and run.state == RunState.RUNNING and reason:
                     run.route_error = reason[:512]
 
-        withdrawal = self.prepare_withdrawal_in_session(session, run_ids)
+        withdrawal = self.prepare_withdrawal_in_session(session, run_ids, served)
         if before_withdrawal is not None:
             before_withdrawal(session)
         publication = self._withdrawal_publication(
@@ -152,11 +156,15 @@ def _withdraw_runs_once(
 
 
 def withdrawal_complete_in_session(
-    self: RecipeRouteService, session: Session, run_ids: Iterable[str]
+    self: RecipeRouteService,
+    session: Session,
+    run_ids: Iterable[str],
+    served: ServedModelInfo,
 ) -> bool:
     """Whether the live bundle is the one without these runs' routes.
 
-    Call inside :meth:`publication_transaction`. The withdrawal intent on a
+    Call inside :meth:`publication_transaction`, with ``served`` read before it
+    opened (the bundle is read from disk, never under row locks). The withdrawal intent on a
     run says what should be live; this says it is: the completed
     publication, still the live marker, is the one a candidate without the
     runs would produce. A withdrawal that was claimed and never executed,
@@ -164,7 +172,7 @@ def withdrawal_complete_in_session(
     """
 
     run_ids = frozenset(run_ids)
-    candidate = self.prepare_withdrawal_in_session(session, run_ids).candidate
+    candidate = self.prepare_withdrawal_in_session(session, run_ids, served).candidate
     owner = session.get(RoutePublicationOwner, 1)
     publication = (
         session.get(RoutePublication, RECIPE_ROUTE_AUTHORITY_ID)
@@ -194,7 +202,10 @@ def withdrawal_complete_in_session(
 
 
 def prepare_withdrawal_in_session(
-    self: RecipeRouteService, session: Session, initial_run_ids: frozenset[str]
+    self: RecipeRouteService,
+    session: Session,
+    initial_run_ids: frozenset[str],
+    served: ServedModelInfo,
 ) -> _RecipeWithdrawal:
     excluded = set(initial_run_ids)
     run_count = len(tuple(session.scalars(select(RecipeRun.id))))
@@ -206,6 +217,7 @@ def prepare_withdrawal_in_session(
                 include_run_id=None,
                 exclude_run_ids=frozenset(excluded),
                 lock=True,
+                served=served,
             )
             break
         except RecipeRouteError as error:
@@ -327,7 +339,10 @@ def maintain(self) -> bool:
     with none open, and records the result conditionally.
     """
 
-    step = self.decide_publication(self._maintenance_step_in_session)
+    served = self.served_model_info()
+    step = self.decide_publication(
+        lambda session: self._maintenance_step_in_session(session, served)
+    )
     if isinstance(step, bool):
         return step
     self._execute(step)
@@ -387,7 +402,7 @@ def _restore_abandoned_stop_withdrawals(
 
 
 def _maintenance_step_in_session(
-    self: RecipeRouteService, session: Session
+    self: RecipeRouteService, session: Session, served: ServedModelInfo
 ) -> bool | _Publication:
     if self._restore_abandoned_stop_withdrawals(session):
         return True
@@ -397,7 +412,7 @@ def _maintenance_step_in_session(
         and pending.state == RoutePublicationState.WITHDRAWAL_PENDING
     ):
         return self._withdrawal_publication(
-            session, self.prepare_withdrawal_in_session(session, frozenset())
+            session, self.prepare_withdrawal_in_session(session, frozenset(), served)
         )
     published = tuple(
         session.scalars(
@@ -430,7 +445,7 @@ def _maintenance_step_in_session(
     if recovering:
         return True
     if not published:
-        return self._maintain_empty_routes(session)
+        return self._maintain_empty_routes(session, served)
     not_running = frozenset(
         run.id for run in published if run.state != RunState.RUNNING
     )
@@ -445,7 +460,8 @@ def _maintenance_step_in_session(
                     reason=f"run is {run.state}",
                 )
         return self._withdrawal_publication(
-            session, self.prepare_withdrawal_in_session(session, not_running)
+            session,
+            self.prepare_withdrawal_in_session(session, not_running, served),
         )
     try:
         candidate = self.candidate_in_session(
@@ -453,6 +469,7 @@ def _maintenance_step_in_session(
             include_run_id=None,
             exclude_run_ids=frozenset(),
             lock=True,
+            served=served,
         )
     except RecipeRouteError as error:
         if error.run_id is None:
@@ -475,7 +492,7 @@ def _maintenance_step_in_session(
         if session.get(RecipeRun, error.run_id) is None:
             return False
         withdrawal = self.prepare_withdrawal_in_session(
-            session, frozenset({error.run_id})
+            session, frozenset({error.run_id}), served
         )
 
         def record_reason(session: Session) -> None:
@@ -538,13 +555,14 @@ def _maintenance_step_in_session(
 
 
 def _maintain_empty_routes(
-    self: RecipeRouteService, session: Session
+    self: RecipeRouteService, session: Session, served: ServedModelInfo
 ) -> bool | _Publication:
     candidate = self.candidate_in_session(
         session,
         include_run_id=None,
         exclude_run_ids=frozenset(),
         lock=True,
+        served=served,
     )
     if candidate.included or candidate.endpoints or candidate.state.aliases:
         return False
@@ -560,6 +578,6 @@ def _maintain_empty_routes(
         # The live bundle still lists models although no run is published:
         # a lifecycle path withdrew the last route only in the database.
         return self._withdrawal_publication(
-            session, self.prepare_withdrawal_in_session(session, frozenset())
+            session, self.prepare_withdrawal_in_session(session, frozenset(), served)
         )
     return False

@@ -19,9 +19,9 @@ from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..litellm import (
     LiteLlmConfig,
     LiteLlmGeneration,
-    LiteLlmModelInfo,
     LiteLlmPolicy,
     RouteState,
+    ServedModelInfo,
     render_config,
     render_empty_config,
 )
@@ -168,7 +168,7 @@ class AtomicRecipeRoutePublisher:
             return None
         return _RecipeCandidate(state, frozenset({run_id}), quota, {alias: endpoint})
 
-    def served_model_info(self) -> dict[str, tuple[str, LiteLlmModelInfo | None]]:
+    def served_model_info(self) -> ServedModelInfo:
         """What the active bundle publishes per alias: its run and its model_info.
 
         A route that already serves keeps the facts it was published with; new

@@ -38,7 +38,7 @@ from ..job_documents import (
     RecoveryStartItem,
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
-from ..litellm import LiteLlmGeneration
+from ..litellm import LiteLlmGeneration, ServedModelInfo
 from ..models import (
     STOPPABLE_NOT_RUNNING_RUN_STATES,
     STOPPABLE_RUN_STATES,
@@ -172,8 +172,10 @@ class _RecoveryRoutes(Protocol):
         pending: RouteWithdrawalFollowUp | None = None,
     ) -> LiteLlmGeneration | None: ...
 
+    def served_model_info(self) -> ServedModelInfo: ...
+
     def withdrawal_complete_in_session(
-        self, session: Session, run_ids: Iterable[str]
+        self, session: Session, run_ids: Iterable[str], served: ServedModelInfo
     ) -> bool: ...
 
 

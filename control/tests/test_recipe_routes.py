@@ -33,7 +33,7 @@ from vonk_control.fleet_profile_contract import (
     FleetProfileEndpointIntent,
 )
 from vonk_control.job_documents import RecipeStartParent
-from vonk_control.litellm import LiteLlmGeneration
+from vonk_control.litellm import LiteLlmGeneration, ServedModelInfo
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -683,6 +683,7 @@ def test_nonzero_mapping_owner_routes_with_its_accepted_rank_identity(
             include_run_id=run_id,
             exclude_run_ids=frozenset(),
             lock=False,
+            served=service.served_model_info(),
         )
     endpoint = candidate.endpoints["qwen"]
     assert endpoint.node_id == "spk_" + "2".zfill(32)
@@ -2511,7 +2512,7 @@ def test_maintenance_contention_uses_the_typed_wait_schedule(
 def _count_maintenance_decisions(service, monkeypatch) -> list[int]:
     calls = [0]
 
-    def not_ready(_session: Session) -> object:
+    def not_ready(_session: Session, _served: ServedModelInfo) -> object:
         calls[0] += 1
         raise RecipeRouteNotReady("evidence is not there yet")
 
@@ -2555,11 +2556,11 @@ def test_maintenance_decides_again_after_the_owner_backoff(
     real = service._maintenance_step_in_session
     calls = [0]
 
-    def once_not_ready(session: Session) -> object:
+    def once_not_ready(session: Session, served: ServedModelInfo) -> object:
         calls[0] += 1
         if calls[0] == 1:
             raise RecipeRouteNotReady("evidence is not there yet")
-        return real(session)
+        return real(session, served)
 
     monkeypatch.setattr(service, "_maintenance_step_in_session", once_not_ready)
     assert service.maintain() is False

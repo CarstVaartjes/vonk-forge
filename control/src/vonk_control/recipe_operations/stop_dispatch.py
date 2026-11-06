@@ -100,6 +100,12 @@ class StopDispatchMixin:
         service = typing_cast("RecipeOperationService", self)
 
         now = service._clock()
+        # Read before the transaction opens: no file is hashed under row locks.
+        served = (
+            service._route_publications.served_model_info()
+            if service._route_publications is not None
+            else {}
+        )
         try:
             transaction = (
                 service._route_publications.publication_transaction()
@@ -137,7 +143,7 @@ class StopDispatchMixin:
                 document, admitted = service._check_service_stop(session, existing)
                 if service._route_publications is not None and (
                     not service._route_publications.withdrawal_complete_in_session(
-                        session, frozenset({run_id})
+                        session, frozenset({run_id}), served
                     )
                 ):
                     # A competing publication listed the run again, or the

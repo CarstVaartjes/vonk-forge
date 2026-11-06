@@ -418,19 +418,84 @@ def test_a_serving_route_keeps_its_facts_until_it_changes(tmp_path: Path) -> Non
     assert entries["qwen-next"]["model_info"]["mode"] == "chat"
 
 
-def test_an_earlier_bundle_stays_untouched_until_a_route_changes(
+def test_the_bundle_is_never_read_inside_the_publication_transaction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Our own files are verified before the owner lock, not under row locks."""
+    from vonk_control.recipe_routes import publisher as publisher_module
+    from vonk_control.recipe_routes.shared import _SQLITE_ROUTE_PUBLICATION_LOCK
+
+    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    real = publisher_module.verify_active_route_bundle
+    held: list[bool] = []
+
+    def observed(root: Path):
+        held.append(_SQLITE_ROUTE_PUBLICATION_LOCK.locked())
+        return real(root)
+
+    monkeypatch.setattr(publisher_module, "verify_active_route_bundle", observed)
+    service.publish_run(run_id)
+    service.maintain()
+    service.withdraw_run(run_id)
+    assert held and not any(held)
+
+
+def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     tmp_path: Path,
 ) -> None:
-    """An upgrade rewrites no published byte and restarts nothing by itself."""
+    """A restarted run is a route change: its facts are read again, not frozen."""
+    from sqlalchemy import update
     from vonk_agent_protocol import RouteState as RunRouteState
+    from vonk_control.models import RecipeRun, RunNode
 
-    from .test_recipe_routes import (
-        NOW,
-        MutableClock,
-        add_running_run,
-        atomic_service,
-        setup,
-    )
+    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    service.publish_run(run_id)
+    assert "model_info" not in _published_entries(tmp_path / "live")["qwen"]
+
+    # Facts land while the route serves: nothing moves.
+    _store_api(base, _source_build_api())
+    service.maintain()
+    assert "model_info" not in _published_entries(tmp_path / "live")["qwen"]
+
+    # Recovery restarts the same run: a new generation, route pending again.
+    with base.sessions.begin() as session:
+        session.execute(
+            update(RecipeRun)
+            .where(RecipeRun.id == run_id)
+            .values(
+                run_generation=RecipeRun.run_generation + 1,
+                route_state=RunRouteState.PENDING,
+            )
+        )
+        # The ranks report the new generation.
+        session.execute(
+            update(RunNode)
+            .where(RunNode.run_id == run_id)
+            .values(observed_run_generation=RunNode.observed_run_generation + 1)
+        )
+    service.publish_run(run_id)
+    assert _published_entries(tmp_path / "live")["qwen"]["model_info"]["mode"] == "chat"
+
+
+def test_an_earlier_bundle_is_republished_once_by_maintenance(
+    tmp_path: Path,
+) -> None:
+    """An earlier ``litellm.json`` (rpm/tpm, pre-call checks on) no longer parses.
+
+    The one contract has no reader for it, so the active bundle is Unknown and
+    the next maintenance pass republishes the whole file under the current
+    policy: no count cap, pre-call checks off. That is the one LiteLLM restart
+    the upgrade causes; the next pass finds the bundle current and does nothing.
+    """
+    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
 
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
@@ -460,6 +525,8 @@ def test_an_earlier_bundle_stays_untouched_until_a_route_changes(
         json.dumps(earlier, sort_keys=True, separators=(",", ":")) + "\n"
     ).encode()
     runtime = AtomicRouteBundlePublisher(live)
+    # The current validator refuses these bytes; the earlier Controller's did not.
+    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
     with runtime._locked() as uncertainty:
         assert uncertainty is None
         marker = runtime._activate(
@@ -476,22 +543,21 @@ def test_an_earlier_bundle_stays_untouched_until_a_route_changes(
             litellm=earlier_bytes,
         )
     assert not isinstance(marker, UnknownError)
+    assert isinstance(verify_active_route_bundle(live), UnknownError)
+    assert service._publisher.served_model_info() == {}
 
-    # The earlier bundle still verifies, the running route is read back as it
-    # was published (no facts), and nothing in it moved.
-    assert service._publisher.served_model_info() == {"qwen": (run_id, None)}
-    still = verify_active_route_bundle(live)
-    assert not isinstance(still, UnknownError)
-    assert still.marker.litellm_sha256 == marker.litellm_sha256
-
-    # The next route change renders the current policy for every route.
-    second = add_running_run(
-        base, run_id, alias="qwen-next", route_state=RunRouteState.PENDING, identity=3
-    )
-    service.publish_run(second)
+    # One maintenance pass republishes under the current policy.
+    assert service.maintain() is True
     entries = _published_entries(live)
-    assert set(entries) == {"qwen", "qwen-next"}
-    assert all("rpm" not in entry["litellm_params"] for entry in entries.values())
+    assert set(entries) == {"qwen"}
+    assert "rpm" not in entries["qwen"]["litellm_params"]
+    assert "tpm" not in entries["qwen"]["litellm_params"]
     after = verify_active_route_bundle(live)
     assert not isinstance(after, UnknownError) and after.litellm is not None
     assert after.litellm.router_settings.enable_pre_call_checks is False
+
+    # Healed: the next pass has nothing to publish and no byte moves.
+    assert service.maintain() is False
+    settled = verify_active_route_bundle(live)
+    assert not isinstance(settled, UnknownError)
+    assert settled.marker.litellm_sha256 == after.marker.litellm_sha256

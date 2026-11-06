@@ -20,9 +20,9 @@ from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN, read_recipe
 
 from ..interface_adapters import InterfaceAdapterError, interface_adapter
 from ..litellm import (
-    LiteLlmModelInfo,
     LiteLlmPolicy,
     RouteState,
+    ServedModelInfo,
 )
 from ..models import (
     AgentNode,
@@ -72,6 +72,7 @@ def _candidate_once(
     include_run_id: str | None,
     exclude_run_ids: frozenset[str],
     lock: bool,
+    served: ServedModelInfo,
 ) -> _RecipeCandidate:
     now = _aware(self._clock())
     aliases: dict[str, str] = {}
@@ -123,9 +124,6 @@ def _candidate_once(
         for node in session.scalars(node_statement):
             nodes_by_run[node.run_id].append(node)
     model_infos = RouteModelInfoReader(session, candidate_runs, self._note_model_info)
-    read_served = getattr(self._publisher, "served_model_info", None)
-    served: dict[str, tuple[str, LiteLlmModelInfo | None]] = {}
-    served_read = False
     for run in candidate_runs:
         nodes = tuple(nodes_by_run[run.id])
         # A route that already serves stays published while its ranks
@@ -272,10 +270,6 @@ def _candidate_once(
                 # with: new facts would rewrite litellm.json, and the supervisor
                 # restarts LiteLLM on any byte change, cutting every route's
                 # in-flight requests. They apply when the route next changes.
-                if not served_read:
-                    served_read = True
-                    if read_served is not None:
-                        served = read_served()
                 frozen = served.get(run.alias)
             else:
                 frozen = None
@@ -323,12 +317,7 @@ def _candidate_once(
                 error, RecipeRankStopped | RecipeEndpointAuthorityRefused
             ):
                 raise
-            read_accepted = getattr(self._publisher, "accepted_run", None)
-            accepted = (
-                read_accepted(run.id, self._management_policy)
-                if read_accepted is not None
-                else None
-            )
+            accepted = self._publisher.accepted_run(run.id, self._management_policy)
             if accepted is None:
                 # Unknown history belongs to this owner. No unverifiable bytes
                 # are copied into a new bundle and unrelated requests proceed.
@@ -505,6 +494,7 @@ def candidate_in_session(
     include_run_id: str | None,
     exclude_run_ids: frozenset[str],
     lock: bool,
+    served: ServedModelInfo,
 ) -> _RecipeCandidate:
     """One authoritative observation; the request owner retries fresh transactions."""
     try:
@@ -514,6 +504,7 @@ def candidate_in_session(
             include_run_id=include_run_id,
             exclude_run_ids=exclude_run_ids,
             lock=lock,
+            served=served,
         )
     except (ValidationError, RecipeExecutionContractError) as error:
         raise RecipeRouteNotReady(

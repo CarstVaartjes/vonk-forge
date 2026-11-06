@@ -170,11 +170,6 @@ class LiteLlmUpstreamParams(_ConfigModel):
     api_key: Literal["os.environ/LITELLM_UPSTREAM_KEY"] = (
         "os.environ/LITELLM_UPSTREAM_KEY"
     )
-    # Bundles an earlier Controller published carry a per-deployment count cap.
-    # They are read as they are; nothing here sets one: the gateway does not
-    # ration, the engine's own admission does.
-    rpm: int | None = Field(default=None, ge=1, le=100_000)
-    tpm: int | None = Field(default=None, ge=1, le=100_000_000)
 
 
 class OpenAiRequestParameter(StrEnum):
@@ -325,3 +320,7 @@ def render_empty_config() -> bytes:
     """Render the LiteLLM configuration that serves no model."""
 
     return _document([])
+
+
+# What the active bundle publishes per alias: the run serving it and its facts.
+ServedModelInfo = Mapping[str, tuple[str, LiteLlmModelInfo | None]]
