@@ -1,0 +1,392 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/october-2026/qwen-image-2-1-turbo-diffusers-single"
+   },
+   "dockerfile": "adapters/october-2026/qwen-image-2-1-turbo-diffusers-single/Dockerfile",
+   "network": {
+    "hosts": [
+     "github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen-image-2-1-turbo-diffusers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 16384,
+    "media_types": [
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 text prompt for image generation.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Single generated PNG image.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Generated image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-aacf7c087ca0-618cd5b83d",
+     "id": "primary-aacf7c087ca029f1-618cd5b8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license-8dc973f024ff-c693279643",
+     "id": "primary-8dc973f024ff9596-c6932796",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-9a262724d564-b335630551",
+     "id": "primary-9a262724d564444f-b3356305",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-index-97e2febeb19d-ee03ace9a3",
+     "id": "primary-97e2febeb19d93cb-ee03ace9",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-3636d0f0bd6b-dffbb05f07",
+     "id": "primary-3636d0f0bd6bef02-dffbb05f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "processor-config-14932921ca48-26961f73ce",
+     "id": "primary-14932921ca485d45-26961f73",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-be75606093db-05256ef213",
+     "id": "primary-be75606093db2094-05256ef2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-fd42a0b35a8d-c2c3c4f263",
+     "id": "primary-fd42a0b35a8d13cd-c2c3c4f2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "scheduler-config-16c948c71f91-67ecb3dc37",
+     "id": "primary-16c948c71f9152a3-67ecb3dc",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-89050cba6b66-bcfd37e83e",
+     "id": "primary-89050cba6b66c4f6-bcfd37e8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-d04d0c6fdd1d-b77bbf3992",
+     "id": "primary-d04d0c6fdd1dc056-b77bbf39",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-a1eee8233f30-c8edafe2db",
+     "id": "primary-a1eee8233f306346-c8edafe2",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-2c567038ca19-98e965502a",
+     "id": "primary-2c567038ca190824-98e96550",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-00001-of-00002-6cccd922767f-f940099643",
+     "id": "primary-6cccd922767f0169-f9400996",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-00002-of-00002-69f53ebb063d-48c20e2a08",
+     "id": "primary-69f53ebb063d2f60-48c20e2a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-safetensors-ind-17987f6623b1-322b43acad",
+     "id": "primary-17987f6623b1c814-322b43ac",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-42bfdec41245-101abd63da",
+     "id": "primary-42bfdec412459bbb-101abd63",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-71879ffd5321-86e9ee3b4f",
+     "id": "primary-71879ffd5321e6d1-86e9ee3b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "130b73ec2a4e2f1c8a930e7416d87429bf4765f6458a5d19671b21bc6560d71e",
+    "kind": "model",
+    "publisher": "qwen",
+    "slug": "qwen-image-2-1-turbo-bf16-fc13ba19"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Qwen",
+   "Diffusers contributors"
+  ],
+  "source_reference": "https://github.com/huggingface/diffusers/tree/2a1433913c7044f34fa4767dd84b28bba0bb0ecf"
+ },
+ "release": {
+  "released_at": "2026-10-27",
+  "version": "0.42.1"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "pipeline",
+    "setting": null,
+    "value": "text-to-image"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "width",
+    "setting": null,
+    "value": 1024
+   },
+   {
+    "name": "height",
+    "setting": null,
+    "value": 1024
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "diffusers",
+  "entrypoint": [
+   "/opt/vonk/bin/diffusers-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 32451624677,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 76903249354
+     },
+     "memory": {
+      "peak_bytes": 90000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/prompt.txt",
+      "input_slots": {
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

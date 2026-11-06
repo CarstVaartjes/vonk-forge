@@ -104,8 +104,8 @@
      ]
     },
     {
-     "file_id": "tokenizer-cc8d3a0ce364-224931eb13",
-     "id": "tokenizer-cc8d3a0ce364-224931eb13",
+     "file_id": "tokenizer-ab26b2add729-224931eb13",
+     "id": "tokenizer-ab26b2add729-224931eb13",
      "mount": {
       "target": "/models"
      },
@@ -126,10 +126,10 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "f4bb913140447a15cc5c67ee58958e21f8343cefdad8949614d7b8946551c370",
+    "content_sha256": "8c3b7f84fa5cc8ae81e13cfeb408e29f47960016284b60d46764037c69cc2414",
     "kind": "model",
     "publisher": "google",
-    "slug": "gemma-4-e2b-it-3e22461f"
+    "slug": "gemma-4-e2b-it-4adf1574"
    }
   }
  ],
@@ -139,11 +139,11 @@
    "vLLM contributors",
    "Google DeepMind"
   ],
-  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/98b3a473f30916ec05eef3e7a01b781aaf4daa8a/nvidia/vllm/README.md"
+  "source_reference": "https://github.com/NVIDIA/dgx-spark-playbooks/blob/30883150541743d580c9c347700c6ac99fc396d2/nvidia/vllm/README.md"
  },
  "release": {
-  "released_at": "2026-10-12",
-  "version": "1.0.5"
+  "released_at": "2026-11-03",
+  "version": "1.0.6"
  },
  "runtime": {
   "arguments": [
@@ -208,7 +208,7 @@
     "name": "entrypoint",
     "resources": {
      "disk": {
-      "artifact_bytes": 10278849571,
+      "artifact_bytes": 10278835678,
       "image_bytes": 22000000000,
       "safety_margin_bytes": 12000000000,
       "working_bytes": 16000000000

@@ -632,7 +632,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "499cf8ee5206932e94055c1dd55214d96aa8f8caeb3f6d941b50aa29d0f39e1e",
+    "content_sha256": "89177d612c3a840f665a75a3c08016c6f84114fdf4242cbb086a3fb5742df4dc",
     "kind": "model",
     "publisher": "lukealonso",
     "slug": "mimo-v2-5-nvfp4-a147dd04"
@@ -714,7 +714,7 @@
  },
  "release": {
   "released_at": "2026-07-13",
-  "version": "1.0.1"
+  "version": "1.0.3"
  },
  "runtime": {
   "arguments": [
@@ -977,7 +977,7 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 124290276025,
+      "peak_bytes": 124452516352,
       "reserve_bytes": 8000000000
      }
     }
@@ -994,7 +994,7 @@
       "working_bytes": 65000000000
      },
      "memory": {
-      "peak_bytes": 124290276025,
+      "peak_bytes": 124452516352,
       "reserve_bytes": 8000000000
      }
     }

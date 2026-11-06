@@ -8,7 +8,7 @@ from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AssetAvailability
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition
 
 from .. import model_cache_states
 from ..auth import CursorCodec
@@ -197,8 +197,9 @@ class LibraryProjection:
         )
 
     @staticmethod
-    def _model_usage(document: ModelDefinition | ModelRevisionProjection) -> list[str]:
-        return sorted(document.capabilities)
+    def _model_usage(text: DocumentText) -> list[str]:
+        """The capabilities the Model's display declares; none while unreadable."""
+        return [] if text.model is None else sorted(text.model.capabilities)
 
     @staticmethod
     def _recipe_resources(

@@ -24,6 +24,7 @@ from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 from vonk_agent_protocol import ReservationState
+from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.telemetry import HostResourceSample
 
 from .dialect_insert import dialect_insert
@@ -151,6 +152,58 @@ def _raise_measured_peak(
             where=MeasuredRolePeak.peak_bytes < insert.excluded.peak_bytes,
         )
     )
+
+
+def carry_measured_peaks(
+    session: Session, publisher: str, slug: str, old_digest: str, new_digest: str
+) -> bool:
+    """Carry measured peaks from a recipe's old digest to its new one.
+
+    Only when both revisions of ``publisher/slug`` have the same execution key:
+    the catalog derives it from everything that runs (the execution document
+    and the artifact keys of the pinned Models), so revisions that differ only
+    in their Model pins, over unchanged model bytes, share it. The execution is
+    then the same and what was measured holds. The rows are copied (the old
+    digest keeps serving its running workloads), a row already on the new
+    digest keeps the higher value, and a repeat changes nothing. Returns
+    whether peaks were carried.
+    """
+
+    if old_digest == new_digest:
+        return False
+    keys = dict(
+        session.execute(
+            select(
+                CatalogDocumentRevision.content_digest,
+                CatalogDocumentRevision.execution_key,
+            ).where(
+                CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
+                CatalogDocumentRevision.publisher == publisher,
+                CatalogDocumentRevision.slug == slug,
+                CatalogDocumentRevision.content_digest.in_([old_digest, new_digest]),
+            )
+        ).all()
+    )
+    execution_key = keys.get(old_digest)
+    if execution_key is None or execution_key != keys.get(new_digest):
+        return False
+    rows = session.execute(
+        select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(
+            MeasuredRolePeak.content_sha256 == old_digest
+        )
+    ).all()
+    for role, peak in rows:
+        insert = dialect_insert(session, MeasuredRolePeak).values(
+            content_sha256=new_digest, role=role, peak_bytes=peak
+        )
+        session.execute(
+            insert.on_conflict_do_update(
+                index_elements=[MeasuredRolePeak.content_sha256, MeasuredRolePeak.role],
+                set_={"peak_bytes": insert.excluded.peak_bytes},
+                where=MeasuredRolePeak.peak_bytes < insert.excluded.peak_bytes,
+            )
+        )
+    return bool(rows)
 
 
 def observed_role_peaks(session: Session, content_digest: str) -> dict[str, int]:

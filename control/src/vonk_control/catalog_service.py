@@ -57,6 +57,7 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
+from .observed_run_memory import carry_measured_peaks
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
@@ -457,6 +458,15 @@ class CatalogService:
         CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
             images, qualifications
         )
+
+    def carry_measured_role_peaks(
+        self, publisher: str, slug: str, old_digest: str, new_digest: str
+    ) -> bool:
+        """Carry a recipe's measured peaks across a Model-pins-only re-key."""
+        with self._sessions.begin() as session:
+            return carry_measured_peaks(
+                session, publisher, slug, old_digest, new_digest
+            )
 
     def import_recipe_library(
         self,

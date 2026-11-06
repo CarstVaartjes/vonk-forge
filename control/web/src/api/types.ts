@@ -110,7 +110,7 @@ export type LibraryViewModel = {
   // The published library text; null until the first sync that carries it.
   model_display: components["schemas"]["ModelDisplay"] | null;
   model: { kind: "model"; publisher: string; slug: string; content_sha256: string };
-  model_document: Pick<ModelDefinition, "identity" | "format" | "capabilities">;
+  model_document: Pick<ModelDefinition, "identity" | "format">;
   model_file_count: WireNumber;
   model_bytes: WireNumber | null;
   cache_usage?: components["schemas"]["ModelCacheUsage"] | null;

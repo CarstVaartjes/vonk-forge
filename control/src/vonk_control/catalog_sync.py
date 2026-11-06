@@ -782,6 +782,8 @@ class ManagedRecipeCatalogSyncService:
                         result.imported_count += 1
                     else:
                         result.updated_count += 1
+                        if previous is not None and previous.content_sha256 is not None:
+                            self._carry_peaks(result, item, previous.content_sha256)
                 except SourceBundleUnknown as error:
                     # Keep the previous revision; the automatic sync retries
                     # this exact source ingress on its next bounded pass.
@@ -890,6 +892,28 @@ class ManagedRecipeCatalogSyncService:
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
         return result
+
+    def _carry_peaks(
+        self, result: ManagedCatalogSyncResult, item: RecipeLibraryItem, old: str
+    ) -> None:
+        """Measured wins: a re-keyed recipe keeps what was measured under its old digest.
+
+        Carried only when both revisions share an execution key, i.e. they differ
+        in nothing that runs (see ``carry_measured_peaks``). A
+        failure is a problem of this sync; the revision itself already applied.
+        """
+        carry = getattr(self._catalog, "carry_measured_role_peaks", None)
+        if not callable(carry):
+            return
+        try:
+            carry(item.publisher, item.slug, old, item.content_sha256)
+        except Exception as error:  # noqa: BLE001 - one recipe's carry never stops the others
+            self._record_problem(
+                result,
+                item,
+                CatalogSyncCode.ITEM_FAILED,
+                str(error)[:256] or type(error).__name__,
+            )
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
         source_bundle = getattr(item, "source_bundle", None)

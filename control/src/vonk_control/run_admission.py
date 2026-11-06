@@ -45,7 +45,7 @@ from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .install_admission.contracts import reason_documents
 from .inventory_repository import InventoryRepository
-from .legal_admission import territorial_admission
+from .legal_admission import stored_model_display, territorial_admission
 from .load_swap import swap_capacity
 from .memory_reservations import memory_reservations
 from .models import (
@@ -597,10 +597,10 @@ class RunAdmissionService:
                 for item in resolved_models
             }
             model_version = resolved_models[0] if resolved_models else None
-            model_document = model_version.document if model_version else None
+            model_display = stored_model_display(session, model_version)
             observed_peaks = observed_role_peaks(session, revision.content_digest)
             legal_admission = territorial_admission(
-                model_document,
+                model_display,
                 operation="run",
             )
             mapping_nodes = tuple(

@@ -492,6 +492,9 @@ test("record titles and the alignment filter follow the published display", () =
     model_title: "Model from display",
     description: "Display only.",
     tags: [],
+    capabilities: [],
+    modalities: ["text"],
+    license: { spdx: "Apache-2.0", url: "https://example.invalid/license", attribution: [] },
   };
   const recipe = model.recipes[0]!;
   recipe.recipe_display = {

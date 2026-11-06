@@ -331,8 +331,11 @@ def recipe_library(
         if cached
         else None
     )
-    model_by_key = {row.content_digest: model for row, model in model_rows}
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
+    usage_by_model = {
+        row.content_digest: self._model_usage(texts[row.document_id])
+        for row, _ in model_rows
+    }
     alignment_by_model = self._alignment_by_model(recipe_rows, texts)
     model_entries = [
         self._model_projection(
@@ -375,7 +378,7 @@ def recipe_library(
             selected_keys &= cached_keys
     entries = [
         self._recipe_projection(
-            row, recipe, model_by_key, snapshot, texts[row.document_id]
+            row, recipe, usage_by_model, snapshot, texts[row.document_id]
         )
         for row, recipe in recipe_rows
     ]
@@ -614,9 +617,13 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
     )
     model_by_key = {row.content_digest: model for row, model in model_rows}
     texts = self._document_texts(row for row, _ in (*model_rows, *recipe_rows))
+    usage_by_model = {
+        row.content_digest: self._model_usage(texts[row.document_id])
+        for row, _ in model_rows
+    }
     entries = [
         self._recipe_projection(
-            row, recipe, model_by_key, snapshot, texts[row.document_id]
+            row, recipe, usage_by_model, snapshot, texts[row.document_id]
         )
         for row, recipe in recipe_rows
     ]

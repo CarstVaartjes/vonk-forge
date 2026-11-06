@@ -38,6 +38,7 @@ from vonk_control.run_admission import (
 )
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
 
+from .display_fixtures import model_display_denying
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .stored_documents_support import valid_policy_report
 
@@ -83,11 +84,6 @@ def setup(
                 for index, item in enumerate(model_document["files"])
             ],
         }
-    if denied_jurisdictions:
-        model_document["license"]["territorial_restrictions"] = {
-            "denied_jurisdictions": list(denied_jurisdictions),
-            "notice": "Use is prohibited in the configured territories.",
-        }
     model = ModelDefinition.model_validate(model_document)
     document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
@@ -118,6 +114,13 @@ def setup(
             publisher=model.identity.publisher,
             slug=model.identity.slug,
             title=model.identity.slug,
+            display=model_display_denying(
+                model_document,
+                denied_jurisdictions,
+                "Use is prohibited in the configured territories.",
+            )
+            if denied_jurisdictions
+            else None,
             created_by="admin",
             created_at=now,
             updated_at=now,
@@ -449,6 +452,9 @@ def test_territorial_license_run_admission_is_informational(tmp_path) -> None:
         sessions, inventory_max_age=300, memory_floor_bytes=50
     ).plan_run(installation, alias="hunyuan", now=now)
     assert unconfigured.allowed is True
+    assert "run.license_territorial_restrictions_informational" in [
+        warning.code for node in unconfigured.nodes for warning in node.warnings
+    ]
 
 
 def test_declared_reserve_is_informational_and_the_platform_floor_applies(

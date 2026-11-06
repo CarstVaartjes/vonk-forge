@@ -953,8 +953,18 @@ class RecipePackageClient:
                 # A generation without verifiable release signatures (for
                 # example one cached by an older reader) is never served.
                 return None
-            snapshot, packages = self._parse_index(raw, publication_commit=publication)
-            snapshot, packages = _bind_release(snapshot, packages, release)
+            retained = _retained_older_major(raw)
+            if retained is not None:
+                # An older contract major, signed and verified, while no newer
+                # one is published: the catalog this Controller already stores
+                # is that release. Nothing in it is re-read with this major's
+                # readers; the sync finds nothing to change and withdraws nothing.
+                snapshot, packages = retained, {}
+            else:
+                snapshot, packages = self._parse_index(
+                    raw, publication_commit=publication
+                )
+                snapshot, packages = _bind_release(snapshot, packages, release)
         except (
             OSError,
             TypeError,
@@ -1316,6 +1326,36 @@ class RecipePackageClient:
                         path.rmdir()
                 temporary.rmdir()
         return target
+
+
+def _retained_older_major(raw: bytes) -> RecipeLibrarySnapshot | None:
+    """The empty snapshot of a verified index from an older contract major.
+
+    ``None`` for an index of this major (or one that is not an index): the
+    normal parse owns those.
+    """
+
+    index = _json(raw)
+    if not isinstance(index, Mapping):
+        return None
+    version, commit = index.get("contract_version"), index.get("source_commit")
+    match = _CONTRACT_VERSION.fullmatch(version) if isinstance(version, str) else None
+    if (
+        match is None
+        or int(match[1]) >= CONTRACT_MAJOR
+        or not isinstance(commit, str)
+        or not _SHA1.fullmatch(commit)
+    ):
+        return None
+    updated = datetime.fromisoformat(str(index.get("updated_at")))
+    if updated.tzinfo is None:
+        return None
+    return RecipeLibrarySnapshot(
+        commit=commit,
+        items=(),
+        version=str(version),
+        updated_at=updated.astimezone(UTC),
+    )
 
 
 def _library_release(index: Mapping[str, object]) -> tuple[str, datetime]:

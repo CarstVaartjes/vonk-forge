@@ -82,7 +82,7 @@ function viewModel(
     model_file_count: model.projected.artifact_count,
     model_bytes: model.resources.disk_bytes ?? null,
     cache_usage: model.cache_usage,
-    model_capabilities: model.projected.capabilities,
+    model_capabilities: model.usage,
     local: model.local,
     family: model.family,
     version: model.version,

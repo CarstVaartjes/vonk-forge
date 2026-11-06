@@ -45,7 +45,7 @@ from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 pytest_plugins = ("tests.test_profile_stop_effect_adoption_postgres",)
 
-RECIPES_SHA = "3e3b6fcba0710ca139086dc61a21020698321cfc"
+RECIPES_SHA = "41be2c4f62e3a4fc3b4e6412c9b419eefc2a2166"
 pytestmark = [
     pytest.mark.skipif(
         not os.environ.get("VONK_RECIPE_EFFECT_CONSUMER_SOURCE"),

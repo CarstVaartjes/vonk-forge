@@ -107,7 +107,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
     version: document.identity.version,
     quantization: document.format.quantization,
   };
-  const usage = [...document.capabilities];
+  const usage = [...(modelDisplayOf(document)?.capabilities ?? [])];
   const alignment = [
     ...new Set(
       recipes.flatMap((recipe) =>
@@ -138,7 +138,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
     model_document: document,
     model_file_count: document.files.length,
     model_bytes: document.files.reduce((sum, file) => sum + Number(file.size_bytes), 0),
-    model_capabilities: [...document.capabilities],
+    model_capabilities: [...usage],
     local,
     ...facets,
     usage,
@@ -304,8 +304,6 @@ export const modelLibrary: ModelLibrary = {
       projected: {
         identity: entry.model_document.identity,
         format: entry.model_document.format,
-        capabilities: entry.model_document.capabilities,
-        modalities: ["text"],
         artifact_count: entry.model_file_count,
         download_bytes: entry.model_bytes,
         installed_bytes: entry.model_bytes,
@@ -314,7 +312,7 @@ export const modelLibrary: ModelLibrary = {
       version: entry.model_document.identity.version,
       variant: entry.model_document.identity.variant,
       quantization: entry.model_document.format.quantization ?? "none",
-      usage: [...entry.model_document.capabilities],
+      usage: [...(entry.model_display?.capabilities ?? [])],
       resources: projectionResources,
       local: projectionLocal,
       alignment: entry.alignment,
