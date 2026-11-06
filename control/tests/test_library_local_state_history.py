@@ -18,7 +18,7 @@ from sqlalchemy import String, column, create_engine, event, func, or_, select, 
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import OperationProgress
+from vonk_agent_protocol import ModelAccessReason, OperationProgress
 from vonk_control.auth import TokenCodec
 from vonk_control.library_contract import LibraryLocalState
 from vonk_control.library_projection import LibraryProjection, local_state
@@ -28,6 +28,8 @@ from vonk_control.model_cache_contract import (
     ModelCacheOperationProgress,
 )
 from vonk_control.models import Base, ModelCacheOperation, ModelCacheSet
+from vonk_control.operation_blockers import make_blocker
+from vonk_control.persisted_waits import schedule_wait
 from vonk_control.stored_json import write_guard_mode
 from vonk_control.strict_json import serialize_json_value
 from vonk_forge_contracts.model import ModelReference
@@ -371,6 +373,49 @@ def test_damaged_manifest_text_does_not_hide_a_digest_latest_request(tmp_path):
     local = _projection(sessions)._database_local_state([wanted])[wanted]
     assert local.preparation is not None
     assert local.preparation.operation_id == good_id
+
+
+def test_a_waiting_download_shows_its_typed_wait_in_the_preparation(tmp_path):
+    """An access wait reaches the library view with its blocker and retry time."""
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'wait.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    wanted = _digest("wanted")
+    url = "https://huggingface.co/org/gated"
+    retry = NOW + timedelta(minutes=6)
+    with sessions.begin() as session:
+        session.add(
+            _cache_set(
+                _digest("good"),
+                wanted,
+                None,
+                "downloading",
+                _manifest(wanted, None, [wanted]),
+            )
+        )
+        waiting = _operation(
+            _digest("good"), kind="download", state="queued", at=NOW, completed=0
+        )
+        schedule_wait(
+            waiting,
+            retry,
+            now=NOW,
+            reason=ModelAccessReason.ACCESS_DENIED,
+            blockers=[
+                make_blocker(
+                    ModelAccessReason.ACCESS_DENIED,
+                    f"Hugging Face access is required: accept the terms at {url}",
+                )
+            ],
+        )
+        session.add(waiting)
+    local = _projection(sessions)._database_local_state([wanted])[wanted]
+    assert local.preparation is not None
+    assert local.preparation.reason == ModelAccessReason.ACCESS_DENIED
+    assert [item.code for item in local.preparation.blockers] == ["access_denied"]
+    assert url in local.preparation.blockers[0].detail
+    assert local.preparation.next_attempt_at == retry
 
 
 def _plan_work(node: dict[str, object]) -> int:

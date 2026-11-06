@@ -8,6 +8,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import (
+    AwareDatetime,
     BeforeValidator,
     ConfigDict,
     Field,
@@ -17,6 +18,7 @@ from pydantic import (
 from vonk_agent_protocol import (
     InstallationState,
     LibraryProjectionCode,
+    OperationReason,
     PlacementInstallState,
     PlacementLoadState,
     RunState,
@@ -47,6 +49,7 @@ from .model_cache_contract import (
     ModelCacheUsage,
     ModelStorageObservation,
 )
+from .operation_blockers import MAX_BLOCKERS, OperationBlocker
 from .run_switch_contract import RunSwitchReason, SparkFit, SparkGroup
 from .strict_json import StrictModel
 
@@ -199,6 +202,13 @@ class LibraryLocalProgress(StrictModel):
     phase: Text64 | None = None
     completed_bytes: int = Field(default=0, ge=0)
     total_bytes: int | None = Field(default=None, ge=0)
+    #: What a waiting operation waits for (access, space, ...) and when it is
+    #: checked again; empty and null while it is not waiting.
+    reason: OperationReason | None = None
+    blockers: list[OperationBlocker] = Field(
+        default_factory=list, max_length=MAX_BLOCKERS
+    )
+    next_attempt_at: AwareDatetime | None = None
 
 
 class LibraryLocalState(StrictModel):
