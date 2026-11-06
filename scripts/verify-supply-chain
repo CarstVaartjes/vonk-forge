@@ -134,7 +134,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
     )
     if (
         len(packages) != 1
-        or packages[0]["version"] != "3.0.0"
+        or packages[0]["version"] != "4.0.0"
         or source not in packages[0]["record"].splitlines()
     ):
         raise ValueError("control lock does not resolve the reviewed public contract")

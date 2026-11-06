@@ -529,6 +529,13 @@ def _seed(world: World, count: int) -> list[RecipeDisplay | ModelDisplay]:
                         "model_title": "After",
                         "description": "d",
                         "tags": [],
+                        "modalities": ["text"],
+                        "capabilities": [],
+                        "license": {
+                            "spdx": "Apache-2.0",
+                            "url": "https://example.invalid/license",
+                            "attribution": [],
+                        },
                     }
                 )
                 if kind == "model"
