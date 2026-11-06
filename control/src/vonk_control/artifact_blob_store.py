@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import hashlib
 import os
 import tempfile
+import threading
 import time
 import uuid
-from collections.abc import AsyncIterable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterable, AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from pydantic import BaseModel, ConfigDict, Field
 from vonk_agent_protocol import (
@@ -34,6 +37,7 @@ from .lifecycle.evidence import BookkeepingReason, retire_as_unknown
 # reconciliation.
 _REFERENCE_LOCK_BUDGET_SECONDS = 30.0
 _REFERENCE_LOCK_RETRY_SECONDS = 0.05
+_RELEASE_POLL_SECONDS = 1.0
 
 
 class BlobStoreUsage(BaseModel):
@@ -137,6 +141,62 @@ class ArtifactBlobStore:
         with self._reference_lock(exclusive=False):
             yield
 
+    @asynccontextmanager
+    async def reference_attachment_async(self) -> AsyncIterator[None]:
+        """``reference_attachment`` for async callers.
+
+        One worker thread takes the flock, holds it until released, and drops
+        it, so the acquire wait never runs on the event loop and a cancel at
+        any point (even during the acquire) cannot leave the lock held: the
+        release flag is set on every exit and the thread honours it as soon as
+        it holds the lock.
+        """
+        loop = asyncio.get_running_loop()
+        acquired: asyncio.Future[None] = loop.create_future()
+        release = threading.Event()
+
+        def settle(error: BaseException | None) -> None:
+            if acquired.done():
+                return
+            if error is None:
+                acquired.set_result(None)
+            else:
+                acquired.set_exception(error)
+
+        def hold() -> None:
+            try:
+                with self.reference_attachment():
+                    with suppress(RuntimeError):  # loop closed
+                        loop.call_soon_threadsafe(settle, None)
+                    # The release flag always ends the hold; the poll only
+                    # keeps the wait interruptible.
+                    while not release.wait(_RELEASE_POLL_SECONDS):
+                        pass
+            except BaseException as error:  # noqa: BLE001 - handed to the waiter
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(settle, error)
+            finally:
+                # Never leave the waiter parked, whatever ended the thread.
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(
+                        settle, RuntimeError("reference lock thread ended")
+                    )
+
+        holder = threading.Thread(target=hold, name="artifact-reference-lock")
+        holder.start()
+        holding = False
+        try:
+            await acquired
+            holding = True
+            yield
+        finally:
+            release.set()
+            if holding:
+                # Shielded: the thread finishes releasing even if this is
+                # cancelled. A cancel during the acquire does not wait for it:
+                # the thread drops the lock the moment it gets it.
+                await asyncio.shield(asyncio.to_thread(holder.join))
+
     @contextmanager
     def reference_reconciliation(self) -> Iterator[None]:
         """Exclude new database attachments while references are reconciled."""
@@ -160,7 +220,9 @@ class ArtifactBlobStore:
         unavailable: UnknownOutcomeError | None = None
         async for _attempt in bounded_async_attempts():
             try:
-                reservation, existing = self._reserve(expected_sha256, expected_bytes)
+                reservation, existing = await asyncio.to_thread(
+                    self._reserve, expected_sha256, expected_bytes
+                )
                 break
             except UnknownOutcomeError as error:
                 unavailable = error
@@ -199,13 +261,15 @@ class ArtifactBlobStore:
         digest = hashlib.sha256()
         observed = 0
         try:
-            descriptor, temporary_name = tempfile.mkstemp(
+            descriptor, temporary_name = await asyncio.to_thread(
+                tempfile.mkstemp,
                 prefix=f".{expected_sha256}.{reservation.token}.",
                 suffix=".part",
                 dir=self._root / ".tmp",
             )
             temporary = Path(temporary_name)
-            with os.fdopen(descriptor, "wb") as stream:
+            stream = os.fdopen(descriptor, "wb")
+            try:
                 async for chunk in chunks:
                     if not isinstance(chunk, bytes):
                         raise ArtifactBlobInvalid(
@@ -219,9 +283,10 @@ class ArtifactBlobStore:
                             reason=InvalidRequestReason.LIMIT_EXCEEDED,
                         )
                     digest.update(chunk)
-                    stream.write(chunk)
-                stream.flush()
-                os.fsync(stream.fileno())
+                    await asyncio.to_thread(stream.write, chunk)
+                await asyncio.to_thread(self._flush_and_sync, stream)
+            finally:
+                await asyncio.to_thread(stream.close)
             if observed != expected_bytes:
                 raise ArtifactBlobInvalid(
                     "artifact upload size does not match",
@@ -234,7 +299,9 @@ class ArtifactBlobStore:
                 )
             async for _attempt in bounded_async_attempts():
                 try:
-                    stored = self._commit(temporary, expected_sha256, observed)
+                    stored = await asyncio.to_thread(
+                        self._commit, temporary, expected_sha256, observed
+                    )
                     temporary = Path()
                     return stored
                 except UnknownOutcomeError as error:
@@ -247,7 +314,17 @@ class ArtifactBlobStore:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             ) from error
         finally:
-            self._cleanup_upload(temporary, reservation)
+            # Shielded: a cancelled upload still removes its temp file and
+            # reservation (a cancel before they were named leaves only files
+            # the reconciler sweeps).
+            await asyncio.shield(
+                asyncio.to_thread(self._cleanup_upload, temporary, reservation)
+            )
+
+    @staticmethod
+    def _flush_and_sync(stream: BinaryIO) -> None:
+        stream.flush()
+        os.fsync(stream.fileno())
 
     def put_bytes(
         self,
