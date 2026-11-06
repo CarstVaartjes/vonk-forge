@@ -4464,7 +4464,7 @@ def test_operations_waiting_only_on_a_model_download_take_no_worker_slot(
 
 
 def test_parked_operation_carries_the_model_childs_typed_wait(tmp_path: Path) -> None:
-    """A gated model's access wait reaches the parent; the stale build wait is gone."""
+    """A gated model's access wait reaches the parent operation."""
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -4473,17 +4473,6 @@ def test_parked_operation_carries_the_model_childs_typed_wait(tmp_path: Path) ->
     url = "https://huggingface.co/org/gated"
     with sessions.begin() as session:
         waiter = _parked_operation("gated", now=now, model_child=True, updated=now)
-        payload = AvailabilityJobPayload.model_validate(waiter.payload).model_copy(
-            update={
-                "failure": AvailabilityOperationFailure(
-                    code="recipe_image.build_wait",
-                    detail="waiting for build",
-                    retryable=True,
-                    recovery_actions=[],
-                )
-            }
-        )
-        waiter.payload = serialize_json_value(payload)
         session.add(waiter)
 
     class ModelCache:
@@ -4514,7 +4503,6 @@ def test_parked_operation_carries_the_model_childs_typed_wait(tmp_path: Path) ->
             "access_denied"
         ]
         assert url in str(require_mapping(blockers[0], "blocker")["detail"])
-        assert parked.payload.get("failure") is None
 
 
 def test_live_download_survives_a_parent_observation_gap_and_resumes(

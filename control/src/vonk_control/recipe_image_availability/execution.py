@@ -63,7 +63,6 @@ from .contracts import (
     _known_total,
     _read,
 )
-from .model_preparation import _settled_image_failure
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -590,19 +589,15 @@ def _defer_for_model(
         payload = self._lifecycle.defer(
             operation, now, now + timedelta(seconds=1), payload=payload
         )
-        generic = make_blocker(
-            RecipeImageCode.WAITING_FOR_MODEL,
-            "Waiting for the model download to finish.",
-            severity="info",
-        )
-        child = payload.model_child
         payload = self._record_blockers(
             operation,
-            _settled_image_failure(payload),
-            self._model_wait_blockers(
-                self._model_cache.get_operation(child.id).blockers, generic
-            )
-            if child is not None and self._model_cache is not None
-            else [generic],
+            payload,
+            [
+                make_blocker(
+                    RecipeImageCode.WAITING_FOR_MODEL,
+                    "Waiting for the model download to finish.",
+                    severity="info",
+                )
+            ],
         )
         operation.payload = serialize_json_value(payload)

@@ -53,7 +53,6 @@ from .contracts import (
     RecipeImageAvailabilityClaim,
     RecipeImageAvailabilityUnknown,
 )
-from .model_preparation import _settled_image_failure
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
@@ -365,7 +364,7 @@ def _park_for_model(
     )
     updated = self._record_blockers(
         operation,
-        _settled_image_failure(updated),
+        updated,
         self._model_wait_blockers(view.blockers, generic),
     )
     schedule_wait(

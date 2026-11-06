@@ -19,7 +19,6 @@ from vonk_agent_protocol import (
 
 from ..admission_locking import ConstraintDefect
 from ..job_documents import (
-    AvailabilityJobPayload,
     AvailabilityModelChild,
 )
 from ..model_cache_contract import (
@@ -52,21 +51,6 @@ from .contracts import (
 
 if TYPE_CHECKING:
     from .service import RecipeImageAvailabilityService
-
-
-def _settled_image_failure(
-    payload: AvailabilityJobPayload,
-) -> AvailabilityJobPayload:
-    """Drop the build-wait failure once the image is prepared."""
-
-    failure = payload.failure
-    if (
-        payload.image_result is not None
-        and failure is not None
-        and failure.code == RecipeImageCode.BUILD_WAIT
-    ):
-        return payload.model_copy(update={"failure": None})
-    return payload
 
 
 def _model_wait_blockers(
