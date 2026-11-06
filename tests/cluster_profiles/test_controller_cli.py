@@ -4547,9 +4547,9 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
     display["model_title"] = "Qwen 3"
     client = FakeClient(
         {
-            ("GET", "/api/model/Qwen%2Fqwen3"): {
-                "selector": "Qwen/qwen3",
-                "model_display": display,
+            ("GET", "/api/model/library"): {
+                "models": [{"selector": "Qwen/qwen3", "model_display": display}],
+                "next_cursor": None,
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
@@ -4569,6 +4569,57 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
         )
         == expected
     )
+
+
+def test_run_title_resolution_reads_the_model_library_in_pages_not_per_model() -> None:
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    total, page_size = 150, 50
+    pages = [
+        {
+            "models": [
+                {
+                    "selector": f"Org/model-{index}",
+                    "model_display": {**display, "model_title": f"Title {index}"},
+                }
+                for index in range(start, start + page_size)
+            ],
+            "next_cursor": f"c{start + page_size}"
+            if start + page_size < total
+            else None,
+        }
+        for start in range(0, total, page_size)
+    ]
+    client = FakeClient(
+        {
+            ("GET", "/api/model/library"): pages,
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        f"vonk-forge/recipe-{index}",
+                        f"Recipe {index}",
+                        model_selector=f"Org/model-{index}",
+                    )
+                    for index in range(total)
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, client),
+            "title 120",
+            deadline=controller_cli.observation.time.monotonic() + 30,
+        )
+        == "vonk-forge/recipe-120"
+    )
+    model_reads = [call for call in client.calls if call[1].startswith("/api/model")]
+    assert len(model_reads) == total // page_size
+    assert {call[1] for call in model_reads} == {"/api/model/library"}
 
 
 def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:

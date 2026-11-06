@@ -2337,6 +2337,26 @@ def test_an_alias_checked_with_the_contract_passes(source: str) -> None:
     assert not check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "same = run.alias == assignment.alias\n",
+        "q = select(RecipeRun.id).where(RecipeRun.alias == alias)\n",
+        "other = assignment.alias != run.alias\n",
+    ],
+)
+def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ALIAS_PATH, source, lines, modes=("alias-rules",))
+    assert not check_source(_ALIAS_PATH, source, set(), modes=("alias-rules",))
+    # The shared predicate and the stop-authority sites compare freely.
+    for site in (
+        "control/src/vonk_control/profile_capacity.py",
+        "control/src/vonk_control/profile_stop_authority.py",
+    ):
+        assert not check_source(site, source, lines, modes=("alias-rules",))
+
+
 def test_demand_exceeds_capacity_is_emitted_only_at_its_classified_sites():
     for probe in (
         "code = ResourceBlockerCode.DEMAND_EXCEEDS_CAPACITY\n",
@@ -3434,3 +3454,232 @@ def test_a_workload_intent_numbered_outside_its_owner_is_flagged(source: str) ->
 def test_reading_or_carrying_a_workload_intent_passes(source: str) -> None:
     lines = set(range(1, source.count("\n") + 1))
     assert not check_source(_INTENT_PATH, source, lines, modes=("intent-ordinal",))
+
+
+_ASYNC_SRC = "control/src/vonk_control/example.py"
+_ASYNC_REPOSITORY = (
+    "class Stream:\n"
+    "    def __init__(self, events: EventRepository) -> None:\n"
+    "        self._events = events\n"
+    "    async def run(self):\n"
+    "        return {body}\n"
+)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "async def f(session):\n    return session.get(Row, 1)\n",
+        "async def f(self):\n    with self._sessions() as session:\n        pass\n",
+        "async def f(sessions):\n    with sessions.begin() as session:\n        pass\n",
+        "async def f(repository):\n    return repository.list()\n",
+        "async def f(path):\n    return open(path).read()\n",
+        "async def f():\n    time.sleep(0.05)\n",
+        "async def f(fd):\n    os.fsync(fd)\n",
+        "async def f(fd):\n    fcntl.flock(fd, fcntl.LOCK_EX)\n",
+        "async def f():\n    return httpx2.Client(base_url='x')\n",
+        "async def f():\n    async def g():\n        time.sleep(1)\n",
+        (
+            "async def f(session, repository):\n"
+            "    await asyncio.to_thread(repository.get, session.get(Row, 1))\n"
+        ),
+        _ASYNC_REPOSITORY.format(body="self._events.high_watermark()"),
+        "async def f():\n    return subprocess.run(['ls'])\n",
+        "async def f(path):\n    return path.read_text()\n",
+        "async def f(path):\n    path.write_bytes(b'x')\n",
+        "async def f(path):\n    return tempfile.mkstemp(dir=path)\n",
+        "async def f(a, b):\n    os.replace(a, b)\n",
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: because\n",
+        # Only startup/shutdown/one-off code is exempt; the sequencing reasons
+        # justify an order, not a blocked event loop.
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: one-session\n",
+        "async def f(session):\n    return session.get(Row, 1)  # sequential: ordering\n",
+        # A same-module sync helper (or context manager) with I/O is I/O.
+        "def load(path):\n    return path.read_text()\nasync def f(path):\n    return load(path)\n",
+        "def load(path):\n    return path.read_text()\ndef mid(path):\n    return load(path)\nasync def f(path):\n    return mid(path)\n",
+        (
+            "class S:\n"
+            "    def read(self, path):\n"
+            "        return open(path).read()\n"
+            "    async def f(self, path):\n"
+            "        return self.read(path)\n"
+        ),
+        (
+            "@contextmanager\n"
+            "def locked(fd):\n"
+            "    fcntl.flock(fd, 1)\n"
+            "    yield\n"
+            "async def f(fd):\n"
+            "    with locked(fd):\n"
+            "        pass\n"
+        ),
+        "async def f(session):\n    return session.get(Row, 1)  # sequential:\n",
+    ],
+)
+def test_sync_io_inside_async_def_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_ASYNC_SRC, source, lines, modes=("sync-in-async",))
+    # Only an added line can fail the change.
+    assert not check_source(_ASYNC_SRC, source, set(), modes=("sync-in-async",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    await asyncio.to_thread(session.get, Row, 1)\n",
+        ),
+        (_ASYNC_SRC, "async def f(r):\n    return await run_in_threadpool(r.read)\n"),
+        (_ASYNC_SRC, "async def f(repository):\n    return await repository.list()\n"),
+        (_ASYNC_SRC, "def f(session):\n    return session.get(Row, 1)\n"),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    def g():\n        return session.get(Row, 1)\n    return await asyncio.to_thread(g)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    await asyncio.to_thread(lambda: session.get(Row, 1))\n",
+        ),
+        (_ASYNC_SRC, "async def f():\n    await asyncio.sleep(1)\n"),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    return session.get(Row, 1)  # sequential: not-hot\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "def load(path):\n    return path.read_text()  # sequential: not-hot\nasync def f(path):\n    return load(path)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "def load(path):\n    return path.read_text()\nasync def f(path):\n    return await asyncio.to_thread(load, path)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    # sequential: not-hot\n    return session.get(Row, 1)\n",
+        ),
+        (
+            _ASYNC_SRC,
+            "async def f(session):\n    return session.get(\n        Row, 1\n    )  # sequential: not-hot\n",
+        ),
+        (
+            "control/tests/test_example.py",
+            "async def f(session):\n    return session.get(Row, 1)\n",
+        ),
+        (
+            "src/cluster_profiles/x.py",
+            "async def f(session):\n    return session.get(Row, 1)\n",
+        ),
+    ],
+)
+def test_threaded_nested_marked_or_out_of_scope_io_passes(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("sync-in-async",))
+
+
+@pytest.mark.parametrize(
+    "reason", ["data-dependency", "ordering", "one-session", "one-resource", "other"]
+)
+def test_only_not_hot_exempts_io_on_the_event_loop(reason: str) -> None:
+    source = f"async def f(session):\n    return session.get(Row, 1)  # sequential: {reason}\n"
+    assert check_source(_ASYNC_SRC, source, {1, 2}, modes=("sync-in-async",))
+
+
+def test_adding_the_async_keyword_alone_carries_the_bodys_findings() -> None:
+    # Turning `def f` into `async def f` adds only line 1; the body's sync I/O
+    # is reported on that line.
+    source = "async def f(path):\n    return path.read_text()\n"
+    assert check_source(_ASYNC_SRC, source, {1}, modes=("sync-in-async",))
+    # An untouched async def with a clean body stays quiet.
+    assert not check_source(
+        _ASYNC_SRC,
+        "async def f(path):\n    return await asyncio.to_thread(path.read_text)\n",
+        {1},
+        modes=("sync-in-async",),
+    )
+    # An untouched async def does not fail for old findings.
+    assert not check_source(_ASYNC_SRC, source, set(), modes=("sync-in-async",))
+
+
+_GIT_TEST_PATH = "control/tests/test_example.py"
+_GIT_FREE = ("git-free-tests",)
+
+
+def _all_lines(source: str) -> set[int]:
+    return set(range(1, source.count("\n") + 2))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_GIT_TEST_PATH, 'subprocess.run(["git", "rev-parse", "HEAD"], check=True)\n'),
+        (_GIT_TEST_PATH, 'out = subprocess.check_output(("git", "log"))\n'),
+        (_GIT_TEST_PATH, 'subprocess.run([*GIT, "init"], check=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(GIT + ["init"], check=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run("git status", shell=True)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["bash", "-c", "cd x && git add ."])\n'),
+        (_GIT_TEST_PATH, 'os.system("git init")\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["/usr/bin/git", "init"])\n'),
+        (_GIT_TEST_PATH, 'env = {"GIT_AUTHOR_NAME": "a"}\n'),
+        ("tests/test_example.py", 'subprocess.run(["git", "init"])\n'),
+        (
+            "control/web/src/staged-code.test.ts",
+            'execFileSync("git", ["init"], { cwd });\n',
+        ),
+        ("web/scripts/check.test.mjs", "spawnSync('git', ['add', '.']);\n"),
+        ("tests/nodes/test_example.sh", 'rev="$(git rev-parse HEAD)"\n'),
+        ("tests/nodes/test_example.sh", "cd repo && git init -q\n"),
+        ("tests/nodes/test_example.sh", "if git diff --quiet; then echo clean; fi\n"),
+        ("tests/nodes/test_example.sh", "while ! git fetch -q; do :; done\n"),
+        ("tests/nodes/test_example.sh", "exec git status\n"),
+        ("control/tests/example.rs", 'let out = Command::new("git").output();\n'),
+    ],
+)
+def test_a_test_that_runs_git_is_flagged(path: str, source: str) -> None:
+    assert check_source(path, source, _all_lines(source), modes=_GIT_FREE)
+    assert not check_source(path, source, set(), modes=_GIT_FREE)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # A stub file named git, a patch target and argv data are not git runs.
+        (_GIT_TEST_PATH, 'stub = tmp_path / "git"\n'),
+        # A faked git is allowed: the helper is monkeypatched, nothing spawns.
+        (_GIT_TEST_PATH, 'monkeypatch.setattr(module, "_git_source", fake)\n'),
+        (_GIT_TEST_PATH, 'git(repo, "commit", "-m", "x")\n'),
+        (_GIT_TEST_PATH, 'result = helpers._git(repo, "init")\n'),
+        (_GIT_TEST_PATH, 'monkeypatch.setattr(module, "git", fake)\n'),
+        (_GIT_TEST_PATH, 'argv = ["git", "push"]\nassert plan(argv)\n'),
+        (_GIT_TEST_PATH, 'subprocess.run(["echo", "git status"])\n'),
+        (_GIT_TEST_PATH, 'env = {"VONK_GIT_SIGNING_KEY_FILE": "k"}\n'),
+        (_GIT_TEST_PATH, 'text = "git show -s --format=%ct"\n'),
+        (
+            "tests/nodes/test_example.sh",
+            "# git is only the CI edge\necho digit status\n",
+        ),
+        ("control/web/src/staged-code.test.ts", '// execFileSync("git")\n'),
+        # Production code is not a test.
+        ("control/src/vonk_control/example.py", 'subprocess.run(["git", "init"])\n'),
+        ("scripts/example.sh", "git rev-parse HEAD\n"),
+        ("control/src/example.rs", 'let out = Command::new("git").output();\n'),
+        ("control/web/src/staged-code.ts", 'execFileSync("git", ["init"]);\n'),
+    ],
+)
+def test_git_free_guard_leaves_other_lines_alone(path: str, source: str) -> None:
+    assert not check_source(path, source, _all_lines(source), modes=_GIT_FREE)
+
+
+def test_rust_git_is_flagged_only_inside_cfg_test_items() -> None:
+    source = (
+        'fn production() { Command::new("git"); }\n'
+        "#[cfg(test)]\n"
+        "mod tests {\n"
+        '    fn t() { Command::new("git"); }\n'
+        "}\n"
+    )
+    path = "control/src/example.rs"
+    assert check_source(path, source, {4}, modes=_GIT_FREE)
+    assert not check_source(path, source, {1}, modes=_GIT_FREE)

@@ -15,7 +15,7 @@ SCRIPT = "scripts/reuse-pr-candidate-images"
 ROLES = ("api", "worker", "hermes", "litellm")
 DIGESTS = {role: "sha256:" + hex_digit * 64 for role, hex_digit in zip(ROLES, "abde")}
 RUN = "38921170575"
-COMMIT = "c" * 40
+TREE = "c" * 40
 
 
 def _executable(path: Path, body: str) -> None:
@@ -50,7 +50,7 @@ def _references(directory: Path, run: str = RUN, skip: str = "") -> Path:
 def _reuse(root: Path, references: Path, temp: Path):
     temp.mkdir(exist_ok=True)
     return subprocess.run(
-        [str(root / SCRIPT), str(references), RUN, COMMIT],
+        [str(root / SCRIPT), str(references), RUN, TREE],
         cwd=root,
         capture_output=True,
         text=True,
@@ -74,7 +74,7 @@ def test_every_verified_image_is_reused_by_digest_without_an_export(tmp_path):
     calls = (tmp_path / "calls").read_text()
     for role in ROLES:
         assert f"verify {role} ghcr.io/carstvaartjes/vonk-forge-{role} " in calls
-        assert f"- {COMMIT}" in calls
+        assert f"- {TREE}" in calls
     assert not list(temp.iterdir())
 
 

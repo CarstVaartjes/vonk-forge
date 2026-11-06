@@ -178,6 +178,7 @@ class RunSwitchOperationService(
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: frozenset[str] = frozenset(),
         replaced_run_ids: frozenset[str] = frozenset(),
+        own_run_id: str | None = None,
     ) -> RunSwitchPlan:
         """Read admission without authoring preparation work.
 
@@ -198,6 +199,7 @@ class RunSwitchOperationService(
             planned_ports=planned_ports,
             kept_run_ids=kept_run_ids,
             replaced_run_ids=replaced_run_ids,
+            own_run_id=own_run_id,
         )
 
     def inspect_candidate(

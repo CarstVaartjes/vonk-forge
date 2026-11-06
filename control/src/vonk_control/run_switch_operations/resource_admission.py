@@ -9,7 +9,6 @@ from typing import (
 )
 from typing import cast as typing_cast
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     RunSwitchCode,
@@ -18,8 +17,6 @@ from vonk_forge_contracts import ModelDefinition
 
 from ..models import (
     CatalogDocumentRevision,
-    RecipeRun,
-    RunNode,
 )
 from ..profile_capacity import kept_runs
 from ..resource_planning import (
@@ -161,16 +158,19 @@ class ResourceAdmissionMixin:
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: Collection[str] = (),
         profile_application_id: str | None = None,
+        own_run_id: str | None = None,
     ) -> _ResourceFits:
         """Fit the request now and after its stops.
 
         The runs the plan keeps are already on their Sparks: they add no new
         demand (``kept_runs``). A request whose own workload is one of them
-        adds no demand either: nothing new starts.
+        adds no demand either: nothing new starts. The profile planner names
+        that run (``own_run_id``, the run serving the assignment); it is never
+        re-matched here.
         """
         service = typing_cast("RunSwitchOperationService", self)
         kept = kept_runs(session, kept_run_ids, profile_application_id)
-        already_kept = _serves_as_kept_run(session, kept, request)
+        already_kept = own_run_id is not None and own_run_id in kept
         serving = request.action != "install" and not already_kept
         (
             freshness,
@@ -334,28 +334,3 @@ def _with_after_stop_swap(
     if current & swap and not after_stop & swap:
         merged |= {_SWAP_COMPONENT}
     return frozenset(merged)
-
-
-def _serves_as_kept_run(
-    session: Session,
-    kept_run_ids: Collection[str],
-    request: RunSwitchPreviewRequest,
-) -> bool:
-    """The request's workload already serves as a run the plan keeps.
-
-    The plan decided which runs are kept; the request's own is the one with its
-    endpoint alias on exactly its Sparks.
-    """
-    if not kept_run_ids:
-        return False
-    nodes = sorted(node.node_id for node in request.spark_group.nodes)
-    return any(
-        sorted(session.scalars(select(RunNode.node_id).where(RunNode.run_id == run_id)))
-        == nodes
-        for run_id in session.scalars(
-            select(RecipeRun.id).where(
-                RecipeRun.id.in_(tuple(kept_run_ids)),
-                RecipeRun.alias == request.alias,
-            )
-        )
-    )
