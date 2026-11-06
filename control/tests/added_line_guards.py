@@ -25,6 +25,7 @@ from . import (
     request_path_scans,
     scratch_names,
     shell_trap_waits,
+    sync_io_in_async,
     whole_collection_readers,
 )
 from . import claim_registry as claims
@@ -105,6 +106,7 @@ MODES = (
     "intent-ordinal",
     "savepoints",
     "barriers",
+    "sync-in-async",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2240,6 +2242,13 @@ def check_source(
             (line, scratch_names.KIND)
             for line in scratch_names.scan_source(source, path)
         )
+    if (
+        python
+        and not is_test
+        and "sync-in-async" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend((line, kind) for line, kind in sync_io_in_async.scan_source(source))
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
             (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
