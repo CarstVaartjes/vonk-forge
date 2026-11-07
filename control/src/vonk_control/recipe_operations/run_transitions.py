@@ -17,11 +17,16 @@ from typing import TYPE_CHECKING
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import RecipeStopPayload, canonical_message
+from vonk_agent_protocol import (
+    RecipeStopPayload,
+    RouteState,
+    RunState,
+    canonical_message,
+)
 
 from ..distributed_recovery import ended_run_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
-from ..models import RecipeInstallation, RecipeRun, RunNode
+from ..models import Job, RecipeInstallation, RecipeRun, RunNode
 from ..recipe_progress import _role_phases, _topology_order
 from ..recipe_stop_payloads import RecipeStopAuthorityError, durable_run_stop_payloads
 from ..stored_json import read_row_column
@@ -41,11 +46,19 @@ def end_unfinished_run(
     request_id: str,
     ordinal: int,
 ) -> bool:
-    """Queue the run's exact Stop under ``ordinal``; True when it was queued.
+    """End an unfinished run: withdraw its route, then stop it or mark it lost.
 
-    Without exact Start authority the run is ended as unknown instead and the
-    result is False.
+    The run becomes ``stopping`` with its exact Stop queued under ``ordinal``
+    (already queued under ``request_id``: left as it is). Without exact Start
+    authority nothing is invented: the run is ended as unknown (``lost``, or
+    ``failed`` once its Sparks are proven to have it gone). True only when this
+    call queued the Stop.
     """
+
+    run.route_state = RouteState.WITHDRAWN
+    if session.scalar(select(Job.id).where(Job.request_id == request_id)):
+        run.state = RunState.STOPPING
+        return False
 
     stop_nodes = tuple(
         session.scalars(
@@ -92,6 +105,7 @@ def end_unfinished_run(
             "claims held until its Sparks report it gone"
         )
         return False
+    run.state = RunState.STOPPING
     stop_node_payloads = tuple(
         (
             run_node.node_id,

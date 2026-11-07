@@ -252,8 +252,6 @@ class TerminalProjectionMixin:
             run = session.get(RecipeRun, owner_id)
             assert run is not None
             if start_failed:
-                run.state = RunState.STOPPING
-                run.route_state = RouteState.WITHDRAWN
                 run.route_error = (
                     f"{recovery_error}; cleanup queued"
                     if recovery_error is not None
@@ -281,7 +279,6 @@ class TerminalProjectionMixin:
                     else _shared_workload_intent(session, job.targets)
                 )
                 if not intent_current:
-                    run.state = RunState.STOPPING if cleanup_ordinal else RunState.LOST
                     run.route_error = (
                         "start failed after a newer workload intent took over; "
                         + (
@@ -290,20 +287,17 @@ class TerminalProjectionMixin:
                             else "cleanup awaits the owning intent"
                         )
                     )
-                if (
-                    not session.scalar(
-                        select(Job.id).where(Job.request_id == cleanup_request_id)
-                    )
-                    and cleanup_ordinal is not None
-                    and end_unfinished_run(
-                        service,
-                        session,
-                        run,
-                        now,
-                        actor=job.actor,
-                        request_id=cleanup_request_id,
-                        ordinal=cleanup_ordinal,
-                    )
+                if cleanup_ordinal is None:
+                    run.state = RunState.LOST
+                    run.route_state = RouteState.WITHDRAWN
+                elif end_unfinished_run(
+                    service,
+                    session,
+                    run,
+                    now,
+                    actor=job.actor,
+                    request_id=cleanup_request_id,
+                    ordinal=cleanup_ordinal,
                 ):
                     cleanup_queued = True
             else:
