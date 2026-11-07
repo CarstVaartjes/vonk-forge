@@ -67,7 +67,6 @@ _NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
 _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
-_MAX_PAGES = 100
 _KEY_ROUTES = [GatewayInferenceRoute.OPENAI.value]
 
 
@@ -748,8 +747,14 @@ class GatewayKeyService:
         return response.status_code, payload
 
     def _gateway_raw_keys(self, target: str | None = None) -> list[_LiteLlmKey]:
+        """Every key, read page by page: bounded by the peer's own total_pages.
+
+        Page 1 states the total; a later page that states another total means
+        the listing changed under the read, and the caller observes it again.
+        """
         keys: list[_LiteLlmKey] = []
-        for page in range(1, _MAX_PAGES + 1):
+
+        def read(page: int) -> int:
             code, payload = self._gateway_request(
                 "GET", "/key/list", params=_KeyListParams(page=page, size=_PAGE_SIZE)
             )
@@ -771,8 +776,12 @@ class GatewayKeyService:
                         ) from error
                     continue
                 keys.append(item)
-            if reply.total_pages is None or page >= reply.total_pages:
-                break
+            return reply.total_pages or 1
+
+        total = read(1)
+        for page in range(2, total + 1):
+            if read(page) != total:
+                raise GatewayKeyError("gateway key list changed while paging")
         return keys
 
     def _gateway_list_keys(self) -> GatewayKeyList:

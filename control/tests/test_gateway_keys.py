@@ -12,6 +12,7 @@ from vonk_agent_protocol import UnknownError
 from vonk_control.auth import Actor
 from vonk_control.gateway_keys import (
     GatewayKeyCreated,
+    GatewayKeyError,
     GatewayKeyService,
     install_gateway_key_routes,
 )
@@ -1198,3 +1199,57 @@ def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
     ]
     assert isinstance(service.create("forbidden"), UnknownError)
     assert "forbidden" not in litellm.keys
+
+
+def _entry(index: int) -> dict:
+    return {
+        "key": f"sk-listed-{index:032d}",
+        "key_alias": f"key-{index:04d}",
+        "models": [],
+        "allowed_routes": ["openai_routes"],
+        "metadata": {"managed_by": "vonk-forge"},
+        "expires": None,
+        "created_at": "2026-09-28T00:00:00Z",
+    }
+
+
+def test_listing_follows_the_peers_pages_past_one_hundred() -> None:
+    litellm = FakeLiteLlm()
+    litellm.keys = {f"key-{i:04d}": _entry(i) for i in range(250)}
+    service = _service(litellm)
+
+    listed = _client(service).get("/api/key")
+
+    assert listed.status_code == 200
+    assert len(listed.json()["keys"]) == 250
+    assert len(service._gateway_raw_keys()) == 250
+    assert service._gateway_exists("key-0249")
+
+
+def test_listing_that_grows_while_paging_ends_typed_and_a_fresh_read_is_admitted():
+    litellm = FakeLiteLlm()
+    litellm.keys = {"only": _entry(1)}
+    healthy = litellm.handle
+    served: list[int] = []
+    growing = [True]
+
+    def handle(request: httpx2.Request) -> httpx2.Response:
+        if growing[0] and request.url.path == "/key/list":
+            page = int(request.url.params["page"])
+            served.append(page)
+            # Every page reports one more page than the last.
+            return httpx2.Response(200, json={"keys": [], "total_pages": page + 1})
+        return healthy(request)
+
+    service = GatewayKeyService(
+        base_url="http://litellm.test",
+        master_key=lambda: MASTER,
+        transport=httpx2.MockTransport(handle),
+    )
+
+    with pytest.raises(GatewayKeyError, match="changed while paging"):
+        service._gateway_raw_keys()
+    assert served == [1, 2]
+
+    growing[0] = False
+    assert [item.key_alias for item in service._gateway_raw_keys()] == ["key-0001"]

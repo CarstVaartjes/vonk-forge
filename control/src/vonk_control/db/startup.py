@@ -45,48 +45,6 @@ def adopt_legacy_rows(connection: Connection) -> None:
         _LOGGER.info("Filled %d stored reference facts", filled)
 
 
-def strip_run_plan_alias(connection: Connection) -> int:
-    """Remove the route name from every stored run plan; the rows changed.
-
-    The route name is ``recipe_runs.alias`` alone.  Run plans written before
-    that carry a second copy that the strict plan contract refuses.  The
-    statement is idempotent and covers every row, history included, so no
-    reader accepts the old shape.  Digests are never recomputed: the stored
-    ``plan_digest`` is an admission token that the Sparks' container labels and
-    stop payloads carry.
-
-    Startup never fails on one row (that would leave no Controller API): a row
-    that cannot be rewritten is logged and stays as it is (a busy row retries
-    startup), and the typed
-    unreadable-run path retains its workload and reports it.
-    """
-    stripped = 0
-    for (run_id,) in connection.execute(
-        # Candidates by text: no jsonb cast outside a row's savepoint, so a plan
-        # that jsonb rejects cannot abort startup.
-        text("SELECT id FROM recipe_runs WHERE plan::text LIKE '%\"alias\"%'")
-    ).all():
-        try:
-            with connection.begin_nested():
-                stripped += connection.execute(
-                    text(
-                        "UPDATE recipe_runs SET plan = (plan::jsonb - 'alias')::json "
-                        "WHERE id = :id AND jsonb_exists(plan::jsonb, 'alias')"
-                    ),
-                    {"id": run_id},
-                ).rowcount
-        except SQLAlchemyError as error:
-            if _database_sqlstate(error) == "55P03":
-                raise _DatabaseStartupContention(
-                    "A run row is busy; startup will retry"
-                ) from None
-            _LOGGER.exception(
-                "Run %s keeps its stored route name; it is reported as unreadable",
-                run_id,
-            )
-    return stripped
-
-
 def initialize_database(
     database_url: str,
     *,
@@ -124,12 +82,6 @@ def initialize_database(
                     try:
                         with lock_connection.begin():
                             verify_schema_is_current(lock_connection)
-                            stripped = strip_run_plan_alias(lock_connection)
-                            if stripped:
-                                _LOGGER.info(
-                                    "Removed the route name from %d stored run plans",
-                                    stripped,
-                                )
                             # Adoption is derived bookkeeping, not schema authority.
                             # A savepoint keeps a damaged historical row from undoing
                             # current schema reconciliation; readers heal rows lazily.

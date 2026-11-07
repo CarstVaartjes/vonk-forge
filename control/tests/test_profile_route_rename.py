@@ -376,10 +376,9 @@ def test_crashed_rank_recovery_authority_holds_after_a_rename(
 
 
 @pytest.mark.slow(60)
-def test_adopting_old_run_plans_keeps_digests_and_routes(
+def test_new_run_plans_carry_no_alias_and_keep_digests_and_routes(
     tmp_path, postgres_engine
 ) -> None:
-    from vonk_control.db.startup import strip_run_plan_alias
     from vonk_control.recipe_execution_contract import RecipeExecutionContractError
 
     world = build_world(tmp_path, postgres_engine)
@@ -405,26 +404,15 @@ def test_adopting_old_run_plans_keeps_digests_and_routes(
                 return (run.plan_digest, candidate.state.digest, reservations)
 
         known = snapshot()
-        # A run written before the change carries the route name in its plan.
-        with postgres_engine.begin() as connection:
-            connection.exec_driver_sql(
-                "UPDATE recipe_runs SET plan = (plan::jsonb "
-                "|| jsonb_build_object('alias', alias))::json"
-            )
-        with world.sessions() as session:
-            run = session.get(RecipeRun, before.id)
-            assert run is not None and run.plan["alias"] == "sweep-alias"
-            with pytest.raises(RecipeExecutionContractError):
-                parse_stored_run_plan(run.plan)
-
-        with postgres_engine.begin() as connection:
-            assert strip_run_plan_alias(connection) == 1
-            assert strip_run_plan_alias(connection) == 0
+        # A new run's plan never carries the route name, and the strict plan
+        # contract refuses one that does.
         with world.sessions() as session:
             run = session.get(RecipeRun, before.id)
             assert run is not None and "alias" not in run.plan
             parse_stored_run_plan(run.plan)
-        # Digests are frozen: the strip recomputes nothing, republishes nothing.
+            with pytest.raises(RecipeExecutionContractError):
+                parse_stored_run_plan({**run.plan, "alias": run.alias})
+        # Digests are frozen: nothing recomputes or republishes.
         assert snapshot() == known
         bundles = len(world.publisher.aliases)
         for _ in range(3):
@@ -621,154 +609,5 @@ def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
             assert read_wait(run) is None and run.route_error is None
 
         _recover(world, sim, before.id)
-    finally:
-        world.close()
-
-
-@pytest.mark.slow(60)
-def test_the_new_code_converges_to_the_normal_route_after_the_old_worker_flipped_it(
-    tmp_path, postgres_engine
-) -> None:
-    from vonk_control.db.startup import strip_run_plan_alias
-
-    world = build_world(tmp_path, postgres_engine)
-    try:
-        sim = Simulation(world, seed=0)
-        before = _identical_runs_loaded(world, sim, "sweep-alias")
-        with world.sessions() as session:
-            normal = world.routes.candidate_in_session(
-                session,
-                include_run_id=None,
-                exclude_run_ids=frozenset(),
-                lock=False,
-                served=ServedModelInfo(),
-            ).state.digest
-        # The old worker could not read the stripped plan: it republished the
-        # run from its accepted projection and left its reason.
-        with world.sessions.begin() as session:
-            run = session.get(RecipeRun, before.id)
-            assert run is not None
-            run.route_digest = "f" * 64
-            run.route_error = "stored recipe run plan is invalid"
-        with postgres_engine.begin() as connection:
-            strip_run_plan_alias(connection)
-        bundles = len(world.publisher.aliases)
-        for _ in range(12):
-            sim.round()
-        # The new code publishes the normal bundle, and from then on every
-        # bundle is that one: no flip back and forth.
-        added = world.publisher.aliases[bundles:]
-        assert added and set(added) == {("sweep-alias",)}
-        with world.sessions() as session:
-            run = session.get(RecipeRun, before.id)
-            assert run is not None and run.route_state == "published"
-            assert run.route_error is None
-            assert (
-                world.routes.candidate_in_session(
-                    session,
-                    include_run_id=None,
-                    exclude_run_ids=frozenset(),
-                    lock=False,
-                    served=ServedModelInfo(),
-                ).state.digest
-                == normal
-            )
-            assert run.route_digest == normal
-    finally:
-        world.close()
-
-
-@pytest.mark.slow(60)
-def test_startup_strips_old_run_plans_and_survives_a_row_it_cannot_strip(
-    tmp_path, postgres_engine
-) -> None:
-    from vonk_control.db import initialize_database
-    from vonk_control.distributed_recovery.common import _unreadable_run_ids
-
-    url = postgres_engine.url.render_as_string(hide_password=False)
-    initialize_database(url)
-    world = build_world(tmp_path, postgres_engine)
-    try:
-        sim = Simulation(world, seed=0)
-        before = _identical_runs_loaded(world, sim, "sweep-alias")
-        known = before.plan_digest
-
-        def old_shape() -> None:
-            with postgres_engine.begin() as connection:
-                connection.exec_driver_sql(
-                    "UPDATE recipe_runs SET plan = (plan::jsonb "
-                    "|| jsonb_build_object('alias', alias))::json"
-                )
-
-        def plan_and_unreadable() -> tuple[dict[str, object], list[str]]:
-            with world.sessions() as session:
-                run = session.get(RecipeRun, before.id)
-                assert run is not None
-                return dict(run.plan), _unreadable_run_ids(session)
-
-        old_shape()
-        assert plan_and_unreadable()[1] == [before.id]
-        initialize_database(url)
-        plan, unreadable = plan_and_unreadable()
-        assert "alias" not in plan and unreadable == []
-        with world.sessions() as session:
-            run = session.get(RecipeRun, before.id)
-            assert run is not None and run.plan_digest == known
-
-        # A row that cannot be rewritten does not take the Controller down: it
-        # stays as it is and the typed unreadable-run path reports it.
-        old_shape()
-        with postgres_engine.begin() as connection:
-            connection.exec_driver_sql(
-                "CREATE FUNCTION refuse_plan_update() RETURNS trigger AS $$ "
-                "BEGIN RAISE EXCEPTION 'row is locked down'; END $$ LANGUAGE plpgsql"
-            )
-            connection.exec_driver_sql(
-                "CREATE TRIGGER refuse_plan_update BEFORE UPDATE OF plan "
-                "ON recipe_runs FOR EACH ROW EXECUTE FUNCTION refuse_plan_update()"
-            )
-        initialize_database(url)
-        plan, unreadable = plan_and_unreadable()
-        assert plan["alias"] == "sweep-alias" and unreadable == [before.id]
-    finally:
-        world.close()
-
-
-@pytest.mark.slow(60)
-def test_the_strip_survives_a_plan_jsonb_rejects_and_retries_a_busy_row(
-    tmp_path, postgres_engine
-) -> None:
-    from sqlalchemy import text
-    from vonk_control.db.connections import _DatabaseStartupContention
-    from vonk_control.db.startup import strip_run_plan_alias
-
-    world = build_world(tmp_path, postgres_engine)
-    try:
-        sim = Simulation(world, seed=0)
-        before = _identical_runs_loaded(world, sim, "sweep-alias")
-        # Valid json, but not jsonb (a NUL character): the row is left as it is.
-        with postgres_engine.begin() as connection:
-            connection.exec_driver_sql(
-                "UPDATE recipe_runs SET plan = "
-                '\'{"alias": "x", "note": "\\u0000"}\'::json'
-            )
-        with postgres_engine.begin() as connection:
-            assert strip_run_plan_alias(connection) == 0
-        with world.sessions() as session:
-            run = session.get(RecipeRun, before.id)
-            assert run is not None and run.plan["alias"] == "x"
-
-        # A row another transaction holds is startup contention, not a skipped row.
-        with postgres_engine.begin() as connection:
-            connection.exec_driver_sql(
-                'UPDATE recipe_runs SET plan = \'{"alias": "x"}\'::json'
-            )
-        with postgres_engine.connect() as holder:
-            holder.execute(text("SELECT id FROM recipe_runs FOR UPDATE"))
-            with postgres_engine.connect() as connection:
-                connection.execute(text("SET lock_timeout = '200ms'"))
-                with pytest.raises(_DatabaseStartupContention):
-                    strip_run_plan_alias(connection)
-            holder.rollback()
     finally:
         world.close()

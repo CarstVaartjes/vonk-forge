@@ -4623,6 +4623,124 @@ def test_run_title_resolution_reads_the_model_library_in_pages_not_per_model() -
     assert {call[1] for call in model_reads} == {"/api/model/library"}
 
 
+class _PagedClient(FakeClient):
+    """A library peer answering each page from ``page_for(call_number)``."""
+
+    def __init__(self, page_for, on_request=lambda: None):
+        super().__init__({})
+        self.page_for = page_for
+        self.on_request = on_request
+        self.queries: list[dict[str, object]] = []
+
+    def request(self, method, path, payload=None, **kwargs):
+        self.on_request()
+        self.calls.append((method, path, payload, kwargs.get("query")))
+        self.queries.append(dict(kwargs.get("query") or {}))
+        return self.page_for(len(self.queries))
+
+
+def _read_pages(client, deadline=1e9):
+    return list(
+        controller_cli.selection._library_pages(
+            cast(controller_cli.ControllerClient, client),
+            "/api/model/library",
+            "models",
+            {"sort": "name"},
+            deadline=deadline,
+        )
+    )
+
+
+def test_library_pages_follow_cursors_to_the_last_page_with_the_shared_page_size():
+    pages = {
+        None: {"models": [1], "next_cursor": "a"},
+        "a": {"models": [2], "next_cursor": "b"},
+        "b": {"models": [3], "next_cursor": None},
+    }
+    client = _PagedClient(lambda n: pages[client.queries[-1].get("cursor")])
+    assert _read_pages(client) == [[1], [2], [3]]
+    assert {query["limit"] for query in client.queries} == {512}
+    assert [query.get("cursor") for query in client.queries] == [None, "a", "b"]
+
+
+@pytest.mark.parametrize(
+    ("second", "message"),
+    [
+        ({"models": [], "next_cursor": "a"}, "cursor repeated"),
+        ({"models": [], "next_cursor": ""}, "invalid cursor"),
+        ({"models": [], "next_cursor": 7}, "invalid cursor"),
+        ({"items": [], "next_cursor": None}, "does not contain models"),
+        ({"models": {}, "next_cursor": None}, "does not contain models"),
+    ],
+)
+def test_library_pages_refuse_a_malformed_page(second, message):
+    first = {"models": [], "next_cursor": "a"}
+    client = _PagedClient(lambda n: first if n == 1 else second)
+    with pytest.raises(ControlMalformedResponse, match=message):
+        _read_pages(client)
+
+
+def test_runaway_library_cursor_ends_at_the_deadline_and_a_fresh_resolve_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Clock:
+        now = 0.0
+
+        def monotonic(self) -> float:
+            return self.now
+
+    clock = Clock()
+    monkeypatch.setattr(controller_cli.selection, "time", clock)
+
+    def tick() -> None:
+        clock.now += 1.0
+
+    # Every page carries a fresh cursor: only the deadline can end the read.
+    runaway = _PagedClient(
+        lambda n: {"models": [], "next_cursor": f"fresh-{n}"}, on_request=tick
+    )
+    with pytest.raises(
+        ControlMalformedResponse, match="selection observation deadline reached"
+    ):
+        controller_cli.run._model_titles(
+            cast(controller_cli.ControllerClient, runaway), deadline=30.0
+        )
+    assert (
+        len(runaway.calls) == 30
+    )  # one page per injected second, ended by the deadline
+
+    # The expired read leaves nothing behind: a fresh resolve is admitted.
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    fresh = FakeClient(
+        {
+            ("GET", "/api/model/library"): {
+                "models": [{"selector": "Qwen/qwen3", "model_display": display}],
+                "next_cursor": None,
+            },
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        "vonk-forge/qwen-code", "Qwen Code", model_selector="Qwen/qwen3"
+                    )
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, fresh),
+            "vonk-forge/qwen-code",
+            deadline=clock.now + 30,
+        )
+        == "vonk-forge/qwen-code"
+    )
+
+
 def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
     args = cli._parser().parse_args(
         ["--profile", "3", "run", "Qwen Code", "--spark", "Atlas", "--yes"]

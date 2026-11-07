@@ -3810,3 +3810,36 @@ def test_edit_inside_an_existing_worker_is_flagged():
 )
 def test_future_worker_that_cannot_hang_its_waiter_is_allowed(body):
     assert not _future_worker_hits(body)
+
+
+_PAGE_CEILINGS = (
+    "def keys(client):\n"
+    "    for page in range(1, _MAX_PAGES + 1):\n"
+    "        client.request('GET', '/key/list', page=page)\n"
+    "\n"
+    "\n"
+    "def repair(store):\n"
+    "    for _ in range(_MAX_REPAIRS):\n"
+    "        store.repair()\n"
+    "\n"
+    "\n"
+    "def hops(client):\n"
+    "    for hop in range(_MAX_HTTP_REDIRECTS + 1):  # item-count-limit: RFC 9110\n"
+    "        client.get('/x')\n"
+    "\n"
+    "\n"
+    "def small(client):\n"
+    "    for attempt in range(3):\n"
+    "        client.request('GET', '/x')\n"
+)
+
+
+def test_a_page_count_ceiling_on_a_fetch_loop_is_flagged() -> None:
+    path = "control/src/vonk_control/gateway_keys.py"
+    assert check_source(path, _PAGE_CEILINGS, {2}, modes=("item-counts",))
+    # No fetch in the body, a stated protocol limit, and a literal retry count.
+    assert not check_source(path, _PAGE_CEILINGS, {7}, modes=("item-counts",))
+    assert not check_source(path, _PAGE_CEILINGS, {12}, modes=("item-counts",))
+    assert not check_source(path, _PAGE_CEILINGS, {17}, modes=("item-counts",))
+    # Old lines stay quiet.
+    assert not check_source(path, _PAGE_CEILINGS, {1, 3}, modes=("item-counts",))
