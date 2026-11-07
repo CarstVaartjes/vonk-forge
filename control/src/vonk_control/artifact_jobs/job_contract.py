@@ -19,6 +19,7 @@ from functools import partial
 from pydantic import Field, model_validator
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import RunState
+from vonk_forge_contracts import EndpointAlias
 
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..library_contract import UuidId
@@ -70,7 +71,7 @@ class ArtifactJobContractResponse(ArtifactJobContractModel):
     #: The run the key resolved to; absent when read by revision.
     run_id: UuidId | None = None
     #: The route name that run serves; absent when read by revision.
-    alias: str | None = Field(default=None, min_length=1, max_length=64)
+    alias: EndpointAlias | None = None
     #: The run's observed state; absent when read by revision.
     run_state: RunState | None = None
     contract_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
