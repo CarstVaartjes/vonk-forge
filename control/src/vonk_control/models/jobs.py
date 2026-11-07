@@ -32,7 +32,7 @@ class Job(Base):
         CheckConstraint(
             _state_in(LifecycleSubject.JOB, *LifecycleState), name="ck_jobs_state"
         ),
-        Index("ix_jobs_owner", "owner_kind", "owner_id", "state"),
+        Index("ix_jobs_owner", "owner_id", "owner_kind", "state"),
     )
     wait_evidence: Mapped[WaitEvidence | Residue | None] = wait_evidence_column(
         __tablename__

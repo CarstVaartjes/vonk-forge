@@ -3743,3 +3743,26 @@ def test_rust_git_is_flagged_only_inside_cfg_test_items() -> None:
     path = "control/src/example.rs"
     assert check_source(path, source, {4}, modes=_GIT_FREE)
     assert not check_source(path, source, {1}, modes=_GIT_FREE)
+
+
+_OWNER_PATH = "control/src/vonk_control/recipe_operations/example.py"
+
+
+def _job_owner_payload(source: str, added: set[int]) -> list[str]:
+    return check_source(_OWNER_PATH, source, added, modes=("job-owner-payload",))
+
+
+@pytest.mark.parametrize("key", ["owner_kind", "owner_id"])
+def test_a_job_owner_extracted_from_the_payload_in_sql_is_flagged(key: str) -> None:
+    source = f'q = select(Job).where(Job.payload["{key}"].as_string() == run.id)\n'
+    assert _job_owner_payload(source, {1})
+    assert not _job_owner_payload(source, set())
+
+
+def test_the_owner_columns_and_other_payload_keys_are_not_flagged() -> None:
+    source = (
+        "q = select(Job).where(Job.owner_id == run.id)\n"
+        'r = select(Job).where(Job.payload["run_id"].as_string() == run.id)\n'
+        'owner = job.payload.get("owner_id")\n'
+    )
+    assert not _job_owner_payload(source, {1, 2, 3})

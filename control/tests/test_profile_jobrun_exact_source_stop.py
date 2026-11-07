@@ -53,7 +53,11 @@ def _damage(sessions, artifact_job_id: str, damage: str) -> str:
                 # The job's link moves to another order no Spark was handed.
                 columns = Job.__table__.columns
                 other = Job(
-                    **{column.name: getattr(order, column.name) for column in columns}
+                    **{
+                        column.name: getattr(order, column.name)
+                        for column in columns
+                        if column.computed is None
+                    }
                 )
                 other.id = str(uuid.uuid4())
                 other.request_id = str(uuid.uuid4())

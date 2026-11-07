@@ -612,7 +612,7 @@ class RunAdmissionService:
             # A planned Stop never discounts an offline rank's unreconciled
             # effects, even after foreground completion released its other ranks.
             deferred_ranks = {
-                (job.payload.get("owner_id"), node_id)
+                (job.owner_id, node_id)
                 for job in session.scalars(
                     select(Job).where(
                         Job.kind == "recipe.stop",

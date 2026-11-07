@@ -335,13 +335,15 @@ class RecipeOperationWorker:
                 # End only this owner's route-observation job. No rank stop or
                 # failed workload is inferred from lost recovery metadata.
                 for job in session.scalars(
-                    select(Job).where(Job.kind == AgentOperation.RECIPE_START)
+                    select(Job).where(
+                        Job.kind == AgentOperation.RECIPE_START,
+                        Job.owner_id == run.id,
+                    )
                 ):
                     # A job that already ended keeps its outcome: the run's
                     # route state and error are the evidence of the failure.
                     if (
                         isinstance(job.payload, Mapping)
-                        and job.payload.get("owner_id") == run.id
                         and job.payload.get("recovery") is not None
                         and not job_states.means(job.state, *TERMINAL_LIFECYCLE_STATES)
                     ):

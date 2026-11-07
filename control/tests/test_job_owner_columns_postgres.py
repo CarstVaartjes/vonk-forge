@@ -69,7 +69,11 @@ def test_startup_adds_the_columns_to_jobs_written_before_them(postgres_engine):
         reconcile_schema(connection)  # a second startup changes nothing
 
 
-def test_an_owner_lookup_uses_the_index(postgres_engine):
+@pytest.mark.parametrize(
+    "predicate",
+    ["owner_kind = 'run' AND owner_id = 'run-77'", "owner_id = 'run-77'"],
+)
+def test_an_owner_lookup_uses_the_index(postgres_engine, predicate):
     with postgres_engine.begin() as connection:
         Base.metadata.create_all(connection)
         connection.execute(
@@ -87,10 +91,7 @@ def test_an_owner_lookup_uses_the_index(postgres_engine):
         plan = "\n".join(
             row[0]
             for row in connection.execute(
-                text(
-                    "EXPLAIN SELECT id FROM jobs WHERE owner_kind = 'run' "
-                    "AND owner_id = 'run-77'"
-                )
+                text(f"EXPLAIN SELECT id FROM jobs WHERE {predicate}")
             )
         )
     assert "ix_jobs_owner" in plan, plan
