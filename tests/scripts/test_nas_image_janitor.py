@@ -650,3 +650,57 @@ def test_rendered_janitor_starts_with_a_read_only_root(tmp_path: Path) -> None:
             check=True,
             timeout=60,
         )
+
+
+class Retiring(janitor.Docker):
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        self.rows = rows
+        self.calls: list[tuple[str, str]] = []
+
+    def request(self, method: str, path: str, body: Any = None) -> Any:
+        if method == "GET":
+            return [dict(row) for row in self.rows]
+        self.calls.append((method, path))
+        return None
+
+
+def labelled(identity: str, service: str, **extra: str) -> dict[str, Any]:
+    return {
+        "Id": identity,
+        "Names": [f"/vonk-forge-{service}-1"],
+        "Labels": {
+            janitor.PROJECT_LABEL: "vonk-forge",
+            janitor.SERVICE_LABEL: service,
+            **extra,
+        },
+    }
+
+
+def test_container_of_a_service_the_bundle_dropped_is_stopped_and_removed(
+    tmp_path: Path,
+) -> None:
+    """Catches an upgrade leaving the dropped service's containers running."""
+    daemon = Retiring(
+        [
+            labelled("a1", "caddy"),
+            labelled("b2", "hermes-agent"),
+            labelled("c3", "hermes-litellm-key-provisioner"),
+            labelled("d4", "hermes-agent", **{janitor.ONEOFF_LABEL: "True"}),
+            {"Id": "e5", "Names": ["/unlabelled"], "Labels": {}},
+        ]
+    )
+    reconciler = janitor.Reconciler(daemon, tmp_path / "repairing.json")
+    reconciler.tick("vonk-forge", frozenset({"caddy", "image-janitor"}))
+    assert daemon.calls == [
+        ("POST", "/containers/b2/stop?t=30"),
+        ("DELETE", "/containers/b2?v=false"),
+        ("POST", "/containers/c3/stop?t=30"),
+        ("DELETE", "/containers/c3?v=false"),
+    ]
+
+
+def test_without_the_bundle_service_list_nothing_is_retired(tmp_path: Path) -> None:
+    """Catches removing containers when the janitor does not know the bundle."""
+    daemon = Retiring([labelled("b2", "hermes-agent")])
+    janitor.Reconciler(daemon, tmp_path / "repairing.json").tick("vonk-forge")
+    assert daemon.calls == []

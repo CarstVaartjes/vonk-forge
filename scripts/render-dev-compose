@@ -42,6 +42,7 @@ VONK_REPOSITORY_PREFIX = "ghcr.io/carstvaartjes/vonk-forge-"
 # digest of the template it was built with, so the running Controller can tell
 # that the NAS Compose file is older than its release.
 COMPOSE_BUNDLE_DIGEST = "VONK_COMPOSE_BUNDLE_DIGEST"
+COMPOSE_SERVICES = "VONK_COMPOSE_SERVICES"
 
 
 def channel_image(image: str, channel: str) -> str:
@@ -176,6 +177,11 @@ def _stamp_bundle_digest(services: dict[str, dict], digest: str) -> None:
         if not isinstance(environment, dict):
             raise TypeError(f"Compose service environment is invalid: {name}")
         environment[COMPOSE_BUNDLE_DIGEST] = digest
+    # The janitor retires project containers of services this bundle no longer
+    # defines (an upgrade does not remove them).
+    services["image-janitor"]["environment"] = {
+        COMPOSE_SERVICES: ",".join(sorted(services))
+    }
 
 
 def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object:

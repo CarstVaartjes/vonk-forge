@@ -89,6 +89,10 @@ def test_render_produces_a_single_self_contained_compose_file(
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
+    # The janitor learns the bundle's services, to retire those an upgrade drops.
+    assert document["services"]["image-janitor"]["environment"] == {
+        "VONK_COMPOSE_SERVICES": ",".join(sorted(document["services"]))
+    }
     # Runtime configuration ships in the Controller image instead.
     assert "configs" not in document
     assert not any(
@@ -303,3 +307,22 @@ def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "immutable published development image" in result.stderr
+
+
+def test_a_hermes_enabled_install_upgrades_to_a_compose_without_hermes(
+    tmp_path: Path,
+) -> None:
+    """Catches a stale `hermes` profile or secret still shaping the upgraded bundle."""
+    from vonk_nas_setup.compose import resolve_compose
+
+    output = tmp_path / "docker-compose.yaml"
+    assert _run_renderer(output).returncode == 0
+    text = output.read_text(encoding="utf-8")
+    old_env = {"COMPOSE_PROFILES": "secure-remote,hermes"}
+    resolved = yaml.safe_load(resolve_compose(text, old_env))
+    for section in ("services", "secrets", "networks", "volumes"):
+        assert not [name for name in resolved.get(section, {}) if "hermes" in name]
+    # The unknown profile member changes nothing against a plain secure-remote.
+    assert resolved == yaml.safe_load(
+        resolve_compose(text, {"COMPOSE_PROFILES": "secure-remote"})
+    )

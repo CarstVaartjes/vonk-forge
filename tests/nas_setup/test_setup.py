@@ -280,3 +280,28 @@ def test_canonical_payload_rejects_unsafe_effects_before_setup(
             )
         with pytest.raises(ValueError):
             NasInstallTemplate.model_validate_json(json.dumps(document))
+
+
+def test_upgrade_of_a_hermes_enabled_install_keeps_its_profile_and_ignores_its_secrets(
+    installed: Path, template: NasInstallTemplate
+) -> None:
+    """Catches the removed Hermes profile or leftover secrets failing an upgrade."""
+    env = parse_environment(installed / ".env")
+    env["COMPOSE_PROFILES"] = "secure-remote,hermes"
+    (installed / ".env").write_text(
+        "".join(f"{name}={value}\n" for name, value in env.items())
+    )
+    (installed / "secrets/hermes-api-key").write_text("leftover\n")
+    before = credentials(installed)
+    result = prepare(
+        template, installed.parent, PromptIo(io.StringIO("")), upgrade=True
+    )
+    assert result.dropped_environment == ()
+    assert parse_environment(installed / ".env")["COMPOSE_PROFILES"] == (
+        "secure-remote,hermes"
+    )
+    assert {name: before[name] for name in before if "hermes" not in name} == {
+        name: value
+        for name, value in credentials(installed).items()
+        if "hermes" not in name
+    }
