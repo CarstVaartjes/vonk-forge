@@ -303,6 +303,10 @@ class LiteLlmModelInfo(_ConfigModel):
                 "an audio mode has no token limits and a text mode requires "
                 "max_input_tokens"
             )
+        if audio and (
+            self.max_tokens is not None or self.max_output_tokens is not None
+        ):
+            raise ValueError("an audio mode has no token limits")
         if (self.vonk_audio_transcription is not None) != (
             self.mode == "audio_transcription"
         ) or (self.vonk_audio_speech is not None) != (self.mode == "audio_speech"):
