@@ -102,6 +102,7 @@ def _model_entry(entry: dict[str, Any]) -> CatalogModelEntry:
     return CatalogModelEntry(
         dict(entry["document"]),
         _display(entry, read_model_display, "model_display_of"),
+        read_model(entry["document"]).identity,
     )
 
 

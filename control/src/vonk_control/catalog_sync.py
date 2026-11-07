@@ -800,7 +800,11 @@ class ManagedRecipeCatalogSyncService:
         # document's problem; the next sync applies it again.
         recipe_uris = {(item.publisher, item.slug): item.uri for item in snapshot.items}
         for display, error in self._catalog.apply_displays(
-            [entry.display for entry in snapshot.catalog_entities]
+            [
+                entry.display
+                for entry in snapshot.catalog_entities
+                if entry.display is not None
+            ]
             + [item.display for item in snapshot.items]
         ):
             self._record_problem_values(
@@ -829,8 +833,8 @@ class ManagedRecipeCatalogSyncService:
                 + [
                     (
                         RunSwitchReasonScopeName.MODEL,
-                        entry.display.identity.publisher,
-                        entry.display.identity.slug,
+                        entry.identity.publisher,
+                        entry.identity.slug,
                     )
                     for entry in snapshot.catalog_entities
                 ]
@@ -894,6 +898,10 @@ class ManagedRecipeCatalogSyncService:
         result.state = (
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
+        # An unreadable display is a note, decided after the state: it neither
+        # makes the sync partial nor costs the unchanged-tick fast path.
+        room = max(0, _MAX_RESULT_ITEMS - len(result.problems))
+        result.problems.extend(snapshot.display_notes[:room])
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
