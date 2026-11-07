@@ -610,3 +610,60 @@ def test_unaddable_column_aborts_startup_instead_of_booting_without_it(
     monkeypatch.setattr(Operations, "add_column", timed_out)
     with pytest.raises(RuntimeError, match="startup aborts"):
         initialize_database(postgres_engine.url.render_as_string(hide_password=False))
+
+
+def test_column_add_blocked_by_a_lock_heals_when_the_lock_clears(
+    postgres_engine: Engine,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Catches a lock-blocked column add that is skipped or never retried."""
+    from sqlalchemy import event
+
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    initialize_database(url)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats DROP COLUMN running_step"
+        )
+
+    build_engine = startup_owner.build_engine
+    faults: list[str | None] = []
+    holder = postgres_engine.connect()
+
+    def bounded_engine(database_url: str) -> Engine:
+        engine = build_engine(database_url)
+
+        @event.listens_for(engine, "connect")
+        def lock_budget(connection, _record):
+            cursor = connection.cursor()
+            cursor.execute("SET lock_timeout = '100ms'")
+            cursor.close()
+
+        @event.listens_for(engine, "handle_error")
+        def release_after_first_fault(context):
+            if getattr(context.original_exception, "sqlstate", None) == "55P03":
+                faults.append(context.statement)
+                holder.rollback()  # the blocker goes away; the retry succeeds
+
+        return engine
+
+    try:
+        holder.exec_driver_sql(
+            "LOCK TABLE control_process_heartbeats IN ACCESS EXCLUSIVE MODE"
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(startup_owner, "build_engine", bounded_engine)
+            initialize_database(url)
+    finally:
+        holder.close()
+
+    assert faults, "the add was never blocked, so the retry was not exercised"
+    with postgres_engine.connect() as connection:
+        columns = {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = 'control_process_heartbeats'"
+            )
+        }
+    assert "running_step" in columns
