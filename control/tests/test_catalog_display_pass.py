@@ -237,8 +237,8 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
 ) -> None:
     index = copy.deepcopy(world.index)
     shown = copy.deepcopy(index["catalog_entities"][0]["display"])
-    # A capability name a later minor added: this contract cannot read it.
-    index["catalog_entities"][0]["display"]["capabilities"] = ["not-yet-known"]
+    # A display this contract cannot read (here: one naming another document).
+    index["catalog_entities"][0]["display"]["identity"]["slug"] = "another-model"
     world.release.publish(index, world.packages)
 
     first = world.reader.list()
@@ -323,7 +323,8 @@ def test_a_persisted_snapshot_without_display_is_problems_only_until_the_next_fe
     snapshot = restarted.list()
     result = world.sync(restarted)
 
-    assert snapshot.items == () and snapshot.catalog_entities == ()
+    assert snapshot.items == ()
+    assert [entry.display for entry in snapshot.catalog_entities] == [None]
     assert len(snapshot.problems) == 2
     assert result.withdrawn_count == 0
     assert world.revisions() == before
