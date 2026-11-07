@@ -28,7 +28,6 @@ WAIT_DEADLINE_MODULES = {
     "vonk_control.agent_jobs.claim_notes",
     "vonk_control.fleet_profiles.selection",
     "vonk_control.db.connections",
-    "vonk_control.gateway_keys",
 }
 
 

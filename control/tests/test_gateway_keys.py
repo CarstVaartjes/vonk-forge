@@ -9,7 +9,6 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from vonk_agent_protocol import UnknownError
-from vonk_control import gateway_keys
 from vonk_control.auth import Actor
 from vonk_control.gateway_keys import (
     GatewayKeyCreated,
@@ -1227,34 +1226,30 @@ def test_listing_follows_the_peers_pages_past_one_hundred() -> None:
     assert service._gateway_exists("key-0249")
 
 
-def test_runaway_page_count_ends_at_the_deadline_and_a_fresh_read_is_admitted(
-    monkeypatch,
-) -> None:
+def test_listing_that_grows_while_paging_ends_typed_and_a_fresh_read_is_admitted():
     litellm = FakeLiteLlm()
     litellm.keys = {"only": _entry(1)}
-    served: list[int] = []
     healthy = litellm.handle
-    runaway = [True]
-    clock = [0.0]
+    served: list[int] = []
+    growing = [True]
 
     def handle(request: httpx2.Request) -> httpx2.Response:
-        if runaway[0] and request.url.path == "/key/list":
+        if growing[0] and request.url.path == "/key/list":
             page = int(request.url.params["page"])
             served.append(page)
-            clock[0] += 1.0  # every page costs one second of the injected clock
+            # Every page reports one more page than the last.
             return httpx2.Response(200, json={"keys": [], "total_pages": page + 1})
         return healthy(request)
 
-    monkeypatch.setattr(gateway_keys, "_monotonic", lambda: clock[0])
     service = GatewayKeyService(
         base_url="http://litellm.test",
         master_key=lambda: MASTER,
         transport=httpx2.MockTransport(handle),
     )
 
-    with pytest.raises(GatewayKeyError, match="observation deadline reached"):
+    with pytest.raises(GatewayKeyError, match="changed while paging"):
         service._gateway_raw_keys()
-    assert len(served) == int(gateway_keys._LIST_DEADLINE_SECONDS)
+    assert served == [1, 2]
 
-    runaway[0] = False
+    growing[0] = False
     assert [item.key_alias for item in service._gateway_raw_keys()] == ["key-0001"]

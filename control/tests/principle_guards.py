@@ -204,7 +204,18 @@ _WAITING = re.compile(
 )
 
 
-def bounded_loop(node: ast.While) -> bool:
+def endless_for(node: ast.For) -> bool:
+    """``for ... in itertools.count(...)`` / ``iter(callable, sentinel)``: a ``while True``."""
+    call = node.iter
+    if not isinstance(call, ast.Call):
+        return False
+    name = ast.unparse(call.func)
+    return name in {"itertools.count", "count", "itertools.repeat", "repeat"} or (
+        name == "iter" and len(call.args) == 2
+    )
+
+
+def bounded_loop(node: ast.While | ast.For) -> bool:
     """A wait loop is bounded only by a stall window, never a fixed deadline.
 
     A loop that neither sleeps, blocks nor reads a clock (a parser, a walk
@@ -212,10 +223,15 @@ def bounded_loop(node: ast.While) -> bool:
     is. In-request retries take
     ``bounded_attempts`` (a ``for`` loop), not a ``while``.
     """
-    tests = [node.test] + [n.test for n in local_nodes(node) if isinstance(n, ast.If)]
+    own = [node.test] if isinstance(node, ast.While) else []
+    tests = own + [n.test for n in local_nodes(node) if isinstance(n, ast.If)]
     if any(_STALL_BOUND.search(ast.unparse(test)) for test in tests):
         return True
-    forever = isinstance(node.test, ast.Constant) and bool(node.test.value)
+    forever = (
+        isinstance(node.test, ast.Constant) and bool(node.test.value)
+        if isinstance(node, ast.While)
+        else True
+    )
     return not forever and not _WAITING.search(ast.unparse(node))
 
 
@@ -608,7 +624,7 @@ def scan_source(
     source: str, *, path: str, mode: str, tree: ast.Module | None = None
 ) -> list[Site]:
     candidates = {
-        "waits": r"\b(?:while|subprocess|urllib|httpx2?)\b|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(|deadline|timedelta|\w_(?:at|since)\b",
+        "waits": r"\b(?:while|subprocess|urllib|httpx2?)\b|\bin\s+(?:itertools\.)?(?:count|repeat|iter)\s*\(|\b(?:run|call|check_call|check_output|urlopen|wait|communicate|join|poll)\s*\(|deadline|timedelta|\w_(?:at|since)\b",
         "reads": r"\.(?:get|route|api_route)\s*\(",
         "tests": r"\bassert\b|\bdef\s+test_",
         "raises": r"\braise\b",
@@ -894,6 +910,11 @@ def scan_source(
                 and _calls_observation_deadline(node, self.receiver)
             )
             if mode == "waits" and not bounded_loop(node) and not helper_bound:
+                self.add(node, "loop-without-deadline")
+            self.generic_visit(node)
+
+        def visit_For(self, node: ast.For):
+            if mode == "waits" and endless_for(node) and not bounded_loop(node):
                 self.add(node, "loop-without-deadline")
             self.generic_visit(node)
 
