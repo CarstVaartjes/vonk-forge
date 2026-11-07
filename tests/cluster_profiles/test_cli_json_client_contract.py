@@ -33,6 +33,7 @@ from cluster_profiles.cli_json_contract import (
     document_kind,
     stamp,
 )
+from cluster_profiles.cli_update import CliUpdateError
 
 SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "vonkctl"
 
@@ -152,6 +153,17 @@ def test_connection_document_matches_its_schema(capsys, monkeypatch) -> None:
 def test_usage_error_document_matches_its_schema(capsys) -> None:
     assert cli.main(("--json", "profile", "no-such-action")) == 2
     _validate(DocumentKind.ERROR, json.loads(capsys.readouterr().out))
+
+
+def test_failed_update_error_document_matches_its_schema(capsys, monkeypatch) -> None:
+    def refuse(**kwargs):
+        raise CliUpdateError("no signed release is reachable")
+
+    monkeypatch.setattr(cli, "run_update", refuse)
+    assert cli.main(("update", "--json")) == 2
+    document = json.loads(capsys.readouterr().out)
+    assert document["error_type"] == "update"
+    _validate(DocumentKind.ERROR, document)
 
 
 def test_every_kind_is_reachable_from_a_command() -> None:

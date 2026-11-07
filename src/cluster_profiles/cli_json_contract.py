@@ -56,6 +56,13 @@ class _Word(StrEnum):
     RESULT = "result"
 
 
+class ErrorKey(StrEnum):
+    """The two keys every failure document carries."""
+
+    ERROR = "error"
+    ERROR_TYPE = "error_type"
+
+
 class CliErrorType(StrEnum):
     """Where a failure document comes from (``error_type``)."""
 

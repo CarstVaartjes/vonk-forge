@@ -20392,7 +20392,7 @@
       "type": "object"
     },
     "SubmissionAcceptance": {
-      "description": "``Submission.acceptance``; a test pins this to the CLI's own literal.",
+      "description": "What this process knows about whether the Controller accepted a request.",
       "enum": [
         "not_submitted",
         "unknown",

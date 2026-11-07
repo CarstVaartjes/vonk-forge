@@ -397,14 +397,3 @@ def test_every_published_kind_names_its_version_in_schema_and_file() -> None:
         schema = json.loads(schema_text(kind))
         assert schema_filename(kind).endswith(f"-v{version}.schema.json")
         assert "schema_version" in json.dumps(schema)
-
-
-def test_submission_acceptance_words_are_the_clis_own() -> None:
-    from typing import get_args, get_type_hints
-
-    from vonk_control.vonkctl_json_contract import SubmissionAcceptance
-
-    from cluster_profiles.cli_outcome import Submission
-
-    cli_words = set(get_args(get_type_hints(Submission)["acceptance"]))
-    assert {word.value for word in SubmissionAcceptance} == cli_words

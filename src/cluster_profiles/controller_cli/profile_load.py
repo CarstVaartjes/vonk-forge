@@ -10,11 +10,11 @@ from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from typing import cast
 
+from ..cli_outcome import SubmissionAcceptance
 from ..cli_render import render_payload
 from ..cli_states_generated import (
     PROFILE_REFUSAL_CODES,
     PROFILE_REVIEW_STALE,
-    UNKNOWN,
 )
 from ..control_client import (
     ControlClientError,
@@ -241,7 +241,7 @@ def _observe_profile_load_request(
 ):
     # Observe only this request; a conflict does not license an effect replay.
     key = args.submission.request_key
-    args.submission.acceptance = UNKNOWN
+    args.submission.acceptance = SubmissionAcceptance.UNKNOWN
 
     def same_request(observed: object) -> None:
         if not isinstance(observed, Mapping):

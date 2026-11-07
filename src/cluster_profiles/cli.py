@@ -25,7 +25,7 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
-from .cli_json_contract import CliErrorType, stamp_document
+from .cli_json_contract import CliErrorType, ErrorKey, stamp_document
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -698,10 +698,13 @@ def _main(
             cache_update_notice(result)
             status = 0
         except (CliUpdateError, OSError) as error:
-            result = {"error": _sanitize_text(error), "error_type": "update"}
+            result = {
+                ErrorKey.ERROR: _sanitize_text(error),
+                ErrorKey.ERROR_TYPE: CliErrorType.UPDATE,
+            }
             status = 2
         if args.global_json or getattr(args, "json", False):
-            print(_json_text(result))
+            print(_json_text(stamp_document(args, result, error=status != 0)))
         else:
             for name, value in result.items():
                 print(

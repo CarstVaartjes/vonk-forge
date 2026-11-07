@@ -24,9 +24,9 @@ ErrorSource = Literal[
 TransportKind = Literal["dns", "connect", "tls", "timeout", "body", "protocol"]
 ErrorDecision = Literal["retry", "defer", "exit"]
 
-_CODE = re.compile(r"[a-z][a-z0-9_.:-]{0,95}\Z")
-#: The grammar of a surfaced error code, published so schemas can state it.
-CODE_PATTERN = r"^[a-z][a-z0-9_.:-]{0,95}$"
+#: The grammar of a surfaced error code: matched whole, and published in schemas.
+CODE_PATTERN = r"[a-z][a-z0-9_.:-]{0,95}\Z"
+_CODE = re.compile(CODE_PATTERN)
 _REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 

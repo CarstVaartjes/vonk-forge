@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import sys
-from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional, Union, cast, get_args
 
@@ -32,7 +31,7 @@ from cluster_profiles.cli_json_contract import (
     CliErrorType,
     DocumentKind,
 )
-from cluster_profiles.cli_outcome import ObservationStatus
+from cluster_profiles.cli_outcome import ObservationStatus, SubmissionAcceptance
 from cluster_profiles.control_client.transfers import TransferReceipt
 from cluster_profiles.error_reporting import (
     CODE_PATTERN,
@@ -54,6 +53,8 @@ from .fleet_projection import FleetSnapshot
 from .library_contract import RecipeDetailResponse, RecipeLibraryResponse
 from .strict_json import StrictModel
 
+#: The shared code grammar as a JSON Schema pattern (``\\Z`` is Python-only).
+_SCHEMA_CODE_PATTERN = "^" + CODE_PATTERN.replace("\\Z", "$")
 JSON_SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
 
@@ -114,7 +115,7 @@ class ErrorContextFields(StrictModel):
     """The safe context of a surfaced failure (``ErrorContext.as_dict``)."""
 
     operation: str
-    code: str = Field(pattern=CODE_PATTERN)
+    code: str = Field(pattern=_SCHEMA_CODE_PATTERN)
     source: ErrorSource
     decision: ErrorDecision
     retryable: bool
@@ -131,15 +132,6 @@ class SubmissionFailure(ErrorContextFields):
 
     stage: str
     detail: str | None = None
-
-
-class SubmissionAcceptance(StrEnum):
-    """``Submission.acceptance``; a test pins this to the CLI's own literal."""
-
-    NOT_SUBMITTED = "not_submitted"
-    UNKNOWN = "unknown"
-    ACCEPTED = "accepted"
-    REFUSED = "refused"
 
 
 class SubmissionReceipt(StrictModel):
@@ -187,7 +179,7 @@ class ErrorDocument(StrictModel):
 
     error: str
     error_type: CliErrorType
-    code: str | None = Field(default=None, pattern=CODE_PATTERN)
+    code: str | None = Field(default=None, pattern=_SCHEMA_CODE_PATTERN)
     detail: str | None = None
     recovery_actions: list[str] | None = None
     usage: str | None = None
