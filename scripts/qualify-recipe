@@ -449,6 +449,12 @@ def _serving_check_documents(recipe: object) -> tuple[dict[str, object], ...]:
     )
 
 
+def _facts_unusable(path: Path, error: Exception) -> None:
+    """Absent facts are silent; facts that exist but fail are reported. Either way the checks go as declared."""
+    if path.is_file():
+        print(f"recipe API facts unusable; serving checks go as declared: {error}", file=sys.stderr)
+
+
 def _chat_api(recipe: object, library_root: Path) -> object | None:
     """The recipe's published chat facts (``api/recipes/<slug>.json``), when usable.
 
@@ -463,9 +469,7 @@ def _chat_api(recipe: object, library_root: Path) -> object | None:
     try:
         block = read_recipe_api(_load_json(path)).for_choices(recipe)
     except (OSError, QualificationError, ValueError) as error:
-        if path.is_file():
-            print(f"recipe API facts unusable; serving checks go as declared: {error}", file=sys.stderr)
-        return None
+        return _facts_unusable(path, error)
     return block if isinstance(block, ChatApi) else None
 
 
