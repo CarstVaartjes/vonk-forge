@@ -13,6 +13,7 @@ from tests.acceptance.test_spark_lifecycle import LifecycleError
 
 pytestmark = pytest.mark.needs_recipe_library
 
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/build-recipe-library"
 REVISION = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -37,6 +38,7 @@ def test_a_release_library_is_fetched_and_built_from_the_revision_it_names(
         "a" * 40,
         tmp_path,
         read_revision=lambda sha: f"{REVISION}\n" if sha == "a" * 40 else "",
+        read_build_script=lambda _sha: SCRIPT.read_text(),
         fetch_library=fetch,
     )
 
@@ -50,6 +52,7 @@ def test_a_release_library_is_fetched_and_built_from_the_revision_it_names(
             "a" * 40,
             tmp_path,
             read_revision=lambda _sha: REVISION,
+            read_build_script=lambda _sha: pytest.fail("script read again"),
             fetch_library=lambda *_: pytest.fail("fetched again"),
         )
         == root
