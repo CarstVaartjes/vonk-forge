@@ -53,14 +53,24 @@ _WAITS_BEHIND_CONTINUING = (
     " reproducible run to run) or running (seed 53) after a co-located load"
     " and an unreadable revision; the root cause is not isolated."
 )
+_SUPERSEDED_BY_RECOVERY_REVIEW = (
+    "A load ends superseded by 'Recovery would stop an unreviewed workload' with no"
+    " newer load (sample seed 10, found when the standalone-install action"
+    " renumbered the seeds; it fails identically without the recovery coordinator"
+    " and the run reaper). The sequence ends with a stacked load reviewed by an"
+    " older Controller, a co-located load and an unreadable solo revision; the root"
+    " cause is not isolated."
+)
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {
     r"no refusal repeats without a change elsewhere: load <id> (queued|running)"
     r" # times: Waiting for exact continuing assignments to finish under the selected"
     r" profile": _WAITS_BEHIND_CONTINUING,
+    r"no load ends superseded without a newer load: load <id> superseded: Recovery"
+    r" would stop an unreviewed workload": _SUPERSEDED_BY_RECOVERY_REVIEW,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _SUPERSEDED_BY_RECOVERY_REVIEW}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
