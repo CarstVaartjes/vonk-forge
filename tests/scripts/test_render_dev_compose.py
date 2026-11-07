@@ -21,9 +21,6 @@ API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'a' * 40}@sha256:{DI
 WORKER_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
-HERMES_IMAGE = (
-    f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
-)
 LITELLM_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
@@ -48,7 +45,6 @@ def _run_renderer(
     *,
     api_image: str = API_IMAGE,
     worker_image: str = WORKER_IMAGE,
-    hermes_image: str = HERMES_IMAGE,
     litellm_image: str = LITELLM_IMAGE,
     channel: str = "pinned",
 ) -> subprocess.CompletedProcess[str]:
@@ -64,8 +60,6 @@ def _run_renderer(
             api_image,
             "--worker-image",
             worker_image,
-            "--hermes-image",
-            hermes_image,
             "--litellm-image",
             litellm_image,
             "--channel",
@@ -91,11 +85,6 @@ def test_render_produces_a_single_self_contained_compose_file(
     document = yaml.safe_load(text)
     assert "\ninclude:" not in text
     assert "tailscale-gateway" in document["services"]
-    assert "hermes-agent" in document["services"]
-    assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
-    assert document["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
-        "hermes"
-    ]
     assert document["services"]["control-api"]["image"] == API_IMAGE
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
@@ -121,24 +110,22 @@ def test_render_produces_a_single_self_contained_compose_file(
         for image in images
     )
 
-    for profile in ([], ["--profile", "hermes"]):
-        config = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                str(ROOT / "deploy/compose/tests/test.env"),
-                "-f",
-                str(output),
-                *profile,
-                "config",
-                "-q",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert config.returncode == 0, config.stderr
+    config = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ROOT / "deploy/compose/tests/test.env"),
+            "-f",
+            str(output),
+            "config",
+            "-q",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert config.returncode == 0, config.stderr
 
 
 # Starts a real PostgreSQL container and runs initdb (~8-12 s on CI runners).
@@ -291,10 +278,6 @@ def test_render_dev_keeps_third_party_pins_and_channel_images(
     assert services["control-api"]["pull_policy"] == "always"
     assert services["control-worker"]["image"] == DEV_WORKER_IMAGE
     assert services["control-worker"]["pull_policy"] == "always"
-    assert (
-        services["hermes-agent"]["image"]
-        == "ghcr.io/carstvaartjes/vonk-forge-hermes:dev"
-    )
     assert (
         services["litellm"]["image"] == "ghcr.io/carstvaartjes/vonk-forge-litellm:dev"
     )

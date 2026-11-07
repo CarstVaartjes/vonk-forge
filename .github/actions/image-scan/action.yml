@@ -15,7 +15,7 @@ inputs:
   gate:
     description: >-
       "false" for an image that is an upstream application release with a thin
-      layer of ours (Hermes, LiteLLM): report only
+      layer of ours (LiteLLM): report only
     required: false
     default: "true"
   skip-dirs:

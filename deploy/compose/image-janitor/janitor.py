@@ -33,6 +33,7 @@ NETWORK_INTERVAL = 30
 PROJECT_LABEL = "com.docker.compose.project"
 GRACE = 24 * INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
+# "hermes" is retired; it stays listed so the janitor still reclaims the old image.
 REPOSITORIES = frozenset(
     f"ghcr.io/carstvaartjes/vonk-forge-{role}"
     for role in ("api", "worker", "litellm", "hermes")

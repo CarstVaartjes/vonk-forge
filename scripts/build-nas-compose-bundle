@@ -43,8 +43,6 @@ SERVICES = {
     "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
-    "hermes-agent",
-    "hermes-litellm-key-provisioner",
     "postgres",
     "control-api",
     "control-worker",
@@ -57,8 +55,6 @@ SECRET_FILES = {
     "admin-password": "admin-password",
     "tailscale-oauth-client-id": "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret": "tailscale-oauth-client-secret",
-    "hermes-api-key": "hermes-api-key",
-    "hermes-litellm-key": "hermes-litellm-key",
     "database-url": "database-url",
     "hf-token": "hf-token",
     "postgres-password": "postgres-password",
@@ -141,8 +137,6 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
             raise BundleError(f"Compose service {name} has an unsafe host privilege")
         profiles = service.get("profiles", [])
         allowed_profiles = {
-            "hermes-agent": ["hermes"],
-            "hermes-litellm-key-provisioner": ["hermes"],
             "tailscale-gateway": ["secure-remote"],
             "tailscale-configurator": ["secure-remote"],
         }
@@ -183,10 +177,6 @@ def _validate_services(document: dict[str, Any]) -> dict[str, Any]:
                 raise BundleError(
                     f"Compose service {name} still contains a host bind mount"
                 )
-    if services["hermes-agent"].get("profiles") != ["hermes"]:
-        raise BundleError("Hermes must remain opt-in through its Compose profile")
-    if services["hermes-litellm-key-provisioner"].get("profiles") != ["hermes"]:
-        raise BundleError("Hermes key provisioning must remain profile-scoped")
     return services
 
 
@@ -303,7 +293,7 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
         "preflight": [
             "Use the operator tailnet only; define and advertise only the exact Services listed below.",
             "Enable MagicDNS and HTTPS certificates in the Tailscale DNS settings.",
-            "Define svc:vonk-forge with endpoint tcp:443; if enabling Hermes, also define svc:hermes-api and svc:hermes-dashboard.",
+            "Define svc:vonk-forge with endpoint tcp:443.",
             "Merge the reviewed grants.example.hujson policy, including gateway self-access and exact Service auto-approval.",
             "Create a machine OAuth client with only auth_keys write scope and only tag:vonk-gateway.",
             "Keep the raw OAuth client ID and secret ready; the secret is entered with hidden input.",
@@ -381,10 +371,8 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                         "metrics-token",
                         "litellm-master-key",
                         "agent-proxy-auth",
-                        "hermes-api-key",
                     )
                 ),
-                {"file": "hermes-litellm-key", "bytes": 32, "prefix": "sk-"},
             ],
             "ed25519_pkcs8_pem": [{"file": "host-runtime-grant-private-key.pem"}],
             "postgres_urls": [
@@ -421,12 +409,6 @@ def _payload(document: dict[str, Any], channel: str) -> dict[str, object]:
                 "provisioner_public_jwk": "agent-ca-provisioner-public-jwk",
                 "password": "step-ca-password",
             },
-        },
-        "hermes": {
-            "env": "COMPOSE_PROFILES",
-            "prompt": "Enable the optional Hermes agent?",
-            "enabled_value": "hermes",
-            "disabled_value": "",
         },
     }
     if group_readable:

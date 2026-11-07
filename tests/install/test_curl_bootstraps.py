@@ -265,26 +265,6 @@ def test_nas_bootstrap_reuses_the_same_command_for_upgrade(tmp_path: Path) -> No
     assert not forbidden.exists()
 
 
-@pytest.mark.parametrize("hermes_option", ("--enable-hermes", "--disable-hermes"))
-def test_nas_bootstrap_passes_only_the_explicit_hermes_toggle(
-    tmp_path: Path, hermes_option: str
-) -> None:
-    (tmp_path / "vonk-forge").mkdir()
-
-    result, receipt, forbidden = _run_bootstrap(
-        tmp_path,
-        "nas",
-        system="Linux",
-        machine="x86_64",
-        arguments=(hermes_option,),
-    )
-
-    assert result.returncode == 0, result.stderr
-    invocation = receipt.read_text().splitlines()[0].split("|", 1)[1].split()
-    assert invocation[2:] == ["--upgrade", hermes_option]
-    assert not forbidden.exists()
-
-
 def test_nas_bootstrap_passes_a_private_answers_file(tmp_path: Path) -> None:
     answers = tmp_path / "answers.txt"
     answers.write_text("\n", encoding="utf-8")
@@ -295,7 +275,7 @@ def test_nas_bootstrap_passes_a_private_answers_file(tmp_path: Path) -> None:
         "nas",
         system="Linux",
         machine="x86_64",
-        arguments=("--answers-file", os.fspath(answers), "--disable-hermes"),
+        arguments=("--answers-file", os.fspath(answers)),
     )
 
     assert result.returncode == 0, result.stderr
@@ -303,7 +283,6 @@ def test_nas_bootstrap_passes_a_private_answers_file(tmp_path: Path) -> None:
     assert invocation[2:] == [
         "--answers-file",
         os.fspath(answers),
-        "--disable-hermes",
     ]
     assert not forbidden.exists()
 
@@ -318,7 +297,7 @@ def test_nas_bootstrap_rejects_user_arguments(tmp_path: Path) -> None:
     )
 
     assert result.returncode != 0
-    assert "accepts only a Hermes mode and --answers-file PATH" in result.stderr
+    assert "accepts only --answers-file PATH" in result.stderr
     assert not receipt.exists()
     assert not forbidden.exists()
 

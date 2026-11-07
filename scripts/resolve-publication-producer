@@ -133,7 +133,7 @@ PRODUCERS = {
         ),
     ),
     # Exactly the files the image job reads: the Dockerfile COPY sources, the
-    # isolated Hermes/LiteLLM contexts and policy (scripts/dev-image-inputs),
+    # isolated LiteLLM contexts and policy (scripts/dev-image-inputs),
     # and what .github/workflows/dev-images.yml names. Tests are not inputs.
     # tests/scripts/test_resolve_publication_producer.py holds this equality.
     ProducerName.IMAGES: Producer(
@@ -158,7 +158,6 @@ PRODUCERS = {
             "deploy/compose/Caddyfile",
             "deploy/compose/caddy/entrypoint.sh",
             "deploy/compose/compose.yaml",
-            "deploy/compose/hermes-agent/**",
             "deploy/compose/image-janitor/janitor.py",
             "deploy/compose/litellm/**",
             "deploy/compose/python-bootstrap.lock",

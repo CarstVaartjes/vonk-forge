@@ -3,11 +3,11 @@
 Standard service images are fixed by version and OCI index digest in
 `deploy/compose/images.lock.json`; Compose uses those exact references as its
 defaults. The custom control image is a release artifact and must be supplied
-through `CONTROL_API_IMAGE`, `CONTROL_WORKER_IMAGE`, and `HERMES_AGENT_IMAGE`
+through `CONTROL_API_IMAGE`, `CONTROL_WORKER_IMAGE`, and `LITELLM_IMAGE`
 with one complete set of registry digests. The three `vonk-forge` packages are
 `ghcr.io/carstvaartjes/vonk-forge-api`,
 `ghcr.io/carstvaartjes/vonk-forge-worker`, and
-`ghcr.io/carstvaartjes/vonk-forge-hermes`. Build the `api` and `worker`
+`ghcr.io/carstvaartjes/vonk-forge-litellm`. Build the `api` and `worker`
 Dockerfile targets from the same release commit; the worker target deliberately
 contains neither Git nor OpenSSH. The Node and Python build bases are separately
 digest-pinned in the lock. Refreshing a pin is a manual, reviewed edit; follow
@@ -75,8 +75,8 @@ docker buildx build --platform linux/amd64 --load \
 docker buildx build --platform linux/amd64 --load \
   --file control/Dockerfile --target worker --tag vonk-forge-worker:release-dry-run .
 docker buildx build --platform linux/amd64 --load \
-  --file deploy/compose/hermes-agent/Dockerfile --target managed \
-  --tag vonk-forge-hermes:release-dry-run deploy/compose/hermes-agent
+  --file deploy/compose/litellm/Dockerfile --target runtime \
+  --tag vonk-forge-litellm:release-dry-run .
 ```
 
 After future deliberate enablement, the tag-triggered GitHub Actions workflow

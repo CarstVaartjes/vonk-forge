@@ -23,7 +23,7 @@ tree=$3
 [[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
 
-roles=(api worker hermes litellm)
+roles=(api worker litellm)
 declare -A digests=()
 for role in "${roles[@]}"; do
   file="$directory/$role"

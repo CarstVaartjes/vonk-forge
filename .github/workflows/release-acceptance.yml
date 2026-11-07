@@ -133,7 +133,7 @@ jobs:
       fail-fast: false
       matrix:
         platform: [amd64, arm64]
-        role: [api, hermes, litellm]
+        role: [api, litellm]
         include:
           - platform: amd64
             runner: ubuntu-24.04
@@ -142,7 +142,6 @@ jobs:
           # API and worker share every expensive Dockerfile stage. Keep them on
           # one builder so the worker reuses this exact candidate's build graph.
           - {role: api, context: '.', file: control/Dockerfile, target: api, cache: 'type=registry,ref=ghcr.io/carstvaartjes/vonk-forge-api:buildcache'}
-          - {role: hermes, context: ., file: deploy/compose/hermes-agent/Dockerfile, target: managed, cache: 'type=gha,scope=vonk-forge-hermes'}
           - {role: litellm, context: '.', file: deploy/compose/litellm/Dockerfile, target: '', cache: 'type=gha,scope=vonk-forge-litellm'}
     env:
       # Pull requests keep their own Controller build cache so a later push
@@ -261,7 +260,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: [api, hermes, litellm]
+        role: [api, litellm]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -345,7 +344,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: [api, worker, hermes, litellm]
+        role: [api, worker, litellm]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -503,7 +502,6 @@ jobs:
             --output "$RUNNER_TEMP/compose/docker-compose.pinned.yml" \
             --api-image "$(cat "$RUNNER_TEMP/images/api")" \
             --worker-image "$(cat "$RUNNER_TEMP/images/worker")" \
-            --hermes-image "$(cat "$RUNNER_TEMP/images/hermes")" \
             --litellm-image "$(cat "$RUNNER_TEMP/images/litellm")"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

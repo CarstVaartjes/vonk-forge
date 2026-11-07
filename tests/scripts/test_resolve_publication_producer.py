@@ -301,7 +301,7 @@ def image_job_inputs() -> set[str]:
             if not fnmatch.fnmatchcase(f"inventory/wheels/{wheel}", source):
                 assert (ROOT / source).exists(), source
                 inputs.add(pattern(source))
-    # Hermes and LiteLLM build from isolated contexts under their policy.
+    # LiteLLM builds from isolated contexts under their policy.
     for path in (*sum(images.CONTEXTS.values(), ()), *images.POLICY):
         inputs.add(pattern(path))
     # Files and local actions the workflow itself names, comments aside.

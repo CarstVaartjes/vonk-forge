@@ -37,7 +37,6 @@ class InstallerPackageArtifact(InstallerReleaseObject):
 class InstallerReleaseImages(WireModel):
     api: InstallerImage
     worker: InstallerImage
-    hermes: InstallerImage
     litellm: InstallerImage
 
 

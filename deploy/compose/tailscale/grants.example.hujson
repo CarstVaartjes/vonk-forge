@@ -2,9 +2,6 @@
   "tagOwners": {
     "tag:vonk-gateway": ["autogroup:admin"]
   },
-  "groups": {
-    "group:hermes-users": ["replace-with-your-login@github"]
-  },
   "acls": [],
   "grants": [
     {
@@ -13,31 +10,20 @@
       "ip": ["tcp:443"]
     },
     {
-      "src": ["group:hermes-users"],
-      "dst": ["svc:hermes-api", "svc:hermes-dashboard"],
-      "ip": ["tcp:443"]
-    },
-    {
       "src": ["tag:vonk-gateway"],
-      "dst": ["svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"],
+      "dst": ["svc:vonk-forge"],
       "ip": ["tcp:443"]
     }
   ],
   "autoApprovers": {
     "services": {
-      "svc:vonk-forge": ["tag:vonk-gateway"],
-      "svc:hermes-api": ["tag:vonk-gateway"],
-      "svc:hermes-dashboard": ["tag:vonk-gateway"]
+      "svc:vonk-forge": ["tag:vonk-gateway"]
     }
   },
   "tests": [
     {
-      "src": "replace-with-your-login@github",
-      "accept": ["svc:hermes-api:443", "svc:hermes-dashboard:443"]
-    },
-    {
       "src": "tag:vonk-gateway",
-      "accept": ["svc:vonk-forge:443", "svc:hermes-api:443", "svc:hermes-dashboard:443"]
+      "accept": ["svc:vonk-forge:443"]
     }
   ]
 }

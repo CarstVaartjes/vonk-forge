@@ -12,8 +12,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = "scripts/reuse-pr-candidate-images"
-ROLES = ("api", "worker", "hermes", "litellm")
-DIGESTS = {role: "sha256:" + hex_digit * 64 for role, hex_digit in zip(ROLES, "abde")}
+ROLES = ("api", "worker", "litellm")
+DIGESTS = {role: "sha256:" + hex_digit * 64 for role, hex_digit in zip(ROLES, "abd")}
 RUN = "38921170575"
 TREE = "c" * 40
 
@@ -82,7 +82,7 @@ def test_every_verified_image_is_reused_by_digest_without_an_export(tmp_path):
 def test_anything_short_of_four_verified_images_builds_instead(tmp_path, fault):
     """Catches a partial reuse, a reference borrowed from another run, or an
     image that is not this tree."""
-    root = _workspace(tmp_path, unverified="hermes" if fault == "unverified" else "")
+    root = _workspace(tmp_path, unverified="worker" if fault == "unverified" else "")
     references = _references(
         tmp_path / "images",
         run="1" if fault == "other-run" else RUN,

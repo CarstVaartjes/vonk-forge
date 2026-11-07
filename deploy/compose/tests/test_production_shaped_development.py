@@ -6,7 +6,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION_COMPOSE = ROOT / "deploy/compose/compose.yaml"
-HERMES_COMPOSE = ROOT / "deploy/compose/hermes-agent/compose.yaml"
 DEVELOPMENT_WORKFLOW = ROOT / ".github/workflows/dev-images.yml"
 
 
@@ -35,25 +34,12 @@ def test_development_workflow_renders_only_the_canonical_graph() -> None:
     assert workflow.count("--template deploy/compose/compose.yaml") == 2
 
 
-def test_hermes_is_opt_in_in_the_shared_production_graph() -> None:
-    document = yaml.safe_load(HERMES_COMPOSE.read_text(encoding="utf-8"))
-    assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
-    assert document["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
-        "hermes"
-    ]
-    assert document["x-hermes-service"]["image"] == (
-        "${HERMES_AGENT_IMAGE:?set a version-pinned Hermes image}"
-    )
+def test_tailscale_configurator_needs_no_secret() -> None:
     tailscale = yaml.safe_load(
         (ROOT / "deploy/compose/tailscale/compose.yaml").read_text(encoding="utf-8")
     )
     configurator = tailscale["services"]["tailscale-configurator"]
-    assert "hermes-agent" not in configurator["depends_on"]
-    assert configurator["secrets"] == ["hermes-api-key"]
-    hermes_text = HERMES_COMPOSE.read_text(encoding="utf-8")
-    assert "HERMES_DASHBOARD_ORIGIN:?" not in hermes_text
-    assert "HERMES_DATA_ROOT:?" not in hermes_text
-    assert "HERMES_API_KEY_FILE:?" not in hermes_text
+    assert "secrets" not in configurator
 
 
 def test_development_image_workflow_validates_the_canonical_graph_with_test_inputs() -> (

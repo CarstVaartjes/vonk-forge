@@ -40,8 +40,8 @@ def test_fresh_lab_and_secure_remote_keep_secret_answers_private(
         ("lab", "lab\n192.168.1.5\nprivate-hf\n", ""),
         (
             "secure",
-            "secure-remote\n192.168.1.5\nprivate-hf\nprivate-ts\nyes\n",
-            "secure-remote,hermes",
+            "secure-remote\n192.168.1.5\nprivate-hf\nprivate-ts\n",
+            "secure-remote",
         ),
     ):
         output = io.StringIO()
@@ -84,29 +84,26 @@ def test_fresh_lab_and_secure_remote_keep_secret_answers_private(
 def test_lost_install_response_and_upgrade_preserve_credentials_and_known_settings(
     installed: Path, template: NasInstallTemplate
 ) -> None:
-    """Catch fresh-request rotation and Hermes overwriting secure-remote membership."""
+    """Catch fresh-request rotation and upgrades dropping known settings."""
     before = credentials(installed)
     with (installed / ".env").open("a") as stream:
-        stream.write('VONK_HERMES_TIMEZONE="Europe/Amsterdam"\nRETIRED_SETTING=old\n')
+        stream.write('VONK_SITE_TIMEZONE="Europe/Amsterdam"\nRETIRED_SETTING=old\n')
     template = template.model_copy(
         update={"docker_compose_yaml": "services: {upgraded: {}}\n"}
     )
-    result = prepare(
-        template, installed.parent, PromptIo(io.StringIO("")), hermes_enabled=True
-    )
+    result = prepare(template, installed.parent, PromptIo(io.StringIO("")))
     assert result.dropped_environment == ("RETIRED_SETTING",)
     assert credentials(installed) == before
     assert (
-        parse_environment(installed / ".env")["VONK_HERMES_TIMEZONE"]
+        parse_environment(installed / ".env")["VONK_SITE_TIMEZONE"]
         == "Europe/Amsterdam"
     )
-    assert parse_environment(installed / ".env")["COMPOSE_PROFILES"] == "hermes"
+    assert parse_environment(installed / ".env")["COMPOSE_PROFILES"] == ""
     prepare(
         template,
         installed.parent,
         PromptIo(io.StringIO("")),
         upgrade=True,
-        hermes_enabled=False,
     )
     assert credentials(installed) == before
     assert parse_environment(installed / ".env")["COMPOSE_PROFILES"] == ""
@@ -142,24 +139,20 @@ def test_upgrade_asks_only_new_inputs_and_keeps_secure_remote_profile(
     bundle = prepare(
         template,
         tmp_path,
-        PromptIo(io.StringIO("secure-remote\n192.168.1.5\n\nexisting-secret\nno\n")),
+        PromptIo(io.StringIO("secure-remote\n192.168.1.5\n\nexisting-secret\n")),
     ).root
     template.required_values.append(
         NasRequiredValuePrompt(env="NEW_SITE_VALUE", prompt="New site value")
     )
     template.secrets.append(NasSecretPrompt(file="new-secret", prompt="New secret"))
-    result = prepare(
+    prepare(
         template,
         tmp_path,
         PromptIo(io.StringIO("new-value\nnew-secret-value\n")),
         upgrade=True,
-        hermes_enabled=True,
     )
-    assert result.hermes_enabled
     assert parse_environment(bundle / ".env")["NEW_SITE_VALUE"] == "new-value"
-    assert (
-        parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == "secure-remote,hermes"
-    )
+    assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == "secure-remote"
     assert (bundle / "secrets/tailscale-key").read_text() == "existing-secret\n"
     assert (bundle / "secrets/new-secret").read_text() == "new-secret-value\n"
 

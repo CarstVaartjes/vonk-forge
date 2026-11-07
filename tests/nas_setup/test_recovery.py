@@ -75,7 +75,7 @@ def test_process_death_mid_publication_replays_exact_bytes_and_releases_owner(
     environment = parse_environment(installed / ".env")
     members = publication.load_members(installed / "secrets", template)
     members["hf-token"] = b"candidate exact bytes\n"
-    environment["VONK_HERMES_TIMEZONE"] = "Europe/Amsterdam"
+    environment["VONK_SITE_TIMEZONE"] = "Europe/Amsterdam"
     staging = publication.stage_intent(template, installed, members, environment)
     staging.rename(installed / publication.INTENT)
     child, ready = child_publisher(installed.parent, template, "publish")
@@ -87,7 +87,7 @@ def test_process_death_mid_publication_replays_exact_bytes_and_releases_owner(
         prepare(template, installed.parent, PromptIo(io.StringIO("")), upgrade=True)
         assert publication.load_members(installed / "secrets", template) == members
         assert (
-            parse_environment(installed / ".env")["VONK_HERMES_TIMEZONE"]
+            parse_environment(installed / ".env")["VONK_SITE_TIMEZONE"]
             == "Europe/Amsterdam"
         )
         assert not (installed / publication.INTENT).exists()

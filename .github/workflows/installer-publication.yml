@@ -128,7 +128,7 @@ jobs:
             AGENT=
             echo "Agent packages are taken from pull request run $RUN_ID" >> "$GITHUB_STEP_SUMMARY"
           fi
-          if built acceptance-image-api acceptance-image-hermes acceptance-image-litellm; then
+          if built acceptance-image-api acceptance-image-litellm; then
             IMAGES=
             echo "Images are taken from pull request run $RUN_ID" >> "$GITHUB_STEP_SUMMARY"
           fi

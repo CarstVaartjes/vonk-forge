@@ -29,7 +29,7 @@ def _environment() -> dict[str, str]:
     return environment
 
 
-def _rendered(*, hermes: bool = False, secure_remote: bool = True) -> dict[str, Any]:
+def _rendered(*, secure_remote: bool = True) -> dict[str, Any]:
     command = [
         "docker",
         "compose",
@@ -38,8 +38,6 @@ def _rendered(*, hermes: bool = False, secure_remote: bool = True) -> dict[str, 
         "-f",
         str(COMPOSE_ROOT / "compose.yaml"),
     ]
-    if hermes:
-        command.extend(("--profile", "hermes"))
     command.extend(("config", "--format", "json"))
     environment = _environment()
     if not secure_remote:
@@ -147,15 +145,12 @@ def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
     assert "tailnet-control-plane" not in services["caddy"]["networks"]
 
 
-def test_default_and_hermes_graphs_are_warning_free_and_do_not_couple_configurator_to_profile() -> (
+def test_default_graph_is_warning_free_and_does_not_couple_configurator_to_profile() -> (
     None
 ):
-    """Catches render warnings and disabled-profile dependencies in either graph."""
-    for hermes in (False, True):
-        services = _rendered(hermes=hermes, secure_remote=False)["services"]
-        assert set(services) == DEFAULT_SERVICES | (
-            {"hermes-agent", "hermes-litellm-key-provisioner"} if hermes else set()
-        )
+    """Catches render warnings and disabled-profile dependencies."""
+    services = _rendered(secure_remote=False)["services"]
+    assert set(services) == DEFAULT_SERVICES
     secure_remote = _rendered()["services"]
     configurator = secure_remote["tailscale-configurator"]
     assert set(configurator["depends_on"]) == {

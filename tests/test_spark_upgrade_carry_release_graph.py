@@ -69,9 +69,10 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             path.write_bytes((ROOT / name).read_bytes())
         monkeypatch.setenv("VONK_ACCEPTANCE_TEST_MODE", "1")
         monkeypatch.setenv("VONK_ACCEPTANCE_RELEASE_PUBLIC_KEY", str(key))
-    roles = ["api", "worker", "hermes", "litellm"]
+    roles = ["api", "worker", "litellm"]
     if historical:
-        roles.append("ca")
+        # The pinned historic renderer still names the retired Hermes and CA roles.
+        roles += ["hermes", "ca"]
     images = {
         role: f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-{source}@sha256:{'b' * 64}"
         for role in roles
@@ -158,7 +159,7 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         compose_image_roles={
             role: service
             for role, service in resolved.compose_image_roles.items()
-            if role != "ca"
+            if role not in ("ca", "hermes")
         },
     )
     lane.controller_generation = resolved.generation
@@ -355,9 +356,6 @@ def test_base_graph_uses_baseline_and_candidate_signed_images(
     configured_services = {
         service: {"image": candidate_images[role]}
         for role, service in COMPOSE_IMAGE_ROLES.items()
-    }
-    configured_services["hermes-litellm-key-provisioner"] = {
-        "image": candidate_images["litellm"]
     }
     base_services = {
         "step-ca": {"image": f"ghcr.io/carstvaartjes/vonk-forge-ca:{tag}"},

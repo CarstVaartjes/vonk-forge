@@ -25,7 +25,7 @@ PRODUCTION_RENDERER = ROOT / "scripts/render-production-compose"
 BUNDLE_BUILDER = ROOT / "scripts/build-nas-compose-bundle"
 IMAGES = {
     f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
-    for role in ("api", "worker", "hermes", "litellm")
+    for role in ("api", "worker", "litellm")
 }
 RELEASE = "a" * 64
 OLDER = "b" * 64
@@ -197,7 +197,7 @@ def test_installer_compose_carries_the_digest_the_controller_image_embeds(
 def test_bundle_digest_follows_the_compose_graph_not_its_formatting(
     tmp_path: Path,
 ) -> None:
-    includes = ("tailscale/compose.yaml", "hermes-agent/compose.yaml")
+    includes = ("tailscale/compose.yaml",)
     for relative in ("compose.yaml", *includes, "image-janitor/janitor.py"):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)

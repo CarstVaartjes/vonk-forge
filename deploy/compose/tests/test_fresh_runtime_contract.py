@@ -18,8 +18,7 @@ DEFAULT_SERVICES = {
     "registry",
 }
 SECURE_REMOTE_SERVICES = {"tailscale-configurator", "tailscale-gateway"}
-HERMES_SERVICES = {"hermes-agent", "hermes-litellm-key-provisioner"}
-ALL_SERVICES = DEFAULT_SERVICES | HERMES_SERVICES | SECURE_REMOTE_SERVICES
+ALL_SERVICES = DEFAULT_SERVICES | SECURE_REMOTE_SERVICES
 # A service image is pinned by a digest or by an explicit version tag; a bare
 # or floating reference pins nothing.
 PINNED_VERSION = re.compile(
@@ -69,8 +68,6 @@ def test_canonical_model_has_the_exact_default_and_optional_service_sets() -> No
     }
     assert default_services == DEFAULT_SERVICES
     assert set(services) == ALL_SERVICES
-    assert services["hermes-agent"]["profiles"] == ["hermes"]
-    assert services["hermes-litellm-key-provisioner"]["profiles"] == ["hermes"]
     assert services["tailscale-gateway"]["profiles"] == ["secure-remote"]
     assert services["tailscale-configurator"]["profiles"] == ["secure-remote"]
     assert {
@@ -78,7 +75,7 @@ def test_canonical_model_has_the_exact_default_and_optional_service_sets() -> No
         for service in services.values()
         if isinstance(service, dict)
         for profile in service.get("profiles", [])
-    } == {"hermes", "secure-remote"}
+    } == {"secure-remote"}
 
 
 def test_canonical_model_has_step_ca_without_an_overlay() -> None:

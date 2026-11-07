@@ -47,8 +47,6 @@ RESTART_ONLY = {
     "registry": "distribution has no configuration reload",
     "tailscale-configurator": "configure.sh is its own reconcile loop; the "
     "healthcheck already runs the restaged copy",
-    "hermes-litellm-key-provisioner": "provision-litellm-key.py is its own "
-    "reconcile loop; the --check healthcheck already runs the restaged copy",
 }
 
 
