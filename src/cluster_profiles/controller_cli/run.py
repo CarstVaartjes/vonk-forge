@@ -22,9 +22,11 @@ from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
 from .selection import (
     _observe_selection,
+    _read_concurrently,
     _recipe_rows,
     _resolve_recipe_selector,
     _selection_remaining,
+    _skipped_read,
 )
 
 
@@ -44,27 +46,33 @@ def _run(
     _require_confirmation(args, "run")
     _request_key(args, factory)
     deadline = time.monotonic() + args.timeout_seconds
-    selector = _resolve_run_recipe(client, args.selector, deadline=deadline)
-
     spark_names = list(args.spark)
+
+    def roster():
+        fleet = client.request(
+            "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
+        )
+        nodes = fleet.get("nodes")
+        if not isinstance(nodes, list) or any(
+            not isinstance(node, Mapping) for node in nodes
+        ):
+            raise ControlMalformedResponse("fleet membership is unavailable")
+        if not nodes or any(
+            not isinstance(node.get("id"), str) or not node["id"] for node in nodes
+        ):
+            raise ControlMalformedResponse("fleet membership is not yet observed")
+        return [str(node["id"]) for node in nodes]
+
+    # The library scan and the fleet roster are independent reads.
+    recipe, fleet = _read_concurrently(
+        lambda: _resolve_run_recipe(client, args.selector, deadline=deadline),
+        _skipped_read
+        if spark_names
+        else lambda: _observe_selection(roster, deadline=deadline),
+    )
+    selector = cast(str, recipe.get())
     if not spark_names:
-
-        def roster():
-            fleet = client.request(
-                "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
-            )
-            nodes = fleet.get("nodes")
-            if not isinstance(nodes, list) or any(
-                not isinstance(node, Mapping) for node in nodes
-            ):
-                raise ControlMalformedResponse("fleet membership is unavailable")
-            if not nodes or any(
-                not isinstance(node.get("id"), str) or not node["id"] for node in nodes
-            ):
-                raise ControlMalformedResponse("fleet membership is not yet observed")
-            return [str(node["id"]) for node in nodes]
-
-        spark_names = _observe_selection(roster, deadline=deadline)
+        spark_names = cast(list[str], fleet.get())
 
     edit_args = argparse.Namespace(
         command="profile",
