@@ -19,7 +19,8 @@ MASTER_KEY_FILE = Path("/run/secrets/litellm-master-key")
 HERMES_KEY_FILE = Path("/run/secrets/hermes-litellm-key")
 KEY_ALIAS = "vonk-hermes-agent"
 MODELS = ["hermes-agent"]
-ALLOWED_ROUTES = ["openai_routes"]
+# Equal to the Controller's managed-key routes: its reconcile also owns this key.
+ALLOWED_ROUTES = ["openai_routes", "model_info_routes"]
 MAX_SECRET_BYTES = 4096
 MAX_RESPONSE_BYTES = 64 * 1024
 TOKEN = re.compile(r"^[A-Za-z0-9_.~-]+$")

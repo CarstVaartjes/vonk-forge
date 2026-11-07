@@ -232,7 +232,10 @@ def test_create_list_and_revoke_client_keys():
     assert secret == litellm.keys["laptop"]["key"]
     # No model list means every gateway model, and only inference routes.
     assert litellm.keys["laptop"]["models"] == []
-    assert litellm.keys["laptop"]["allowed_routes"] == ["openai_routes"]
+    assert litellm.keys["laptop"]["allowed_routes"] == [
+        "openai_routes",
+        "model_info_routes",
+    ]
     assert created.json().get("expires_at") is None
 
     scoped = client.post(
@@ -1144,7 +1147,10 @@ def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal(
     published = set()
 
     def grants(models, _runs):
-        routes = [GatewayInferenceRoute.OPENAI.value]
+        routes = [
+            GatewayInferenceRoute.OPENAI.value,
+            GatewayInferenceRoute.MODEL_INFO.value,
+        ]
         if published and (not models or published.intersection(models)):
             routes.append(GatewayInferenceRoute.SYSTEMONE.value)
         return routes
@@ -1158,9 +1164,13 @@ def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal(
     for name in ("sweep", "d3"):
         assert litellm.keys[name]["allowed_routes"] == [
             GatewayInferenceRoute.OPENAI,
+            GatewayInferenceRoute.MODEL_INFO,
             GatewayInferenceRoute.SYSTEMONE,
         ]
-    assert litellm.keys["chat"]["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+    assert litellm.keys["chat"]["allowed_routes"] == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
     for name, item in litellm.keys.items():
         for field in ("key", "models", "expires", "created_at", "duration"):
             assert item[field] == original[name][field]
@@ -1168,9 +1178,27 @@ def test_published_native_routes_reconcile_existing_scoped_keys_without_renewal(
     published.clear()
     assert service.reconcile_route_grants() is True
     assert all(
-        item["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+        item["allowed_routes"]
+        == [GatewayInferenceRoute.OPENAI, GatewayInferenceRoute.MODEL_INFO]
         for item in litellm.keys.values()
     )
+
+
+def test_existing_inference_only_keys_converge_to_model_info_without_renewal():
+    from vonk_control.gateway_route_grants import GatewayInferenceRoute
+
+    litellm = FakeLiteLlm()
+    service = _service(litellm)
+    _created(service.create("laptop", models=["chat"], expires="30d"))
+    litellm.keys["laptop"]["allowed_routes"] = [GatewayInferenceRoute.OPENAI.value]
+    secret = litellm.keys["laptop"]["key"]
+    assert service.reconcile_route_grants() is True
+    assert litellm.keys["laptop"]["allowed_routes"] == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
+    assert litellm.keys["laptop"]["key"] == secret
+    assert service.reconcile_route_grants() is False
 
 
 def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
@@ -1179,7 +1207,7 @@ def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
     litellm = FakeLiteLlm()
     service = _service(litellm)
     service._route_grants = lambda models, _runs: (
-        [GatewayInferenceRoute.OPENAI.value]
+        [GatewayInferenceRoute.OPENAI.value, GatewayInferenceRoute.MODEL_INFO.value]
         + (
             [GatewayInferenceRoute.SYSTEMONE.value]
             if not models or "d3" in models
@@ -1190,11 +1218,16 @@ def test_new_key_grants_native_route_only_inside_its_existing_model_scope():
     _created(service.create("chat", models=["chat"]))
     assert litellm.keys["d3"]["allowed_routes"] == [
         GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
         GatewayInferenceRoute.SYSTEMONE,
     ]
-    assert litellm.keys["chat"]["allowed_routes"] == [GatewayInferenceRoute.OPENAI]
+    assert litellm.keys["chat"]["allowed_routes"] == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
     service._route_grants = lambda _models, _runs: [
         GatewayInferenceRoute.OPENAI.value,
+        GatewayInferenceRoute.MODEL_INFO.value,
         "/key/generate",
     ]
     assert isinstance(service.create("forbidden"), UnknownError)

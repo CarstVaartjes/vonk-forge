@@ -58,7 +58,7 @@ def test_missing_key_is_created_with_exact_inference_only_policy(monkeypatch) ->
         "key": HERMES_KEY,
         "key_alias": "vonk-hermes-agent",
         "models": ["hermes-agent"],
-        "allowed_routes": ["openai_routes"],
+        "allowed_routes": ["openai_routes", "model_info_routes"],
         "blocked": False,
         "metadata": {"managed_by": "vonk-forge", "service": "hermes-agent"},
     }
@@ -98,7 +98,7 @@ def test_existing_key_value_is_reused_and_policy_drift_is_reconciled(
         "key": HERMES_KEY,
         "key_alias": "vonk-hermes-agent",
         "models": ["hermes-agent"],
-        "allowed_routes": ["openai_routes"],
+        "allowed_routes": ["openai_routes", "model_info_routes"],
         "blocked": False,
     }
     assert all(path != "/key/generate" for _, path, _ in calls)
@@ -217,3 +217,22 @@ def test_secret_reader_rejects_symlinks(tmp_path: Path) -> None:
 
     with pytest.raises(module.ProvisionError):
         module._read_secret(link, prefix="sk-")
+
+
+def test_controller_reconcile_and_hermes_check_agree_on_one_key() -> None:
+    from vonk_control.gateway_route_grants import BASE_KEY_ROUTES
+
+    module = _module()
+    assert module.ALLOWED_ROUTES == list(BASE_KEY_ROUTES)
+    # The Controller reconciles any managed key to BASE_KEY_ROUTES; the key it
+    # leaves is exactly what the Hermes health check accepts.
+    assert module._is_exact(
+        {
+            "info": {
+                "key_alias": module.KEY_ALIAS,
+                "models": module.MODELS,
+                "allowed_routes": list(BASE_KEY_ROUTES),
+                "blocked": False,
+            }
+        }
+    )

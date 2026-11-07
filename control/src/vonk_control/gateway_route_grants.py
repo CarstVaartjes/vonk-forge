@@ -14,7 +14,18 @@ from .recipe_routes import RecipeRouteNotReady
 
 class GatewayInferenceRoute(StrEnum):
     OPENAI = "openai_routes"
+    # LiteLLM v1.103.0: exactly /model/info, /v1/model/info, /model_group/info.
+    # The handler lists only the models the calling key may use.
+    MODEL_INFO = "model_info_routes"
     SYSTEMONE = "/vllm/systemone"
+
+
+# The routes every managed key holds; deploy/compose/hermes-agent/provision-litellm-key.py
+# mirrors this list (a test keeps them equal).
+BASE_KEY_ROUTES: tuple[str, ...] = (
+    GatewayInferenceRoute.OPENAI.value,
+    GatewayInferenceRoute.MODEL_INFO.value,
+)
 
 
 def recipe_key_routes(
@@ -28,7 +39,7 @@ def recipe_key_routes(
     Only accepted running interface intents grant native routes. The short read transaction
     ends before the caller contacts LiteLLM. Model ACLs still authorize each call.
     """
-    routes = [GatewayInferenceRoute.OPENAI.value]
+    routes: list[str] = list(BASE_KEY_ROUTES)
     statement = (
         select(RecipeRun.alias, CatalogDocumentRevision.document)
         .select_from(RecipeRun)

@@ -8,6 +8,9 @@ gateway does:
 
 * ``/v1/model/info`` returns every vector's model_info verbatim, the ``vonk_``
   keys included, and nothing for the route without facts;
+* a CLIENT key created as the Controller creates them (its own models and
+  ``allowed_routes``) reads ``/v1/model/info`` and sees only its own models,
+  while key, user and ``/v2`` information stay refused;
 * a ``mode: "decision"`` route loads;
 * a prompt far beyond a route's ``max_input_tokens`` is forwarded, not rejected
   by the gateway (the engine is the one gate);
@@ -29,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
 
+from vonk_control.gateway_route_grants import BASE_KEY_ROUTES
 from vonk_control.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
@@ -41,6 +45,11 @@ ROOT = Path(__file__).resolve().parents[2]
 VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"
 MASTER_KEY = "sk-model-info-proof"
 PORT = 4000
+DB_PORT = 55432
+POSTGRES_IMAGE = json.loads(
+    (ROOT / "deploy/compose/images.lock.json").read_text(encoding="utf-8")
+)["images"]["postgres"]
+DB_PASSWORD = "model-info-proof"
 
 
 class Upstream(BaseHTTPRequestHandler):
@@ -107,12 +116,14 @@ def render(upstream_host: str, upstream_port: int) -> bytes:
     )
 
 
-def call(path: str, body: dict[str, object] | None = None) -> tuple[int, object]:
+def call(
+    path: str, body: dict[str, object] | None = None, key: str = MASTER_KEY
+) -> tuple[int, object]:
     request = urllib.request.Request(
         f"http://127.0.0.1:{PORT}{path}",
         data=None if body is None else json.dumps(body).encode(),
         headers={
-            "Authorization": f"Bearer {MASTER_KEY}",
+            "Authorization": f"Bearer {key}",
             "Content-Type": "application/json",
         },
     )
@@ -148,7 +159,36 @@ def listed(entries: dict[str, dict], alias: str) -> dict:
     return entries[alias]
 
 
+def prove_client_key() -> None:
+    """A virtual key, created as the Controller creates them, reads its own facts."""
+    scope = [alias_of("plain"), alias_of("options-base")]
+    deadline = time.monotonic() + 120
+    while True:  # the key store is ready once the database migration finished
+        status, created = call(
+            "/key/generate",
+            {
+                "key_alias": "proof-client",
+                "models": scope,
+                "allowed_routes": list(BASE_KEY_ROUTES),
+                "metadata": {"managed_by": "vonk-forge"},
+            },
+        )
+        if status == 200:
+            break
+        check(time.monotonic() < deadline, f"key generate answered {status}")
+        time.sleep(2)
+    key = created["key"]  # type: ignore[index]
+    status, info = call("/v1/model/info", key=key)
+    check(status == 200, f"a client key was refused /v1/model/info: {status} {info}")
+    names = sorted(entry["model_name"] for entry in info["data"])  # type: ignore[index]
+    check(names == sorted(scope), f"a client key saw {names}, not its own models")
+    for path in ("/v2/model/info", "/key/info", "/user/info", "/team/list"):
+        status, _ = call(path, key=key)
+        check(status in (401, 403), f"a client key reached {path}: {status}")
+
+
 def prove() -> None:
+    prove_client_key()
     entries: dict[str, dict] = {}
     status, info = call("/v1/model/info")
     check(status == 200 and isinstance(info, dict), f"/v1/model/info answered {status}")
@@ -242,7 +282,30 @@ def main() -> None:
     config.write_bytes(render(upstream_host, server.server_address[1]))
     config.chmod(0o644)
     container = "vonk-model-info-proof"
-    subprocess.run(["docker", "rm", "-f", container], check=False, capture_output=True)
+    database = "vonk-model-info-proof-db"
+    for name in (container, database):
+        subprocess.run(["docker", "rm", "-f", name], check=False, capture_output=True)
+    subprocess.run(
+        [
+            "docker",
+            "run",
+            "--detach",
+            "--name",
+            database,
+            "--publish",
+            f"127.0.0.1:{DB_PORT}:5432",
+            "--env",
+            f"POSTGRES_PASSWORD={DB_PASSWORD}",
+            "--env",
+            "POSTGRES_DB=litellm",
+            POSTGRES_IMAGE,
+        ],
+        check=True,
+    )
+    database_host = "host.docker.internal" if arguments.published else "127.0.0.1"
+    database_url = (
+        f"postgresql://postgres:{DB_PASSWORD}@{database_host}:{DB_PORT}/litellm"
+    )
     subprocess.run(
         [
             "docker",
@@ -259,6 +322,8 @@ def main() -> None:
             f"LITELLM_MASTER_KEY={MASTER_KEY}",
             "--env",
             "LITELLM_UPSTREAM_KEY=stub-upstream-key",
+            "--env",
+            f"LITELLM_DATABASE_URL={database_url}",
             "--volume",
             f"{config}:/proof/litellm.json:ro",
             "--entrypoint",
@@ -280,9 +345,10 @@ def main() -> None:
         subprocess.run(["docker", "logs", "--tail", "200", container], check=False)
         raise
     finally:
-        subprocess.run(
-            ["docker", "rm", "-f", container], check=False, capture_output=True
-        )
+        for name in (container, database):
+            subprocess.run(
+                ["docker", "rm", "-f", name], check=False, capture_output=True
+            )
         server.shutdown()
     print("model_info proof passed")
 
