@@ -1072,6 +1072,78 @@ def _drain_until(service, operation_id: str, now: list[datetime], states: set[st
     raise AssertionError(f"operation did not reach {states}: {observed.state}")
 
 
+def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    data = b"pinned model bytes"
+    requests: list[httpx2.Request] = []
+    now = [NOW]
+    serve_pinned = [False]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        body = data if serve_pinned[0] else b"X" * len(data)
+        return httpx2.Response(200, request=request, content=body)
+
+    service, client = _service(
+        tmp_path, sessions, maximum=1, handler=handler, clock=lambda: now[0]
+    )
+    artifact = _artifact("integrity-ends", data)
+    operation = _start(service, [artifact], "00000000-0000-4000-8000-000000000453")
+    ended = _drain_until(service, operation.id, now, {"succeeded", "failed"})
+    assert ended.state == "failed"
+    assert len(requests) == 2  # the first mismatch is retried, the second ends it
+    assert ended.failure is not None
+    assert ended.failure["retryable"] is False
+    detail = str(ended.failure["detail"])
+    assert str(artifact["sha256"]) in detail and "2 consecutive" in detail
+    assert ended.blockers == () and ended.next_attempt_at is None
+    for _ in range(3):
+        now[0] += timedelta(seconds=600)
+        service.tick()
+    assert len(requests) == 2  # nothing retries an ended download
+    # A fresh exact request counts independently and is served the pinned bytes.
+    serve_pinned[0] = True
+    fresh = _start(service, [artifact], "00000000-0000-4000-8000-000000000454")
+    done = _drain_until(service, fresh.id, now, {"succeeded", "failed"})
+    assert done.id != ended.id and done.state == "succeeded"
+    service.close()
+    assert client is not None
+    client.close()
+
+
+def test_a_mismatch_between_other_failures_does_not_count_as_consecutive(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    data = b"pinned model bytes"
+    requests: list[httpx2.Request] = []
+    now = [NOW]
+    answers = [b"X" * len(data), None, b"X" * len(data), data]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        body = answers[min(len(requests), len(answers)) - 1]
+        if body is None:
+            return httpx2.Response(404, request=request)
+        return httpx2.Response(200, request=request, content=body)
+
+    service, client = _service(
+        tmp_path, sessions, maximum=1, handler=handler, clock=lambda: now[0]
+    )
+    operation = _start(
+        service,
+        [_artifact("integrity-reset", data)],
+        "00000000-0000-4000-8000-000000000455",
+    )
+    done = _drain_until(service, operation.id, now, {"succeeded", "failed"})
+    assert done.state == "succeeded"
+    service.close()
+    assert client is not None
+    client.close()
+
+
 def test_hf_access_failure_resumes_automatically_after_token_change(
     tmp_path: Path,
 ) -> None:
@@ -1133,7 +1205,7 @@ def test_digest_mismatch_discards_bytes_and_downloads_again(tmp_path: Path) -> N
 
     def handler(request: httpx2.Request) -> httpx2.Response:
         requests.append(request)
-        if len(requests) <= 2:
+        if len(requests) <= 1:
             return httpx2.Response(200, request=request, content=b"X" * len(data))
         return httpx2.Response(200, request=request, content=data)
 
@@ -1144,7 +1216,7 @@ def test_digest_mismatch_discards_bytes_and_downloads_again(tmp_path: Path) -> N
     operation = _start(service, [artifact], "00000000-0000-4000-8000-000000000452")
     completed = _drain_until(service, operation.id, now, {"succeeded", "failed"})
     assert completed.state == "succeeded"
-    assert len(requests) == 3
+    assert len(requests) == 2
     # Every retry restarted from byte zero instead of resuming bad bytes.
     assert all("range" not in request.headers for request in requests)
     stored = service.root / "objects" / str(artifact["sha256"])[0:2]

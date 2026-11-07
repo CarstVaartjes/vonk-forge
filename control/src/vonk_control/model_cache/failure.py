@@ -31,6 +31,11 @@ from .constants import (
     _SOURCE_GONE_STATUSES,
 )
 from .errors import ModelCacheError, _ArtifactWriterBusy
+from .ingress_mismatch import (
+    IngressMismatchStep,
+    ingress_mismatch_detail,
+    observe_ingress_mismatch,
+)
 from .persistence import (
     _cache_failure,
     _operation_cancellation,
@@ -99,7 +104,10 @@ class FailureMixin:
             )
             if operation is not None and operation.state == "cancelled":
                 return
-            if transfer_attempt is not None and source_status in _SOURCE_GONE_STATUSES:
+            if transfer_attempt is not None and (
+                source_status in _SOURCE_GONE_STATUSES
+                or failure_code == ModelCacheCode.DIGEST_MISMATCH
+            ):
                 if operation is None:
                     return
                 claim = cache._lifecycle.lifecycle(operation, now)
@@ -112,7 +120,7 @@ class FailureMixin:
                 ):
                     # The same failed Future may be reported again after a
                     # lost commit acknowledgement. Only its exact live attempt
-                    # can contribute a new provider file observation.
+                    # can contribute a new provider file or digest observation.
                     return
             cancellation_pending = (
                 operation is not None and _operation_cancellation(operation) is not None
@@ -137,7 +145,8 @@ class FailureMixin:
                 retained_retry = (
                     payload_before.retry if payload_before is not None else None
                 )
-                gone_recovery: str | None = None
+                ended_recovery: str | None = None
+                ingress_mismatch = None
                 missing_source: ModelCacheMissingSourceObservation | None = None
                 artifact_key = failed_artifact_key or operation.current_artifact_key
                 if (
@@ -170,7 +179,7 @@ class FailureMixin:
                         retryable = False
                         verdict = Disposition.FAIL
                         failure_code = ModelCacheCode.SOURCE_GONE
-                        gone_recovery = "download_again"
+                        ended_recovery = "download_again"
                         detail = cache._source_gone_detail(
                             session,
                             manifest,
@@ -180,6 +189,41 @@ class FailureMixin:
                         )
                         if row is not None:
                             row.last_error = detail
+
+                if (
+                    retryable
+                    and transfer_attempt is not None
+                    and failure_code == ModelCacheCode.DIGEST_MISMATCH
+                    and artifact_key
+                ):
+                    pinned = next(
+                        (
+                            item
+                            for item in manifest.artifacts
+                            if artifact_key in {item.key, item.artifact_id}
+                        ),
+                        None,
+                    )
+                    if pinned is not None:
+                        ingress_mismatch, step = observe_ingress_mismatch(
+                            retained_retry.ingress_mismatch
+                            if retained_retry is not None
+                            else None,
+                            artifact_key=artifact_key,
+                            sha256=pinned.sha256,
+                        )
+                        if step is IngressMismatchStep.END:
+                            # Observed twice in a row: the source serves other
+                            # content than the pin. End with the evidence; a
+                            # fresh exact request counts independently.
+                            retryable = False
+                            verdict = Disposition.FAIL
+                            ended_recovery = "download_again"
+                            detail = ingress_mismatch_detail(
+                                pinned.path, ingress_mismatch
+                            )
+                            if row is not None:
+                                row.last_error = detail
 
                 operator_retries = (
                     0
@@ -254,6 +298,7 @@ class FailureMixin:
                         update={
                             "operator_retries": operator_retries,
                             "missing_source": missing_source,
+                            "ingress_mismatch": ingress_mismatch,
                             "access_checks": access_checks,
                         }
                     )
@@ -277,7 +322,7 @@ class FailureMixin:
                     failure_code,
                     detail,
                     retryable=retryable,
-                    recovery=gone_recovery
+                    recovery=ended_recovery
                     or getattr(error, "recovery", None)
                     or ("capacity" if failure_code == ModelCacheCode.CAPACITY else None)
                     or ("resume" if bounded_retry else "retry"),
