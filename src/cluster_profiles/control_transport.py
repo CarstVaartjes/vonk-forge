@@ -37,7 +37,7 @@ def _resolve_address(arguments: tuple[Any, ...]) -> Future[Any]:
     def resolve() -> None:
         try:
             result.set_result(socket.getaddrinfo(*arguments))
-        except Exception as error:  # noqa: BLE001 - propagate worker failures to the waiting request
+        except BaseException as error:  # noqa: BLE001 - the waiter must always complete
             result.set_exception(error)
         finally:
             with _DNS_LOCK:

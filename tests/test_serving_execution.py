@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 
@@ -244,3 +245,31 @@ def test_native_decision_check_rejects_changed_option_probabilities() -> None:
         evaluate_http_response(
             HttpObservation(200, {}, response.model_dump_json().encode()), check
         )
+
+
+def test_unfitted_check_never_needs_the_contracts_package(
+    fixture_server: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in ("vonk_forge_contracts", "vonk_forge_contracts.api"):
+        monkeypatch.setitem(sys.modules, name, None)  # an import now raises ImportError
+    check = {
+        "name": "chat-smoke",
+        "kind": "openai.chat",
+        "request": {
+            "transport": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "body": {
+                "model": "$ALIAS",
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 4,
+            },
+        },
+        "assertions": ["chat.nonempty", "chat.output-cap"],
+    }
+
+    observed = execute_http_check(
+        fixture_server, check, model_alias="fixture-model", chat_api=None
+    )
+
+    assert observed["response_shape"] == "chat.completion"

@@ -97,6 +97,7 @@ MODES = (
     "plan-digests",
     "background-retries",
     "tick-polls",
+    "future-workers",
     "locked-io",
     "scratch-names",
     "capacity-refusals",
@@ -459,6 +460,61 @@ def runtime_count_caps(source: str) -> list[int]:
                 )
                 if cap and (named or collection):
                     found.add(node.lineno)
+    return sorted(found)
+
+
+_FETCH_CALL = re.compile(r"(?i)request|fetch|page|^(?:get|post|put|patch|send)$")
+
+
+def _calls_a_fetch(node: ast.AST) -> bool:
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else ""
+        )
+        if _FETCH_CALL.search(name):
+            return True
+    return False
+
+
+def paging_count_ceilings(source: str) -> list[int]:
+    """``for ... in range(... _MAX_* ...)`` loops whose body fetches a page.
+
+    A paged read ends with the peer's last page, bounded by a deadline; a page
+    count ceiling truncates or refuses a library that outgrows it. A real
+    protocol limit (HTTP redirects) says why with ``# item-count-limit:``.
+    """
+    lines = source.splitlines()
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.For):
+            continue
+        loop = node.iter
+        if not (
+            isinstance(loop, ast.Call)
+            and isinstance(loop.func, ast.Name)
+            and loop.func.id == "range"
+        ):
+            continue
+        capped = any(
+            isinstance(part, ast.Name)
+            and _MAX_CONSTANT.match(part.id)
+            and part.id not in _RANGE_CONSTANTS
+            for argument in loop.args
+            for part in ast.walk(argument)
+        )
+        if (
+            capped
+            and any(_calls_a_fetch(statement) for statement in node.body)
+            and ITEM_COUNT_PRAGMA not in lines[node.lineno - 1]
+        ):
+            found.add(node.lineno)
     return sorted(found)
 
 
@@ -1905,6 +1961,14 @@ def check_source(
         and TICK_POLL_SCOPE.search(source)
     ):
         hits.extend((line, TICK_POLL_MESSAGE) for line in fixed_tick_polls(source))
+    if python and not is_test and "future-workers" in modes:
+        # An edit anywhere inside the worker can drop its BaseException handler.
+        hits.extend(
+            (changed, FUTURE_WORKER_MESSAGE)
+            for start, end in future_workers_catching_exception(source)
+            for changed in sorted(added)
+            if start <= changed <= end
+        )
     if python and not is_test and "planner-defects" in modes:
         hits.extend(
             (line, "planner contract defect hidden by broad wait")
@@ -2138,7 +2202,11 @@ def check_source(
         hits.extend(
             (line, "item-count cap on a model-sized list; bound by bytes instead")
             for line in sorted(
-                {*model_sized_count_caps(source), *runtime_count_caps(source)}
+                {
+                    *model_sized_count_caps(source),
+                    *runtime_count_caps(source),
+                    *paging_count_ceilings(source),
+                }
             )
         )
     if (
@@ -2447,6 +2515,67 @@ def fixed_tick_polls(source: str) -> list[int]:
                 if polls:
                     sites.append(loop.lineno)
     return sites
+
+
+# A thread that completes a Future only when the read succeeds or raises an
+# Exception leaves the waiter blocked for good when it dies with a
+# BaseException (CancelledError, SystemExit): the Future is never completed.
+FUTURE_WORKER_MESSAGE = (
+    "thread completes a Future only on Exception; complete it in except BaseException"
+)
+FUTURE_COMPLETIONS = frozenset({"set_result", "set_exception"})
+
+
+def _is_thread_target(node: ast.AST) -> str | None:
+    if not isinstance(node, ast.Call):
+        return None
+    name = (
+        node.func.attr
+        if isinstance(node.func, ast.Attribute)
+        else getattr(node.func, "id", "")
+    )
+    if name != "Thread":
+        return None
+    for keyword in node.keywords:
+        if keyword.arg == "target" and isinstance(keyword.value, ast.Name):
+            return keyword.value.id
+    return None
+
+
+def _completes_on_base_exception(function: ast.AST) -> bool:
+    for handler in (n for n in ast.walk(function) if isinstance(n, ast.ExceptHandler)):
+        broad = handler.type is None or (
+            isinstance(handler.type, ast.Name) and handler.type.id == "BaseException"
+        )
+        if broad and any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in FUTURE_COMPLETIONS
+            for n in ast.walk(handler)
+        ):
+            return True
+    return False
+
+
+def future_workers_catching_exception(source: str) -> list[tuple[int, int]]:
+    """Spans of thread targets that complete a Future without BaseException."""
+    tree = ast.parse(source)
+    targets = {name for node in ast.walk(tree) if (name := _is_thread_target(node))}
+    if not targets:
+        return []
+    return [
+        (node.lineno, node.end_lineno or node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name in targets
+        and any(
+            isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr in FUTURE_COMPLETIONS
+            for n in ast.walk(node)
+        )
+        and not _completes_on_base_exception(node)
+    ]
 
 
 def planner_defect_waits(source: str) -> list[int]:
