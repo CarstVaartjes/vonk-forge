@@ -1876,7 +1876,7 @@ def test_every_litellm_build_verifies_the_locked_base_signature_first() -> None:
     """Fail closed at the security edge: any job that builds the LiteLLM
     Dockerfile (directly or through a matrix) must run the signature check in
     an earlier step that cannot be skipped or ignored."""
-    builds = 0
+    sites: set[str] = set()
     for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
         document = yaml.safe_load(path.read_text())
         for name, body in (document.get("jobs") or {}).items():
@@ -1885,7 +1885,7 @@ def test_every_litellm_build_verifies_the_locked_base_signature_first() -> None:
             for index, step in enumerate(steps):
                 if not _builds_litellm(step, matrix):
                     continue
-                builds += 1
+                sites.add(f"{path.name}:{name}")
                 verifies = [
                     earlier
                     for earlier in steps[:index]
@@ -1902,7 +1902,7 @@ def test_every_litellm_build_verifies_the_locked_base_signature_first() -> None:
                     )
                 ]
                 assert installs, f"{path.name}:{name} does not install cosign"
-    assert builds >= 3
+    assert "ci.yml:nas-install" in sites
 
 
 def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) -> None:
@@ -1953,10 +1953,12 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
     assert not called.exists()
 
     # With the lock matching the Dockerfile, cosign is called with the key.
-    reference = re.search(
+    upstream = re.search(
         r"(?m)^FROM (\S+) AS upstream",
         (root / "deploy/compose/litellm/Dockerfile").read_text(),
-    ).group(1)
+    )
+    assert upstream is not None
+    reference = upstream.group(1)
     lock["build_bases"]["litellm"] = reference
     lock_path.write_text(json.dumps(lock))
     accepted = subprocess.run(

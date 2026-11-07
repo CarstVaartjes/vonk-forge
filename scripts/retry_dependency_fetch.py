@@ -39,7 +39,7 @@ _PERMANENT = re.compile(
     r"repository(?: [^\n]+)? not found|not our ref|couldn't find remote ref|"
     r"could not read (?:username|password)|terminal prompts disabled|manifest unknown|"
     r"certificate verify failed|certificate signed by unknown authority|"
-    r"no matching signatures|digest mismatch|hash mismatch|hashes are required|no solution found|failed to build",
+    r"no matching signatures|no signatures found|digest mismatch|hash mismatch|hashes are required|no solution found|failed to build",
     re.IGNORECASE,
 )
 
