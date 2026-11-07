@@ -62,7 +62,6 @@ def _run_plan() -> dict[str, object]:
         observation_schema_version=2,
         run_generation=1,
         installation_id="00000000-0000-4000-8000-000000000001",
-        alias="demo",
         mapping_id="00000000-0000-4000-8000-000000000002",
         mapping_generation=1,
         recipe_revision_id="00000000-0000-4000-8000-000000000003",

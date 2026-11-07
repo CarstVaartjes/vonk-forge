@@ -83,7 +83,6 @@ class JobActivationMixin:
             "recipe.job.activate.v1",
             None,
             installation_id=plan.installation_id,
-            run_alias=plan.alias,
         )
         if existing is not None:
             return existing
@@ -95,7 +94,6 @@ class JobActivationMixin:
                 "recipe.job.activate.v1",
                 None,
                 installation_id=plan.installation_id,
-                run_alias=plan.alias,
             )
             if replay is not None:
                 return replay
@@ -258,7 +256,6 @@ class JobActivationMixin:
                         "recipe.job.activate.v1",
                         None,
                         installation_id=plan.installation_id,
-                        run_alias=plan.alias,
                     )
                 )
             except UnknownOutcomeError as error:

@@ -279,6 +279,10 @@ class RecipeRun(Base):
         DateTime(timezone=True), nullable=False, index=True
     )
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the route name was last changed on the live run; ``None`` means the
+    #: name was accepted when the run was created.  The newest accepted request
+    #: for a name owns it, so the owner order reads ``renamed_at or created_at``.
+    renamed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class RunNode(Base):

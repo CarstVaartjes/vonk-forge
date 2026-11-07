@@ -27,6 +27,7 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfile, FleetProfileApplication, FleetProfileSelection
 from ..recipe_operations import _run_is_one_shot
+from ..run_route_name import carries_alias
 from ..strict_json import stored_document_detail
 from .contracts import (
     FleetProfileConflict,
@@ -169,6 +170,9 @@ class FleetProfileService:
                     # A job member never has an endpoint: it serves by holding
                     # its run for submissions, so it has none to report.
                     continue
+                if run is not None and not carries_alias(run, assignment.alias):
+                    # A run routed under another name is not this endpoint.
+                    run = None
                 if (
                     run is not None
                     and run.state == RunState.RUNNING

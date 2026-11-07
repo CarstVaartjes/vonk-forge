@@ -12,6 +12,7 @@ import copy
 import json
 import uuid
 from datetime import UTC, datetime
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from vonk_control.catalog_entities import (
 )
 from vonk_control.catalog_revision_contract import (
     ModelRevisionProjection,
+    RecipeRevisionProjection,
     read_catalog_projection,
 )
 from vonk_control.catalog_sync_contract import (
@@ -401,3 +403,51 @@ def test_the_published_status_of_a_carried_proof_is_readable() -> None:
     assert carried, "the 4.0 index carries proofs moved by the Model facts split"
     for status in carried:
         PublishedQualificationStatusView.model_validate(status)
+
+
+def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
+    tmp_path: Path,
+) -> None:
+    """The refresh re-validates what it wrote: an api block's required nullable
+    member (max_input_tokens) must survive it, not be dropped as a None."""
+    from vonk_control.catalog_entities import CatalogEntityService as Entities
+    from vonk_forge_contracts import read_recipe_api
+
+    sessions, _service, reader, item = _fixture(tmp_path)
+    for entity in reader.snapshot.catalog_entities:
+        entities = Entities(sessions, clock=lambda: NOW)
+        draft = create_draft(entities, entity.document, actor="test")
+        entities.resolve(draft.id, actor="test")
+    entities = Entities(sessions, clock=lambda: NOW)
+    draft = create_draft(entities, item.document, actor="test")
+    revision = entities.resolve(draft.id, actor="test")
+    example = json.loads(
+        (
+            files("vonk_forge_contracts") / "examples" / "recipe-api-decision.json"
+        ).read_text()
+    )
+    example["identity"] = item.document["identity"]
+    api = read_recipe_api(example)
+    entities.record_published_facts(
+        {}, {}, {(revision.publisher, revision.slug, revision.content_digest): api}
+    )
+    with sessions.begin() as session:
+        row = session.get(CatalogDocumentRevision, revision.id)
+        assert row is not None
+        stale = copy.deepcopy(row.projected)
+        stale["build_options"]["layers"] = True  # a previous compiler's policy
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == row.id)
+            .values(projected=stale)
+        )
+
+    assert entities.refresh_build_policy() == ()
+
+    with sessions() as session:
+        row = session.get(CatalogDocumentRevision, revision.id)
+        assert row is not None
+        stored = read_catalog_projection(row)
+        assert isinstance(stored, RecipeRevisionProjection)
+        assert stored.api == api
+        assert row.projected["build_options"]["layers"] is False

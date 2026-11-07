@@ -62,7 +62,13 @@ def _preview(payload: Mapping[str, object]) -> None:
         print(f"{_text(step.get('index'))}. {_text(step.get('label'))}")
         _field("Affected Sparks", _words(step.get("node_ids")))
     for run in _records(effects, "runs"):
-        _field(f"{_text(run.get('action')).title()} endpoint", run.get("alias"))
+        previous = run.get("previous_alias")
+        _field(
+            f"{_text(run.get('action')).title()} endpoint",
+            run.get("alias")
+            if previous is None
+            else f"{run.get('alias')} (rename {previous} → {run.get('alias')})",
+        )
         _field("Run", run.get("run_id"))
         _field("Complete group", _words(run.get("node_ids")))
     for installation in _records(effects, "installations"):

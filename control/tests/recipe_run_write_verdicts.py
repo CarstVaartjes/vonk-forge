@@ -38,13 +38,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "bf8ea87e8746ea4fa6e76f6cdf992b1c3507f5b5db6b900a0d2bbbfe26260026",
+            "1f79f6595f3fe7d682c03bffed9a3591b3eb59f9e17f8bc04acfe1fecbd4af3c",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
     "recipe_routes/service.py": {
         "_claim_run_publication_once": (
-            "c6c3431315aedc64bc88fbc07f3c332a9bf775743493fe0c40dac61117655285",
+            "f2e9124b22a295179cd9006c793e83b2a161dc75864e77a8e54b881edcb18dbc",
             "callback: publication transition owns claim and run writes",
         ),
         "_complete_run_publication": (
@@ -74,7 +74,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition reconciles abandoned intent",
         ),
         "_maintenance_step_in_session": (
-            "719ada994e350b319dd78f0796e6fbf1c9277cb1d5f9bf9f6ae17452e6ee57e9",
+            "fca4aefc9e71112ada1a3329a9fcf0a7e87ba9bcabe3a0870f9a5b9e6d5206d6",
             "callback: publication transition owns maintenance projection",
         ),
         "_withdraw_runs_once.decide.record_reason": (
@@ -132,7 +132,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "e642022cb930ec565b9fe968700fa6399b08a835416aedc0c1e38303da1e9150",
+            "6d3618fc710e5617d8d26f132da9bdaeeafbc9dd98ce24245c60b53ab7c4aaff",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
@@ -142,13 +142,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_activation.py": {
         "_activate_job_run_once": (
-            "0c0627137bd0bad785689a696583bbdab51e71e953afd54015aee5f6a082bd44",
+            "df303f026c3847af285787fba50627945c3fc261c874654ede86d13ebb5b822a",
             "retain: activation admission binds accepted run intent",
         ),
     },
     "recipe_operations/start.py": {
         "_start_once": (
-            "b09518a0f10c15a325fd5d81fde19fbf0dbf9220ef124293052114702682760e",
+            "f858901c454e27821f87f9ce151fa5a688c2e88484fa76ee3d4926b230715456",
             "retain: Start admission binds run and capacity",
         ),
     },
@@ -162,6 +162,12 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
         "_project_terminal_result": (
             "381aab92244881ed24e907acca256e794897dd9442bdcdd3228a65b36385efe1",
             "caller-owned: queue result transaction owns terminal projection",
+        ),
+    },
+    "run_route_name.py": {
+        "rename_run": (
+            "d28af1decdfe0fea513ed8d69e1560a596a140bbaee47ae0d563cf9f2c85f105",
+            "caller-owned: the profile admission transaction owns the rename; the next route publication pass fences the republish",
         ),
     },
     "recipe_operations/offline_stop.py": {

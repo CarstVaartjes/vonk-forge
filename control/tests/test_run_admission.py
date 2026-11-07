@@ -268,7 +268,9 @@ def setup(
     return sessions, now, node, installation.id
 
 
-def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -> None:
+def test_run_alias_is_not_in_the_digest_and_is_not_persisted_in_the_plan(
+    tmp_path,
+) -> None:
     sessions, now, _node, installation = setup(tmp_path, free_memory=300)
     service = RunAdmissionService(
         sessions, inventory_max_age=300, memory_floor_bytes=50
@@ -283,14 +285,16 @@ def test_run_alias_is_digest_bound_and_persisted_with_plan_authority(tmp_path) -
     )
     assert plan.alias == "qwen"
     assert alternate.alias == "qwen-alt"
-    assert alternate.plan_digest != plan.plan_digest
+    # The route name is routing metadata, not execution identity.
+    assert alternate.plan_digest == plan.plan_digest
 
     run_id = service.accept_run(plan, actor="admin", now=now)
 
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        assert run.alias == plan.alias == run.plan["alias"]
+        assert run.alias == plan.alias
+        assert "alias" not in run.plan
 
 
 def test_a_second_single_spark_run_takes_the_other_authorised_port(tmp_path) -> None:
