@@ -12,6 +12,7 @@ restarted or re-admitted.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -22,6 +23,27 @@ if TYPE_CHECKING:
     from .models import RecipeRun
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def owner_order(run: RecipeRun) -> tuple[datetime, str]:
+    """The order in which runs own a name: the newest accepted intent (creation
+    or rename) wins, the id breaks a tie. The route publisher applies the same
+    order in ``recipe_routes.candidate``."""
+    return (run.renamed_at or run.created_at, run.id)
+
+
+def alias_owner(runs: Iterable[RecipeRun]) -> RecipeRun | None:
+    """The run that owns the name among runs that carry it, or ``None``."""
+    return max(runs, key=owner_order, default=None)
+
+
+def runs_named(session: Session, alias: str) -> tuple[RecipeRun, ...]:
+    """Every run, live or ended, whose route name is ``alias``."""
+    from sqlalchemy import select
+
+    from .models import RecipeRun
+
+    return tuple(session.scalars(select(RecipeRun).where(RecipeRun.alias == alias)))
 
 
 def carries_alias(run: RecipeRun, alias: str | None) -> bool:

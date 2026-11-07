@@ -71,6 +71,7 @@ from .contracts import (
     _recipe_interface,
     _validate_inputs_against_contract,
 )
+from .job_contract import ArtifactJobContractResponse, read_job_contract
 from .outputs import ArtifactJobService as OutputService
 
 
@@ -710,6 +711,22 @@ class ArtifactJobService(OutputService):
             if job is None:
                 raise MissingRecord(request_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._view_in_session(session, job)
+
+    def job_contract(
+        self,
+        *,
+        run_id: str | None = None,
+        alias: str | None = None,
+        recipe_revision_id: str | None = None,
+    ) -> ArtifactJobContractResponse:
+        """The contract ``create`` validates against, read before any job exists."""
+        with self._sessions() as session:
+            return read_job_contract(
+                session,
+                run_id=run_id,
+                alias=alias,
+                recipe_revision_id=recipe_revision_id,
+            )
 
     def list_for_run(
         self, run_id: str, *, limit: int = 100

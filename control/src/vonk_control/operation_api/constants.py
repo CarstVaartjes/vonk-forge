@@ -26,6 +26,10 @@ _ADMIN_OPERATION_IDS = {
         "/api/recipe/runs/{run_id}/artifact-jobs",
     ): "createArtifactJob",
     ("get", "/api/artifact-jobs/capabilities"): "getArtifactJobCapabilities",
+    (
+        "get",
+        "/api/artifact-jobs/contract/{by}/{key}",
+    ): "getArtifactJobContract",
     ("get", "/api/artifact-jobs/requests/{request_id}"): "getArtifactJobByRequestId",
     ("get", "/api/artifact-jobs/{job_id}"): "getArtifactJobStatus",
     ("put", "/api/artifact-jobs/{job_id}/inputs/{name}"): "uploadArtifactJobInput",
