@@ -76,7 +76,6 @@ from vonk_agent_protocol import (
 from . import job_states
 from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
-from .fleet_projection import _installation_payload_expectations
 from .installation_transitions import end_orphaned_installation
 from .logging import log_event
 from .machine_states import DISTRIBUTION_HELD
@@ -274,12 +273,11 @@ def incomplete_installation_ids(session: Session) -> tuple[str, ...]:
         if installation.state != InstallationState.INSTALLED:
             found.append(installation.id)
             continue
-        expectations = _installation_payload_expectations(installation.plan)
         if any(
             node.state != InstallationNodeState.INSTALLED
             or (
-                node.node_id in expectations
-                and node.installed_bytes < expectations[node.node_id]
+                node.required_payload_bytes is not None
+                and node.installed_bytes < node.required_payload_bytes
             )
             for node in session.scalars(
                 select(InstallationNode).where(
