@@ -1347,7 +1347,7 @@ def clone_running_run(sessions, source_run_id: str, *, alias: str) -> str:
                 mapping_generation=source.mapping_generation,
                 alias=alias,
                 plan_digest=authority,
-                plan={**source.plan, "alias": alias, "plan_digest": authority},
+                plan={**source.plan, "plan_digest": authority},
                 state="running",
                 route_state="pending",
                 run_generation=source.run_generation,
@@ -2773,13 +2773,8 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     qwen = service.preview_run(installation.owner_id, "qwen")
     alternate = service.preview_run(installation.owner_id, "qwen-alt")
 
-    with pytest.raises(Exception) as _ending:
-        service.start(
-            alternate,
-            plan_digest=qwen.plan_digest,
-            actor="admin",
-            request_id="0" * 35 + "2",
-        )
+    # The route name is not execution identity: one digest for both names.
+    assert qwen.plan_digest == alternate.plan_digest
     started = service.start(
         alternate,
         plan_digest=alternate.plan_digest,
@@ -2816,6 +2811,17 @@ def test_start_uses_current_alias_and_replays_by_request_identity(
     assert len(runs) == len(jobs) == len(operations) == 1
     assert len(reservations) == 2
     assert queue.available == 2
+
+
+def test_the_plan_digest_does_not_depend_on_the_route_name(tmp_path: Path) -> None:
+    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="0" * 35 + "7"
+    )
+    first = service.preview_run(installation.owner_id, "qwen")
+    second = service.preview_run(installation.owner_id, "another-name")
+    assert first.alias != second.alias
+    assert first.plan_digest == second.plan_digest
 
 
 def test_start_and_activate_replay_require_the_same_installation(
@@ -2905,31 +2911,18 @@ def test_adopt_start_binds_the_durable_child_without_reproducing_its_digest(
     changed = service.preview_run(installation.owner_id, "qwen")
     assert changed.plan_digest != qwen.plan_digest
 
-    adopted = service.adopt_start(
-        installation.owner_id, "qwen", request_id="0" * 35 + "3"
-    )
+    adopted = service.adopt_start(installation.owner_id, request_id="0" * 35 + "3")
 
     assert adopted == started
-    # Adoption is scoped to this exact child: another alias, another
-    # installation or another request key is not it.
+    # Adoption is scoped to this exact child: another installation or another
+    # request key is not it.
     assert (
         service.adopt_start(
-            installation.owner_id, "qwen-alt", request_id="0" * 35 + "3"
+            "00000000-0000-4000-8000-000000000000", request_id="0" * 35 + "3"
         )
         is None
     )
-    assert (
-        service.adopt_start(
-            "00000000-0000-4000-8000-000000000000",
-            "qwen",
-            request_id="0" * 35 + "3",
-        )
-        is None
-    )
-    assert (
-        service.adopt_start(installation.owner_id, "qwen", request_id="0" * 35 + "9")
-        is None
-    )
+    assert service.adopt_start(installation.owner_id, request_id="0" * 35 + "9") is None
     # Replay never queues a second effect for the same step.
     with sessions() as session:
         assert (

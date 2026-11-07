@@ -126,7 +126,6 @@ def _singleton_recovery_authority(
         or run_plan.mapping_generation != run.mapping_generation
         or run_plan.recipe_revision_id != revision.id
         or run_plan.plan_digest != run.plan_digest
-        or run_plan.alias != run.alias
         or run_plan.run_generation != run.run_generation
         or run_plan.execution_mode == "one-shot-jobs"
         or installation_plan.mapping_id != installation.mapping_id

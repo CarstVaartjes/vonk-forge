@@ -1309,7 +1309,6 @@ def test_stale_singleton_wait_does_not_starve_later_recovery_or_hot_loop(
         current_node = session.query(RunNode).filter_by(run_id=run_id).one()
         assert current is not None
         stale_plan = json.loads(canonical_message(current.plan))
-        stale_plan["alias"] = "older-unobserved-singleton"
         session.add(
             RecipeRun(
                 id=stale_id,

@@ -39,6 +39,7 @@ from ..models import (
     RecipeRun,
 )
 from ..preparation_contract import RuntimeImageIdentity
+from ..run_route_name import carries_alias
 from ..run_switch_contract import RunSwitchProfileStopScope, SparkGroup, SparkGroupNode
 from ..strict_json import warn_unreadable_once
 from .contracts import (
@@ -123,7 +124,8 @@ class FleetProfileService:
             for assignment in resolved_assignments
         }
         desired_installation_ids: set[str] = set()
-        desired_run_ids: set[str] = set()
+        # The kept runs, each with the route name its assignment chose.
+        desired_run_aliases: dict[str, str | None] = {}
         run_effects: list[FleetProfileRunEffect] = []
         installation_effects: list[FleetProfileInstallationEffect] = []
         reasons: list[FleetProfileReason] = []
@@ -153,7 +155,7 @@ class FleetProfileService:
                 and assignment.desired_state == DesiredAssignmentState.RUNNING
                 and state.current_state == ObservedAssignmentState.RUNNING
             ):
-                desired_run_ids.add(state.run.id)
+                desired_run_aliases[state.run.id] = assignment.alias
             if (
                 state.current_state != assignment.desired_state
                 and assignment.id not in adopted_assignments
@@ -317,18 +319,21 @@ class FleetProfileService:
                     target_node_ids=sorted(intersection),
                     missing_node_ids=sorted(missing_members),
                 )
+            kept = run.id in desired_run_aliases
+            target_alias = desired_run_aliases.get(run.id) or run.alias
             run_effects.append(
                 FleetProfileRunEffect(
                     run_id=run.id,
                     installation_id=run.installation_id,
-                    alias=run.alias,
+                    alias=target_alias,
+                    previous_alias=None
+                    if carries_alias(run, target_alias)
+                    else run.alias,
                     node_ids=sorted(members),
                     action=ProfileAction.KEEP.value
-                    if run.id in desired_run_ids
+                    if kept
                     else ProfileChildPhase.STOP.value,
-                    profile_stop_scope=profile_stop_scope
-                    if run.id not in desired_run_ids
-                    else None,
+                    profile_stop_scope=None if kept else profile_stop_scope,
                 )
             )
             if run_effects[-1].action == ProfileChildPhase.STOP.value:

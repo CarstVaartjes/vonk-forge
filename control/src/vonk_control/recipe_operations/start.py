@@ -107,7 +107,6 @@ class StartMixin:
             WireAgentOperation.RECIPE_START.value,
             None,
             installation_id=plan.installation_id,
-            run_alias=plan.alias,
         )
         if existing is not None:
             return existing
@@ -136,7 +135,6 @@ class StartMixin:
                 WireAgentOperation.RECIPE_START.value,
                 None,
                 installation_id=plan.installation_id,
-                run_alias=plan.alias,
             )
             if replay is not None:
                 return replay
@@ -383,7 +381,6 @@ class StartMixin:
                         WireAgentOperation.RECIPE_START.value,
                         None,
                         installation_id=plan.installation_id,
-                        run_alias=plan.alias,
                     )
                 )
             except UnknownOutcomeError as error:

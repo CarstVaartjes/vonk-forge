@@ -605,7 +605,6 @@ def validate_profile_stop_owner(
         or len(effect_matches) != 1
         or effect_matches[0].action != "stop"
         or effect_matches[0].installation_id != run.installation_id
-        or effect_matches[0].alias != run.alias
         or tuple(effect_matches[0].node_ids) != tuple(sorted(node_ids))
         or (
             (profile_scope is None and effect_matches[0].profile_stop_scope is not None)
@@ -628,7 +627,6 @@ def validate_profile_stop_owner(
         or authorization.reachable_node_ids != list(expected_reachable_ids)
         or authorization.missing_node_ids != list(expected_missing_ids)
         or stop is None
-        or stop.alias != run.alias
         or stop.run_plan_digest != run.plan_digest
         or stop.plan_digest != authorization.stop_plan_digest
         or tuple(stop.node_ids) != expected_target_ids

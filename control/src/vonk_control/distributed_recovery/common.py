@@ -6,6 +6,7 @@ import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import cache
 from hashlib import (
     sha256,
 )
@@ -55,6 +56,7 @@ from ..persisted_waits import read_wait, schedule_wait, write_wait
 from ..recipe_execution_contract import (
     RecipeExecutionContractError,
     RouteWithdrawalFollowUp,
+    StoredRunPlan,
     parse_stored_run_plan,
 )
 from ..recipe_lifecycle_contract import RecipeOperationCancellationResult
@@ -198,8 +200,22 @@ class _RecoveryDependencyPending(UnsettledOutcome):
     disposition = Disposition.WAIT
 
 
+@cache
+def _reader_identity() -> str:
+    """The contract this release reads a stored run plan with."""
+    return sha256(
+        canonical_message(StoredRunPlan.model_json_schema(mode="validation"))
+    ).hexdigest()
+
+
 def _plan_identity(run: RecipeRun) -> str:
-    return sha256(canonical_message(run.plan)).hexdigest()
+    """The unreadable outcome remembered for these bytes read by this contract.
+
+    A release that reads the plan differently (a field removed or added) must
+    parse it again once: the wait written by an older reader says nothing about
+    the newer one.
+    """
+    return sha256(_reader_identity().encode() + canonical_message(run.plan)).hexdigest()
 
 
 def _unchanged_unreadable(run: RecipeRun) -> bool:

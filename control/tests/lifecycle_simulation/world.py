@@ -104,6 +104,11 @@ class World:
     raised_ticks: _RaisedTicks = field(default_factory=_RaisedTicks)
     #: The world's own engine, released when it closes.
     engine: Engine | None = None
+    #: The route publisher each Controller process builds; the current one is
+    #: ``publisher``, so a test can read its generations or make it fail.
+    publisher_type: Callable[[], ConcurrentPublisher] = ConcurrentPublisher
+    publisher: ConcurrentPublisher = field(init=False)
+    routes: RecipeRouteService = field(init=False)
 
     def __post_init__(self) -> None:
         self.controller = self._start()
@@ -157,6 +162,7 @@ class World:
         profiles = build_production_fleet_profile_service(
             self.sessions, clock=clock, run_switch_operations=planner
         )
+        self.publisher = self.publisher_type()
         orders = AgentJobService(
             self.sessions, clock=clock, result_consumer=lifecycle.consume_agent_result
         )
@@ -166,14 +172,15 @@ class World:
             self.sessions, clock=clock, lifecycle=lifecycle, demands=demands
         )
         profiles.bind_storage_relief(storage.relief_for_spark)
+        self.routes = RecipeRouteService(
+            self.sessions,
+            publisher=self.publisher,
+            management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
+            clock=clock,
+        )
         worker = RecipeOperationWorker(
             self.sessions,
-            RecipeRouteService(
-                self.sessions,
-                publisher=ConcurrentPublisher(),
-                management_policy=ManagementAddressPolicy.parse("192.168.1.0/24"),
-                clock=clock,
-            ),
+            self.routes,
             clock=clock,
             order_reconcile=orders.reconcile_orders,
             stop_admission_cleanup=lifecycle.reconcile_pending_service_stops,
