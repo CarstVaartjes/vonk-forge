@@ -561,6 +561,47 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     )
 
 
+def _release_index(recipes: list[object]) -> dict[str, object]:
+    """A release-shaped library index this Controller's parser accepts."""
+    from vonk_control.recipe_packages import (
+        PACKAGE_MEDIA_TYPE,
+        PACKAGE_REPOSITORY,
+        PACKAGE_SCHEMA_VERSION,
+    )
+    from vonk_forge_contracts import CONTRACT_MAJOR
+
+    return {
+        "schema_version": PACKAGE_SCHEMA_VERSION,
+        "kind": "recipe-library-index",
+        "repository": PACKAGE_REPOSITORY,
+        "source_commit": "c" * 40,
+        "contract_version": f"{CONTRACT_MAJOR}.0.0",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "package_contract": {
+            "schema_version": PACKAGE_SCHEMA_VERSION,
+            "media_type": PACKAGE_MEDIA_TYPE,
+        },
+        "recipes": recipes,
+        "catalog_entities": [],
+    }
+
+
+def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None:
+    """A skipped canary would sync nothing and look like success; it fails here."""
+    pytest.importorskip("vonk_control", reason="requires the control environment")
+    specification = importlib.util.spec_from_file_location(
+        "canary_import_refusal",
+        ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    unreadable = {"document": {"kind": "recipe"}, "package": {}}
+
+    with pytest.raises(ValueError, match="cannot read the canary index"):
+        program.FixtureReader(_release_index([unreadable]), {})
+
+
 @pytest.mark.parametrize("predecessor", [None, "reviewed", "unreviewed"])
 def test_canary_catalog_path_calls_the_installed_service_contract(
     tmp_path, predecessor, monkeypatch
@@ -584,7 +625,6 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
         reviewed_catalog_content,
     )
     from vonk_control.models import Base
-    from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 
     specification = importlib.util.spec_from_file_location(
         "canary_import_contract",
@@ -597,16 +637,8 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 10, 9, tzinfo=UTC)
-    snapshot = RecipeLibrarySnapshot(commit="c" * 40, items=())
-    reader = program.FixtureReader(
-        {
-            "source_commit": snapshot.commit,
-            "repository": snapshot.repository,
-            "recipes": [],
-            "catalog_entities": [],
-        },
-        {},
-    )
+    reader = program.FixtureReader(_release_index([]), {})
+    snapshot = reader.snapshot
     service = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=CatalogService(

@@ -4,10 +4,12 @@ The Spark lifecycle harness runs this program inside the ``control-api``
 container as the Controller user.  Production Controllers only read signed
 recipe releases, so the canary's producer fixture cannot arrive through the
 network reader.  Instead the exact index and package bytes arrive on stdin and
-are applied through the same managed catalog sync, package decoder and catalog
-import the release reader feeds.  The verified archive is kept in the
-Controller's digest-addressed package cache so the recorded package handle
-points at durable state.
+are applied through the same index parser, managed catalog sync, package
+decoder and catalog import the release reader feeds.  The program runs in the
+previous release's Controller too, so it uses only names that release ships
+and builds none of the Controller's own types.  The verified archive is kept
+in the Controller's digest-addressed package cache so the recorded package
+handle points at durable state.
 
 Input (stdin, JSON): ``request_key``, ``index`` (UTF-8 text) and ``packages``
 (base64, one per Recipe of the index).  Output (stdout, JSON): the managed
@@ -28,7 +30,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast, get_args
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import TokenCodec
@@ -40,20 +42,15 @@ from vonk_control.catalog_sync import (
     SyncTrigger,
 )
 from vonk_control.db import build_engine, session_factory
-from vonk_control.recipe_library_types import (
-    CatalogModelEntry,
-    RecipeLibraryItem,
-    RecipeLibrarySnapshot,
-)
-from vonk_control.recipe_packages import load_recipe_package
+from vonk_control.recipe_packages import RecipePackageClient, load_recipe_package
 from vonk_control.settings import Settings
 from vonk_control.source_bundles import DatabaseSourceBundleStore
-from vonk_forge_contracts import (
-    read_model,
-    read_model_display,
-    read_recipe,
-    read_recipe_display,
-)
+
+if TYPE_CHECKING:
+    from vonk_control.recipe_library_types import (
+        RecipeLibraryItem,
+        RecipeLibrarySnapshot,
+    )
 
 SYNC_ACTOR = "system:spark-lifecycle-canary"
 # The Controller's own automatic sync may hold the single sync slot.
@@ -79,77 +76,38 @@ def _cache_package(cache_root: Path, archive: bytes, digest: str) -> Path:
     return target
 
 
-def _display(entry: dict[str, Any], read: Callable[..., Any], derive: str) -> Any:
-    """The display an index entry carries, else the installed contracts' own.
-
-    This program runs inside whichever Controller the lane installed. A canary
-    index published before the per-entry display (a 2.x library, read by a 2.x
-    Controller) carries none; that Controller's contracts derive it from the
-    document, as its release did. A 3.0 index always carries it, and 3.0
-    contracts have no derivation, so a display-less index there fails loudly.
-    """
-    if "display" in entry:
-        return read(entry["display"])
-    import vonk_forge_contracts
-
-    return getattr(vonk_forge_contracts, derive)(
-        (read_model if derive == "model_display_of" else read_recipe)(entry["document"])
-    )
-
-
-def _model_entry(entry: dict[str, Any]) -> CatalogModelEntry:
-    """One index Model with its display."""
-    return CatalogModelEntry(
-        dict(entry["document"]),
-        _display(entry, read_model_display, "model_display_of"),
-        read_model(entry["document"]).identity,
-    )
-
-
 class FixtureReader:
-    """The snapshot of the producer's canary index: one Recipe, or siblings.
+    """The producer's canary index, read by the installed Controller's own parser.
 
-    Each entry carries its own display, which the installed contracts read.
+    This program runs inside whichever Controller the lane installed: the
+    previous release and then the candidate. It never builds Controller types
+    itself; the snapshot is exactly what that Controller's release reader makes
+    of the same signed index, so it has that Controller's shape by construction
+    (tests/test_baseline_program_surface.py keeps it that way).
     """
 
     def __init__(self, index: dict[str, Any], archives: dict[str, Path]) -> None:
-        commit = str(index["source_commit"])
-        self._archives: dict[str, tuple[str, Path]] = {}
-        items = []
-        for entry in index["recipes"]:
-            document = entry["document"]
-            identity = document["identity"]
-            display = _display(entry, read_recipe_display, "recipe_display_of")
-            digest = str(entry["content_sha256"])
-            item = RecipeLibraryItem(
-                library_commit=commit,
-                source_path=str(entry["source_path"]),
-                publisher=str(identity["publisher"]),
-                slug=str(identity["slug"]),
-                title=display.title,
-                description=display.description,
-                tags=tuple(display.tags),
-                display=display,
-                content_sha256=digest,
-                source_bundle_sha256=str(entry["source_bundle_sha256"]),
-                package_sha256=str(entry["package"]["sha256"]),
-                uri=f"vonk://catalog/{identity['publisher']}/{identity['slug']}@sha256:{digest}",
-                document=dict(document),
-            )
-            self._archives[item.uri] = (
-                str(entry["package"]["sha256"]),
-                archives[str(entry["package"]["sha256"])],
-            )
-            items.append(item)
-        self._items = {item.uri: item for item in items}
-        self.snapshot = RecipeLibrarySnapshot(
-            commit=commit,
-            items=tuple(items),
-            repository=str(index["repository"]),
-            catalog_entities=tuple(
-                _model_entry(value) for value in index["catalog_entities"]
-            ),
+        # The index parser is the only one the previous release ships. It reads
+        # no client state, so it runs without a client, whose construction is
+        # release-download wiring this program has no use for.
+        parse = cast(Any, RecipePackageClient)._parse_index
+        snapshot, _packages = parse(
+            None,
+            json.dumps(index).encode("utf-8"),
+            publication_commit=str(index["source_commit"]),
         )
+        # The Controller skips an entry it cannot read and still syncs the
+        # rest; a canary it skipped would import nothing, so refuse loudly.
+        if snapshot.problems or len(snapshot.items) != len(index["recipes"]):
+            raise ValueError(
+                "the installed Controller cannot read the canary index: "
+                f"{snapshot.problems!r}"
+            )
+        self.snapshot: RecipeLibrarySnapshot = snapshot
+        self._items = {item.uri: item for item in snapshot.items}
+        self._archives = {
+            item.uri: archives[item.package_sha256] for item in snapshot.items
+        }
 
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
@@ -158,10 +116,9 @@ class FixtureReader:
         item = self._items.get(uri)
         if item is None:
             raise KeyError(uri)
-        package_sha256, archive_path = self._archives[uri]
         return load_recipe_package(
-            archive_path,
-            package_sha256=package_sha256,
+            self._archives[uri],
+            package_sha256=item.package_sha256,
             publisher=item.publisher,
             slug=item.slug,
             recipe_content_sha256=item.content_sha256,
