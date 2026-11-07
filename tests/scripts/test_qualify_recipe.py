@@ -349,3 +349,108 @@ if args[:1] == ['info']:
     engine_log = log.read_text(encoding="utf-8")
     assert "info" in engine_log
     assert " run " not in engine_log
+
+
+def _qualify_module() -> Any:
+    from importlib.machinery import SourceFileLoader
+    from importlib.util import module_from_spec, spec_from_loader
+
+    loader = SourceFileLoader("vonk_qualify_recipe_audio", str(SCRIPT))
+    spec = spec_from_loader(loader.name, loader)
+    assert spec is not None
+    module = module_from_spec(spec)
+    sys.modules[loader.name] = module
+    loader.exec_module(module)
+    return module
+
+
+def test_qualifier_runs_the_audio_serving_checks_of_the_contract_example() -> None:
+    """The qualifier's multipart, fixture and audio-assertion paths, with no checkout.
+
+    Reads the contract's own ``recipe-audio-serving`` example, so it runs in CI
+    wherever the contracts are installed (the library-root tests above skip there).
+    """
+    import struct
+    from importlib.resources import files
+    from types import SimpleNamespace
+
+    from vonk_forge_contracts import read_recipe
+
+    rate = 16000
+    data = b"\x00\x00" * rate
+    audio = (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(data))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+        + b"data"
+        + struct.pack("<I", len(data))
+        + data
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers["Content-Length"] or 0))
+            if self.path == "/v1/audio/transcriptions":
+                assert self.headers["Content-Type"].startswith("multipart/form-data")
+                body, kind = b'{"text":"ask not"}', "application/json"
+            elif self.path == "/v1/audio/speech":
+                body, kind = audio, "audio/wav"
+            else:
+                body, kind = (
+                    json.dumps(
+                        {
+                            "choices": [{"message": {"content": "a picture"}}],
+                            "usage": {"completion_tokens": 1},
+                        }
+                    ).encode(),
+                    "application/json",
+                )
+            self.send_response(200)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format: str, *_args: object) -> None:
+            return
+
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-audio-serving.json")
+        .read_text(encoding="utf-8")
+    )
+    recipe = read_recipe(document)
+    module = _qualify_module()
+    assert {"transcription.nonempty", "speech.audio"} <= module.SUPPORTED_CHECKS
+    fixture = "qualification/fixtures/jfk-inaugural-10s.wav"
+    assert {
+        path
+        for check in recipe.validation.serving.checks
+        for path in check.fixture_paths()
+    } == {fixture}
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        inputs = SimpleNamespace(
+            recipe=recipe, package=SimpleNamespace(files={fixture: audio})
+        )
+        args = SimpleNamespace(
+            serving_url=f"http://127.0.0.1:{server.server_port}",
+            platform_root=ROOT,
+            library_root=ROOT / "no-library",
+            timeout_seconds=10.0,
+        )
+        report = module._run_declared_serving_checks(inputs, args)
+    finally:
+        server.shutdown()
+        thread.join(timeout=30)
+    assert report["status"] == "passed"
+    shapes = {item["check"]: item["response_shape"] for item in report["checks"]}
+    assert shapes == {
+        "chat": "chat.completion",
+        "transcribe": "audio.transcription",
+        "speak": "audio.speech",
+    }

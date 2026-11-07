@@ -181,16 +181,9 @@ def _validate_package_paths(
     ):
         raise ValueError("build base image digest is not in package inputs")
     for check in recipe.validation.serving.checks:
-        request = check.request
-        fixture = getattr(request, "fixture", None)
-        slots = getattr(request, "input_slots", {})
-        if fixture is not None:
-            required = {fixture, *slots.values()}
-            missing = sorted(required - package_paths)
-            if missing:
-                raise ValueError(
-                    f"job serving package files are missing: {', '.join(missing)}"
-                )
+        missing = sorted(set(check.fixture_paths()) - package_paths)
+        if missing:
+            raise ValueError(f"serving package files are missing: {', '.join(missing)}")
 
 
 class RecipePackageClient:
