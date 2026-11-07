@@ -8,7 +8,7 @@ from typing import cast
 
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AssetAvailability
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition
 
 from .. import model_cache_states
 from ..auth import CursorCodec
@@ -32,6 +32,7 @@ from ..model_cache_contract import (
     ModelCacheUsage,
 )
 from ..models import CatalogDocumentRevision
+from ..wait_contract import QueueWait
 from .catalog import (
     _catalog_documents,
     _document_texts,
@@ -167,6 +168,7 @@ class LibraryProjection:
         phase: object,
         completed: object,
         total: object,
+        wait: QueueWait | None = None,
     ) -> LibraryLocalProgress | None:
         """The progress of one cache operation, or ``None`` when its stored
         state does not read: the asset then shows no progress (unknown)."""
@@ -194,11 +196,15 @@ class LibraryProjection:
             phase=phase if isinstance(phase, str) else None,
             completed_bytes=completed,
             total_bytes=total,
+            reason=wait.reason if wait else None,
+            blockers=list(wait.blockers) if wait else [],
+            next_attempt_at=wait.next_check if wait else None,
         )
 
     @staticmethod
-    def _model_usage(document: ModelDefinition | ModelRevisionProjection) -> list[str]:
-        return sorted(document.capabilities)
+    def _model_usage(text: DocumentText) -> list[str]:
+        """The capabilities the Model's display declares; none while unreadable."""
+        return [] if text.model is None else sorted(text.model.capabilities)
 
     @staticmethod
     def _recipe_resources(

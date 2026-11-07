@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import signal
 import textwrap
+import threading
 import uuid
 from collections.abc import Mapping
 from contextlib import redirect_stdout
@@ -32,6 +34,8 @@ from cluster_profiles.control_client import (
     _operation,
     validate_control_document,
 )
+from cluster_profiles.controller_cli import profile_authoring, selection
+from cluster_profiles.controller_cli.selection import _read_concurrently
 from cluster_profiles.generated_control.models.fleet_profile_endpoints_view import (
     FleetProfileEndpointsView,
 )
@@ -2045,15 +2049,22 @@ def test_profile_add_autosaves_whole_fleet_authoring_shape_with_revision() -> No
     )
     assert status == 0
     assert payload["revision"] == 8
-    assert client.calls == [
-        ("GET", "/api/profile/2/definition", None, None),
-        (
-            "GET",
-            "/api/recipe/library",
-            None,
-            {"limit": 512, "sort": "name", "assess": False},
-        ),
-        ("GET", "/api/fleet", None, None),
+    # The definition, recipe and Spark reads are independent and run at once.
+    reads, writes = client.calls[:3], client.calls[3:]
+    assert sorted(reads, key=lambda call: call[1]) == sorted(
+        [
+            ("GET", "/api/profile/2/definition", None, None),
+            (
+                "GET",
+                "/api/recipe/library",
+                None,
+                {"limit": 512, "sort": "name", "assess": False},
+            ),
+            ("GET", "/api/fleet", None, None),
+        ],
+        key=lambda call: call[1],
+    )
+    assert writes == [
         (
             "PUT",
             "/api/profile/2",
@@ -2121,10 +2132,10 @@ def test_profile_add_rejects_an_ambiguous_spark_name() -> None:
     ambiguous_error = payload["error"]
     assert isinstance(ambiguous_error, str)
     assert "ambiguous spark selector" in ambiguous_error
-    assert [call[1] for call in client.calls] == [
+    assert {call[1] for call in client.calls} == {
         "/api/profile/1/definition",
         "/api/fleet",
-    ]
+    }
 
 
 def test_profile_remove_resolves_recipe_title_to_canonical_selector() -> None:
@@ -4536,9 +4547,9 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
     display["model_title"] = "Qwen 3"
     client = FakeClient(
         {
-            ("GET", "/api/model/Qwen%2Fqwen3"): {
-                "selector": "Qwen/qwen3",
-                "model_display": display,
+            ("GET", "/api/model/library"): {
+                "models": [{"selector": "Qwen/qwen3", "model_display": display}],
+                "next_cursor": None,
             },
             ("GET", "/api/recipe/library"): {
                 "recipes": [
@@ -4558,6 +4569,57 @@ def test_run_resolves_a_recipe_or_its_model_to_one_catalog_recipe(
         )
         == expected
     )
+
+
+def test_run_title_resolution_reads_the_model_library_in_pages_not_per_model() -> None:
+    display = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-display.json")
+        .read_text()
+    )
+    total, page_size = 150, 50
+    pages = [
+        {
+            "models": [
+                {
+                    "selector": f"Org/model-{index}",
+                    "model_display": {**display, "model_title": f"Title {index}"},
+                }
+                for index in range(start, start + page_size)
+            ],
+            "next_cursor": f"c{start + page_size}"
+            if start + page_size < total
+            else None,
+        }
+        for start in range(0, total, page_size)
+    ]
+    client = FakeClient(
+        {
+            ("GET", "/api/model/library"): pages,
+            ("GET", "/api/recipe/library"): {
+                "recipes": [
+                    _recipe_projection(
+                        f"vonk-forge/recipe-{index}",
+                        f"Recipe {index}",
+                        model_selector=f"Org/model-{index}",
+                    )
+                    for index in range(total)
+                ],
+                "next_cursor": None,
+            },
+        }
+    )
+    assert (
+        controller_cli._resolve_run_recipe(
+            cast(controller_cli.ControllerClient, client),
+            "title 120",
+            deadline=controller_cli.observation.time.monotonic() + 30,
+        )
+        == "vonk-forge/recipe-120"
+    )
+    model_reads = [call for call in client.calls if call[1].startswith("/api/model")]
+    assert len(model_reads) == total // page_size
+    assert {call[1] for call in model_reads} == {"/api/model/library"}
 
 
 def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
@@ -5103,3 +5165,265 @@ def test_profile_list_traverses_the_server_continuation():
     assert isinstance(profiles, list)
     assert [item["number"] for item in profiles] == list(range(1, 130))
     assert client.calls[-1][3] == {"after": 128}
+
+
+# Independent CLI selection reads run at once and keep their own outcomes.
+# Every fake read waits on a barrier that opens only when all of them are in
+# flight together, so concurrency is proven by ordering, not by elapsed time.
+
+
+def _barrier(parties: int) -> threading.Barrier:
+    return threading.Barrier(parties, timeout=30)  # wall-clock: hang guard
+
+
+def _meeting(barrier: threading.Barrier, value: object, *, fail: bool = False):
+    def read() -> object:
+        barrier.wait()
+        if fail:
+            raise ValueError("fleet is unavailable")
+        return value
+
+    return read
+
+
+def test_independent_reads_are_in_flight_together() -> None:
+    barrier = _barrier(3)
+
+    outcomes = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b"),
+        _meeting(barrier, "c"),
+    )
+
+    assert [outcome.get() for outcome in outcomes] == ["a", "b", "c"]
+
+
+def test_one_failing_read_does_not_hide_the_others() -> None:
+    barrier = _barrier(3)
+
+    first, failed, last = _read_concurrently(
+        _meeting(barrier, "a"),
+        _meeting(barrier, "b", fail=True),
+        _meeting(barrier, "c"),
+    )
+
+    assert first.get() == "a"
+    assert last.get() == "c"
+    with pytest.raises(ValueError, match="fleet is unavailable"):
+        failed.get()
+
+
+class _InjectedClock:
+    """A clock the test owns: sleeping advances it, nothing waits in real time."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, delay: float) -> None:
+        self.now += max(delay, 0.01)
+
+
+def test_definition_read_past_its_deadline_reports_its_own_timed_out_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The definition read's own typed outcome reaches the operator, every run.
+
+    The concurrency helper must never put a generic error in its place, so the
+    run is repeated to prove no scheduling order changes the answer.
+    """
+    for _ in range(50):
+        clock = _InjectedClock()
+        for module in (controller_cli.observation, selection, profile_authoring):
+            monkeypatch.setattr(module, "time", clock)
+        responses = dict(_ADD_RESPONSES)
+        responses[("GET", "/api/profile/2/definition")] = ControlUnavailable(
+            503, "control API unavailable"
+        )
+        client = FakeClient(responses)
+
+        status, payload = run(
+            (
+                "--profile",
+                "2",
+                "profile",
+                "add",
+                "Recipe UUID",
+                "--spark",
+                "Atlas",
+                "--timeout-seconds",
+                "1",
+                "--json",
+            ),
+            client,
+        )
+
+        assert status == 2
+        observation = payload["observation"]
+        assert isinstance(observation, dict)
+        assert observation["status"] == "timed_out"
+        assert observation["path"] == "/api/profile/2/definition"
+        assert observation["reconnect_command"]
+        assert "deadline reached" not in json.dumps(payload)
+        assert not any(call[0] == "PUT" for call in client.calls)
+
+
+def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
+    from cluster_profiles.controller_cli.selection import _skipped_read
+
+    seen: list[threading.Thread] = []
+
+    def broken() -> object:
+        seen.append(threading.current_thread())
+        raise OSError("down")
+
+    outcome, skipped = _read_concurrently(broken, _skipped_read)
+
+    assert seen == [threading.current_thread()]
+    assert skipped.get() is None
+    with pytest.raises(OSError):
+        outcome.get()
+
+
+def test_ctrl_c_interrupts_at_once_while_reads_hang() -> None:
+    release = threading.Event()
+
+    def hanging() -> object:
+        release.wait(30)  # wall-clock: hang guard
+        return "late"
+
+    main = threading.get_ident()
+    sender = threading.Timer(0.2, lambda: signal.pthread_kill(main, signal.SIGINT))
+    sender.start()
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _read_concurrently(hanging, hanging)
+    finally:
+        release.set()
+
+
+class _MeetingClient(FakeClient):
+    """Holds the first GET of each named path until all of them are in flight."""
+
+    def __init__(self, responses, meet: set[str], failing: str | None = None):
+        super().__init__(responses)
+        self._barrier = _barrier(len(meet))
+        self._meet = meet
+        self._failing = failing
+        self._first: set[str] = set()
+        self._lock = threading.Lock()
+        self.completed: set[str] = set()
+
+    def request(self, method, path, *args, **kwargs):
+        with self._lock:
+            first = path in self._meet and path not in self._first
+            self._first.add(path)
+        if first:
+            self._barrier.wait()
+        if path == self._failing:
+            raise ControlMalformedResponse("peer is down")
+        result = super().request(method, path, *args, **kwargs)
+        self.completed.add(path)
+        return result
+
+
+_ATLAS = {"id": "spk_" + "a" * 32, "display_name": "Atlas", "hostname": "atlas"}
+_ADD_RESPONSES = {
+    ("GET", "/api/profile/2/definition"): {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "number": 2,
+        "revision": 7,
+        "definition": {"name": "Coding", "assignments": []},
+    },
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/recipe-uuid", "Recipe UUID")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    ("PUT", "/api/profile/2"): {"number": 2, "revision": 8},
+}
+_ADD_PATHS = {"/api/profile/2/definition", "/api/recipe/library", "/api/fleet"}
+
+
+def _profile_add(client: FakeClient) -> tuple[int, dict[str, object]]:
+    return run(
+        (
+            "--profile",
+            "2",
+            "profile",
+            "add",
+            "Recipe UUID",
+            "--spark",
+            "Atlas",
+            "--yes",
+            "--json",
+        ),
+        client,
+    )
+
+
+def test_profile_add_reads_definition_recipe_and_sparks_together() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS)
+
+    status, _ = _profile_add(client)
+
+    assert status == 0
+    assert _ADD_PATHS <= client.completed
+
+
+def test_profile_add_failing_peer_leaves_the_other_reads_intact() -> None:
+    client = _MeetingClient(dict(_ADD_RESPONSES), _ADD_PATHS, failing="/api/fleet")
+
+    status, _ = _profile_add(client)
+
+    assert status != 0
+    assert {"/api/profile/2/definition", "/api/recipe/library"} <= client.completed
+    assert not any(call[0] == "PUT" for call in client.calls)
+
+
+def _run_command(client: FakeClient) -> None:
+    args = cli._parser().parse_args(
+        ["--profile", "1", "run", "Qwen Code", "--yes", "--json"]
+    )
+    controller_cli._run(
+        args,
+        cast(controller_cli.ControllerClient, client),
+        lambda: "11111111-1111-4111-8111-111111111111",
+    )
+
+
+class _StopAfterReads(RuntimeError):
+    pass
+
+
+_RUN_RESPONSES = {
+    ("GET", "/api/recipe/library"): {
+        "recipes": [_recipe_projection("vonk-forge/qwen-code", "Qwen Code")],
+        "next_cursor": None,
+    },
+    ("GET", "/api/fleet"): {"nodes": [_ATLAS]},
+    # Ends the command right after the two reads under test.
+    ("GET", "/api/profile/1/definition"): _StopAfterReads(),
+}
+_RUN_PATHS = {"/api/recipe/library", "/api/fleet"}
+
+
+def test_run_reads_the_library_and_the_fleet_together() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS)
+
+    with pytest.raises(_StopAfterReads):
+        _run_command(client)
+
+    assert _RUN_PATHS <= client.completed
+
+
+def test_run_failing_fleet_read_leaves_the_library_result_intact() -> None:
+    client = _MeetingClient(dict(_RUN_RESPONSES), _RUN_PATHS, failing="/api/fleet")
+
+    with pytest.raises(ControlMalformedResponse):
+        _run_command(client)
+
+    assert "/api/profile/1/definition" not in client.completed
+    assert "/api/recipe/library" in client.completed

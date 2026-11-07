@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     CatalogSyncState,
     RecipeBuildCode,
     RecipePackageCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_control import recipe_packages
@@ -44,6 +45,7 @@ from vonk_control.recipe_packages import (
     RecipePackageClient,
     RecipePackageError,
 )
+from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_forge_contracts import (
@@ -95,7 +97,6 @@ def _canonical_package_fixture(
             },
             "requires_token": False,
             "dependencies": [],
-            "modalities": ["text"],
             "source": {
                 "repository": "https://example.invalid/fixture",
                 "revision": "a" * 40,
@@ -103,11 +104,6 @@ def _canonical_package_fixture(
             "format": {
                 "precision": "fp16",
                 "quantization": "none",
-            },
-            "license": {
-                "spdx": "Apache-2.0",
-                "url": "https://www.apache.org/licenses/LICENSE-2.0",
-                "attribution": [],
             },
             "files": [
                 {
@@ -118,7 +114,6 @@ def _canonical_package_fixture(
                     "roles": ["weights"],
                 }
             ],
-            "capabilities": ["text-generation"],
         }
     )
     model_document = model.model_dump(mode="json", exclude_none=True)
@@ -289,7 +284,7 @@ def _canonical_package_fixture(
     index = {
         "schema_version": 2,
         "kind": "recipe-library-index",
-        "contract_version": "3.0.0",
+        "contract_version": "4.0.0",
         "updated_at": "2026-09-28T12:00:00Z",
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,
@@ -407,9 +402,9 @@ class _Release:
                 200,
                 json=[
                     {"tag_name": "v4.0.0", "draft": False, "assets": []},
-                    {"tag_name": "v3.9.0", "draft": True, "assets": []},
+                    {"tag_name": "v4.9.0", "draft": True, "assets": []},
                     release,
-                    {"tag_name": "v3.0.5", "draft": False, "assets": []},
+                    {"tag_name": "v4.0.5", "draft": False, "assets": []},
                 ],
             )
         if path == f"{RELEASES}/tags/{self.tag}":
@@ -453,7 +448,7 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     return verified
 
 
-def _release_for(index: bytes, package: bytes, *, tag: str = "v3.1.0") -> _Release:
+def _release_for(index: bytes, package: bytes, *, tag: str = "v4.1.0") -> _Release:
     return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
 
 
@@ -487,7 +482,7 @@ def test_production_reader_downloads_one_signed_bundle(
         f"http://127.0.0.1:8083{RELEASES}?per_page=100",
         (
             "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v3.1.0/recipe-library.tar"
+            "v4.1.0/recipe-library.tar"
         ),
         (
             "http://127.0.0.1:8085/github-production-release-asset/1336002555/"
@@ -498,7 +493,7 @@ def test_production_reader_downloads_one_signed_bundle(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
-    assert snapshot.version == "3.0.0"
+    assert snapshot.version == "4.0.0"
     assert snapshot.updated_at is not None
     assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
@@ -512,16 +507,16 @@ def test_production_reader_can_hold_an_exact_release_tag(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    release = _release_for(index, package, tag="v3.0.0")
-    client = _client(release, tmp_path / "packages", release="v3.0.0")
+    release = _release_for(index, package, tag="v4.0.0")
+    client = _client(release, tmp_path / "packages", release="v4.0.0")
     assert client.list().commit == SIGNED_COMMIT
     # Without a relay the reader downloads from github.com and follows only
     # the redirect to GitHub's release asset origin.
     assert release.requests == [
-        f"http://127.0.0.1{RELEASES}/tags/v3.0.0",
+        f"http://127.0.0.1{RELEASES}/tags/v4.0.0",
         (
             "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v3.0.0/recipe-library.tar"
+            "v4.0.0/recipe-library.tar"
         ),
         (
             "https://release-assets.githubusercontent.com/github-production-release-"
@@ -663,7 +658,7 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
         RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
         packages,
         recipe_packages._VerifiedRelease(
-            tag="v3.1.0",
+            tag="v4.1.0",
             commit=SIGNED_COMMIT,
             assets=frozenset({"recipe-2.tar.gz", "unlisted.tar.gz"}),
             checksums={"recipe-2.tar.gz": "a" * 64},
@@ -866,11 +861,11 @@ def test_unchanged_release_is_noticed_cheaply_and_a_new_one_is_fetched(
     first = client.list()
     downloads = len(release.requests)
     assert client.list() == first
-    assert conditional == [None, '"v3.1.0"']
+    assert conditional == [None, '"v4.1.0"']
     assert len(release.requests) == downloads + 1  # only the conditional check
 
     # A new release changes the listing: the check no longer answers 304.
-    release.tag = "v3.1.1"
+    release.tag = "v4.1.1"
     client.list()
     assert len(release.requests) > downloads + 2
     client.close()
@@ -897,6 +892,45 @@ def test_signed_content_is_prepared_despite_different_source_provenance(
         assert second == first
         assert first.closure_path.is_dir()
         assert not snapshot.problems
+    finally:
+        client.close()
+
+
+def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_tick(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """The window where this Controller runs but its contract major is unpublished.
+
+    Only an older major exists: the read is a typed, visible wait
+    (UNAVAILABLE, an unavailable observation), never a refusal of the stored
+    catalog. The same client adopts the major on the tick after it appears.
+    """
+    index, _row, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    older_only = True
+
+    def transport(request: httpx2.Request) -> httpx2.Response:
+        if older_only and request.url.path == RELEASES:
+            return httpx2.Response(
+                200, json=[{"tag_name": "v3.2.0", "draft": False, "assets": []}]
+            )
+        return release.handler(request)
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(transport),
+    )
+    try:
+        for _tick in range(2):  # retried every tick, with the same typed answer
+            with pytest.raises(RecipePackageUnsettled) as waiting:
+                client.list()
+            assert waiting.value.code == RecipePackageCode.UNAVAILABLE
+            assert waiting.value.typed_reason == WaitReason.OBSERVATION_UNAVAILABLE
+            assert "contract v4" in waiting.value.detail
+        older_only = False
+        snapshot = client.list()
+        assert snapshot.version == "4.0.0" and snapshot.items
     finally:
         client.close()
 

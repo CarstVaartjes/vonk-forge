@@ -77,6 +77,13 @@ def _legacy_model() -> dict:
     identity["family"]["title"] = "Synthetic"
     identity["model"]["title"] = "Synthetic Tiny"
     document["metadata"] = {"description": "A small model.", "tags": ["synthetic"]}
+    document["capabilities"] = ["text-generation"]
+    document["modalities"] = ["text"]
+    document["license"] = {
+        "spdx": "Apache-2.0",
+        "url": "https://www.apache.org/licenses/LICENSE-2.0",
+        "attribution": [],
+    }
     return document
 
 
@@ -321,7 +328,8 @@ def test_the_shared_document_vectors_agree_with_the_controller(sessions) -> None
     valid = [
         path.name
         for path in _EXAMPLES.iterdir()
-        if path.name.endswith(".json") and "display" not in path.name
+        if path.name.endswith(".json")
+        and _example(path.name).get("kind") in {"model", "recipe"}
     ]
     assert valid
     for name in valid:

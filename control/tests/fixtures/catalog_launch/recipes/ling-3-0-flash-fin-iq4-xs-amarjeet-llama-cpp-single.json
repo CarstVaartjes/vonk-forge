@@ -1,0 +1,295 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "e5a2f80c0f1bdbb829d19b3ba3e84359acad95ea9fae2161661e08af46a31ce0",
+    "repository": "ghcr.io/ggml-org/llama.cpp"
+   },
+   "context": {
+    "path": "adapters/ling/amarjeet-fin-gguf-single"
+   },
+   "dockerfile": "adapters/ling/amarjeet-fin-gguf-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "ling-3-0-flash-fin-iq4-xs-amarjeet-llama-cpp-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "ling-3.0-flash-fin-iq4-xs"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "shard-1-of-2-471abcec6df7",
+     "id": "primary-shard-1-of-2-471abcec6df7",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "shard-2-of-2-46eea04ce07a",
+     "id": "primary-shard-2-of-2-46eea04ce07a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "f8288a027656cfc72f2dea99e80a0375b724288f73c58ee1d2c129ca1d763610",
+    "kind": "model",
+    "publisher": "bartowski",
+    "slug": "ling-3-0-flash-fin-iq4-xs-gguf-a792b6bd"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "--spec-type draft-mtp (upstream default); the model's MTP layer drafts tokens for the target to verify.",
+     "label": "MTP (draft-mtp)",
+     "value": "mtp"
+    },
+    {
+     "args": [
+      {
+       "name": "spec-type",
+       "value": "none"
+      }
+     ],
+     "help": "--spec-type none: no speculative decoding. Upstream's fallback when the server will not start with MTP.",
+     "label": "Off",
+     "value": "off"
+    }
+   ],
+   "help": "Multi-token-prediction self-speculation with the GGUF's own MTP layer, which needs no draft model. Upstream makes draft-mtp the default and offers none as the fallback if the server refuses to start with it.",
+   "label": "Speculative decoding",
+   "name": "speculation"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "amarjeet",
+   "bartowski",
+   "inclusionAI",
+   "llama.cpp contributors"
+  ],
+  "source_reference": "https://github.com/amarjeet/dgx-spark-recipes/tree/43697e780972fd63c1378c532b392edbe95240bc"
+ },
+ "release": {
+  "released_at": "2026-10-02",
+  "version": "1.0.1"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "model",
+    "setting": null,
+    "value": "/models/Ling-3.0-flash-Fin-IQ4_XS/Ling-3.0-flash-Fin-IQ4_XS-00001-of-00002.gguf"
+   },
+   {
+    "name": "alias",
+    "setting": null,
+    "value": "ling-3.0-flash-fin-iq4-xs"
+   },
+   {
+    "name": "ctx-size",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "host",
+    "setting": null,
+    "value": "0.0.0.0"
+   },
+   {
+    "name": "port",
+    "setting": null,
+    "value": 8000
+   },
+   {
+    "name": "parallel",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "n-gpu-layers",
+    "setting": null,
+    "value": 999
+   },
+   {
+    "name": "flash-attn",
+    "setting": null,
+    "value": "on"
+   },
+   {
+    "name": "batch-size",
+    "setting": null,
+    "value": 4096
+   },
+   {
+    "name": "ubatch-size",
+    "setting": null,
+    "value": 2048
+   },
+   {
+    "name": "load-mode",
+    "setting": null,
+    "value": "mmap"
+   },
+   {
+    "name": "jinja",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "reasoning-format",
+    "setting": null,
+    "value": "deepseek"
+   },
+   {
+    "name": "temp",
+    "setting": null,
+    "value": 1.0
+   },
+   {
+    "name": "top-p",
+    "setting": null,
+    "value": 0.95
+   },
+   {
+    "name": "top-k",
+    "setting": null,
+    "value": 20
+   },
+   {
+    "name": "spec-type",
+    "setting": null,
+    "value": "draft-mtp"
+   }
+  ],
+  "engine": "llama-cpp",
+  "entrypoint": [
+   "/opt/vonk/bin/llama-server"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 1
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 68739201632,
+      "image_bytes": 8000000000,
+      "safety_margin_bytes": 10000000000,
+      "working_bytes": 4000000000
+     },
+     "memory": {
+      "peak_bytes": 84000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 2048,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "ling-3.0-flash-fin-iq4-xs"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

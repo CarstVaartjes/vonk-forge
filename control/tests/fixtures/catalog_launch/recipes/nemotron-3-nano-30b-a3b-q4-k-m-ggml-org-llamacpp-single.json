@@ -66,7 +66,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "8c8e83e379b047f06b1b1c01e000874c1e829ef842fee7b01e9d990b2368306e",
+    "content_sha256": "35708b47b34008079e94e785fb408235e279c757a082c8e69b32d31d9701d5af",
     "kind": "model",
     "publisher": "ggml-org",
     "slug": "nemotron-3-nano-30b-a3b-q4-k-m-fe801509"

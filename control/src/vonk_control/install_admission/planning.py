@@ -35,7 +35,7 @@ from ..disk_reservations import (
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_artifacts, inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
-from ..legal_admission import territorial_admission
+from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
     AgentNode,
     ClusterMapping,
@@ -199,7 +199,7 @@ class InstallPlanningService:
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 ) from error
             models = resolved_entities.model_revisions
-            model_document = models[0].document if models else None
+            model_display = stored_model_display(session, models[0] if models else None)
             compiled_plan_error: str | None = None
             compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed
@@ -247,7 +247,7 @@ class InstallPlanningService:
                 )
                 compiled_plan_by_node = {}
             legal_admission = territorial_admission(
-                model_document,
+                model_display,
                 operation="install",
             )
             topology_reason: AdmissionReason | None = None

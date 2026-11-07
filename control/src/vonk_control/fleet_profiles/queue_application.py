@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     SupersedeCode,
 )
 from vonk_agent_protocol.agent_words import (
+    ProfileAction,
     ProfileCancellationCause,
     ProfileChildPhase,
     ProfileOperationKind,
@@ -58,6 +59,7 @@ from ..recipe_build_cancellation import (
     BuildConsumerError,
     lock_profile_build_dependencies,
 )
+from ..run_route_name import rename_run
 from ..workload_intent import allocate_workload_intent, raise_workload_intent
 from .assessment_support import (
     _require_recovery_preparations,
@@ -692,6 +694,17 @@ class FleetProfileService:
                 completed_steps=0,
                 total_steps=len(preview.steps),
             ).model_dump(mode="json")
+            # A kept run that answers to another name takes this load's name in
+            # the admission transaction: the one writer of a live route name.
+            renamed = False
+            for effect in control.effects.runs:
+                if (
+                    effect.action == ProfileAction.KEEP.value
+                    and effect.previous_alias is not None
+                ):
+                    kept = session.get(RecipeRun, effect.run_id)
+                    if kept is not None:
+                        renamed |= rename_run(session, kept, effect.alias, now=now)
             row = existing
             if row is None:
                 row = FleetProfileAdapter.new_application(
@@ -712,7 +725,7 @@ class FleetProfileService:
                     progress=progress,
                     result=(
                         FleetProfileApplicationResult(
-                            changed=False, completed_steps=0
+                            changed=renamed, completed_steps=0
                         ).model_dump(mode="json")
                         if not preview.steps and not preview.effects.adopted
                         else None
@@ -738,7 +751,7 @@ class FleetProfileService:
                 row.progress = progress
                 row.result = (
                     FleetProfileApplicationResult(
-                        changed=False, completed_steps=0
+                        changed=renamed, completed_steps=0
                     ).model_dump(mode="json")
                     if not preview.steps and not preview.effects.adopted
                     else None

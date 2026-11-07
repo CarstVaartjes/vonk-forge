@@ -1,0 +1,205 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/image/texture-upscale-pytorch"
+   },
+   "dockerfile": "adapters/image/texture-upscale-pytorch/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "texture-upscale-4x-nomos8ksc-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 33554432,
+    "media_types": [
+     "image/jpeg",
+     "image/png"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "One PNG or JPEG texture to upscale 4x; at most 2048x2048 pixels.",
+      "extensions": [
+       ".jpeg",
+       ".jpg",
+       ".png"
+      ],
+      "id": "image",
+      "label": "Texture",
+      "max_file_bytes": 33554432,
+      "max_files": 1,
+      "max_total_bytes": 33554432,
+      "media_types": [
+       "image/jpeg",
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 536870912,
+    "slots": [
+     {
+      "description": "The input upscaled 4x as one PNG (RGBA when the input has transparency).",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Upscaled texture",
+      "max_file_bytes": 536870912,
+      "max_files": 1,
+      "max_total_bytes": 536870912,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "file-4xnomos8ksc-9e158a603ceb-c258713c0b",
+     "id": "primary-001",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "92ffa761d82427f6b71daaa11789d90a2fb4c4a2e48afdc02772480beb146ebf",
+    "kind": "model",
+    "publisher": "phips",
+    "slug": "4xnomos8ksc-623bdf3d"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Philip Hofmann (Phips)"
+  ],
+  "source_reference": "https://huggingface.co/Phips/4xNomos8kSC/tree/623bdf3d1ec5bccb02548a79eec1b62d32ff86fd"
+ },
+ "release": {
+  "released_at": "2026-11-06",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/run.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 33467822,
+      "image_bytes": 10000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 2000000000
+     },
+     "memory": {
+      "peak_bytes": 42000000000,
+      "reserve_bytes": 4000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.png",
+      "input_slots": {
+       "image": "qualification/fixtures/tiny.png"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

@@ -422,7 +422,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "9e5d2d444647f36a999aa7946be6e2d6cb32100a4bea4ca689bc15f21236e1ed",
+    "content_sha256": "b5bc99e628cf873d97ed0cf4cf1ba0fe141904ea0b0e72ae09d4a8ed33b022db",
     "kind": "model",
     "publisher": "qwen",
     "slug": "qwen-image-layered-8f0ca708"

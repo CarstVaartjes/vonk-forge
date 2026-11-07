@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import select, update
@@ -23,6 +24,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     document_sha256,
@@ -55,6 +57,7 @@ from .models import (
     CatalogDocumentRevision,
     CatalogRecipeModelReference,
 )
+from .strict_json import serialize_json_value
 
 if TYPE_CHECKING:
     from .catalog_sync_contract import ManagedCatalogSyncProblem
@@ -70,6 +73,7 @@ class PublishedFacts(TypedDict, total=False):
 
     prebuilt_image: PrebuiltImage | None
     qualification: PublishedQualificationStatusView | None
+    api: RecipeApi | None
 
 
 class CatalogError(RuntimeError):
@@ -273,9 +277,13 @@ class CatalogEntityService:
             if _build_policy_current(row, recipe):
                 return
             try:
-                projected = RecipeRevisionProjection.model_validate_json(
-                    canonical_message(row.projected)
-                ).model_dump(mode="json", exclude_none=True)
+                # The canonical egress keeps the required nullable members (an
+                # api block's max_input_tokens) that exclude_none would drop.
+                projected = serialize_json_value(
+                    RecipeRevisionProjection.model_validate_json(
+                        canonical_message(row.projected)
+                    )
+                )
             except (CatalogRevisionContractError, TypeError, ValueError) as error:
                 # The document is readable but the stored projection is not
                 # (it predates the current projection contract).
@@ -295,12 +303,13 @@ class CatalogEntityService:
         self,
         images: Mapping[RevisionKey, PrebuiltImage | None],
         qualifications: Mapping[RevisionKey, PublishedQualificationStatusView | None],
+        apis: Mapping[RevisionKey, RecipeApi | None] = MappingProxyType({}),
     ) -> None:
         """Record what the signed catalog publishes beside each active revision.
 
-        Both maps are keyed by ``(publisher, slug, content digest)``: a
-        prebuilt image and a qualification status belong to one exact
-        revision. In each map, omitted keys are unknown and keep their last
+        Every map is keyed by ``(publisher, slug, content digest)``: a
+        prebuilt image, a qualification status and the API facts belong to one
+        exact revision. In each map, omitted keys are unknown and keep their last
         recorded value; an observed key with None explicitly withdraws it.
 
         As in ``refresh_build_policy``, only a revision whose recorded facts
@@ -316,6 +325,8 @@ class CatalogEntityService:
                 facts["prebuilt_image"] = images[key]
             if key in qualifications:
                 facts["qualification"] = qualifications[key]
+            if key in apis:
+                facts["api"] = apis[key]
             if not facts or _published_facts_current(revision, facts):
                 continue
             with self._write() as session:
@@ -683,14 +694,23 @@ class CatalogEntityService:
         session.add_all(bindings)
 
 
-# Display moved out of the documents in contracts 3.0. The readers ignore these
-# keys (one tolerant reader serves stored 2.x rows), so every write refuses them
-# here instead: a 2.x shape is never written.
+# Display moved out of the documents in contracts 3.0, and a Model's declared
+# facts (capabilities, modalities, license) in 4.0. The readers ignore these
+# keys (one tolerant reader serves stored older rows), so every write refuses
+# them here instead: an older shape is never written. A Model document may
+# carry no field that only its display declares.
 _RETIRED_DISPLAY_PATHS = (("metadata",), ("identity", "*", "title"))
+_MODEL_DISPLAY_ONLY_FIELDS = frozenset(ModelDisplay.model_fields) - frozenset(
+    ModelDefinition.model_fields
+)
 
 
-def _refuse_retired_display_fields(document: PublishedDocument) -> None:
+def _refuse_retired_display_fields(document: PublishedDocument, *, model: bool) -> None:
     """Refuse a document that still carries display (``*`` is any one key)."""
+    if model and _MODEL_DISPLAY_ONLY_FIELDS & document.keys():
+        raise CatalogValidationError(
+            CatalogCode.DOCUMENT_INVALID, "document carries retired display fields"
+        )
     for path in _RETIRED_DISPLAY_PATHS:
         nodes: list[PublishedValue] = [document]
         for key in path:
@@ -727,7 +747,7 @@ def _parse(
             CatalogCode.DOCUMENT_INVALID,
             "document does not satisfy the public recipe contract",
         ) from error
-    _refuse_retired_display_fields(clean)
+    _refuse_retired_display_fields(clean, model=isinstance(parsed, ModelDefinition))
     return (
         parsed,
         clean,
@@ -780,8 +800,6 @@ def model_document_projection(model: ModelDefinition) -> ModelRevisionProjection
     return ModelRevisionProjection(
         identity=model.identity,
         format=model.format,
-        capabilities=model.capabilities,
-        modalities=model.modalities,
         artifact_count=len(model.files),
         download_bytes=model.download_bytes,
         installed_bytes=model.installed_bytes,

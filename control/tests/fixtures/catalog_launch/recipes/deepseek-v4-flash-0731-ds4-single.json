@@ -46,7 +46,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "46e2c607dfae5961badb502053208042f230d7d4eed3680efe85d3d4df0b268d",
+    "content_sha256": "fdf1b85468f97c234c0595e8bc3a15454afb1d6bc8dd76e26269f6dd49a5301c",
     "kind": "model",
     "publisher": "antirez",
     "slug": "deepseek-v4-flash-0731-ds4"
@@ -108,11 +108,11 @@
    "DeepSeek AI",
    "Salvatore Sanfilippo (antirez)"
   ],
-  "source_reference": "https://github.com/antirez/ds4/tree/5379c1c9ac315f1540371b06a3db88491d4059ff"
+  "source_reference": "https://github.com/antirez/ds4/tree/b3f50180ec2c7324892be1f50bc83555ccb8d5e7"
  },
  "release": {
-  "released_at": "2026-10-20",
-  "version": "2.2.2"
+  "released_at": "2026-11-03",
+  "version": "2.2.3"
  },
  "runtime": {
   "arguments": [

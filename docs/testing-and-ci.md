@@ -644,7 +644,7 @@ Identical content built for a pull request and for main is therefore one image.
 Controller (for a reused image, the pull request's test merge) and `API source
 tree` is its tree, which equals the release commit's
 (`git rev-parse <release commit>^{tree}`).
-An image built before the tree label is bound through its commit's tree.
+An image without the tree label is refused.
 Main's release reuses the candidate images of the successful pull request CI run
 that tested its exact tree (`scripts/resolve-tested-ci`): when all four verify
 for main's commit (`scripts/reuse-pr-candidate-images`), `dev-images.yml` skips

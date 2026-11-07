@@ -753,7 +753,6 @@ def runtime_service(
                 "observation_schema_version": 2,
                 "run_generation": 1,
                 "installation_id": installation_id,
-                "alias": "authority-test",
                 "mapping_id": mapping_id,
                 "mapping_generation": 1,
                 "recipe_revision_id": revision_id,

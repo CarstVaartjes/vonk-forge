@@ -45,7 +45,7 @@ from .test_run_switch_operations import RecordingArtifactExecutor, _service
 
 pytest_plugins = ("tests.test_profile_stop_effect_adoption_postgres",)
 
-RECIPES_SHA = "3e3b6fcba0710ca139086dc61a21020698321cfc"
+RECIPES_SHA = "e4f98d0f3f3bb3321bf4bc85ec0350ba2876f8ba"
 pytestmark = [
     pytest.mark.skipif(
         not os.environ.get("VONK_RECIPE_EFFECT_CONSUMER_SOURCE"),
@@ -156,12 +156,11 @@ def test_real_pending_stop_crosses_installed_cli_and_recipes_cleanup(
         healthy_child,
     ) = pending_stop
     recipes = Path(os.environ["VONK_RECIPE_EFFECT_CONSUMER_SOURCE"]).resolve()
-    spec = importlib.util.spec_from_file_location(
-        "frozen_recipes_cleanup", recipes / "spark_sweep/cleanup.py"
-    )
-    assert spec is not None and spec.loader is not None
-    cleanup = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(cleanup)
+    # The frozen cleanup module imports its package siblings: load it as part
+    # of the checkout's package.
+    monkeypatch.syspath_prepend(str(recipes))
+    cleanup = importlib.import_module("spark_sweep.cleanup")
+    assert Path(cleanup.__file__ or "").resolve() == recipes / "spark_sweep/cleanup.py"
     before_claims = _claims(sessions, nodes[0])
     replacement = profile("installed-consumer-replacement")
     api, tokens = _client(sessions, profiles=profiles)

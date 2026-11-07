@@ -15,16 +15,18 @@ from ..control_client import (
     ControlMalformedResponse,
     validate_control_document,
 )
-from .common import ControllerClient, _profile_number, _quoted, _request_key
+from .common import ControllerClient, _profile_number, _request_key
 from .confirmation import ActionDeclined, _require_confirmation
 from .profile import _profile
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
 from .selection import (
     _observe_selection,
+    _read_concurrently,
     _recipe_rows,
     _resolve_recipe_selector,
     _selection_remaining,
+    _skipped_read,
 )
 
 
@@ -44,27 +46,33 @@ def _run(
     _require_confirmation(args, "run")
     _request_key(args, factory)
     deadline = time.monotonic() + args.timeout_seconds
-    selector = _resolve_run_recipe(client, args.selector, deadline=deadline)
-
     spark_names = list(args.spark)
+
+    def roster():
+        fleet = client.request(
+            "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
+        )
+        nodes = fleet.get("nodes")
+        if not isinstance(nodes, list) or any(
+            not isinstance(node, Mapping) for node in nodes
+        ):
+            raise ControlMalformedResponse("fleet membership is unavailable")
+        if not nodes or any(
+            not isinstance(node.get("id"), str) or not node["id"] for node in nodes
+        ):
+            raise ControlMalformedResponse("fleet membership is not yet observed")
+        return [str(node["id"]) for node in nodes]
+
+    # The library scan and the fleet roster are independent reads.
+    recipe, fleet = _read_concurrently(
+        lambda: _resolve_run_recipe(client, args.selector, deadline=deadline),
+        _skipped_read
+        if spark_names
+        else lambda: _observe_selection(roster, deadline=deadline),
+    )
+    selector = cast(str, recipe.get())
     if not spark_names:
-
-        def roster():
-            fleet = client.request(
-                "GET", "/api/fleet", timeout_seconds=_selection_remaining(deadline)
-            )
-            nodes = fleet.get("nodes")
-            if not isinstance(nodes, list) or any(
-                not isinstance(node, Mapping) for node in nodes
-            ):
-                raise ControlMalformedResponse("fleet membership is unavailable")
-            if not nodes or any(
-                not isinstance(node.get("id"), str) or not node["id"] for node in nodes
-            ):
-                raise ControlMalformedResponse("fleet membership is not yet observed")
-            return [str(node["id"]) for node in nodes]
-
-        spark_names = _observe_selection(roster, deadline=deadline)
+        spark_names = cast(list[str], fleet.get())
 
     edit_args = argparse.Namespace(
         command="profile",
@@ -120,6 +128,60 @@ def _run(
     }
 
 
+# 512 models per page: the bound is far above any library, so only a runaway
+# cursor can reach it.
+_MAX_MODEL_LIBRARY_PAGES = 1024
+
+
+def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:
+    """Selector -> published model title, from the paged model library.
+
+    A model without a published display has no title to match and is omitted.
+    """
+    from ..generated_control.models.model_display import ModelDisplay
+
+    titles: dict[str, str] = {}
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    for _ in range(_MAX_MODEL_LIBRARY_PAGES):
+        query = {"limit": 512, "sort": "name"}
+        if cursor is not None:
+            query["cursor"] = cursor
+        page = client.request(
+            "GET",
+            "/api/model/library",
+            query=query,
+            timeout_seconds=_selection_remaining(deadline),
+        )
+        models = page.get("models")
+        if not isinstance(models, list):
+            raise ControlMalformedResponse(
+                "model library response does not contain models"
+            )
+        for row in models:
+            if not isinstance(row, Mapping) or not isinstance(row.get("selector"), str):
+                raise ControlMalformedResponse(
+                    "model library response contains an invalid model"
+                )
+            display = row.get("model_display")
+            if display is not None:
+                titles[cast(str, row["selector"])] = ModelDisplay.from_dict(
+                    validate_control_document("ModelDisplay", display)
+                ).model_title
+        next_cursor = page.get("next_cursor")
+        if next_cursor is None:
+            return titles
+        if not isinstance(next_cursor, str) or not next_cursor:
+            raise ControlMalformedResponse(
+                "model library response contains an invalid cursor"
+            )
+        if next_cursor in seen_cursors:
+            raise ControlMalformedResponse("model library cursor repeated")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    raise ControlMalformedResponse("model library has more pages than expected")
+
+
 def _resolve_run_recipe(
     client: ControllerClient, requested: str, *, deadline: float
 ) -> str:
@@ -162,30 +224,12 @@ def _resolve_run_recipe(
             }:
                 model_matches.add(selector)
     if not matches and not model_matches:
-        from ..generated_control.models.model_display import ModelDisplay
-
+        # One paged library read carries every model's published title.
+        titles = _observe_selection(
+            lambda: _model_titles(client, deadline=deadline), deadline=deadline
+        )
         for model_selector, recipes in model_recipes.items():
-
-            def model_title(selected: str = model_selector):
-                detail = client.request(
-                    "GET",
-                    f"/api/model/{_quoted(selected)}",
-                    timeout_seconds=_selection_remaining(deadline),
-                )
-                if detail.get("selector") != selected:
-                    raise ControlMalformedResponse(
-                        "model title observation identifies another selection"
-                    )
-                display = detail.get("model_display")
-                if display is None:
-                    # No published display yet: there is no title to match.
-                    return ""
-                return ModelDisplay.from_dict(
-                    validate_control_document("ModelDisplay", display)
-                ).model_title
-
-            title = _observe_selection(model_title, deadline=deadline)
-            if title.casefold() == needle:
+            if titles.get(model_selector, "").casefold() == needle:
                 model_matches.update(recipes)
     candidates = matches or model_matches
     if len(candidates) == 1:

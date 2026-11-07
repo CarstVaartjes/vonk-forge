@@ -330,6 +330,7 @@ class ModelCacheOperationHandle(Protocol):
     plan_digest: str | None
     failure: AvailabilityOperationFailure | None
     result: object | None
+    blockers: Sequence[OperationBlocker]
 
 
 class ModelCacheRemovalCoordinator(Protocol):

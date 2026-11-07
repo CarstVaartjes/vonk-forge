@@ -513,5 +513,7 @@ class CompositeDistributionPhaseExecutor(
             downloaded_bytes=cache.downloaded_bytes,
             total_bytes=cache.expected_bytes,
             progress=progress,
-            reason=view.last_error,
+            reason=None if view.wait else view.last_error,
+            blockers=list(view.blockers),
+            next_attempt_at=view.wait.next_check if view.wait else None,
         )

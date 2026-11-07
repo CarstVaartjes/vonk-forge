@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
@@ -20,6 +21,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     canonical_json,
@@ -57,6 +59,7 @@ from .models import (
     CatalogDocumentHead,
     RecipeSourceBundle,
 )
+from .observed_run_memory import carry_measured_peaks
 from .recipe_runtime_specs import RecipeRuntimeSpecError, recipe_topology
 from .source_bundles import (
     SourceBundleError,
@@ -453,9 +456,10 @@ class CatalogService:
         qualifications: Mapping[
             tuple[str, str, str], PublishedQualificationStatusView | None
         ],
+        apis: Mapping[tuple[str, str, str], RecipeApi | None] = MappingProxyType({}),
     ) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
-            images, qualifications
+            images, qualifications, apis
         )
 
     def import_recipe_library(
@@ -521,6 +525,20 @@ class CatalogService:
             )
         actor = _actor(actor)
         with self._sessions.begin() as session:
+            identity = captured.definition.identity
+            previous_digest = session.scalar(
+                select(CatalogDocumentRevision.content_digest)
+                .join(
+                    CatalogDocumentHead,
+                    CatalogDocumentHead.active_revision_id
+                    == CatalogDocumentRevision.id,
+                )
+                .where(
+                    CatalogDocumentHead.kind == RunSwitchReasonScopeName.RECIPE,
+                    CatalogDocumentHead.publisher == identity.publisher,
+                    CatalogDocumentHead.slug == identity.slug,
+                )
+            )
             for value in dependencies:
                 self._upsert_canonical_document(session, value, actor=actor)
             revision, head_selected = self._upsert_canonical_document(
@@ -528,6 +546,16 @@ class CatalogService:
             )
             if not head_selected:
                 self._select_imported_recipe_head(session, revision)
+            if previous_digest is not None:
+                # Measured wins: in the transaction that moves the head, so the
+                # new head never exists without the peaks its execution earned.
+                carry_measured_peaks(
+                    session,
+                    identity.publisher,
+                    identity.slug,
+                    previous_digest,
+                    revision.content_digest,
+                )
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )

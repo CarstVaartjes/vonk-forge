@@ -1,0 +1,56 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-11ad7efa2497-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+   "size_bytes": 1519
+  },
+  {
+   "id": "file-4xnomos8ksc-9e158a603ceb-c258713c0b",
+   "path": "4xNomos8kSC.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "9e158a603ceb1a21de7159cbdf32c402d1d68d03397f3d6d473d0152fc12122c",
+   "size_bytes": 33467822
+  },
+  {
+   "id": "readme-414be5c5de7d-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "414be5c5de7de2e38ee83ef128aa47b1d3c1666677573ac1d6ccf0d2314942a4",
+   "size_bytes": 1100
+  }
+ ],
+ "format": {
+  "precision": "fp16",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "xinntao",
+   "slug": "real-esrgan"
+  },
+  "model": {
+   "publisher": "xinntao",
+   "slug": "4xnomos8ksc"
+  },
+  "publisher": "phips",
+  "slug": "4xnomos8ksc-623bdf3d",
+  "variant": "623bdf3d",
+  "version": "623bdf3d"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Phips/4xNomos8kSC",
+  "revision": "623bdf3d1ec5bccb02548a79eec1b62d32ff86fd"
+ }
+}

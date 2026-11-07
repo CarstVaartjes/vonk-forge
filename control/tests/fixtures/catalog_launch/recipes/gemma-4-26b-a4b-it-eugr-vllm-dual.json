@@ -1,0 +1,369 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "e608a6c31e6fd41e05b5c8a8a558f9301d1122b6f8b535af70a4d992f7214f51",
+    "repository": "docker.io/eugr/spark-vllm"
+   },
+   "context": {
+    "path": "adapters/eugr/gemma4-26b-a4b"
+   },
+   "dockerfile": "adapters/eugr/gemma4-26b-a4b/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "gemma-4-26b-a4b-it-eugr-vllm-dual"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "gemma-4-26b-a4b-it"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "mmmu-pro-c310e41b2dfd",
+     "id": "primary-mmmu-pro-c310e41b2dfd",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "metadata-aa4fc74fe06a",
+     "id": "primary-metadata-aa4fc74fe06a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-4f463225c4fe",
+     "id": "primary-readme-4f463225c4fe",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-ae53464bf3be",
+     "id": "primary-chat-template-ae53464bf3be",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-ed0c1eb3633d",
+     "id": "primary-config-ed0c1eb3633d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-d4226bbe3117",
+     "id": "primary-generation-config-d4226bbe3117",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00002-1127684971bb",
+     "id": "primary-model-00001-of-00002-1127684971bb",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00002-aab47033e1e8",
+     "id": "primary-model-00002-of-00002-aab47033e1e8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-907826a6e46f",
+     "id": "primary-model-safetensors-index-907826a6e46f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processor-config-32bdf45d2ad4",
+     "id": "primary-processor-config-32bdf45d2ad4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-cc8d3a0ce364",
+     "id": "primary-tokenizer-cc8d3a0ce364",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-9f4fec4b1dc6",
+     "id": "primary-tokenizer-config-9f4fec4b1dc6",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "697cebc7adf1a694369f497f3976aa4bac01eaf42af8a556e09c629e59ce7176",
+    "kind": "model",
+    "publisher": "google",
+    "slug": "gemma-4-26b-a4b-it-4d7ae498"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "eugr (MIT)",
+   "Google DeepMind (Apache-2.0)",
+   "vLLM contributors (Apache-2.0)"
+  ],
+  "source_reference": "https://github.com/eugr/spark-vllm-docker/tree/73a48892ee517426d99dda658213eab75c5c2126"
+ },
+ "release": {
+  "released_at": "2026-11-04",
+  "version": "prebuilt-vllm-current"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "tensor-parallel-size",
+    "setting": null,
+    "value": 2
+   },
+   {
+    "name": "served-model-name",
+    "setting": null,
+    "value": "gemma-4-26b-a4b-it"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "setting": null,
+    "value": "0.8"
+   },
+   {
+    "name": "load-format",
+    "setting": null,
+    "value": "safetensors"
+   },
+   {
+    "name": "enable-prefix-caching",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "setting": null,
+    "value": true
+   },
+   {
+    "name": "tool-call-parser",
+    "setting": null,
+    "value": "gemma4"
+   },
+   {
+    "name": "reasoning-parser",
+    "setting": null,
+    "value": "gemma4"
+   },
+   {
+    "name": "quantization",
+    "setting": null,
+    "value": "fp8"
+   },
+   {
+    "name": "kv-cache-dtype",
+    "setting": null,
+    "value": "fp8"
+   },
+   {
+    "name": "max-num-batched-tokens",
+    "setting": "max_batch_tokens",
+    "value": null
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models"
+  ],
+  "environment": [],
+  "lifecycle": {
+   "stop_timeout_seconds": 180
+  }
+ },
+ "settings": {
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": {
+   "change_effect": "restart",
+   "value": 8192
+  }
+ },
+ "topology": {
+  "name": "dual",
+  "node_count": 2,
+  "parallelism": {
+   "backend": "mp",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 2
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 51644340088,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 16000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 114930585191,
+      "reserve_bytes": 8000000000
+     }
+    }
+   },
+   {
+    "count": 1,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 51644340088,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 16000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 114930585191,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "worker",
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "gemma-4-26b-a4b-it"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

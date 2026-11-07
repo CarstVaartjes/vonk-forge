@@ -303,7 +303,9 @@ def test_disappeared_withdrawal_target_does_not_poison_completion(tmp_path):
         base, run_id, alias="fresh", route_state="withdrawn", identity=8
     )
     with base.publication_transaction() as session:
-        withdrawal = base.prepare_withdrawal_in_session(session, frozenset({run_id}))
+        withdrawal = base.prepare_withdrawal_in_session(
+            session, frozenset({run_id}), base.served_model_info()
+        )
         publication = base._withdrawal_publication(session, withdrawal)
     with base.sessions.begin() as session:
         for node in session.query(RunNode).filter_by(run_id=run_id):

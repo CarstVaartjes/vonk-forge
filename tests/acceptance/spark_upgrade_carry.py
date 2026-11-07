@@ -457,11 +457,23 @@ def _download_library(revision: str, destination: Path) -> None:
     _retry_transient(f"recipe library {revision} ({url})", attempt)
 
 
+LIBRARY_BUILD_SCRIPT = "scripts/build-recipe-library"
+
+
 def _revision_through_api(source_sha: str) -> str:
     """The library revision a release's own source tree names, read through the API.
 
     The lane needs no history in its checkout this way.
     """
+    return _file_through_api(LIBRARY_REVISION_FILE, source_sha)
+
+
+def _build_script_through_api(source_sha: str) -> str:
+    """The library build script of a release's own source tree."""
+    return _file_through_api(LIBRARY_BUILD_SCRIPT, source_sha)
+
+
+def _file_through_api(path: str, source_sha: str) -> str:
 
     def attempt() -> str:
         reply = subprocess.run(
@@ -470,10 +482,7 @@ def _revision_through_api(source_sha: str) -> str:
                 "api",
                 "-H",
                 "Accept: application/vnd.github.raw",
-                (
-                    f"repos/CarstVaartjes/vonk-forge/contents/{LIBRARY_REVISION_FILE}"
-                    f"?ref={source_sha}"
-                ),
+                (f"repos/CarstVaartjes/vonk-forge/contents/{path}?ref={source_sha}"),
             ],
             check=False,
             capture_output=True,
@@ -484,7 +493,7 @@ def _revision_through_api(source_sha: str) -> str:
             raise OSError(reply.stderr.strip() or f"gh exited {reply.returncode}")
         return reply.stdout
 
-    return _retry_transient("the release's recipe library revision", attempt)
+    return _retry_transient(f"the release's {path}", attempt)
 
 
 def release_library_root(
@@ -492,12 +501,15 @@ def release_library_root(
     workspace: Path,
     *,
     read_revision: Callable[[str], str] = _revision_through_api,
+    read_build_script: Callable[[str], str] = _build_script_through_api,
     fetch_library: Callable[[str, Path], None] = _download_library,
 ) -> Path:
     """The recipe library a release was accepted with, built beside the lane.
 
     Each release names its library in its own source tree, so the phase that
-    runs a release's Controller imports the canary that release could read.
+    runs a release's Controller imports the canary that release could read. The
+    library is built with that release's own build script, which matches the
+    recipe tool of the revision it names.
     """
     revision = read_revision(source_sha).strip()
     if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
@@ -508,15 +520,11 @@ def release_library_root(
         fetch_library(revision, root)
         # An unpacked archive has no history: its files carry the commit time.
         epoch = int((root / "tools/build-catalog-index").stat().st_mtime)
+        script = workspace / f"build-recipe-library-{source_sha}"
+        script.write_text(read_build_script(source_sha))
+        script.chmod(0o755)
         subprocess.run(
-            [
-                str(
-                    Path(__file__).resolve().parents[2] / "scripts/build-recipe-library"
-                ),
-                str(root),
-                revision,
-                str(epoch),
-            ],
+            [str(script), str(root), revision, str(epoch)],
             check=True,
             timeout=1800,
         )

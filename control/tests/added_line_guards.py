@@ -16,6 +16,7 @@ from . import (
     alias_rules,
     bare_savepoints,
     docker_listings,
+    git_free_test_lines,
     intent_ordinal_writers,
     legacy_tolerance,
     lifecycle_sets,
@@ -25,6 +26,7 @@ from . import (
     request_path_scans,
     scratch_names,
     shell_trap_waits,
+    sync_io_in_async,
     whole_collection_readers,
 )
 from . import claim_registry as claims
@@ -105,6 +107,8 @@ MODES = (
     "intent-ordinal",
     "savepoints",
     "barriers",
+    "sync-in-async",
+    "git-free-tests",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2217,6 +2221,20 @@ def check_source(
         hits.extend(
             (line, alias_rules.KIND) for line in alias_rules.scan_source(source)
         )
+    if "alias-rules" in modes and alias_rules.run_alias_in_scope(path) and not is_test:
+        hits.extend(
+            (line, alias_rules.RUN_ALIAS_KIND)
+            for line in alias_rules.scan_run_alias(source)
+        )
+    if (
+        "alias-rules" in modes
+        and alias_rules.run_alias_write_in_scope(path)
+        and not is_test
+    ):
+        hits.extend(
+            (line, alias_rules.RUN_ALIAS_WRITE_KIND)
+            for line in alias_rules.scan_run_alias_write(source, path)
+        )
     if (
         "intent-ordinal" in modes
         and intent_ordinal_writers.in_scope(path)
@@ -2240,9 +2258,30 @@ def check_source(
             (line, scratch_names.KIND)
             for line in scratch_names.scan_source(source, path)
         )
+    if (
+        python
+        and not is_test
+        and "sync-in-async" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend((line, kind) for line, kind in sync_io_in_async.scan_source(source))
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
             (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)
+        )
+    if "git-free-tests" in modes:
+        # A Rust file under tests/ is all test; elsewhere only cfg(test) items.
+        every_line = set(range(1, source.count("\n") + 2))
+        hits.extend(
+            (line, git_free_test_lines.KIND)
+            for line in git_free_test_lines.scan_path(
+                path,
+                source,
+                is_test=is_test,
+                test_lines=every_line
+                if is_test
+                else (rust_test_lines(source) if path.endswith(".rs") else set()),
+            )
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

@@ -32,6 +32,7 @@ from vonk_forge_contracts import (
 
 from ..exact_integer_storage import DecimalIntegerToken, ExactNonnegativeInteger
 from ..model_primitives import Base, _lower_hex
+from ..unreadable_rows import note_unreadable
 
 
 class RecipeSourceBundle(Base):
@@ -115,6 +116,23 @@ class CatalogDocument(Base):
 
     def model_display(self) -> ModelDisplay | None:
         return None if self.display is None else read_model_display(self.display)
+
+    def readable_recipe_display(self) -> RecipeDisplay | None:
+        """The display, or None (noted once) when this contract cannot read it."""
+        try:
+            return self.recipe_display()
+        except ValueError as error:
+            return note_unreadable(*self._unreadable(error))
+
+    def readable_model_display(self) -> ModelDisplay | None:
+        """The display, or None (noted once) when this contract cannot read it."""
+        try:
+            return self.model_display()
+        except ValueError as error:
+            return note_unreadable(*self._unreadable(error))
+
+    def _unreadable(self, error: ValueError) -> tuple[str, str, str]:
+        return "catalog display", f"{self.kind}/{self.slug}", str(error)[:120]
 
 
 class CatalogDocumentRevision(Base):

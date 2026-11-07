@@ -7,8 +7,12 @@ and all technical admission checks remain authoritative for execution.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+from vonk_forge_contracts import ModelDisplay
+
+from .models import CatalogDocument, CatalogDocumentRevision
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,8 +20,27 @@ class TerritorialAdmissionDecision:
     warning: tuple[str, str] | None
 
 
+def stored_model_display(
+    session: Session, revision: CatalogDocumentRevision | None
+) -> ModelDisplay | None:
+    """The published display of a Model revision's document, or None.
+
+    The license is a display fact, not part of the hashed Model document. A
+    display that is missing, or stored by an older contract and unreadable now,
+    declares nothing (read, and noted once, by the one reader the library uses): the
+    warning built from it is informational and never blocks anything.
+    """
+
+    if revision is None:
+        return None
+    row = session.get(CatalogDocument, revision.document_id)
+    if row is None:
+        return None
+    return row.readable_model_display()
+
+
 def territorial_admission(
-    model_version: Mapping[str, object] | None,
+    display: ModelDisplay | None,
     *,
     operation: str,
 ) -> TerritorialAdmissionDecision:
@@ -25,28 +48,11 @@ def territorial_admission(
 
     if operation not in {"install", "run"}:
         raise ValueError("territorial admission operation is invalid")
-    license_document = (
-        model_version.get("license") if isinstance(model_version, Mapping) else None
-    )
-    restrictions = (
-        license_document.get("territorial_restrictions")
-        if isinstance(license_document, Mapping)
-        else None
-    )
+    restrictions = None if display is None else display.license.territorial_restrictions
     if restrictions is None:
         return TerritorialAdmissionDecision(None)
-    if not isinstance(restrictions, Mapping):
-        return TerritorialAdmissionDecision(None)
-    denied = restrictions.get("denied_jurisdictions")
-    notice = restrictions.get("notice")
-    if (
-        not isinstance(denied, list)
-        or not denied
-        or not all(isinstance(value, str) for value in denied)
-        or not isinstance(notice, str)
-        or not notice
-    ):
-        return TerritorialAdmissionDecision(None)
+    denied = restrictions.denied_jurisdictions
+    notice = restrictions.notice
     prefix = f"{operation}.license"
     return TerritorialAdmissionDecision(
         (

@@ -101,7 +101,7 @@ def _model_projection(
         version=document.identity.version,
         variant=document.identity.variant,
         quantization=document.format.quantization,
-        usage=self._model_usage(document),
+        usage=self._model_usage(text),
         resources=LibraryResourceProjection(
             disk_bytes=None if usage is None else usage.disk_bytes
         ),
@@ -116,7 +116,7 @@ def _recipe_projection(
     self: LibraryProjection,
     revision: CatalogDocumentRevision,
     document: RecipeDefinition | RecipeRevisionProjection,
-    model_by_key: Mapping[str, ModelDefinition | ModelRevisionProjection],
+    usage_by_model: Mapping[str, Sequence[str]],
     snapshot: Mapping[str, LibraryLocalState] | None,
     text: DocumentText,
 ) -> LibraryRecipeProjection:
@@ -129,13 +129,12 @@ def _recipe_projection(
         self.selector(reference.publisher, reference.slug)
         for reference in projected.models
     ]
-    known_models = [
-        model_by_key[reference.content_sha256]
-        for reference in projected.models
-        if reference.content_sha256 in model_by_key
-    ]
     usage = sorted(
-        {item for model in known_models for item in self._model_usage(model)}
+        {
+            item
+            for reference in projected.models
+            for item in usage_by_model.get(reference.content_sha256, ())
+        }
     )
     resources = self._recipe_resources(document)
     return LibraryRecipeProjection(

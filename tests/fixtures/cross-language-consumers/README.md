@@ -22,8 +22,9 @@ payloads have no browser route. Aggregate diagnostics byte bounds and the Python
 JSON ingress digit limit are explicitly narrower ingress constraints, not silently
 claimed as structural JSON Schema behavior.
 
-`scripts/tests/prepare_official_schema_consumers.py` requires the official
-JSON-Schema-Test-Suite commit `5b0ee1613e45fcc2bddac00e07c19cd49b00d8a8` and selects
+`scripts/tests/prepare_official_schema_consumers.py` reads the official
+JSON-Schema-Test-Suite checkout that the CI workflow pins by `ref:` (the only
+place the pin lives) and selects
 its draft 2020-12 type, required, properties, additionalProperties, numeric bounds,
 multipleOf, enum, const, allOf, anyOf and oneOf files. It uses the production schema
 compiler in mathematical integer/exact decimal mode. Production strict integer

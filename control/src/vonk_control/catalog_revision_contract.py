@@ -7,13 +7,14 @@ from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from pydantic import ConfigDict, Field, ValidationError
 from vonk_agent_protocol import UnknownOutcomeError, canonical_message
 from vonk_agent_protocol.build_import import RecipeBuildOptions
 from vonk_forge_contracts import (
     ModelDefinition,
+    RecipeApi,
     RecipeDefinition,
     document_sha256,
     read_model,
@@ -69,12 +70,6 @@ class RecipePackageHandleProjection(StrictJSONModel):
     recipe_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     archive_path: str
     closure_path: str
-
-
-# ``vonk_forge_contracts.model`` declares these modality literals inline and is
-# outside this change's scope, so the set is named locally. The order must match
-# the contract field exactly to keep the projection schema byte-identical.
-ModelModalities = list[Literal["text", "image", "audio", "video", "3d", "embeddings"]]
 
 
 class _CatalogRevisionProjection(StrictJSONModel):
@@ -157,8 +152,6 @@ class ArtifactInputProjection(StrictJSONModel):
 class ModelRevisionProjection(_CatalogRevisionProjection):
     identity: ModelIdentity
     format: ModelFormat
-    capabilities: list[str]
-    modalities: ModelModalities
     artifact_count: int = Field(ge=0)
     download_bytes: int = Field(ge=0)
     installed_bytes: int = Field(ge=0)
@@ -184,6 +177,9 @@ class RecipeRevisionProjection(_CatalogRevisionProjection):
     prebuilt_image: PrebuiltImage | None = None
     # The signed catalog's qualification status for this revision; informative.
     qualification: PublishedQualificationStatusView | None = None
+    # The signed catalog's gateway API facts for this revision (a sibling of the
+    # recipe, never part of its content identity); none when it publishes none.
+    api: RecipeApi | None = None
 
 
 CatalogRevisionProjection = ModelRevisionProjection | RecipeRevisionProjection

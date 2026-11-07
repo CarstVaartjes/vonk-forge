@@ -352,7 +352,7 @@ function ModelRevisionsRow({
     revisions[0]!;
   const key = modelKey(model.model);
   const bytes = model.model_bytes;
-  const capabilities = model.model_capabilities ?? [];
+  const capabilities = model.usage;
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
   // A recipe may reference the same model in more than one selection with

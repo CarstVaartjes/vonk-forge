@@ -45,7 +45,7 @@ from .gpu_health import gpu_health_reason
 from .install_admission import AdmissionReason
 from .install_admission.contracts import reason_documents
 from .inventory_repository import InventoryRepository
-from .legal_admission import territorial_admission
+from .legal_admission import stored_model_display, territorial_admission
 from .load_swap import swap_capacity
 from .memory_reservations import memory_reservations
 from .models import (
@@ -492,7 +492,6 @@ def require_same_execution(reviewed: RunPlan, current: RunPlan) -> None:
     def identity(plan: RunPlan) -> tuple[object, ...]:
         return (
             plan.installation_id,
-            plan.alias,
             plan.mapping_id,
             plan.mapping_generation,
             plan.recipe_revision_id,
@@ -597,10 +596,10 @@ class RunAdmissionService:
                 for item in resolved_models
             }
             model_version = resolved_models[0] if resolved_models else None
-            model_document = model_version.document if model_version else None
+            model_display = stored_model_display(session, model_version)
             observed_peaks = observed_role_peaks(session, revision.content_digest)
             legal_admission = territorial_admission(
-                model_document,
+                model_display,
                 operation="run",
             )
             mapping_nodes = tuple(
@@ -947,7 +946,6 @@ class RunAdmissionService:
         identity = {
             "schema_version": 1,
             "installation_id": installation_id,
-            "alias": alias,
             "mapping_id": mapping.id,
             "mapping_generation": mapping.generation,
             "recipe_revision_id": revision.id,
@@ -1203,7 +1201,6 @@ class RunAdmissionService:
                     "observation_schema_version": observation_schema_version,
                     "run_generation": 1,
                     "installation_id": plan.installation_id,
-                    "alias": plan.alias,
                     "mapping_id": plan.mapping_id,
                     "mapping_generation": plan.mapping_generation,
                     "recipe_revision_id": plan.recipe_revision_id,

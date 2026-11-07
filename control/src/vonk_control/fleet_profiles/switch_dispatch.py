@@ -295,7 +295,7 @@ class RunSwitchFleetProfileAdapter:
                     "Profile child Stop exceeds its current authorized scope"
                 )
             expected = stops.get(stop.run_id)
-            if expected is None or expected.alias != stop.alias:
+            if expected is None:
                 raise FleetProfileReviewStale(
                     "Profile child would stop an unreviewed workload; review again"
                 )

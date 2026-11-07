@@ -71,6 +71,13 @@ def test_a_2x_baseline_canary_index_without_displays_is_read_with_the_installed_
                 "model_title": "Derived",
                 "description": "Derived by the installed 2.x contracts.",
                 "tags": [],
+                "modalities": ["text"],
+                "capabilities": [],
+                "license": {
+                    "spdx": "Apache-2.0",
+                    "url": "https://example.invalid/license",
+                    "attribution": [],
+                },
             }
         )
 
@@ -129,6 +136,13 @@ def test_a_3_0_canary_index_uses_the_displays_it_carries(tmp_path: Path) -> None
             "model_title": "Carried",
             "description": "Carried by the index.",
             "tags": [],
+            "modalities": ["text"],
+            "capabilities": [],
+            "license": {
+                "spdx": "Apache-2.0",
+                "url": "https://example.invalid/license",
+                "attribution": [],
+            },
         }
     archives = {
         str(entry["package"]["sha256"]): Path("/archive") for entry in index["recipes"]
