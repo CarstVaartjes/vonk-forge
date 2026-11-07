@@ -1,6 +1,7 @@
 """Db: schema."""
 
 import copy
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
@@ -30,19 +31,14 @@ from .schema_helpers import (
 )
 
 
-def reconcile_schema(connection: Connection) -> None:
-    """Apply safe metadata differences inside the caller's startup transaction."""
+def _schema_differences(connection: Connection) -> list[tuple[Any, ...]]:
+    """Differences between the live catalog and the models, minus tolerated ones."""
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-    from sqlalchemy import inspect
 
-    from ..exact_integer_adoption import adopt_exact_integer_columns
     from ..models import Base
 
-    adopt_exact_integer_columns(connection)
-    ops = Operations(MigrationContext.configure(connection))
-    differences = [
+    return [
         difference
         for difference in _flatten_schema_differences(
             compare_metadata(
@@ -54,6 +50,20 @@ def reconcile_schema(connection: Connection) -> None:
         )
         if _schema_difference_key(difference) not in _TOLERATED_SCHEMA_DIFFERENCES
     ]
+
+
+def reconcile_schema(connection: Connection) -> None:
+    """Apply safe metadata differences inside the caller's startup transaction."""
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import inspect
+
+    from ..exact_integer_adoption import adopt_exact_integer_columns
+    from ..models import Base
+
+    adopt_exact_integer_columns(connection)
+    ops = Operations(MigrationContext.configure(connection))
+    differences = _schema_differences(connection)
     drift: SchemaDrift = {kind: [] for kind in SchemaDriftKind}
     drift[SchemaDriftKind.UNHANDLED_DIFFERENCE].extend(
         _unhandled_differences(differences)
@@ -109,14 +119,10 @@ def reconcile_schema(connection: Connection) -> None:
                 from sqlalchemy import DefaultClause
 
                 column.server_default = DefaultClause(text(default_sql))
-        try:
-            with connection.begin_nested():
-                ops.add_column(table_name, column)
-        except SQLAlchemyError as error:
-            _LOGGER.warning(
-                "Skipped missing column %s.%s: %s", table_name, column.name, error
-            )
-            continue
+        # A column that cannot be added is never skipped: the error propagates
+        # to startup, which rolls the transaction back and retries (55P03) or
+        # crashes for the supervisor to restart. No half-booted Controller.
+        ops.add_column(table_name, column)
         _LOGGER.info("Added column %s.%s", table_name, model_column.name)
         if (
             not model_column.nullable
@@ -506,6 +512,17 @@ def reconcile_schema(connection: Connection) -> None:
     drift[SchemaDriftKind.DEFERRED_CHECK_CONSTRAINT].extend(
         _check_constraint_differences(connection)
     )
+    # Runtime net: a model column still absent here must not boot the Controller.
+    still_missing = [
+        f"{difference[2]}.{difference[3].name}"
+        for difference in _schema_differences(connection)
+        if difference[0] == "add_column"
+    ]
+    if still_missing:
+        raise RuntimeError(
+            "Schema reconciliation left model columns missing: "
+            + ", ".join(still_missing)
+        )
     left = {kind.value: items for kind, items in drift.items() if items}
     if left:
         _LOGGER.warning(
