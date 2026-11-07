@@ -18,7 +18,7 @@ from vonk_control.models import RecipeRun
 
 from .lifecycle_simulation.actions import Step, perform
 from .lifecycle_simulation.simulation import Simulation
-from .lifecycle_simulation.world import PAIR, SOLO, build_world
+from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, build_world
 
 _REAPED = "recipe.run.owner-ended"
 
@@ -50,14 +50,14 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
     try:
         sim = Simulation(world, seed=0)
         solo = world.assignment(SOLO, world.nodes[:1])
-        # Two installations stay behind, unused, with nothing running.
-        for name, assignment in (
-            ("solo", solo),
-            ("pair", world.assignment(PAIR, world.nodes)),
-        ):
-            assert sim.settle(_load(sim, name, [assignment])) == "succeeded"
-            assert sim.settle(_load(sim, f"idle {name}", [])) == "succeeded"
-        assert set(_states(sim).values()) == {"stopped"}
+        beside = world.assignment(SOLO_B, world.nodes[:1])
+        # An installation stays behind, unused, with nothing running.
+        pair = _load(sim, "pair", [world.assignment(PAIR, world.nodes)])
+        assert sim.settle(pair) == "succeeded"
+        assert sim.settle(_load(sim, "idle", [])) == "succeeded"
+        # Another run keeps serving on the Spark: its report is never empty, so
+        # no absence of the new run can be inferred from it.
+        assert sim.settle(_load(sim, "beside", [beside])) == "succeeded"
 
         # The Sparks answer everything but Starts for now: the next load's Start
         # is queued and never claimed.
@@ -69,7 +69,7 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
             )
 
         monkeypatch.setattr(sim.sparks, "_orders", without_starts)
-        _load(sim, "solo again", [solo])
+        _load(sim, "solo beside", [beside, solo])
         for _ in range(60):
             sim.round()
             if "starting" in _states(sim).values():
@@ -82,6 +82,7 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
         for _ in range(30):
             sim.round()
         assert "starting" not in _states(sim).values()
+        assert "running" in _states(sim).values()  # the run beside it is untouched
         assert any(_REAPED in record.getMessage() for record in caplog.records)
 
         sim.quiesce()
