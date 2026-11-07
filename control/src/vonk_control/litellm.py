@@ -11,7 +11,16 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field, model_validator
 from vonk_forge_contracts import EndpointAlias
-from vonk_forge_contracts.api import ReasoningDefault, RequestPlacement
+from vonk_forge_contracts.api import (
+    AudioInputFormat,
+    Iso639_1,
+    ReasoningDefault,
+    RequestPlacement,
+    SpeechResponseFormat,
+    TimestampGranularity,
+    TranscriptionResponseFormat,
+    VoiceName,
+)
 from vonk_forge_contracts.recipe import Scalar
 
 from .strict_json import StrictModel
@@ -175,17 +184,23 @@ class LiteLlmUpstreamParams(_ConfigModel):
 class OpenAiRequestParameter(StrEnum):
     """The one owner of OpenAI request parameter names the gateway publishes."""
 
+    INSTRUCTIONS = "instructions"
+    LANGUAGE = "language"
     MAX_COMPLETION_TOKENS = "max_completion_tokens"
     MAX_TOKENS = "max_tokens"
     PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    PROMPT = "prompt"
     REASONING_EFFORT = "reasoning_effort"
     RESPONSE_FORMAT = "response_format"
+    SPEED = "speed"
     STOP = "stop"
     STREAM = "stream"
     TEMPERATURE = "temperature"
+    TIMESTAMP_GRANULARITIES = "timestamp_granularities"
     TOOL_CHOICE = "tool_choice"
     TOOLS = "tools"
     TOP_P = "top_p"
+    VOICE = "voice"
 
 
 class VonkReasoningEffort(_ConfigModel):
@@ -211,6 +226,29 @@ class VonkThinking(_ConfigModel):
     default: ReasoningDefault
 
 
+class VonkAudioTranscription(_ConfigModel):
+    """What a transcription route takes, as its recipe states it (no LiteLLM field)."""
+
+    input_formats: list[AudioInputFormat] = Field(min_length=1)
+    max_file_bytes: int = Field(ge=1)
+    max_audio_seconds: int | None = Field(ge=1)
+    languages: list[Iso639_1] = Field(min_length=1)
+    response_formats: list[TranscriptionResponseFormat] = Field(min_length=1)
+    prompt: bool
+    timestamp_granularities: list[TimestampGranularity]
+    temperature: bool
+
+
+class VonkAudioSpeech(_ConfigModel):
+    """What a speech route takes, as its recipe states it (no LiteLLM field)."""
+
+    voices: list[VoiceName] = Field(min_length=1)
+    response_formats: list[SpeechResponseFormat] = Field(min_length=1)
+    instructions: bool
+    speed: bool
+    max_input_chars: int = Field(ge=1)
+
+
 class LiteLlmModelInfo(_ConfigModel):
     """The ``model_info`` of one route: LiteLLM v1.103.0 field names verbatim.
 
@@ -219,9 +257,9 @@ class LiteLlmModelInfo(_ConfigModel):
     ``vonk_`` keys carry what LiteLLM has no field for.
     """
 
-    mode: Literal["chat", "decision"]
+    mode: Literal["chat", "decision", "audio_transcription", "audio_speech"]
     max_tokens: int | None = Field(default=None, ge=1)
-    max_input_tokens: int = Field(ge=1)
+    max_input_tokens: int | None = Field(default=None, ge=1)
     max_output_tokens: int | None = Field(default=None, ge=1)
     supports_vision: bool
     supports_audio_input: bool
@@ -240,6 +278,11 @@ class LiteLlmModelInfo(_ConfigModel):
     supports_native_streaming: bool
     supported_endpoints: list[str] = Field(min_length=1)
     supported_openai_params: list[OpenAiRequestParameter]
+    supported_modalities: list[Literal["text", "audio"]] | None = None
+    supported_output_modalities: list[Literal["text", "audio"]] | None = None
+    health_check_voice: str | None = None
+    vonk_audio_transcription: VonkAudioTranscription | None = None
+    vonk_audio_speech: VonkAudioSpeech | None = None
     vonk_thinking: VonkThinking | None = None
     vonk_reasoning_effort: VonkReasoningEffort | None = None
     vonk_default_output_tokens: int | None = Field(default=None, ge=1)
@@ -248,6 +291,29 @@ class LiteLlmModelInfo(_ConfigModel):
     def _max_tokens_is_the_output_cap(self) -> LiteLlmModelInfo:
         if self.max_tokens != self.max_output_tokens:
             raise ValueError("max_tokens must equal max_output_tokens")
+        return self
+
+    @model_validator(mode="after")
+    def _the_mode_decides_which_fields_apply(self) -> LiteLlmModelInfo:
+        """Token limits belong to text modes; each ``vonk_audio_*`` key to its mode."""
+
+        audio = self.mode in ("audio_transcription", "audio_speech")
+        if audio == (self.max_input_tokens is not None):
+            raise ValueError(
+                "an audio mode has no token limits and a text mode requires "
+                "max_input_tokens"
+            )
+        if audio and (
+            self.max_tokens is not None or self.max_output_tokens is not None
+        ):
+            raise ValueError("an audio mode has no token limits")
+        if (self.vonk_audio_transcription is not None) != (
+            self.mode == "audio_transcription"
+        ) or (self.vonk_audio_speech is not None) != (self.mode == "audio_speech"):
+            raise ValueError("a vonk_audio_* key belongs to exactly its own mode")
+        speech = self.vonk_audio_speech
+        if (speech.voices[0] if speech else None) != self.health_check_voice:
+            raise ValueError("health_check_voice is the first voice of a speech route")
         return self
 
 

@@ -4408,6 +4408,46 @@ class SparkLifecycle:
         return typed.model_dump(mode="json")
 
     @staticmethod
+    def _blocker_diagnostic(blockers: object) -> list[dict[str, object]]:
+        if not isinstance(blockers, list):
+            return []
+        return [
+            {
+                "code": blocker.get("code"),
+                "detail": str(blocker.get("detail"))[:300],
+                "node_ids": blocker.get("node_ids"),
+            }
+            for blocker in blockers[:8]
+            if isinstance(blocker, dict)
+        ]
+
+    @staticmethod
+    def _admission_diagnostic(preview: dict[str, object]) -> list[dict[str, object]]:
+        """Name the blockers each blocking assignment decision carries.
+
+        ``summary.blockers`` counts them, but the reasons list shows only
+        warnings; the decisive blocker lives on the assignment decision.
+        """
+
+        decisions = preview.get("admission_decisions")
+        if not isinstance(decisions, list):
+            return []
+        blocking = [
+            decision
+            for decision in decisions
+            if isinstance(decision, dict) and decision.get("allowed") is not True
+        ]
+        return [
+            {
+                "assignment_id": decision.get("assignment_id"),
+                "blockers": SparkLifecycle._blocker_diagnostic(
+                    decision.get("blockers")
+                ),
+            }
+            for decision in blocking[:8]
+        ]
+
+    @staticmethod
     def _preview_diagnostic(preview: dict[str, object]) -> str:
         """Describe a rejected profile preview instead of collapsing its cause.
 
@@ -4439,6 +4479,7 @@ class SparkLifecycle:
             ]
         return json.dumps(
             {
+                "admission": SparkLifecycle._admission_diagnostic(preview),
                 "allowed": preview.get("allowed"),
                 "preparations": rendered_preparations,
                 "reasons": rendered_reasons,

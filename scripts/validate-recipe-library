@@ -400,10 +400,7 @@ def _validate_v2_package(
             )
         expected_fixture_paths: set[str] = set()
         for check in expected_recipe.validation.serving.checks:
-            request = check.request
-            if getattr(request, "transport", None) == "job":
-                expected_fixture_paths.add(request.fixture)
-                expected_fixture_paths.update(request.input_slots.values())
+            expected_fixture_paths.update(check.fixture_paths())
 
         def is_source_member(name: str) -> bool:
             try:
@@ -472,13 +469,10 @@ def _validate_v2_package(
                 f"{package_label}: base image is absent from build inputs"
             )
         for check in expected_recipe.validation.serving.checks:
-            request = check.request
-            if getattr(request, "transport", None) == "job":
-                required = {request.fixture, *request.input_slots.values()}
-                if missing := sorted(required - payload_names):
-                    raise LibraryValidationError(
-                        f"{package_label}: serving closure is missing: {', '.join(missing)}"
-                    )
+            if missing := sorted(set(check.fixture_paths()) - payload_names):
+                raise LibraryValidationError(
+                    f"{package_label}: serving closure is missing: {', '.join(missing)}"
+                )
 
 
 def _validate_recipe_option_policy(
@@ -697,9 +691,7 @@ def _validate_v2(library_root: Path, platform_root: Path) -> dict[str, Any]:
             closure: set[str] = {build.context.path, build.dockerfile}
             closure.update(patch.path for patch in build.patches)
             for check in recipe.validation.serving.checks:
-                request = check.request
-                if getattr(request, "transport", None) == "job":
-                    closure.update((request.fixture, *request.input_slots.values()))
+                closure.update(check.fixture_paths())
             validate_recipe_package_paths(recipe, closure)
         except (ContractResolutionError, ValueError) as error:
             raise LibraryValidationError(

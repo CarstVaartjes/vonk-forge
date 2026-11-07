@@ -159,6 +159,58 @@ def test_max_tokens_is_the_output_cap() -> None:
         LiteLlmModelInfo.model_validate({**fields, "max_tokens": 5})
 
 
+def _vector(name: str) -> dict:
+    return next(vector for vector in VECTORS if vector["name"] == name)
+
+
+def test_an_audio_route_needs_no_generation_settings() -> None:
+    """The audio branch runs before the settings and modality reads."""
+    vector = {**_vector("transcription"), "recipe": "recipe-job.json"}
+    assert _document("recipe-job.json")["settings"]["kind"] not in (
+        "generation",
+        "decision",
+    )
+    info = _built(vector)
+    assert info.mode == "audio_transcription"
+    assert info.max_input_tokens is None and info.max_output_tokens is None
+    assert info.supports_audio_input and not info.supports_audio_output
+
+
+def test_the_audio_endpoint_is_the_mode_never_a_recipe_choice() -> None:
+    assert _built(_vector("transcription")).supported_endpoints == [
+        "/v1/audio/transcriptions"
+    ]
+    assert _built(_vector("speech")).supported_endpoints == ["/v1/audio/speech"]
+
+
+def test_the_speech_health_check_voice_is_the_first_voice() -> None:
+    assert _built(_vector("speech")).health_check_voice == "alloy"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"max_input_tokens": 10},
+        {"max_output_tokens": 5, "max_tokens": 5},
+        {"vonk_audio_speech": None},
+        {"vonk_audio_transcription": {}},
+        {"health_check_voice": "echo"},
+        {"mode": "chat"},
+    ],
+    ids=["tokens", "output-tokens", "missing-block", "foreign-block", "voice", "mode"],
+)
+def test_the_mode_decides_which_audio_fields_apply(change: dict) -> None:
+    fields = _built(_vector("speech")).model_dump()
+    with pytest.raises(ValidationError):
+        LiteLlmModelInfo.model_validate({**fields, **change})
+
+
+def test_a_text_route_still_requires_its_input_limit() -> None:
+    fields = _built(VECTORS[0]).model_dump()
+    with pytest.raises(ValidationError, match="max_input_tokens"):
+        LiteLlmModelInfo.model_validate({**fields, "max_input_tokens": None})
+
+
 def _identity(info: LiteLlmModelInfo | None) -> RouteRunIdentity:
     return RouteRunIdentity(
         run_id="run",

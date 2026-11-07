@@ -550,6 +550,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "required acceptance execution: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/test_serving_audio_checks.py",
+        "serving audio checks: multipart upload and WAV answer against a real local server.",
+    ),
+    (
         "tests/test_serving_execution.py",
         "serving execution: fixed entrypoint/fixture behavior.",
     ),

@@ -16,6 +16,8 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_forge_contracts import (
+    AudioSpeechApi,
+    AudioTranscriptionApi,
     ChatApi,
     DecisionApi,
     RecipeApi,
@@ -45,6 +47,8 @@ from .catalog_revision_contract import (
 from .litellm import (
     LiteLlmModelInfo,
     OpenAiRequestParameter,
+    VonkAudioSpeech,
+    VonkAudioTranscription,
     VonkReasoningEffort,
     VonkThinking,
 )
@@ -72,6 +76,9 @@ _CHAT_PARAMETERS = (
     OpenAiRequestParameter.TOP_P,
 )
 _DECISION_ENDPOINT = "/v1/systemone"
+# One endpoint per audio mode, as in LiteLLM's own audio entries.
+_TRANSCRIPTION_ENDPOINT = "/v1/audio/transcriptions"
+_SPEECH_ENDPOINT = "/v1/audio/speech"
 
 
 class ModelInfoError(ValueError):
@@ -182,12 +189,18 @@ def build_model_info(
 ) -> LiteLlmModelInfo:
     """Apply the mapping's option choices and setting values to the facts."""
 
+    block = api.for_choices(recipe, choices)
+    # Audio blocks carry no token limits, so they read no context setting and
+    # branch before anything below reads ``input_modalities``.
+    if isinstance(block, AudioTranscriptionApi):
+        return _transcription_model_info(block)
+    if isinstance(block, AudioSpeechApi):
+        return _speech_model_info(block)
     recipe_settings = recipe.settings
     if not isinstance(
         recipe_settings, RecipeGenerationSettings | RecipeDecisionSettings
     ):
         raise ModelInfoError("the recipe does not serve a generation or decision route")
-    block = api.for_choices(recipe, choices)
     override = settings.get("context_tokens")
     context = (
         override
@@ -296,6 +309,71 @@ def build_model_info(
         vonk_default_output_tokens=_default_output_tokens(
             recipe, block, choices, settings
         ),
+    )
+
+
+def _audio_model_info(**fields: object) -> LiteLlmModelInfo:
+    """The fields every audio mode states the same way: not applicable is false."""
+
+    return LiteLlmModelInfo.model_validate(
+        {
+            "supports_vision": False,
+            "supports_pdf_input": False,
+            "supports_video_input": False,
+            "supports_reasoning": False,
+            "thinking_always_on": False,
+            "supports_function_calling": False,
+            "supports_tool_choice": False,
+            "supports_parallel_function_calling": False,
+            "supports_response_schema": False,
+            "supports_system_messages": False,
+            "supports_native_streaming": False,
+            **fields,
+        }
+    )
+
+
+def _transcription_model_info(block: AudioTranscriptionApi) -> LiteLlmModelInfo:
+    parameters = {
+        OpenAiRequestParameter.LANGUAGE,
+        OpenAiRequestParameter.RESPONSE_FORMAT,
+        *([OpenAiRequestParameter.TEMPERATURE] if block.temperature else []),
+        *([OpenAiRequestParameter.PROMPT] if block.prompt else []),
+        *(
+            [OpenAiRequestParameter.TIMESTAMP_GRANULARITIES]
+            if block.timestamp_granularities
+            else []
+        ),
+    }
+    return _audio_model_info(
+        mode="audio_transcription",
+        supports_audio_input=True,
+        supports_audio_output=False,
+        supported_endpoints=[_TRANSCRIPTION_ENDPOINT],
+        supported_openai_params=sorted(parameters),
+        vonk_audio_transcription=VonkAudioTranscription(
+            **block.model_dump(exclude={"mode"})
+        ),
+    )
+
+
+def _speech_model_info(block: AudioSpeechApi) -> LiteLlmModelInfo:
+    parameters = {
+        OpenAiRequestParameter.VOICE,
+        OpenAiRequestParameter.RESPONSE_FORMAT,
+        *([OpenAiRequestParameter.SPEED] if block.speed else []),
+        *([OpenAiRequestParameter.INSTRUCTIONS] if block.instructions else []),
+    }
+    return _audio_model_info(
+        mode="audio_speech",
+        supports_audio_input=False,
+        supports_audio_output=True,
+        supported_endpoints=[_SPEECH_ENDPOINT],
+        supported_openai_params=sorted(parameters),
+        supported_modalities=["text"],
+        supported_output_modalities=["audio"],
+        health_check_voice=block.voices[0],
+        vonk_audio_speech=VonkAudioSpeech(**block.model_dump(exclude={"mode"})),
     )
 
 
