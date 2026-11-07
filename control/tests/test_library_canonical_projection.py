@@ -1615,6 +1615,10 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     class Control:
         @staticmethod
         def request(method, path, payload=None, **kwargs):
+            if path == "/api/catalog/managed-recipes/sync-status":
+                # The lane asks after a failure whether the library withdrew
+                # the fixture: this fixture sync is the newest, nothing was.
+                return 200, {"trigger": "manual", "withdrawn_count": 0}
             calls.append((method, path))
             if method == "GET" and path == "/api/recipe/library":
                 return 200, projection.recipe_library().model_dump(mode="json")

@@ -2544,6 +2544,29 @@ def test_a_canary_withdrawn_twice_fails_with_the_catalog_sync_status(
     assert len(imported) == 2
 
 
+def test_an_unreadable_sync_status_never_replaces_the_canary_failure(
+    monkeypatch,
+) -> None:
+    lifecycle, lane, _imported, _downloads = _canary_lane_under_withdrawal(
+        monkeypatch, [_WITHDRAWN_PREVIEW]
+    )
+    request = lane.control.request
+
+    def without_sync_status(method, path, *args, **kwargs):
+        if path == "/api/catalog/managed-recipes/sync-status":
+            raise AssertionError((method, path))
+        return request(method, path, *args, **kwargs)
+
+    lane.control.request = without_sync_status
+
+    with pytest.raises(lifecycle.LifecycleError) as raised:
+        lane._run_synthetic_canary(NODE, carry=lambda: None)
+
+    message = str(raised.value)
+    assert "profile.recipe_unavailable" in message
+    assert "catalog sync status unknown" in message
+
+
 def _calls(node, name: str) -> bool:
     import ast
 
