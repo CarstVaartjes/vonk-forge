@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "DesiredAssignmentState": {
+      "description": "What a fleet-profile assignment is asked to become on its Sparks.",
+      "enum": [
+        "installed",
+        "running"
+      ],
+      "title": "DesiredAssignmentState",
+      "type": "string"
+    },
+    "EndpointResponse": {
+      "description": "One published alias: clients use `api_base` with `alias` as the model.\n\n`backend_api_base` is the Spark-local serving address LiteLLM routes to.\nIt is diagnostic only and usually unreachable from a client.",
+      "properties": {
+        "alias": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "api_base": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Api Base",
+          "type": "string"
+        },
+        "backend_api_base": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Backend Api Base",
+          "type": "string"
+        },
+        "generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Observed At",
+          "type": "string"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "api_base",
+        "backend_api_base",
+        "generation",
+        "node_id",
+        "observed_at",
+        "plan_digest"
+      ],
+      "title": "EndpointResponse",
+      "type": "object"
+    },
+    "EndpointState": {
+      "description": "Whether the endpoint of a fleet-profile assignment can be reached.",
+      "enum": [
+        "installed-only",
+        "not-published-yet",
+        "published",
+        "expired",
+        "withdrawn",
+        "unavailable"
+      ],
+      "title": "EndpointState",
+      "type": "string"
+    },
+    "FleetProfileEndpointAssignmentView": {
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alias"
+        },
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "desired_state": {
+          "$ref": "#/$defs/DesiredAssignmentState"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndpointResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recipe_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Recipe Title",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/EndpointState"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "recipe_title",
+        "desired_state",
+        "state"
+      ],
+      "title": "FleetProfileEndpointAssignmentView",
+      "type": "object"
+    },
+    "FleetProfileEndpointProjectionIssue": {
+      "description": "Safe diagnostic for immutable profile history that cannot be read.",
+      "properties": {
+        "code": {
+          "const": "profile.application_intent.invalid",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "title": "FleetProfileEndpointProjectionIssue",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "application_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Application Id"
+    },
+    "application_state": {
+      "anyOf": [
+        {
+          "enum": [
+            "queued",
+            "running",
+            "backoff",
+            "needs-operator",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "superseded"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Application State"
+    },
+    "assignments": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/FleetProfileEndpointAssignmentView"
+          },
+          "maxItems": 64,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Assignments"
+    },
+    "number": {
+      "maximum": 2147483647,
+      "minimum": 1,
+      "title": "Number",
+      "type": "integer"
+    },
+    "observed_at": {
+      "format": "date-time",
+      "title": "Observed At",
+      "type": "string"
+    },
+    "profile_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Profile Id"
+    },
+    "projection_issue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FleetProfileEndpointProjectionIssue"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "number",
+    "observed_at",
+    "assignments"
+  ],
+  "title": "vonkctl profile-endpoints document (schema_version 1)",
+  "type": "object"
+}

@@ -50,6 +50,8 @@ For development from a source checkout, install that checkout with
 
 Use `--json` for one parseable object on stdout: indented when stdout is a
 terminal, one compact line when it is piped (the same document either way).
+The documents clients consume carry a `schema_version` and have published JSON
+Schemas: see the [`--json` client contract](../vonkctl-json-contract.md).
 Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
 Profile edits and loads require an explicit `--profile N`; there is no saved

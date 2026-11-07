@@ -1,0 +1,97 @@
+{
+  "$defs": {
+    "DownloadedFile": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "downloaded",
+            "reused"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "transfer": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Transfer"
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "size_bytes",
+        "sha256",
+        "state"
+      ],
+      "title": "DownloadedFile",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "files": {
+      "items": {
+        "$ref": "#/$defs/DownloadedFile"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "job_id": {
+      "title": "Job Id",
+      "type": "string"
+    },
+    "output_manifest_sha256": {
+      "title": "Output Manifest Sha256",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "state": {
+      "title": "State",
+      "type": "string"
+    },
+    "total_bytes": {
+      "minimum": 0,
+      "title": "Total Bytes",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "job_id",
+    "state",
+    "output_manifest_sha256",
+    "files",
+    "total_bytes"
+  ],
+  "title": "vonkctl artifact-download document (schema_version 1)",
+  "type": "object"
+}

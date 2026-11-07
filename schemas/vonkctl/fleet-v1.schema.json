@@ -1,0 +1,3324 @@
+{
+  "$defs": {
+    "AgentRuntimeIdentity": {
+      "properties": {
+        "architecture": {
+          "enum": [
+            "linux-amd64",
+            "linux-arm64"
+          ],
+          "title": "Architecture",
+          "type": "string"
+        },
+        "binary_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Binary Digest",
+          "type": "string"
+        },
+        "build_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Build Digest",
+          "type": "string"
+        },
+        "package_activation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackageActivationReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "semantic_version": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "title": "Semantic Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "architecture",
+        "semantic_version",
+        "build_digest",
+        "binary_digest"
+      ],
+      "title": "AgentRuntimeIdentity",
+      "type": "object"
+    },
+    "CapacityReservations": {
+      "properties": {
+        "disk_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Disk Bytes",
+          "type": "integer"
+        },
+        "gpu_memory_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Gpu Memory Bytes",
+          "type": "integer"
+        },
+        "host_memory_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Host Memory Bytes",
+          "type": "integer"
+        },
+        "port_count": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Port Count",
+          "type": "integer"
+        },
+        "unified_memory_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Unified Memory Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "disk_bytes",
+        "unified_memory_bytes",
+        "host_memory_bytes",
+        "gpu_memory_bytes",
+        "port_count"
+      ],
+      "title": "CapacityReservations",
+      "type": "object"
+    },
+    "CertificateState": {
+      "description": "The standing of a node's client certificate, as the fleet projection shows it.",
+      "enum": [
+        "valid",
+        "missing",
+        "not-yet-valid",
+        "expired",
+        "revoked",
+        "inactive"
+      ],
+      "title": "CertificateState",
+      "type": "string"
+    },
+    "DisplayMemoryObservation": {
+      "description": "Best-effort root-helper evidence, refreshed with every inventory.\n\nMemTotal includes other firmware/kernel reservations. It is not itself a\ndisplay carveout. Only a measured, platform-specific rule may classify it.\nConnected displays describe now, not what was connected at boot or Auto.",
+      "properties": {
+        "bios_version": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bios Version"
+        },
+        "carveout_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Carveout Bytes"
+        },
+        "device_tree_memory_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 17592186044416,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Device Tree Memory Bytes"
+        },
+        "display_connected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Display Connected"
+        },
+        "memory_total_bytes": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 17592186044416,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Total Bytes"
+        },
+        "signal": {
+          "$ref": "#/$defs/DisplayMemorySignal",
+          "default": "unknown"
+        },
+        "soc_firmware_version": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Soc Firmware Version"
+        }
+      },
+      "title": "DisplayMemoryObservation",
+      "type": "object"
+    },
+    "DisplayMemorySignal": {
+      "enum": [
+        "unknown",
+        "memory-total",
+        "reserved-range",
+        "efi-variable"
+      ],
+      "title": "DisplayMemorySignal",
+      "type": "string"
+    },
+    "FleetNode": {
+      "properties": {
+        "agent_runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentRuntimeIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "connection": {
+          "$ref": "#/$defs/NodeConnection"
+        },
+        "display_name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "gpu_clock_desired": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_clock_policy": {
+          "$ref": "#/$defs/GpuClockPolicy",
+          "default": {
+            "default_max_mhz": 2200,
+            "default_min_mhz": 300,
+            "hard_max_mhz": 2300
+          }
+        },
+        "hostname": {
+          "maxLength": 255,
+          "title": "Hostname",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "installed": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RecipePresence"
+              },
+              {
+                "$ref": "#/$defs/UnavailableRecipePresence"
+              }
+            ]
+          },
+          "title": "Installed",
+          "type": "array"
+        },
+        "inventory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InventoryState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ip_address": {
+          "anyOf": [
+            {
+              "maxLength": 45,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ip Address"
+        },
+        "labels": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxProperties": 64,
+              "propertyNames": {
+                "maxLength": 64,
+                "minLength": 1
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Labels"
+        },
+        "lifecycle": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Lifecycle",
+          "type": "string"
+        },
+        "loaded": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RunPresence"
+              },
+              {
+                "$ref": "#/$defs/UnavailableRunPresence"
+              }
+            ]
+          },
+          "title": "Loaded",
+          "type": "array"
+        },
+        "projection_issues": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Projection Issues"
+        },
+        "reservations": {
+          "$ref": "#/$defs/CapacityReservations"
+        },
+        "swap_desired": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapIntent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "swap_policy": {
+          "$ref": "#/$defs/SwapPolicy",
+          "default": {
+            "default_gib": 64,
+            "exhausted_free_floor_gib": 2,
+            "exhausted_free_percent": 10,
+            "filling_used_percent": 90,
+            "maximum_gib": 128,
+            "minimum_gib": 16,
+            "release_headroom_gib": 16,
+            "tolerance_mib": 512
+          }
+        },
+        "telemetry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelemetryState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/ProjectionReason"
+          },
+          "maxItems": 128,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "hostname",
+        "lifecycle",
+        "labels",
+        "connection",
+        "inventory",
+        "telemetry",
+        "installed",
+        "loaded",
+        "reservations",
+        "warnings"
+      ],
+      "title": "FleetNode",
+      "type": "object"
+    },
+    "GpuClockApplyState": {
+      "enum": [
+        "applied",
+        "waiting",
+        "expired",
+        "refused"
+      ],
+      "title": "GpuClockApplyState",
+      "type": "string"
+    },
+    "GpuClockIntent": {
+      "description": "A selected profile generation fences delayed requests on the Spark.",
+      "properties": {
+        "generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "range": {
+          "$ref": "#/$defs/GpuClockRange"
+        }
+      },
+      "required": [
+        "generation",
+        "range"
+      ],
+      "title": "GpuClockIntent",
+      "type": "object"
+    },
+    "GpuClockMetric": {
+      "enum": [
+        "graphics_mhz",
+        "sm_mhz",
+        "max_graphics_mhz",
+        "max_sm_mhz",
+        "throttle_reasons"
+      ],
+      "title": "GpuClockMetric",
+      "type": "string"
+    },
+    "GpuClockObservation": {
+      "description": "Unavailable readings name their cause; a successful write is not a readback.",
+      "properties": {
+        "apply_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockApplyState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deadline": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Deadline"
+        },
+        "desired": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockIntent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "graphics_mhz": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Graphics Mhz"
+        },
+        "locked_range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_graphics_mhz": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 4294967295,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Graphics Mhz"
+        },
+        "max_sm_mhz": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 4294967295,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Sm Mhz"
+        },
+        "next_attempt_at": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Attempt At"
+        },
+        "receipt_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Receipt Detail"
+        },
+        "sm_mhz": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sm Mhz"
+        },
+        "throttle_reasons": {
+          "anyOf": [
+            {
+              "maximum": 18446744073709551615,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Throttle Reasons"
+        },
+        "unavailable": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/GpuClockUnavailable"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unavailable"
+        }
+      },
+      "title": "GpuClockObservation",
+      "type": "object"
+    },
+    "GpuClockPolicy": {
+      "description": "Exported with the wire graph so native code uses these same constants.",
+      "properties": {
+        "default_max_mhz": {
+          "const": 2200,
+          "default": 2200,
+          "title": "Default Max Mhz",
+          "type": "integer"
+        },
+        "default_min_mhz": {
+          "const": 300,
+          "default": 300,
+          "title": "Default Min Mhz",
+          "type": "integer"
+        },
+        "hard_max_mhz": {
+          "const": 2300,
+          "default": 2300,
+          "title": "Hard Max Mhz",
+          "type": "integer"
+        }
+      },
+      "title": "GpuClockPolicy",
+      "type": "object"
+    },
+    "GpuClockRange": {
+      "properties": {
+        "max_mhz": {
+          "description": "GPU maximum exceeds 2300 MHz hardware-safety edge: sustained load above the cap has hard-powered Sparks off",
+          "maximum": 2300,
+          "minimum": 0,
+          "title": "Max Mhz",
+          "type": "integer"
+        },
+        "min_mhz": {
+          "maximum": 2300,
+          "minimum": 0,
+          "title": "Min Mhz",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_mhz",
+        "max_mhz"
+      ],
+      "title": "GpuClockRange",
+      "type": "object"
+    },
+    "GpuClockSupport": {
+      "description": "Driver reported graphics levels, independent of the policy ceiling.",
+      "properties": {
+        "levels_mhz": {
+          "items": {
+            "exclusiveMinimum": 0,
+            "maximum": 4294967295,
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Levels Mhz",
+          "type": "array"
+        },
+        "max_mhz": {
+          "exclusiveMinimum": 0,
+          "maximum": 4294967295,
+          "title": "Max Mhz",
+          "type": "integer"
+        },
+        "min_mhz": {
+          "exclusiveMinimum": 0,
+          "maximum": 4294967295,
+          "title": "Min Mhz",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_mhz",
+        "max_mhz",
+        "levels_mhz"
+      ],
+      "title": "GpuClockSupport",
+      "type": "object"
+    },
+    "GpuClockUnavailable": {
+      "properties": {
+        "detail": {
+          "title": "Detail",
+          "type": "string"
+        },
+        "metric": {
+          "$ref": "#/$defs/GpuClockMetric"
+        },
+        "reason": {
+          "$ref": "#/$defs/GpuClockUnavailableReason"
+        }
+      },
+      "required": [
+        "metric",
+        "reason",
+        "detail"
+      ],
+      "title": "GpuClockUnavailable",
+      "type": "object"
+    },
+    "GpuClockUnavailableReason": {
+      "enum": [
+        "requires-reset",
+        "not-supported",
+        "command-failed",
+        "invalid-output"
+      ],
+      "title": "GpuClockUnavailableReason",
+      "type": "string"
+    },
+    "GpuHealth": {
+      "enum": [
+        "healthy",
+        "needs-reset",
+        "unavailable"
+      ],
+      "title": "GpuHealth",
+      "type": "string"
+    },
+    "GpuUnavailableReason": {
+      "enum": [
+        "gpu.command-failed",
+        "gpu.command-timeout",
+        "gpu.invalid-output",
+        "gpu.requires-reset",
+        "gpu.unsupported-metrics"
+      ],
+      "title": "GpuUnavailableReason",
+      "type": "string"
+    },
+    "HostSettings": {
+      "description": "The Spark host maintenance the platform keeps, as the agent observes it.\n\nA Spark runs headless: a desktop costs about 1 GB of the memory recipes\ncount on. Its GPU clock is capped so sustained load cannot power it off,\nand its swap is sized for the biggest loads' transient peaks. The\nprivileged helper corrects drift; this is what is left.",
+      "properties": {
+        "display_manager_active": {
+          "title": "Display Manager Active",
+          "type": "boolean"
+        },
+        "display_memory": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayMemoryObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_clock_support": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockSupport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "graphical_default_target": {
+          "title": "Graphical Default Target",
+          "type": "boolean"
+        },
+        "store_retention_failure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StoreRetentionFailure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "swap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "display_manager_active",
+        "graphical_default_target"
+      ],
+      "title": "HostSettings",
+      "type": "object"
+    },
+    "InstallDegradedReason": {
+      "description": "Why an installation is shown partial in the fleet projection.",
+      "enum": [
+        "external-member",
+        "mapping-incomplete",
+        "missing-ranks",
+        "unexpected-ranks",
+        "rank-membership-mismatch",
+        "installation-not-installed",
+        "rank-not-installed",
+        "rank-incomplete-bytes"
+      ],
+      "title": "InstallDegradedReason",
+      "type": "string"
+    },
+    "InstallPartialEvidence": {
+      "description": "Why one recipe installation group on a Spark is not complete.",
+      "properties": {
+        "affected_ranks": {
+          "items": {
+            "maximum": 499,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "title": "Affected Ranks",
+          "type": "array"
+        },
+        "expected_rank_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Expected Rank Count",
+          "type": "integer"
+        },
+        "group_state": {
+          "$ref": "#/$defs/InstallationState"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "installed_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installed Bytes"
+        },
+        "present_ranks": {
+          "items": {
+            "maximum": 499,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "title": "Present Ranks",
+          "type": "array"
+        },
+        "rank": {
+          "maximum": 499,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rank_state": {
+          "$ref": "#/$defs/InstallationState"
+        },
+        "reason": {
+          "$ref": "#/$defs/InstallDegradedReason"
+        },
+        "recipe_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Id",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "required_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Bytes"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "recipe_id",
+        "recipe_revision_id",
+        "title",
+        "rank",
+        "expected_rank_count",
+        "present_ranks",
+        "affected_ranks",
+        "reason",
+        "group_state",
+        "rank_state"
+      ],
+      "title": "InstallPartialEvidence",
+      "type": "object"
+    },
+    "InstallationBytes": {
+      "description": "One installation directory's logical size on a Spark when reported:\nevery file at its full length, a private copy or a shared model link.",
+      "properties": {
+        "bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "bytes"
+      ],
+      "title": "InstallationBytes",
+      "type": "object"
+    },
+    "InstallationState": {
+      "description": "The condition of a recipe installation across its Sparks.",
+      "enum": [
+        "planned",
+        "installing",
+        "installed",
+        "partial",
+        "failed",
+        "uninstalled"
+      ],
+      "title": "InstallationState",
+      "type": "string"
+    },
+    "InventoryState": {
+      "properties": {
+        "age_seconds": {
+          "maximum": 9.223372036854776e+18,
+          "minimum": 0,
+          "title": "Age Seconds",
+          "type": "number"
+        },
+        "artifact_store_read_only": {
+          "title": "Artifact Store Read Only",
+          "type": "boolean"
+        },
+        "capabilities": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "container_runtime_version": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[\\x00-\\x7f]+$",
+          "title": "Container Runtime Version",
+          "type": "string"
+        },
+        "disk_free_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Disk Free Bytes",
+          "type": "integer"
+        },
+        "disk_total_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Disk Total Bytes",
+          "type": "integer"
+        },
+        "fabric_address": {
+          "anyOf": [
+            {
+              "maxLength": 45,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric Address"
+        },
+        "fabric_bandwidth_mbps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric Bandwidth Mbps"
+        },
+        "freshness": {
+          "enum": [
+            "fresh",
+            "stale"
+          ],
+          "title": "Freshness",
+          "type": "string"
+        },
+        "gpu_count": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Gpu Count",
+          "type": "integer"
+        },
+        "gpu_health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuHealth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_memory_free_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Gpu Memory Free Bytes",
+          "type": "integer"
+        },
+        "gpu_memory_total_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Gpu Memory Total Bytes",
+          "type": "integer"
+        },
+        "host_memory_free_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Host Memory Free Bytes",
+          "type": "integer"
+        },
+        "host_memory_total_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Host Memory Total Bytes",
+          "type": "integer"
+        },
+        "host_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HostSettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installation_bytes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/InstallationBytes"
+              },
+              "maxItems": 4096,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Bytes"
+        },
+        "installations": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installations"
+        },
+        "memory_pool": {
+          "enum": [
+            "shared",
+            "separate"
+          ],
+          "title": "Memory Pool",
+          "type": "string"
+        },
+        "model_objects": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ModelStoreObject"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Objects"
+        },
+        "nas_route_interface": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nas Route Interface"
+        },
+        "network_interfaces": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/NetworkInterface"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Interfaces"
+        },
+        "nvidia_driver_version": {
+          "maxLength": 256,
+          "minLength": 1,
+          "pattern": "^[\\x00-\\x7f]+$",
+          "title": "Nvidia Driver Version",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "title": "Received At",
+          "type": "string"
+        },
+        "runs": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "maxItems": 4096,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runs"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "unused_model_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unused Model Bytes"
+        }
+      },
+      "required": [
+        "schema_version",
+        "observed_at",
+        "disk_total_bytes",
+        "disk_free_bytes",
+        "host_memory_total_bytes",
+        "host_memory_free_bytes",
+        "gpu_memory_total_bytes",
+        "gpu_memory_free_bytes",
+        "gpu_count",
+        "memory_pool",
+        "artifact_store_read_only",
+        "capabilities",
+        "nvidia_driver_version",
+        "container_runtime_version",
+        "received_at",
+        "age_seconds",
+        "freshness"
+      ],
+      "title": "InventoryState",
+      "type": "object"
+    },
+    "ModelStoreLayoutFault": {
+      "description": "Exact managed path and OS cause; not host-path-bearing prose.",
+      "properties": {
+        "errno": {
+          "anyOf": [
+            {
+              "maximum": 4095,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Errno"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "pattern": "^installations/[^/]+/models/.+",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ModelStoreLayoutFault",
+      "type": "object"
+    },
+    "ModelStoreObject": {
+      "description": "Measured object identity in the Spark model store; absence needs a full scan.",
+      "properties": {
+        "bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sha256",
+        "bytes"
+      ],
+      "title": "ModelStoreObject",
+      "type": "object"
+    },
+    "NetworkInterface": {
+      "description": "One NIC from sysfs, with best-effort nl80211 NAS-route link evidence.",
+      "properties": {
+        "carrier": {
+          "title": "Carrier",
+          "type": "boolean"
+        },
+        "frequency_mhz": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frequency Mhz"
+        },
+        "kind": {
+          "enum": [
+            "wired",
+            "wifi",
+            "fabric",
+            "tunnel",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "link_speed_mbps": {
+          "anyOf": [
+            {
+              "maximum": 1000000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Speed Mbps"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "rx_bitrate_mbps": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rx Bitrate Mbps"
+        },
+        "signal_dbm": {
+          "anyOf": [
+            {
+              "maximum": 0,
+              "minimum": -128,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Signal Dbm"
+        },
+        "tx_bitrate_mbps": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tx Bitrate Mbps"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "carrier"
+      ],
+      "title": "NetworkInterface",
+      "type": "object"
+    },
+    "NodeConnection": {
+      "properties": {
+        "agent_state": {
+          "enum": [
+            "unregistered",
+            "pending",
+            "active",
+            "retired",
+            "revoked"
+          ],
+          "title": "Agent State",
+          "type": "string"
+        },
+        "certificate_state": {
+          "$ref": "#/$defs/CertificateState"
+        },
+        "last_seen_age_seconds": {
+          "anyOf": [
+            {
+              "maximum": 9.223372036854776e+18,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Seen Age Seconds"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Last Seen At"
+        },
+        "offline_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeOfflineReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "online_state": {
+          "enum": [
+            "online",
+            "offline",
+            "unregistered"
+          ],
+          "title": "Online State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_state",
+        "certificate_state",
+        "online_state",
+        "offline_reason",
+        "last_seen_at",
+        "last_seen_age_seconds"
+      ],
+      "title": "NodeConnection",
+      "type": "object"
+    },
+    "NodeOfflineReason": {
+      "description": "Why a node is shown offline in the fleet projection.",
+      "enum": [
+        "unregistered",
+        "agent-inactive",
+        "agent-revoked",
+        "never-seen",
+        "stale",
+        "certificate-missing",
+        "certificate-not-yet-valid",
+        "certificate-expired",
+        "certificate-revoked",
+        "certificate-inactive"
+      ],
+      "title": "NodeOfflineReason",
+      "type": "string"
+    },
+    "PackageActivationOutcome": {
+      "enum": [
+        "awaiting_controller_activation",
+        "candidate_install_failed",
+        "controller_confirmed_activation",
+        "restoring_captured_source",
+        "source_restored_and_restarted",
+        "source_restore_failed"
+      ],
+      "title": "PackageActivationOutcome",
+      "type": "string"
+    },
+    "PackageActivationPhase": {
+      "description": "Where a package activation transaction stands.",
+      "enum": [
+        "armed",
+        "activation_failed",
+        "acknowledged",
+        "rolling_back",
+        "rolled_back",
+        "rollback_failed"
+      ],
+      "title": "PackageActivationPhase",
+      "type": "string"
+    },
+    "PackageActivationReceipt": {
+      "properties": {
+        "attempt_nonce": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Attempt Nonce",
+          "type": "string"
+        },
+        "candidate_binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Binary Sha256",
+          "type": "string"
+        },
+        "candidate_package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Candidate Package Sha256",
+          "type": "string"
+        },
+        "candidate_version": {
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+          "title": "Candidate Version",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "int64",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Created At",
+          "type": "integer"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/PackageActivationOutcome"
+        },
+        "phase": {
+          "$ref": "#/$defs/PackageActivationPhase"
+        },
+        "schema_version": {
+          "const": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "source_binary_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Binary Sha256",
+          "type": "string"
+        },
+        "source_package_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Source Package Sha256",
+          "type": "string"
+        },
+        "source_version": {
+          "pattern": "^[0-9A-Za-z][0-9A-Za-z.+~:-]{0,127}$",
+          "title": "Source Version",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "int64",
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Updated At",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "node_id",
+        "source_package_sha256",
+        "source_version",
+        "source_binary_sha256",
+        "candidate_package_sha256",
+        "candidate_version",
+        "candidate_binary_sha256",
+        "attempt_nonce",
+        "phase",
+        "created_at",
+        "updated_at",
+        "outcome"
+      ],
+      "title": "PackageActivationReceipt",
+      "type": "object"
+    },
+    "ProjectionCode": {
+      "description": "Warnings and attention items of the fleet and library projections.",
+      "enum": [
+        "cpu.low-clock",
+        "evidence.repeating",
+        "fleet.frame_budget_exceeded",
+        "fleet.frame_encoding_unavailable",
+        "fleet.stored_event_payload_unavailable",
+        "observation.transfer_unavailable",
+        "host.desktop-running",
+        "host.desktop-at-boot",
+        "host.store-retention",
+        "host.display-memory",
+        "host.gpu-clock-uncapped",
+        "host.swap-short",
+        "model.store_layout",
+        "install.partial",
+        "inventory.missing",
+        "inventory.stale",
+        "network.nas-route-wifi-no-wired-port",
+        "network.nas-route-wifi-wired-port-down",
+        "network.nas-route-wifi-wired-port-unused",
+        "network.nas-transfer-slow",
+        "node.gpu_requires_reset",
+        "node.gpu_unavailable",
+        "node.offline",
+        "profile.retrying",
+        "recipe.update_available",
+        "run.degraded",
+        "telemetry.delayed",
+        "telemetry.missing",
+        "telemetry.stale"
+      ],
+      "title": "ProjectionCode",
+      "type": "string"
+    },
+    "ProjectionReason": {
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ProjectionCode"
+        },
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "install_partial": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallPartialEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_store_layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelStoreLayoutFault"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recommendation"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "severity"
+      ],
+      "title": "ProjectionReason",
+      "type": "object"
+    },
+    "PrometheusAttention": {
+      "properties": {
+        "active_at": {
+          "title": "Active At",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "severity": {
+          "title": "Severity",
+          "type": "string"
+        },
+        "source": {
+          "const": "prometheus",
+          "default": "prometheus",
+          "title": "Source",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "summary",
+        "severity",
+        "labels",
+        "active_at"
+      ],
+      "title": "PrometheusAttention",
+      "type": "object"
+    },
+    "RecipePresence": {
+      "properties": {
+        "affected_ranks": {
+          "items": {
+            "maximum": 499,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "title": "Affected Ranks",
+          "type": "array"
+        },
+        "complete": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Complete"
+        },
+        "degraded_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallDegradedReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expected_rank_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Expected Rank Count",
+          "type": "integer"
+        },
+        "group_state": {
+          "$ref": "#/$defs/InstallationState"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "installed_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installed Bytes"
+        },
+        "member_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Member Node Ids",
+          "type": "array"
+        },
+        "present_ranks": {
+          "items": {
+            "maximum": 499,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "title": "Present Ranks",
+          "type": "array"
+        },
+        "projection_issue": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Projection Issue"
+        },
+        "rank": {
+          "maximum": 499,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rank_state": {
+          "$ref": "#/$defs/InstallationState"
+        },
+        "recipe_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Id",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "required_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required Bytes"
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "topology_name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Topology Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "installation_id",
+        "recipe_id",
+        "recipe_revision_id",
+        "title",
+        "topology_name",
+        "expected_rank_count",
+        "present_ranks",
+        "member_node_ids",
+        "rank",
+        "role",
+        "group_state",
+        "rank_state",
+        "complete"
+      ],
+      "title": "RecipePresence",
+      "type": "object"
+    },
+    "RecipeUpdateNotice": {
+      "description": "A running workload uses an older revision than the newest active one.",
+      "properties": {
+        "code": {
+          "default": "recipe.update_available",
+          "pattern": "^recipe\\.update_available$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "newest_released_at": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Newest Released At"
+        },
+        "newest_revision_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Newest Revision Id",
+          "type": "string"
+        },
+        "newest_version": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Newest Version"
+        },
+        "running_released_at": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Running Released At"
+        },
+        "running_revision_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Running Revision Id",
+          "type": "string"
+        },
+        "running_version": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Running Version"
+        },
+        "severity": {
+          "default": "info",
+          "pattern": "^info$",
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "running_revision_id",
+        "newest_revision_id",
+        "detail"
+      ],
+      "title": "RecipeUpdateNotice",
+      "type": "object"
+    },
+    "RouteState": {
+      "description": "Whether a run's inference route is published to the gateway.",
+      "enum": [
+        "withdrawn",
+        "pending",
+        "published",
+        "failed"
+      ],
+      "title": "RouteState",
+      "type": "string"
+    },
+    "RunDegradedReason": {
+      "description": "Why a run is shown degraded in the fleet projection.",
+      "enum": [
+        "external-member",
+        "mapping-incomplete",
+        "missing-ranks",
+        "unexpected-ranks",
+        "rank-membership-mismatch",
+        "run-not-running",
+        "rank-not-running",
+        "rank-stale",
+        "route-not-published"
+      ],
+      "title": "RunDegradedReason",
+      "type": "string"
+    },
+    "RunPresence": {
+      "properties": {
+        "alias": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "degraded_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunDegradedReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expected_rank_count": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Expected Rank Count",
+          "type": "integer"
+        },
+        "group_state": {
+          "enum": [
+            "healthy",
+            "degraded",
+            "unavailable"
+          ],
+          "title": "Group State",
+          "type": "string"
+        },
+        "healthy": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Healthy"
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "load_swap_held_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load Swap Held Bytes"
+        },
+        "member_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "title": "Member Node Ids",
+          "type": "array"
+        },
+        "option_choices": {
+          "additionalProperties": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxProperties": 16,
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Option Choices",
+          "type": "object"
+        },
+        "present_ranks": {
+          "items": {
+            "maximum": 499,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 500,
+          "title": "Present Ranks",
+          "type": "array"
+        },
+        "projection_issue": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Projection Issue"
+        },
+        "rank": {
+          "maximum": 499,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "rank_age_seconds": {
+          "maximum": 9.223372036854776e+18,
+          "minimum": 0,
+          "title": "Rank Age Seconds",
+          "type": "number"
+        },
+        "rank_fresh": {
+          "title": "Rank Fresh",
+          "type": "boolean"
+        },
+        "rank_state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "recipe_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Id",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "recipe_update": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeUpdateNotice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "route_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Route Reason"
+        },
+        "route_state": {
+          "$ref": "#/$defs/RouteState"
+        },
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_state": {
+          "$ref": "#/$defs/RunState"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "installation_id",
+        "recipe_id",
+        "recipe_revision_id",
+        "title",
+        "alias",
+        "expected_rank_count",
+        "present_ranks",
+        "member_node_ids",
+        "rank",
+        "role",
+        "run_state",
+        "route_state",
+        "rank_state",
+        "rank_age_seconds",
+        "rank_fresh",
+        "group_state",
+        "healthy"
+      ],
+      "title": "RunPresence",
+      "type": "object"
+    },
+    "RunState": {
+      "description": "The condition of a recipe run (and of each of its ranks).",
+      "enum": [
+        "planned",
+        "starting",
+        "running",
+        "stopping",
+        "stopped",
+        "failed",
+        "lost"
+      ],
+      "title": "RunState",
+      "type": "string"
+    },
+    "StoreRetentionFailure": {
+      "description": "The first unresolved removal in a pass; other stores keep progressing.",
+      "properties": {
+        "diagnostic": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Diagnostic",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "retry_after_seconds": {
+          "default": 60,
+          "exclusiveMinimum": 0,
+          "maximum": 3600,
+          "title": "Retry After Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "diagnostic"
+      ],
+      "title": "StoreRetentionFailure",
+      "type": "object"
+    },
+    "SwapApplyState": {
+      "enum": [
+        "applied",
+        "waiting",
+        "expired"
+      ],
+      "title": "SwapApplyState",
+      "type": "string"
+    },
+    "SwapCheckpoint": {
+      "description": "Root-owned desired intent and bounded retry window, crash-safe on disk.\n\nThe helper publishes the same record read-only for the agent.",
+      "properties": {
+        "applied_boot_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Applied Boot Id"
+        },
+        "deadline": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Deadline",
+          "type": "integer"
+        },
+        "desired": {
+          "$ref": "#/$defs/SwapIntent"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maxLength": 2048,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "next_attempt_at": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Attempt At"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapWaitReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "$ref": "#/$defs/SwapApplyState"
+        }
+      },
+      "required": [
+        "desired",
+        "state",
+        "deadline"
+      ],
+      "title": "SwapCheckpoint",
+      "type": "object"
+    },
+    "SwapIntent": {
+      "description": "A selected profile generation fences delayed requests on the Spark.",
+      "properties": {
+        "generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Generation",
+          "type": "integer"
+        },
+        "size_gib": {
+          "description": "Swap size must be a whole number of GiB from 16 to 128",
+          "maximum": 128,
+          "minimum": 16,
+          "title": "Size Gib",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "generation",
+        "size_gib"
+      ],
+      "title": "SwapIntent",
+      "type": "object"
+    },
+    "SwapObservation": {
+      "description": "Active swap as the kernel reports it, beside the helper's last receipt.",
+      "properties": {
+        "free_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Free Bytes",
+          "type": "integer"
+        },
+        "receipt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapCheckpoint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "receipt_detail": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Receipt Detail"
+        },
+        "total_bytes": {
+          "maximum": 17592186044416,
+          "minimum": 0,
+          "title": "Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_bytes",
+        "free_bytes"
+      ],
+      "title": "SwapObservation",
+      "type": "object"
+    },
+    "SwapPolicy": {
+      "description": "Exported with the wire graph so native code uses these same constants.",
+      "properties": {
+        "default_gib": {
+          "const": 64,
+          "default": 64,
+          "title": "Default Gib",
+          "type": "integer"
+        },
+        "exhausted_free_floor_gib": {
+          "const": 2,
+          "default": 2,
+          "title": "Exhausted Free Floor Gib",
+          "type": "integer"
+        },
+        "exhausted_free_percent": {
+          "const": 10,
+          "default": 10,
+          "title": "Exhausted Free Percent",
+          "type": "integer"
+        },
+        "filling_used_percent": {
+          "const": 90,
+          "default": 90,
+          "title": "Filling Used Percent",
+          "type": "integer"
+        },
+        "maximum_gib": {
+          "const": 128,
+          "default": 128,
+          "title": "Maximum Gib",
+          "type": "integer"
+        },
+        "minimum_gib": {
+          "const": 16,
+          "default": 16,
+          "title": "Minimum Gib",
+          "type": "integer"
+        },
+        "release_headroom_gib": {
+          "const": 16,
+          "default": 16,
+          "title": "Release Headroom Gib",
+          "type": "integer"
+        },
+        "tolerance_mib": {
+          "const": 512,
+          "default": 512,
+          "title": "Tolerance Mib",
+          "type": "integer"
+        }
+      },
+      "title": "SwapPolicy",
+      "type": "object"
+    },
+    "SwapWaitReason": {
+      "description": "Why the desired swap is not (all) active yet; each one retries.",
+      "enum": [
+        "insufficient-disk",
+        "command-failed",
+        "file-failed",
+        "host-unreadable",
+        "release-deferred"
+      ],
+      "title": "SwapWaitReason",
+      "type": "string"
+    },
+    "TelemetryPoint": {
+      "properties": {
+        "boot_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Boot Id",
+          "type": "string"
+        },
+        "cpu_frequency_avg_mhz": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Frequency Avg Mhz"
+        },
+        "cpu_frequency_max_mhz": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Frequency Max Mhz"
+        },
+        "cpu_frequency_min_mhz": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Frequency Min Mhz"
+        },
+        "disk_free_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Disk Free Bytes"
+        },
+        "disk_total_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Disk Total Bytes"
+        },
+        "gpu_clock": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_memory_free_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gpu Memory Free Bytes"
+        },
+        "gpu_memory_total_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gpu Memory Total Bytes"
+        },
+        "gpu_temperature_c": {
+          "anyOf": [
+            {
+              "maximum": 150,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Temperature C"
+        },
+        "gpu_unavailable_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuUnavailableReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gpu_utilization_percent": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Gpu Utilization Percent"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "memory_available_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Available Bytes"
+        },
+        "memory_total_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Total Bytes"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "observed_at": {
+          "format": "date-time",
+          "title": "Observed At",
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "title": "Received At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "memory_total_bytes",
+        "memory_available_bytes",
+        "disk_total_bytes",
+        "disk_free_bytes",
+        "boot_id",
+        "observed_at",
+        "gpu_utilization_percent",
+        "gpu_memory_total_bytes",
+        "gpu_memory_free_bytes",
+        "id",
+        "node_id",
+        "received_at"
+      ],
+      "title": "TelemetryPoint",
+      "type": "object"
+    },
+    "TelemetryState": {
+      "properties": {
+        "age_seconds": {
+          "maximum": 9.223372036854776e+18,
+          "minimum": 0,
+          "title": "Age Seconds",
+          "type": "number"
+        },
+        "freshness": {
+          "enum": [
+            "live",
+            "delayed",
+            "stale"
+          ],
+          "title": "Freshness",
+          "type": "string"
+        },
+        "sample": {
+          "$ref": "#/$defs/TelemetryPoint"
+        }
+      },
+      "required": [
+        "age_seconds",
+        "freshness",
+        "sample"
+      ],
+      "title": "TelemetryState",
+      "type": "object"
+    },
+    "UnavailableRecipePresence": {
+      "description": "Known membership whose stored group evidence cannot be projected.",
+      "properties": {
+        "affected_ranks": {
+          "default": null,
+          "title": "Affected Ranks",
+          "type": "null"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "null"
+        },
+        "degraded_reason": {
+          "default": null,
+          "title": "Degraded Reason",
+          "type": "null"
+        },
+        "expected_rank_count": {
+          "anyOf": [
+            {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Rank Count"
+        },
+        "group_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallationState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "installation_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "installed_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installed Bytes"
+        },
+        "member_node_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Node Ids"
+        },
+        "present_ranks": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 499,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Present Ranks"
+        },
+        "projection_issue": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Projection Issue",
+          "type": "string"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "maximum": 499,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "rank_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InstallationState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recipe_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Id"
+        },
+        "recipe_revision_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Revision Id"
+        },
+        "required_bytes": {
+          "default": null,
+          "title": "Required Bytes",
+          "type": "null"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "topology_name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Topology Name"
+        }
+      },
+      "required": [
+        "installation_id",
+        "projection_issue",
+        "complete"
+      ],
+      "title": "UnavailableRecipePresence",
+      "type": "object"
+    },
+    "UnavailableRunPresence": {
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alias"
+        },
+        "degraded_reason": {
+          "default": null,
+          "title": "Degraded Reason",
+          "type": "null"
+        },
+        "expected_rank_count": {
+          "anyOf": [
+            {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Rank Count"
+        },
+        "group_state": {
+          "const": "unavailable",
+          "default": "unavailable",
+          "title": "Group State",
+          "type": "string"
+        },
+        "healthy": {
+          "title": "Healthy",
+          "type": "null"
+        },
+        "installation_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Installation Id"
+        },
+        "load_swap_held_bytes": {
+          "default": null,
+          "title": "Load Swap Held Bytes",
+          "type": "null"
+        },
+        "member_node_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^spk_[0-9a-f]{32}$",
+                "type": "string"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Node Ids"
+        },
+        "option_choices": {
+          "default": null,
+          "title": "Option Choices",
+          "type": "null"
+        },
+        "present_ranks": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 499,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 500,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Present Ranks"
+        },
+        "projection_issue": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Projection Issue",
+          "type": "string"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "maximum": 499,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "rank_age_seconds": {
+          "default": null,
+          "title": "Rank Age Seconds",
+          "type": "null"
+        },
+        "rank_fresh": {
+          "default": null,
+          "title": "Rank Fresh",
+          "type": "null"
+        },
+        "rank_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "recipe_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Id"
+        },
+        "recipe_revision_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Revision Id"
+        },
+        "recipe_update": {
+          "default": null,
+          "title": "Recipe Update",
+          "type": "null"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "route_reason": {
+          "default": null,
+          "title": "Route Reason",
+          "type": "null"
+        },
+        "route_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RouteState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "run_id",
+        "projection_issue",
+        "healthy"
+      ],
+      "title": "UnavailableRunPresence",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "attention": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/PrometheusAttention"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attention"
+    },
+    "attention_unavailable": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Attention Unavailable"
+    },
+    "authority_revision": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Authority Revision",
+      "type": "string"
+    },
+    "event_cursor": {
+      "maximum": 9223372036854775807,
+      "minimum": 0,
+      "title": "Event Cursor",
+      "type": "integer"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/FleetNode"
+      },
+      "title": "Nodes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "event_cursor",
+    "generated_at",
+    "authority_revision",
+    "nodes"
+  ],
+  "title": "vonkctl fleet document (schema_version 1)",
+  "type": "object"
+}

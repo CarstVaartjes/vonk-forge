@@ -1,0 +1,92 @@
+{
+  "$defs": {
+    "ObservationReceipt": {
+      "properties": {
+        "age_seconds": {
+          "title": "Age Seconds",
+          "type": "number"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        },
+        "observed_at": {
+          "title": "Observed At",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reconnect_command": {
+          "title": "Reconnect Command",
+          "type": "string"
+        },
+        "reconnecting": {
+          "title": "Reconnecting",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/ObservationStatus"
+        },
+        "timeout_seconds": {
+          "title": "Timeout Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "status",
+        "path",
+        "reconnect_command",
+        "timeout_seconds",
+        "observed_at",
+        "age_seconds",
+        "reconnecting"
+      ],
+      "title": "ObservationReceipt",
+      "type": "object"
+    },
+    "ObservationStatus": {
+      "enum": [
+        "following",
+        "complete",
+        "timed_out",
+        "interrupted",
+        "ended"
+      ],
+      "title": "ObservationStatus",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "observation": {
+      "$ref": "#/$defs/ObservationReceipt"
+    },
+    "result": {
+      "additionalProperties": true,
+      "title": "Result",
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "result",
+    "observation"
+  ],
+  "title": "vonkctl observation document (schema_version 1)",
+  "type": "object"
+}

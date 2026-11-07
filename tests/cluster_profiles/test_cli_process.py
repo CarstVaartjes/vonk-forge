@@ -191,7 +191,7 @@ def test_no_input_does_not_require_terminal_or_change_json(capsys) -> None:
     client = Observations({"nodes": []})
     assert cli.main(("fleet", "--no-input", "--json"), control_client=client) == 0
     captured = capsys.readouterr()
-    assert json.loads(captured.out) == {"nodes": []}
+    assert json.loads(captured.out) == {"nodes": [], "schema_version": 1}
     assert not captured.err
 
 

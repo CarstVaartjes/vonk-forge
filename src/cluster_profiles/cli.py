@@ -25,6 +25,7 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
+from .cli_json_contract import DocumentKind, document_kind, stamp
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -511,7 +512,7 @@ def _emit(
     json_output = args.global_json or getattr(args, "json", False)
     safe = _sanitize(payload, terminal=not json_output)
     if json_output:
-        print(_json_text(safe))
+        print(_json_text(safe, document_kind(args, safe, error=error)))
         return
     if error:
         code = safe.get("code")
@@ -570,9 +571,10 @@ def _emit(
         )
 
 
-def _json_text(document: object) -> str:
-    """One JSON document: indented for a person, compact for a pipe."""
+def _json_text(document: Mapping, kind: DocumentKind | None = None) -> str:
+    """One versioned JSON document: indented for a person, compact for a pipe."""
 
+    document = stamp(document, kind)
     if sys.stdout.isatty():
         return json.dumps(document, sort_keys=True, indent=2)
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
