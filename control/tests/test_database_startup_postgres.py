@@ -585,3 +585,28 @@ def test_damaged_optional_inventory_keeps_capacity_and_fresh_report_recovers(
     assert recovered.id != before.id
     assert recovered.observed_at == clock.now
     assert recovered.disk_free_bytes == before.disk_free_bytes
+
+
+def test_unaddable_column_aborts_startup_instead_of_booting_without_it(
+    postgres_engine: Engine,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Catches a Controller that reports ready after a column add failed."""
+    from alembic.operations import Operations
+    from sqlalchemy.exc import OperationalError
+
+    initialize_database(postgres_engine.url.render_as_string(hide_password=False))
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats DROP COLUMN running_step"
+        )
+
+    class StatementTimeout(Exception):
+        sqlstate = "57014"
+
+    def timed_out(*_args: object, **_kwargs: object) -> None:
+        raise OperationalError("ALTER TABLE", {}, StatementTimeout("timeout"))
+
+    monkeypatch.setattr(Operations, "add_column", timed_out)
+    with pytest.raises(RuntimeError, match="startup aborts"):
+        initialize_database(postgres_engine.url.render_as_string(hide_password=False))

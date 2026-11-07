@@ -109,14 +109,10 @@ def reconcile_schema(connection: Connection) -> None:
                 from sqlalchemy import DefaultClause
 
                 column.server_default = DefaultClause(text(default_sql))
-        try:
-            with connection.begin_nested():
-                ops.add_column(table_name, column)
-        except SQLAlchemyError as error:
-            _LOGGER.warning(
-                "Skipped missing column %s.%s: %s", table_name, column.name, error
-            )
-            continue
+        # A column that cannot be added is never skipped: the error propagates
+        # to startup, which rolls the transaction back and retries (55P03) or
+        # crashes for the supervisor to restart. No half-booted Controller.
+        ops.add_column(table_name, column)
         _LOGGER.info("Added column %s.%s", table_name, model_column.name)
         if (
             not model_column.nullable
