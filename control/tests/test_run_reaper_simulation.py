@@ -56,9 +56,10 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
             assert sim.settle(_load(sim, f"idle {name}", [])) == "succeeded"
         assert set(_states(sim).values()) == {"stopped"}
 
-        # The Sparks do not answer: the next load's Start is queued, never claimed.
+        # The Sparks report but answer no order for a while: the next load's
+        # Start is queued, never claimed.
         for spark in sim.sparks.by_node.values():
-            spark.down_steps = 10_000
+            spark.late_rounds = 200
         _load(sim, "solo again", [solo])
         for _ in range(20):
             sim.round()

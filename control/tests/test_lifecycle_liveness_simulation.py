@@ -55,9 +55,8 @@ _WAITS_BEHIND_CONTINUING = (
 )
 _SUPERSEDED_BY_RECOVERY_REVIEW = (
     "A load ends superseded by 'Recovery would stop an unreviewed workload' with no"
-    " newer load (sample seed 10, found when the standalone-install action"
-    " renumbered the seeds; it fails identically without the recovery coordinator"
-    " and the run reaper). The sequence ends with a stacked load reviewed by an"
+    " newer load (sample seed 10 of an earlier action table; it failed identically"
+    " without the recovery coordinator and the run reaper). The sequence ends with a stacked load reviewed by an"
     " older Controller, a co-located load and an unreadable solo revision; the root"
     " cause is not isolated (follow-up: vonk-forge #2128)."
 )
@@ -70,7 +69,7 @@ KNOWN_BUGS = {
     r" would stop an unreviewed workload": _SUPERSEDED_BY_RECOVERY_REVIEW,
 }
 #: Seeds of the fixed sample that find a known bug; they flip when it is fixed.
-FIXED_SAMPLE_FAILURES: dict[int, str] = {10: _SUPERSEDED_BY_RECOVERY_REVIEW}
+FIXED_SAMPLE_FAILURES: dict[int, str] = {}
 
 _LONG_RUN = "VONK_LIFECYCLE_SIM_SEEDS" in os.environ
 SEEDS = int(os.environ.get("VONK_LIFECYCLE_SIM_SEEDS", "12"))
