@@ -109,6 +109,7 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "state",
             "required_bytes",
             "installed_bytes",
+            "required_payload_bytes",
             "updated_at",
         ]
     ),
