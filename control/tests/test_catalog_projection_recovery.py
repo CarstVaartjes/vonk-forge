@@ -22,7 +22,7 @@ from vonk_control.operation_api.contracts import OperationListPage, OperationPro
 from vonk_control.operation_api.providers import merge_operation_providers
 from vonk_control.operation_item_contract import OperationItem
 
-from .display_fixtures import create_draft
+from .display_fixtures import create_draft, reword
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -124,7 +124,7 @@ def test_verified_import_supersedes_an_unreadable_pending_candidate(changed_cont
         sessions, clock=lambda: datetime.now(UTC), cursors=CursorCodec(b"c" * 32)
     )
     if changed_content:
-        document["license"]["attribution"] = ["fresh verified content"]
+        reword(document, "fresh verified content")
     service.import_catalog_models("test", [document])
     service.import_catalog_models("test", [document])
     with sessions() as session:

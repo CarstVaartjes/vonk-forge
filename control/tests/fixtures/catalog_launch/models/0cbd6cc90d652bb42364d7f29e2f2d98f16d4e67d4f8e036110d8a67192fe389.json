@@ -1,0 +1,66 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "g1-clip-84afc7c22947-abd01a0968",
+   "path": "motionbricks/out/G1-clip.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "84afc7c229473351a24b0a7d79fc47be9dbb81bd12774285f2f60a3c0e9028df",
+   "size_bytes": 7761041
+  },
+  {
+   "id": "model-step-2000000-0223c352b308-86ac5c6ccb",
+   "path": "motionbricks/out/motionbricks_pose/version_1/checkpoints/model-step=2000000.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "0223c352b308ba638a499cc5c92104da36cb1d04cea2f8ce61d54a2489f853f1",
+   "size_bytes": 1639126476
+  },
+  {
+   "id": "model-step-2000000-d7299a9b1f5a-ab3dcf5f31",
+   "path": "motionbricks/out/motionbricks_root/version_1/checkpoints/model-step=2000000.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "d7299a9b1f5aca35730c36dfe7ea28075708ac8266bf384fe8e2ef9c9aee69c7",
+   "size_bytes": 409551754
+  },
+  {
+   "id": "model-step-2000000-f12a09d46ad3-27d55e7f5f",
+   "path": "motionbricks/out/motionbricks_vqvae/version_1/checkpoints/model-step=2000000.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "f12a09d46ad390a8e2eecbe7219b2472fcab6b59df0a13f6a40c35cb6da4d99a",
+   "size_bytes": 285607244
+  }
+ ],
+ "format": {
+  "precision": "fp32",
+  "quantization": "none"
+ },
+ "identity": {
+  "family": {
+   "publisher": "nvidia",
+   "slug": "motionbricks"
+  },
+  "model": {
+   "publisher": "nvidia",
+   "slug": "motionbricks-g1"
+  },
+  "publisher": "nvidia",
+  "slug": "motionbricks-g1-45c03fac",
+  "variant": "MotionBricks G1 45c03fac",
+  "version": "MotionBricks G1 45c03fac"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "provider": "github-lfs",
+  "repository": "https://github.com/NVlabs/GR00T-WholeBodyControl",
+  "revision": "45c03facbf848e0c743091b7d9c17952096ff908"
+ }
+}

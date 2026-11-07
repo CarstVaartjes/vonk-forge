@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zlib
 from collections.abc import Mapping
 from importlib import resources
 from typing import cast
@@ -46,6 +47,27 @@ def display_of_model(document: Mapping[str, object], **text: object) -> ModelDis
     return read_model_display(_shared_display("model-display.json", document, text))
 
 
+def model_display_denying(
+    document: Mapping[str, object], denied_jurisdictions: tuple[str, ...], notice: str
+) -> dict[str, object]:
+    """The stored display of a Model whose license names denied jurisdictions."""
+    shared = display_of_model(document)
+    license_document = shared.license.model_dump(mode="json", exclude_none=True)
+    license_document["territorial_restrictions"] = {
+        "denied_jurisdictions": list(denied_jurisdictions),
+        "notice": notice,
+    }
+    return published_json(display_of_model(document, license=license_document))
+
+
+def legacy_model_display(document: Mapping[str, object]) -> dict[str, object]:
+    """The display a 3.x library published for a Model: no modalities, capabilities or license."""
+    stored = published_json(display_of_model(document))
+    for fact in ("modalities", "capabilities", "license"):
+        del stored[fact]
+    return stored
+
+
 def display_of(document: Mapping[str, object]) -> RecipeDisplay | ModelDisplay:
     return (
         display_of_model(document)
@@ -67,14 +89,25 @@ def publish_displays(index: dict) -> dict:
     return index
 
 
-def reword(document: dict, text: str) -> None:
-    """Change a stored document's bytes through its free-text attribution.
+def _next_patch(version: str, text: str) -> str:
+    """A version that differs per ``text``, so two rewordings stay two documents."""
+    return f"{version[:100]} r{zlib.crc32(text.encode()) % 1_000_000}"
 
-    Display is not part of a document, so a test that needs "the same recipe,
-    edited" edits the attribution, which stays in the document.
+
+def reword(document: dict, text: str) -> None:
+    """Change a stored document's bytes without changing what it is.
+
+    Display (and a Model's license) is not part of a document, so a test that
+    needs "the same recipe, edited" edits the attribution, which stays in a
+    recipe. A Model document holds no free text: its version moves
+    instead, whatever ``text`` says (its files, the execution data, stay put).
     """
-    section = document["license" if document["kind"] == "model" else "provenance"]
-    section["attribution"] = [text]
+    if document["kind"] == "model":
+        document["identity"]["version"] = _next_patch(
+            document["identity"]["version"], text
+        )
+        return
+    document["provenance"]["attribution"] = [text]
 
 
 def reworded(definition, text: str):
@@ -82,7 +115,9 @@ def reworded(definition, text: str):
     if definition.kind == "model":
         return definition.model_copy(
             update={
-                "license": definition.license.model_copy(update={"attribution": [text]})
+                "identity": definition.identity.model_copy(
+                    update={"version": _next_patch(definition.identity.version, text)}
+                )
             }
         )
     return definition.model_copy(

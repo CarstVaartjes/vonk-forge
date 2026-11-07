@@ -386,7 +386,7 @@ def _index(kind: str, document: dict, display: object) -> bytes:
     envelope = {
         "schema_version": 2,
         "kind": "recipe-library-index",
-        "contract_version": "3.0.0",
+        "contract_version": "4.0.0",
         "updated_at": "2026-09-28T12:00:00Z",
         "repository": PACKAGE_REPOSITORY,
         "source_commit": "a" * 40,
@@ -529,6 +529,13 @@ def _seed(world: World, count: int) -> list[RecipeDisplay | ModelDisplay]:
                         "model_title": "After",
                         "description": "d",
                         "tags": [],
+                        "modalities": ["text"],
+                        "capabilities": [],
+                        "license": {
+                            "spdx": "Apache-2.0",
+                            "url": "https://example.invalid/license",
+                            "attribution": [],
+                        },
                     }
                 )
                 if kind == "model"

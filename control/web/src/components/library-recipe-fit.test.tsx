@@ -69,6 +69,9 @@ test("names the Model from the published display, not the document", () => {
     model_title: "Model from display",
     description: "Display only.",
     tags: [],
+    capabilities: [],
+    modalities: ["text"],
+    license: { spdx: "Apache-2.0", url: "https://example.invalid/license", attribution: [] },
   };
   render(<LibraryRecipeFit detail={detail} />);
   expect(screen.getByRole("region", { name: "Model and memory fit" })).toHaveTextContent(
