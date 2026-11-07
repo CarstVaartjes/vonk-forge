@@ -64,8 +64,8 @@ def never_launched(session: Session, run_id: str) -> bool:
         session.scalars(
             select(Job.id).where(
                 Job.kind == WireAgentOperation.RECIPE_START.value,
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run_id,
+                Job.owner_kind == "run",
+                Job.owner_id == run_id,
             )
         )
     )

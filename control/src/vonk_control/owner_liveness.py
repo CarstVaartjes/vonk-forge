@@ -579,13 +579,13 @@ def runs_named_by_live_work(
     named: set[str] = set()
     for owner_kind, owner_id, result in session.execute(
         select(
-            Job.payload["owner_kind"].as_string(),
-            Job.payload["owner_id"].as_string(),
+            Job.owner_kind,
+            Job.owner_id,
             cast(Job.result, Text),
         ).where(
             Job.state.in_(job_states.LIVE),
             or_(
-                Job.payload["owner_id"].as_string().in_(list(wanted)),
+                Job.owner_id.in_(list(wanted)),
                 *(cast(Job.result, Text).contains(found) for found in wanted),
             ),
         )
