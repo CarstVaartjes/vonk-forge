@@ -191,7 +191,7 @@ def test_no_input_does_not_require_terminal_or_change_json(capsys) -> None:
     client = Observations({"nodes": []})
     assert cli.main(("fleet", "--no-input", "--json"), control_client=client) == 0
     captured = capsys.readouterr()
-    assert json.loads(captured.out) == {"nodes": []}
+    assert json.loads(captured.out) == {"nodes": [], "schema_version": 1}
     assert not captured.err
 
 
@@ -391,7 +391,12 @@ def test_interrupted_follow_keeps_the_remote_identity_and_does_not_cancel(capsys
     assert not captured.err
     assert document["observation"]["status"] == "interrupted"
     assert identity in document["observation"]["reconnect_command"]
-    assert document["result"] == {"id": identity, "state": "running"}
+    assert document["result_kind"] == "profile-application"
+    assert document["result"] == {
+        "id": identity,
+        "state": "running",
+        "schema_version": 1,
+    }
     assert all(method == "GET" for method, _ in client.calls)
 
 

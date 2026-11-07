@@ -133,3 +133,46 @@ def scan_sites(roots: Sequence[Path] = SOURCE_ROOTS) -> list[Site]:
             relative = module.relative_to(REPO_ROOT).as_posix()
             sites.extend(scan_source(module.read_text(encoding="utf-8"), path=relative))
     return sites
+
+
+def scan_bare_class_fields(source: str, *, path: str) -> list[Site]:
+    """Class fields annotated with a bare ``dict`` or ``Mapping``.
+
+    ``dict`` alone is as free as ``dict[str, object]``: a model field that holds
+    "any JSON" hides the shape of data this repository controls. Type the
+    members (a model, a TypedDict) or the mapping's value.
+    """
+
+    if _BARE_CANDIDATE.search(source) is None:
+        return []
+    sites: list[Site] = []
+    for owner in ast.walk(ast.parse(source)):
+        if not isinstance(owner, ast.ClassDef):
+            continue
+        for member in owner.body:
+            if not isinstance(member, ast.AnnAssign):
+                continue
+            subscripted = {
+                id(child.value)
+                for child in ast.walk(member.annotation)
+                if isinstance(child, ast.Subscript)
+            }
+            for child in ast.walk(member.annotation):
+                if (
+                    isinstance(child, ast.Name | ast.Attribute)
+                    and _name(child) in _MAPPING_NAMES
+                    and id(child) not in subscripted
+                ):
+                    sites.append(
+                        Site(
+                            path=path,
+                            function=owner.name,
+                            annotation=ast.unparse(member.annotation),
+                            line=member.lineno,
+                        )
+                    )
+                    break
+    return sites
+
+
+_BARE_CANDIDATE = re.compile(r"\b(?:Mapping|MutableMapping|dict|Dict)\b")

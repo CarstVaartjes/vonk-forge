@@ -7,6 +7,7 @@ from textwrap import dedent
 import pytest
 
 from .untyped_mapping_boundaries import (
+    scan_bare_class_fields,
     scan_source,
 )
 
@@ -91,3 +92,24 @@ def test_generated_extension_dicts_do_not_hide_authored_cli_debt(tmp_path, monke
     assert [site.path for site in scanner.scan_sites([root])] == [
         "src/cluster_profiles/authored.py"
     ]
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["dict", "Mapping", "dict | None", "list[dict]", "typing.Dict | None"],
+)
+def test_a_bare_mapping_class_field_is_a_site(annotation: str) -> None:
+    sites = scan_bare_class_fields(
+        f"class Model:\n    value: {annotation} = None\n", path=PATH
+    )
+    assert [site.annotation for site in sites] == [annotation]
+
+
+@pytest.mark.parametrize(
+    "annotation", ["dict[str, str]", "Mapping[str, int]", "list[Model]", "str | None"]
+)
+def test_a_typed_class_field_is_not_a_bare_mapping(annotation: str) -> None:
+    source = f"class Model:\n    value: {annotation}\n"
+    assert scan_bare_class_fields(source, path=PATH) == []
+    # A bare dict outside a class body is a function parameter, not a model field.
+    assert scan_bare_class_fields("def f(value: dict): ...\n", path=PATH) == []

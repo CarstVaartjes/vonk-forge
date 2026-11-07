@@ -25,6 +25,15 @@ class EnrollmentDeliveryError(Exception):
     interrupted: bool = False
 
 
+class SubmissionAcceptance(StrEnum):
+    """What this process knows about whether the Controller accepted a request."""
+
+    NOT_SUBMITTED = "not_submitted"
+    UNKNOWN = "unknown"
+    ACCEPTED = "accepted"
+    REFUSED = "refused"
+
+
 @dataclass
 class Submission:
     """What this process knows about acceptance, not remote execution state."""
@@ -34,9 +43,7 @@ class Submission:
     lookup_path: str
     timeout_seconds: float
     action: str = "download"
-    acceptance: Literal["not_submitted", "unknown", "accepted", "refused"] = (
-        "not_submitted"
-    )
+    acceptance: SubmissionAcceptance = SubmissionAcceptance.NOT_SUBMITTED
     operation_id: str | None = None
     failures: list[dict[str, object]] = field(default_factory=list)
 

@@ -22,6 +22,7 @@ does not require routine SSH.
 | Contribute or verify changes | [Testing and CI](testing-and-ci.md) |
 | Keep main current, integrate agent work, and land PRs | [Development workflow](runbooks/development-workflow.md) |
 | Understand shared Python, Rust, and API contracts | [Contract ownership and handoffs](api-contracts.md) |
+| Read `vonkctl --json` from another tool | [`--json` client contract](vonkctl-json-contract.md) |
 
 ## Authority at a glance
 
