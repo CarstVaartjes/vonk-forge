@@ -34,10 +34,10 @@ pass ordinary engine arguments unchanged after the executable. Several recipes
 for the same model and Spark count remain independent revisions, including
 variants from one creator with different engines or settings.
 
-## The ten built-in harnesses
+## The eleven built-in harnesses
 
 The built-in compiler adapters are `comfyui`, `diffusers`, `ds4`, `exllamav3`,
-`llama-cpp`, `pytorch-pipeline`, `sglang`, `tensorfold`, `tensorrt-llm`, and `vllm`. Their names describe
+`llama-cpp`, `pytorch-pipeline`, `pytorch-server`, `sglang`, `tensorfold`, `tensorrt-llm`, and `vllm`. `pytorch-server` is the generic launch contract for a Python/PyTorch server that speaks an OpenAI-shaped interface and is none of the named engines; it carries no engine-specific memory or metrics assumptions. Their names describe
 execution behavior, not separate catalog entities or a promise that every
 model supports every engine or topology. The selected Model, Recipe, package,
 compiler, structural qualification, and Fleet admission must agree.

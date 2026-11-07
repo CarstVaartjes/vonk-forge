@@ -32,6 +32,7 @@ BUILTINS = (
     "ds4",
     "tensorfold",
     "exllamav3",
+    "pytorch-server",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
@@ -45,6 +46,7 @@ OPENAI_BUILTINS = {
     "ds4",
     "tensorfold",
     "exllamav3",
+    "pytorch-server",
 }
 ENTRYPOINTS = {
     "vllm": ["/opt/vonk/bin/vllm", "serve", "/models"],
@@ -54,6 +56,7 @@ ENTRYPOINTS = {
     "ds4": ["/opt/vonk/bin/ds4-serve", "/models"],
     "tensorfold": ["/opt/vonk/bin/tensorfold-serve"],
     "exllamav3": ["/opt/vonk/bin/exllamav3-serve"],
+    "pytorch-server": ["/opt/vonk/bin/pytorch-server"],
     "diffusers": ["/opt/vonk/bin/diffusers-job"],
     "comfyui": ["/opt/vonk/bin/comfyui-job"],
     "pytorch-pipeline": ["/opt/vonk/bin/pytorch-pipeline"],
@@ -97,6 +100,11 @@ ARGS = {
         {"name": "host", "value": "0.0.0.0"},
         {"name": "port", "value": 8000},
         {"name": "max-seq-len", "value": 32768},
+    ],
+    "pytorch-server": [
+        {"name": "host", "value": "0.0.0.0"},
+        {"name": "port", "value": 8000},
+        {"name": "max-model-len", "value": 16384},
     ],
     "diffusers": [
         {"name": "pipeline", "value": "text-to-image"},

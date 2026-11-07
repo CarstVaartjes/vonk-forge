@@ -107,6 +107,15 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         wrapper="/opt/vonk/bin/exllamav3-serve",
     ),
     CanonicalHarnessMetadata(
+        slug="pytorch-server",
+        adapters=("openai",),
+        capability_requirements=("nvidia-gpu",),
+        topology_modes=("single",),
+        security_exceptions=(),
+        executables=("pytorch-server",),
+        wrapper="/opt/vonk/bin/pytorch-server",
+    ),
+    CanonicalHarnessMetadata(
         slug="diffusers",
         adapters=("image-job", "audio-job", "video-job", "artifact-job"),
         capability_requirements=("nvidia-gpu",),
