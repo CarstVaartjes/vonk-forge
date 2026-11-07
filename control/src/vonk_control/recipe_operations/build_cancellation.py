@@ -365,7 +365,7 @@ class BuildCancellationMixin:
             select(Job.id)
             .where(
                 Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                Job.payload["owner_id"].as_string() == build_id,
+                Job.owner_id == build_id,
                 Job.state.in_(job_states.LIVE),
             )
             .limit(1)
@@ -401,7 +401,7 @@ def _next_cleanup_key(
         for job in session.scalars(
             select(Job).where(
                 Job.kind == WireAgentOperation.RECIPE_BUILD_CLEANUP.value,
-                Job.payload["owner_id"].as_string() == owner_id,
+                Job.owner_id == owner_id,
             )
         )
     }

@@ -503,8 +503,8 @@ def _original_start_authority(session: Session, run: RecipeRun) -> Job | Residue
             select(Job)
             .where(
                 Job.kind == "recipe.start",
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_kind == "run",
+                Job.owner_id == run.id,
                 Job.payload["recovery"].as_string().is_(None),
             )
             .order_by(Job.created_at, Job.id)

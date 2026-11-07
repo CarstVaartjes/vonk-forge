@@ -523,7 +523,7 @@ class PhaseDispatchMixin:
                             select(Job)
                             .where(
                                 Job.kind == "recipe.start",
-                                Job.payload["owner_id"].as_string() == verify_run_id,
+                                Job.owner_id == verify_run_id,
                             )
                             .order_by(Job.created_at.desc())
                             .limit(1)

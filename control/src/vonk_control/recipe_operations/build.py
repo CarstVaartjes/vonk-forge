@@ -290,7 +290,7 @@ class BuildMixin:
             cancelling = session.scalar(
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                    Job.payload["owner_id"].as_string() == plan.build_id,
+                    Job.owner_id == plan.build_id,
                     Job.state.in_(job_states.LIVE),
                     _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                 )
@@ -352,7 +352,7 @@ class BuildMixin:
                                 LifecycleState.CANCELLED,
                             )
                         ),
-                        Job.payload["owner_id"].as_string() == build.id,
+                        Job.owner_id == build.id,
                         Job.payload["plan_digest"].as_string()
                         == build.build_input_sha256,
                     )
@@ -581,7 +581,7 @@ class BuildMixin:
             .where(
                 Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                 Job.state == LifecycleState.SUCCEEDED.value,
-                Job.payload["owner_id"].as_string() == build_id,
+                Job.owner_id == build_id,
                 Job.payload["plan_digest"].as_string() == build_input_sha256,
             )
             .order_by(Job.updated_at.desc())

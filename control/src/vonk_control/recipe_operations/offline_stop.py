@@ -207,7 +207,7 @@ class OfflineStopMixin:
                     .where(Job.id == job_id if job_id is not None else true())
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_STOP.value,
-                        Job.payload["owner_kind"].as_string() == OwnerKind.RUN,
+                        Job.owner_kind == OwnerKind.RUN,
                         Job.state.in_(
                             [
                                 LifecycleState.QUEUED,

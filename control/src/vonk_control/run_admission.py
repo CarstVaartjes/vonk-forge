@@ -616,9 +616,7 @@ class RunAdmissionService:
                 for job in session.scalars(
                     select(Job).where(
                         Job.kind == "recipe.stop",
-                        Job.payload["owner_id"]
-                        .as_string()
-                        .in_(
+                        Job.owner_id.in_(
                             select(RecipeRun.id).where(
                                 RecipeRun.state.in_([RunState.LOST, RunState.STOPPING])
                             )
