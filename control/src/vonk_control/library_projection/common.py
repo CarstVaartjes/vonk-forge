@@ -39,6 +39,7 @@ from ..models import CatalogDocument, CatalogDocumentRevision
 from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from ..strict_json import serialize_json_value
+from ..unreadable_rows import LOGGED_UNREADABLE, note_unreadable
 
 """Bounded canonical Model to Recipe Library projection."""
 
@@ -292,9 +293,7 @@ def _filter_digest(filters: Mapping[str, object]) -> str:
 
 
 _LOGGER = logging.getLogger("vonk_control.library_projection")
-
-
-_LOGGED_UNREADABLE: set[str] = set()
+_LOGGED_UNREADABLE = LOGGED_UNREADABLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,26 +315,12 @@ class DocumentText:
 
 
 def _document_text(row: CatalogDocument) -> DocumentText:
-    try:
-        if row.kind == ReceiptOwner.RECIPE:
-            return DocumentText(row.title, recipe=row.recipe_display())
-        return DocumentText(row.title, model=row.model_display())
-    except ValueError as error:
-        _note_unreadable("catalog display", f"{row.kind}/{row.slug}", str(error)[:120])
-        return DocumentText(row.title)
+    if row.kind == ReceiptOwner.RECIPE:
+        return DocumentText(row.title, recipe=row.readable_recipe_display())
+    return DocumentText(row.title, model=row.readable_model_display())
 
 
-def _note_unreadable(kind: str, key: str, detail: str) -> None:
-    """Say once that a stored row is unreadable.
-
-    The projection leaves that one row out (or reads it as unknown) and goes on:
-    a damaged row is evidence to rebuild, never a reason to fail the whole page.
-    """
-
-    marker = f"{kind}:{key}"
-    if marker not in _LOGGED_UNREADABLE:
-        _LOGGED_UNREADABLE.add(marker)
-        _LOGGER.warning("ignoring unreadable %s %s: %s", kind, key, detail)
+_note_unreadable = note_unreadable
 
 
 def _readable_document[T](

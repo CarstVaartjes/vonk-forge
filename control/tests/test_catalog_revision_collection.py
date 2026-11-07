@@ -141,8 +141,6 @@ class Catalog:
                 projected = ModelRevisionProjection(
                     identity=model.identity,
                     format=model.format,
-                    capabilities=model.capabilities,
-                    modalities=model.modalities,
                     artifact_count=len(model.files),
                     download_bytes=model.download_bytes,
                     installed_bytes=model.installed_bytes,

@@ -89,8 +89,8 @@ def _damage(
     row = session.get(CatalogDocumentRevision, revision_id)
     assert row is not None
     document = row.document.copy()
-    if field == "modalities.0":
-        document["modalities"] = ["private-input"]
+    if field == "requires_token":
+        document["requires_token"] = "private-input"
     else:
         files = document["files"]
         assert isinstance(files, list)
@@ -166,7 +166,7 @@ def test_historical_damage_is_retired_without_blocking_current_reads(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize("field", ["files.0.size_bytes", "modalities.0"])
+@pytest.mark.parametrize("field", ["files.0.size_bytes", "requires_token"])
 def test_current_head_reports_field_and_normal_sync_rebuilds_exact_revision(
     catalog: CatalogService, tmp_path: Path, field: str
 ) -> None:
@@ -232,7 +232,7 @@ def test_whole_table_audit_collects_every_bad_row_without_effects(
                 _damage(
                     session,
                     row.id,
-                    field="modalities.0"
+                    field="requires_token"
                     if row.slug == "bad-enum"
                     else "files.0.size_bytes",
                 )
@@ -272,7 +272,7 @@ def test_sync_replaces_a_damaged_head_when_source_revision_is_already_local(
     )
     catalog.entities.resolve(candidate.id, actor="test")
     with catalog._sessions.begin() as session:
-        _damage(session, candidate.id, field="modalities.0")
+        _damage(session, candidate.id, field="requires_token")
     # Distinct completions keep the latest successful episode unambiguous.
     now[0] += timedelta(seconds=1)
     healed = sync.automatic()

@@ -1,0 +1,223 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "d44d6dc249c2c8330d0b380c595a514f0e86137fcc717fe7a4389a25720ade37",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/three-d/skintokens"
+   },
+   "dockerfile": "adapters/three-d/skintokens/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "huggingface.co",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "skintokens-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "mesh-job",
+   "input": {
+    "max_bytes": 268435456,
+    "media_types": [
+     "model/gltf-binary"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "One GLB character mesh to rig with SkinTokens.",
+      "extensions": [
+       ".glb"
+      ],
+      "id": "mesh",
+      "label": "Character mesh",
+      "max_file_bytes": 268435456,
+      "max_files": 1,
+      "max_total_bytes": 268435456,
+      "media_types": [
+       "model/gltf-binary"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 536870912,
+    "slots": [
+     {
+      "description": "The rigged SkinTokens binary glTF mesh.",
+      "extensions": [
+       ".glb"
+      ],
+      "id": "mesh",
+      "label": "Rigged mesh",
+      "max_file_bytes": 536870912,
+      "max_files": 1,
+      "max_total_bytes": 536870912,
+      "media_types": [
+       "model/gltf-binary"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "grpo-1400-f4e4706a11cf-0a004da47f",
+     "id": "primary-001",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "last-4843f49e58af-3417e359c3",
+     "id": "primary-002",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "a96dff28e02b7a3040a4bc4d53d0e64823a2d8f7fbb8b96e079c91fc7b9e71ab",
+    "kind": "model",
+    "publisher": "vast-ai",
+    "slug": "skintokens"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "vast-ai"
+  ],
+  "source_reference": "https://huggingface.co/VAST-AI/SkinTokens/tree/79736cad0fd84de384d5eede659b4ebd24effe33"
+ },
+ "release": {
+  "released_at": "2026-10-26",
+  "version": "2.0.16"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/run.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "model/gltf-binary"
+   },
+   {
+    "name": "timeout-seconds",
+    "setting": null,
+    "value": 3600
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 1618915724,
+      "image_bytes": 16000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 24000000000
+     },
+     "memory": {
+      "peak_bytes": 48000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "mesh-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.glb",
+      "input_slots": {
+       "mesh": "qualification/fixtures/tiny.glb"
+      },
+      "output_slot": "mesh",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "mesh-job"
+  }
+ }
+}

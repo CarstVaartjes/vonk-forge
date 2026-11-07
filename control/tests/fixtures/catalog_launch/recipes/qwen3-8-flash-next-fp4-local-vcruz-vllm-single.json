@@ -1,0 +1,675 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "03a956544e9f9b4b7ba91690469fbe7848bdbef29a7d2e0f5788368467bb3595",
+    "repository": "eugr/spark-vllm-b12x"
+   },
+   "context": {
+    "path": "adapters/qwen/vcruz-fp4-local-vllm-single"
+   },
+   "dockerfile": "adapters/qwen/vcruz-fp4-local-vllm-single/Dockerfile",
+   "network": {
+    "hosts": []
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-8-flash-next-fp4-local-vcruz-vllm-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "qwen3.8-flash-next-fp4-local"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-8237eb95e69c-618cd5b83d",
+     "id": "metadata-8237eb95e69c-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-b0ad2a8a314c-b335630551",
+     "id": "readme-b0ad2a8a314c-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-c3cf9e34abf4-00824420d1",
+     "id": "chat-template-c3cf9e34abf4-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-b50dbc52a0c8-587cb980af",
+     "id": "config-b50dbc52a0c8-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-e70c136c1b78-97dd3d578b",
+     "id": "generation-config-e70c136c1b78-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "merges-a9d356d7bdf1-b0d6dcfed4",
+     "id": "merges-a9d356d7bdf1-b0d6dcfed4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-5fa166bbb1cf-0a05be8238",
+     "id": "model-safetensors-index-5fa166bbb1cf-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-27225450ac9c-36afccab5d",
+     "id": "preprocessor-config-27225450ac9c-36afccab5d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00021-ebf3648c5f4c-560b25b548",
+     "id": "model-00001-of-00021-ebf3648c5f4c-560b25b548",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00021-79a643fc5c02-a0564fa2af",
+     "id": "model-00002-of-00021-79a643fc5c02-a0564fa2af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00021-c45f942203db-a1b01cf5b5",
+     "id": "model-00003-of-00021-c45f942203db-a1b01cf5b5",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00021-071ab9cf963c-a469002989",
+     "id": "model-00004-of-00021-071ab9cf963c-a469002989",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00005-of-00021-f80d17870eb1-6f424332e6",
+     "id": "model-00005-of-00021-f80d17870eb1-6f424332e6",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00006-of-00021-3e9183d4ebb2-21ee8047e1",
+     "id": "model-00006-of-00021-3e9183d4ebb2-21ee8047e1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00007-of-00021-aa1ad959c4d6-e7439820a8",
+     "id": "model-00007-of-00021-aa1ad959c4d6-e7439820a8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00008-of-00021-0b18844027be-d09207fa7f",
+     "id": "model-00008-of-00021-0b18844027be-d09207fa7f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00009-of-00021-2d0b6c66790c-fa5f133206",
+     "id": "model-00009-of-00021-2d0b6c66790c-fa5f133206",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00010-of-00021-3ed9bd73745a-fd84ab6369",
+     "id": "model-00010-of-00021-3ed9bd73745a-fd84ab6369",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00011-of-00021-4936ff28c6cc-e4651bb33e",
+     "id": "model-00011-of-00021-4936ff28c6cc-e4651bb33e",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00012-of-00021-dd7df5a6ff73-420f105f44",
+     "id": "model-00012-of-00021-dd7df5a6ff73-420f105f44",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00013-of-00021-28a455c8ea4e-489cc0a5c5",
+     "id": "model-00013-of-00021-28a455c8ea4e-489cc0a5c5",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00014-of-00021-6941676e685a-32ceb9c6ed",
+     "id": "model-00014-of-00021-6941676e685a-32ceb9c6ed",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00015-of-00021-2a1129b5acfc-366abe9dd1",
+     "id": "model-00015-of-00021-2a1129b5acfc-366abe9dd1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00016-of-00021-635e97fbad78-5ba816c901",
+     "id": "model-00016-of-00021-635e97fbad78-5ba816c901",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00017-of-00021-bf60d564d89a-7e13ec5606",
+     "id": "model-00017-of-00021-bf60d564d89a-7e13ec5606",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00018-of-00021-c5bde22f9364-bdae9f3647",
+     "id": "model-00018-of-00021-c5bde22f9364-bdae9f3647",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00019-of-00021-da3dc3b4f428-68d5c40be6",
+     "id": "model-00019-of-00021-da3dc3b4f428-68d5c40be6",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00020-of-00021-4978bb6b8480-ca1646b853",
+     "id": "model-00020-of-00021-4978bb6b8480-ca1646b853",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00021-of-00021-48203838f2c7-6f28fa1bdc",
+     "id": "model-00021-of-00021-48203838f2c7-6f28fa1bdc",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-0997f410c57a-224931eb13",
+     "id": "tokenizer-0997f410c57a-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "id": "tokenizer-config-b11349aafa7c-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vocab-ce99b4cb2983-ba05d8e2e4",
+     "id": "vocab-ce99b4cb2983-ba05d8e2e4",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "13b2981a8ee38a822309e8603d87c370a234fb9160371e82390fe09315b30d84",
+    "kind": "model",
+    "publisher": "nvidia",
+    "slug": "qwen3-8-flash-next-fp4-local-b9ce18a6"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "vcruz305",
+   "eugr",
+   "NVIDIA",
+   "Qwen"
+  ],
+  "source_reference": "https://github.com/vcruz305/Qwen3.8-Flash-Next-FP4-Spark-recipe/tree/0d727c4ec145dadc14ac311508c4bb8c577e1a7a"
+ },
+ "release": {
+  "released_at": "2026-10-18",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "value": "qwen3.8-flash-next-fp4-local"
+   },
+   {
+    "name": "host",
+    "value": "0.0.0.0"
+   },
+   {
+    "name": "port",
+    "value": 8000
+   },
+   {
+    "name": "tensor-parallel-size",
+    "value": 1
+   },
+   {
+    "name": "pipeline-parallel-size",
+    "value": 1
+   },
+   {
+    "name": "mamba-cache-mode",
+    "value": "align"
+   },
+   {
+    "name": "enable-prefix-caching",
+    "value": true
+   },
+   {
+    "name": "enable-chunked-prefill",
+    "value": true
+   },
+   {
+    "name": "dtype",
+    "value": "bfloat16"
+   },
+   {
+    "name": "kv-cache-dtype",
+    "value": "fp8"
+   },
+   {
+    "name": "quantization",
+    "value": "modelopt_mixed"
+   },
+   {
+    "name": "block-size",
+    "value": 16
+   },
+   {
+    "name": "load-format",
+    "value": "b12x"
+   },
+   {
+    "name": "max-num-batched-tokens",
+    "value": 4096
+   },
+   {
+    "name": "speculative-config",
+    "value": {
+     "method": "mtp",
+     "num_speculative_tokens": 4
+    }
+   },
+   {
+    "name": "gdn-decode-kernel",
+    "value": "b12x"
+   },
+   {
+    "name": "linear-backend",
+    "value": "b12x"
+   },
+   {
+    "name": "moe-backend",
+    "value": "b12x"
+   },
+   {
+    "name": "no-enable-flashinfer-autotune",
+    "value": true
+   },
+   {
+    "name": "mm-encoder-tp-mode",
+    "value": "data"
+   },
+   {
+    "name": "reasoning-parser",
+    "value": "qwen3"
+   },
+   {
+    "name": "tool-call-parser",
+    "value": "qwen3_xml"
+   },
+   {
+    "name": "enable-auto-tool-choice",
+    "value": true
+   },
+   {
+    "name": "compilation-config",
+    "value": {
+     "pass_config": {
+      "fuse_act_quant": true
+     }
+    }
+   },
+   {
+    "name": "gpu-memory-utilization",
+    "value": 0.905
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens"
+   },
+   {
+    "name": "max-num-seqs",
+    "setting": "concurrency"
+   }
+  ],
+  "engine": "vllm",
+  "entrypoint": [
+   "/opt/vonk/bin/vllm",
+   "serve",
+   "/models"
+  ],
+  "environment": [
+   {
+    "name": "VLLM_PLE_TABLE_MEMORY",
+    "value": "shared"
+   },
+   {
+    "name": "CUTE_DSL_ARCH",
+    "value": "sm_121a"
+   },
+   {
+    "name": "SAFETENSORS_FAST_GPU",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_WORKER_MULTIPROC_METHOD",
+    "value": "spawn"
+   },
+   {
+    "name": "VLLM_SSM_CONV_STATE_LAYOUT",
+    "value": "DS"
+   },
+   {
+    "name": "VLLM_USE_AOT_COMPILE",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_USE_MEGA_AOT_ARTIFACT",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_USE_V2_MODEL_RUNNER",
+    "value": "1"
+   },
+   {
+    "name": "B12X_POLICY_MODE",
+    "value": "auto"
+   },
+   {
+    "name": "VLLM_MXFP8_LM_HEAD",
+    "value": "1"
+   },
+   {
+    "name": "VLLM_B12X_MOE_FP4_LAYER_MAX_INPUT_SCALE",
+    "value": "w13"
+   },
+   {
+    "name": "VLLM_B12X_MOE_FP4_FORCE_A16",
+    "value": "1"
+   },
+   {
+    "name": "B12X_W4A16_A4_PREFILL",
+    "value": "1"
+   },
+   {
+    "name": "B12X_COMPILE_WORKERS",
+    "value": "1"
+   },
+   {
+    "name": "B12X_AUTOTUNE",
+    "value": "0"
+   },
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 8
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 102262310289,
+      "image_bytes": 30000000000,
+      "safety_margin_bytes": 24000000000,
+      "working_bytes": 30000000000
+     },
+     "memory": {
+      "peak_bytes": 124450224497,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 64,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "qwen3.8-flash-next-fp4-local"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}

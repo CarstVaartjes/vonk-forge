@@ -1,0 +1,475 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "7531d90bcbe0e43e1f7363029c7e145ce90eebeb494a7b4695fdba0329d7c3c3",
+    "repository": "nvcr.io/nvidia/pytorch"
+   },
+   "context": {
+    "path": "adapters/qwen/qwen3-8-27b-taussoe-tensorfold-single"
+   },
+   "dockerfile": "adapters/qwen/qwen3-8-27b-taussoe-tensorfold-single/Dockerfile",
+   "network": {
+    "hosts": [
+     "files.pythonhosted.org",
+     "pypi.org"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen3-8-27b-taussoe-tensorfold-dual"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "Qwen3.8-27B"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "license-bbedc3fda330-c693279643",
+     "id": "target-license-bbedc3fda330-c693279643",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "readme-bf73904ccec2-b335630551",
+     "id": "target-readme-bf73904ccec2-b335630551",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "chat-template-c3cf9e34abf4-00824420d1",
+     "id": "target-chat-template-c3cf9e34abf4-00824420d1",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-14b65a0ee065-587cb980af",
+     "id": "target-config-14b65a0ee065-587cb980af",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "generation-config-e70c136c1b78-97dd3d578b",
+     "id": "target-generation-config-e70c136c1b78-97dd3d578b",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00003-6cc1508e96fb-5ad6951325",
+     "id": "target-model-00001-of-00003-6cc1508e96fb-5ad6951325",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00003-83f2a20ca805-b421ec05d0",
+     "id": "target-model-00002-of-00003-83f2a20ca805-b421ec05d0",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00003-31b8c91ef899-c5bdb3d6ec",
+     "id": "target-model-00003-of-00003-31b8c91ef899-c5bdb3d6ec",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-13b840162b4c-0a05be8238",
+     "id": "target-model-safetensors-index-13b840162b4c-0a05be8238",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-27225450ac9c-36afccab5d",
+     "id": "target-preprocessor-config-27225450ac9c-36afccab5d",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "processor-config-45fc17c8dd24-27f0cb76af",
+     "id": "target-processor-config-45fc17c8dd24-27f0cb76af",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "qwen-logo-e56f3a62991f-f86d0c6523",
+     "id": "target-qwen-logo-e56f3a62991f-f86d0c6523",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-06b9509352d2-224931eb13",
+     "id": "target-tokenizer-06b9509352d2-224931eb13",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-792fa3f0cb88-94d5c6ba8f",
+     "id": "target-tokenizer-config-792fa3f0cb88-94d5c6ba8f",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "id": "target-video-preprocessor-config-7768af27c1fa-35d01a7325",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "vocab-ce99b4cb2983-ba05d8e2e4",
+     "id": "target-vocab-ce99b4cb2983-ba05d8e2e4",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "e31efc97f3a2fcbbb082012283a2ecf33d181b55e5c768d320e3e772b160a87d",
+    "kind": "model",
+    "publisher": "vontra",
+    "slug": "qwen3-8-27b-mlx-4bit-70ae7fac"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "readme-0c06405ffff8-b335630551",
+     "id": "drafter-readme-0c06405ffff8-b335630551",
+     "mount": {
+      "target": "/models/drafter"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "config-873e3556509b-587cb980af",
+     "id": "drafter-config-873e3556509b-587cb980af",
+     "mount": {
+      "target": "/models/drafter"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    },
+    {
+     "file_id": "model-67fc76d68dc5-9d75c1098f",
+     "id": "drafter-model-67fc76d68dc5-9d75c1098f",
+     "mount": {
+      "target": "/models/drafter"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
+    }
+   ],
+   "id": "drafter",
+   "model": {
+    "content_sha256": "abd9b4c762654ff36016c8c8520a39d113d68258813d57f1a70b4fca9fcec070",
+    "kind": "model",
+    "publisher": "z-lab",
+    "slug": "qwen3-8-27b-dflash2-50307d4c"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Draft with z-lab/Qwen3.8-27B-DFlash2 (upstream default).",
+     "label": "DFlash2 draft trees",
+     "value": "dflash2"
+    },
+    {
+     "args": [
+      {
+       "name": "no-drafts",
+       "value": true
+      }
+     ],
+     "help": "Serial one-token-at-a-time reference decoding (--no-drafts); same output, about a quarter of the speed.",
+     "label": "No drafting",
+     "value": "serial"
+    }
+   ],
+   "help": "DFlash2 proposes token trees that the target verifies against its own serial sample, so replies are unchanged by drafting (upstream claim). Upstream measures serial decoding at 13.1 tok/s on one Spark against 49-59 drafted. The CUDA engine requires the draft model unless --no-drafts is set.",
+   "label": "Speculative drafting",
+   "name": "drafting"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "taussoe",
+   "Ash Hart (TensorFold)",
+   "Vontra",
+   "z-lab",
+   "Qwen contributors"
+  ],
+  "source_reference": "https://github.com/taussoe/tensorfold-recipes/tree/d8a7c09c893eb41be5e93dbd684ce7d4f127d7ac"
+ },
+ "release": {
+  "released_at": "2026-09-29",
+  "version": "0.3.6.3"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "host",
+    "setting": null,
+    "value": "0.0.0.0"
+   },
+   {
+    "name": "port",
+    "setting": null,
+    "value": 8000
+   },
+   {
+    "name": "name",
+    "setting": null,
+    "value": "Qwen3.8-27B"
+   },
+   {
+    "name": "parallel",
+    "setting": "concurrency",
+    "value": null
+   },
+   {
+    "name": "context",
+    "setting": "context_tokens",
+    "value": null
+   },
+   {
+    "name": "drafter",
+    "setting": null,
+    "value": "/models/drafter"
+   },
+   {
+    "name": "max-tokens",
+    "setting": null,
+    "value": 32768
+   }
+  ],
+  "engine": "tensorfold",
+  "entrypoint": [
+   "/opt/vonk/bin/tensorfold-serve"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TENSORFOLD_NO_UPDATE_CHECK",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": {
+   "change_effect": "restart",
+   "value": 1
+  },
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 262144
+  },
+  "kind": "generation",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "dual",
+  "node_count": 2,
+  "parallelism": {
+   "backend": "native",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 2
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 19930346855,
+      "image_bytes": 26000000000,
+      "safety_margin_bytes": 10000000000,
+      "working_bytes": 8000000000
+     },
+     "memory": {
+      "peak_bytes": 67100000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   },
+   {
+    "count": 1,
+    "endpoint_owner": false,
+    "name": "worker",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 19930346855,
+      "image_bytes": 26000000000,
+      "safety_margin_bytes": 10000000000,
+      "working_bytes": 8000000000
+     },
+     "memory": {
+      "peak_bytes": 67100000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "worker",
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "body": null,
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "chat.nonempty",
+      "chat.output-cap"
+     ],
+     "kind": "openai.chat",
+     "name": "bounded-chat",
+     "request": {
+      "body": {
+       "max_tokens": 256,
+       "messages": [
+        {
+         "content": "hello",
+         "role": "user"
+        }
+       ],
+       "model": "Qwen3.8-27B"
+      },
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}
