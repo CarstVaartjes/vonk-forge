@@ -2399,3 +2399,291 @@ def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
     assert admission[0]["blockers"][0]["code"] == "memory.insufficient"
     assert admission[0]["blockers"][0]["detail"] == "not enough memory"
     assert admission[0]["blockers"][0]["node_ids"] == ["spk_" + "b" * 32]
+
+
+NODE = "spk_" + "1" * 32
+
+
+def _canary_lane_under_withdrawal(
+    monkeypatch, previews: list[dict[str, object]], *, parked_loads: int = 0
+):
+    """A lane whose Controller withdraws the canary until a preview is admitted.
+
+    ``previews`` are the profile previews the Controller answers in order. The
+    lane stops at the profile load, the first step after the re-offered serve.
+    """
+    lifecycle = _module()
+    import vonk_control.library_contract as contract
+
+    sha = "a" * 64
+    fixture = lifecycle.CanonicalCanaryFixture(
+        index_path=Path("index.json"),
+        index_bytes=b"{}",
+        package_path=PurePosixPath("package.tar.gz"),
+        package_bytes=b"",
+        source_commit="a" * 40,
+        publisher="vonk-forge-test",
+        slug="canonical-synthetic-canary",
+        recipe_content_sha256=sha,
+        model_content_sha256="c" * 64,
+        role="entrypoint",
+        serving_check={},
+        recipe={},
+    )
+    monkeypatch.setattr(
+        contract,
+        "LibraryRecipeIdentity",
+        SimpleNamespace(
+            model_validate_json=lambda _value: SimpleNamespace(
+                recipe_revision_id="revision",
+                publisher=fixture.publisher,
+                slug=fixture.slug,
+                content_sha256=sha,
+            )
+        ),
+    )
+    monkeypatch.setattr(lifecycle, "_canonical_recipe_matches", lambda *_args: True)
+    imported: list[str] = []
+    downloads: list[str] = []
+    remaining = list(previews)
+
+    class Control:
+        def request(self, method, path, body=None, allowed=None):
+            if path == "/api/catalog/managed-recipes/sync-status":
+                return 200, {
+                    "trigger": "automatic",
+                    "state": "current",
+                    "commit": "c" * 40,
+                    "withdrawn_count": 2,
+                }
+            if (method, path) == (
+                "GET",
+                f"/api/recipe/{fixture.publisher}/{fixture.slug}",
+            ):
+                return 200, {
+                    "identity": {},
+                    "selector": f"{fixture.publisher}/{fixture.slug}",
+                    "document": {},
+                    "model_selectors": ["model"],
+                }
+            if method == "PUT":
+                return 200, {"revision": 1}
+            assert (method, path) == ("POST", "/api/profile/1/preview")
+            return 200, remaining.pop(0)
+
+    lane = lifecycle.SparkLifecycle.__new__(lifecycle.SparkLifecycle)
+    lane.control = Control()
+    lane.browser = object()
+    lane.synthetic_canary_fixture = fixture
+    lane._import_canary_catalog = lambda _fixture, key: (
+        imported.append(key)
+        or {
+            "state": "current",
+            "commit": fixture.source_commit,
+            "problems": [],
+            "total_count": 1,
+            "processed_count": 1,
+            "imported_count": 1,
+            "unchanged_count": 0,
+        }
+    )
+    lane._fleet_snapshot = lambda: {"nodes": [{"id": NODE}]}
+    lane._request_recipe_download = lambda _selector, *, request_key: (
+        downloads.append(request_key) or {}
+    )
+    lane._await_recipe_download = lambda *_args, **_kwargs: {
+        "result": {
+            "recipe_content_sha256": sha,
+            "model_content_digests": [fixture.model_content_sha256],
+            "image_digest": "sha256:" + "d" * 64,
+            "oci_archive_sha256": "e" * 64,
+            "image_bytes": 1,
+        }
+    }
+
+    lane.loads = loads = []
+    lane.awaited = awaited = []
+
+    def load(_preview, *, request_key):
+        loads.append(request_key)
+        if len(loads) <= parked_loads:
+            raise lifecycle.LifecycleError("the profile load parked and timed out")
+        return {}
+
+    def await_load(*_args, **_kwargs):
+        awaited.append(True)
+        raise lifecycle.LifecycleError("reached the load await")
+
+    lane._load_canary_profile = load
+    lane._await_profile_application = await_load
+    lane._installation_failure = lambda stage, error: lifecycle.LifecycleError(
+        f"{stage}: {error}"
+    )
+    return lifecycle, lane, imported, downloads
+
+
+_WITHDRAWN_PREVIEW = {
+    "allowed": False,
+    "reasons": [{"code": "profile.recipe_unavailable", "severity": "error"}],
+    "preparations": [],
+}
+_ADMITTED_PREVIEW = {
+    "allowed": True,
+    "plan_digest": "f" * 64,
+    "scope": {"node_ids": [NODE], "idle_node_ids": []},
+    "preparations": [
+        {
+            "preparation": {
+                "model": {
+                    "model_content_sha256": "c" * 64,
+                    "artifact_set_sha256": "1" * 64,
+                    "artifact_set_bytes": 1,
+                },
+                "runtime_image": {
+                    "image_digest": "sha256:" + "d" * 64,
+                    "oci_layout_sha256": "2" * 64,
+                    "image_bytes": 1,
+                },
+            }
+        }
+    ],
+}
+
+
+def test_a_canary_the_library_withdrew_is_offered_again_and_served(
+    monkeypatch,
+) -> None:
+    lifecycle, lane, imported, downloads = _canary_lane_under_withdrawal(
+        monkeypatch, [_WITHDRAWN_PREVIEW, _ADMITTED_PREVIEW]
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
+        lane._run_synthetic_canary(NODE, carry=lambda: None)
+
+    # One re-import, and the second attempt downloads under its own request key.
+    assert len(imported) == 2 and imported[0] != imported[1]
+    assert len(downloads) == 2 and downloads[0] != downloads[1]
+    assert len(lane.loads) == 1
+
+
+def test_a_canary_withdrawn_between_preview_and_load_is_offered_again(
+    monkeypatch,
+) -> None:
+    """The Controller previews again at load time: the retry covers the load too."""
+    lifecycle, lane, imported, downloads = _canary_lane_under_withdrawal(
+        monkeypatch, [_ADMITTED_PREVIEW, _ADMITTED_PREVIEW], parked_loads=1
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
+        lane._run_synthetic_canary(NODE, carry=lambda: None)
+
+    assert len(imported) == 2 and len(downloads) == 2
+    # The second load has its own request key, and only it was awaited.
+    assert len(lane.loads) == 2 and lane.loads[0] != lane.loads[1]
+    assert lane.awaited == [True]
+
+
+def test_a_canary_withdrawn_twice_fails_with_the_catalog_sync_status(
+    monkeypatch,
+) -> None:
+    lifecycle, lane, imported, _downloads = _canary_lane_under_withdrawal(
+        monkeypatch, [_WITHDRAWN_PREVIEW, _WITHDRAWN_PREVIEW]
+    )
+
+    with pytest.raises(lifecycle.LifecycleError) as raised:
+        lane._run_synthetic_canary(NODE)
+
+    message = str(raised.value)
+    assert "withdrew the fixture again" in message
+    assert "profile.recipe_unavailable" in message
+    assert '"trigger": "automatic"' in message and '"withdrawn_count": 2' in message
+    assert len(imported) == 2
+
+
+def _calls(node, name: str) -> bool:
+    import ast
+
+    return any(
+        isinstance(call, ast.Call) and getattr(call.func, "attr", None) == name
+        for call in ast.walk(node)
+    )
+
+
+def _serves_without_admission(tree) -> list[str]:
+    """Serves offered once more that do not reach the load and its await.
+
+    The Controller previews again when it loads, so a serve that ends at the
+    preview leaves a withdrawal between preview and load outside the retry.
+    """
+    import ast
+
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    missing: list[str] = []
+    for call in ast.walk(tree):
+        if not (
+            isinstance(call, ast.Call)
+            and getattr(call.func, "attr", None) == "_offered_once_more"
+            and call.args
+        ):
+            continue
+        names = {
+            node.attr if isinstance(node, ast.Attribute) else node.id
+            for node in ast.walk(call.args[0])
+            if isinstance(node, ast.Attribute | ast.Name)
+        }
+        if not any(
+            name in functions
+            and _calls(functions[name], "_load_canary_profile")
+            and _calls(functions[name], "_await_profile_application")
+            for name in names
+        ):
+            missing.append(f"line {call.lineno}")
+    return missing
+
+
+def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
+    import ast
+
+    found: list[str] = []
+    for child in ast.iter_child_nodes(node):
+        if not isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+            found += _unguarded_fixture_imports(child, enclosing)
+            continue
+        functions = (*enclosing, child)
+        if (
+            child.name != "_import_canary_catalog"
+            and child.name != "_import_candidate_library"
+            and _calls(child, "_import_canary_catalog")
+            and not any(_calls(f, "_offered_once_more") for f in functions)
+        ):
+            found.append(child.name)
+        found += _unguarded_fixture_imports(child, functions)
+    return found
+
+
+def test_every_fixture_import_in_the_lane_code_is_offered_once_more() -> None:
+    """A fixture import that is then served must go through _offered_once_more.
+
+    The live recipe library can be republished while a lane runs, which
+    withdraws the fixture by design. Each function that imports a fixture must
+    sit inside, or be, a function that calls ``_offered_once_more``, and the
+    serve it wraps must reach the profile load and its await. The
+    candidate library is only imported: the carry that follows serves the
+    workload that already runs.
+    """
+    import ast
+
+    root = Path(__file__).parent / "acceptance"
+    unguarded: list[str] = []
+    for name in ("test_spark_lifecycle.py", "spark_upgrade_carry.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        unguarded += [f"{name}:{f}" for f in _unguarded_fixture_imports(tree)]
+        unguarded += [
+            f"{name}: no load in the serve at {w}"
+            for w in _serves_without_admission(tree)
+        ]
+    assert unguarded == []

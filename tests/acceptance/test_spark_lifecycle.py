@@ -3302,6 +3302,22 @@ class SparkLifecycle:
             return None
         return latest if withdrawn > 0 else None
 
+    def _catalog_sync_diagnostic(self) -> str:
+        """The newest catalog sync (trigger, commit, withdrawals) for a failure message."""
+        assert self.control is not None
+        try:
+            _, payload = self.control.request(
+                "GET", "/api/catalog/managed-recipes/sync-status"
+            )
+        except SliceError as error:
+            return f"catalog sync status unreadable: {error}"[:256]
+        latest = require_object(payload, "managed recipe catalog sync status")
+        summary = {
+            key: latest.get(key)
+            for key in ("trigger", "state", "commit", "withdrawn_count")
+        }
+        return "catalog sync status: " + json.dumps(summary, sort_keys=True)
+
     def _offered_once_more[T](
         self, serve: Callable[[str], T], reimport: Callable[[str], object]
     ) -> T:
@@ -3394,172 +3410,215 @@ class SparkLifecycle:
                     "synthetic canary catalog sync is incomplete: "
                     + json.dumps(summary, sort_keys=True)[:1024]
                 )
-            phase = "recipe-resolution"
-            from vonk_control.library_contract import LibraryRecipeIdentity
 
-            # A known identity resolves directly against committed catalog state.
-            # The periodically refreshed discovery index may still be older.
-            recipe_selector = f"{fixture.publisher}/{fixture.slug}"
-            _, detail_payload = self.control.request(
-                "GET", f"/api/recipe/{recipe_selector}"
-            )
-            detail = require_object(detail_payload, "synthetic canary Recipe detail")
-            identity = LibraryRecipeIdentity.model_validate_json(
-                canonical_message(detail.get("identity"))
-            )
-            revision_id = identity.recipe_revision_id
-            model_selectors = detail.get("model_selectors")
-            if (
-                detail.get("selector") != recipe_selector
-                or identity.publisher != fixture.publisher
-                or identity.slug != fixture.slug
-                or identity.content_sha256 != fixture.recipe_content_sha256
-                or not _canonical_recipe_matches(
-                    detail.get("document"), fixture.recipe, fixture.library_root
-                )
-                or not isinstance(model_selectors, list)
-                or len(model_selectors) != 1
-                or not isinstance(model_selectors[0], str)
-            ):
-                raise LifecycleError("synthetic canary canonical closure differs")
-            completed.append("recipe-resolved")
-            phase = "source-download"
-            fleet_before = self._fleet_snapshot()
-            fleet_nodes = fleet_before.get("nodes")
-            fleet_node_ids = (
-                {
-                    node.get("id")
-                    for node in fleet_nodes
-                    if isinstance(node, dict) and isinstance(node.get("id"), str)
-                }
-                if isinstance(fleet_nodes, list)
-                else set()
-            )
-            if fleet_node_ids != {node_id}:
-                raise LifecycleError(
-                    "synthetic canary requires a disposable fleet with exactly one enrolled Spark"
-                )
-            download_payload = self._request_recipe_download(
-                recipe_selector,
-                request_key=self._canary_request_key(
-                    fixture, node_id, "recipe-download"
-                ),
-            )
-            download = self._await_recipe_download(
-                require_object(download_payload, "synthetic canary recipe download"),
-                fixture=fixture,
-                recipe_revision_id=revision_id,
-            )
-            download_result = require_object(
-                download.get("result"), "recipe download result"
-            )
-            if (
-                download_result.get("recipe_content_sha256")
-                != fixture.recipe_content_sha256
-                or fixture.model_content_sha256
-                not in download_result.get("model_content_digests", [])
-                or re.fullmatch(
-                    r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))
-                )
-                is None
-                or SHA256.fullmatch(str(download_result.get("oci_archive_sha256")))
-                is None
-                or type(download_result.get("image_bytes")) is not int
-                or download_result["image_bytes"] <= 0
-            ):
-                raise LifecycleError(
-                    "synthetic canary recipe download receipts are incomplete"
-                )
-            completed.append("source-verified")
+            def serve(attempt: str) -> tuple[int, dict[str, object]]:
+                """Resolve, download, preview and load the canary; the profile revision and application."""
+                nonlocal phase
+                assert self.control is not None
+                del completed[1:]
+                phase = "recipe-resolution"
+                from vonk_control.library_contract import LibraryRecipeIdentity
 
-            profile_payload = {
-                "name": "Acceptance synthetic canary",
-                "description": "Disposable whole-fleet lifecycle canary",
-                "installation_policy": "keep-cached",
-                "labels": {"purpose": "acceptance"},
-                "favorite": False,
-                "assignments": [
+                # A known identity resolves directly against committed catalog state.
+                # The periodically refreshed discovery index may still be older.
+                recipe_selector = f"{fixture.publisher}/{fixture.slug}"
+                _, detail_payload = self.control.request(
+                    "GET", f"/api/recipe/{recipe_selector}"
+                )
+                detail = require_object(
+                    detail_payload, "synthetic canary Recipe detail"
+                )
+                identity = LibraryRecipeIdentity.model_validate_json(
+                    canonical_message(detail.get("identity"))
+                )
+                revision_id = identity.recipe_revision_id
+                model_selectors = detail.get("model_selectors")
+                if (
+                    detail.get("selector") != recipe_selector
+                    or identity.publisher != fixture.publisher
+                    or identity.slug != fixture.slug
+                    or identity.content_sha256 != fixture.recipe_content_sha256
+                    or not _canonical_recipe_matches(
+                        detail.get("document"), fixture.recipe, fixture.library_root
+                    )
+                    or not isinstance(model_selectors, list)
+                    or len(model_selectors) != 1
+                    or not isinstance(model_selectors[0], str)
+                ):
+                    raise LifecycleError("synthetic canary canonical closure differs")
+                completed.append("recipe-resolved")
+                phase = "source-download"
+                fleet_before = self._fleet_snapshot()
+                fleet_nodes = fleet_before.get("nodes")
+                fleet_node_ids = (
                     {
-                        "recipe_selector": recipe_selector,
-                        "spark_ids": [node_id],
-                        "assignment_name": fixture.slug,
-                        "desired_state": "running",
+                        node.get("id")
+                        for node in fleet_nodes
+                        if isinstance(node, dict) and isinstance(node.get("id"), str)
                     }
-                ],
-            }
-            phase = "profile-authoring"
-            _, saved_payload = self.control.request(
-                "PUT", "/api/profile/1", profile_payload
-            )
-            saved = require_object(saved_payload, "synthetic canary profile save")
-            profile_revision = saved.get("revision")
-            if type(profile_revision) is not int or profile_revision < 1:
-                raise LifecycleError("synthetic canary profile revision is invalid")
-            _, preview_payload = self.control.request("POST", "/api/profile/1/preview")
-            preview = require_object(
-                preview_payload, "synthetic canary profile preview"
-            )
-            if (
-                preview.get("allowed") is not True
-                or not isinstance(preview.get("plan_digest"), str)
-                or SHA256.fullmatch(preview["plan_digest"]) is None
-                or not isinstance(preview.get("scope"), dict)
-                or set(preview["scope"].get("node_ids", [])) != fleet_node_ids
-                or set(preview["scope"].get("idle_node_ids", [])) != set()
-                or not isinstance(preview.get("preparations"), list)
-                or len(preview["preparations"]) != 1
-            ):
-                raise LifecycleError(
-                    "synthetic canary profile preview is not admitted: "
-                    + self._preview_diagnostic(preview)
+                    if isinstance(fleet_nodes, list)
+                    else set()
                 )
-            preparation = require_object(
-                preview["preparations"][0], "synthetic canary preparation"
-            ).get("preparation")
-            preparation = require_object(preparation, "synthetic canary preparation")
-            model_preparation = require_object(
-                preparation.get("model"), "model preparation"
-            )
-            runtime_preparation = require_object(
-                preparation.get("runtime_image"), "runtime image preparation"
-            )
-            if (
-                model_preparation.get("model_content_sha256")
-                != fixture.model_content_sha256
-                or SHA256.fullmatch(str(model_preparation.get("artifact_set_sha256")))
-                is None
-                or type(model_preparation.get("artifact_set_bytes")) is not int
-                or model_preparation["artifact_set_bytes"] <= 0
-                or re.fullmatch(
-                    r"sha256:[0-9a-f]{64}", str(runtime_preparation.get("image_digest"))
+                if fleet_node_ids != {node_id}:
+                    raise LifecycleError(
+                        "synthetic canary requires a disposable fleet with exactly one enrolled Spark"
+                    )
+                download_payload = self._request_recipe_download(
+                    recipe_selector,
+                    request_key=self._canary_request_key(
+                        fixture, node_id, f"recipe-download{attempt}"
+                    ),
                 )
-                is None
-                or SHA256.fullmatch(str(runtime_preparation.get("oci_layout_sha256")))
-                is None
-                or type(runtime_preparation.get("image_bytes")) is not int
-                or runtime_preparation["image_bytes"] <= 0
-            ):
-                raise LifecycleError(
-                    "synthetic canary preparation receipts are incomplete"
+                download = self._await_recipe_download(
+                    require_object(
+                        download_payload, "synthetic canary recipe download"
+                    ),
+                    fixture=fixture,
+                    recipe_revision_id=revision_id,
                 )
+                download_result = require_object(
+                    download.get("result"), "recipe download result"
+                )
+                if (
+                    download_result.get("recipe_content_sha256")
+                    != fixture.recipe_content_sha256
+                    or fixture.model_content_sha256
+                    not in download_result.get("model_content_digests", [])
+                    or re.fullmatch(
+                        r"sha256:[0-9a-f]{64}", str(download_result.get("image_digest"))
+                    )
+                    is None
+                    or SHA256.fullmatch(str(download_result.get("oci_archive_sha256")))
+                    is None
+                    or type(download_result.get("image_bytes")) is not int
+                    or download_result["image_bytes"] <= 0
+                ):
+                    raise LifecycleError(
+                        "synthetic canary recipe download receipts are incomplete"
+                    )
+                completed.append("source-verified")
 
-            # The carry lane is still running the published baseline here;
-            # journal repair is a candidate behavior exercised by the fresh lane.
-            if carry is None:
-                phase = "start-receipt-loss"
-                self._arm_start_receipt_loss()
-            phase = "profile-load"
-            application_payload = self._load_canary_profile(
-                preview,
-                request_key=self._canary_request_key(fixture, node_id, "profile-load"),
+                profile_payload = {
+                    "name": "Acceptance synthetic canary",
+                    "description": "Disposable whole-fleet lifecycle canary",
+                    "installation_policy": "keep-cached",
+                    "labels": {"purpose": "acceptance"},
+                    "favorite": False,
+                    "assignments": [
+                        {
+                            "recipe_selector": recipe_selector,
+                            "spark_ids": [node_id],
+                            "assignment_name": fixture.slug,
+                            "desired_state": "running",
+                        }
+                    ],
+                }
+                phase = "profile-authoring"
+                _, saved_payload = self.control.request(
+                    "PUT", "/api/profile/1", profile_payload
+                )
+                saved = require_object(saved_payload, "synthetic canary profile save")
+                profile_revision = saved.get("revision")
+                if type(profile_revision) is not int or profile_revision < 1:
+                    raise LifecycleError("synthetic canary profile revision is invalid")
+                _, preview_payload = self.control.request(
+                    "POST", "/api/profile/1/preview"
+                )
+                preview = require_object(
+                    preview_payload, "synthetic canary profile preview"
+                )
+                if (
+                    preview.get("allowed") is not True
+                    or not isinstance(preview.get("plan_digest"), str)
+                    or SHA256.fullmatch(preview["plan_digest"]) is None
+                    or not isinstance(preview.get("scope"), dict)
+                    or set(preview["scope"].get("node_ids", [])) != fleet_node_ids
+                    or set(preview["scope"].get("idle_node_ids", [])) != set()
+                    or not isinstance(preview.get("preparations"), list)
+                    or len(preview["preparations"]) != 1
+                ):
+                    raise LifecycleError(
+                        "synthetic canary profile preview is not admitted: "
+                        + self._preview_diagnostic(preview)
+                        + "; "
+                        + self._catalog_sync_diagnostic()
+                    )
+                preparation = require_object(
+                    preview["preparations"][0], "synthetic canary preparation"
+                ).get("preparation")
+                preparation = require_object(
+                    preparation, "synthetic canary preparation"
+                )
+                model_preparation = require_object(
+                    preparation.get("model"), "model preparation"
+                )
+                runtime_preparation = require_object(
+                    preparation.get("runtime_image"), "runtime image preparation"
+                )
+                if (
+                    model_preparation.get("model_content_sha256")
+                    != fixture.model_content_sha256
+                    or SHA256.fullmatch(
+                        str(model_preparation.get("artifact_set_sha256"))
+                    )
+                    is None
+                    or type(model_preparation.get("artifact_set_bytes")) is not int
+                    or model_preparation["artifact_set_bytes"] <= 0
+                    or re.fullmatch(
+                        r"sha256:[0-9a-f]{64}",
+                        str(runtime_preparation.get("image_digest")),
+                    )
+                    is None
+                    or SHA256.fullmatch(
+                        str(runtime_preparation.get("oci_layout_sha256"))
+                    )
+                    is None
+                    or type(runtime_preparation.get("image_bytes")) is not int
+                    or runtime_preparation["image_bytes"] <= 0
+                ):
+                    raise LifecycleError(
+                        "synthetic canary preparation receipts are incomplete"
+                    )
+
+                # The carry lane is still running the published baseline here;
+                # journal repair is a candidate behavior exercised by the fresh lane.
+                if carry is None:
+                    phase = "start-receipt-loss"
+                    self._arm_start_receipt_loss()
+                phase = "profile-load"
+                application_payload = self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        fixture, node_id, f"profile-load{attempt}"
+                    ),
+                )
+                application = self._await_profile_application(
+                    require_object(
+                        application_payload, "synthetic canary profile application"
+                    ),
+                    label="synthetic canary profile load",
+                    node_id=node_id,
+                )
+                return profile_revision, application
+
+            def import_again(stage: str) -> None:
+                sync = self._import_canary_catalog(
+                    fixture, self._canary_request_key(fixture, node_id, stage)
+                )
+                if (
+                    sync.get("state") != "current"
+                    or sync.get("commit") != fixture.source_commit
+                    or sync.get("problems") != []
+                ):
+                    raise LifecycleError(
+                        "synthetic canary catalog sync is incomplete: "
+                        + json.dumps(sync, sort_keys=True, default=str)[:1024]
+                    )
+
+            profile_revision, application = self._offered_once_more(
+                serve, lambda attempt: import_again(f"catalog-sync{attempt}")
             )
-            application = self._await_profile_application(
-                require_object(
-                    application_payload, "synthetic canary profile application"
-                ),
-                label="synthetic canary profile load",
-                node_id=node_id,
-            )
+
             profile_progress = require_object(
                 application.get("progress"), "profile progress"
             )
