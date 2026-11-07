@@ -667,6 +667,7 @@ class Retiring(janitor.Docker):
 def labelled(identity: str, service: str, **extra: str) -> dict[str, Any]:
     return {
         "Id": identity,
+        "Created": 100,
         "Names": [f"/vonk-forge-{service}-1"],
         "Labels": {
             janitor.PROJECT_LABEL: "vonk-forge",
@@ -690,7 +691,9 @@ def test_container_of_a_service_the_bundle_dropped_is_stopped_and_removed(
         ]
     )
     reconciler = janitor.Reconciler(daemon, tmp_path / "repairing.json")
-    reconciler.tick("vonk-forge", frozenset({"caddy", "image-janitor"}))
+    reconciler.retire(
+        daemon.request("GET", ""), frozenset({"caddy", "image-janitor"}), 200
+    )
     assert daemon.calls == [
         ("POST", "/containers/b2/stop?t=30"),
         ("DELETE", "/containers/b2?v=false"),
@@ -704,3 +707,18 @@ def test_without_the_bundle_service_list_nothing_is_retired(tmp_path: Path) -> N
     daemon = Retiring([labelled("b2", "hermes-agent")])
     janitor.Reconciler(daemon, tmp_path / "repairing.json").tick("vonk-forge")
     assert daemon.calls == []
+
+
+def test_container_created_after_the_janitor_started_is_never_retired(
+    tmp_path: Path,
+) -> None:
+    """Catches an old janitor removing a service that a newer bundle just added."""
+    daemon = Retiring([labelled("n1", "brand-new-service")])
+    reconciler = janitor.Reconciler(daemon, tmp_path / "repairing.json")
+    reconciler.retire(daemon.request("GET", ""), frozenset({"caddy"}), 50)
+    assert daemon.calls == []
+    reconciler.retire(daemon.request("GET", ""), frozenset({"caddy"}), 200)
+    assert daemon.calls == [
+        ("POST", "/containers/n1/stop?t=30"),
+        ("DELETE", "/containers/n1?v=false"),
+    ]

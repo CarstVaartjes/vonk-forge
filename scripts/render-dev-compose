@@ -179,9 +179,9 @@ def _stamp_bundle_digest(services: dict[str, dict], digest: str) -> None:
         environment[COMPOSE_BUNDLE_DIGEST] = digest
     # The janitor retires project containers of services this bundle no longer
     # defines (an upgrade does not remove them).
-    services["image-janitor"]["environment"] = {
-        COMPOSE_SERVICES: ",".join(sorted(services))
-    }
+    services["image-janitor"].setdefault("environment", {})[COMPOSE_SERVICES] = (
+        ",".join(sorted(services))
+    )
 
 
 def _replace_image_tokens(value: object, replacements: dict[str, str]) -> object:

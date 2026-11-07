@@ -37,6 +37,9 @@ ONEOFF_LABEL = "com.docker.compose.oneoff"
 COMPOSE_SERVICES = frozenset(
     name for name in os.environ.get("VONK_COMPOSE_SERVICES", "").split(",") if name
 )
+# A redeploy that adds a service creates it while the previous janitor, with its
+# older list, still runs; only containers older than this process are retired.
+STARTED = time.time()
 GRACE = 24 * INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
 # "hermes" is a retired service; it stays listed so its old image is reclaimed.
@@ -55,6 +58,7 @@ class Row(TypedDict):
 
     Id: str
     Names: NotRequired[list[str]]
+    Created: NotRequired[int]
     Labels: NotRequired[dict[str, str] | None]
 
 
@@ -499,13 +503,15 @@ class Reconciler:
             journal[identity] = entry
         publish(self.journal, journal)
 
-    def retire(self, rows: list[Row], services: frozenset[str]) -> list[Row]:
+    def retire(
+        self, rows: list[Row], services: frozenset[str], started: float = STARTED
+    ) -> list[Row]:
         """Remove project containers of services the bundle no longer defines.
 
         An upgrade redeploys the new Compose file but never removes the
         containers of a service it dropped. Only this project's containers, only
-        a service named by its Compose label and absent from `services`, never a
-        one-off; the volumes stay.
+        a service named by its Compose label and absent from `services`, created before
+        this process started, never a one-off; the volumes stay.
         """
         kept = []
         for row in rows:
@@ -516,6 +522,7 @@ class Reconciler:
                 or service is None
                 or service in services
                 or labels.get(ONEOFF_LABEL) == "True"
+                or row.get("Created", started) >= started
             ):
                 kept.append(row)
                 continue
@@ -528,7 +535,10 @@ class Reconciler:
                 # Docker answers 304 for an already stopped container.
                 if "304" not in str(error):
                     raise
-            self.docker.request("DELETE", f"/containers/{identity}?v=false")
+            try:
+                self.docker.request("DELETE", f"/containers/{identity}?v=false")
+            except DockerNotFound:
+                pass  # Gone already: Compose or an operator removed it first.
             log(Reason.RETIRED, service=service, container=row.get("Names"))
         return kept
 
