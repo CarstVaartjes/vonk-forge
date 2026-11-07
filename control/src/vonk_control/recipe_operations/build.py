@@ -52,7 +52,7 @@ from ..models import (
     Job,
     RecipeBuild,
 )
-from ..owner_liveness import live_build_job
+from ..owner_liveness import OwnerKind, issued_for, live_build_job
 from ..prebuilt_images import policy_prebuilt_reference
 from ..recipe_build_cancellation import (
     RecipeBuildIntent,
@@ -290,7 +290,7 @@ class BuildMixin:
             cancelling = session.scalar(
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                    Job.owner_id == plan.build_id,
+                    issued_for(OwnerKind.RECIPE_BUILD, plan.build_id),
                     Job.state.in_(job_states.LIVE),
                     _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
                 )
@@ -581,7 +581,7 @@ class BuildMixin:
             .where(
                 Job.kind == WireAgentOperation.RECIPE_BUILD.value,
                 Job.state == LifecycleState.SUCCEEDED.value,
-                Job.owner_id == build_id,
+                issued_for(OwnerKind.RECIPE_BUILD, build_id),
                 Job.payload["plan_digest"].as_string() == build_input_sha256,
             )
             .order_by(Job.updated_at.desc())

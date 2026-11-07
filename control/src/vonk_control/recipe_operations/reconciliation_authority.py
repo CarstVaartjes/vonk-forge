@@ -45,6 +45,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
+from ..owner_liveness import OwnerKind
 from ..recipe_action_plans import (
     UninstallPlan,
 )
@@ -197,7 +198,7 @@ class ReconciliationAuthorityMixin:
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_INSTALL.value,
                     Job.state == LifecycleState.SUCCEEDED.value,
-                    Job.owner_kind == "installation",
+                    Job.owner_kind == OwnerKind.INSTALLATION,
                     Job.owner_id == installation.id,
                     Job.payload["plan_digest"].as_string() == installation.plan_digest,
                 )
@@ -207,7 +208,7 @@ class ReconciliationAuthorityMixin:
             session.scalars(
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_RECONCILE.value,
-                    Job.owner_kind == "installation",
+                    Job.owner_kind == OwnerKind.INSTALLATION,
                     Job.owner_id == installation.id,
                 )
             )
@@ -223,7 +224,7 @@ class ReconciliationAuthorityMixin:
                             LifecycleState.BACKOFF,
                         )
                     ),
-                    Job.owner_kind == "installation",
+                    Job.owner_kind == OwnerKind.INSTALLATION,
                     Job.owner_id == installation.id,
                     Job.kind.in_(
                         (
@@ -475,7 +476,7 @@ class ReconciliationAuthorityMixin:
                     LifecycleState.BACKOFF,
                 )
             ),
-            Job.owner_kind == "installation",
+            Job.owner_kind == OwnerKind.INSTALLATION,
             Job.owner_id == installation.id,
             Job.kind.in_(
                 (

@@ -477,6 +477,12 @@ _ARMS: dict[OwnerKind, Callable[[Session, OwnerRef, datetime | None], Owner]] = 
 }
 
 
+def issued_for(owner_kind: OwnerKind, owner_id: str) -> ColumnElement[bool]:
+    """The Jobs issued for this owner: an indexed lookup on the owner columns."""
+
+    return (Job.owner_kind == owner_kind.value) & (Job.owner_id == owner_id)
+
+
 def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> bool:
     """Whether a not-yet-ended operation was issued for, or records, this owner.
 
