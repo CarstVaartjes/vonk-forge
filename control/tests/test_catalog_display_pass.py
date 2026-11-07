@@ -222,33 +222,45 @@ def test_a_bad_display_is_that_entrys_problem_and_the_rest_still_apply(
 
     snapshot = world.reader.list()
 
-    assert len(snapshot.problems) == 1
-    assert snapshot.problems[0].detail.startswith("catalog model display is invalid")
+    # A display note: the Model still applies, nothing is skipped, and the
+    # snapshot stays complete (so retraction is not paused).
+    assert snapshot.problems == ()
+    assert len(snapshot.display_notes) == 1
+    assert snapshot.display_notes[0].detail.startswith(
+        "catalog model display is invalid"
+    )
     assert len(snapshot.catalog_entities) == 1
     assert snapshot.catalog_entities[0].display is None
     result = world.sync()
-    assert result.skipped_count == 1
+    assert result.skipped_count == 0
+    assert len(result.problems) == 1
     assert world.library_recipe().identity.title == "Applied despite its neighbour"
     assert world.library_model().model_display is not None
 
 
+@pytest.mark.parametrize("breakage", ["foreign", "capability"])
 def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
-    world: World,
+    world: World, breakage: str
 ) -> None:
     index = copy.deepcopy(world.index)
     shown = copy.deepcopy(index["catalog_entities"][0]["display"])
-    # A display this contract cannot read (here: one naming another document).
-    index["catalog_entities"][0]["display"]["identity"]["slug"] = "another-model"
+    broken = index["catalog_entities"][0]["display"]
+    if breakage == "foreign":
+        broken["identity"]["slug"] = "another-model"
+    else:
+        # A capability name outside the closed vocabulary's pattern.
+        broken["capabilities"] = ["Not_A_Name"]
     world.release.publish(index, world.packages)
 
     first = world.reader.list()
-    world.sync()
+    result = world.sync()
 
-    assert len(first.problems) == 1
-    assert first.problems[0].detail.startswith("catalog model display is invalid")
+    assert first.problems == ()
+    assert len(first.display_notes) == 1
+    assert first.display_notes[0].detail.startswith("catalog model display is invalid")
     assert first.catalog_entities[0].display is None
-    model = world.library_model()
-    assert model.model_display is None
+    assert result.skipped_count == 0
+    assert world.library_model().model_display is None
     assert world.documents()["model"]
 
     index["catalog_entities"][0]["display"] = shown
@@ -256,7 +268,21 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     second = world.reader.list()
     world.sync()
 
-    assert second.problems == ()
+    assert second.display_notes == ()
+    assert world.library_model().model_display is not None
+
+
+def test_a_display_that_becomes_unreadable_leaves_the_shown_one_in_place(
+    world: World,
+) -> None:
+    world.sync()
+    index = copy.deepcopy(world.index)
+    index["catalog_entities"][0]["display"]["capabilities"] = ["Not_A_Name"]
+    world.release.publish(index, world.packages)
+
+    result = world.sync()
+
+    assert result.skipped_count == 0
     assert world.library_model().model_display is not None
 
 
@@ -325,7 +351,7 @@ def test_a_persisted_snapshot_without_display_is_problems_only_until_the_next_fe
 
     assert snapshot.items == ()
     assert [entry.display for entry in snapshot.catalog_entities] == [None]
-    assert len(snapshot.problems) == 2
+    assert len(snapshot.problems) == 1 and len(snapshot.display_notes) == 1
     assert result.withdrawn_count == 0
     assert world.revisions() == before
     assert world.documents() == texts
@@ -503,8 +529,11 @@ def test_every_invalid_display_vector_is_a_per_entry_problem_with_the_named_erro
     assert snapshot.items == ()
     # A Model survives an unreadable display (without it); a Recipe does not.
     assert (len(snapshot.catalog_entities) == 1) == (kind == "model")
-    assert len(snapshot.problems) == 1
-    assert "display is invalid" in snapshot.problems[0].detail
+    # A Model's unreadable display is a note; a Recipe's is a skipped document.
+    notes = snapshot.display_notes if kind == "model" else snapshot.problems
+    assert len(snapshot.problems) == (kind != "model")
+    assert len(notes) == 1
+    assert "display is invalid" in notes[0].detail
     client.close()
 
 

@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay, read_model
+from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay
+from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
 if TYPE_CHECKING:
@@ -105,12 +106,8 @@ class CatalogModelEntry:
 
     document: dict
     display: ModelDisplay | None
-
-    @property
-    def key(self) -> tuple[str, str]:
-        """(publisher, slug) of the document, whatever its display."""
-        identity = read_model(self.document).identity
-        return identity.publisher, identity.slug
+    #: From the validated document, so retraction never depends on the display.
+    identity: ModelIdentity
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +118,11 @@ class RecipeLibrarySnapshot:
     catalog_entities: tuple[CatalogModelEntry, ...] = ()
     # Index documents skipped because they could not be read, each a sync problem.
     problems: tuple[ManagedCatalogSyncProblem, ...] = ()
+    # Displays this Controller could not read: the document still applies. A
+    # note is reported but is not a skipped document, does not make the snapshot
+    # incomplete and does not pause retraction. A display already stored stays
+    # shown until a readable one arrives.
+    display_notes: tuple[ManagedCatalogSyncProblem, ...] = ()
     # The library release version (its contract version) and when its
     # recipes last changed.
     version: str | None = None

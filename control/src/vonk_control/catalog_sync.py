@@ -684,6 +684,8 @@ class ManagedRecipeCatalogSyncService:
             )
             if not self._progress(run_id, result):
                 return None
+        # An unreadable display is a note, not a skipped document.
+        result.problems.extend(snapshot.display_notes[:_MAX_RESULT_ITEMS])
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
@@ -831,7 +833,11 @@ class ManagedRecipeCatalogSyncService:
                     for item in snapshot.items
                 ]
                 + [
-                    (RunSwitchReasonScopeName.MODEL, *entry.key)
+                    (
+                        RunSwitchReasonScopeName.MODEL,
+                        entry.identity.publisher,
+                        entry.identity.slug,
+                    )
                     for entry in snapshot.catalog_entities
                 ]
             )

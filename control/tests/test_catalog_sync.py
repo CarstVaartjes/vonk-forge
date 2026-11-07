@@ -254,7 +254,9 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
         catalog_entities=(
             *reader.snapshot.catalog_entities,
             CatalogModelEntry(
-                {"invalid": True}, reader.snapshot.catalog_entities[0].display
+                {"invalid": True},
+                reader.snapshot.catalog_entities[0].display,
+                reader.snapshot.catalog_entities[0].identity,
             ),
         ),
     )

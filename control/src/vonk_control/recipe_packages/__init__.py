@@ -662,6 +662,7 @@ class RecipePackageClient:
         # release) is skipped and reported, and the rest of the signed index
         # still applies. Only the index envelope itself is all-or-nothing.
         problems: list[ManagedCatalogSyncProblem] = []
+        display_notes: list[ManagedCatalogSyncProblem] = []
         for entry in raw_entities:
             if not isinstance(entry, Mapping) or not isinstance(
                 entry.get("document"), Mapping
@@ -688,7 +689,7 @@ class RecipePackageClient:
                 )
             except (TypeError, ValueError) as error:
                 model_display = None
-                problems.append(
+                display_notes.append(
                     _index_problem(
                         None, "catalog model display is invalid", entry, error
                     )
@@ -708,7 +709,9 @@ class RecipePackageClient:
             identities.add(identity)
             catalog_entities.append(
                 CatalogModelEntry(
-                    document=dict(entry["document"]), display=model_display
+                    document=dict(entry["document"]),
+                    display=model_display,
+                    identity=model.identity,
                 )
             )
         packages: dict[str, RecipePackageEntry] = {}
@@ -888,6 +891,7 @@ class RecipePackageClient:
             updated_at=updated_at,
             catalog_entities=tuple(catalog_entities),
             problems=tuple(problems),
+            display_notes=tuple(display_notes),
         ), packages
 
     def _promote_candidate(self) -> None:
