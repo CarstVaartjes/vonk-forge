@@ -1854,3 +1854,115 @@ def test_every_image_build_on_an_x86_hosted_runner_first_frees_the_runner_disk()
             ):
                 missing.append(f"{path.name}:{name}")
     assert missing == []
+
+
+LITELLM_DOCKERFILE = "deploy/compose/litellm/Dockerfile"
+LITELLM_VERIFY = "scripts/verify-litellm-base-signature"
+
+
+def _builds_litellm(step: dict, matrix: dict) -> bool:
+    if not str(step.get("uses", "")).startswith("docker/build-push-action"):
+        return False
+    file = str(step.get("with", {}).get("file", ""))
+    if file.endswith(LITELLM_DOCKERFILE):
+        return True
+    if "matrix." not in file:
+        return False
+    includes = matrix.get("include") or []
+    return any(entry.get("file") == LITELLM_DOCKERFILE for entry in includes)
+
+
+def test_every_litellm_build_verifies_the_locked_base_signature_first() -> None:
+    """Fail closed at the security edge: any job that builds the LiteLLM
+    Dockerfile (directly or through a matrix) must run the signature check in
+    an earlier step that cannot be skipped or ignored."""
+    sites: set[str] = set()
+    for path in sorted((ROOT / ".github/workflows").glob("*.yml")):
+        document = yaml.safe_load(path.read_text())
+        for name, body in (document.get("jobs") or {}).items():
+            steps = body.get("steps") or []
+            matrix = (body.get("strategy") or {}).get("matrix") or {}
+            for index, step in enumerate(steps):
+                if not _builds_litellm(step, matrix):
+                    continue
+                sites.add(f"{path.name}:{name}")
+                verifies = [
+                    earlier
+                    for earlier in steps[:index]
+                    if LITELLM_VERIFY in str(earlier.get("run", ""))
+                    and not earlier.get("continue-on-error")
+                    and earlier.get("if") in (None, "matrix.role == 'litellm'")
+                ]
+                assert verifies, f"{path.name}:{name} builds LiteLLM unverified"
+                installs = [
+                    earlier
+                    for earlier in steps[:index]
+                    if str(earlier.get("uses", "")).startswith(
+                        "sigstore/cosign-installer@"
+                    )
+                ]
+                assert installs, f"{path.name}:{name} does not install cosign"
+    assert "ci.yml:nas-install" in sites
+
+
+def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    (root / "scripts").mkdir(parents=True)
+    (root / "deploy/compose/trust").mkdir(parents=True)
+    for relative in (
+        "scripts/verify-litellm-base-signature",
+        "scripts/retry-dependency-fetch",
+        "scripts/retry_dependency_fetch.py",
+        "deploy/compose/litellm/Dockerfile",
+        "deploy/compose/trust/litellm-cosign.pub",
+        "deploy/compose/images.lock.json",
+    ):
+        destination = root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative).read_bytes())
+        destination.chmod((ROOT / relative).stat().st_mode)
+    lock_path = root / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    called = tmp_path / "cosign-called"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_executable(bin_dir / "cosign", f'#!/bin/sh\necho "$@" >> {called}\n')
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "LANG": "C.UTF-8"}
+    script = root / "scripts/verify-litellm-base-signature"
+
+    # A reference without a digest is refused and cosign never runs.
+    lock["build_bases"]["litellm"] = "ghcr.io/berriai/litellm:v1.103.0"
+    lock_path.write_text(json.dumps(lock))
+    refused = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
+    assert refused.returncode != 0
+    assert "not digest-pinned" in refused.stderr
+    assert not called.exists()
+
+    # A Dockerfile that drifts from a valid lock is refused before cosign.
+    lock["build_bases"]["litellm"] = (
+        "ghcr.io/berriai/litellm:v1.103.0@sha256:" + "1" * 64
+    )
+    lock_path.write_text(json.dumps(lock))
+    drifted = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
+    assert drifted.returncode != 0
+    assert "differs from locked" in drifted.stderr
+    assert not called.exists()
+
+    # With the lock matching the Dockerfile, cosign is called with the key.
+    upstream = re.search(
+        r"(?m)^FROM (\S+) AS upstream",
+        (root / "deploy/compose/litellm/Dockerfile").read_text(),
+    )
+    assert upstream is not None
+    reference = upstream.group(1)
+    lock["build_bases"]["litellm"] = reference
+    lock_path.write_text(json.dumps(lock))
+    accepted = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert called.read_text().strip().endswith(reference)

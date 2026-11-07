@@ -219,6 +219,34 @@ def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> N
     assert f"{name} image uses a floating tag" in " ".join(_errors(result))
 
 
+@pytest.mark.parametrize("target", ("lock", "dockerfile"))
+def test_litellm_dockerfile_must_match_locked_digest(
+    tmp_path: Path, target: str
+) -> None:
+    repository = _copy(tmp_path)
+    lock_path = repository / "deploy/compose/images.lock.json"
+    lock = json.loads(lock_path.read_text())
+    other = "sha256:" + "1" * 64
+    locked = lock["build_bases"]["litellm"]
+    assert _errors(_run(repository)) == []
+    if target == "lock":
+        lock["build_bases"]["litellm"] = locked.split("@")[0] + "@" + other
+        lock_path.write_text(json.dumps(lock))
+    else:
+        dockerfile = repository / "deploy/compose/litellm/Dockerfile"
+        text = dockerfile.read_text()
+        # Drift only the last (runtime) FROM line.
+        head, _, tail = text.rpartition(locked)
+        dockerfile.write_text(head + locked.split("@")[0] + "@" + other + tail)
+
+    result = _run(repository)
+
+    assert result.returncode != 0
+    assert "LiteLLM Dockerfile FROM lines are not exactly the locked" in " ".join(
+        _errors(result)
+    )
+
+
 def test_verifier_rejects_protocol_version_drift(tmp_path: Path) -> None:
     repository = _copy(tmp_path)
     project = repository / "agent_protocol/pyproject.toml"

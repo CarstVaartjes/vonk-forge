@@ -890,6 +890,8 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             "rust/crates/vonk-agent-protocol/src/generated.rs",
             "src/cluster_profiles/cli_states_generated.py",
             "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
+            # External CLI subcommands, not contract words.
+            "scripts/retry_dependency_fetch.py",
         }
         or path.startswith(PYTHON_EXCLUDED_PREFIXES)
     ):
