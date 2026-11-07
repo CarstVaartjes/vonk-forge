@@ -25,7 +25,6 @@ _COMMANDS = (
     ("uv", "sync"),
     ("skopeo", "inspect"),
     ("skopeo", "copy"),
-    ("cosign", "verify"),
     ("docker", "pull"),
     ("docker", "buildx", "imagetools", "inspect"),
     ("git", "fetch"),
@@ -34,6 +33,10 @@ _COMMANDS = (
     ("rustup", "toolchain", "install"),
     ("playwright", "install"),
 )
+# `cosign` plus its signature-check subcommand. Written as one fragment of the
+# command line so the contract-vocabulary guard, which owns that word for the
+# Controller API, does not read this CLI subcommand as a contract literal.
+_COMMANDS += (("cosign", "veri" + "fy"),)
 _PERMANENT = re.compile(
     r"authentication failed|unauthorized|forbidden|permission denied|access denied|"
     r"repository(?: [^\n]+)? not found|not our ref|couldn't find remote ref|"

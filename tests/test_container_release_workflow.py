@@ -1933,7 +1933,9 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
     # A reference without a digest is refused and cosign never runs.
     lock["build_bases"]["litellm"] = "ghcr.io/berriai/litellm:v1.103.0"
     lock_path.write_text(json.dumps(lock))
-    refused = subprocess.run([script], capture_output=True, text=True, env=env)
+    refused = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
     assert refused.returncode != 0
     assert "not digest-pinned" in refused.stderr
     assert not called.exists()
@@ -1943,7 +1945,9 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
         "ghcr.io/berriai/litellm:v1.103.0@sha256:" + "1" * 64
     )
     lock_path.write_text(json.dumps(lock))
-    drifted = subprocess.run([script], capture_output=True, text=True, env=env)
+    drifted = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
     assert drifted.returncode != 0
     assert "differs from locked" in drifted.stderr
     assert not called.exists()
@@ -1955,6 +1959,8 @@ def test_litellm_signature_script_refuses_an_unpinned_reference(tmp_path: Path) 
     ).group(1)
     lock["build_bases"]["litellm"] = reference
     lock_path.write_text(json.dumps(lock))
-    accepted = subprocess.run([script], capture_output=True, text=True, env=env)
+    accepted = subprocess.run(
+        [script], capture_output=True, text=True, env=env, check=False
+    )
     assert accepted.returncode == 0, accepted.stderr
     assert called.read_text().strip().endswith(reference)
