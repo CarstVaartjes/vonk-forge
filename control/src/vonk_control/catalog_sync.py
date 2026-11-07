@@ -684,8 +684,6 @@ class ManagedRecipeCatalogSyncService:
             )
             if not self._progress(run_id, result):
                 return None
-        # An unreadable display is a note, not a skipped document.
-        result.problems.extend(snapshot.display_notes[:_MAX_RESULT_ITEMS])
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
@@ -900,6 +898,10 @@ class ManagedRecipeCatalogSyncService:
         result.state = (
             CatalogSyncState.PARTIAL if result.problems else CatalogSyncState.CURRENT
         )
+        # An unreadable display is a note, decided after the state: it neither
+        # makes the sync partial nor costs the unchanged-tick fast path.
+        room = max(0, _MAX_RESULT_ITEMS - len(result.problems))
+        result.problems.extend(snapshot.display_notes[:room])
         return result
 
     def _store_source_bundle(self, item: RecipeLibraryItem, actor: str) -> None:
