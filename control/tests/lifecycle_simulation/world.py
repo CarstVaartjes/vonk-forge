@@ -107,6 +107,8 @@ class World:
     engine: Engine | None = None
     #: What a standalone install of the whole fleet is previewed from.
     install_source: tuple[str, str] | None = None
+    #: Recipes whose stored revisions stopped parsing (``make_unreadable``).
+    unreadable: set[str] = field(default_factory=set)
     #: The route publisher each Controller process builds; the current one is
     #: ``publisher``, so a test can read its generations or make it fail.
     publisher_type: Callable[[], ConcurrentPublisher] = ConcurrentPublisher
@@ -233,6 +235,8 @@ class World:
         """The contract moved on: ``recipe``'s stored revisions no longer parse,
         and (with ``successor``) the catalog publishes one the current contract
         accepts."""
+
+        self.unreadable.add(recipe)
 
         with self.sessions.begin() as session:
             stored = session.execute(

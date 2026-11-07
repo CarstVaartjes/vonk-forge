@@ -176,6 +176,8 @@ def _standalone_install(sim: Simulation, step: Step) -> None:
     Sparks supersedes whatever Start is still queued and unclaimed on them."""
 
     assert sim.world.install_source is not None
+    if PAIR in sim.world.unreadable:
+        return  # an install of a recipe nobody can read is not a request to make
     mapping_id, build_id = sim.world.install_source
     lifecycle = sim.world.controller.lifecycle
     plan = lifecycle.preview_install(mapping_id, build_id)
