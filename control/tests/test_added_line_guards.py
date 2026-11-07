@@ -3843,3 +3843,43 @@ def test_a_page_count_ceiling_on_a_fetch_loop_is_flagged() -> None:
     assert not check_source(path, _PAGE_CEILINGS, {17}, modes=("item-counts",))
     # Old lines stay quiet.
     assert not check_source(path, _PAGE_CEILINGS, {1, 3}, modes=("item-counts",))
+
+
+_CLOSURE_PATH = "control/src/vonk_control/example.py"
+_CLOSURE = ("fixture-closures",)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "required = {request.fixture, *request.input_slots.values()}\n",
+        "paths.add(check.request.fixture)\n",
+        'fixture = getattr(request, "fixture", None)\n',
+        'slots = getattr(request, "input_slots", {})\n',
+        "paths.update(check.request.input_slots.values())\n",
+    ],
+)
+def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
+    assert check_source(_CLOSURE_PATH, source, {1}, modes=_CLOSURE)
+    assert check_source(
+        "scripts/example", "#!/usr/bin/env python3\n" + source, {2}, modes=_CLOSURE
+    )
+    assert not check_source(_CLOSURE_PATH, source, set(), modes=_CLOSURE)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # The check owns its closure.
+        (_CLOSURE_PATH, "paths = set(check.fixture_paths())\n"),
+        # A pytest fixture and an unrelated attribute are not a closure.
+        (_CLOSURE_PATH, "@pytest.fixture\ndef value(): ...\n"),
+        (_CLOSURE_PATH, "name = options.fixture\n"),
+        # Building a request names its fields; reading a closure out of one is the hit.
+        (_CLOSURE_PATH, 'request = Job(fixture="a", input_slots={})\n'),
+        # Tests may inspect the request they built.
+        ("control/tests/test_example.py", "assert request.input_slots == {}\n"),
+    ],
+)
+def test_fixture_closure_guard_leaves_other_lines_alone(path: str, source: str) -> None:
+    assert not check_source(path, source, {1, 2}, modes=_CLOSURE)

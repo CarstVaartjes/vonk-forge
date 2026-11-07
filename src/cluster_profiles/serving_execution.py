@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from .cli_states import ENDED_STATES, SUCCEEDED
 from .control_transport import open_https
+from .serving_audio import AudioCheckError, assert_speech, multipart_body
 from .serving_request import ArgumentValue, Json, bounded_chat_check
 
 if TYPE_CHECKING:
@@ -124,6 +125,19 @@ def evaluate_http_response(
     ):
         raise ServingObservationUnknown("serving check assertions are unavailable")
     assertions = list(assertions)
+    if kind == "openai.speech":
+        # The answer is audio bytes, not JSON.
+        if "speech.audio" not in assertions:
+            raise ServingObservationUnknown("speech assertion is unavailable")
+        try:
+            audio = assert_speech(observation.headers, observation.body)
+        except AudioCheckError as error:
+            raise ServingExecutionError(f"invalid speech response: {error}") from error
+        return {
+            "response_shape": "audio.speech",
+            "audio_seconds": round(audio.seconds, 3),
+            "sample_rate": audio.sample_rate,
+        }
     response = _json_body(observation)
     if kind == "openai.health":
         if "endpoint.healthy" not in assertions:
@@ -153,6 +167,13 @@ def evaluate_http_response(
             "response_shape": "structured_decision",
             "questions": len(observed.answers),
         }
+    if kind == "openai.transcription":
+        text = response.get("text")
+        if "transcription.nonempty" not in assertions:
+            raise ServingObservationUnknown("transcription assertion is unavailable")
+        if not isinstance(text, str) or not text.strip():
+            raise ServingExecutionError("transcription response is empty")
+        return {"response_shape": "audio.transcription", "characters": len(text)}
     if kind == "openai.embedding":
         data = response.get("data")
         if "embedding.nonempty" in assertions and (
@@ -246,6 +267,32 @@ def evaluate_job_result(
     }
 
 
+def _multipart_request(
+    request: object,
+    model_alias: str | None,
+    fixtures: Mapping[str, bytes],
+) -> tuple[bytes, str]:
+    """The declared form fields plus the staged fixture, encoded once."""
+
+    from pydantic import ValidationError
+    from vonk_forge_contracts.recipe import RecipeMultipartServingRequest
+
+    try:
+        declared = RecipeMultipartServingRequest.model_validate(request)
+        return multipart_body(
+            {
+                name: str(_substitute_alias(value, model_alias))
+                for name, value in declared.fields.items()
+            },
+            declared.file.field,
+            declared.file.media_type,
+            declared.file.fixture,
+            fixtures,
+        )
+    except (ValidationError, AudioCheckError) as error:
+        raise ServingExecutionError(f"serving multipart request: {error}") from error
+
+
 def execute_http_check(
     base_url: str,
     check: Mapping[str, Json],
@@ -254,6 +301,7 @@ def execute_http_check(
     model_alias: str | None = None,
     chat_api: ChatApi | None = None,
     argument_value: ArgumentValue | None = None,
+    fixtures: Mapping[str, bytes] | None = None,
     opener: Callable[..., Any] = open_https,
 ) -> dict[str, object]:
     """Issue the declared request and evaluate its actual response.
@@ -261,6 +309,7 @@ def execute_http_check(
     ``chat_api`` is the recipe's published chat facts (``argument_value`` reads its
     runtime arguments): a chat check is sent as
     ``bounded_chat_check`` fits it, and evaluated against what was sent.
+    ``fixtures`` are the package files a multipart check stages (its audio file).
     """
 
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -272,17 +321,21 @@ def execute_http_check(
     path = request.get("path")
     if method not in {"GET", "POST"} or not isinstance(path, str):
         raise ServingExecutionError("serving HTTP request is invalid")
-    payload = _substitute_alias(request.get("body"), model_alias)
-    data = (
-        json.dumps(payload, separators=(",", ":")).encode()
-        if payload is not None
-        else None
-    )
+    if request.get("transport") == "http-multipart":
+        data, content_type = _multipart_request(request, model_alias, fixtures or {})
+    else:
+        payload = _substitute_alias(request.get("body"), model_alias)
+        data = (
+            json.dumps(payload, separators=(",", ":")).encode()
+            if payload is not None
+            else None
+        )
+        content_type = "application/json"
     http_request = urllib.request.Request(
         base_url.rstrip("/") + path,
         data=data,
         method=str(method),
-        headers={"Content-Type": "application/json"} if data is not None else {},
+        headers={"Content-Type": content_type} if data is not None else {},
     )
 
     def read_bounded(response: Any) -> bytes:
