@@ -21,16 +21,14 @@ from __future__ import annotations
 import base64
 import dataclasses
 import hashlib
-import inspect
 import json
 import os
 import sys
 import tempfile
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast, get_args
+from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import CatalogSyncCode
 from vonk_control.auth import TokenCodec
@@ -39,7 +37,11 @@ from vonk_control.catalog_sync import (
     CatalogSyncError,
     CatalogSyncView,
     ManagedRecipeCatalogSyncService,
-    SyncTrigger,
+)
+from vonk_control.catalog_sync_contract import (
+    CatalogSyncTrigger,
+    ManagedCatalogSyncRequest,
+    reviewed_catalog_content,
 )
 from vonk_control.db import build_engine, session_factory
 from vonk_control.recipe_packages import RecipePackageClient, load_recipe_package
@@ -87,15 +89,18 @@ class FixtureReader:
     """
 
     def __init__(self, index: dict[str, Any], archives: dict[str, Path]) -> None:
-        # The index parser is the only one the previous release ships. It reads
-        # no client state, so it runs without a client, whose construction is
-        # release-download wiring this program has no use for.
-        parse = cast(Any, RecipePackageClient)._parse_index
-        snapshot, _packages = parse(
-            None,
-            json.dumps(index).encode("utf-8"),
-            publication_commit=str(index["source_commit"]),
-        )
+        # The release reader's index parser is the only one the previous
+        # release ships. Its client does no I/O until asked to list a release;
+        # a private cache root keeps it away from the Controller's own cache.
+        with tempfile.TemporaryDirectory() as cache_root:
+            client = RecipePackageClient(cache_root=Path(cache_root))
+            try:
+                snapshot, _packages = client._parse_index(
+                    json.dumps(index).encode("utf-8"),
+                    publication_commit=str(index["source_commit"]),
+                )
+            finally:
+                client.close()
         # The Controller skips an entry it cannot read and still syncs the
         # rest; a canary it skipped would import nothing, so refuse loudly.
         if snapshot.problems or len(snapshot.items) != len(index["recipes"]):
@@ -105,9 +110,14 @@ class FixtureReader:
             )
         self.snapshot: RecipeLibrarySnapshot = snapshot
         self._items = {item.uri: item for item in snapshot.items}
-        self._archives = {
-            item.uri: archives[item.package_sha256] for item in snapshot.items
-        }
+        self._archives: dict[str, tuple[str, Path]] = {}
+        for item in snapshot.items:
+            if item.package_sha256 is None:  # the release parser always sets it
+                raise ValueError(f"canary {item.uri} has no package")
+            self._archives[item.uri] = (
+                item.package_sha256,
+                archives[item.package_sha256],
+            )
 
     def list(self) -> RecipeLibrarySnapshot:
         return self.snapshot
@@ -116,9 +126,10 @@ class FixtureReader:
         item = self._items.get(uri)
         if item is None:
             raise KeyError(uri)
+        package_sha256, archive = self._archives[uri]
         return load_recipe_package(
-            self._archives[uri],
-            package_sha256=item.package_sha256,
+            archive,
+            package_sha256=package_sha256,
             publisher=item.publisher,
             slug=item.slug,
             recipe_content_sha256=item.content_sha256,
@@ -134,50 +145,14 @@ def sync_canary_catalog(
     request_key: str,
     snapshot: RecipeLibrarySnapshot,
 ) -> CatalogSyncView:
-    """Use the installed Controller's observed contract, including lane predecessors.
-
-    Only the acceptance harness bridges promoted releases; the production service
-    has one request model. Signature discovery happens before any effect, never
-    by catching TypeError after a possibly executed sync.
-    """
-    parameters = inspect.signature(service.sync).parameters
-    if "request" in parameters:
-        from vonk_control.catalog_sync_contract import (
-            CatalogSyncTrigger,
-            ManagedCatalogSyncRequest,
-            reviewed_catalog_content,
-        )
-
-        return service.sync(
-            ManagedCatalogSyncRequest(
-                request_key=request_key,
-                trigger=CatalogSyncTrigger.MANUAL,
-                actor=SYNC_ACTOR,
-                reviewed_content_sha256=reviewed_catalog_content(snapshot),
-            )
-        )
-    # These calls execute only inside older promoted Controller images. Their
-    # installed signature is authoritative; the immutable FixtureReader serves
-    # exactly the producer snapshot even before review binding was introduced.
-    # Predecessors declare their manual trigger first in the canonical Literal.
-    # Consume that installed vocabulary rather than adding a second spelling.
-    manual_trigger = (
-        SyncTrigger.MANUAL
-        if isinstance(SyncTrigger, type)
-        else get_args(SyncTrigger)[0]
-    )
-    legacy_sync = cast(Callable[..., CatalogSyncView], service.sync)
-    if "reviewed_snapshot" in parameters:
-        return legacy_sync(
+    """A manual sync bound to exactly the canary snapshot this program read."""
+    return service.sync(
+        ManagedCatalogSyncRequest(
             request_key=request_key,
-            trigger=manual_trigger,
+            trigger=CatalogSyncTrigger.MANUAL,
             actor=SYNC_ACTOR,
-            reviewed_snapshot=snapshot,
+            reviewed_content_sha256=reviewed_catalog_content(snapshot),
         )
-    return legacy_sync(
-        request_key=request_key,
-        trigger=manual_trigger,
-        actor=SYNC_ACTOR,
     )
 
 

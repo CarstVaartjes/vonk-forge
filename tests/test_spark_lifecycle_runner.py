@@ -602,14 +602,10 @@ def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None
         program.FixtureReader(_release_index([unreadable]), {})
 
 
-@pytest.mark.parametrize("predecessor", [None, "reviewed", "unreviewed"])
-def test_canary_catalog_path_calls_the_installed_service_contract(
-    tmp_path, predecessor, monkeypatch
-):
+def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     """Catches keyword drift in the executable harness, without a recipe checkout.
 
-    Predecessor facades expose their real historical signatures and forward to
-    today's real service; no stub replaces its acceptance or durable sync path.
+    The real service runs its acceptance and durable sync path; no stub.
     """
     import uuid
     from datetime import UTC, datetime
@@ -619,11 +615,6 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog_service import CatalogService
     from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-    from vonk_control.catalog_sync_contract import (
-        CatalogSyncTrigger,
-        ManagedCatalogSyncRequest,
-        reviewed_catalog_content,
-    )
     from vonk_control.models import Base
 
     specification = importlib.util.spec_from_file_location(
@@ -648,42 +639,7 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
         clock=clock,
     )
 
-    def reviewed(*, request_key, trigger, actor, reviewed_snapshot=None):
-        return service.sync(
-            ManagedCatalogSyncRequest(
-                request_key=request_key,
-                trigger=CatalogSyncTrigger(trigger),
-                actor=actor,
-                reviewed_content_sha256=reviewed_catalog_content(reviewed_snapshot)
-                if reviewed_snapshot is not None
-                else None,
-            )
-        )
-
-    def unreviewed(*, request_key, trigger, actor, expected_commit=None):
-        return service.sync(
-            ManagedCatalogSyncRequest(
-                request_key=request_key,
-                trigger=CatalogSyncTrigger(trigger),
-                actor=actor,
-            )
-        )
-
-    if predecessor is not None:
-        from typing import Literal
-
-        # Promoted Controllers expose a Literal rather than today's enum.
-        monkeypatch.setattr(
-            program,
-            "SyncTrigger",
-            Literal[CatalogSyncTrigger.MANUAL, CatalogSyncTrigger.AUTOMATIC],
-        )
-
-    installed = (
-        service
-        if predecessor is None
-        else SimpleNamespace(sync=reviewed if predecessor == "reviewed" else unreviewed)
-    )
+    installed = service
     request_key = str(uuid.uuid4())
     first = program.sync_canary_catalog(
         installed, request_key=request_key, snapshot=snapshot
