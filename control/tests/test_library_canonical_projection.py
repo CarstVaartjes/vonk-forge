@@ -1615,6 +1615,10 @@ def test_imported_canary_resolves_exactly_while_discovery_index_is_stale(
     class Control:
         @staticmethod
         def request(method, path, payload=None, **kwargs):
+            if path == "/api/catalog/managed-recipes/sync-status":
+                # The lane asks after a failure whether the library withdrew
+                # the fixture: this fixture sync is the newest, nothing was.
+                return 200, {"trigger": "manual", "withdrawn_count": 0}
             calls.append((method, path))
             if method == "GET" and path == "/api/recipe/library":
                 return 200, projection.recipe_library().model_dump(mode="json")
@@ -1776,3 +1780,65 @@ def test_connected_consumers_read_documents_only_from_detail(
     assert any(path.startswith("/api/model/") for path in detail_paths)
     assert any(path.startswith("/api/recipe/") for path in detail_paths)
     engine.dispose()
+
+
+def test_recipe_detail_resolves_an_exact_revision_that_is_no_longer_the_newest(
+    tmp_path: Path,
+) -> None:
+    """A run names its revision by id; that revision stays readable after a
+    newer one becomes the head, while the slug keeps naming the newest."""
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    template = index["recipes"][0]["document"]
+    engine = create_engine(f"sqlite:///{tmp_path / 'revision-selector.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    _insert_canonical_rows(sessions, kind="recipe", template=template, count=1)
+    with sessions.begin() as session:
+        older = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe"
+            )
+        )
+        assert older is not None
+        document = copy.deepcopy(older.document)
+        release = document["release"]
+        assert isinstance(release, dict)
+        release["version"] = "9.9.9"
+        newer = CatalogDocumentRevision(
+            id=str(uuid.uuid4()),
+            document_id=older.document_id,
+            kind="recipe",
+            publisher=older.publisher,
+            slug=older.slug,
+            revision_number=2,
+            schema_version=2,
+            state="active",
+            document=document,
+            content_digest=document_sha256(
+                RecipeDefinition.model_validate(document).model_dump(mode="json")
+            ),
+            projected={},
+            created_by="test",
+            created_at=datetime(2026, 9, 7, tzinfo=UTC),
+        )
+        session.add(newer)
+        session.flush()
+        head = session.scalar(select(CatalogDocumentHead))
+        assert head is not None
+        head.active_revision_id = newer.id
+        older_id, newer_id = older.id, newer.id
+        older_digest, newer_digest = older.content_digest, newer.content_digest
+    projection = LibraryProjection(
+        sessions,
+        clock=lambda: datetime(2026, 10, 7, tzinfo=UTC),
+        cursors=TokenCodec(b"r" * 32).cursor_codec(),
+    )
+
+    def digest(selector: str) -> str:
+        return projection.recipe_detail(selector).identity.content_sha256
+
+    assert digest(older_id) == older_digest
+    assert digest(newer_id) == newer_digest
+    assert digest(f"{older.publisher}/{older.slug}") == newer_digest
+    with pytest.raises(KeyError):
+        projection.recipe_detail("00000000-0000-4000-8000-0000000000ff")

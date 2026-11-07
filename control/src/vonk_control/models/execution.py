@@ -139,6 +139,10 @@ class InstallationNode(Base):
     installed_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+    #: The payload this rank must have materialized (the admitted plan's
+    #: ``required_payload_bytes``), recorded with the row. ``NULL`` is no
+    #: expectation, which is not evidence that the rank is short.
+    required_payload_bytes: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

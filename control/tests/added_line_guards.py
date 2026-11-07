@@ -16,6 +16,7 @@ from . import (
     alias_rules,
     bare_savepoints,
     docker_listings,
+    fixture_closures,
     git_free_test_lines,
     intent_ordinal_writers,
     job_owner_payload,
@@ -112,6 +113,7 @@ MODES = (
     "sync-in-async",
     "git-free-tests",
     "job-owner-payload",
+    "fixture-closures",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2357,6 +2359,11 @@ def check_source(
                 if is_test
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
+        )
+    if python and not is_test and "fixture-closures" in modes:
+        hits.extend(
+            (line, fixture_closures.KIND)
+            for line in fixture_closures.scan_source(source)
         )
     if python and is_test and "clocks" in modes:
         hits.extend(

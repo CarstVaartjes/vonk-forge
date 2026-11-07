@@ -21,6 +21,7 @@ from vonk_control.artifact_job_api import (
     MAX_ARTIFACT_OUTPUT_UPLOAD_BYTES,
 )
 from vonk_control.gateway_route_grants import GatewayInferenceRoute
+from vonk_forge_contracts.api import MAX_AUDIO_FILE_BYTES
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -698,10 +699,11 @@ def _edge_body_bound(site: object, method: str, path: str) -> int | None:
 
 
 _UUID = str(uuid4())
-#: The largest inference body the browser edge must admit: a 180 MB media upload
-#: as a base64 data URI is 240 MB, under 256 MiB (180 is Nemotron-3.5-Transcribe's
-#: VLLM_MAX_AUDIO_CLIP_FILESIZE_MB, from NVIDIA's model card). LiteLLM sets no limit itself.
-_INFERENCE_BODY_BYTES = 256 * 1024 * 1024
+#: The largest inference body the browser edge must admit: the largest audio
+#: upload a recipe's audio_transcription api document may declare (the contract's
+#: constant, 256 MiB). A 180 MB media upload as a base64 data URI is 240 MB, under
+#: it too. LiteLLM sets no limit itself.
+_INFERENCE_BODY_BYTES = MAX_AUDIO_FILE_BYTES
 #: The OpenAI-shaped paths plus the granted native route, which the edge
 #: serves as /v1/systemone and rewrites to GatewayInferenceRoute.SYSTEMONE.
 _INFERENCE_POSTS = (
@@ -710,6 +712,7 @@ _INFERENCE_POSTS = (
     "/v1/responses",
     "/v1/messages",
     "/v1" + GatewayInferenceRoute.SYSTEMONE.value.removeprefix("/vllm"),
+    "/v1/audio/transcriptions",
 )
 #: Each request the Controller bounds, on the edge site that carries it, with the
 #: Controller's own maximum. The large-body paths are proven against the
@@ -799,8 +802,19 @@ def test_every_edge_admits_each_body_the_controller_accepts_and_no_more() -> Non
             two_mib = 2 * 1024 * 1024
             chat_bound = _edge_body_bound(browser, "POST", "/v1/chat/completions")
             assert chat_bound is not None and chat_bound >= two_mib
+            # The transcription bound is exactly the contract's largest upload:
+            # that many bytes pass and one more is refused at the edge.
+            assert (
+                _edge_body_bound(browser, "POST", "/v1/audio/transcriptions")
+                == MAX_AUDIO_FILE_BYTES
+            )
             for method, path in (
                 ("POST", "/v1/embeddings"),
+                # Speech takes JSON text and the model list takes none: both
+                # keep the document bound; only transcription uploads are large.
+                ("POST", "/v1/audio/speech"),
+                ("GET", "/v1/models"),
+                ("GET", "/v1/audio/transcriptions"),
                 ("POST", "/v1/chat/completions/extra"),
                 ("GET", "/v1/chat/completions"),
                 ("POST", "/litellm/chat/completions"),

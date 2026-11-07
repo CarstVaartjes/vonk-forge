@@ -254,7 +254,9 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
         catalog_entities=(
             *reader.snapshot.catalog_entities,
             CatalogModelEntry(
-                {"invalid": True}, reader.snapshot.catalog_entities[0].display
+                {"invalid": True},
+                reader.snapshot.catalog_entities[0].display,
+                reader.snapshot.catalog_entities[0].identity,
             ),
         ),
     )
@@ -687,6 +689,26 @@ def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> No
     sync = _sync(sessions, service, reader)
     first = sync.automatic()
     repeated = sync.automatic()
+    assert repeated.id == first.id
+    assert reader.fetches == [reader.snapshot.items[0].uri]
+
+
+def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    note = ManagedCatalogSyncProblem(
+        code="document_incompatible", detail="catalog model display is invalid"
+    )
+    reader.snapshot = replace(reader.snapshot, display_notes=(note,))
+    sync = _sync(sessions, service, reader)
+
+    first = sync.automatic()
+    repeated = sync.automatic()
+
+    assert first.state == "current"
+    assert first.skipped_count == 0
+    assert [problem.detail for problem in first.problems] == [note.detail]
     assert repeated.id == first.id
     assert reader.fetches == [reader.snapshot.items[0].uri]
 

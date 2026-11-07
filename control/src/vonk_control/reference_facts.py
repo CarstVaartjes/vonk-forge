@@ -1,9 +1,11 @@
-"""The two stored reference facts a removal review asks by target.
+"""The stored reference facts a removal review (and the presence check) asks by target.
 
 * Which saved profiles name a recipe: ``fleet_profile_recipes``, derived from a
   profile's assignments in the flush that saves them.
 * Which installations use a model set: ``recipe_installations.
   model_artifact_set_sha256``, written with the plan at install admission.
+* How many payload bytes a rank must have materialized:
+  ``installation_nodes.required_payload_bytes``, written with the rank.
 
 Rows written before these facts existed are filled from their own stored
 documents at Controller startup (``fill_reference_facts``). Readers ask the
@@ -26,6 +28,7 @@ from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .models import (
     FleetProfile,
     FleetProfileRecipe,
+    InstallationNode,
     RecipeInstallation,
 )
 
@@ -114,7 +117,11 @@ def fill_reference_facts(connection: Connection) -> int:
     assignments are damaged is reported and left as it is.
     """
     filled, _unreadable = fill_installation_model_sets(connection)
-    return filled + _fill_profile_recipes(connection)
+    return (
+        filled
+        + _fill_profile_recipes(connection)
+        + fill_installation_payload_bytes(connection)
+    )
 
 
 def plan_model_set(plan: object) -> str | None:
@@ -170,6 +177,50 @@ def fill_installation_model_sets(
         )
         filled += 1
     return filled, tuple(unreadable)
+
+
+def fill_installation_payload_bytes(connection: Connection) -> int:
+    """Record each rank's admitted payload for installations that predate it.
+
+    ``installation_nodes.required_payload_bytes`` is written with the rank at
+    install admission. A rank of an installation that is not uninstalled and has
+    none is filled from its own stored plan; a plan that carries no expectation
+    (or no longer reads) leaves the rank empty, which is no expectation. Returns
+    the ranks filled.
+    """
+    from .recipe_execution_contract import (
+        RecipeExecutionContractError,
+        parse_stored_installation_plan,
+    )
+
+    filled = 0
+    for installation_id, plan in connection.execute(
+        select(RecipeInstallation.id, RecipeInstallation.plan).where(
+            RecipeInstallation.state != InstallationState.UNINSTALLED,
+            RecipeInstallation.id.in_(
+                select(InstallationNode.installation_id).where(
+                    InstallationNode.required_payload_bytes.is_(None)
+                )
+            ),
+        )
+    ).all():
+        try:
+            stored = parse_stored_installation_plan(plan)
+        except RecipeExecutionContractError:
+            continue
+        for node in stored.nodes:
+            if node.required_payload_bytes is None:
+                continue
+            filled += connection.execute(
+                update(InstallationNode)
+                .where(
+                    InstallationNode.installation_id == installation_id,
+                    InstallationNode.node_id == node.node_id,
+                    InstallationNode.required_payload_bytes.is_(None),
+                )
+                .values(required_payload_bytes=node.required_payload_bytes)
+            ).rowcount
+    return filled
 
 
 def _fill_profile_recipes(connection: Connection) -> int:

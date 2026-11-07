@@ -1,6 +1,6 @@
 """Bind native vLLM passthrough to the configured upstream Bearer credential.
 
-LiteLLM 1.103.0's VLLMModelInfo drops api_key and otherwise emits x-api-key.
+LiteLLM 1.106.7's VLLMModelInfo drops api_key and otherwise emits x-api-key.
 vLLM's server authenticates Authorization: Bearer. Keep this correction scoped
 to the passthrough provider; the proxy's client authentication remains unchanged.
 """

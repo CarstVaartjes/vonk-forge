@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+from vonk_control.harnesses.canonical_metadata import CANONICAL_HARNESSES
 from vonk_control.harnesses.common import HarnessCompileError
 from vonk_control.runtime_writable_paths import (
     compile_environment,
@@ -22,6 +23,7 @@ from vonk_control.runtime_writable_paths import (
         "ds4",
         "tensorfold",
         "exllamav3",
+        "pytorch-server",
         "diffusers",
         "comfyui",
         "pytorch-pipeline",
@@ -92,6 +94,7 @@ def test_non_path_recipe_environment_remains_recipe_owned() -> None:
         ("ds4", "ds4", "/metrics"),
         ("tensorfold", "unsupported", None),
         ("exllamav3", "unsupported", None),
+        ("pytorch-server", "unsupported", None),
         ("diffusers", "unsupported", None),
         ("comfyui", "comfyui", "/queue"),
         ("pytorch-pipeline", "unsupported", None),
@@ -116,20 +119,7 @@ def test_recipe_cannot_override_or_repeat_platform_telemetry(value: str) -> None
         compile_environment("vllm", (("VLLM_NO_USAGE_STATS", value),))
 
 
-@pytest.mark.parametrize(
-    "slug",
-    (
-        "vllm",
-        "sglang",
-        "tensorrt-llm",
-        "llama-cpp",
-        "ds4",
-        "tensorfold",
-        "diffusers",
-        "comfyui",
-        "pytorch-pipeline",
-    ),
-)
+@pytest.mark.parametrize("slug", [metadata.slug for metadata in CANONICAL_HARNESSES])
 def test_do_not_track_is_a_platform_default_for_every_engine(slug: str) -> None:
     assert ("DO_NOT_TRACK", "1") in telemetry_contract(slug).environment
     assert dict(effective_environment(slug, ()))["DO_NOT_TRACK"] == "1"

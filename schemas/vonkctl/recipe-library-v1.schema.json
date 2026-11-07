@@ -392,6 +392,175 @@
       "title": "ArtifactLifecycleCode",
       "type": "string"
     },
+    "AudioSpeechApi": {
+      "description": "A route serving ``POST /v1/audio/speech``: text in, audio bytes out.\n\n``voices`` are the values of OpenAI's ``voice`` parameter; the first is the\nroute's health-check voice. ``instructions`` and ``speed`` say whether the\nengine honours those OpenAI parameters. ``max_input_chars`` bounds ``input``.",
+      "properties": {
+        "instructions": {
+          "title": "Instructions",
+          "type": "boolean"
+        },
+        "max_input_chars": {
+          "minimum": 1,
+          "title": "Max Input Chars",
+          "type": "integer"
+        },
+        "mode": {
+          "const": "audio_speech",
+          "title": "Mode",
+          "type": "string"
+        },
+        "response_formats": {
+          "items": {
+            "enum": [
+              "mp3",
+              "opus",
+              "aac",
+              "flac",
+              "wav",
+              "pcm"
+            ],
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Response Formats",
+          "type": "array"
+        },
+        "speed": {
+          "title": "Speed",
+          "type": "boolean"
+        },
+        "voices": {
+          "items": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Voices",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "voices",
+        "response_formats",
+        "instructions",
+        "speed",
+        "max_input_chars"
+      ],
+      "title": "AudioSpeechApi",
+      "type": "object"
+    },
+    "AudioTranscriptionApi": {
+      "description": "A route serving ``POST /v1/audio/transcriptions``: one audio upload in.\n\nThe input is audio by mode, so the block has no modalities or token limits.\n``max_file_bytes`` and ``max_audio_seconds`` are the engine's own upload and\ndecode limits (``null``: the engine states no duration limit); ``languages``\nare the ISO 639-1 values of OpenAI's ``language`` parameter the engine\naccepts. ``prompt`` and ``temperature`` say whether the engine honours those\nOpenAI parameters; no ``timestamp_granularities`` means none are offered.",
+      "properties": {
+        "input_formats": {
+          "items": {
+            "enum": [
+              "flac",
+              "m4a",
+              "mp3",
+              "mp4",
+              "mpeg",
+              "mpga",
+              "ogg",
+              "wav",
+              "webm"
+            ],
+            "type": "string"
+          },
+          "maxItems": 9,
+          "minItems": 1,
+          "title": "Input Formats",
+          "type": "array"
+        },
+        "languages": {
+          "items": {
+            "pattern": "^[a-z]{2}$",
+            "type": "string"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Languages",
+          "type": "array"
+        },
+        "max_audio_seconds": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Max Audio Seconds"
+        },
+        "max_file_bytes": {
+          "maximum": 268435456,
+          "minimum": 1,
+          "title": "Max File Bytes",
+          "type": "integer"
+        },
+        "mode": {
+          "const": "audio_transcription",
+          "title": "Mode",
+          "type": "string"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "boolean"
+        },
+        "response_formats": {
+          "items": {
+            "enum": [
+              "json",
+              "text",
+              "srt",
+              "verbose_json",
+              "vtt",
+              "diarized_json"
+            ],
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Response Formats",
+          "type": "array"
+        },
+        "temperature": {
+          "title": "Temperature",
+          "type": "boolean"
+        },
+        "timestamp_granularities": {
+          "items": {
+            "enum": [
+              "word",
+              "segment"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Timestamp Granularities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "input_formats",
+        "max_file_bytes",
+        "max_audio_seconds",
+        "languages",
+        "response_formats",
+        "prompt",
+        "timestamp_granularities",
+        "temperature"
+      ],
+      "title": "AudioTranscriptionApi",
+      "type": "object"
+    },
     "BlockingOperation": {
       "description": "The operation a wait is behind, so a reader can follow it.",
       "properties": {
@@ -2954,6 +3123,8 @@
         "api": {
           "discriminator": {
             "mapping": {
+              "audio_speech": "#/$defs/AudioSpeechApi",
+              "audio_transcription": "#/$defs/AudioTranscriptionApi",
               "chat": "#/$defs/ChatApi",
               "decision": "#/$defs/DecisionApi"
             },
@@ -2965,6 +3136,12 @@
             },
             {
               "$ref": "#/$defs/DecisionApi"
+            },
+            {
+              "$ref": "#/$defs/AudioTranscriptionApi"
+            },
+            {
+              "$ref": "#/$defs/AudioSpeechApi"
             }
           ],
           "title": "Api"
@@ -3001,6 +3178,8 @@
         "api": {
           "discriminator": {
             "mapping": {
+              "audio_speech": "#/$defs/AudioSpeechApi",
+              "audio_transcription": "#/$defs/AudioTranscriptionApi",
               "chat": "#/$defs/ChatApi",
               "decision": "#/$defs/DecisionApi"
             },
@@ -3012,6 +3191,12 @@
             },
             {
               "$ref": "#/$defs/DecisionApi"
+            },
+            {
+              "$ref": "#/$defs/AudioTranscriptionApi"
+            },
+            {
+              "$ref": "#/$defs/AudioSpeechApi"
             }
           ],
           "title": "Api"
@@ -3844,6 +4029,74 @@
         "reserve_bytes"
       ],
       "title": "RecipeMemoryResources",
+      "type": "object"
+    },
+    "RecipeMultipartFile": {
+      "properties": {
+        "field": {
+          "const": "file",
+          "title": "Field",
+          "type": "string"
+        },
+        "fixture": {
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*))*$",
+          "title": "Fixture",
+          "type": "string"
+        },
+        "media_type": {
+          "const": "audio/wav",
+          "title": "Media Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "fixture",
+        "media_type"
+      ],
+      "title": "RecipeMultipartFile",
+      "type": "object"
+    },
+    "RecipeMultipartServingRequest": {
+      "description": "``POST /v1/audio/transcriptions``: form fields plus one staged audio file.",
+      "properties": {
+        "fields": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "maxProperties": 32,
+          "minProperties": 1,
+          "title": "Fields",
+          "type": "object"
+        },
+        "file": {
+          "$ref": "#/$defs/RecipeMultipartFile"
+        },
+        "method": {
+          "const": "POST",
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "const": "/v1/audio/transcriptions",
+          "title": "Path",
+          "type": "string"
+        },
+        "transport": {
+          "const": "http-multipart",
+          "title": "Transport",
+          "type": "string"
+        }
+      },
+      "required": [
+        "transport",
+        "method",
+        "path",
+        "fields",
+        "file"
+      ],
+      "title": "RecipeMultipartServingRequest",
       "type": "object"
     },
     "RecipeOpenAIInterface": {
@@ -4787,6 +5040,8 @@
               "completion.output-cap",
               "embedding.nonempty",
               "decision.probabilities",
+              "transcription.nonempty",
+              "speech.audio",
               "inference.completed",
               "artifact.output"
             ],
@@ -4806,6 +5061,8 @@
             "openai.completion",
             "openai.embedding",
             "openai.systemone",
+            "openai.transcription",
+            "openai.speech",
             "image-job.output",
             "audio-job.output",
             "video-job.output",
@@ -4826,6 +5083,7 @@
           "discriminator": {
             "mapping": {
               "http": "#/$defs/RecipeHttpServingRequest",
+              "http-multipart": "#/$defs/RecipeMultipartServingRequest",
               "job": "#/$defs/RecipeJobServingRequest"
             },
             "propertyName": "transport"
@@ -4833,6 +5091,9 @@
           "oneOf": [
             {
               "$ref": "#/$defs/RecipeHttpServingRequest"
+            },
+            {
+              "$ref": "#/$defs/RecipeMultipartServingRequest"
             },
             {
               "$ref": "#/$defs/RecipeJobServingRequest"

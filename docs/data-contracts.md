@@ -178,6 +178,7 @@ module defines its own.
 | `control/src/vonk_control/artifact_job_api.py` | declared | 3 | Authenticated controller and mTLS agent routes for artifact recipe jobs. |
 | `control/src/vonk_control/artifact_job_evidence.py` | controller-contract | 1 | The one closed result-evidence contract of an artifact job. |
 | `control/src/vonk_control/artifact_jobs/contracts.py` | declared | 10 | Durable, bounded, content-addressed artifact-producing recipe jobs. |
+| `control/src/vonk_control/artifact_jobs/job_contract.py` | declared | 1 | The compiled job contract of a recipe revision, read before a job exists. |
 | `control/src/vonk_control/artifact_maintenance.py` | declared | 1 | Typed reports of artifact maintenance sweeps. |
 | `control/src/vonk_control/auth_api.py` | declared | 4 | Strict HTTP boundary for durable browser authentication. |
 | `control/src/vonk_control/ca_issuance_contract.py` | controller-contract | 7 | Exact accepted CA issuance binding, authenticated sign/observe request, durable receipt states and typed refusals. |

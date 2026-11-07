@@ -2244,6 +2244,7 @@ def _installed_byte_group(
                 role="entrypoint",
                 state="installed",
                 required_bytes=reservation_bytes,
+                required_payload_bytes=payload_expectation_bytes,
                 installed_bytes=installed_bytes,
                 updated_at=NOW,
             )

@@ -181,16 +181,9 @@ def _validate_package_paths(
     ):
         raise ValueError("build base image digest is not in package inputs")
     for check in recipe.validation.serving.checks:
-        request = check.request
-        fixture = getattr(request, "fixture", None)
-        slots = getattr(request, "input_slots", {})
-        if fixture is not None:
-            required = {fixture, *slots.values()}
-            missing = sorted(required - package_paths)
-            if missing:
-                raise ValueError(
-                    f"job serving package files are missing: {', '.join(missing)}"
-                )
+        missing = sorted(set(check.fixture_paths()) - package_paths)
+        if missing:
+            raise ValueError(f"serving package files are missing: {', '.join(missing)}")
 
 
 class RecipePackageClient:
@@ -662,6 +655,7 @@ class RecipePackageClient:
         # release) is skipped and reported, and the rest of the signed index
         # still applies. Only the index envelope itself is all-or-nothing.
         problems: list[ManagedCatalogSyncProblem] = []
+        display_notes: list[ManagedCatalogSyncProblem] = []
         for entry in raw_entities:
             if not isinstance(entry, Mapping) or not isinstance(
                 entry.get("document"), Mapping
@@ -679,17 +673,20 @@ class RecipePackageClient:
                     )
                 )
                 continue
+            # Display is text for people: an unreadable one (a capability name a
+            # later minor added) costs the display only, never the Model. The
+            # entry is read again on a later sync.
             try:
-                model_display = _entry_display(
+                model_display: ModelDisplay | None = _entry_display(
                     entry, model.identity, read_model_display
                 )
             except (TypeError, ValueError) as error:
-                problems.append(
+                model_display = None
+                display_notes.append(
                     _index_problem(
                         None, "catalog model display is invalid", entry, error
                     )
                 )
-                continue
             digest = entry.get("content_sha256")
             if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
                 problems.append(
@@ -705,7 +702,9 @@ class RecipePackageClient:
             identities.add(identity)
             catalog_entities.append(
                 CatalogModelEntry(
-                    document=dict(entry["document"]), display=model_display
+                    document=dict(entry["document"]),
+                    display=model_display,
+                    identity=model.identity,
                 )
             )
         packages: dict[str, RecipePackageEntry] = {}
@@ -885,6 +884,7 @@ class RecipePackageClient:
             updated_at=updated_at,
             catalog_entities=tuple(catalog_entities),
             problems=tuple(problems),
+            display_notes=tuple(display_notes),
         ), packages
 
     def _promote_candidate(self) -> None:

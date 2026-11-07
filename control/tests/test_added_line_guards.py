@@ -3866,3 +3866,52 @@ def test_the_owner_columns_and_other_payload_keys_are_not_flagged() -> None:
         'owner = job.payload.get("owner_id")\n'
     )
     assert not _job_owner_payload(source, {1, 2, 3})
+
+
+_CLOSURE_PATH = "control/src/vonk_control/example.py"
+_CLOSURE = ("fixture-closures",)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "required = {request.fixture, *request.input_slots.values()}\n",
+        "paths.add(check.request.fixture)\n",
+        'fixture = getattr(request, "fixture", None)\n',
+        'slots = getattr(request, "input_slots", {})\n',
+        "paths.update(check.request.input_slots.values())\n",
+        "paths.add(check.request.file.fixture)\n",
+        'paths.add(f"{check.request.file.fixture}")\n',
+        "job = check.request\npaths.add(job.fixture)\n",
+    ],
+)
+def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_CLOSURE_PATH, source, lines, modes=_CLOSURE)
+    assert check_source(
+        "scripts/example",
+        "#!/usr/bin/env python3\n" + source,
+        {line + 1 for line in lines},
+        modes=_CLOSURE,
+    )
+    assert not check_source(_CLOSURE_PATH, source, set(), modes=_CLOSURE)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # The check owns its closure.
+        (_CLOSURE_PATH, "paths = set(check.fixture_paths())\n"),
+        # A pytest fixture and an unrelated attribute are not a closure.
+        (_CLOSURE_PATH, "@pytest.fixture\ndef value(): ...\n"),
+        (_CLOSURE_PATH, "name = options.fixture\n"),
+        # The executor's own typed request, not a check's.
+        (_CLOSURE_PATH, "name = declared.file.fixture\n"),
+        # Building a request names its fields; reading a closure out of one is the hit.
+        (_CLOSURE_PATH, 'request = Job(fixture="a", input_slots={})\n'),
+        # Tests may inspect the request they built.
+        ("control/tests/test_example.py", "assert request.input_slots == {}\n"),
+    ],
+)
+def test_fixture_closure_guard_leaves_other_lines_alone(path: str, source: str) -> None:
+    assert not check_source(path, source, {1, 2}, modes=_CLOSURE)

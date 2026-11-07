@@ -173,6 +173,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
+      - name: Install Cosign
+        if: matrix.role == 'litellm'
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify the locked LiteLLM base signature
+        if: matrix.role == 'litellm'
+        run: scripts/verify-litellm-base-signature
       - name: Name the dependency layer day
         id: day
         run: echo "value=$(date -u +%F)" >> "$GITHUB_OUTPUT"

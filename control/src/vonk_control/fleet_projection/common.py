@@ -50,10 +50,6 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
-from ..recipe_execution_contract import (
-    RecipeExecutionContractError,
-    parse_stored_installation_plan,
-)
 from ..recipe_update_notice import RecipeUpdateNotice
 from ..strict_json import StrictModel
 from ..telemetry import TelemetrySampleView
@@ -94,29 +90,6 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
         return read_recipe(revision.document)
     except (TypeError, ValueError):
         return None
-
-
-def _installation_payload_expectations(plan: object) -> dict[str, int]:
-    """Per-node materialized payload expectation from the persisted plan.
-
-    ``RecipeInstallation.plan`` is the durable admission record and already
-    carries each node's admitted payload, so the presence byte check reads the
-    expectation from there instead of duplicating it into a column.  A plan
-    admitted before the expectation existed, or one that no longer reads as
-    the current contract, yields no expectation: an absent expectation is not
-    evidence that an installation is short, and this projection must not turn
-    a display annotation into a fleet-wide read failure.
-    """
-
-    try:
-        stored = parse_stored_installation_plan(plan)
-    except RecipeExecutionContractError:
-        return {}
-    return {
-        node.node_id: node.required_payload_bytes
-        for node in stored.nodes
-        if node.required_payload_bytes is not None
-    }
 
 
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]
