@@ -2305,6 +2305,8 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     assert result.returncode == 0, result.stderr
 
 
+# Assembles and signs a whole release publication through the real script.
+@pytest.mark.slow(60)
 @pytest.mark.parametrize(
     "image_tag", (f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40)
 )
