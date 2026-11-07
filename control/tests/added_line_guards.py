@@ -1907,9 +1907,12 @@ def check_source(
     ):
         hits.extend((line, TICK_POLL_MESSAGE) for line in fixed_tick_polls(source))
     if python and not is_test and "future-workers" in modes:
+        # An edit anywhere inside the worker can drop its BaseException handler.
         hits.extend(
-            (line, FUTURE_WORKER_MESSAGE)
-            for line in future_workers_catching_exception(source)
+            (changed, FUTURE_WORKER_MESSAGE)
+            for start, end in future_workers_catching_exception(source)
+            for changed in sorted(added)
+            if start <= changed <= end
         )
     if python and not is_test and "planner-defects" in modes:
         hits.extend(
@@ -2481,16 +2484,6 @@ def _is_thread_target(node: ast.AST) -> str | None:
     return None
 
 
-def _waits_with_timeout(tree: ast.Module) -> bool:
-    return any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"result", "wait", "exception"}
-        and any(keyword.arg == "timeout" for keyword in node.keywords)
-        for node in ast.walk(tree)
-    )
-
-
 def _completes_on_base_exception(function: ast.AST) -> bool:
     for handler in (n for n in ast.walk(function) if isinstance(n, ast.ExceptHandler)):
         broad = handler.type is None or (
@@ -2506,17 +2499,14 @@ def _completes_on_base_exception(function: ast.AST) -> bool:
     return False
 
 
-def future_workers_catching_exception(source: str) -> list[int]:
-    """Thread targets that complete a Future without a BaseException handler.
-
-    A waiter that bounds its wait with a timeout is exempt: it cannot hang.
-    """
+def future_workers_catching_exception(source: str) -> list[tuple[int, int]]:
+    """Spans of thread targets that complete a Future without BaseException."""
     tree = ast.parse(source)
     targets = {name for node in ast.walk(tree) if (name := _is_thread_target(node))}
-    if not targets or _waits_with_timeout(tree):
+    if not targets:
         return []
     return [
-        node.lineno
+        (node.lineno, node.end_lineno or node.lineno)
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and node.name in targets

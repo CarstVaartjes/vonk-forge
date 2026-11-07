@@ -3770,9 +3770,8 @@ BASE_EXCEPTION_WORKER = EXCEPTION_ONLY_WORKER.replace(
 BARE_EXCEPT_WORKER = EXCEPTION_ONLY_WORKER.replace(
     "except Exception as error", "except"
 )
-TIMEOUT_WAITER = EXCEPTION_ONLY_WORKER.replace(
-    "future.result()", "future.result(timeout=deadline)"
-)
+# An unrelated bounded wait elsewhere in the module does not exempt the worker.
+TIMEOUT_WAITER = EXCEPTION_ONLY_WORKER + "    stop.wait(timeout=1)\n"
 NO_COMPLETION_WORKER = """\
     def work():
         read()
@@ -3793,9 +3792,21 @@ def test_future_worker_catching_only_exception_is_flagged():
     assert not _future_worker_hits(EXCEPTION_ONLY_WORKER, {1})
 
 
+def test_unrelated_timeout_wait_does_not_exempt_an_exception_only_worker():
+    assert _future_worker_hits(TIMEOUT_WAITER)
+
+
+def test_edit_inside_an_existing_worker_is_flagged():
+    source = FUTURE_WORKER_HEADER + EXCEPTION_ONLY_WORKER
+    inside = source.splitlines().index("            future.set_exception(error)") + 1
+    assert _future_worker_hits(EXCEPTION_ONLY_WORKER, {inside})
+    # An added line after the worker is not part of it.
+    assert not _future_worker_hits(EXCEPTION_ONLY_WORKER, {inside + 3})
+
+
 @pytest.mark.parametrize(
     "body",
-    [BASE_EXCEPTION_WORKER, BARE_EXCEPT_WORKER, TIMEOUT_WAITER, NO_COMPLETION_WORKER],
+    [BASE_EXCEPTION_WORKER, BARE_EXCEPT_WORKER, NO_COMPLETION_WORKER],
 )
 def test_future_worker_that_cannot_hang_its_waiter_is_allowed(body):
     assert not _future_worker_hits(body)
