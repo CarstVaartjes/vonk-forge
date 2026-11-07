@@ -249,6 +249,47 @@ def test_preview_exposes_idle_scope_full_digest_and_blocking_reason(capsys):
     assert reason in captured.err
 
 
+def test_profile_review_shows_a_kept_run_being_renamed(capsys):
+    run_id = "11111111-1111-4111-8111-111111111111"
+    render_payload(
+        {
+            "allowed": True,
+            "profile_name": "Owner",
+            "plan_digest": "b" * 64,
+            "scope": {"node_ids": ["Atlas"], "idle_node_ids": []},
+            "summary": {},
+            "assignments": [],
+            "steps": [],
+            "preparation_decisions": [],
+            "assessments": [],
+            "effects": {
+                "runs": [
+                    {
+                        "action": "keep",
+                        "alias": "owner-alias",
+                        "previous_alias": "sweep-alias",
+                        "run_id": run_id,
+                        "node_ids": ["Atlas"],
+                    },
+                    {
+                        "action": "keep",
+                        "alias": "steady",
+                        "run_id": run_id,
+                        "node_ids": ["Atlas"],
+                    },
+                ],
+                "installations": [],
+                "superseded": [],
+            },
+        },
+        "profile",
+        action="preview",
+    )
+    out = capsys.readouterr().out
+    assert "owner-alias (rename sweep-alias → owner-alias)" in out
+    assert "steady" in out and "steady (rename" not in out
+
+
 def test_profile_review_shows_unmeasured_run_capacity_as_an_exact_range(capsys):
     run_id = "11111111-1111-4111-8111-111111111111"
     node_id = "spk_" + "a" * 32

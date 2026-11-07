@@ -499,7 +499,6 @@ class ExecutorPhasesMixin:
             # would have rejected our own durable request key.
             adopted = service._lifecycle.adopt_start(
                 installation_id,
-                plan.alias,
                 request_id=start_request_id,
                 kind=(
                     _JOB_ACTIVATION

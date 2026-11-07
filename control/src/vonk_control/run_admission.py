@@ -492,7 +492,6 @@ def require_same_execution(reviewed: RunPlan, current: RunPlan) -> None:
     def identity(plan: RunPlan) -> tuple[object, ...]:
         return (
             plan.installation_id,
-            plan.alias,
             plan.mapping_id,
             plan.mapping_generation,
             plan.recipe_revision_id,
@@ -947,7 +946,6 @@ class RunAdmissionService:
         identity = {
             "schema_version": 1,
             "installation_id": installation_id,
-            "alias": alias,
             "mapping_id": mapping.id,
             "mapping_generation": mapping.generation,
             "recipe_revision_id": revision.id,
@@ -1203,7 +1201,6 @@ class RunAdmissionService:
                     "observation_schema_version": observation_schema_version,
                     "run_generation": 1,
                     "installation_id": plan.installation_id,
-                    "alias": plan.alias,
                     "mapping_id": plan.mapping_id,
                     "mapping_generation": plan.mapping_generation,
                     "recipe_revision_id": plan.recipe_revision_id,

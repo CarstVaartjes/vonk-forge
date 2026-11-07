@@ -22,7 +22,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.compiled_execution_plan import COMPILED_PLAN_STORAGE_CONTEXT
 from vonk_agent_protocol.inventory import MemoryPool
-from vonk_forge_contracts import EndpointAlias
 
 from .content_identity import ImageContent, same_image
 from .integer_domains import MAX_DATABASE_BIGINT, MAX_DATABASE_INTEGER
@@ -173,7 +172,6 @@ class StoredRunPlan(_PersistedModel):
     observation_schema_version: Literal[2]
     run_generation: int = Field(le=MAX_DATABASE_BIGINT, ge=1)
     installation_id: UuidId
-    alias: EndpointAlias
     mapping_id: UuidId
     mapping_generation: int = Field(le=MAX_DATABASE_INTEGER, ge=1)
     recipe_revision_id: UuidId
