@@ -418,6 +418,23 @@ def image_errors(root: Path) -> list[str]:
         errors.append("hermes build base is missing or invalid")
     elif hermes_reference not in hermes_dockerfile:
         errors.append("hermes build base is absent from Hermes Dockerfile")
+    litellm_reference = build_bases.get("litellm")
+    litellm_dockerfile = (root / "deploy/compose/litellm/Dockerfile").read_text()
+    litellm_froms = [
+        match.group(1)
+        for match in re.finditer(
+            r"(?mi)^FROM\s+(?:--\S+\s+)*(?!\$)(\S+)(?:\s+AS\s+\S+)?\s*$",
+            litellm_dockerfile,
+        )
+    ]
+    if not isinstance(litellm_reference, str):
+        errors.append("litellm build base is missing or invalid")
+    elif len(litellm_froms) != 2 or any(
+        reference != litellm_reference for reference in litellm_froms
+    ):
+        errors.append(
+            "LiteLLM Dockerfile FROM lines are not exactly the locked litellm build base"
+        )
     if "ARG NODE_IMAGE" not in dockerfile or "ARG PYTHON_IMAGE" not in dockerfile:
         errors.append("control build bases are not explicit locked arguments")
     if (

@@ -195,6 +195,7 @@ PRODUCERS = {
             "scripts/reuse-development-image",
             "scripts/reuse-pr-candidate-images",
             "scripts/reuse-pr-image-security",
+            "scripts/verify-litellm-base-signature",
             "scripts/verify-multiarch-image-manifest",
             "scripts/verify-public-image-inputs",
             "scripts/verify-published-image",
