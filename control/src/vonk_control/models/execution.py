@@ -176,6 +176,9 @@ STOPPABLE_NOT_RUNNING_RUN_STATES = frozenset(
 ACTIVE_RUN_STATES = (STOPPABLE_NOT_RUNNING_RUN_STATES - {RunState.LOST}) | {
     RunState.RUNNING
 }
+#: A run in one of these is waiting on an owning operation (a Start, a Stop):
+#: ``running`` has live observation and ``lost`` has no owner by design.
+IN_FLIGHT_RUN_STATES = STOPPABLE_NOT_RUNNING_RUN_STATES - {RunState.LOST}
 #: The run states that own capacity and a Spark lifecycle: any load that needs
 #: such a run's Sparks plans its exact Stop, which releases the claims. A run in
 #: any other state can never be stopped by a plan, so it holds no ports or

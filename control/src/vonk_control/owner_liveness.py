@@ -562,6 +562,49 @@ def installations_named_by_live_jobs(
     return wanted & named
 
 
+def runs_named_by_live_work(
+    session: Session, run_ids: Collection[str]
+) -> frozenset[str]:
+    """Which of ``run_ids`` live work names: one query per kind of work, any count.
+
+    The batch form of ``run_has_live_operation`` (a not-yet-ended operation
+    issued for the run, or recording it in its progress), plus a live Spark
+    order whose payload names the run: a deferred offline Stop order outlives
+    its parent operation and still owns the run's Stop.
+    """
+
+    wanted = frozenset(run_ids)
+    if not wanted:
+        return frozenset()
+    named: set[str] = set()
+    for owner_kind, owner_id, result in session.execute(
+        select(
+            Job.payload["owner_kind"].as_string(),
+            Job.payload["owner_id"].as_string(),
+            cast(Job.result, Text),
+        ).where(
+            Job.state.in_(job_states.LIVE),
+            or_(
+                Job.payload["owner_id"].as_string().in_(list(wanted)),
+                *(cast(Job.result, Text).contains(found) for found in wanted),
+            ),
+        )
+    ):
+        if owner_kind == OwnerKind.RUN and owner_id in wanted:
+            named.add(owner_id)
+        if result:
+            named.update(found for found in wanted if found in result)
+    named.update(
+        session.scalars(
+            select(AgentOperation.payload["run_id"].as_string()).where(
+                AgentOperation.state.in_(agent_operation_states.LIVE),
+                AgentOperation.payload["run_id"].as_string().in_(list(wanted)),
+            )
+        )
+    )
+    return wanted & named
+
+
 def run_has_live_operation(session: Session, run_id: str) -> bool:
     """Whether a not-yet-ended operation (a Start, a Stop) still owns this run."""
 

@@ -29,6 +29,7 @@ from .catalog import (
 from .coordinator import CoordinatorFailure as CoordinatorFailure
 from .evidence import REPEATED_EVIDENCE_SEQUENCE as REPEATED_EVIDENCE_SEQUENCE
 from .execution import ACTIVE_RUN_STATES as ACTIVE_RUN_STATES
+from .execution import IN_FLIGHT_RUN_STATES as IN_FLIGHT_RUN_STATES
 from .execution import (
     STOPPABLE_NOT_RUNNING_RUN_STATES as STOPPABLE_NOT_RUNNING_RUN_STATES,
 )
