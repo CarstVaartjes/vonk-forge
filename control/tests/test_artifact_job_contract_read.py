@@ -52,11 +52,11 @@ def _run(sessions, run_id: str) -> tuple[str, str]:
         return run.alias, installation.recipe_revision_id
 
 
-def _stop(sessions, run_id: str) -> None:
+def _set_run_state(sessions, run_id: str, state: RunState) -> None:
     with sessions.begin() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None
-        run.state = RunState.STOPPING
+        run.state = state
 
 
 def _client(service) -> TestClient:
@@ -138,7 +138,7 @@ def test_contract_read_of_a_run_that_is_not_running_answers_not_running(
         tmp_path
     )
     alias, revision_id = _run(sessions, run_id)
-    _stop(sessions, run_id)
+    _set_run_state(sessions, run_id, RunState.STOPPING)
 
     for key in ({"run_id": run_id}, {"alias": alias}):
         answer = service.job_contract(**key)
@@ -243,7 +243,7 @@ def test_http_read_returns_the_typed_contract_and_typed_states(tmp_path) -> None
     assert missing.headers["x-vonk-error-code"] == "job_contract.not_found"
     assert client.get("/api/artifact-jobs/contract/run/not-a-uuid").status_code == 404
 
-    _stop(sessions, run_id)
+    _set_run_state(sessions, run_id, RunState.STOPPING)
     stopping = client.get(f"/api/artifact-jobs/contract/run/{run_id}")
     # A read answers; the state says it is not running.
     assert stopping.status_code == 200
