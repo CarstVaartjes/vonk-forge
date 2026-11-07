@@ -563,15 +563,14 @@ same compiled contract `recipe job create` validates against. Name the run, the
 route alias that run serves, or an exact recipe revision (which needs no run):
 
 ```bash
-vonkctl --json recipe job contract --alias ALIAS
-vonkctl recipe job contract --run RUN_UUID
+vonkctl --json recipe job contract --run RUN_UUID
 vonkctl recipe job contract --revision RECIPE_REVISION_UUID
 ```
 
-A refusal carries a stable code and the next command: `job_contract.not_found`
-(no such run, alias or revision), `job_contract.not_running` (the run is not
-running yet or any more), `job_contract.not_a_job_recipe` (a chat recipe),
-`job_contract.contract_invalid` (the revision cannot take jobs).
+A key that names nothing is an error (`vonkctl fleet` lists runs). Otherwise the
+Controller answers with a state: `available`, `not-running`, `not-a-job-recipe`
+or `contract-invalid`. Any state other than `available` exits non-zero with the
+code `job_contract.<state>` and the next command.
 `vonkctl recipe detail RECIPE_REVISION_UUID` also accepts an exact recipe
 revision id, including one that is no longer the newest.
 

@@ -6,13 +6,12 @@ contract it returns is proven to be the one ``create`` validates against.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from vonk_agent_protocol import RunState
+from vonk_control.api import create_app
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_job_api import install_artifact_job_routes
 from vonk_control.artifact_jobs import (
@@ -21,9 +20,8 @@ from vonk_control.artifact_jobs import (
     JobContractNotFound,
     JobContractState,
 )
-from vonk_control.auth import Actor
+from vonk_control.auth import Actor, TokenCodec
 from vonk_control.models import RecipeInstallation, RecipeRun
-from vonk_control.run_route_name import alias_owner
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.control_client import validate_control_document
@@ -31,6 +29,7 @@ from cluster_profiles.generated_control.models.artifact_job_contract_response im
     ArtifactJobContractResponse as ClientArtifactJobContractResponse,
 )
 
+from .test_agent_api import Jobs
 from .test_artifact_job_uncompilable_contract import (
     _required_input_without_required_slot,
 )
@@ -101,17 +100,15 @@ def test_contract_read_by_run_is_the_contract_create_validates_against(
     assert answer.contract.max_timeout_seconds == 3_600
 
 
-def test_contract_read_by_alias_and_by_revision_agree_with_the_run(tmp_path) -> None:
+def test_contract_read_by_revision_agrees_with_the_run(tmp_path) -> None:
     sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
         tmp_path
     )
-    alias, revision_id = _run(sessions, run_id)
+    _alias, revision_id = _run(sessions, run_id)
 
     by_run = service.job_contract(run_id=run_id)
-    by_alias = service.job_contract(alias=alias)
     by_revision = service.job_contract(recipe_revision_id=revision_id)
 
-    assert by_alias == by_run
     assert by_revision.contract == by_run.contract
     assert by_revision.contract_sha256 == by_run.contract_sha256
     assert (by_revision.run_id, by_revision.alias, by_revision.run_state) == (
@@ -121,14 +118,14 @@ def test_contract_read_by_alias_and_by_revision_agree_with_the_run(tmp_path) -> 
     )
 
 
-@pytest.mark.parametrize("key", ["run_id", "alias", "recipe_revision_id"])
+@pytest.mark.parametrize("key", ["run_id", "recipe_revision_id"])
 def test_contract_read_of_an_unknown_key_is_not_found(tmp_path, key) -> None:
     _sessions, _operations, _queue, service, _run_id, _node = running_artifact_service(
         tmp_path
     )
 
     with pytest.raises(JobContractNotFound):
-        service.job_contract(**{key: "no-such-alias" if key == "alias" else UNKNOWN})
+        service.job_contract(**{key: UNKNOWN})
 
 
 def test_contract_read_of_a_run_that_is_not_running_answers_not_running(
@@ -137,11 +134,10 @@ def test_contract_read_of_a_run_that_is_not_running_answers_not_running(
     sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
         tmp_path
     )
-    alias, revision_id = _run(sessions, run_id)
+    _alias, revision_id = _run(sessions, run_id)
     _set_run_state(sessions, run_id, RunState.STOPPING)
 
-    for key in ({"run_id": run_id}, {"alias": alias}):
-        answer = service.job_contract(**key)
+    for answer in (service.job_contract(run_id=run_id),):
         assert answer.state is JobContractState.NOT_RUNNING
         assert answer.run_state == RunState.STOPPING
         assert answer.run_id == run_id
@@ -195,31 +191,14 @@ def test_contract_read_of_an_uncompilable_recipe_names_the_cause(tmp_path) -> No
     assert "does not compile" in answer.detail
 
 
-def test_alias_owner_is_the_newest_accepted_intent() -> None:
-    def run(run_id: str, created: int, renamed: int | None = None) -> RecipeRun:
-        return RecipeRun(
-            id=run_id,
-            created_at=datetime(2026, 1, created, tzinfo=UTC),
-            renamed_at=None
-            if renamed is None
-            else datetime(2026, 1, renamed, tzinfo=UTC),
-        )
-
-    older, renamed_in, newer = run("a", 1), run("b", 1, renamed=5), run("c", 3)
-
-    assert alias_owner([older, renamed_in, newer]) is renamed_in
-    assert alias_owner([older, newer]) is newer
-    assert alias_owner([]) is None
-
-
 def test_http_read_returns_the_typed_contract_and_typed_states(tmp_path) -> None:
     sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
         tmp_path
     )
-    alias, revision_id = _run(sessions, run_id)
+    _alias, revision_id = _run(sessions, run_id)
     client = _client(service)
 
-    read = client.get(f"/api/artifact-jobs/contract/alias/{alias}")
+    read = client.get(f"/api/artifact-jobs/contract/run/{run_id}")
 
     assert read.status_code == 200
     document = read.json()
@@ -238,7 +217,7 @@ def test_http_read_returns_the_typed_contract_and_typed_states(tmp_path) -> None
     assert by_revision.status_code == 200
     assert "run_id" not in by_revision.json()
 
-    missing = client.get("/api/artifact-jobs/contract/alias/nope")
+    missing = client.get(f"/api/artifact-jobs/contract/run/{UNKNOWN}")
     assert missing.status_code == 404
     assert missing.headers["x-vonk-error-code"] == "job_contract.not_found"
     assert client.get("/api/artifact-jobs/contract/run/not-a-uuid").status_code == 404
@@ -249,3 +228,23 @@ def test_http_read_returns_the_typed_contract_and_typed_states(tmp_path) -> None
     assert stopping.status_code == 200
     assert stopping.json()["state"] == "not-running"
     assert validate_control_document("ArtifactJobContractResponse", stopping.json())
+
+
+def test_a_viewer_bearer_token_reads_the_contract_through_create_app(tmp_path) -> None:
+    _sessions, _operations, _queue, service, run_id, _node = running_artifact_service(
+        tmp_path
+    )
+    now = int(NOW.timestamp())
+    tokens = TokenCodec(b"artifact-job-contract-read-key-0001")
+    client = TestClient(
+        create_app(jobs=Jobs(), tokens=tokens, artifact_jobs=service, now=lambda: now)
+    )
+    path = f"/api/artifact-jobs/contract/run/{run_id}"
+    viewer = tokens.issue(Actor("read-only", "viewer"), ttl_seconds=600, now=now)
+
+    assert client.get(path).status_code == 401
+    read = client.get(path, headers={"Authorization": "Bearer " + viewer})
+
+    assert read.status_code == 200, read.text
+    assert read.json()["state"] == "available"
+    assert read.json()["run_id"] == run_id

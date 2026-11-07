@@ -3,9 +3,9 @@
 ``create`` validates a job against the contract compiled from the run's recipe
 revision (``_recipe_interface`` then ``_compile_contract``). A client that wants
 to build a valid create request reads that same compilation here, keyed by what
-it already knows: the running run, the alias that run serves, or the exact
-recipe revision. Nothing is stored and no second slot schema exists: the answer
-is the ``CompiledArtifactContract`` that ``create`` would check.
+it already knows: the running run or the exact recipe revision. Nothing is
+stored and no second slot schema exists: the answer is the
+``CompiledArtifactContract`` that ``create`` would check.
 
 A read observes and answers. What cannot be given is a typed ``state``, not a
 refusal: only a key that names nothing is not found.
@@ -24,7 +24,6 @@ from ..compiled_artifact_contract import CompiledArtifactContract
 from ..library_contract import UuidId
 from ..lifecycle.evidence import Damaged
 from ..models import RecipeInstallation, RecipeRun
-from ..run_route_name import alias_owner, runs_named
 from .contracts import (
     ArtifactJobContractModel,
     ArtifactJobError,
@@ -52,7 +51,7 @@ JOB_CONTRACT_NOT_FOUND = "job_contract.not_found"
 
 
 class JobContractNotFound(ArtifactJobError):
-    """The key names no run, alias or active recipe revision."""
+    """The key names no run or active recipe revision."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
@@ -93,18 +92,15 @@ def read_job_contract(
     session: Session,
     *,
     run_id: str | None = None,
-    alias: str | None = None,
     recipe_revision_id: str | None = None,
 ) -> ArtifactJobContractResponse:
     """Resolve exactly one key to a recipe revision and compile its contract."""
 
-    if sum(key is not None for key in (run_id, alias, recipe_revision_id)) != 1:
-        raise ValueError("exactly one of run_id, alias or recipe_revision_id")
+    if sum(key is not None for key in (run_id, recipe_revision_id)) != 1:
+        raise ValueError("exactly one of run_id or recipe_revision_id")
     run: RecipeRun | None = None
     if run_id is not None:
         run = _run_by_id(session, run_id)
-    elif alias is not None:
-        run = _run_by_alias(session, alias)
     if run is not None:
         installation = session.get(RecipeInstallation, run.installation_id)
         recipe_revision_id = (
@@ -155,16 +151,3 @@ def _run_by_id(session: Session, run_id: str) -> RecipeRun:
     if run is None:
         raise JobContractNotFound(f"run {run_id} does not exist")
     return run
-
-
-def _run_by_alias(session: Session, alias: str) -> RecipeRun:
-    """The running run that owns the alias (as the route publisher decides);
-    when none runs, the newest run that carried it, so the answer can say what
-    that run is doing."""
-
-    runs = runs_named(session, alias)
-    owner = alias_owner(run for run in runs if run.state == RunState.RUNNING)
-    owner = owner or alias_owner(runs)
-    if owner is None:
-        raise JobContractNotFound(f"no run serves the alias {alias}")
-    return owner

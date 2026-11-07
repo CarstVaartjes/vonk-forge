@@ -26,6 +26,7 @@ from .cli_states import (
     SUCCEEDED,
     preparation,
 )
+from .cli_states_generated import JobContractState
 from .control_client import (
     ControlClientError,
     ControlHTTPError,
@@ -120,12 +121,11 @@ def add_artifact_job_commands(
         "contract",
         help="Show the input and output slots a running recipe takes jobs by",
         description="Read the job contract (slot names, media types, size limits "
-        "and knobs) before creating a job. Name the run, the alias it serves, or "
-        "an exact recipe revision.",
+        "and knobs) before creating a job. Name the run (its id is in "
+        "`vonkctl fleet`) or an exact recipe revision.",
     )
     key = contract.add_mutually_exclusive_group(required=True)
     key.add_argument("--run", type=_uuid_argument, metavar="ID")
-    key.add_argument("--alias", metavar="NAME", help="A route name a run serves")
     key.add_argument(
         "--revision",
         type=_uuid_argument,
@@ -972,19 +972,18 @@ def _digest_regular_file(path: Path, maximum: int, name: str) -> tuple[int, str]
             os.close(descriptor)
 
 
-#: Where a contract that cannot be given points next, keyed by the Controller's
-#: stable code: `fleet` lists loaded runs with their aliases and recipe
-#: revisions, `profile endpoint` shows whether a load is still in flight, and a
+#: Where a contract that cannot be given points next, per state the Controller
+#: answers: `profile endpoint` shows whether a load is still in flight, and a
 #: revision's contract needs no run.
 _CONTRACT_NEXT_STEPS = {
-    "job_contract.not_found": ("vonkctl fleet", "vonkctl profile list"),
-    "job_contract.not_running": (
+    JobContractState.NOT_RUNNING: (
         "vonkctl profile endpoint",
         "vonkctl recipe job contract --revision <recipe-revision-id>",
     ),
-    "job_contract.not_a_job_recipe": ("vonkctl recipe detail <recipe-revision-id>",),
-    "job_contract.contract_invalid": ("vonkctl recipe library",),
+    JobContractState.NOT_A_JOB_RECIPE: ("vonkctl recipe detail <recipe-revision-id>",),
+    JobContractState.CONTRACT_INVALID: ("vonkctl recipe library",),
 }
+_CONTRACT_NOT_FOUND_STEPS = ("vonkctl fleet", "vonkctl profile list")
 
 
 def _contract(
@@ -992,41 +991,25 @@ def _contract(
     client: ArtifactJobClient,
     quote: Callable[[str], str],
 ):
-    by, key = next(
-        (name, value)
-        for name, value in (
-            ("run", args.run),
-            ("alias", args.alias),
-            ("revision", args.revision),
+    """One bounded read; the Controller's typed answer is final."""
+    by, key = ("run", args.run) if args.run else ("revision", args.revision)
+    try:
+        value = client.request("GET", f"/api/artifact-jobs/contract/{by}/{quote(key)}")
+    except ControlNotFound as error:
+        error.recovery = _CONTRACT_NOT_FOUND_STEPS
+        raise
+    answer = validate_control_document("ArtifactJobContractResponse", value)
+    if answer.get("contract") is None:
+        # The Controller answered that there is no contract to give; the usual
+        # error document carries the state as its code, the cause and next steps.
+        state = JobContractState(answer["state"])
+        raise ControlHTTPError(
+            409,
+            str(answer.get("detail")),
+            code="job_contract." + state.value,
+            recovery=_CONTRACT_NEXT_STEPS[state],
         )
-        if value is not None
-    )
-
-    def read(timeout: float):
-        try:
-            value = client.request(
-                "GET",
-                f"/api/artifact-jobs/contract/{by}/{quote(key)}",
-                timeout_seconds=timeout,
-            )
-        except ControlHTTPError as error:
-            error.recovery = _CONTRACT_NEXT_STEPS.get(error.code, error.recovery)
-            raise
-        answer = validate_control_document("ArtifactJobContractResponse", value)
-        if answer.get("contract") is None:
-            # The Controller answered that there is no contract to give; the
-            # usual error document carries its code, cause and next steps.
-            state = str(answer.get("state")).replace("-", "_")
-            code = "job_contract." + state
-            raise ControlHTTPError(
-                409,
-                str(answer.get("detail", "no job contract is available")),
-                code=code,
-                recovery=_CONTRACT_NEXT_STEPS.get(code, ()),
-            )
-        return answer
-
-    return _recover(client, read, lambda timeout: read(timeout))
+    return answer
 
 
 def _capabilities(client: ArtifactJobClient) -> dict[str, object]:

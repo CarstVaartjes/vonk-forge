@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from cluster_profiles import cli
+from cluster_profiles import cli, cli_artifact_jobs
+from cluster_profiles.cli_states_generated import JobContractState
 from cluster_profiles.control_client import ControlNotFound
 
 RUN_ID = "00000000-0000-4000-8000-000000000002"
@@ -100,7 +101,6 @@ class _Controller:
     ("flags", "path"),
     [
         (("--run", RUN_ID), f"{CONTRACT_PATH}/run/{RUN_ID}"),
-        (("--alias", "image"), f"{CONTRACT_PATH}/alias/image"),
         (("--revision", REVISION_ID), f"{CONTRACT_PATH}/revision/{REVISION_ID}"),
     ],
 )
@@ -118,7 +118,7 @@ def test_contract_json_is_the_controllers_typed_document(capsys, flags, path) ->
 
 def test_contract_text_names_slots_limits_and_knobs(capsys) -> None:
     status = cli.main(
-        ("recipe", "job", "contract", "--alias", "image"),
+        ("recipe", "job", "contract", "--run", RUN_ID),
         control_client=_Controller(_contract_document()),
     )
 
@@ -146,61 +146,62 @@ def test_contract_by_revision_reads_without_a_run(capsys) -> None:
     assert "Recipe revision: " + REVISION_ID in output
 
 
-def _unavailable(state: str, detail: str) -> dict[str, object]:
+def _unavailable(state: JobContractState) -> dict[str, object]:
     """The Controller's typed answer when there is no contract to give."""
     return {
-        "state": state,
-        "detail": detail,
+        "state": state.value,
+        "detail": f"no contract: {state.value}",
         "recipe_revision_id": REVISION_ID,
         "recipe": "vonk-forge/flux-klein",
     }
 
 
-@pytest.mark.parametrize(
-    ("outcome", "code", "next_step"),
-    [
-        (
-            ControlNotFound(
-                404, "no run serves the alias x", code="job_contract.not_found"
-            ),
-            "job_contract.not_found",
-            "vonkctl fleet",
-        ),
-        (
-            _unavailable("not-running", "run is stopping, not running"),
-            "job_contract.not_running",
-            "vonkctl recipe job contract --revision <recipe-revision-id>",
-        ),
-        (
-            _unavailable("not-a-job-recipe", "the recipe takes no jobs"),
-            "job_contract.not_a_job_recipe",
-            "vonkctl recipe detail <recipe-revision-id>",
-        ),
-        (
-            _unavailable(
-                "contract-invalid", "recipe artifact contract does not compile"
-            ),
-            "job_contract.contract_invalid",
-            "vonkctl recipe library",
-        ),
-    ],
-)
-def test_contract_that_cannot_be_given_is_typed_with_a_next_step(
-    capsys, outcome, code, next_step
+UNAVAILABLE = [
+    state for state in JobContractState if state is not JobContractState.AVAILABLE
+]
+
+
+def test_every_state_without_a_contract_has_a_next_step() -> None:
+    assert set(UNAVAILABLE) == set(cli_artifact_jobs._CONTRACT_NEXT_STEPS)
+    assert all(cli_artifact_jobs._CONTRACT_NEXT_STEPS.values())
+
+
+@pytest.mark.parametrize("state", UNAVAILABLE)
+def test_contract_that_cannot_be_given_is_typed_with_a_next_step_after_one_read(
+    capsys, state
 ) -> None:
+    controller = _Controller(_unavailable(state))
+
     status = cli.main(
-        ("--json", "recipe", "job", "contract", "--alias", "x"),
-        control_client=_Controller(outcome),
+        ("--json", "recipe", "job", "contract", "--run", RUN_ID),
+        control_client=controller,
     )
 
     error = json.loads(capsys.readouterr().out)
     assert status != 0
-    assert error["code"] == code
-    assert next_step in error["recovery_actions"]
+    assert controller.paths == [f"{CONTRACT_PATH}/run/{RUN_ID}"]
+    assert error["code"] == "job_contract." + state.value
+    assert error["recovery_actions"] == list(
+        cli_artifact_jobs._CONTRACT_NEXT_STEPS[state]
+    )
     assert error["detail"]
 
 
-@pytest.mark.parametrize("flags", [(), ("--run", RUN_ID, "--alias", "image")])
+def test_contract_of_an_unknown_run_is_not_found_after_one_read(capsys) -> None:
+    controller = _Controller(ControlNotFound(404, "run does not exist"))
+
+    status = cli.main(
+        ("--json", "recipe", "job", "contract", "--run", RUN_ID),
+        control_client=controller,
+    )
+
+    error = json.loads(capsys.readouterr().out)
+    assert status != 0
+    assert len(controller.paths) == 1
+    assert "vonkctl fleet" in error["recovery_actions"]
+
+
+@pytest.mark.parametrize("flags", [(), ("--run", RUN_ID, "--revision", REVISION_ID)])
 def test_contract_needs_exactly_one_key(capsys, flags) -> None:
     controller = _Controller(_contract_document())
 

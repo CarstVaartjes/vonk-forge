@@ -122,12 +122,12 @@ def install_artifact_job_routes(
         operation_id="getArtifactJobContract",
     )
     def job_contract(
-        by: Literal["run", "alias", "revision"],
+        by: Literal["run", "revision"],
         key: Annotated[str, Path(min_length=1, max_length=128)],
         _actor: Actor = actor_dependency,
     ) -> ArtifactJobContractResponse:
-        """The contract ``create`` validates against, keyed by a run, the alias it
-        serves or an exact recipe revision. A key that names nothing is 404."""
+        """The contract ``create`` validates against, keyed by a run or an exact
+        recipe revision. A key that names nothing is 404."""
         if service is None:
             raise ArtifactJobUnavailableError(
                 "artifact jobs are unavailable",
@@ -136,7 +136,6 @@ def install_artifact_job_routes(
         try:
             return service.job_contract(
                 run_id=key if by == "run" else None,
-                alias=key if by == "alias" else None,
                 recipe_revision_id=key if by == "revision" else None,
             )
         except JobContractNotFound as missing:

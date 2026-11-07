@@ -716,7 +716,6 @@ class ArtifactJobService(OutputService):
         self,
         *,
         run_id: str | None = None,
-        alias: str | None = None,
         recipe_revision_id: str | None = None,
     ) -> ArtifactJobContractResponse:
         """The contract ``create`` validates against, read before any job exists."""
@@ -724,7 +723,6 @@ class ArtifactJobService(OutputService):
             return read_job_contract(
                 session,
                 run_id=run_id,
-                alias=alias,
                 recipe_revision_id=recipe_revision_id,
             )
 
