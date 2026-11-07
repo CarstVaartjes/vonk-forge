@@ -40,7 +40,10 @@ def _states(sim: Simulation) -> dict[str, str]:
 
 @pytest.mark.slow(40)
 def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
-    tmp_path, postgres_engine, caplog: pytest.LogCaptureFixture
+    tmp_path,
+    postgres_engine,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     caplog.set_level(logging.INFO)
     world = build_world(tmp_path, postgres_engine)
@@ -56,12 +59,18 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
             assert sim.settle(_load(sim, f"idle {name}", [])) == "succeeded"
         assert set(_states(sim).values()) == {"stopped"}
 
-        # The Sparks report but answer no order for a while: the next load's
-        # Start is queued, never claimed.
-        for spark in sim.sparks.by_node.values():
-            spark.late_rounds = 200
+        # The Sparks answer everything but Starts for now: the next load's Start
+        # is queued and never claimed.
+        orders = sim.sparks._orders
+
+        def without_starts(node_id: str):
+            return tuple(
+                order for order in orders(node_id) if order.kind != "recipe.start"
+            )
+
+        monkeypatch.setattr(sim.sparks, "_orders", without_starts)
         _load(sim, "solo again", [solo])
-        for _ in range(20):
+        for _ in range(60):
             sim.round()
             if "starting" in _states(sim).values():
                 break
