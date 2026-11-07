@@ -14,10 +14,14 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .cli_states import ENDED_STATES, SUCCEEDED
 from .control_transport import open_https
+from .serving_request import ArgumentValue, Json, bounded_chat_check
+
+if TYPE_CHECKING:
+    from vonk_forge_contracts.api import ChatApi
 
 
 class ServingExecutionError(ValueError):
@@ -244,17 +248,25 @@ def evaluate_job_result(
 
 def execute_http_check(
     base_url: str,
-    check: Mapping[str, object],
+    check: Mapping[str, Json],
     *,
     timeout_seconds: float = 30.0,
     model_alias: str | None = None,
+    chat_api: ChatApi | None = None,
+    argument_value: ArgumentValue | None = None,
     opener: Callable[..., Any] = open_https,
 ) -> dict[str, object]:
-    """Issue the declared request and evaluate its actual response."""
+    """Issue the declared request and evaluate its actual response.
+
+    ``chat_api`` is the recipe's published chat facts (``argument_value`` reads its
+    runtime arguments): a chat check is sent as
+    ``bounded_chat_check`` fits it, and evaluated against what was sent.
+    """
 
     if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
         raise ServingExecutionError("serving timeout must be finite and positive")
     deadline = time.monotonic() + timeout_seconds
+    check = bounded_chat_check(check, chat_api, argument_value)
     request = _mapping(check.get("request"), "serving check request")
     method = request.get("method")
     path = request.get("path")

@@ -47,6 +47,7 @@ GUARDS: tuple[str, ...] = (
     "tests/test_clock_skew_validity_sites.py",
     "tests/test_transfer_admission_guard.py",
     "tests/test_model_removal_callers.py",
+    "tests/test_serving_request_guard.py",
     "tests/scripts/test_select_ci_areas.py",
     "tests/scripts/test_verify_ci_gate.py",
     "tests/scripts/test_build_control_wheel.py::test_every_control_workflow_builds_the_wheel_before_uv",
@@ -551,6 +552,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/test_serving_execution.py",
         "serving execution: fixed entrypoint/fixture behavior.",
+    ),
+    (
+        "tests/test_serving_request.py",
+        "serving request: fitted chat check against a faithful thinking engine.",
     ),
     ("tests/test_shell_suites.py", "shell suites: fixed entrypoint/fixture behavior."),
     (
