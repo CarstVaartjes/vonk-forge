@@ -3294,29 +3294,32 @@ class SparkLifecycle:
             _, payload = self.control.request(
                 "GET", "/api/catalog/managed-recipes/sync-status"
             )
-        except SliceError:
-            return None  # unobserved: the phase keeps its own failure
-        latest = require_object(payload, "managed recipe catalog sync status")
+            latest = require_object(payload, "managed recipe catalog sync status")
+        except Exception:  # noqa: BLE001 -- unobserved: the phase keeps its own failure
+            return None
         withdrawn = latest.get("withdrawn_count")
         if latest.get("trigger") != "automatic" or type(withdrawn) is not int:
             return None
         return latest if withdrawn > 0 else None
 
     def _catalog_sync_diagnostic(self) -> str:
-        """The newest catalog sync (trigger, commit, withdrawals) for a failure message."""
-        assert self.control is not None
+        """The newest catalog sync (trigger, commit, withdrawals) for a failure message.
+
+        Best effort: it describes a failure and must never replace it.
+        """
         try:
+            assert self.control is not None
             _, payload = self.control.request(
                 "GET", "/api/catalog/managed-recipes/sync-status"
             )
-        except SliceError as error:
-            return f"catalog sync status unreadable: {error}"[:256]
-        latest = require_object(payload, "managed recipe catalog sync status")
-        summary = {
-            key: latest.get(key)
-            for key in ("trigger", "state", "commit", "withdrawn_count")
-        }
-        return "catalog sync status: " + json.dumps(summary, sort_keys=True)
+            latest = require_object(payload, "managed recipe catalog sync status")
+            summary = {
+                key: latest.get(key)
+                for key in ("trigger", "state", "commit", "withdrawn_count")
+            }
+            return "catalog sync status: " + json.dumps(summary, sort_keys=True)
+        except Exception:  # noqa: BLE001 -- a diagnostic never masks its failure
+            return "catalog sync status unknown"
 
     def _offered_once_more[T](
         self, serve: Callable[[str], T], reimport: Callable[[str], object]
