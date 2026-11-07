@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestError,
+    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
 )
@@ -33,7 +34,10 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
 )
-from vonk_control.owner_liveness import installations_named_by_live_jobs
+from vonk_control.owner_liveness import (
+    installations_named_by_live_jobs,
+    runs_named_by_live_work,
+)
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE
 
 from .fleet_match import fleet_mismatch
@@ -107,6 +111,14 @@ IN_FLIGHT_KINDS = (
             }
         ),
         installations_named_by_live_jobs,
+    ),
+    InFlightKind(
+        "run",
+        RecipeRun,
+        RunState,
+        # ``running`` has live observation; ``lost`` has no owner by design.
+        frozenset({RunState.RUNNING, RunState.STOPPED, RunState.FAILED, RunState.LOST}),
+        runs_named_by_live_work,
     ),
 )
 _NUMBERS = re.compile(r"\d+")

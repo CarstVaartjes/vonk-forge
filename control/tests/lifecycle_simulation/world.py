@@ -23,6 +23,7 @@ from sqlalchemy import Engine, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -104,6 +105,8 @@ class World:
     raised_ticks: _RaisedTicks = field(default_factory=_RaisedTicks)
     #: The world's own engine, released when it closes.
     engine: Engine | None = None
+    #: What a standalone install of the whole fleet is previewed from.
+    install_source: tuple[str, str] | None = None
     #: The route publisher each Controller process builds; the current one is
     #: ``publisher``, so a test can read its generations or make it fail.
     publisher_type: Callable[[], ConcurrentPublisher] = ConcurrentPublisher
@@ -194,6 +197,14 @@ class World:
             ).tick,
             fleet_profiles=profiles,
             run_switches=planner,
+            recoveries=DistributedRecoveryCoordinator(
+                self.sessions,
+                routes=self.routes,
+                agent_jobs=orders,
+                clock=clock,
+                recovery_run_stops=lifecycle,
+                run_endings=lifecycle,
+            ),
         )
         return Controller(lifecycle, planner, profiles, worker, storage)
 
@@ -299,7 +310,7 @@ def build_world(
     # connection never goes stale: no liveness ping before every session (a
     # round opens some fifty sessions; the pings were a third of its round trips).
     engine = create_engine(engine.url, pool_pre_ping=False)
-    sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine, **setup_options
     )
     now = [lifecycle._clock()]
@@ -337,6 +348,7 @@ def build_world(
         template=lifecycle,
         readable=readable,
         engine=engine,
+        install_source=(mapping_id, build_id),
     )
 
 

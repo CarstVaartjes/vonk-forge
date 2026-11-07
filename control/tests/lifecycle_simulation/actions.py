@@ -54,6 +54,10 @@ class Step:
                 f"load {_stack_name(self)} as reviewed by an older Controller"
                 " (its stored plan promises one port twice)"
             ),
+            "standalone-install": (
+                "install the fleet recipe on both Sparks outside any load"
+                " (a new workload intent over whatever is queued)"
+            ),
             "cancel": "cancel the newest unfinished load",
             "stop": "load the idle profile (stop everything)",
             "restart": "restart the Controller worker",
@@ -167,6 +171,22 @@ def _cancel(sim: Simulation, step: Step) -> None:
     )
 
 
+def _standalone_install(sim: Simulation, step: Step) -> None:
+    """A person installs a recipe by itself: a new workload intent over the
+    Sparks supersedes whatever Start is still queued and unclaimed on them."""
+
+    assert sim.world.install_source is not None
+    mapping_id, build_id = sim.world.install_source
+    lifecycle = sim.world.controller.lifecycle
+    plan = lifecycle.preview_install(mapping_id, build_id)
+    lifecycle.install(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=_request_key(sim),
+    )
+
+
 def _stop(sim: Simulation, step: Step) -> None:
     _load(sim, "idle", [])
 
@@ -216,6 +236,7 @@ ACTIONS: dict[str, tuple[int, Perform]] = {
     "load-concurrently": (2, _load_concurrently),
     "load-stacked": (3, _stacked),
     "stale-stacked-load": (1, _stale_stacked_load),
+    "standalone-install": (2, _standalone_install),
     "cancel": (2, _cancel),
     "stop": (2, _stop),
     "restart": (2, _restart),
