@@ -70,6 +70,9 @@ ALLOWED_FILES = frozenset(
         # The CLI ships without the contract package; its words are generated
         # from the contract by scripts/generate-python-vocabulary.
         "src/cluster_profiles/cli_states_generated.py",
+        # External CLI subcommand allowlist (cosign/git/curl), not Controller
+        # contract words.
+        "scripts/retry_dependency_fetch.py",
     }
 )
 
@@ -891,6 +894,7 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             "src/cluster_profiles/cli_states_generated.py",
             "agent_protocol/src/vonk_agent_protocol/route_activation_words.py",
         }
+        or path in ALLOWED_FILES
         or path.startswith(PYTHON_EXCLUDED_PREFIXES)
     ):
         return []
