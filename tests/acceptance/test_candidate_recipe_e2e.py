@@ -256,7 +256,16 @@ def test_recipe_producer_output_is_fresh_before_controller_sync(tmp_path: Path) 
     if producer is None or not producer.is_file():
         pytest.skip("recipe producer checkout is unavailable")
     result = subprocess.run(
-        [sys.executable, os.fspath(producer), "--output-dir", os.fspath(tmp_path)],
+        [
+            sys.executable,
+            os.fspath(producer),
+            "--output-dir",
+            os.fspath(tmp_path),
+            "--source-commit",
+            "0" * 40,
+            "--source-date-epoch",
+            "0",
+        ],
         check=False,
         capture_output=True,
         text=True,
