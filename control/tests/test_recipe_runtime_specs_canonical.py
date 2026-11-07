@@ -253,6 +253,11 @@ def test_source_build_requires_and_binds_exact_receipt(
             ["/opt/vonk/bin/exllamav3-serve"],
             "recipe-source-build.json",
         ),
+        (
+            "pytorch-server",
+            ["/opt/vonk/bin/pytorch-server"],
+            "recipe-source-build.json",
+        ),
         ("diffusers", ["/opt/vonk/bin/diffusers-job"], "recipe-job.json"),
         ("comfyui", ["/opt/vonk/bin/comfyui-job"], "recipe-job.json"),
         ("pytorch-pipeline", ["/opt/vonk/bin/pytorch-pipeline"], "recipe-job.json"),
