@@ -473,22 +473,17 @@ def _chat_api(recipe: object, library_root: Path) -> object | None:
     return block if isinstance(block, ChatApi) else None
 
 
-def _argument_value(recipe: object) -> Callable[[str], int | None]:
-    """The integer value of the recipe's runtime argument of that name, as launched."""
-    settings = {
-        name: setting.value
-        for name in ("context_tokens", "concurrency", "max_batch_tokens")
-        if (setting := getattr(recipe.settings, name, None)) is not None
-    } | {name: setting.value for name, setting in recipe.settings.knobs.items()}
+def _argument_value(recipe: object) -> Callable[[str], int | None] | None:
+    """The library contracts' integer reading of the recipe's runtime arguments, as launched.
 
-    def value(name: str) -> int | None:
-        for argument in recipe.with_option_choices({}).runtime.arguments:
-            if argument.name == name:
-                found = argument.value if argument.setting is None else settings.get(argument.setting)
-                return found if type(found) is int else None
+    A library whose contracts predate it yields none: the check is sent as declared.
+    """
+    try:
+        from vonk_forge_contracts.api_checks import integer_argument
+    except ImportError:
         return None
-
-    return value
+    resolved = recipe.with_option_choices({})
+    return lambda name: integer_argument(resolved, name, resolved.settings)
 
 
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:

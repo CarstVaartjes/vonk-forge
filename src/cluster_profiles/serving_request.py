@@ -84,13 +84,13 @@ def bounded_chat_check(
 ) -> dict[str, Json]:
     """The check with its chat request fitted to the route's reasoning facts."""
 
-    from vonk_forge_contracts.api import ApiReasoningAlwaysOn, ApiReasoningSwitch
-
     fitted = copy.deepcopy(dict(check))
     request = fitted.get("request")
     body = request.get("body") if isinstance(request, dict) else None
     if api is None or fitted.get("kind") != "openai.chat" or not isinstance(body, dict):
         return fitted
+    from vonk_forge_contracts.api import ApiReasoningAlwaysOn, ApiReasoningSwitch
+
     reasoning = api.reasoning
     if isinstance(reasoning, ApiReasoningSwitch):
         target: Json = body
