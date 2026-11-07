@@ -3743,3 +3743,59 @@ def test_rust_git_is_flagged_only_inside_cfg_test_items() -> None:
     path = "control/src/example.rs"
     assert check_source(path, source, {4}, modes=_GIT_FREE)
     assert not check_source(path, source, {1}, modes=_GIT_FREE)
+
+
+FUTURE_WORKER_HEADER = """\
+import threading
+from concurrent.futures import Future
+
+
+def start(read):
+    future = Future()
+
+"""
+EXCEPTION_ONLY_WORKER = """\
+    def work():
+        try:
+            future.set_result(read())
+        except Exception as error:
+            future.set_exception(error)
+
+    threading.Thread(target=work, daemon=True).start()
+    return future.result()
+"""
+BASE_EXCEPTION_WORKER = EXCEPTION_ONLY_WORKER.replace(
+    "except Exception", "except BaseException"
+)
+BARE_EXCEPT_WORKER = EXCEPTION_ONLY_WORKER.replace(
+    "except Exception as error", "except"
+)
+TIMEOUT_WAITER = EXCEPTION_ONLY_WORKER.replace(
+    "future.result()", "future.result(timeout=deadline)"
+)
+NO_COMPLETION_WORKER = """\
+    def work():
+        read()
+
+    threading.Thread(target=work, daemon=True).start()
+"""
+
+
+def _future_worker_hits(body: str, lines: set[int] | None = None) -> list[str]:
+    source = FUTURE_WORKER_HEADER + body
+    added = lines or set(range(1, len(source.splitlines()) + 1))
+    return check_source("src/pkg/reads.py", source, added, modes=("future-workers",))
+
+
+def test_future_worker_catching_only_exception_is_flagged():
+    assert _future_worker_hits(EXCEPTION_ONLY_WORKER)
+    # Only an added line is reported.
+    assert not _future_worker_hits(EXCEPTION_ONLY_WORKER, {1})
+
+
+@pytest.mark.parametrize(
+    "body",
+    [BASE_EXCEPTION_WORKER, BARE_EXCEPT_WORKER, TIMEOUT_WAITER, NO_COMPLETION_WORKER],
+)
+def test_future_worker_that_cannot_hang_its_waiter_is_allowed(body):
+    assert not _future_worker_hits(body)
