@@ -580,7 +580,7 @@ def runs_named_by_live_work(
             Job.payload["owner_id"].as_string(),
             cast(Job.result, Text),
         ).where(
-            Job.state.not_in(JOB_ENDED_STATES),
+            Job.state.in_(job_states.LIVE),
             or_(
                 Job.payload["owner_id"].as_string().in_(list(wanted)),
                 *(cast(Job.result, Text).contains(found) for found in wanted),
