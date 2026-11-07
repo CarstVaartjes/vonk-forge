@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
+import itertools
 import logging
 import os
 import re
@@ -752,9 +753,7 @@ class GatewayKeyService:
     def _gateway_raw_keys(self, target: str | None = None) -> list[_LiteLlmKey]:
         keys: list[_LiteLlmKey] = []
         deadline = _monotonic() + _LIST_DEADLINE_SECONDS
-        page = 0
-        while True:
-            page += 1
+        for page in itertools.count(1):
             if _monotonic() >= deadline:
                 raise GatewayKeyError("gateway key list observation deadline reached")
             code, payload = self._gateway_request(
