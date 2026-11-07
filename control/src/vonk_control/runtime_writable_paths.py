@@ -103,6 +103,7 @@ _ENGINE_PATHS: dict[str, tuple[RuntimeWritablePath, ...]] = {
     "ds4": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "tensorfold": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "exllamav3": (*_COMMON_PATHS, *_PYTHON_PATHS),
+    "pytorch-server": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "diffusers": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "comfyui": (*_COMMON_PATHS, *_PYTHON_PATHS),
     "pytorch-pipeline": (*_COMMON_PATHS, *_PYTHON_PATHS),
@@ -149,6 +150,10 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
 }
+
+# The generic PyTorch server serves no engine-defined /metrics: the same contract
+# as ExLlamaV3, bound once rather than restated.
+_ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
 # it for every runtime so recipes never carry it.
@@ -198,6 +203,7 @@ for _slug in (
     "ds4",
     "tensorfold",
     "exllamav3",
+    "pytorch-server",
     "diffusers",
     "comfyui",
     "pytorch-pipeline",
