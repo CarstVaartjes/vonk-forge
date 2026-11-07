@@ -24,7 +24,7 @@ if TYPE_CHECKING:
         LibraryRecipeProjection,
     )
 
-from .common import ControllerClient
+from .common import MAX_PAGE_LIMIT, ControllerClient
 from .submission import _known_http_refusal_status
 
 
@@ -148,7 +148,7 @@ def _scan_recipe_rows(
         client,
         "/api/recipe/library",
         "recipes",
-        {"limit": 512, "sort": "name", "assess": False},
+        {"sort": "name", "assess": False},
         deadline=deadline,
     ):
         for row in raw_recipes:
@@ -183,7 +183,7 @@ def _library_pages(
 ) -> Iterator[list[object]]:
     """The item list of every page of a cursor-paged library read, in order.
 
-    The read ends with the Controller's last page; a repeated or malformed
+    Pages are ``MAX_PAGE_LIMIT`` items. The read ends with the Controller's last page; a repeated or malformed
     cursor is a malformed response, so the loop is bounded by the data.
     """
     cursor: str | None = None
@@ -192,7 +192,11 @@ def _library_pages(
         page = client.request(
             "GET",
             path,
-            query=query if cursor is None else {**query, "cursor": cursor},
+            query=(
+                {**query, "limit": MAX_PAGE_LIMIT}
+                if cursor is None
+                else {**query, "limit": MAX_PAGE_LIMIT, "cursor": cursor}
+            ),
             timeout_seconds=_selection_remaining(deadline),
         )
         _selection_remaining(deadline)

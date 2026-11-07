@@ -67,7 +67,9 @@ _NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$"
 _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
-_MAX_PAGES = 100
+# The whole key listing ends with the peer's last page or at this deadline.
+_LIST_DEADLINE_SECONDS = 30.0
+_monotonic = time.monotonic
 _KEY_ROUTES = [GatewayInferenceRoute.OPENAI.value]
 
 
@@ -749,7 +751,12 @@ class GatewayKeyService:
 
     def _gateway_raw_keys(self, target: str | None = None) -> list[_LiteLlmKey]:
         keys: list[_LiteLlmKey] = []
-        for page in range(1, _MAX_PAGES + 1):
+        deadline = _monotonic() + _LIST_DEADLINE_SECONDS
+        page = 0
+        while True:
+            page += 1
+            if _monotonic() >= deadline:
+                raise GatewayKeyError("gateway key list observation deadline reached")
             code, payload = self._gateway_request(
                 "GET", "/key/list", params=_KeyListParams(page=page, size=_PAGE_SIZE)
             )

@@ -141,7 +141,7 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
         client,
         "/api/model/library",
         "models",
-        {"limit": 512, "sort": "name"},
+        {"sort": "name"},
         deadline=deadline,
     ):
         for row in models:

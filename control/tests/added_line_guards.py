@@ -462,6 +462,61 @@ def runtime_count_caps(source: str) -> list[int]:
     return sorted(found)
 
 
+_FETCH_CALL = re.compile(r"(?i)request|fetch|page|^(?:get|post|put|patch|send)$")
+
+
+def _calls_a_fetch(node: ast.AST) -> bool:
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call):
+            continue
+        func = call.func
+        name = (
+            func.attr
+            if isinstance(func, ast.Attribute)
+            else func.id
+            if isinstance(func, ast.Name)
+            else ""
+        )
+        if _FETCH_CALL.search(name):
+            return True
+    return False
+
+
+def paging_count_ceilings(source: str) -> list[int]:
+    """``for ... in range(... _MAX_* ...)`` loops whose body fetches a page.
+
+    A paged read ends with the peer's last page, bounded by a deadline; a page
+    count ceiling truncates or refuses a library that outgrows it. A real
+    protocol limit (HTTP redirects) says why with ``# item-count-limit:``.
+    """
+    lines = source.splitlines()
+    found: set[int] = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.For):
+            continue
+        loop = node.iter
+        if not (
+            isinstance(loop, ast.Call)
+            and isinstance(loop.func, ast.Name)
+            and loop.func.id == "range"
+        ):
+            continue
+        capped = any(
+            isinstance(part, ast.Name)
+            and _MAX_CONSTANT.match(part.id)
+            and part.id not in _RANGE_CONSTANTS
+            for argument in loop.args
+            for part in ast.walk(argument)
+        )
+        if (
+            capped
+            and any(_calls_a_fetch(statement) for statement in node.body)
+            and ITEM_COUNT_PRAGMA not in lines[node.lineno - 1]
+        ):
+            found.add(node.lineno)
+    return sorted(found)
+
+
 def added_lines(patch: str) -> dict[str, set[int]]:
     """Parse hunks, carrying unchanged relocated blocks without duplicating debt.
 
@@ -2138,7 +2193,11 @@ def check_source(
         hits.extend(
             (line, "item-count cap on a model-sized list; bound by bytes instead")
             for line in sorted(
-                {*model_sized_count_caps(source), *runtime_count_caps(source)}
+                {
+                    *model_sized_count_caps(source),
+                    *runtime_count_caps(source),
+                    *paging_count_ceilings(source),
+                }
             )
         )
     if (
