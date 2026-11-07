@@ -56,6 +56,7 @@ from .common import (
     release_inactive_run_claims_in_session,
     settle_observed_absent_runs_in_session,
 )
+from .run_reaper import RunEndings, end_orphaned_runs_in_session
 from .singleton import _singleton_recovery_authority
 
 _LOGGER = logging.getLogger(__name__)
@@ -92,6 +93,7 @@ class DistributedRecoveryCoordinator:
         agent_jobs: _RecoveryJobQueue,
         clock: Callable[[], datetime],
         recovery_run_stops: _RecoveryRunStops | None = None,
+        run_endings: RunEndings | None = None,
         start_timeout_seconds: int = 3600,
     ) -> None:
         self._sessions = sessions
@@ -99,6 +101,7 @@ class DistributedRecoveryCoordinator:
         self._agent_jobs = agent_jobs
         self._clock = clock
         self._recovery_run_stops = recovery_run_stops
+        self._run_endings = run_endings
         self._start_timeout_seconds = validate_distributed_start_timeout_seconds(
             start_timeout_seconds
         )
@@ -425,6 +428,12 @@ class DistributedRecoveryCoordinator:
                 queued = True
                 worked = True
                 break
+            if self._run_endings is not None and run_id is None:
+                reaped, reaped_stop = end_orphaned_runs_in_session(
+                    session, self._run_endings, now
+                )
+                worked = reaped or worked
+                queued = reaped_stop or queued
             worked = settle_observed_absent_runs_in_session(session, now) or worked
             worked = release_inactive_run_claims_in_session(session, now) or worked
             return worked, queued

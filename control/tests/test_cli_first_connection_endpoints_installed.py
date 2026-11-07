@@ -57,6 +57,9 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.operation_api import durable_operation_services
+from vonk_control.vonkctl_json_contract import DOCUMENTS
+
+from cluster_profiles.cli_json_contract import DocumentKind
 
 from .test_fleet_profiles import _installed_pair_plan
 from .test_profile_load_installed_cli import (
@@ -70,6 +73,7 @@ from .test_recipe_routes import setup as setup_routes
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 _TOKEN_KEY = b"first-connection-and-profile-endpoints-key"
+_CLI_ENDPOINTS = DOCUMENTS[DocumentKind.PROFILE_ENDPOINTS]
 
 
 def _api(
@@ -638,7 +642,8 @@ def test_installed_cli_discovers_only_the_published_profile_endpoint_and_revocat
         )
 
     assert withdrawn.returncode == 0, withdrawn.stderr
-    withdrawn_view = FleetProfileEndpointsView.model_validate_json(withdrawn.stdout)
+    # vonkctl prints the Controller view plus its schema_version stamp.
+    withdrawn_view = _CLI_ENDPOINTS.validate_json(withdrawn.stdout)
     assert withdrawn_view.assignments is not None
     assert len(withdrawn_view.assignments) == 1
     assignment = withdrawn_view.assignments[0]

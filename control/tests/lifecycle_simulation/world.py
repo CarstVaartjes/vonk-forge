@@ -23,6 +23,7 @@ from sqlalchemy import Engine, create_engine, select, update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.attempt_residues import AttemptResidueReconciler
+from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import (
     FleetProfileService,
@@ -194,6 +195,14 @@ class World:
             ).tick,
             fleet_profiles=profiles,
             run_switches=planner,
+            recoveries=DistributedRecoveryCoordinator(
+                self.sessions,
+                routes=self.routes,
+                agent_jobs=orders,
+                clock=clock,
+                recovery_run_stops=lifecycle,
+                run_endings=lifecycle,
+            ),
         )
         return Controller(lifecycle, planner, profiles, worker, storage)
 

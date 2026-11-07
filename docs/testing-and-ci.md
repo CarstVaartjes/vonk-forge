@@ -689,7 +689,7 @@ wrapped, so a retry cannot turn a failing test into a passing job.
 
 ## Reusing accepted component images
 
-Development publication reuses Hermes and LiteLLM by their exact build inputs.
+Development publication reuses LiteLLM by their exact build inputs.
 `scripts/dev-image-inputs` hashes Git paths, file modes and blob identities for
 an isolated build context plus the complete build/acceptance policy. BuildKit
 receives only that context: a new `COPY` cannot silently depend on an unhashed

@@ -1,0 +1,1241 @@
+{
+  "$defs": {
+    "ArtifactFileDeclaration": {
+      "properties": {
+        "media_type": {
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 536870912,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        },
+        "slot": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+          "title": "Slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slot",
+        "name",
+        "media_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "title": "ArtifactFileDeclaration",
+      "type": "object"
+    },
+    "ArtifactInputContract": {
+      "properties": {
+        "max_bytes": {
+          "maximum": 1073741824,
+          "minimum": 0,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "media_types": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Media Types",
+          "type": "array"
+        },
+        "required": {
+          "title": "Required",
+          "type": "boolean"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/ArtifactSlotContract"
+          },
+          "maxItems": 32,
+          "title": "Slots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "media_types",
+        "max_bytes",
+        "slots"
+      ],
+      "title": "ArtifactInputContract",
+      "type": "object"
+    },
+    "ArtifactJobResultEvidence": {
+      "description": "What the Controller knows about how a job ended, to every field.",
+      "properties": {
+        "active_scope_may_remain": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Scope May Remain"
+        },
+        "cancel_actor": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancel Actor"
+        },
+        "cancel_reason": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancel Reason"
+        },
+        "cancel_request_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancel Request Id"
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Diagnostic"
+        },
+        "elapsed_milliseconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Elapsed Milliseconds"
+        },
+        "exit_code": {
+          "anyOf": [
+            {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exit Code"
+        },
+        "failure_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "cancellation-stop-uncertain",
+                "agent-lease-expired"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure Kind"
+        },
+        "late_results_accepted": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Late Results Accepted"
+        },
+        "output_breach": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OutputContractBreach"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "peak_memory_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Peak Memory Bytes"
+        },
+        "recoverable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recoverable"
+        },
+        "residue_resolved_by": {
+          "anyOf": [
+            {
+              "const": "exact-stop",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Residue Resolved By"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        }
+      },
+      "title": "ArtifactJobResultEvidence",
+      "type": "object"
+    },
+    "ArtifactOutputContract": {
+      "properties": {
+        "max_total_bytes": {
+          "maximum": 2147483648,
+          "minimum": 1,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        },
+        "path": {
+          "const": "/outputs",
+          "title": "Path",
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "$ref": "#/$defs/ArtifactSlotContract"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Slots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "max_total_bytes",
+        "slots"
+      ],
+      "title": "ArtifactOutputContract",
+      "type": "object"
+    },
+    "ArtifactOutputFile": {
+      "properties": {
+        "media_type": {
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+          "title": "Media Type",
+          "type": "string"
+        },
+        "name": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "maximum": 1073741824,
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "media_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "title": "ArtifactOutputFile",
+      "type": "object"
+    },
+    "ArtifactOutputLimits": {
+      "properties": {
+        "allowed_media_types": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Allowed Media Types",
+          "type": "array"
+        },
+        "max_file_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Max File Bytes",
+          "type": "integer"
+        },
+        "max_files": {
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Files",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "maximum": 2147483648,
+          "minimum": 1,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_files",
+        "max_file_bytes",
+        "max_total_bytes",
+        "allowed_media_types"
+      ],
+      "title": "ArtifactOutputLimits",
+      "type": "object"
+    },
+    "ArtifactSlotContract": {
+      "properties": {
+        "description": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "extensions": {
+          "items": {
+            "pattern": "^\\.[a-z0-9][a-z0-9._-]{0,15}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Extensions",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "max_file_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Max File Bytes",
+          "type": "integer"
+        },
+        "max_files": {
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Files",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "maximum": 2147483648,
+          "minimum": 1,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        },
+        "media_types": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Media Types",
+          "type": "array"
+        },
+        "min_files": {
+          "maximum": 32,
+          "minimum": 0,
+          "title": "Min Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "description",
+        "media_types",
+        "extensions",
+        "min_files",
+        "max_files",
+        "max_file_bytes",
+        "max_total_bytes"
+      ],
+      "title": "ArtifactSlotContract",
+      "type": "object"
+    },
+    "BooleanParameter": {
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "$ref": "#/$defs/ParameterScalar"
+          },
+          "maxItems": 128,
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "default": {
+          "title": "Default",
+          "type": "boolean"
+        },
+        "maximum": {
+          "default": null,
+          "title": "Maximum",
+          "type": "null"
+        },
+        "minimum": {
+          "default": null,
+          "title": "Minimum",
+          "type": "null"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "type": {
+          "const": "boolean",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "title": "BooleanParameter",
+      "type": "object"
+    },
+    "CompiledArtifactContract": {
+      "description": "The canonical typed artifact execution contract.",
+      "properties": {
+        "input": {
+          "$ref": "#/$defs/ArtifactInputContract"
+        },
+        "interface": {
+          "enum": [
+            "audio-job",
+            "video-job",
+            "image-job",
+            "mesh-job",
+            "artifact-job"
+          ],
+          "title": "Interface",
+          "type": "string"
+        },
+        "max_timeout_seconds": {
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Max Timeout Seconds",
+          "type": "integer"
+        },
+        "output": {
+          "$ref": "#/$defs/ArtifactOutputContract"
+        },
+        "output_limits": {
+          "$ref": "#/$defs/ArtifactOutputLimits"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ParameterDefinition"
+          },
+          "maxItems": 64,
+          "title": "Parameters",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "interface",
+        "input",
+        "parameters",
+        "output",
+        "output_limits",
+        "max_timeout_seconds"
+      ],
+      "title": "CompiledArtifactContract",
+      "type": "object"
+    },
+    "EnumParameter": {
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "$ref": "#/$defs/ParameterScalar"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "default": {
+          "$ref": "#/$defs/ParameterScalar"
+        },
+        "maximum": {
+          "default": null,
+          "title": "Maximum",
+          "type": "null"
+        },
+        "minimum": {
+          "default": null,
+          "title": "Minimum",
+          "type": "null"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "type": {
+          "const": "enum",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "allowed_values",
+        "type",
+        "default"
+      ],
+      "title": "EnumParameter",
+      "type": "object"
+    },
+    "FloatParameter": {
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "$ref": "#/$defs/ParameterScalar"
+          },
+          "maxItems": 128,
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            }
+          ],
+          "title": "Default"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "type": {
+          "const": "float",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "title": "FloatParameter",
+      "type": "object"
+    },
+    "IntegerParameter": {
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "$ref": "#/$defs/ParameterScalar"
+          },
+          "maxItems": 128,
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "default": {
+          "title": "Default",
+          "type": "integer"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "type": {
+          "const": "integer",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "title": "IntegerParameter",
+      "type": "object"
+    },
+    "OutputContractBreach": {
+      "description": "The output-contract rule a job's manifest broke, measured.",
+      "properties": {
+        "entry": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Entry"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "observed": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed"
+        },
+        "rule": {
+          "enum": [
+            "job_output_allowed_media_type",
+            "job_output_max_files",
+            "job_output_max_file_bytes",
+            "job_output_max_total_bytes",
+            "job_output_slot",
+            "job_output_slot_max_file_bytes",
+            "job_output_slot_files",
+            "job_output_slot_max_total_bytes",
+            "job_output_contract_max_total_bytes"
+          ],
+          "title": "Rule",
+          "type": "string"
+        },
+        "slot": {
+          "anyOf": [
+            {
+              "maxLength": 32,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slot"
+        }
+      },
+      "required": [
+        "rule"
+      ],
+      "title": "OutputContractBreach",
+      "type": "object"
+    },
+    "OutputLimits": {
+      "properties": {
+        "allowed_media_types": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Allowed Media Types",
+          "type": "array"
+        },
+        "max_file_bytes": {
+          "maximum": 1073741824,
+          "minimum": 1,
+          "title": "Max File Bytes",
+          "type": "integer"
+        },
+        "max_files": {
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Files",
+          "type": "integer"
+        },
+        "max_total_bytes": {
+          "maximum": 2147483648,
+          "minimum": 1,
+          "title": "Max Total Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_files",
+        "max_file_bytes",
+        "max_total_bytes",
+        "allowed_media_types"
+      ],
+      "title": "OutputLimits",
+      "type": "object"
+    },
+    "ParameterDefinition": {
+      "discriminator": {
+        "mapping": {
+          "boolean": "#/$defs/BooleanParameter",
+          "enum": "#/$defs/EnumParameter",
+          "float": "#/$defs/FloatParameter",
+          "integer": "#/$defs/IntegerParameter",
+          "string": "#/$defs/StringParameter"
+        },
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StringParameter"
+        },
+        {
+          "$ref": "#/$defs/IntegerParameter"
+        },
+        {
+          "$ref": "#/$defs/FloatParameter"
+        },
+        {
+          "$ref": "#/$defs/BooleanParameter"
+        },
+        {
+          "$ref": "#/$defs/EnumParameter"
+        }
+      ]
+    },
+    "ParameterScalar": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "StringParameter": {
+      "properties": {
+        "allowed_values": {
+          "items": {
+            "$ref": "#/$defs/ParameterScalar"
+          },
+          "maxItems": 128,
+          "title": "Allowed Values",
+          "type": "array"
+        },
+        "default": {
+          "title": "Default",
+          "type": "string"
+        },
+        "maximum": {
+          "default": null,
+          "title": "Maximum",
+          "type": "null"
+        },
+        "minimum": {
+          "default": null,
+          "title": "Minimum",
+          "type": "null"
+        },
+        "name": {
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Name",
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pattern"
+        },
+        "type": {
+          "const": "string",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "default"
+      ],
+      "title": "StringParameter",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "cancel_requested_at": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cancel Requested At"
+    },
+    "compiled_contract": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CompiledArtifactContract"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "contract_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contract Sha256",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Id",
+      "type": "string"
+    },
+    "input_declarations": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/ArtifactFileDeclaration"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Input Declarations"
+    },
+    "input_files": {
+      "items": {
+        "$ref": "#/$defs/ArtifactFileDeclaration"
+      },
+      "title": "Input Files",
+      "type": "array"
+    },
+    "input_manifest_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Input Manifest Sha256",
+      "type": "string"
+    },
+    "input_total_bytes": {
+      "minimum": 0,
+      "title": "Input Total Bytes",
+      "type": "integer"
+    },
+    "interface": {
+      "enum": [
+        "audio-job",
+        "video-job",
+        "image-job",
+        "mesh-job",
+        "artifact-job"
+      ],
+      "title": "Interface",
+      "type": "string"
+    },
+    "operation_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operation Id"
+    },
+    "output_files": {
+      "items": {
+        "$ref": "#/$defs/ArtifactOutputFile"
+      },
+      "title": "Output Files",
+      "type": "array"
+    },
+    "output_limits": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/OutputLimits"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "output_manifest_sha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output Manifest Sha256"
+    },
+    "preparation": {
+      "anyOf": [
+        {
+          "enum": [
+            "draft",
+            "ready"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Preparation"
+    },
+    "result_evidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArtifactJobResultEvidence"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "run_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "enum": [
+            "queued",
+            "running",
+            "backoff",
+            "observing",
+            "needs-operator",
+            "succeeded",
+            "failed",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "State"
+    },
+    "status_reason": {
+      "anyOf": [
+        {
+          "maxLength": 512,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Status Reason"
+    },
+    "submit_request_id": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Submit Request Id"
+    },
+    "supported_actions": {
+      "default": [],
+      "items": {
+        "const": "stop",
+        "type": "string"
+      },
+      "title": "Supported Actions",
+      "type": "array"
+    },
+    "timeout_seconds": {
+      "maximum": 3600,
+      "minimum": 1,
+      "title": "Timeout Seconds",
+      "type": "integer"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "run_id",
+    "interface",
+    "state",
+    "contract_sha256",
+    "compiled_contract",
+    "input_manifest_sha256",
+    "input_total_bytes",
+    "input_declarations",
+    "input_files",
+    "output_limits",
+    "output_files",
+    "timeout_seconds",
+    "created_at",
+    "updated_at",
+    "schema_version"
+  ],
+  "title": "vonkctl artifact-job document (schema_version 1)",
+  "type": "object"
+}

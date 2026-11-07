@@ -47,7 +47,6 @@ flowchart LR
         db[(PostgreSQL)]
         storage[Managed model and image storage]
         litellm[LiteLLM]
-        hermes[Hermes Agent]
         telemetry[Prometheus]
     end
 
@@ -66,7 +65,6 @@ flowchart LR
     worker --> storage
     litellm -->|separate database| db
     api <-->|HMAC revision authority| worker
-    hermes -->|published v1 hermes-agent run| caddy
     telemetry --> api
     litellm -->|accepted published route only| s1
     litellm -->|accepted published route only| sn
@@ -469,7 +467,7 @@ desired platform topology and policy are persisted in PostgreSQL.
 For the current platform path, the catalog owns exact model versions, execution harnesses, recipe revisions,
 installations, mappings, and runs. Recipe route publication derives LiteLLM
 configuration from the accepted v1 run itself; no external repository or
-Hermes fallback policy participates. Platform plans remain canonical and
+fallback policy participates. Platform plans remain canonical and
 persisted in PostgreSQL with their authority revision, targets, operation graph,
 payload digests, routes, protocol range, and plan digest. Catalog plans use a
 recipe revision digest as their own content identity.
@@ -498,7 +496,6 @@ fabric recovery, and explicit break-glass inspection.
 | PostgreSQL | Control intent, immutable resolved plans, operation/attempt fences, identity, authorization, reservations, cancellation, and retained telemetry; current artifact bookkeeping awaits the ownership cutover above. |
 | Managed artifact storage | Model files, runnable image archives, and native transfer caches; target owner of typed verification manifests and local recovery checkpoints. |
 | LiteLLM | OpenAI-compatible aliases and quotas generated only from the last published route bundle; LiteLLM keeps serving it while the worker is stalled, and routes leave only through an explicit republish. |
-| Hermes Agent | Persistent tools/UI service that reaches inference only through the Caddy-gated LiteLLM route published by an exact v1 `RecipeRun` named `hermes-agent`. |
 | Prometheus | Platform, agent, job, route, node-exporter, and DCGM observability. |
 | Tailscale | Named remote services without placing remote-access software on GPU nodes. |
 | GPU node agent | Non-root outbound control client and the only routine executor of typed node/release/workload operations. |
@@ -513,7 +510,7 @@ master key. That key is staged in the API-only gateway directory, outside the
 normalized secret volume shared with the worker.
 
 The Compose project keeps PostgreSQL, agent ingress, revision authority,
-registry publication, inference, and Hermes networks separate. Only Caddy
+registry publication, and inference networks separate. Only Caddy
 publishes a host port. LiteLLM alone joins GPU node-facing cluster egress; the
 worker and API do not.
 

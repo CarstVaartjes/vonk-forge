@@ -260,7 +260,7 @@ def _exact_service_stop_receipt_covers_start(
             .where(
                 Job.kind == "recipe.stop",
                 Job.state == LifecycleState.SUCCEEDED,
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_id == run.id,
                 Job.id.in_(
                     select(StoredOperation.parent_job_id).where(
                         StoredOperation.node_id == source.node_id,

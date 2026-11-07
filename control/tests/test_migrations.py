@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
@@ -910,3 +911,58 @@ def test_postgres_startup_reinstalls_every_declared_foreign_key(
                 "SELECT conname FROM pg_constraint WHERE contype = 'f' AND NOT convalidated"
             )
         ).all()
+
+
+def test_unaddable_missing_column_fails_reconciliation_instead_of_skipping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches booting without a column whose add timed out on a lock."""
+    from alembic.operations import Operations
+    from sqlalchemy.exc import OperationalError
+
+    class LockTimeout(Exception):
+        sqlstate = "55P03"
+
+    url = f"sqlite:///{tmp_path / 'unaddable-column.sqlite'}"
+    _upgrade(url)
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE control_process_heartbeats DROP COLUMN running_step")
+            )
+
+        def timed_out(*_args: object, **_kwargs: object) -> None:
+            raise OperationalError("ALTER TABLE", {}, LockTimeout("lock timeout"))
+
+        monkeypatch.setattr(Operations, "add_column", timed_out)
+        with engine.connect() as connection, pytest.raises(OperationalError):
+            verify_schema_is_current(connection)
+    finally:
+        engine.dispose()
+
+
+def test_missing_column_left_after_reconciliation_fails_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Catches a column add that silently did nothing and let startup finish."""
+    from alembic.operations import Operations
+
+    url = f"sqlite:///{tmp_path / 'net-column.sqlite'}"
+    _upgrade(url)
+    engine = create_engine(url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text("ALTER TABLE control_process_heartbeats DROP COLUMN running_step")
+            )
+        monkeypatch.setattr(Operations, "add_column", lambda *_a, **_k: None)
+        with (
+            engine.connect() as connection,
+            pytest.raises(
+                RuntimeError, match="control_process_heartbeats.running_step"
+            ),
+        ):
+            verify_schema_is_current(connection)
+    finally:
+        engine.dispose()

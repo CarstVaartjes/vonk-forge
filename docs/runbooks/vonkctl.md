@@ -50,6 +50,8 @@ For development from a source checkout, install that checkout with
 
 Use `--json` for one parseable object on stdout: indented when stdout is a
 terminal, one compact line when it is piped (the same document either way).
+The documents clients consume carry a `schema_version` and have published JSON
+Schemas: see the [`--json` client contract](../vonkctl-json-contract.md).
 Use `--profile N` to select a
 stable numbered Profile for that invocation; the default is Profile 1.
 Profile edits and loads require an explicit `--profile N`; there is no saved
@@ -988,6 +990,10 @@ vonkctl key revoke ci --yes
 ```
 
 The web manages the same keys under the operator menu, **API keys**.
+
+An agent such as Hermes is just another gateway client: create a key as above,
+point the client at the gateway `/v1` endpoint with that key, and read model
+facts from `/v1/model/info`. Vonk Forge runs and wires no agent itself.
 
 `key create` and `key roll` show the key once: on stdout, or only in the new `--output` file.
 Without `--model` a key may use every gateway model, so it keeps working as

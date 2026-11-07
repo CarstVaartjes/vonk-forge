@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 from sqlalchemy import select
-from vonk_control.models import FleetProfileApplication
+from vonk_control.models import (
+    STOPPABLE_RUN_STATES,
+    FleetProfileApplication,
+    RecipeInstallation,
+    RecipeRun,
+)
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .world import PAIR, SOLO, SOLO_B
@@ -53,6 +58,10 @@ class Step:
             "stale-stacked-load": (
                 f"load {_stack_name(self)} as reviewed by an older Controller"
                 " (its stored plan promises one port twice)"
+            ),
+            "remove-unused-install": (
+                "remove an installation nothing runs, outside any load"
+                " (a new workload intent over whatever is queued)"
             ),
             "cancel": "cancel the newest unfinished load",
             "stop": "load the idle profile (stop everything)",
@@ -167,6 +176,40 @@ def _cancel(sim: Simulation, step: Step) -> None:
     )
 
 
+def _remove_unused_install(sim: Simulation, step: Step) -> None:
+    """A person (or the storage sweep) removes an installation nothing runs: the
+    removal takes a new workload intent over its Sparks, which supersedes
+    whatever Start is still queued and unclaimed on them."""
+
+    with sim.world.sessions() as session:
+        busy = select(RecipeRun.installation_id).where(
+            RecipeRun.state.in_(STOPPABLE_RUN_STATES)
+        )
+        unused = tuple(
+            session.scalars(
+                select(RecipeInstallation.id)
+                .where(
+                    RecipeInstallation.state == "installed",
+                    RecipeInstallation.id.not_in(busy),
+                )
+                .order_by(RecipeInstallation.created_at, RecipeInstallation.id)
+            )
+        )
+    if not unused:
+        return
+    installation_id = unused[step.other % len(unused)]
+    lifecycle = sim.world.controller.lifecycle
+    plan = lifecycle.preview_uninstall(installation_id)
+    lifecycle.uninstall(
+        installation_id,
+        plan_digest=plan.plan_digest,
+        actor="admin",
+        request_id=_request_key(sim),
+    )
+    # Only an accepted removal took the intent; a refusal raised above.
+    sim.monitor.standalone_intents.append(sim.world.clock())
+
+
 def _stop(sim: Simulation, step: Step) -> None:
     _load(sim, "idle", [])
 
@@ -216,6 +259,7 @@ ACTIONS: dict[str, tuple[int, Perform]] = {
     "load-concurrently": (2, _load_concurrently),
     "load-stacked": (3, _stacked),
     "stale-stacked-load": (1, _stale_stacked_load),
+    "remove-unused-install": (2, _remove_unused_install),
     "cancel": (2, _cancel),
     "stop": (2, _stop),
     "restart": (2, _restart),

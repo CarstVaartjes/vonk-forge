@@ -546,6 +546,7 @@ class RecipeRouteService:
             select(Job)
             .where(
                 Job.kind == AgentOperation.RECIPE_START,
+                Job.owner_id == run.id,
                 Job.state != LifecycleState.FAILED,
             )
             .order_by(Job.created_at.desc(), Job.id.desc())
@@ -555,7 +556,6 @@ class RecipeRouteService:
                 job
                 for job in jobs
                 if isinstance(job.payload, Mapping)
-                and job.payload.get("owner_id") == run.id
                 and job.payload.get("recovery") is not None
             ),
             None,

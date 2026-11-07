@@ -860,6 +860,7 @@ def assemble_production_worker(
             agent_jobs=agent_jobs,
             clock=clock,
             recovery_run_stops=lifecycle,
+            run_endings=lifecycle,
             start_timeout_seconds=distributed_start_timeout_seconds,
         ),
     )

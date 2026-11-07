@@ -39,14 +39,6 @@ DEFAULT_MAP = {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
     },
 }
-HERMES_MAP = {
-    "version": "0.0.1",
-    "services": {
-        "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}},
-        "svc:hermes-api": {"endpoints": {"tcp:443": "http://hermes-agent:8642"}},
-        "svc:hermes-dashboard": {"endpoints": {"tcp:443": "http://hermes-agent:9119"}},
-    },
-}
 
 
 def _host_status(*services: str) -> str:
@@ -147,31 +139,6 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
     return state, calls
 
 
-def _write_hermes_http_nc(tmp_path: Path) -> Path:
-    requests = tmp_path / "hermes-http-requests.log"
-    fake = tmp_path / "nc"
-    fake.write_text(
-        "#!/usr/bin/env python3\n"
-        "import os, pathlib, sys\n"
-        "request = sys.stdin.read()\n"
-        "with pathlib.Path(os.environ['HERMES_TEST_REQUESTS']).open('a', encoding='utf-8') as stream:\n"
-        "    stream.write(request.replace('\\r', '<CR>') + '\\n---\\n')\n"
-        "ready = pathlib.Path(os.environ['HERMES_TEST_READY']).exists()\n"
-        "expected = 'Authorization: Bearer ' + os.environ['HERMES_TEST_KEY'] + '\\r\\n'\n"
-        "if request.startswith('GET /health HTTP/1.1\\r\\n'):\n"
-        "    status = 200 if ready and expected in request else (401 if expected not in request else 503)\n"
-        "elif request.startswith('GET / HTTP/1.1\\r\\n'):\n"
-        "    status = 200 if ready else 503\n"
-        "else:\n"
-        "    sys.exit(0)\n"
-        "reason = 'OK' if status == 200 else 'Unavailable'\n"
-        "sys.stdout.write(f'HTTP/1.1 {status} {reason}\\r\\nContent-Length: 0\\r\\n\\r\\n')\n",
-        encoding="utf-8",
-    )
-    fake.chmod(0o755)
-    return requests
-
-
 def _write_logging_mktemp(tmp_path: Path) -> Path:
     allocations = tmp_path / "mktemp-allocations.log"
     fake = tmp_path / "mktemp"
@@ -270,66 +237,6 @@ def test_default_gateway_reconciles_only_the_vonk_service(
     assert result.returncode == 0, result.stderr
     invocation_log = calls.read_text(encoding="utf-8")
     assert "serve get-config --all" in invocation_log
-    assert "--service=svc:hermes-api" not in invocation_log
-    assert "--service=svc:hermes-dashboard" not in invocation_log
-
-
-def test_unavailable_hermes_with_stale_advertisements_is_withdrawn_before_exact_return(
-    tmp_path: Path, short_socket_directory: Path
-) -> None:
-    """Catches an exact Serve map hiding stale Hermes AdvertiseServices."""
-    socket_path = short_socket_directory / "tailscaled.sock"
-    daemon_socket = socket.socket(socket.AF_UNIX)
-    daemon_socket.bind(str(socket_path))
-    state, calls = _write_stateful_tailscale(tmp_path)
-    state.write_text(
-        json.dumps(
-            {
-                "config": DEFAULT_MAP,
-                "advertised": [
-                    "svc:hermes-api",
-                    "svc:hermes-dashboard",
-                    "svc:vonk-forge",
-                ],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        encoding="utf-8",
-    )
-    nc = tmp_path / "nc"
-    nc.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    nc.chmod(0o755)
-    try:
-        result = subprocess.run(
-            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
-            env=os.environ
-            | {
-                "PATH": f"{tmp_path}:{os.environ['PATH']}",
-                "TS_CONFIGURE_ONCE": "1",
-                "TS_SOCKET_PATH": str(socket_path),
-                "TS_TEST_STATE": str(state),
-                "TS_TEST_CALLS": str(calls),
-            },
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=30,
-        )
-    finally:
-        daemon_socket.close()
-
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == ""
-    assert result.stderr == ""
-    assert json.loads(state.read_text(encoding="utf-8")) == {
-        "config": DEFAULT_MAP,
-        "advertised": ["svc:vonk-forge"],
-    }
-    invocations = calls.read_text(encoding="utf-8").splitlines()
-    first_exact_read = invocations.index("serve status --json")
-    assert invocations.index("serve drain svc:hermes-api") < first_exact_read
-    assert invocations.index("serve drain svc:hermes-dashboard") < first_exact_read
 
 
 def _environment() -> dict[str, str]:
@@ -374,7 +281,6 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     assert not gateway.get("cap_add")
     assert set(gateway["networks"]) == {
         "tailnet-control-plane",
-        "tailnet-hermes-edge",
         "tailnet-web-edge",
     }
     assert gateway["environment"] == {
@@ -403,7 +309,7 @@ def test_gateway_is_persistent_userspace_and_unpublished() -> None:
     }
 
 
-def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -> None:
+def test_configurator_has_no_profile_dependency() -> None:
     environment = _environment()
     environment["COMPOSE_PROFILES"] = "secure-remote"
     configurator = _rendered(environment=environment)["services"][
@@ -420,14 +326,9 @@ def test_configurator_discovers_optional_hermes_without_a_profile_dependency() -
     volumes = _volume_targets(configurator)
     assert volumes["/var/run/tailscale"]["type"] == "volume"
     assert volumes["/run/vonk-runtime-assets"]["read_only"] is True
-    assert {secret["target"] for secret in configurator["secrets"]} == {
-        "/run/secrets/hermes-api-key"
-    }
+    assert not configurator.get("secrets")
     assert configurator["restart"] == "unless-stopped"
-    assert configurator["environment"] == {
-        "VONK_SELECTED_PROFILES": "secure-remote",
-    }
-    assert configurator["healthcheck"]["timeout"] == "8s"
+    assert not configurator.get("environment")
     assert configurator["depends_on"] == {
         "caddy": {"condition": "service_healthy", "required": True, "restart": True},
         "control-api": {
@@ -451,65 +352,27 @@ def test_service_map_and_configurator_are_exact_https_and_fail_closed() -> None:
     assert "serve set-config --all" in text
     for command in (
         '--service="${control_service}" --https=443 http://caddy:8080',
-        '--service="${hermes_api_service}" --https=443 http://hermes-agent:8642',
-        '--service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119',
         'serve advertise "${control_service}"',
-        'serve advertise "${hermes_api_service}"',
-        'serve advertise "${hermes_dashboard_service}"',
     ):
         assert command in text
     assert "serve get-config --all" in text
     assert "serve reset" not in text
     assert "VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge" in text
-    assert "VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api" in text
-    assert "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard" in text
     assert "validate_service_name" in text
-    assert text.count('HTTPS\\":true') >= 3
+    assert text.count('HTTPS\\":true') >= 1
     assert '"HTTP":true' in text
     assert "120" in text
     assert "extract_json_array service-host" in text
     assert "PrimaryRoutes" in text
     assert "grant tag:vonk-gateway TCP 443 access" in text
     assert "tailscale-service-hosts.compact" in text
-    assert "${hermes_api_service}" in text
-    assert "${hermes_dashboard_service}" in text
     assert '"services/vonk-forge"' not in text
-    assert "BusyBox nc exits as soon as piped stdin reaches EOF" in text
-    assert "sleep 1" in text
-    assert "'[23][0-9][0-9]'" in text
     health = text.split('if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then', 1)[1].split(
         "\nfi", 1
     )[0]
-    assert "*,hermes,*)" in health
-    assert "hermes_is_available" in health
-    assert "serve_is_exact 1" in health
-    assert "serve_is_exact 0" in health
+    assert "serve_is_exact" in health
     for forbidden in ("svc:*", "svc:ai-devbox", "tcp:22", "--tcp=22"):
         assert forbidden not in text
-
-
-def test_selected_hermes_profile_is_passed_to_the_configurator() -> None:
-    environment = _environment()
-    environment["COMPOSE_PROFILES"] = "secure-remote,hermes"
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(COMPOSE / "compose.yaml"),
-            "config",
-            "--format",
-            "json",
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
-    configurator = json.loads(result.stdout)["services"]["tailscale-configurator"]
-    assert configurator["environment"] == {
-        "VONK_SELECTED_PROFILES": "secure-remote,hermes",
-    }
 
 
 def test_configurator_uses_distinct_overridden_service_names(
@@ -533,8 +396,6 @@ def test_configurator_uses_distinct_overridden_service_names(
                 "TS_TEST_STATE": str(state),
                 "TS_TEST_CALLS": str(calls),
                 "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge-acceptance",
-                "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api-acceptance",
-                "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-acceptance",
             },
             capture_output=True,
             text=True,
@@ -558,18 +419,12 @@ def test_configurator_uses_distinct_overridden_service_names(
     }
     invocations = calls.read_text(encoding="utf-8")
     assert "--service=svc:vonk-forge-acceptance" in invocations
-    assert "serve drain svc:hermes-api-acceptance" in invocations
-    assert "serve drain svc:hermes-dashboard-acceptance" in invocations
 
 
 @pytest.mark.parametrize(
     "environment",
     [
         {"VONK_TAILSCALE_CONTROL_SERVICE": "svc:Uppercase"},
-        {
-            "VONK_TAILSCALE_CONTROL_SERVICE": "svc:duplicate",
-            "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:duplicate",
-        },
     ],
 )
 def test_configurator_rejects_invalid_or_duplicate_service_names(
@@ -957,220 +812,7 @@ def test_configurator_repairs_plaintext_or_extra_service_map(
         "serve set-config --all",
     ):
         assert command in calls
-    assert "--service=svc:hermes-" not in calls
     assert "serve reset" not in calls
-
-
-def test_configurator_advertises_hermes_when_both_profile_endpoints_are_available(
-    tmp_path: Path, short_socket_directory: Path
-) -> None:
-    socket_path = short_socket_directory / "tailscaled.sock"
-    daemon_socket = socket.socket(socket.AF_UNIX)
-    daemon_socket.bind(str(socket_path))
-    calls = tmp_path / "calls.log"
-    repaired = tmp_path / "repaired"
-    fake = tmp_path / "tailscale"
-    requests = _write_hermes_http_nc(tmp_path)
-    ready = tmp_path / "hermes-ready"
-    ready.touch()
-    key = tmp_path / "hermes-api-key"
-    key.write_text("test-hermes-key\n", encoding="utf-8")
-    # Tailscale's declarative format stores services in a Go map, so its JSON
-    # encoder is free to emit any member order. Deliberately use the reverse of
-    # configure.sh's construction order to prove readiness is semantic while
-    # every service name, listener, and upstream remains exact.
-    expected_map = json.dumps(
-        {
-            "version": HERMES_MAP["version"],
-            "services": dict(reversed(HERMES_MAP["services"].items())),
-        },
-        separators=(",", ":"),
-    )
-    healthy_status = json.dumps(
-        {
-            "Services": {
-                service: {"TCP": {"443": {"HTTPS": True}}}
-                for service in HERMES_MAP["services"]
-            }
-        },
-        separators=(",", ":"),
-    )
-    host_status = _host_status(*HERMES_MAP["services"])
-    fake.write_text(
-        "#!/bin/sh\n"
-        f"calls={calls}\n"
-        f"repaired={repaired}\n"
-        'printf \'%s\\n\' "$*" >>"$calls"\n'
-        'case "$*" in\n'
-        '  *"serve get-config --all"*) '
-        f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{expected_map}'; "
-        'else printf \'%s\\n\' \'{"version":"0.0.1","services":{}}\'; fi ;;\n'
-        '  *"serve status --json"*) '
-        f"if [ -f \"$repaired\" ]; then printf '%s\\n' '{healthy_status}'; "
-        "else printf '%s\\n' '{\"Services\":{}}'; fi ;;\n"
-        '  *"--service=svc:vonk-forge --https=443 http://caddy:8080"*) '
-        'touch "$repaired" ;;\n'
-        "  *\"status --json\"*) printf '%s\\n' "
-        f"'{host_status}' ;;\n"
-        "esac\n",
-        encoding="utf-8",
-    )
-    fake.chmod(0o755)
-    try:
-        result = subprocess.run(
-            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
-            env=os.environ
-            | {
-                "PATH": f"{tmp_path}:{os.environ['PATH']}",
-                "TS_CONFIGURE_ONCE": "1",
-                "TS_SOCKET_PATH": str(socket_path),
-                "HERMES_API_KEY_PATH": str(key),
-                "HERMES_TEST_KEY": "test-hermes-key",
-                "HERMES_TEST_READY": str(ready),
-                "HERMES_TEST_REQUESTS": str(requests),
-            },
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        missing_hermes_capabilities = fake.read_text(encoding="utf-8").replace(
-            host_status,
-            _host_status("svc:vonk-forge"),
-        )
-        fake.write_text(missing_hermes_capabilities, encoding="utf-8")
-        health = subprocess.run(
-            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
-            env=os.environ
-            | {
-                "PATH": f"{tmp_path}:{os.environ['PATH']}",
-                "TS_HEALTHCHECK_ONLY": "1",
-                "TS_SOCKET_PATH": str(socket_path),
-                "VONK_SELECTED_PROFILES": "hermes",
-                "HERMES_API_KEY_PATH": str(key),
-                "HERMES_TEST_KEY": "test-hermes-key",
-                "HERMES_TEST_READY": str(ready),
-                "HERMES_TEST_REQUESTS": str(requests),
-            },
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    finally:
-        daemon_socket.close()
-
-    assert result.returncode == 0, result.stderr
-    assert health.returncode != 0
-    invocation_log = calls.read_text(encoding="utf-8")
-    for service in HERMES_MAP["services"]:
-        assert f"--service={service} --https=443" in invocation_log
-    request_log = requests.read_text(encoding="utf-8")
-    assert "GET /health HTTP/1.1<CR>" in request_log
-    assert "Authorization: Bearer test-hermes-key<CR>" in request_log
-    assert "GET / HTTP/1.1<CR>" in request_log
-
-
-# Slow by design: the real reconciler script polls once per second and the
-# test waits for four readiness transitions plus the drain on shutdown.
-@pytest.mark.slow(30)
-def test_reconciler_tracks_authenticated_hermes_readiness_and_is_concurrency_safe(
-    tmp_path: Path, short_socket_directory: Path
-) -> None:
-    """Catches TCP-only readiness, stale advertisements, and shared scratch files."""
-    socket_path = short_socket_directory / "tailscaled.sock"
-    daemon_socket = socket.socket(socket.AF_UNIX)
-    daemon_socket.bind(str(socket_path))
-    state, calls = _write_stateful_tailscale(tmp_path)
-    requests = _write_hermes_http_nc(tmp_path)
-    allocations = _write_logging_mktemp(tmp_path)
-    ready = tmp_path / "hermes-ready"
-    key = tmp_path / "hermes-api-key"
-    key.write_text("transition-key\n", encoding="utf-8")
-    scratch = tmp_path / "scratch"
-    scratch.mkdir()
-    environment = os.environ | {
-        "PATH": f"{tmp_path}:{os.environ['PATH']}",
-        "TMPDIR": str(scratch),
-        "TS_SOCKET_PATH": str(socket_path),
-        "TS_RECONCILE_INTERVAL_SECONDS": "1",
-        "TS_TEST_STATE": str(state),
-        "TS_TEST_CALLS": str(calls),
-        "TS_TEST_READ_DELAY": "0.05",
-        "TS_TEST_MKTEMP_ALLOCATIONS": str(allocations),
-        "HERMES_API_KEY_PATH": str(key),
-        "HERMES_TEST_KEY": "transition-key",
-        "HERMES_TEST_READY": str(ready),
-        "HERMES_TEST_REQUESTS": str(requests),
-    }
-    reconciler = subprocess.Popen(
-        ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
-        env=environment,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
-        ready.touch()
-        _wait_for_service_state(state, HERMES_MAP, set(HERMES_MAP["services"]))
-        ready.unlink()
-        _wait_for_service_state(state, DEFAULT_MAP, {"svc:vonk-forge"})
-        ready.touch()
-        _wait_for_service_state(state, HERMES_MAP, set(HERMES_MAP["services"]))
-
-        healthchecks = [
-            subprocess.Popen(
-                ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
-                env=environment | {"TS_HEALTHCHECK_ONLY": "1"},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            for _ in range(4)
-        ]
-        results = [healthcheck.communicate(timeout=8) for healthcheck in healthchecks]
-        assert [healthcheck.returncode for healthcheck in healthchecks] == [
-            0,
-            0,
-            0,
-            0,
-        ], results
-        assert results == [("", "")] * 4
-    finally:
-        reconciler.terminate()
-        try:
-            stdout, stderr = reconciler.communicate(timeout=30)
-        except subprocess.TimeoutExpired:
-            reconciler.kill()
-            stdout, stderr = reconciler.communicate(timeout=30)
-        daemon_socket.close()
-    assert reconciler.returncode == 0, (stdout, stderr)
-    assert stdout == ""
-    assert stderr == ""
-    assert json.loads(state.read_text(encoding="utf-8")) == {
-        "config": {"version": "0.0.1", "services": {}},
-        "advertised": [],
-    }
-    allocated = allocations.read_text(encoding="utf-8").splitlines()
-    assert len(allocated) >= 5
-    assert len(allocated) == len(set(allocated))
-    assert not list(scratch.iterdir())
-    invocations = calls.read_text(encoding="utf-8").splitlines()
-    drain_api = invocations.index("serve drain svc:hermes-api")
-    clear_api = invocations.index("serve clear svc:hermes-api", drain_api)
-    drain_dashboard = invocations.index("serve drain svc:hermes-dashboard", clear_api)
-    clear_dashboard = invocations.index(
-        "serve clear svc:hermes-dashboard", drain_dashboard
-    )
-    clear_all = next(
-        index
-        for index, invocation in enumerate(
-            invocations[clear_dashboard:], clear_dashboard
-        )
-        if invocation.startswith("serve set-config --all ")
-    )
-    assert drain_api < clear_api < drain_dashboard < clear_dashboard < clear_all
 
 
 def test_reconciler_withdraws_services_at_once_during_its_interval_sleep(
@@ -1239,9 +881,6 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
     policy = json.loads((COMPOSE / "tailscale/grants.example.hujson").read_text())
 
     assert policy["tagOwners"] == {"tag:vonk-gateway": ["autogroup:admin"]}
-    assert policy["groups"] == {
-        "group:hermes-users": ["replace-with-your-login@github"]
-    }
     assert policy["acls"] == []
     assert policy["grants"] == [
         {
@@ -1250,33 +889,20 @@ def test_grants_example_is_exact_service_least_privilege() -> None:
             "ip": ["tcp:443"],
         },
         {
-            "src": ["group:hermes-users"],
-            "dst": ["svc:hermes-api", "svc:hermes-dashboard"],
-            "ip": ["tcp:443"],
-        },
-        {
             "src": ["tag:vonk-gateway"],
-            "dst": ["svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"],
+            "dst": ["svc:vonk-forge"],
             "ip": ["tcp:443"],
         },
     ]
     assert policy["autoApprovers"] == {
         "services": {
-            service: ["tag:vonk-gateway"] for service in HERMES_MAP["services"]
+            service: ["tag:vonk-gateway"] for service in DEFAULT_MAP["services"]
         }
     }
     assert policy["tests"] == [
         {
-            "src": "replace-with-your-login@github",
-            "accept": ["svc:hermes-api:443", "svc:hermes-dashboard:443"],
-        },
-        {
             "src": "tag:vonk-gateway",
-            "accept": [
-                "svc:vonk-forge:443",
-                "svc:hermes-api:443",
-                "svc:hermes-dashboard:443",
-            ],
+            "accept": ["svc:vonk-forge:443"],
         },
     ]
     rendered = json.dumps(policy)

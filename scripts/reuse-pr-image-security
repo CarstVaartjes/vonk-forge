@@ -22,7 +22,7 @@ if ! jq -e --argjson run "$run_id" --arg repo "$GITHUB_REPOSITORY" '
   exit 0
 fi
 attempt=$(jq -er '.run_attempt | numbers | select(. > 0)' <<< "$record")
-roles=(api worker hermes litellm)
+roles=(api worker litellm)
 for role in "${roles[@]}"; do
   variable="${role^^}_DIGEST"
   digest=${!variable}

@@ -44,18 +44,28 @@ def end_unfinished_run(
     *,
     actor: str,
     request_id: str,
-    ordinal: int,
+    ordinal: int | None,
+    note: str,
 ) -> bool:
     """End an unfinished run: withdraw its route, then stop it or mark it lost.
 
     The run becomes ``stopping`` with its exact Stop queued under ``ordinal``
-    (already queued under ``request_id``: left as it is). Without exact Start
+    (already queued under ``request_id``: left as it is). With no ordinal (no
+    single intent owns its Sparks) the run is ``lost``, stoppable, so the owner
+    of the Sparks still finds it; it is never left ``failed``. ``note`` leads
+    the route error. Without exact Start
     authority nothing is invented: the run is ended as unknown (``lost``, or
     ``failed`` once its Sparks are proven to have it gone). True only when this
     call queued the Stop.
     """
 
     run.route_state = RouteState.WITHDRAWN
+    run.updated_at = now
+    if ordinal is None:
+        run.state = RunState.LOST
+        run.route_error = f"{note}; cleanup awaits the owning intent"
+        return False
+    run.route_error = f"{note}; cleanup queued"
     if session.scalar(select(Job.id).where(Job.request_id == request_id)):
         run.state = RunState.STOPPING
         return False

@@ -91,8 +91,8 @@ def _run_start_intent(session: Session, run_id: str) -> int:
             select(Job)
             .where(
                 Job.kind == root_kind,
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run_id,
+                Job.owner_kind == "run",
+                Job.owner_id == run_id,
                 Job.payload["recovery"].as_string().is_(None),
             )
             .order_by(Job.created_at, Job.id)
@@ -220,8 +220,8 @@ def _active_owned_workload_jobs(
                 if include_waiting_cancellation
                 else (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
             ),
-            Job.payload["owner_kind"].as_string() == owner_kind,
-            Job.payload["owner_id"].as_string() == owner_id,
+            Job.owner_kind == owner_kind,
+            Job.owner_id == owner_id,
         )
         .order_by(Job.id)
     )

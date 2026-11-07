@@ -45,6 +45,7 @@ from ..models import (
     RecipeInstallation,
     RecipeRun,
 )
+from ..owner_liveness import OwnerKind
 from ..recipe_action_plans import (
     UninstallPlan,
 )
@@ -197,8 +198,8 @@ class ReconciliationAuthorityMixin:
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_INSTALL.value,
                     Job.state == LifecycleState.SUCCEEDED.value,
-                    Job.payload["owner_kind"].as_string() == "installation",
-                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.owner_kind == OwnerKind.INSTALLATION,
+                    Job.owner_id == installation.id,
                     Job.payload["plan_digest"].as_string() == installation.plan_digest,
                 )
             )
@@ -207,8 +208,8 @@ class ReconciliationAuthorityMixin:
             session.scalars(
                 select(Job).where(
                     Job.kind == WireAgentOperation.RECIPE_RECONCILE.value,
-                    Job.payload["owner_kind"].as_string() == "installation",
-                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.owner_kind == OwnerKind.INSTALLATION,
+                    Job.owner_id == installation.id,
                 )
             )
         )
@@ -223,8 +224,8 @@ class ReconciliationAuthorityMixin:
                             LifecycleState.BACKOFF,
                         )
                     ),
-                    Job.payload["owner_kind"].as_string() == "installation",
-                    Job.payload["owner_id"].as_string() == installation.id,
+                    Job.owner_kind == OwnerKind.INSTALLATION,
+                    Job.owner_id == installation.id,
                     Job.kind.in_(
                         (
                             WireAgentOperation.RECIPE_INSTALL.value,
@@ -247,8 +248,8 @@ class ReconciliationAuthorityMixin:
                                 LifecycleState.BACKOFF,
                             )
                         ),
-                        Job.payload["owner_kind"].as_string() == "run",
-                        Job.payload["owner_id"].as_string().in_(run_ids),
+                        Job.owner_kind == "run",
+                        Job.owner_id.in_(run_ids),
                         Job.kind.in_(
                             (
                                 WireAgentOperation.RECIPE_START.value,
@@ -475,8 +476,8 @@ class ReconciliationAuthorityMixin:
                     LifecycleState.BACKOFF,
                 )
             ),
-            Job.payload["owner_kind"].as_string() == "installation",
-            Job.payload["owner_id"].as_string() == installation.id,
+            Job.owner_kind == OwnerKind.INSTALLATION,
+            Job.owner_id == installation.id,
             Job.kind.in_(
                 (
                     WireAgentOperation.RECIPE_INSTALL.value,
@@ -501,8 +502,8 @@ class ReconciliationAuthorityMixin:
                                 LifecycleState.BACKOFF,
                             )
                         ),
-                        Job.payload["owner_kind"].as_string() == "run",
-                        Job.payload["owner_id"].as_string().in_(run_ids),
+                        Job.owner_kind == "run",
+                        Job.owner_id.in_(run_ids),
                         Job.kind.in_(
                             (
                                 WireAgentOperation.RECIPE_START.value,

@@ -312,8 +312,8 @@ def build_may_run(session: Session, build: RecipeBuild) -> bool:
     for job_id in session.scalars(
         select(Job.id).where(
             Job.state.not_in(JOB_ENDED_STATES),
-            Job.payload["owner_kind"].as_string() == OwnerKind.RECIPE_BUILD.value,
-            Job.payload["owner_id"].as_string() == build.id,
+            Job.owner_kind == OwnerKind.RECIPE_BUILD.value,
+            Job.owner_id == build.id,
         )
     ):
         states = set(
@@ -344,8 +344,8 @@ def build_holds_disk(
             select(AgentOperation, Job.state)
             .join(Job, Job.id == AgentOperation.parent_job_id)
             .where(
-                Job.payload["owner_kind"].as_string() == OwnerKind.RECIPE_BUILD,
-                Job.payload["owner_id"].as_string() == build.id,
+                Job.owner_kind == OwnerKind.RECIPE_BUILD,
+                Job.owner_id == build.id,
             )
         )
     )
@@ -477,6 +477,12 @@ _ARMS: dict[OwnerKind, Callable[[Session, OwnerRef, datetime | None], Owner]] = 
 }
 
 
+def issued_for(owner_kind: OwnerKind, owner_id: str) -> ColumnElement[bool]:
+    """The Jobs issued for this owner: an indexed lookup on the owner columns."""
+
+    return (Job.owner_kind == owner_kind.value) & (Job.owner_id == owner_id)
+
+
 def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> bool:
     """Whether a not-yet-ended operation was issued for, or records, this owner.
 
@@ -492,10 +498,7 @@ def referencing_active_job(session: Session, owner_kind: str, owner_id: str) -> 
             select(Job.id)
             .where(
                 Job.state.not_in(JOB_ENDED_STATES),
-                (
-                    (Job.payload["owner_kind"].as_string() == owner_kind)
-                    & (Job.payload["owner_id"].as_string() == owner_id)
-                )
+                ((Job.owner_kind == owner_kind) & (Job.owner_id == owner_id))
                 | cast(Job.result, Text).contains(owner_id),
             )
             .limit(1)
@@ -540,7 +543,7 @@ def installations_named_by_live_jobs(
     named: set[str] = set()
     for owner_kind, result, *values in session.execute(
         select(
-            Job.payload["owner_kind"].as_string(),
+            Job.owner_kind,
             cast(Job.result, Text),
             *(_payload_text(path) for path in paths),
         ).where(
@@ -559,6 +562,49 @@ def installations_named_by_live_jobs(
     return wanted & named
 
 
+def runs_named_by_live_work(
+    session: Session, run_ids: Collection[str]
+) -> frozenset[str]:
+    """Which of ``run_ids`` live work names: one query per kind of work, any count.
+
+    The batch form of ``run_has_live_operation`` (a not-yet-ended operation
+    issued for the run, or recording it in its progress), plus a live Spark
+    order whose payload names the run: a deferred offline Stop order outlives
+    its parent operation and still owns the run's Stop.
+    """
+
+    wanted = frozenset(run_ids)
+    if not wanted:
+        return frozenset()
+    named: set[str] = set()
+    for owner_kind, owner_id, result in session.execute(
+        select(
+            Job.owner_kind,
+            Job.owner_id,
+            cast(Job.result, Text),
+        ).where(
+            Job.state.in_(job_states.LIVE),
+            or_(
+                Job.owner_id.in_(list(wanted)),
+                *(cast(Job.result, Text).contains(found) for found in wanted),
+            ),
+        )
+    ):
+        if owner_kind == OwnerKind.RUN and owner_id in wanted:
+            named.add(owner_id)
+        if result:
+            named.update(found for found in wanted if found in result)
+    named.update(
+        session.scalars(
+            select(AgentOperation.payload["run_id"].as_string()).where(
+                AgentOperation.state.in_(agent_operation_states.LIVE),
+                AgentOperation.payload["run_id"].as_string().in_(list(wanted)),
+            )
+        )
+    )
+    return wanted & named
+
+
 def run_has_live_operation(session: Session, run_id: str) -> bool:
     """Whether a not-yet-ended operation (a Start, a Stop) still owns this run."""
 
@@ -573,7 +619,7 @@ def live_build_job(session: Session, build: RecipeBuild) -> Job | None:
         .where(
             Job.kind == WireAgentOperation.RECIPE_BUILD.value,
             Job.state.in_(_ACTIVE_JOB_STATES),
-            Job.payload["owner_id"].as_string() == build.id,
+            Job.owner_id == build.id,
             Job.payload["plan_digest"].as_string() == build.build_input_sha256,
         )
         .order_by(Job.updated_at.desc(), Job.id)
@@ -598,9 +644,9 @@ def builds_in_flight(now: datetime) -> ColumnElement[bool]:
     may still run.
     """
 
-    own_job = (
-        Job.payload["owner_kind"].as_string() == OwnerKind.RECIPE_BUILD.value
-    ) & (Job.payload["owner_id"].as_string() == RecipeBuild.id)
+    own_job = (Job.owner_kind == OwnerKind.RECIPE_BUILD.value) & (
+        Job.owner_id == RecipeBuild.id
+    )
     may_run = exists().where(
         Job.state.not_in(JOB_ENDED_STATES),
         own_job,
@@ -661,8 +707,8 @@ def _effect_is_uncertain(session: Session, installation_id: str) -> bool:
     last = session.scalar(
         select(Job)
         .where(
-            Job.payload["owner_kind"].as_string() == OwnerKind.INSTALLATION.value,
-            Job.payload["owner_id"].as_string() == installation_id,
+            Job.owner_kind == OwnerKind.INSTALLATION.value,
+            Job.owner_id == installation_id,
         )
         .order_by(Job.updated_at.desc(), Job.id.desc())
         .limit(1)

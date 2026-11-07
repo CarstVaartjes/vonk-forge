@@ -9,7 +9,12 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, ModelCacheCode, WaitReason
+from vonk_agent_protocol import (
+    Disposition,
+    ModelCacheCode,
+    SecurityRefusalReason,
+    WaitReason,
+)
 
 from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite
@@ -21,6 +26,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_blockers import make_blocker
+from ..operation_contract import AvailabilityRecoveryAction
 from ..persisted_waits import schedule_wait, typed_wait_reason
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso
@@ -31,6 +37,11 @@ from .constants import (
     _SOURCE_GONE_STATUSES,
 )
 from .errors import ModelCacheError, _ArtifactWriterBusy
+from .ingress_mismatch import (
+    IngressMismatchStep,
+    ingress_mismatch_detail,
+    observe_ingress_mismatch,
+)
 from .persistence import (
     _cache_failure,
     _operation_cancellation,
@@ -89,6 +100,7 @@ class FailureMixin:
         ):
             failure_code = ModelCacheCode.OPERATION_FAILED
         cancellation_pending = False
+        digest_mismatch = failure_code == ModelCacheCode.DIGEST_MISMATCH
         source_status = getattr(error, "source_status", None)
         # The receipts are read before the transaction takes its row locks.
         all_valid = all(cache._object_is_stored(spec) for spec in manifest.artifacts)
@@ -99,7 +111,9 @@ class FailureMixin:
             )
             if operation is not None and operation.state == "cancelled":
                 return
-            if transfer_attempt is not None and source_status in _SOURCE_GONE_STATUSES:
+            if transfer_attempt is not None and (
+                source_status in _SOURCE_GONE_STATUSES or digest_mismatch
+            ):
                 if operation is None:
                     return
                 claim = cache._lifecycle.lifecycle(operation, now)
@@ -112,7 +126,7 @@ class FailureMixin:
                 ):
                     # The same failed Future may be reported again after a
                     # lost commit acknowledgement. Only its exact live attempt
-                    # can contribute a new provider file observation.
+                    # can contribute a new provider file or digest observation.
                     return
             cancellation_pending = (
                 operation is not None and _operation_cancellation(operation) is not None
@@ -138,6 +152,7 @@ class FailureMixin:
                     payload_before.retry if payload_before is not None else None
                 )
                 gone_recovery: str | None = None
+                ingress_mismatch = None
                 missing_source: ModelCacheMissingSourceObservation | None = None
                 artifact_key = failed_artifact_key or operation.current_artifact_key
                 if (
@@ -170,7 +185,7 @@ class FailureMixin:
                         retryable = False
                         verdict = Disposition.FAIL
                         failure_code = ModelCacheCode.SOURCE_GONE
-                        gone_recovery = "download_again"
+                        gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                         detail = cache._source_gone_detail(
                             session,
                             manifest,
@@ -180,6 +195,44 @@ class FailureMixin:
                         )
                         if row is not None:
                             row.last_error = detail
+
+                if (
+                    retryable
+                    and transfer_attempt is not None
+                    and digest_mismatch
+                    and artifact_key
+                ):
+                    pinned = next(
+                        (
+                            item
+                            for item in manifest.artifacts
+                            if artifact_key in {item.key, item.artifact_id}
+                        ),
+                        None,
+                    )
+                    if pinned is not None:
+                        ingress_mismatch, step = observe_ingress_mismatch(
+                            retained_retry.ingress_mismatch
+                            if retained_retry is not None
+                            else None,
+                            artifact_key=artifact_key,
+                            sha256=pinned.sha256,
+                        )
+                        if step is IngressMismatchStep.END:
+                            # Observed twice in a row: the source serves other
+                            # content than the pin. End with the evidence; a
+                            # fresh exact request counts independently.
+                            retryable = False
+                            verdict = Disposition.FAIL
+                            # The security code of the ingress digest edge, so
+                            # no parent starts a repair download of it.
+                            failure_code = SecurityRefusalReason.DIGEST_MISMATCH
+                            gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
+                            detail = ingress_mismatch_detail(
+                                pinned.path, ingress_mismatch
+                            )
+                            if row is not None:
+                                row.last_error = detail
 
                 operator_retries = (
                     0
@@ -254,6 +307,7 @@ class FailureMixin:
                         update={
                             "operator_retries": operator_retries,
                             "missing_source": missing_source,
+                            "ingress_mismatch": ingress_mismatch,
                             "access_checks": access_checks,
                         }
                     )

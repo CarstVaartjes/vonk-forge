@@ -11,7 +11,6 @@ DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 DIGEST_VARIABLES = (
     "CONTROL_API_DIGEST",
     "CONTROL_WORKER_DIGEST",
-    "HERMES_AGENT_DIGEST",
     "LITELLM_DIGEST",
 )
 

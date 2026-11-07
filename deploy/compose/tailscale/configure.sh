@@ -27,15 +27,7 @@ if [ "${require_service_host}" = "0" ] && [ "${ephemeral}" != "true" ]; then
     exit 64
 fi
 reconcile_interval=${TS_RECONCILE_INTERVAL_SECONDS:-30}
-hermes_api_host=${HERMES_API_HOST:-hermes-agent}
-hermes_api_port=${HERMES_API_PORT:-8642}
-hermes_dashboard_host=${HERMES_DASHBOARD_HOST:-hermes-agent}
-hermes_dashboard_port=${HERMES_DASHBOARD_PORT:-9119}
-hermes_api_key_path=${HERMES_API_KEY_PATH:-/run/secrets/hermes-api-key}
-selected_profiles=${VONK_SELECTED_PROFILES:-}
 control_service=${VONK_TAILSCALE_CONTROL_SERVICE:-svc:vonk-forge}
-hermes_api_service=${VONK_TAILSCALE_HERMES_API_SERVICE:-svc:hermes-api}
-hermes_dashboard_service=${VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE:-svc:hermes-dashboard}
 
 validate_service_name() {
     printf '%s\n' "$1" \
@@ -43,20 +35,11 @@ validate_service_name() {
 }
 
 validate_service_name "${control_service}" \
-    && validate_service_name "${hermes_api_service}" \
-    && validate_service_name "${hermes_dashboard_service}" \
     || { echo "ERROR: Tailscale Service names are invalid." >&2; exit 64; }
-[ "${control_service}" != "${hermes_api_service}" ] \
-    && [ "${control_service}" != "${hermes_dashboard_service}" ] \
-    && [ "${hermes_api_service}" != "${hermes_dashboard_service}" ] \
-    || { echo "ERROR: Tailscale Service names must be distinct." >&2; exit 64; }
 
 default_service_map=$(printf \
     '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
     "${control_service}")
-hermes_service_map=$(printf \
-    '{"version":"0.0.1","services":{"%s":{"endpoints":{"tcp:443":"http://hermes-agent:8642"}},"%s":{"endpoints":{"tcp:443":"http://hermes-agent:9119"}},"%s":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}' \
-    "${hermes_api_service}" "${hermes_dashboard_service}" "${control_service}")
 
 scratch_root=${TMPDIR:-/tmp}
 runtime_dir=$(mktemp -d "${scratch_root%/}/vonk-tailscale.XXXXXX")
@@ -75,68 +58,11 @@ ts() {
     tailscale --socket="${socket}" "$@"
 }
 
-http_probe() {
-    host=$1
-    port=$2
-    path=$3
-    authorization=$4
-    response_path=$5
-    accepted_statuses=$6
-
-    {
-        printf 'GET %s HTTP/1.1\r\n' "${path}"
-        printf 'Host: %s:%s\r\n' "${host}" "${port}"
-        if [ -n "${authorization}" ]; then
-            printf 'Authorization: Bearer %s\r\n' "${authorization}"
-        fi
-        printf 'Connection: close\r\n\r\n'
-        # BusyBox nc exits as soon as piped stdin reaches EOF, which can race
-        # the peer's first response byte. Keep stdin open for one bounded
-        # second so the final-read timeout can observe the HTTP status.
-        sleep 1
-    } | nc -w 3 "${host}" "${port}" >"${response_path}" 2>/dev/null \
-        && grep -Eq "^HTTP/1\\.[01] ${accepted_statuses}[[:space:]]" "${response_path}"
-}
-
-hermes_is_available() {
-    [ -r "${hermes_api_key_path}" ] || return 1
-    hermes_api_key=$(tr -d '\r\n' <"${hermes_api_key_path}")
-    [ -n "${hermes_api_key}" ] || return 1
-    http_probe \
-        "${hermes_api_host}" \
-        "${hermes_api_port}" \
-        /health \
-        "${hermes_api_key}" \
-        "${runtime_dir}/hermes-api-response" \
-        '2[0-9][0-9]' \
-        && http_probe \
-            "${hermes_dashboard_host}" \
-            "${hermes_dashboard_port}" \
-            / \
-            '' \
-            "${runtime_dir}/hermes-dashboard-response" \
-            '[23][0-9][0-9]'
-}
-
-withdraw_hermes_services() {
-    # Tailscale stores Serve config and AdvertiseServices
-    # independently. Drain before reading the map so stale advertisements are
-    # removed even when there is no corresponding Serve config to inspect.
-    # Clear then removes any remaining handler. Both commands are idempotent;
-    # suppress their expected informational output while preserving failures.
-    ts serve drain "${hermes_api_service}" >/dev/null 2>&1
-    ts serve clear "${hermes_api_service}" >/dev/null 2>&1
-    ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1
-    ts serve clear "${hermes_dashboard_service}" >/dev/null 2>&1
-}
-
 withdraw_all_services() {
     # A stopped gateway must not remain registered as a candidate host for the
     # fixed Service VIPs. Drain first, then atomically clear the full map and
     # AdvertiseServices preference before tailscaled itself is stopped.
     ts serve drain "${control_service}" >/dev/null 2>&1 || true
-    ts serve drain "${hermes_api_service}" >/dev/null 2>&1 || true
-    ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1 || true
     ts serve set-config --all "${empty_service_map}" >/dev/null 2>&1 || true
 }
 
@@ -198,10 +124,6 @@ shutdown_services() {
 }
 
 serve_is_exact() {
-    include_hermes=$1
-    if [ "${include_hermes}" = "0" ]; then
-        withdraw_hermes_services
-    fi
     ts serve status --json >"${runtime_dir}/tailscale-serve-status.json"
     ts serve get-config --all >"${runtime_dir}/tailscale-serve-config.json"
     tr -d '[:space:]' \
@@ -228,19 +150,8 @@ serve_is_exact() {
         "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"443":{"HTTP":true}' "${runtime_dir}/tailscale-serve-status.compact" \
         && ! grep -Fq '"TCPForward"' "${runtime_dir}/tailscale-serve-status.compact" \
-        && if [ "${include_hermes}" = "1" ]; then
-            grep -Fq "\"${hermes_api_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
-                "${runtime_dir}/tailscale-serve-status.compact" \
-                && grep -Fq "\"${hermes_dashboard_service}\":{\"TCP\":{\"443\":{\"HTTPS\":true}}" \
-                    "${runtime_dir}/tailscale-serve-status.compact" \
-                && service_map_is_exact \
-                    "${comparable_service_map}" "${hermes_service_map}"
-        else
-            ! grep -Fq "\"${hermes_api_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
-                && ! grep -Fq "\"${hermes_dashboard_service}\":" "${runtime_dir}/tailscale-serve-status.compact" \
-                && service_map_is_exact \
-                    "${comparable_service_map}" "${default_service_map}"
-        fi
+        && service_map_is_exact \
+            "${comparable_service_map}" "${default_service_map}"
 }
 
 serve_is_pending_ephemeral_acceptance() {
@@ -260,7 +171,6 @@ serve_is_pending_ephemeral_acceptance() {
 }
 
 configure_services() {
-    include_hermes=$1
     # Configuration-file import currently infers the listener protocol from the
     # HTTP upstream and can create plaintext HTTP on port 443. Express the
     # listener protocol explicitly through the CLI instead.
@@ -276,19 +186,12 @@ configure_services() {
 
 advertise_services() {
     ts serve advertise "${control_service}" >/dev/null
-    if [ "${include_hermes}" = "1" ]; then
-        ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
-        ts serve advertise "${hermes_api_service}" >/dev/null
-        ts serve --service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119 >/dev/null
-        ts serve advertise "${hermes_dashboard_service}" >/dev/null
-    fi
 }
 
 wait_for_exact_services() {
-    include_hermes=$1
     activation_remaining=120
     while [ "${activation_remaining}" -gt 0 ]; do
-        if serve_is_exact "${include_hermes}"; then
+        if serve_is_exact; then
             return 0
         fi
         sleep 2
@@ -335,36 +238,15 @@ service_has_mapped_addresses() {
 }
 
 service_host_is_approved() {
-    include_hermes=$1
-    service_has_mapped_addresses "${control_service}" || return 1
-    if [ "${include_hermes}" = "0" ]; then
-        return 0
-    fi
-    service_has_mapped_addresses "${hermes_api_service}" \
-        && service_has_mapped_addresses "${hermes_dashboard_service}"
+    service_has_mapped_addresses "${control_service}"
 }
 
 reconfigure_approved_services() {
-    include_hermes=$1
     repaired=1
     if service_has_mapped_addresses "${control_service}"; then
         ts serve drain "${control_service}" >/dev/null 2>&1 || true
         ts serve --service="${control_service}" --https=443 http://caddy:8080 >/dev/null
         ts serve advertise "${control_service}" >/dev/null
-        repaired=0
-    fi
-    if [ "${include_hermes}" = "1" ] \
-        && service_has_mapped_addresses "${hermes_api_service}"; then
-        ts serve drain "${hermes_api_service}" >/dev/null 2>&1 || true
-        ts serve --service="${hermes_api_service}" --https=443 http://hermes-agent:8642 >/dev/null
-        ts serve advertise "${hermes_api_service}" >/dev/null
-        repaired=0
-    fi
-    if [ "${include_hermes}" = "1" ] \
-        && service_has_mapped_addresses "${hermes_dashboard_service}"; then
-        ts serve drain "${hermes_dashboard_service}" >/dev/null 2>&1 || true
-        ts serve --service="${hermes_dashboard_service}" --https=443 http://hermes-agent:9119 >/dev/null
-        ts serve advertise "${hermes_dashboard_service}" >/dev/null
         repaired=0
     fi
     return "${repaired}"
@@ -398,7 +280,6 @@ service_has_primary_routes() {
 }
 
 service_host_is_active() {
-    include_hermes=$1
     ts status --json >"${runtime_dir}/tailscale-status.json" || return 1
     tr -d '[:space:]' \
         <"${runtime_dir}/tailscale-status.json" \
@@ -420,61 +301,28 @@ service_host_is_active() {
         extract_json_array PrimaryRoutes \
             "${runtime_dir}/tailscale-status.compact" "${primary_routes}" \
             || return 1
-        service_has_primary_routes "${control_service}" || return 1
-        if [ "${include_hermes}" = "0" ]; then
-            return 0
-        fi
-        service_has_primary_routes "${hermes_api_service}" \
-            && service_has_primary_routes "${hermes_dashboard_service}"
+        service_has_primary_routes "${control_service}"
         return
     fi
-    service_host_is_approved "${include_hermes}"
+    service_host_is_approved
 }
 
-include_hermes=0
-hermes_is_available && include_hermes=1
-
 if [ "${TS_HEALTHCHECK_ONLY:-0}" = "1" ]; then
-    case ",${selected_profiles}," in
-        *,hermes,*)
-            if ! [ -S "${socket}" ]; then
-                echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
-                exit 1
-            fi
-            if [ "${require_service_host}" = "1" ] \
-                && ! service_host_is_active 1; then
-                echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
-                exit 1
-            fi
-            if ! hermes_is_available; then
-                echo "ERROR: Tailscale configurator healthcheck: Hermes endpoints are unavailable" >&2
-                exit 1
-            fi
-            if ! serve_is_exact 1 \
-                && ! serve_is_pending_ephemeral_acceptance; then
-                echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
-                report_serve_mismatch
-                exit 1
-            fi
-            ;;
-        *)
-            if ! [ -S "${socket}" ]; then
-                echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
-                exit 1
-            fi
-            if [ "${require_service_host}" = "1" ] \
-                && ! service_host_is_active 0; then
-                echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
-                exit 1
-            fi
-            if ! serve_is_exact 0 \
-                && ! serve_is_pending_ephemeral_acceptance; then
-                echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
-                report_serve_mismatch
-                exit 1
-            fi
-            ;;
-    esac
+    if ! [ -S "${socket}" ]; then
+        echo "ERROR: Tailscale configurator healthcheck: socket unavailable" >&2
+        exit 1
+    fi
+    if [ "${require_service_host}" = "1" ] \
+        && ! service_host_is_active; then
+        echo "ERROR: Tailscale configurator healthcheck: Service host routes are not active" >&2
+        exit 1
+    fi
+    if ! serve_is_exact \
+        && ! serve_is_pending_ephemeral_acceptance; then
+        echo "ERROR: Tailscale configurator healthcheck: Serve configuration is not exact" >&2
+        report_serve_mismatch
+        exit 1
+    fi
     exit
 fi
 
@@ -495,11 +343,11 @@ if [ "${remaining}" -le 0 ]; then
     exit 1
 fi
 
-if ! serve_is_exact "${include_hermes}"; then
-    configure_services "${include_hermes}"
+if ! serve_is_exact; then
+    configure_services
 fi
 configuration_ready=1
-if ! wait_for_exact_services "${include_hermes}"; then
+if ! wait_for_exact_services; then
     echo "ERROR: Tailscale Services do not have the exact HTTPS listeners." >&2
     # A fresh child tailnet can accept the tagged host before its Serve
     # configuration and route advertisements converge. Keep the reconciler
@@ -513,7 +361,7 @@ if [ "${require_service_host}" = "1" ]; then
     remaining=${route_wait_seconds}
     route_repair_remaining=0
     while [ "${remaining}" -gt 0 ]; do
-        if service_host_is_active "${include_hermes}"; then
+        if service_host_is_active; then
             break
         fi
         if [ "${route_repair_remaining}" -le 0 ]; then
@@ -526,8 +374,8 @@ if [ "${require_service_host}" = "1" ]; then
             # local Serve config is exact but the daemon retained an advertisement
             # without installing its primary routes. The policy remains the only
             # authority that approves the host.
-            if reconfigure_approved_services "${include_hermes}"; then
-                wait_for_exact_services "${include_hermes}" || true
+            if reconfigure_approved_services; then
+                wait_for_exact_services || true
             else
                 advertise_services || true
             fi
@@ -560,11 +408,9 @@ fi
 while :; do
     # Interruptible, so the shutdown trap runs at once and not after the sleep.
     sleep "${reconcile_interval}" & wait $!
-    desired_hermes=0
-    hermes_is_available && desired_hermes=1
-    if ! serve_is_exact "${desired_hermes}"; then
-        configure_services "${desired_hermes}"
-        wait_for_exact_services "${desired_hermes}" || exit 1
+    if ! serve_is_exact; then
+        configure_services
+        wait_for_exact_services || exit 1
     fi
     # Re-advertise while approval is still pending. Once control has mapped the
     # TailVIPs but tailscaled has not activated their PrimaryRoutes, replace the
@@ -575,9 +421,9 @@ while :; do
     # access or a container restart. The policy remains the only authority that
     # approves the host.
     if [ "${require_service_host}" = "1" ] \
-        && ! service_host_is_active "${desired_hermes}"; then
-        if reconfigure_approved_services "${desired_hermes}"; then
-            wait_for_exact_services "${desired_hermes}" || true
+        && ! service_host_is_active; then
+        if reconfigure_approved_services; then
+            wait_for_exact_services || true
         else
             # A pending advertisement is not represented by service-host, so
             # keep retrying the exact local advertisement until policy approval

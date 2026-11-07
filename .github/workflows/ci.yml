@@ -574,7 +574,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Prepare digest-pinned CI dependency mirrors
-        run: scripts/pull-test-images postgres --dockerfile control/Dockerfile --dockerfile deploy/compose/hermes-agent/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile
+        run: scripts/pull-test-images postgres --dockerfile control/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Name the dependency layer day
@@ -618,15 +618,6 @@ jobs:
           tests/acceptance/litellm_model_info_proof.py
           --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           --work "$RUNNER_TEMP/model-info-proof"
-      - name: Build the Hermes image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/compose/hermes-agent/Dockerfile
-          target: managed
-          load: true
-          tags: ${{ env.IMAGE_PREFIX }}-hermes:${{ env.IMAGE_TAG }}
-          cache-from: type=gha,scope=vonk-forge-hermes
       - name: Render the installer payload and the local image overlay
         run: |
           set -euo pipefail
@@ -636,7 +627,6 @@ jobs:
             --output "$out/docker-compose.pinned.yml" \
             --api-image "$IMAGE_PREFIX-api:$IMAGE_TAG" \
             --worker-image "$IMAGE_PREFIX-worker:$IMAGE_TAG" \
-            --hermes-image "$IMAGE_PREFIX-hermes:$IMAGE_TAG" \
             --litellm-image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
           uv run --project control --frozen python scripts/build-nas-compose-bundle \
             --compose "$out/docker-compose.pinned.yml" --channel dev \
@@ -645,8 +635,8 @@ jobs:
           # Point those services at the images just built, never at GHCR.
           {
             echo services:
-            for pair in control-api:api control-worker:worker hermes-agent:hermes \
-              litellm:litellm hermes-litellm-key-provisioner:litellm; do
+            for pair in control-api:api control-worker:worker \
+              litellm:litellm; do
               printf '  %s:\n    image: %s-%s:%s\n    pull_policy: never\n' \
                 "${pair%%:*}" "$IMAGE_PREFIX" "${pair##*:}" "$IMAGE_TAG"
             done
@@ -687,8 +677,6 @@ jobs:
           VONK_ACCEPTANCE_NAS_IP: 127.0.0.1
           VONK_ACCEPTANCE_TAILNET_DNS_SUFFIX: acceptance.invalid
           VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE: svc:vonk-forge
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE: svc:hermes-api
-          VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE: svc:hermes-dashboard
           VONK_ACCEPTANCE_TAILSCALE_MODE: disabled
           VONK_ACCEPTANCE_WORKSPACE: ${{ github.workspace }}
         run: scripts/run-with-nas-secret-group uv run --project control --frozen python tests/acceptance/test_fresh_nas_install.py
@@ -1422,7 +1410,6 @@ jobs:
       worker_image: ${{ steps.release.outputs.worker_image }}
       api_dev_source: ${{ steps.release.outputs.api_dev_source }}
       worker_dev_source: ${{ steps.release.outputs.worker_dev_source }}
-      hermes_image: ${{ steps.release.outputs.hermes_image }}
       litellm_image: ${{ steps.release.outputs.litellm_image }}
       litellm_dev_source: ${{ steps.release.outputs.litellm_dev_source }}
       tag_oid: ${{ steps.authority.outputs.tag_oid }}
@@ -1677,7 +1664,6 @@ jobs:
     outputs:
       api_digest: ${{ steps.api.outputs.digest }}
       worker_digest: ${{ steps.worker.outputs.digest }}
-      hermes_digest: ${{ steps.hermes.outputs.digest }}
       litellm_digest: ${{ steps.litellm.outputs.digest }}
     steps:
       - name: Check out tagged commit
@@ -1701,13 +1687,6 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      - name: Prepare digest-pinned CI dependency mirrors
-        run: scripts/pull-test-images --dockerfile deploy/compose/hermes-agent/Dockerfile --image docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
-      - name: Set up ARM64 emulation
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          image: ${{ env.CI_IMAGE_400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 }}
-          platforms: arm64
       - name: Require the preinstalled Docker Buildx plugin
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Install Skopeo from Ubuntu
@@ -1848,78 +1827,6 @@ jobs:
           [[ $(skopeo inspect --format '{{.Digest}}' \
             "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG") == "$DIGEST" ]]
           printf 'digest=%s\n' "$DIGEST" >> "$GITHUB_OUTPUT"
-      - name: Reconcile existing Hermes release image
-        id: existing-hermes
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
-          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-        run: |
-          scripts/reconcile-hermes-release-image \
-            "$HERMES_AGENT_IMAGE" "$RELEASE_VERSION" "$GITHUB_SHA" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" \
-            "refs/tags/$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
-      - name: Revalidate release authority before Hermes publication
-        shell: bash
-        env:
-          SOURCE_SHA: ${{ github.sha }}
-          TAG_NAME: ${{ github.ref_name }}
-          TAG_OID: ${{ needs.release-metadata.outputs.tag_oid }}
-        run: |
-          set -euo pipefail
-          scripts/verify-release-tag-authority \
-            "$TAG_NAME" "$TAG_OID" "$SOURCE_SHA"
-
-      - name: Build and push Hermes image
-        id: hermes-build
-        if: steps.existing-hermes.outputs.exists != 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/compose/hermes-agent/Dockerfile
-          target: managed
-          platforms: linux/amd64,linux/arm64
-          push: true
-          sbom: true
-          provenance: mode=max
-          tags: |
-            ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
-            ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.commit_tag }}
-          labels: |
-            org.opencontainers.image.title=vonk-forge-hermes
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.release-metadata.outputs.version }}
-      - name: Scan the Hermes release image for fixable vulnerabilities
-        if: steps.existing-hermes.outputs.exists != 'true'
-        uses: ./.github/actions/image-scan
-        env:
-          TRIVY_PLATFORM: linux/amd64
-        with:
-          image: ${{ needs.release-metadata.outputs.hermes_image }}@${{ steps.hermes-build.outputs.digest }}
-          category: release-hermes
-          # An upstream application release with a thin layer of ours.
-          gate: "false"
-      - name: Attest Hermes release provenance
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ${{ needs.release-metadata.outputs.hermes_image }}
-          subject-digest: ${{ steps.existing-hermes.outputs.digest || steps.hermes-build.outputs.digest }}
-          push-to-registry: true
-      - name: Verify and record Hermes release image
-        id: hermes
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
-          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}
-        run: |
-          scripts/reconcile-hermes-release-image \
-            "$HERMES_AGENT_IMAGE" "$RELEASE_VERSION" "$GITHUB_SHA" \
-            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_REPOSITORY" \
-            "refs/tags/$GITHUB_REF_NAME" --require-attestation --repair-tags \
-            >> "$GITHUB_OUTPUT"
       - name: Write digest-pinned image summary
         shell: bash
         run: |
@@ -1928,7 +1835,6 @@ jobs:
             printf '%s\n' \
               "CONTROL_API_IMAGE=${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
               "CONTROL_WORKER_IMAGE=${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-              "HERMES_AGENT_IMAGE=${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
               "LITELLM_IMAGE=${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
@@ -1941,13 +1847,11 @@ jobs:
             --output release-output/docker-compose.production.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
             --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
           scripts/render-production-compose --channel pinned \
             --output release-output/docker-compose.pinned.yml \
             --api-image "${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.api.outputs.digest }}" \
             --worker-image "${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.worker.outputs.digest }}" \
-            --hermes-image "${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}@${{ steps.hermes.outputs.digest }}" \
             --litellm-image "${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}@${{ steps.litellm.outputs.digest }}"
       - name: Upload production Compose
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -1989,18 +1893,15 @@ jobs:
         env:
           CONTROL_API_IMAGE: ${{ needs.release-metadata.outputs.api_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_WORKER_IMAGE: ${{ needs.release-metadata.outputs.worker_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
-          HERMES_AGENT_IMAGE: ${{ needs.release-metadata.outputs.hermes_image }}:${{ needs.release-metadata.outputs.version }}
           LITELLM_IMAGE: ${{ needs.release-metadata.outputs.litellm_image }}:${{ needs.release-metadata.outputs.image_version_tag }}
           CONTROL_API_DIGEST: ${{ needs.publish-images.outputs.api_digest }}
           CONTROL_WORKER_DIGEST: ${{ needs.publish-images.outputs.worker_digest }}
-          HERMES_AGENT_DIGEST: ${{ needs.publish-images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ needs.publish-images.outputs.litellm_digest }}
         run: |
           scripts/validate-container-release-digests
           printf '%s\n' \
             "CONTROL_API_IMAGE=$CONTROL_API_IMAGE@$CONTROL_API_DIGEST" \
             "CONTROL_WORKER_IMAGE=$CONTROL_WORKER_IMAGE@$CONTROL_WORKER_DIGEST" \
-            "HERMES_AGENT_IMAGE=$HERMES_AGENT_IMAGE@$HERMES_AGENT_DIGEST" \
             "LITELLM_IMAGE=$LITELLM_IMAGE@$LITELLM_DIGEST" \
             > vonk-forge-images.env
           sha256sum vonk-forge-images.env > vonk-forge-images.env.sha256

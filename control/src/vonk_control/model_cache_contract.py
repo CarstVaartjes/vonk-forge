@@ -277,10 +277,21 @@ class ModelCacheMissingSourceObservation(StrippedStrictModel):
     observations: int = Field(ge=1)
 
 
+class ModelCacheIngressMismatch(StrippedStrictModel):
+    """Consecutive downloads of one pinned file whose bytes failed its digest."""
+
+    artifact_key: str = Field(min_length=1)
+    sha256: Digest
+    observations: int = Field(ge=1)
+
+
 class ModelCacheRetry(StrippedStrictModel):
     automatic_attempts: int = Field(ge=1)
     operator_retries: int = Field(ge=0)
     missing_source: ModelCacheMissingSourceObservation | None = None
+    # Set only while the last failure was an ingress digest mismatch; any other
+    # outcome clears it, so the count is of consecutive mismatches.
+    ingress_mismatch: ModelCacheIngressMismatch | None = None
     # Checks of a provider-owned wait (access approval, or a rate limit without
     # a hint): its re-check cadence, five minutes doubling to one hour.
     access_checks: int = Field(default=0, ge=0)
@@ -953,6 +964,7 @@ __all__ = [
     "ModelCacheDownloadRequest",
     "ModelCacheDownloadResult",
     "ModelCacheEntryState",
+    "ModelCacheIngressMismatch",
     "ModelCacheInventoryResponse",
     "ModelCacheMissingSourceObservation",
     "ModelCacheObjectReceipt",

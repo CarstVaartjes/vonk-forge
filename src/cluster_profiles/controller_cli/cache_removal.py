@@ -14,6 +14,7 @@ from typing import cast
 
 from ..cli_outcome import (
     Submission,
+    SubmissionAcceptance,
 )
 from ..cli_render import render_payload
 from ..control_client import (
@@ -234,7 +235,7 @@ def _existing_cache_removal(
         lookup,
         3 * timeout,
         action="remove",
-        acceptance="not_submitted",
+        acceptance=SubmissionAcceptance.NOT_SUBMITTED,
     )
     args.submission = submission
     deadline = time.monotonic() + submission.timeout_seconds
@@ -280,7 +281,7 @@ def _existing_cache_removal(
         args.observation = None
         return None
     submission.operation_id = _cache_operation_id(noun, result)
-    submission.acceptance = "accepted"
+    submission.acceptance = SubmissionAcceptance.ACCEPTED
     return result
 
 

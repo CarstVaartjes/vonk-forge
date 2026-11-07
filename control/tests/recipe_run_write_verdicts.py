@@ -70,7 +70,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition owns run withdrawal",
         ),
         "_restore_abandoned_stop_withdrawals": (
-            "abc38b9f711b1f462bb83c8c11de2d8c3446a73ecae0469283b40655173e0fe8",
+            "eee442f6968db3522a61ed24414d0dbd1cb5be7c151570b6203f9b5bfb0754f4",
             "callback: publication transition reconciles abandoned intent",
         ),
         "_maintenance_step_in_session": (
@@ -160,14 +160,14 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "caa5db52cb336246a8766dac66fbdf97494189c2ecec8acbfbba23c8aef216c3",
+            "cad56079288887fa60baff7b099b157a020ced1e8cbc3c73c29067eb57d21bb7",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },
     "recipe_operations/run_transitions.py": {
         "end_unfinished_run": (
-            "165fffc3c4fcc69fc88df520bb656c531de313bdbb3a08fb28d7c5e312f29d49",
-            "caller-owned: the failed-start terminal projection (queue result transaction) owns the cleanup Stop or the lost verdict",
+            "e905decb4ddd15367323ab9e4dc9f4134deb598dd4c1cae089e886c2d7469338",
+            "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },
     "run_route_name.py": {

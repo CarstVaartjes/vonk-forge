@@ -290,7 +290,9 @@ def test_cli_recovers_committed_load_after_lost_response_and_profile_edit(
     )
     captured = capsys.readouterr()
     assert code == 0, captured.out
-    assert json.loads(captured.out) == accepted
+    printed = json.loads(captured.out)
+    assert printed.pop("schema_version") == 1
+    assert printed == accepted
     assert [method for method, _, _ in calls] == ["POST", "GET"]
     assert calls[0][2] == {
         "request_key": key,
@@ -746,6 +748,7 @@ def test_workload_change_during_admission_rejects_only_unreviewed_destructive_ta
                                 column.name: getattr(original, column.name)
                                 for column in Job.__table__.columns
                                 if column.name not in {"id", "request_id", "state"}
+                                and column.computed is None
                             },
                             id=replacement,
                             request_id=str(uuid4()),

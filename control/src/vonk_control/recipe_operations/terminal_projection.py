@@ -252,11 +252,6 @@ class TerminalProjectionMixin:
             run = session.get(RecipeRun, owner_id)
             assert run is not None
             if start_failed:
-                run.route_error = (
-                    f"{recovery_error}; cleanup queued"
-                    if recovery_error is not None
-                    else "one or more ranks failed to start; cleanup queued"
-                )
                 cleanup_request_id = str(
                     uuid.uuid5(
                         uuid.NAMESPACE_URL,
@@ -279,18 +274,12 @@ class TerminalProjectionMixin:
                     else _shared_workload_intent(session, job.targets)
                 )
                 if not intent_current:
-                    run.route_error = (
-                        "start failed after a newer workload intent took over; "
-                        + (
-                            "cleanup queued"
-                            if cleanup_ordinal
-                            else "cleanup awaits the owning intent"
-                        )
-                    )
-                if cleanup_ordinal is None:
-                    run.state = RunState.LOST
-                    run.route_state = RouteState.WITHDRAWN
-                elif end_unfinished_run(
+                    note = "start failed after a newer workload intent took over"
+                elif recovery_error is not None:
+                    note = str(recovery_error)
+                else:
+                    note = "one or more ranks failed to start"
+                if end_unfinished_run(
                     service,
                     session,
                     run,
@@ -298,6 +287,7 @@ class TerminalProjectionMixin:
                     actor=job.actor,
                     request_id=cleanup_request_id,
                     ordinal=cleanup_ordinal,
+                    note=note,
                 ):
                     cleanup_queued = True
             else:

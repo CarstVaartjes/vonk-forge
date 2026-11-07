@@ -66,7 +66,7 @@ def pending_run_stop_nodes(session: Session, run_id: str) -> frozenset[str]:
         for job in session.scalars(
             select(Job).where(
                 Job.kind == "recipe.stop",
-                Job.payload["owner_id"].as_string() == run_id,
+                Job.owner_id == run_id,
             )
         )
         for node_id in deferred_stop_nodes(job)

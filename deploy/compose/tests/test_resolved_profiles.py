@@ -14,7 +14,7 @@ from vonk_nas_setup.compose import resolve_compose
 ROOT = Path(__file__).resolve().parents[3]
 IMAGES = {
     f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
-    for role in ("api", "worker", "hermes", "litellm")
+    for role in ("api", "worker", "litellm")
 }
 ENVIRONMENT = (
     "NAS_LAN_IP=192.0.2.10\nVONK_CONTROL_HOSTNAME=control.example.test\n"
@@ -51,16 +51,6 @@ def _services(directory: Path, compose: bytes) -> dict:
     [
         ("", set()),
         ("secure-remote", {"tailscale-gateway", "tailscale-configurator"}),
-        (
-            "secure-remote,hermes",
-            {
-                "tailscale-gateway",
-                "tailscale-configurator",
-                "hermes-agent",
-                "hermes-litellm-key-provisioner",
-            },
-        ),
-        ("hermes", {"hermes-agent", "hermes-litellm-key-provisioner"}),
     ],
 )
 def test_compose_config_accepts_the_resolved_bundle(

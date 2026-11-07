@@ -150,25 +150,6 @@ def test_direct_entrypoint_resolves_repository_imports() -> None:
     assert result.stderr.startswith("fresh NAS acceptance: ")
 
 
-def test_only_hermes_bundle_receives_the_expensive_reference_rollout(
-    tmp_path: Path,
-) -> None:
-    acceptance = _acceptance_module()
-    default = tmp_path / "default"
-    hermes = tmp_path / "hermes"
-
-    assert acceptance.reference_rollout_bundles(default, hermes) == (hermes,)
-
-
-def test_canonical_hermes_topology_includes_the_key_provisioner() -> None:
-    acceptance = _acceptance_module()
-
-    assert acceptance.HERMES_SERVICES == acceptance.DEFAULT_SERVICES | {
-        "hermes-agent",
-        "hermes-litellm-key-provisioner",
-    }
-
-
 def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
     acceptance = _acceptance_module()
     arguments = {
@@ -180,23 +161,16 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
         "control_service": "svc:vonk-forge-ci",
     }
 
-    disabled = dict(acceptance.nas_responses(**arguments, hermes=False))
-    enabled = dict(acceptance.nas_responses(**arguments, hermes=True))
-    assert set(disabled) == set(enabled)
-    assert {disabled[prompt] for prompt in disabled if "Hermes" in prompt} == {"n"}
-    assert {enabled[prompt] for prompt in enabled if "Hermes" in prompt} == {"y"}
-    answers = set(disabled.values())
+    responses = dict(acceptance.nas_responses(**arguments))
+    answers = set(responses.values())
     assert {"secure-remote", "192.0.2.10", "vonk-forge-ci.acceptance.example.test"} <= (
         answers
     )
     # CIDRs, derived hostnames, and every internal secret are never asked.
-    assert not any("CIDR" in prompt or "password" in prompt for prompt in disabled)
+    assert not any("CIDR" in prompt or "password" in prompt for prompt in responses)
 
 
-@pytest.mark.parametrize("hermes", [False, True])
-def test_installer_output_detects_permuted_secret_answers(
-    tmp_path: Path, hermes: bool
-) -> None:
+def test_installer_output_detects_permuted_secret_answers(tmp_path: Path) -> None:
     acceptance = _acceptance_module()
     arguments = {
         "nas_ip": "192.0.2.10",
@@ -205,14 +179,11 @@ def test_installer_output_detects_permuted_secret_answers(
         "oauth_client_secret": "distinct-client-secret",
         "upstream_key": "distinct-upstream-key",
         "control_service": "svc:vonk-forge-ci",
-        "hermes_dashboard_service": "svc:hermes-dashboard-ci",
-        "hermes": hermes,
     }
-    profiles = '"secure-remote,hermes"' if hermes else "secure-remote"
     (tmp_path / ".env").write_text(
         "NAS_LAN_IP=192.0.2.10\n"
         "VONK_CONTROL_HOSTNAME=vonk-forge-ci.acceptance.example.test\n"
-        f"COMPOSE_PROFILES={profiles}\n"
+        "COMPOSE_PROFILES=secure-remote\n"
     )
     secrets = tmp_path / "secrets"
     secrets.mkdir()
@@ -355,8 +326,6 @@ def test_operator_tailscale_assets_have_no_acceptance_service_or_policy() -> Non
     )
     forbidden = (
         "svc:vonk-forge-acceptance",
-        "svc:hermes-api-acceptance",
-        "svc:hermes-dashboard-acceptance",
         "tag:vonk-acceptance",
     )
     for path in operator_assets:
@@ -374,9 +343,6 @@ def test_tailscale_disabled_service_set_excludes_both_owners() -> None:
     assert acceptance.LOCAL_SERVICES == (
         acceptance.DEFAULT_SERVICES - acceptance.TAILSCALE_SERVICES
     )
-    assert acceptance.LOCAL_HERMES_SERVICES == (
-        acceptance.HERMES_SERVICES - acceptance.TAILSCALE_SERVICES
-    )
 
 
 def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
@@ -388,7 +354,7 @@ def test_tailscale_disabled_ps_contract_rejects_either_owner() -> None:
             "Service": service,
             "State": "running",
         }
-        for service in sorted(acceptance.LOCAL_HERMES_SERVICES)
+        for service in sorted(acceptance.LOCAL_SERVICES)
     ]
 
     acceptance.assert_tailscale_services_absent(json.dumps(healthy))
@@ -421,7 +387,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
                 "Service": service,
                 "State": "running",
             }
-            for service in sorted(acceptance.LOCAL_HERMES_SERVICES)
+            for service in sorted(acceptance.LOCAL_SERVICES)
         ]
     )
 
@@ -431,8 +397,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             "config",
             "--images",
         ]:
-            # Two services share one image (litellm and its key provisioner).
-            output = ("example.invalid/image@sha256:" + "a" * 64 + "\n") * 2
+            output = "example.invalid/image@sha256:" + "a" * 64 + "\n"
         elif command[-4:] == ["ps", "--all", "--format", "json"]:
             output = healthy
         elif command[2:6] == ["exec", "-T", "control-api", "python"]:
@@ -464,7 +429,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     monkeypatch.setattr(
         acceptance,
         "compose_services",
-        lambda _bundle: acceptance.HERMES_SERVICES,
+        lambda _bundle: acceptance.DEFAULT_SERVICES,
     )
     monkeypatch.setattr(acceptance, "run", run)
     monkeypatch.setattr(acceptance, "image_present", lambda _image: False)
@@ -491,14 +456,11 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
         enrollment_hostname="enroll.acceptance.example.test",
         registry_hostname="registry.acceptance.example.test",
         tailnet_suffix="acceptance.example.test",
-        hermes=True,
         tailscale_mode="disabled",
     )
 
     up = next(command for command in calls if "up" in command)
-    assert up[-len(acceptance.LOCAL_HERMES_SERVICES) :] == sorted(
-        acceptance.LOCAL_HERMES_SERVICES
-    )
+    assert up[-len(acceptance.LOCAL_SERVICES) :] == sorted(acceptance.LOCAL_SERVICES)
     # The started images are acquired first, through the bounded fetch retry.
     listed = calls.index(
         [
@@ -506,7 +468,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
             "compose",
             "config",
             "--images",
-            *sorted(acceptance.LOCAL_HERMES_SERVICES),
+            *sorted(acceptance.LOCAL_SERVICES),
         ]
     )
     pull = [
@@ -519,7 +481,7 @@ def test_tailscale_disabled_rollout_starts_only_the_local_service_allowlist(
     assert listed < calls.index(pull) < calls.index(up)
     assert calls.count(pull) == 1
     assert not set(up) & acceptance.TAILSCALE_SERVICES
-    assert observed["expected"] == acceptance.LOCAL_HERMES_SERVICES
+    assert observed["expected"] == acceptance.LOCAL_SERVICES
     assert {command[4] for command in calls if command[2:4] == ["exec", "-T"]} == {
         "control-api",
         "control-worker",
@@ -628,7 +590,6 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
                         ],
                     },
                     "tailscale-configurator": {"environment": {}},
-                    "hermes-agent": {"environment": {}},
                 }
             }
         ),
@@ -640,8 +601,6 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
         bundle,
         control="svc:vonk-forge",
         gateway_hostname="vonk-forge-ci-123-1",
-        hermes_api="svc:hermes-api",
-        hermes_dashboard="svc:hermes-dashboard-ci",
         require_external_tailnet_client=False,
     )
 
@@ -653,15 +612,10 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
     assert "?ephemeral=true&preauthorized=true" in gateway["command"][-1]
     assert services["tailscale-configurator"]["environment"] == {
         "VONK_TAILSCALE_CONTROL_SERVICE": "svc:vonk-forge",
-        "VONK_TAILSCALE_HERMES_API_SERVICE": "svc:hermes-api",
-        "VONK_TAILSCALE_HERMES_DASHBOARD_SERVICE": "svc:hermes-dashboard-ci",
         "VONK_TAILSCALE_EPHEMERAL": "true",
         "TS_REQUIRE_PRIMARY_ROUTES": "0",
         "TS_REQUIRE_SERVICE_HOST": "0",
     }
-    assert services["hermes-agent"]["environment"]["API_SERVER_CORS_ORIGINS"] == (
-        "https://hermes-dashboard-ci.acceptance.example.test"
-    )
     assert (
         acceptance.tailscale_service_hostname(
             "svc:vonk-forge", "acceptance.example.test"
@@ -674,8 +628,6 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
             bundle,
             control="svc:duplicate",
             gateway_hostname="vonk-forge-ci-123-1",
-            hermes_api="svc:duplicate",
-            hermes_dashboard="svc:hermes-dashboard",
             require_external_tailnet_client=False,
         )
 
@@ -684,8 +636,6 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
             bundle,
             control="svc:vonk-forge",
             gateway_hostname="INVALID HOSTNAME",
-            hermes_api="svc:hermes-api",
-            hermes_dashboard="svc:hermes-dashboard",
             require_external_tailnet_client=False,
         )
 
@@ -714,7 +664,7 @@ def test_immutable_image_check_distinguishes_versioned_dev_tags(
     )
 
 
-def _serve_status(*, hermes: bool) -> dict[str, object]:
+def _serve_status() -> dict[str, object]:
     services: dict[str, object] = {
         "svc:vonk-forge": {
             "TCP": {"443": {"HTTPS": True}},
@@ -725,27 +675,6 @@ def _serve_status(*, hermes: bool) -> dict[str, object]:
             },
         }
     }
-    if hermes:
-        services.update(
-            {
-                "svc:hermes-api": {
-                    "TCP": {"443": {"HTTPS": True}},
-                    "Web": {
-                        "hermes-api.acceptance.example.test:443": {
-                            "Handlers": {"/": {"Proxy": "http://hermes-agent:8642"}}
-                        }
-                    },
-                },
-                "svc:hermes-dashboard": {
-                    "TCP": {"443": {"HTTPS": True}},
-                    "Web": {
-                        "hermes-dashboard.acceptance.example.test:443": {
-                            "Handlers": {"/": {"Proxy": "http://hermes-agent:9119"}}
-                        }
-                    },
-                },
-            }
-        )
     return {"Services": services}
 
 
@@ -764,15 +693,8 @@ class _RequestKwargs(TypedDict):
     ca_file: Path
 
 
-def _tailscale_status(*, hermes: bool) -> _TailscaleStatus:
+def _tailscale_status() -> _TailscaleStatus:
     service_addresses = {"svc:vonk-forge": ["100.64.0.10"]}
-    if hermes:
-        service_addresses.update(
-            {
-                "svc:hermes-api": ["100.64.0.11"],
-                "svc:hermes-dashboard": ["100.64.0.12"],
-            }
-        )
     return {
         "BackendState": "Running",
         "Self": {
@@ -788,8 +710,8 @@ def _tailscale_status(*, hermes: bool) -> _TailscaleStatus:
 
 def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> None:
     acceptance = _acceptance_module()
-    expected = {"svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"}
-    valid = _tailscale_status(hermes=True)
+    expected = {"svc:vonk-forge"}
+    valid = _tailscale_status()
     acceptance.assert_tailnet_service_primary_routes(
         valid,
         expected_services=expected,
@@ -799,12 +721,12 @@ def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> No
     missing_mapping = json.loads(json.dumps(valid))
     missing_mapping["Self"]["CapMap"].pop("service-host")
     missing = json.loads(json.dumps(valid))
-    missing["Self"]["PrimaryRoutes"].remove("100.64.0.12/32")
+    missing["Self"]["PrimaryRoutes"].remove("100.64.0.10/32")
     mismatched = json.loads(json.dumps(valid))
     mismatched["Self"]["PrimaryRoutes"][-1] = "100.64.0.99/32"
     wrong_service = json.loads(json.dumps(valid))
     service_hosts = wrong_service["Self"]["CapMap"]["service-host"][0]
-    service_hosts["svc:unrelated"] = service_hosts.pop("svc:hermes-dashboard")
+    service_hosts["svc:unrelated"] = service_hosts.pop("svc:vonk-forge")
     other_host_only = json.loads(json.dumps(valid))
     other_host_only["Peer"] = {
         "other": {"PrimaryRoutes": other_host_only["Self"]["PrimaryRoutes"]}
@@ -831,8 +753,8 @@ def test_tailnet_service_route_ownership_is_bound_to_the_current_gateway() -> No
 
 def test_tailnet_service_mapping_does_not_require_primary_routes() -> None:
     acceptance = _acceptance_module()
-    expected = {"svc:vonk-forge", "svc:hermes-api", "svc:hermes-dashboard"}
-    status = _tailscale_status(hermes=True)
+    expected = {"svc:vonk-forge"}
+    status = _tailscale_status()
     status["Self"].pop("PrimaryRoutes")
 
     acceptance.assert_tailnet_service_mappings(
@@ -841,56 +763,44 @@ def test_tailnet_service_mapping_does_not_require_primary_routes() -> None:
     )
 
 
-def _serve_configuration(*, hermes: bool) -> dict[str, object]:
+def _serve_configuration() -> dict[str, object]:
     services: dict[str, object] = {
         "svc:vonk-forge": {"endpoints": {"tcp:443": "http://caddy:8080"}}
     }
-    if hermes:
-        services.update(
-            {
-                "svc:hermes-api": {
-                    "endpoints": {"tcp:443": "http://hermes-agent:8642"}
-                },
-                "svc:hermes-dashboard": {
-                    "endpoints": {"tcp:443": "http://hermes-agent:9119"}
-                },
-            }
-        )
     return {"version": "0.0.1", "services": services}
 
 
 def test_tailnet_serve_configuration_requires_exact_selected_upstreams() -> None:
     acceptance = _acceptance_module()
-    status = _serve_status(hermes=True)
-    configuration = _serve_configuration(hermes=True)
+    status = _serve_status()
+    configuration = _serve_configuration()
 
     acceptance.assert_tailnet_serve_configuration(
         json.dumps(status),
         json.dumps(configuration),
-        hermes=True,
         tailnet_suffix="acceptance.example.test",
     )
 
     invalid: list[dict[str, object]] = []
-    extra_service = _serve_configuration(hermes=True)
+    extra_service = _serve_configuration()
     extra_service["services"]["svc:unexpected"] = {  # type: ignore[index]
         "endpoints": {"tcp:443": "http://unexpected:9999"}
     }
     invalid.append(extra_service)
-    missing_service = _serve_configuration(hermes=True)
-    del missing_service["services"]["svc:hermes-dashboard"]  # type: ignore[index]
+    missing_service = _serve_configuration()
+    del missing_service["services"]["svc:vonk-forge"]  # type: ignore[index]
     invalid.append(missing_service)
-    wrong_target = _serve_configuration(hermes=True)
-    wrong_target["services"]["svc:hermes-api"]["endpoints"]["tcp:443"] = (  # type: ignore[index]
-        "http://caddy:8080"
+    wrong_target = _serve_configuration()
+    wrong_target["services"]["svc:vonk-forge"]["endpoints"]["tcp:443"] = (  # type: ignore[index]
+        "http://other:8080"
     )
     invalid.append(wrong_target)
-    wrong_port = _serve_configuration(hermes=True)
+    wrong_port = _serve_configuration()
     wrong_port["services"]["svc:vonk-forge"]["endpoints"] = {  # type: ignore[index]
         "tcp:8443": "http://caddy:8080"
     }
     invalid.append(wrong_port)
-    extra_route = _serve_configuration(hermes=True)
+    extra_route = _serve_configuration()
     extra_route["services"]["svc:vonk-forge"]["endpoints"]["tcp:80"] = (  # type: ignore[index]
         "http://caddy:8080"
     )
@@ -901,25 +811,20 @@ def test_tailnet_serve_configuration_requires_exact_selected_upstreams() -> None
             acceptance.assert_tailnet_serve_configuration(
                 json.dumps(status),
                 json.dumps(document),
-                hermes=True,
                 tailnet_suffix="acceptance.example.test",
             )
 
 
 def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
     acceptance = _acceptance_module()
-    default = _serve_status(hermes=False)
-    hermes = _serve_status(hermes=True)
+    default = _serve_status()
 
     acceptance.assert_tailnet_serve_status(
-        json.dumps(default), hermes=False, tailnet_suffix="acceptance.example.test"
-    )
-    acceptance.assert_tailnet_serve_status(
-        json.dumps(hermes), hermes=True, tailnet_suffix="acceptance.example.test"
+        json.dumps(default), tailnet_suffix="acceptance.example.test"
     )
 
     invalid: list[dict[str, object]] = []
-    extra_service = _serve_status(hermes=True)
+    extra_service = _serve_status()
     extra_service["Services"]["svc:unexpected"] = {  # type: ignore[index]
         "TCP": {"443": {"HTTPS": True}},
         "Web": {
@@ -929,21 +834,21 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
         },
     }
     invalid.append(extra_service)
-    missing_service = _serve_status(hermes=True)
-    del missing_service["Services"]["svc:hermes-dashboard"]  # type: ignore[index]
+    missing_service = _serve_status()
+    del missing_service["Services"]["svc:vonk-forge"]  # type: ignore[index]
     invalid.append(missing_service)
-    wrong_target = _serve_status(hermes=True)
-    wrong_target["Services"]["svc:hermes-api"]["Web"][  # type: ignore[index]
-        "hermes-api.acceptance.example.test:443"
-    ]["Handlers"]["/"]["Proxy"] = "http://caddy:8080"  # type: ignore[index]
+    wrong_target = _serve_status()
+    wrong_target["Services"]["svc:vonk-forge"]["Web"][  # type: ignore[index]
+        "vonk-forge.acceptance.example.test:443"
+    ]["Handlers"]["/"]["Proxy"] = "http://other:8080"  # type: ignore[index]
     invalid.append(wrong_target)
-    wrong_port = _serve_status(hermes=True)
+    wrong_port = _serve_status()
     wrong_port["Services"]["svc:vonk-forge"]["TCP"] = {"8443": {"HTTPS": True}}  # type: ignore[index]
     invalid.append(wrong_port)
-    wrong_protocol = _serve_status(hermes=True)
+    wrong_protocol = _serve_status()
     wrong_protocol["Services"]["svc:vonk-forge"]["TCP"]["443"] = {"HTTP": True}  # type: ignore[index]
     invalid.append(wrong_protocol)
-    node_listener = _serve_status(hermes=True)
+    node_listener = _serve_status()
     node_listener["TCP"] = {"443": {"HTTPS": True}}
     invalid.append(node_listener)
 
@@ -951,13 +856,11 @@ def test_tailnet_serve_status_requires_the_exact_selected_routes() -> None:
         with pytest.raises(AcceptanceError):
             acceptance.assert_tailnet_serve_status(
                 json.dumps(document),
-                hermes=True,
                 tailnet_suffix="acceptance.example.test",
             )
     with pytest.raises(AcceptanceError):
         acceptance.assert_tailnet_serve_status(
             '{"Services":{},"Services":{}}',
-            hermes=False,
             tailnet_suffix="acceptance.example.test",
         )
 
@@ -975,9 +878,9 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     responses = iter(
         (
-            json.dumps(_tailscale_status(hermes=True)),
-            json.dumps(_serve_status(hermes=True)),
-            json.dumps(_serve_configuration(hermes=True)),
+            json.dumps(_tailscale_status()),
+            json.dumps(_serve_status()),
+            json.dumps(_serve_configuration()),
         )
     )
 
@@ -996,12 +899,9 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
 
     acceptance.verify_tailscale_services(
         tmp_path,
-        hermes=True,
         tailnet_suffix="acceptance.example.test",
         service_addresses={
             "svc:vonk-forge": "100.64.0.10",
-            "svc:hermes-api": "100.64.0.11",
-            "svc:hermes-dashboard": "100.64.0.12",
         },
         compose_command=["docker", "compose", "--project-name", "isolated"],
     )
@@ -1012,24 +912,22 @@ def test_tailnet_service_probe_uses_an_independent_host_client(
     )
     assert probe_commands == [
         acceptance._tailnet_tunnel("vonk-forge.acceptance.example.test", 443),
-        acceptance._tailnet_tunnel("hermes-dashboard.acceptance.example.test", 443),
     ]
 
-    local_status = _tailscale_status(hermes=True)
+    local_status = _tailscale_status()
     local_status["Self"]["CapMap"] = {}  # type: ignore[index]
     local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
     responses = iter(
         (
             json.dumps(local_status),
-            json.dumps(_serve_status(hermes=True)),
-            json.dumps(_serve_configuration(hermes=True)),
+            json.dumps(_serve_status()),
+            json.dumps(_serve_configuration()),
         )
     )
     compose_commands.clear()
     probe_commands.clear()
     acceptance.verify_tailscale_services(
         tmp_path,
-        hermes=True,
         tailnet_suffix="acceptance.example.test",
         service_addresses=None,
     )
@@ -1045,7 +943,7 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
     compose.write_text("#!/bin/sh\n")
     compose.chmod(0o755)
     monkeypatch.setenv("VONK_ACCEPTANCE_REFERENCE_COMPOSE", str(compose))
-    local_status = _tailscale_status(hermes=False)
+    local_status = _tailscale_status()
     local_status["Self"]["CapMap"] = {}  # type: ignore[index]
     local_status["Self"]["PrimaryRoutes"] = []  # type: ignore[index]
 
@@ -1059,14 +957,13 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
     monkeypatch.setattr(acceptance, "run", run)
     acceptance.verify_tailscale_services(
         tmp_path,
-        hermes=False,
         tailnet_suffix="acceptance.example.test",
         service_addresses=None,
     )
 
     responses = iter(
         (
-            json.dumps(_tailscale_status(hermes=False)),
+            json.dumps(_tailscale_status()),
             "{}",
             '{"version":"0.0.1"}',
         )
@@ -1074,7 +971,6 @@ def test_no_client_accepts_only_exact_pending_ephemeral_advertisement(
     with pytest.raises(AcceptanceError):
         acceptance.verify_tailscale_services(
             tmp_path,
-            hermes=False,
             tailnet_suffix="acceptance.example.test",
             service_addresses={"svc:vonk-forge": "100.64.0.10"},
         )
@@ -1379,9 +1275,8 @@ def test_controller_provenance_waits_only_for_missing_completed_worker_loop(
 
 
 @pytest.mark.needs_docker
-@pytest.mark.parametrize("hermes", [False, True])
 def test_reference_acceptance_accepts_the_installer_service_topology(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hermes: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches an installer service rejected before the real acceptance rollout."""
     acceptance = _acceptance_module()
@@ -1391,7 +1286,7 @@ def test_reference_acceptance_accepts_the_installer_service_topology(
         rendered,
         **{
             f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
-            for role in ("api", "worker", "hermes", "litellm")
+            for role in ("api", "worker", "litellm")
         },
         channel="pinned",
     )
@@ -1399,7 +1294,7 @@ def test_reference_acceptance_accepts_the_installer_service_topology(
     payload = _script_module(PAYLOAD_BUILDER, "acceptance_topology_builder")._payload(
         document, "dev"
     )
-    selection = "secure-remote,hermes" if hermes else "secure-remote"
+    selection = "secure-remote"
     (tmp_path / "docker-compose.yaml").write_bytes(
         resolve_compose(payload["docker_compose_yaml"], {"COMPOSE_PROFILES": selection})
     )
@@ -1408,5 +1303,5 @@ def test_reference_acceptance_accepts_the_installer_service_topology(
         f"COMPOSE_PROFILES={selection}\n"
     )
     monkeypatch.setattr(acceptance, "reference_compose", lambda: ["docker", "compose"])
-    expected = acceptance.HERMES_SERVICES if hermes else acceptance.DEFAULT_SERVICES
+    expected = acceptance.DEFAULT_SERVICES
     assert acceptance.compose_services(tmp_path) == expected

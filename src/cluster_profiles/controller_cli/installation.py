@@ -8,8 +8,7 @@ import time
 from collections.abc import Callable, Mapping
 from typing import cast
 
-from ..cli_outcome import Submission
-from ..cli_states_generated import UNKNOWN
+from ..cli_outcome import Submission, SubmissionAcceptance
 from ..control_client import (
     ControlClientError,
     ControlForbidden,
@@ -252,7 +251,7 @@ def _recipe_installation_reconcile(
             raise
         # Incomplete bookkeeping cannot gate the authorized request. The
         # idempotent owner judges this exact key and installation on acceptance.
-        args.submission.acceptance = UNKNOWN
+        args.submission.acceptance = SubmissionAcceptance.UNKNOWN
         existing = None
     if existing is not None:
         args.submission.operation_id = validate(existing)

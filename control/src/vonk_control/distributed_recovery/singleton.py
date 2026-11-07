@@ -314,8 +314,8 @@ def _accepted_start_authority(
             select(Job)
             .where(
                 Job.kind == "recipe.start",
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_kind == "run",
+                Job.owner_id == run.id,
             )
             .order_by(Job.created_at, Job.id)
         )
@@ -447,8 +447,8 @@ def _validate_singleton_recovery_start_origin(
             select(Job).where(
                 Job.kind == "recipe.stop",
                 Job.request_id == stop_request_id,
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_kind == "run",
+                Job.owner_id == run.id,
             )
         )
     )

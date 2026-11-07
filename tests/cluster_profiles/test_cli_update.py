@@ -197,7 +197,7 @@ def _signed_publication(
         "source_sha": source_sha,
         "images": {
             name: "ghcr.io/vonk/" + name + ":v1@sha256:" + "a" * 64
-            for name in ("api", "worker", "hermes", "litellm")
+            for name in ("api", "worker", "litellm")
         },
         "artifacts": artifacts,
         "bootstraps": bootstraps,
@@ -1407,8 +1407,8 @@ def test_update_installs_across_release_format_changes(
         Path("schemas/install-release-manifest.schema.json").read_text()
     )
     images = old_schema["$defs"]["InstallerReleaseImages"]
-    del images["properties"]["hermes"]
-    images["required"].remove("hermes")
+    del images["properties"]["litellm"]
+    images["required"].remove("litellm")
     release_raw = next(v for k, v in objects.items() if k.endswith("release.json"))
     with not_adopted():
         Draft202012Validator(old_schema).validate(json.loads(release_raw))
