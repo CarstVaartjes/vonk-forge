@@ -18,6 +18,13 @@ class GpuClockMetric(StrEnum):
     THROTTLE = "throttle_reasons"
 
 
+class JobContractState(StrEnum):
+    AVAILABLE = "available"
+    NOT_RUNNING = "not-running"
+    NOT_A_JOB_RECIPE = "not-a-job-recipe"
+    CONTRACT_INVALID = "contract-invalid"
+
+
 class QualificationStatus(StrEnum):
     WORKING = "Working"
     RECHECK = "Re-check: worked before"

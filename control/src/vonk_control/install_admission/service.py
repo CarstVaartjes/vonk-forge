@@ -359,6 +359,7 @@ class InstallAdmissionService(InstallPlanningService):
                     state=InstallationNodeState.PLANNED,
                     required_bytes=node.required_bytes,
                     installed_bytes=0,
+                    required_payload_bytes=node.required_payload_bytes,
                     updated_at=now,
                 )
             )

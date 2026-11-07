@@ -16,6 +16,7 @@ from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
     published_json,
+    read_model,
     read_model_display,
     read_recipe_display,
 )
@@ -77,7 +78,9 @@ def display_of(document: Mapping[str, object]) -> RecipeDisplay | ModelDisplay:
 
 
 def model_entry(document: Mapping[str, object]) -> CatalogModelEntry:
-    return CatalogModelEntry(dict(document), display_of_model(document))
+    return CatalogModelEntry(
+        dict(document), display_of_model(document), read_model(document).identity
+    )
 
 
 def publish_displays(index: dict) -> dict:

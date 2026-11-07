@@ -34,7 +34,6 @@ from .common import (
     UnavailableRunPresence,
     _canonical_recipe,
     _install_degraded_reason,
-    _installation_payload_expectations,
     _run_degraded_reason,
     _unavailable_presence,
     _utc,
@@ -85,7 +84,11 @@ def _installed_presence(
                 )
             )
             affected: list[int] = []
-            expectations = _installation_payload_expectations(installation.plan)
+            expectations = {
+                node.node_id: node.required_payload_bytes
+                for node in nodes
+                if node.required_payload_bytes is not None
+            }
             if reason is None and installation.state != InstallationState.INSTALLED:
                 reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
             if reason is None:

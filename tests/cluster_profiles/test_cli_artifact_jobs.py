@@ -423,6 +423,7 @@ def test_installed_cli_process_exposes_the_complete_artifact_job_surface() -> No
 
     assert process.returncode == 0
     for action in (
+        "contract",
         "list",
         "create",
         "upload",

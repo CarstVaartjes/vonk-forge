@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Sequence
 from datetime import datetime
@@ -12,6 +13,7 @@ from sqlalchemy import select
 from ..catalog_queries import active_head_revision
 from ..library_contract import (
     _MAX_PAGE_RECIPES,
+    _UUID_PATTERN,
     LibraryFilterValues,
     LibraryModelProjection,
     LibraryRecipeAuthoringDetail,
@@ -39,6 +41,8 @@ from .common import (
     _note_unreadable,
     _observed_library_page,
 )
+
+_REVISION_ID = re.compile(_UUID_PATTERN)
 
 if TYPE_CHECKING:
     from .service import LibraryProjection
@@ -569,16 +573,22 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         query = select(CatalogDocumentRevision).where(
             CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
             CatalogDocumentRevision.state == "active",
-            active_head_revision(),
         )
-        if "/" in wanted:
+        if _REVISION_ID.fullmatch(wanted):
+            # An exact revision, as a run or fleet row names it: a running
+            # revision is often no longer the newest, so it needs no head.
+            query = query.where(CatalogDocumentRevision.id == wanted)
+        elif "/" in wanted:
             publisher, slug = wanted.split("/", 1)
             query = query.where(
+                active_head_revision(),
                 CatalogDocumentRevision.publisher == publisher,
                 CatalogDocumentRevision.slug == slug,
             )
         else:
-            query = query.where(CatalogDocumentRevision.slug == wanted)
+            query = query.where(
+                active_head_revision(), CatalogDocumentRevision.slug == wanted
+            )
         exact = list(session.scalars(query))
     if not exact:
         raise KeyError(selector)

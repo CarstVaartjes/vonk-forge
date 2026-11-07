@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import OperationalError
 from vonk_control.attempt_residues import (
     LEFTOVER_GRACE,
@@ -890,11 +890,12 @@ def _installed_but_short(load, spark_files: CompleteArtifactInspector) -> str:
             select(RecipeInstallation).where(RecipeInstallation.state == "installed")
         )
         assert installation is not None
-        plan = json.loads(json.dumps(installation.plan))
-        for node in plan["nodes"]:
-            node["required_payload_bytes"] = 10**12
-        installation.plan = plan
         installation_id = installation.id
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id == installation_id)
+            .values(required_payload_bytes=10**12)
+        )
         for run in session.scalars(select(RecipeRun)):
             run.state = "stopped"
             run.route_state = "withdrawn"
@@ -1007,10 +1008,11 @@ def test_an_installation_short_of_its_payload_is_uninstalled_after_the_grace(
     with load.sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None
-        plan = json.loads(json.dumps(installation.plan))
-        for node in plan["nodes"]:
-            node["required_payload_bytes"] = 1_000
-        installation.plan = plan
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id == installation_id)
+            .values(required_payload_bytes=1_000)
+        )
     with load.sessions() as session:
         assert installation_id in incomplete_installation_ids(session)
     assert _reconciler(load, after=LEFTOVER_GRACE + timedelta(minutes=1)).tick()
