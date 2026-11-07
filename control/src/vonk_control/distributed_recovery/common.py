@@ -397,8 +397,8 @@ def _superseded(session: Session, run: RecipeRun, run_nodes: Sequence[RunNode]) 
         for ordinal in session.scalars(
             select(Job.payload["workload_intent_ordinal"].as_integer()).where(
                 Job.kind == "recipe.start",
-                Job.payload["owner_kind"].as_string() == "run",
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_kind == "run",
+                Job.owner_id == run.id,
                 Job.state == "succeeded",
             )
         )

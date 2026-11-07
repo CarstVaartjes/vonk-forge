@@ -128,6 +128,8 @@ NOT_CLAIMS: dict[str, str] = {
     "node_telemetry_samples": "observed telemetry of a node",
     "route_publication_owner": "a transaction-scoped lock anchor; its durable "
     "columns record the last activation, and a newer claim supersedes",
+    "jobs": "its owner columns are generated from the payload; an operation "
+    "names its owner, it reserves nothing another request needs",
     "job_attempts": "an execution lease on its own Job; it reserves nothing "
     "another request needs, and the next claim lapses it",
     "model_cache_operations": "an execution lease on its own operation; it "

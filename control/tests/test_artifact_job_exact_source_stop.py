@@ -521,7 +521,13 @@ def _relink_to_another_order(sessions, artifact_job_id: str, *, issued: bool) ->
     with sessions.begin() as session:
         order, child = _order(session, artifact_job_id)
         columns = Job.__table__.columns
-        other = Job(**{column.name: getattr(order, column.name) for column in columns})
+        other = Job(
+            **{
+                column.name: getattr(order, column.name)
+                for column in columns
+                if column.computed is None
+            }
+        )
         other.id = str(uuid.uuid4())
         other.request_id = str(uuid.uuid4())
         other.state = "running" if issued else "queued"

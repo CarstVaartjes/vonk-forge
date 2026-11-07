@@ -249,7 +249,7 @@ def lock_build_dependency(
     cancelling = session.scalar(
         select(Job).where(
             Job.kind == "recipe.build.v1",
-            Job.payload["owner_id"].as_string() == build.id,
+            Job.owner_id == build.id,
             Job.state.in_(job_states.LIVE),
             _JsonFlagIsTrue(Job.result, "cancel_requested").is_(True),
         )

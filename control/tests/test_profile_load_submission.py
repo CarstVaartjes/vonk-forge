@@ -746,6 +746,7 @@ def test_workload_change_during_admission_rejects_only_unreviewed_destructive_ta
                                 column.name: getattr(original, column.name)
                                 for column in Job.__table__.columns
                                 if column.name not in {"id", "request_id", "state"}
+                                and column.computed is None
                             },
                             id=replacement,
                             request_id=str(uuid4()),

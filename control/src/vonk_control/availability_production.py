@@ -487,7 +487,7 @@ def build_recipe_image_availability(
                 # used by consumers that already know their builder.
                 candidates = session.scalars(
                     select(RecipeBuild)
-                    .join(Job, Job.payload["owner_id"].as_string() == RecipeBuild.id)
+                    .join(Job, Job.owner_id == RecipeBuild.id)
                     .where(
                         RecipeBuild.recipe_revision_id == revision_id,
                         Job.kind == "recipe.build.v1",
@@ -544,7 +544,7 @@ def build_recipe_image_availability(
                         select(Job)
                         .where(
                             Job.kind == "recipe.build.v1",
-                            Job.payload["owner_id"].as_string() == build.id,
+                            Job.owner_id == build.id,
                             Job.payload["plan_digest"].as_string() == digest,
                             Job.state.in_(("queued", "running")),
                         )

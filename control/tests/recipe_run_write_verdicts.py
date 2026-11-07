@@ -70,7 +70,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition owns run withdrawal",
         ),
         "_restore_abandoned_stop_withdrawals": (
-            "abc38b9f711b1f462bb83c8c11de2d8c3446a73ecae0469283b40655173e0fe8",
+            "eee442f6968db3522a61ed24414d0dbd1cb5be7c151570b6203f9b5bfb0754f4",
             "callback: publication transition reconciles abandoned intent",
         ),
         "_maintenance_step_in_session": (

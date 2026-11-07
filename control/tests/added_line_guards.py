@@ -18,6 +18,7 @@ from . import (
     docker_listings,
     git_free_test_lines,
     intent_ordinal_writers,
+    job_owner_payload,
     legacy_tolerance,
     lifecycle_sets,
     locked_io,
@@ -110,6 +111,7 @@ MODES = (
     "barriers",
     "sync-in-async",
     "git-free-tests",
+    "job-owner-payload",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1701,6 +1703,8 @@ def check_source(
             )
         if "legacy" in modes and legacy_tolerance.in_scope(path):
             hits.extend(legacy_tolerance.scan_source(source))
+        if "job-owner-payload" in modes and job_owner_payload.in_scope(path):
+            hits.extend(job_owner_payload.scan_source(source))
         if "lifecycle-sets" in modes and lifecycle_sets.in_scope(path):
             hits.extend(
                 (line, lifecycle_sets.KIND)

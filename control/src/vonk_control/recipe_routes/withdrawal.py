@@ -374,7 +374,7 @@ def _restore_abandoned_stop_withdrawals(
             .where(
                 Job.kind == AgentOperation.RECIPE_STOP,
                 Job.state == LifecycleState.RUNNING.value,
-                Job.payload["owner_id"].as_string() == run.id,
+                Job.owner_id == run.id,
                 Job.payload["service_stop_review"]["stage"]
                 .as_string()
                 .in_(["accepted", "withdrawal-claimed"]),

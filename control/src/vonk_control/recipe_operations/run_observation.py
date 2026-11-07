@@ -208,8 +208,8 @@ class RunObservationMixin:
                             }
                         ),
                         Job.state.in_(job_states.LIVE),
-                        Job.payload["owner_kind"].as_string() == "run",
-                        Job.payload["owner_id"].as_string() == run.id,
+                        Job.owner_kind == "run",
+                        Job.owner_id == run.id,
                     )
                     .order_by(Job.created_at, Job.id)
                 )
