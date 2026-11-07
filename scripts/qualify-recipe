@@ -38,7 +38,7 @@ _ARCHIVE_PAYLOAD_PREFIXES = ("image/", "oci/", "weights/")
 SUPPORTED_CHECKS = frozenset({
     "endpoint.healthy", "chat.nonempty", "chat.output-cap", "completion.nonempty",
     "completion.output-cap", "embedding.nonempty", "tools.called", "inference.completed",
-    "artifact.output",
+    "artifact.output", "transcription.nonempty", "speech.audio",
 })
 
 
@@ -248,9 +248,7 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
         closure_paths = set(package.paths)
         closure_paths.add(recipe.execution.build.context.path)
         for check in recipe.validation.serving.checks:
-            if getattr(check.request, "transport", None) == "job":
-                closure_paths.add(check.request.fixture)
-                closure_paths.update(check.request.input_slots.values())
+            closure_paths.update(check.fixture_paths())
         resolver.validate_recipe_package_paths(recipe, closure_paths)
     except Exception as error:
         raise QualificationError(f"canonical model or package closure resolution failed: {error}") from error
@@ -264,17 +262,7 @@ def _resolve_models(library_root: Path, recipe: object, package: PackageSnapshot
         for file in model.files
     }
     source_context = PurePosixPath(recipe.execution.build.context.path)
-    fixture_paths = {
-        request.fixture
-        for check in recipe.validation.serving.checks
-        if (request := check.request).transport == "job"
-    }
-    fixture_paths.update(
-        input_path
-        for check in recipe.validation.serving.checks
-        if (request := check.request).transport == "job"
-        for input_path in request.input_slots.values()
-    )
+    fixture_paths = {path for check in recipe.validation.serving.checks for path in check.fixture_paths()}
 
     def is_source_member(name: str) -> bool:
         try:
@@ -509,11 +497,11 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
     results: list[dict[str, object]] = []
     for check in checks:
         step = f"serving.{check['name']}"
-        if check["request"]["transport"] != "http":
+        if check["request"]["transport"] not in {"http", "http-multipart"}:
             raise EnvironmentLimited("job serving requires the Controller artifact-job adapter")
         started = time.monotonic()
         try:
-            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias, chat_api=chat_api, argument_value=_argument_value(inputs.recipe))
+            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias, chat_api=chat_api, argument_value=_argument_value(inputs.recipe), fixtures=inputs.package.files)
         except ServingExecutionError as error:
             raise QualificationError(f"{step}: {error}") from error
         results.append({"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result})

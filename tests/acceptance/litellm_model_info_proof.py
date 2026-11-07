@@ -14,6 +14,14 @@ gateway does:
 * a ``mode: "decision"`` route loads;
 * a prompt far beyond a route's ``max_input_tokens`` is forwarded, not rejected
   by the gateway (the engine is the one gate);
+* the audio routes work for an ordinary client key through the official
+  OpenAI SDK: ``audio.transcriptions.create`` reaches the upstream as one
+  multipart ``POST /v1/audio/transcriptions`` and ``audio.speech.create`` as one
+  ``POST /v1/audio/speech`` with exactly the fields sent, the stub's WAV comes
+  back unchanged, ``task_type`` is dropped (the LiteLLM v1.103.0 behaviour the
+  design relies on, pinned so a bump that changes it fails visibly), the same
+  key reads the audio facts from ``/v1/model/info``, a model outside its scope
+  is refused, and a key without ``openai_routes`` is refused on both paths;
 * a request with tools, a response format and sampling reaches the upstream
   identically through a route with facts and a route without them.
 """
@@ -21,7 +29,10 @@ gateway does:
 from __future__ import annotations
 
 import argparse
+import email.parser
+import email.policy
 import json
+import struct
 import subprocess
 import sys
 import threading
@@ -30,9 +41,10 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 
-from vonk_control.gateway_route_grants import BASE_KEY_ROUTES
+import openai
+from vonk_control.gateway_route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 from vonk_control.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
@@ -52,12 +64,50 @@ POSTGRES_IMAGE = json.loads(
 DB_PASSWORD = "model-info-proof"
 
 
+def wav_bytes(seconds: float = 0.1, rate: int = 16000) -> bytes:
+    """A small silent mono 16-bit WAV: the stub's speech answer and the upload."""
+    data = b"\x00\x00" * int(seconds * rate)
+    header = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt "
+    header += struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+    return header + b"data" + struct.pack("<I", len(data)) + data
+
+
+STUB_WAV = wav_bytes()
+UPLOAD_WAV = wav_bytes(0.25)
+
+
+def multipart_parts(content_type: str, body: bytes) -> dict[str, bytes]:
+    """The parts of a multipart body by field name."""
+    message = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+        f"Content-Type: {content_type}\r\n\r\n".encode() + body
+    )
+    return {
+        str(part.get_param("name", header="content-disposition")): cast(
+            bytes, part.get_payload(decode=True)
+        )
+        for part in message.iter_parts()
+    }
+
+
 class Upstream(BaseHTTPRequestHandler):
     received: ClassVar[list[dict[str, object]]] = []
+    # What the audio routes sent: (path, content type, fields or JSON body).
+    audio: ClassVar[list[tuple[str, str, dict[str, object]]]] = []
 
     def do_POST(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
-        body = json.loads(self.rfile.read(length))
+        raw = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type", "")
+        if self.path == "/v1/audio/transcriptions":
+            fields: dict[str, object] = dict(multipart_parts(content_type, raw))
+            Upstream.audio.append((self.path, content_type, fields))
+            self.reply(200, "application/json", b'{"text":"stub transcript"}')
+            return
+        body = json.loads(raw)
+        if self.path == "/v1/audio/speech":
+            Upstream.audio.append((self.path, content_type, body))
+            self.reply(200, "audio/wav", STUB_WAV)
+            return
         Upstream.received.append(body)
         answer = json.dumps(
             {
@@ -79,8 +129,11 @@ class Upstream(BaseHTTPRequestHandler):
                 },
             }
         ).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
+        self.reply(200, "application/json", answer)
+
+    def reply(self, status: int, content_type: str, answer: bytes) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(answer)))
         self.end_headers()
         self.wfile.write(answer)
@@ -159,36 +212,183 @@ def listed(entries: dict[str, dict], alias: str) -> dict:
     return entries[alias]
 
 
-def prove_client_key() -> None:
-    """A virtual key, created as the Controller creates them, reads its own facts."""
-    scope = [alias_of("plain"), alias_of("options-base")]
+CLIENT_SCOPE = [
+    alias_of(name)
+    for name in ("plain", "options-base", "transcription", "speech-instructions")
+]
+
+
+def generate_key(key_alias: str, routes: list[str]) -> str:
+    """A virtual key, created as the Controller creates them (models and routes)."""
     deadline = time.monotonic() + 120
     while True:  # the key store is ready once the database migration finished
         status, created = call(
             "/key/generate",
             {
-                "key_alias": "proof-client",
-                "models": scope,
-                "allowed_routes": list(BASE_KEY_ROUTES),
+                "key_alias": key_alias,
+                "models": CLIENT_SCOPE,
+                "allowed_routes": routes,
                 "metadata": {"managed_by": "vonk-forge"},
             },
         )
         if status == 200:
-            break
+            return created["key"]  # type: ignore[index]
         check(time.monotonic() < deadline, f"key generate answered {status}")
         time.sleep(2)
-    key = created["key"]  # type: ignore[index]
+
+
+def prove_client_key() -> str:
+    """An ordinary client key reads its own facts; returns it for the audio proof."""
+    key = generate_key("proof-client", list(BASE_KEY_ROUTES))
     status, info = call("/v1/model/info", key=key)
     check(status == 200, f"a client key was refused /v1/model/info: {status} {info}")
     names = sorted(entry["model_name"] for entry in info["data"])  # type: ignore[index]
-    check(names == sorted(scope), f"a client key saw {names}, not its own models")
+    check(
+        names == sorted(CLIENT_SCOPE), f"a client key saw {names}, not its own models"
+    )
     for path in ("/v2/model/info", "/key/info", "/user/info", "/team/list"):
         status, _ = call(path, key=key)
         check(status in (401, 403), f"a client key reached {path}: {status}")
+    return key
+
+
+def sdk(key: str) -> openai.OpenAI:
+    """The official OpenAI SDK, as any client uses the gateway."""
+    return openai.OpenAI(
+        base_url=f"http://127.0.0.1:{PORT}/v1", api_key=key, max_retries=0
+    )
+
+
+def refused(action: object) -> int:
+    """The status the gateway refused an SDK call with; fails when it did not."""
+    try:
+        action()  # type: ignore[operator]
+    except openai.APIStatusError as error:
+        return error.status_code
+    raise SystemExit("model_info proof failed: the gateway served a refused call")
+
+
+def prove_audio(key: str) -> None:
+    """The audio routes through the real gateway, with an ordinary client key."""
+    client = sdk(key)
+    transcription, speech = alias_of("transcription"), alias_of("speech-instructions")
+
+    # The facts every client reads: the modes, endpoints, parameters and the
+    # custom keys, verbatim from the shared vectors.
+    status, info = call("/v1/model/info", key=key)
+    check(status == 200, f"/v1/model/info answered {status} for the client key")
+    served = {
+        entry["model_name"]: entry["model_info"]
+        for entry in info["data"]  # type: ignore[index]
+    }
+    for vector in vectors():
+        name = str(vector["name"])
+        if alias_of(name) in (transcription, speech):
+            for fact, value in vector["model_info"].items():  # type: ignore[union-attr]
+                got = served[alias_of(name)].get(fact)
+                check(got == value, f"{name}: the client key sees {fact}={got!r}")
+    check(
+        served[transcription]["mode"] == "audio_transcription"
+        and served[speech]["mode"] == "audio_speech"
+        and served[speech]["health_check_voice"] == "alloy"
+        and "max_file_size_mb" not in served[transcription],
+        "the audio routes do not show their modes",
+    )
+    status, group = call("/model_group/info", key=key)
+    check(status == 200, f"/model_group/info answered {status} for the client key")
+    modes = {item["model_group"]: item["mode"] for item in group["data"]}  # type: ignore[index]
+    check(
+        modes[transcription] == "audio_transcription"
+        and modes[speech] == "audio_speech",
+        "/model_group/info does not show the audio modes",
+    )
+
+    # Speech to text: one multipart POST with the file and the fields sent.
+    Upstream.audio.clear()
+    result = client.audio.transcriptions.create(
+        model=transcription,
+        file=("clip.wav", UPLOAD_WAV, "audio/wav"),
+        language="nl",
+    )
+    check(result.text == "stub transcript", f"the transcript is {result.text!r}")
+    check(len(Upstream.audio) == 1, "the transcription was not forwarded once")
+    path, content_type, fields = Upstream.audio[0]
+    check(
+        path == "/v1/audio/transcriptions"
+        and content_type.startswith("multipart/form-data")
+        and fields.get("file") == UPLOAD_WAV
+        and fields.get("language") == b"nl"
+        and fields.get("model") == b"transcription",
+        f"the upstream saw {path} {content_type} {sorted(fields)}",
+    )
+
+    # Text to speech: exactly the fields sent, the audio back byte for byte.
+    # ``task_type`` is not forwarded by LiteLLM; the design relies on that.
+    Upstream.audio.clear()
+    answer = client.audio.speech.create(
+        model=speech,
+        voice="alloy",
+        input="The road ahead is closed.",
+        response_format="wav",
+        instructions="Calm and slow.",
+        speed=1.25,
+        extra_body={"task_type": "VoiceDesign", "ref_audio": "x", "stream": True},
+    )
+    check(answer.content == STUB_WAV, "the speech bytes changed on the way back")
+    check(
+        answer.response.headers["content-type"].startswith("audio/wav"),
+        f"the speech content type is {answer.response.headers['content-type']!r}",
+    )
+    check(len(Upstream.audio) == 1, "the speech request was not forwarded once")
+    path, content_type, body = Upstream.audio[0]
+    check(
+        path == "/v1/audio/speech"
+        and content_type.startswith("application/json")
+        and body
+        == {
+            "model": "speech-instructions",
+            "voice": "alloy",
+            "input": "The road ahead is closed.",
+            "response_format": "wav",
+            "instructions": "Calm and slow.",
+            "speed": 1.25,
+        },
+        f"the upstream saw {path} {body}",
+    )
+
+    # Scope: a model outside the key's list is refused, on both audio paths,
+    # before anything reaches the upstream.
+    Upstream.audio.clear()
+    outside = refused(
+        lambda: client.audio.transcriptions.create(
+            model=alias_of("transcription-minimal"),
+            file=("clip.wav", UPLOAD_WAV, "audio/wav"),
+        )
+    )
+    check(outside in (401, 403), f"an out-of-scope transcription got {outside}")
+    outside = refused(
+        lambda: client.audio.speech.create(
+            model=alias_of("speech"), voice="alloy", input="x"
+        )
+    )
+    check(outside in (401, 403), f"an out-of-scope speech got {outside}")
+
+    # A key without openai_routes reads facts but cannot call either path.
+    narrow = sdk(
+        generate_key("proof-no-openai-routes", [GatewayInferenceRoute.MODEL_INFO.value])
+    )
+    for denied in (
+        lambda: narrow.audio.transcriptions.create(
+            model=transcription, file=("clip.wav", UPLOAD_WAV, "audio/wav")
+        ),
+        lambda: narrow.audio.speech.create(model=speech, voice="alloy", input="x"),
+    ):
+        check(refused(denied) == 403, "a key without openai_routes reached audio")
+    check(not Upstream.audio, "a refused audio call reached the upstream")
 
 
 def prove() -> None:
-    prove_client_key()
+    client_key = prove_client_key()
     entries: dict[str, dict] = {}
     status, info = call("/v1/model/info")
     check(status == 200 and isinstance(info, dict), f"/v1/model/info answered {status}")
@@ -259,6 +459,7 @@ def prove() -> None:
     check(
         "tools" in forwarded[0] and "response_format" in forwarded[0], "params dropped"
     )
+    prove_audio(client_key)
 
 
 def main() -> None:
