@@ -21,6 +21,7 @@ from ..model_cache_contract import (
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_blockers import make_blocker
+from ..operation_contract import AvailabilityRecoveryAction
 from ..persisted_waits import schedule_wait, typed_wait_reason
 from .artifacts import ArtifactSetManifest
 from .catalog_helpers import _iso
@@ -94,6 +95,7 @@ class FailureMixin:
         ):
             failure_code = ModelCacheCode.OPERATION_FAILED
         cancellation_pending = False
+        digest_mismatch = failure_code == ModelCacheCode.DIGEST_MISMATCH
         source_status = getattr(error, "source_status", None)
         # The receipts are read before the transaction takes its row locks.
         all_valid = all(cache._object_is_stored(spec) for spec in manifest.artifacts)
@@ -105,8 +107,7 @@ class FailureMixin:
             if operation is not None and operation.state == "cancelled":
                 return
             if transfer_attempt is not None and (
-                source_status in _SOURCE_GONE_STATUSES
-                or failure_code == ModelCacheCode.DIGEST_MISMATCH
+                source_status in _SOURCE_GONE_STATUSES or digest_mismatch
             ):
                 if operation is None:
                     return
@@ -145,7 +146,7 @@ class FailureMixin:
                 retained_retry = (
                     payload_before.retry if payload_before is not None else None
                 )
-                ended_recovery: str | None = None
+                gone_recovery: str | None = None
                 ingress_mismatch = None
                 missing_source: ModelCacheMissingSourceObservation | None = None
                 artifact_key = failed_artifact_key or operation.current_artifact_key
@@ -179,7 +180,7 @@ class FailureMixin:
                         retryable = False
                         verdict = Disposition.FAIL
                         failure_code = ModelCacheCode.SOURCE_GONE
-                        ended_recovery = "download_again"
+                        gone_recovery = "download_again"
                         detail = cache._source_gone_detail(
                             session,
                             manifest,
@@ -193,7 +194,7 @@ class FailureMixin:
                 if (
                     retryable
                     and transfer_attempt is not None
-                    and failure_code == ModelCacheCode.DIGEST_MISMATCH
+                    and digest_mismatch
                     and artifact_key
                 ):
                     pinned = next(
@@ -218,7 +219,7 @@ class FailureMixin:
                             # fresh exact request counts independently.
                             retryable = False
                             verdict = Disposition.FAIL
-                            ended_recovery = "download_again"
+                            gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                             detail = ingress_mismatch_detail(
                                 pinned.path, ingress_mismatch
                             )
@@ -322,7 +323,7 @@ class FailureMixin:
                     failure_code,
                     detail,
                     retryable=retryable,
-                    recovery=ended_recovery
+                    recovery=gone_recovery
                     or getattr(error, "recovery", None)
                     or ("capacity" if failure_code == ModelCacheCode.CAPACITY else None)
                     or ("resume" if bounded_retry else "retry"),
