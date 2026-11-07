@@ -185,6 +185,8 @@ def _standalone_install(sim: Simulation, step: Step) -> None:
         actor="admin",
         request_id=_request_key(sim),
     )
+    # Only an accepted install took the intent; a refusal raised above.
+    sim.monitor.standalone_intents.append(sim.world.clock())
 
 
 def _stop(sim: Simulation, step: Step) -> None:

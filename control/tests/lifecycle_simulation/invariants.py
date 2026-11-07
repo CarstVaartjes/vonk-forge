@@ -271,6 +271,9 @@ class Monitor:
     _healthy_since: datetime | None = None
     #: Loads an operator asked to cancel.
     cancel_requested: set[str] = field(default_factory=set)
+    #: When an operator took a workload intent outside any load (a standalone
+    #: install): it supersedes every load accepted at or before it.
+    standalone_intents: list[datetime] = field(default_factory=list)
     _repeats: dict[str, int] = field(default_factory=dict)
     _dead_since: dict[str, datetime] = field(default_factory=dict)
     _orphaned_since: dict[str, datetime] = field(default_factory=dict)
@@ -385,7 +388,7 @@ class Monitor:
             newer = any(
                 other_id != request_id and other.accepted_at >= request.accepted_at
                 for other_id, other in current.requests.items()
-            )
+            ) or any(taken >= request.accepted_at for taken in self.standalone_intents)
             if newer:
                 continue
             if request.state == "superseded":
