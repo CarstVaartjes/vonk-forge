@@ -727,3 +727,43 @@ def test_startup_strips_old_run_plans_and_survives_a_row_it_cannot_strip(
         assert plan["alias"] == "sweep-alias" and unreadable == [before.id]
     finally:
         world.close()
+
+
+@pytest.mark.slow(60)
+def test_the_strip_survives_a_plan_jsonb_rejects_and_retries_a_busy_row(
+    tmp_path, postgres_engine
+) -> None:
+    from sqlalchemy import text
+    from vonk_control.db.connections import _DatabaseStartupContention
+    from vonk_control.db.startup import strip_run_plan_alias
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        before = _identical_runs_loaded(world, sim, "sweep-alias")
+        # Valid json, but not jsonb (a NUL character): the row is left as it is.
+        with postgres_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE recipe_runs SET plan = "
+                '\'{"alias": "x", "note": "\\u0000"}\'::json'
+            )
+        with postgres_engine.begin() as connection:
+            assert strip_run_plan_alias(connection) == 0
+        with world.sessions() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None and run.plan["alias"] == "x"
+
+        # A row another transaction holds is startup contention, not a skipped row.
+        with postgres_engine.begin() as connection:
+            connection.exec_driver_sql(
+                'UPDATE recipe_runs SET plan = \'{"alias": "x"}\'::json'
+            )
+        with postgres_engine.connect() as holder:
+            holder.execute(text("SELECT id FROM recipe_runs FOR UPDATE"))
+            with postgres_engine.connect() as connection:
+                connection.execute(text("SET lock_timeout = '200ms'"))
+                with pytest.raises(_DatabaseStartupContention):
+                    strip_run_plan_alias(connection)
+            holder.rollback()
+    finally:
+        world.close()
