@@ -191,12 +191,13 @@ def test_the_speech_health_check_voice_is_the_first_voice() -> None:
     "change",
     [
         {"max_input_tokens": 10},
+        {"max_output_tokens": 5, "max_tokens": 5},
         {"vonk_audio_speech": None},
         {"vonk_audio_transcription": {}},
         {"health_check_voice": "echo"},
         {"mode": "chat"},
     ],
-    ids=["tokens", "missing-block", "foreign-block", "voice", "mode"],
+    ids=["tokens", "output-tokens", "missing-block", "foreign-block", "voice", "mode"],
 )
 def test_the_mode_decides_which_audio_fields_apply(change: dict) -> None:
     fields = _built(_vector("speech")).model_dump()
