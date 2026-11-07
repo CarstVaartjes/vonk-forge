@@ -27,7 +27,7 @@ from vonk_forge_contracts import document_sha256
 from .catalog_launch_fixtures import load_inputs
 from .display_fixtures import create_draft
 
-RECIPE_SLUG = "trellis-2-4b-pytorch-single"
+RECIPE_SLUG = "skintokens-pytorch-single"
 INSTALLED_PLAN = (
     Path(__file__).resolve().parents[2]
     / "agent_protocol"

@@ -6,13 +6,15 @@
     "repository": "nvcr.io/nvidia/pytorch"
    },
    "context": {
-    "path": "adapters/nvidia/nemotron-lightning-tensorfold-single"
+    "path": "adapters/llm/ashhart-tensorfold-single"
    },
-   "dockerfile": "adapters/nvidia/nemotron-lightning-tensorfold-single/Dockerfile",
+   "dockerfile": "adapters/llm/ashhart-tensorfold-single/Dockerfile",
    "network": {
     "hosts": [
-     "files.pythonhosted.org",
-     "pypi.org"
+     "github.com",
+     "objects.githubusercontent.com",
+     "release-assets.githubusercontent.com",
+     "storage.googleapis.com"
     ]
    },
    "patches": []
@@ -40,7 +42,7 @@
      "file_id": "metadata-34448b82c17d-618cd5b83d",
      "id": "primary-metadata-34448b82c17d-618cd5b83d",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -50,7 +52,7 @@
      "file_id": "license-d7c8a9e5d189-c693279643",
      "id": "primary-license-d7c8a9e5d189-c693279643",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -60,7 +62,7 @@
      "file_id": "readme-ce0891251a86-b335630551",
      "id": "primary-readme-ce0891251a86-b335630551",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -70,7 +72,7 @@
      "file_id": "chat-template-58933db77d30-00824420d1",
      "id": "primary-chat-template-58933db77d30-00824420d1",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -80,7 +82,7 @@
      "file_id": "config-2d4bdc543efd-587cb980af",
      "id": "primary-config-2d4bdc543efd-587cb980af",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -90,7 +92,7 @@
      "file_id": "generation-config-0ed94823ae73-97dd3d578b",
      "id": "primary-generation-config-0ed94823ae73-97dd3d578b",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -100,7 +102,7 @@
      "file_id": "model-00001-of-00004-7cc60a26a467-1913267ec8",
      "id": "primary-model-00001-of-00004-7cc60a26a467-1913267ec8",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -110,7 +112,7 @@
      "file_id": "model-00002-of-00004-ed6020dad4cd-60f6088da9",
      "id": "primary-model-00002-of-00004-ed6020dad4cd-60f6088da9",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -120,7 +122,7 @@
      "file_id": "model-00003-of-00004-fcc12aa6d00f-fc35f2c4d5",
      "id": "primary-model-00003-of-00004-fcc12aa6d00f-fc35f2c4d5",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -130,7 +132,7 @@
      "file_id": "model-00004-of-00004-6fcd77b94087-5078e75d62",
      "id": "primary-model-00004-of-00004-6fcd77b94087-5078e75d62",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -140,7 +142,7 @@
      "file_id": "model-safetensors-index-4c12ae327464-0a05be8238",
      "id": "primary-model-safetensors-index-4c12ae327464-0a05be8238",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -150,7 +152,7 @@
      "file_id": "mtp-4bit-4953d2323861-fe52f099e1",
      "id": "primary-mtp-4bit-4953d2323861-fe52f099e1",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -160,7 +162,7 @@
      "file_id": "tokenizer-623c34567aeb-224931eb13",
      "id": "primary-tokenizer-623c34567aeb-224931eb13",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -170,7 +172,7 @@
      "file_id": "tokenizer-config-ec380f0a6c0c-94d5c6ba8f",
      "id": "primary-tokenizer-config-ec380f0a6c0c-94d5c6ba8f",
      "mount": {
-      "target": "/models"
+      "target": "/models/target"
      },
      "roles": [
       "entrypoint"
@@ -179,7 +181,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "7adadef076681ad2457f1b42bcddd00ac7c9be62016e5fe08497b84f979648a4",
+    "content_sha256": "85502608e4cde1f1edb5e408e29890f0d4b772b5b16cd40c5c6e4095adfc54a5",
     "kind": "model",
     "publisher": "vontra",
     "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp-8bbcb5b6"
@@ -191,7 +193,7 @@
    "choices": [
     {
      "default": true,
-     "help": "Up to 15 MTP drafts a round, each chain stopping where the next verify row would cost more than its draft saves; window and level costs are measured at startup on this GPU (upstream default on CUDA since 0.6.5).",
+     "help": "Up to 15 MTP drafts a round, each chain stopping where the next verify row would cost more than its draft saves; window and level costs are measured at startup on this GPU (upstream default on CUDA).",
      "label": "MTP, cost-chosen depth",
      "value": "mtp-auto"
     },
@@ -202,7 +204,7 @@
        "value": 3
       }
      ],
-     "help": "At most 3 MTP drafts a round (--mtp-drafts 3; TensorFold's CUDA default before 0.6.5); speed unmeasured.",
+     "help": "At most 3 MTP drafts a round (--mtp-drafts 3); speed unmeasured.",
      "label": "MTP, 3 drafts",
      "value": "mtp-3"
     },
@@ -235,7 +237,7 @@
        "value": true
       }
      ],
-     "help": "Serial one-token-at-a-time reference decoding (--no-drafts); slower (upstream measured 108 to 110 tok/s serial against 123 to 146 with MTP on a 64 GB M5 Pro, an MLX result).",
+     "help": "Plain one-token-at-a-time decoding through the same engine (--no-drafts); slower (upstream measured 108 to 110 tok/s plain against 123 to 146 with MTP on a 64 GB M5 Pro, an MLX result with TensorFold 0.3.5.1).",
      "label": "No drafting",
      "value": "serial"
     }
@@ -251,11 +253,11 @@
    "Vontra",
    "NVIDIA Corporation"
   ],
-  "source_reference": "https://github.com/ashhart/TensorFold/tree/cb2ebf0540f42604e2759b2ddef497861e928248"
+  "source_reference": "https://github.com/ashhart/TensorFold/tree/6ec5fa4cb233f3606acbdad5bec433f0f8758f96"
  },
  "release": {
-  "released_at": "2026-10-06",
-  "version": "0.6.6"
+  "released_at": "2026-11-05",
+  "version": "1.2.3"
  },
  "runtime": {
   "arguments": [
@@ -289,20 +291,7 @@
   "entrypoint": [
    "/opt/vonk/bin/tensorfold-serve"
   ],
-  "environment": [
-   {
-    "name": "HF_HUB_OFFLINE",
-    "value": "1"
-   },
-   {
-    "name": "TRANSFORMERS_OFFLINE",
-    "value": "1"
-   },
-   {
-    "name": "TENSORFOLD_NO_UPDATE_CHECK",
-    "value": "1"
-   }
-  ],
+  "environment": [],
   "lifecycle": {
    "stop_timeout_seconds": 60
   }

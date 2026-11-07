@@ -355,6 +355,7 @@ class FleetProfileService:
                                 assignment,
                                 lambda item: control.states[item.id].run,
                             ),
+                            own_run_id=state.run.id if state.run else None,
                             replaced_run_ids=frozenset(
                                 effect.run_id
                                 for effect in run_effects

@@ -62,12 +62,6 @@ def _recipe(
     return recipe
 
 
-def _license(document: dict[str, object]) -> dict[str, object]:
-    license_document = document["license"]
-    assert isinstance(license_document, dict)
-    return license_document
-
-
 def _model_reference(recipe: dict[str, object]) -> dict[str, object]:
     models = recipe["models"]
     assert isinstance(models, list) and models
@@ -279,7 +273,6 @@ def test_model_capability_revision_reuses_its_artifact_projection(
     first = _resolve(service, original)
     changed = copy.deepcopy(original)
     reword(changed, "updated capability documentation")
-    _license(changed)["attribution"] = ["updated attribution"]
     successor = service.revise(
         first.document_id, changed, actor="operator", expected_revision=1
     )
@@ -299,7 +292,6 @@ def test_recipe_reuse_keys_follow_effective_model_artifact(
 
     changed_model = copy.deepcopy(original)
     reword(changed_model, "updated capability documentation")
-    _license(changed_model)["attribution"] = ["updated attribution"]
     changed_model_revision = service.revise(
         model_revision.document_id,
         changed_model,

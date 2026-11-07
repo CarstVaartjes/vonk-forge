@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
+from concurrent.futures import Future
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from ..cli_select import SelectorError
@@ -56,6 +59,70 @@ def _observe_selection[T](read: Callable[[], T], *, deadline: float) -> T:
     raise ControlMalformedResponse(
         f"selection observation is unavailable; last error {cause}"
     ) from last_error
+
+
+@dataclass(frozen=True)
+class _ReadOutcome:
+    """One read's own outcome: its value or the error it ended with."""
+
+    value: object = None
+    error: Exception | None = None
+
+    def get(self) -> object:
+        """The read's value; raises that read's own error."""
+        if self.error is not None:
+            raise self.error
+        return self.value
+
+
+_MAX_CONCURRENT_READS = 3
+
+
+def _skipped_read() -> None:
+    """A read that is not needed for this action."""
+
+
+def _run_read(read: Callable[[], object]) -> _ReadOutcome:
+    try:
+        return _ReadOutcome(value=read())
+    except Exception as error:  # noqa: BLE001 - recorded as this read's outcome
+        return _ReadOutcome(error=error)
+
+
+def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
+    """Run independent reads at once; each keeps its own outcome.
+
+    Every read caps itself at its own deadline, so this helper never invents
+    an error or a timeout for a read: it waits until each read has finished
+    and returns that read's own value or error. The outcomes come back in the
+    order given, so a caller that consumes them in the order it used to run
+    the reads meets the same first error as before.
+
+    A single real read runs inline. Several run in daemon threads while the
+    caller waits on each read's result in order; that wait is interruptible, so Ctrl-C
+    still raises KeyboardInterrupt on the main thread at once.
+    """
+    real = [read for read in reads if read is not _skipped_read]
+    if len(real) > _MAX_CONCURRENT_READS:
+        raise ValueError("too many concurrent reads")
+    if len(real) <= 1:
+        return [
+            _ReadOutcome() if read is _skipped_read else _run_read(read)
+            for read in reads
+        ]
+    pending: dict[int, Future[_ReadOutcome]] = {
+        index: Future() for index, read in enumerate(reads) if read is not _skipped_read
+    }
+
+    def work(future: Future[_ReadOutcome], read: Callable[[], object]) -> None:
+        future.set_result(_run_read(read))
+
+    for index, future in pending.items():
+        threading.Thread(target=work, args=(future, reads[index]), daemon=True).start()
+    return [
+        _ReadOutcome() if index not in pending else pending[index].result()
+        for index in range(len(reads))
+    ]
 
 
 def _recipe_rows(

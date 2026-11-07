@@ -531,7 +531,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "a1fb14c2973b48098a52377cf1d5ba44bef43e4c8b5c86a3481fe57024285182",
+    "content_sha256": "3318872c643e6f5c95ed4b3fd61a79861414de5de39e1e1b5f85a719f6fd94ae",
     "kind": "model",
     "publisher": "thinkingmachines",
     "slug": "inkling-975b-a41b-nvfp4"

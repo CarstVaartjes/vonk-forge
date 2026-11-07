@@ -1,0 +1,231 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/three-d/motionbricks"
+   },
+   "dockerfile": "adapters/three-d/motionbricks/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "motionbricks-g1-pytorch-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "artifact-job",
+   "input": {
+    "max_bytes": 65536,
+    "media_types": [
+     "application/json"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "JSON script of motion segments: style, duration, heading and an optional speed (upstream-internal, unverified).",
+      "extensions": [
+       ".json"
+      ],
+      "id": "command",
+      "label": "Motion command",
+      "max_file_bytes": 65536,
+      "max_files": 1,
+      "max_total_bytes": 65536,
+      "media_types": [
+       "application/json"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Unitree G1 MuJoCo qpos trajectory at 30 fps as JSON.",
+      "extensions": [
+       ".json"
+      ],
+      "id": "motion",
+      "label": "G1 motion",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "application/json"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "g1-clip-84afc7c22947-abd01a0968",
+     "id": "primary-g1-clip-84afc7c22947-abd01a0968",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-step-2000000-0223c352b308-86ac5c6ccb",
+     "id": "primary-model-step-2000000-0223c352b308-86ac5c6ccb",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-step-2000000-d7299a9b1f5a-ab3dcf5f31",
+     "id": "primary-model-step-2000000-d7299a9b1f5a-ab3dcf5f31",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-step-2000000-f12a09d46ad3-27d55e7f5f",
+     "id": "primary-model-step-2000000-f12a09d46ad3-27d55e7f5f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "0cbd6cc90d652bb42364d7f29e2f2d98f16d4e67d4f8e036110d8a67192fe389",
+    "kind": "model",
+    "publisher": "nvidia",
+    "slug": "motionbricks-g1-45c03fac"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "nvidia"
+  ],
+  "source_reference": "https://github.com/NVlabs/GR00T-WholeBodyControl/blob/45c03facbf848e0c743091b7d9c17952096ff908/motionbricks/README.md"
+ },
+ "release": {
+  "released_at": "2026-10-27",
+  "version": "1.0.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "entrypoint",
+    "setting": null,
+    "value": "/opt/vonk/source/run.py"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "application/json"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "pytorch-pipeline",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-pipeline"
+  ],
+  "environment": [],
+  "lifecycle": {
+   "stop_timeout_seconds": 60
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 2342046515,
+      "image_bytes": 12000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 4000000000
+     },
+     "memory": {
+      "peak_bytes": 16000000000,
+      "reserve_bytes": 4000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "artifact-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/motionbricks-command.json",
+      "input_slots": {
+       "command": "qualification/fixtures/motionbricks-command.json"
+      },
+      "output_slot": "motion",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "artifact-job"
+  }
+ }
+}

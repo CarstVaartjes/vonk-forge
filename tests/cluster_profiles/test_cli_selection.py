@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import cast
 
 import pytest
@@ -20,12 +21,32 @@ class Pages:
     request_timeout_seconds = 15.0
 
     def __init__(self, pages):
-        self.pages = iter(pages)
+        self.pages = list(pages)
         self.calls = []
+        self._lock = threading.Lock()
 
     def request(self, method, path, payload=None, **kwargs):
-        self.calls.append((method, path, payload, kwargs))
-        return next(self.pages)
+        # Independent reads run at once, so each request takes the next page
+        # of its own kind (definition, recipe library, other) in order.
+        with self._lock:
+            self.calls.append((method, path, payload, kwargs))
+            kind = self._kind(path)
+            for index, page in enumerate(self.pages):
+                if self._kind_of_page(page) == kind:
+                    return self.pages.pop(index)
+            raise StopIteration
+
+    @staticmethod
+    def _kind(path):
+        if path.endswith("/definition"):
+            return "definition"
+        return "recipes" if path == "/api/recipe/library" else "other"
+
+    @staticmethod
+    def _kind_of_page(page):
+        if "definition" in page:
+            return "definition"
+        return "recipes" if "recipes" in page and "selector" not in page else "other"
 
     def profile_endpoints(self, number, alias=None):
         raise AssertionError("recipe selection must not inspect profile endpoints")
@@ -198,9 +219,7 @@ def test_selection_budget_covers_every_page_and_discards_late_results(monkeypatc
     assert resolved is None
     assert [call[3]["timeout_seconds"] for call in client.calls] == [30, 10]
     clock[0] = 100
-    client.pages = iter(
-        [{"recipes": [recipe("one/code", "Coding")], "next_cursor": None}]
-    )
+    client.pages = [{"recipes": [recipe("one/code", "Coding")], "next_cursor": None}]
     assert controller_cli._resolve_recipe_selector(client, "Coding") == "one/code"
 
 

@@ -1051,6 +1051,8 @@ def test_model_download_is_a_durable_cache_child_with_exact_pins(
             )
         ),
         last_error=None,
+        blockers=(),
+        wait=None,
         result=None,
     )
 
@@ -1965,6 +1967,8 @@ def test_zero_byte_model_download_uses_the_cache_admission() -> None:
         state=LifecycleState.SUCCEEDED,
         artifact_set_sha256="d" * 64,
         last_error=None,
+        blockers=(),
+        wait=None,
         result=ModelCacheDownloadResult(
             schema_version=2, artifact_set_sha256="d" * 64, coverage="complete"
         ),

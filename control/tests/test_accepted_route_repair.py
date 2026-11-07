@@ -9,7 +9,10 @@ from vonk_control.litellm import LiteLlmPolicy, RouteState, render_config
 from vonk_control.presence import ManagementAddressPolicy
 from vonk_control.recipe_routes import AtomicRecipeRoutePublisher
 from vonk_control.recipe_routes.shared import _RecipeCandidate, _RecipeEndpoint
-from vonk_control.route_bundle_contract import RouteBundleDocument
+from vonk_control.route_bundle_contract import (
+    RouteAcceptedModelPolicy,
+    RouteBundleDocument,
+)
 from vonk_control.route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
@@ -35,11 +38,9 @@ def test_accepted_projection_miss_is_repaired_without_unverified_reuse(
     state = RouteState({"model": endpoint.api_base}, "a" * 64)
     policy = LiteLlmPolicy(
         {
-            "model": {
-                "upstream_model": "model",
-                "requests_per_minute": 10,
-                "tokens_per_minute": 100,
-            }
+            "model": RouteAcceptedModelPolicy(
+                upstream_model="model",
+            )
         }
     )
     candidate = _RecipeCandidate(

@@ -4,12 +4,10 @@
 usage: agent-package-versions write VERSION BASELINE_VERSION OUTPUT
        agent-package-versions read RUN_ID SOURCE_SHA
 
-A package set is normally versioned from its source commit
-(scripts/agent-package-metadata + scripts/dev-publication-sequence). One that
-main sealed from a pull request keeps the pull request's version, so every
-producing run records its versions in the small ``<artifact>-versions``
-artifact. ``read`` prints the metadata lines of agent-package-metadata from
-that record, and recomputes them from the source when a run has none.
+Every producing run records its versions in the small ``<artifact>-versions``
+artifact, because a set that main sealed from a pull request keeps the pull
+request's version. ``read`` prints the metadata lines of agent-package-metadata
+from that record; a run without a record fails.
 """
 
 from __future__ import annotations
@@ -72,15 +70,7 @@ def read(run_id: str, sha: str) -> list[str]:
     )["artifacts"]
     records = [item for item in artifacts if not item.get("expired")]
     if not records:
-        # A run from before the record: its versions follow its source.
-        sequence = subprocess.run(
-            [str(ROOT / "scripts/dev-publication-sequence"), sha],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        ).stdout.strip()
-        return METADATA["metadata"](["development", "branch", "main", sha, sequence])
+        raise ValueError("agent package versions record is missing")
     if len(records) != 1:
         raise ValueError("agent package versions are ambiguous")
     archive = gh(f"/repos/{repository}/actions/artifacts/{records[0]['id']}/zip")

@@ -2,15 +2,28 @@
  "execution": {
   "build": {
    "base_image": {
-    "digest": "c4a8820479f1c012dcb350300220eb82845a484937c9fc635cb2c5489dd3b74f",
-    "repository": "docker.io/vllm/vllm-openai"
+    "digest": "5dc1bca23d05bd37b011be68ec470c03b403a5da07ec3a86e41af9470e9d0cc6",
+    "repository": "nvcr.io/nvidia/cuda"
    },
    "context": {
     "path": "adapters/qwen/flash-next-tonyd2wild-vllm"
    },
    "dockerfile": "adapters/qwen/flash-next-tonyd2wild-vllm/Dockerfile",
    "network": {
-    "hosts": []
+    "hosts": [
+     "ports.ubuntu.com",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "pypi.org",
+     "files.pythonhosted.org",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.nvidia.com",
+     "wheels.vllm.ai",
+     "flashinfer.ai",
+     "github.com",
+     "release-assets.githubusercontent.com"
+    ]
    },
    "patches": []
   }
@@ -45,8 +58,8 @@
      ]
     },
     {
-     "file_id": "readme-e3ed0cb89950-b335630551",
-     "id": "primary-readme-e3ed0cb89950-b335630551",
+     "file_id": "readme-e56b4bd51523-b335630551",
+     "id": "primary-readme-e56b4bd51523-b335630551",
      "mount": {
       "target": "/models"
      },
@@ -67,8 +80,8 @@
      ]
     },
     {
-     "file_id": "config-deef67a61f33-587cb980af",
-     "id": "primary-config-deef67a61f33-587cb980af",
+     "file_id": "config-4156f806efe3-587cb980af",
+     "id": "primary-config-4156f806efe3-587cb980af",
      "mount": {
       "target": "/models"
      },
@@ -311,10 +324,10 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "788c612ba2913fe19f8b4b7f7694998318909d8c0c98162bb3f55055bd9981fb",
+    "content_sha256": "7273a21b37bd19e5fe90eb0817d859b4c49b5fa85684ab14006fcc4720ae64b5",
     "kind": "model",
     "publisher": "nvidia",
-    "slug": "qwen3-8-flash-next-nvfp4-fc694b54"
+    "slug": "qwen3-8-flash-next-nvfp4-fab0aecb"
    }
   }
  ],
@@ -521,8 +534,8 @@
   "source_reference": "https://github.com/tonyd2wild/Qwen3.8-Flash-Next-NVFP4-DGX-Spark/tree/6ad1c8f15cbab1ababd2048e8e5f94094dbfc4a0"
  },
  "release": {
-  "released_at": "2026-09-06",
-  "version": "1.0.0"
+  "released_at": "2026-11-03",
+  "version": "1.0.2"
  },
  "runtime": {
   "arguments": [
@@ -750,7 +763,7 @@
       "working_bytes": 30000000000
      },
      "memory": {
-      "peak_bytes": 112530585191,
+      "peak_bytes": 114930585191,
       "reserve_bytes": 8000000000
      }
     }
@@ -767,7 +780,7 @@
       "working_bytes": 30000000000
      },
      "memory": {
-      "peak_bytes": 112530585191,
+      "peak_bytes": 114930585191,
       "reserve_bytes": 8000000000
      }
     }

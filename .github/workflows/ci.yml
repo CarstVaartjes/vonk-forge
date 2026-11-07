@@ -612,6 +612,12 @@ jobs:
           load: true
           tags: ${{ env.IMAGE_PREFIX }}-litellm:${{ env.IMAGE_TAG }}
           cache-from: type=gha,scope=vonk-forge-litellm
+      - name: Prove route model_info through the built LiteLLM image
+        run: >-
+          uv run --project control --frozen python
+          tests/acceptance/litellm_model_info_proof.py
+          --image "$IMAGE_PREFIX-litellm:$IMAGE_TAG"
+          --work "$RUNNER_TEMP/model-info-proof"
       - name: Build the Hermes image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -1570,7 +1576,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/api-attestation.json"
-          scripts/verify-published-image api "$API_IMAGE" "$digest" - "$GITHUB_SHA"
+          scripts/verify-published-image api "$API_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
           inspect_error="$RUNNER_TEMP/api-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$API_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
@@ -1604,7 +1610,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/worker-attestation.json"
-          scripts/verify-published-image worker "$WORKER_IMAGE" "$digest" - "$GITHUB_SHA"
+          scripts/verify-published-image worker "$WORKER_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
           inspect_error="$RUNNER_TEMP/worker-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$WORKER_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then
@@ -1639,7 +1645,7 @@ jobs:
             --source-ref refs/heads/main \
             --deny-self-hosted-runners \
             --format json > "$RUNNER_TEMP/litellm-attestation.json"
-          scripts/verify-published-image litellm "$LITELLM_IMAGE" "$digest" - "$GITHUB_SHA"
+          scripts/verify-published-image litellm "$LITELLM_IMAGE" "$digest" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
           inspect_error="$RUNNER_TEMP/litellm-version-inspect-error"
           if observed=$(skopeo inspect --format '{{.Digest}}' \
             "docker://$LITELLM_IMAGE:$IMAGE_VERSION_TAG" 2>"$inspect_error"); then

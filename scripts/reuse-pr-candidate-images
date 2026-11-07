@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Reuse the images a pull request built for this exact source tree.
 #
-# usage: reuse-pr-candidate-images DIRECTORY RUN_ID COMMIT
+# usage: reuse-pr-candidate-images DIRECTORY RUN_ID TREE
 #
 # DIRECTORY holds the pull request run's acceptance-image-* references (one
 # file per role). Every image must pass scripts/verify-published-image for
-# COMMIT, which binds it to COMMIT's Git tree. The selected digests are printed
+# TREE, the Git tree of the source being published. The selected digests are printed
 # as <role>_digest=... plus reused=true; the publisher takes them by digest and
 # exports nothing (the pull request already verified the same digests).
 # When any image is absent, unexpected or does not verify, nothing is printed:
@@ -13,14 +13,14 @@
 set -euo pipefail
 
 if (($# != 3)); then
-  echo "usage: reuse-pr-candidate-images DIRECTORY RUN_ID COMMIT" >&2
+  echo "usage: reuse-pr-candidate-images DIRECTORY RUN_ID TREE" >&2
   exit 64
 fi
 directory=$1
 run_id=$2
-commit=$3
+tree=$3
 [[ "$run_id" =~ ^[1-9][0-9]*$ ]]
-[[ "$commit" =~ ^[0-9a-f]{40}$ ]]
+[[ "$tree" =~ ^[0-9a-f]{40}$ ]]
 : "${RUNNER_TEMP:?RUNNER_TEMP must be set}"
 
 roles=(api worker hermes litellm)
@@ -39,7 +39,7 @@ for role in "${roles[@]}"; do
   fi
   digest=${BASH_REMATCH[1]}
   if ! scripts/verify-published-image "$role" \
-    "ghcr.io/carstvaartjes/vonk-forge-$role" "$digest" - "$commit" >&2; then
+    "ghcr.io/carstvaartjes/vonk-forge-$role" "$digest" - "$tree" >&2; then
     echo "The $role image of run $run_id is not this source tree; building images" >&2
     exit 0
   fi

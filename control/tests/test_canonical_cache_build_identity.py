@@ -11,7 +11,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from vonk_control.catalog_entities import recipe_document_projection
+from vonk_control.catalog_entities import (
+    model_document_projection,
+    recipe_document_projection,
+)
 from vonk_control.catalog_revision_contract import write_catalog_projection
 from vonk_control.compiled_execution_plan import VerifiedModelObject
 from vonk_control.model_cache import ModelCacheService
@@ -114,15 +117,9 @@ def _add_active(
 ) -> CatalogDocumentRevision:
     if kind == "model":
         parsed = ModelDefinition.model_validate(document)
-        projected: dict[str, object] = {
-            "identity": parsed.identity.model_dump(mode="json"),
-            "format": parsed.format.model_dump(mode="json"),
-            "capabilities": parsed.capabilities,
-            "modalities": parsed.modalities,
-            "artifact_count": len(parsed.files),
-            "download_bytes": parsed.download_bytes,
-            "installed_bytes": parsed.installed_bytes,
-        }
+        projected: dict[str, object] = model_document_projection(parsed).model_dump(
+            mode="json"
+        )
     else:
         parsed = RecipeDefinition.model_validate(document)
         projected = recipe_document_projection(parsed)

@@ -116,6 +116,7 @@ class _AssessmentProvider(Protocol):  # noqa: PYI046 -- used by service composit
         planned_ports: frozenset[tuple[str, int]],
         kept_run_ids: frozenset[str],
         replaced_run_ids: frozenset[str],
+        own_run_id: str | None,
     ) -> RunSwitchAssessment | Residue: ...
 
 

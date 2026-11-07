@@ -1,0 +1,585 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/video/hunyuan-video-15-native"
+   },
+   "dockerfile": "adapters/video/hunyuan-video-15-native/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "hunyuan-video-15-i2v-step-distilled-diffusers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "video-job",
+   "input": {
+    "max_bytes": 16842752,
+    "media_types": [
+     "image/jpeg",
+     "image/png",
+     "image/webp",
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 text prompt for video generation.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 65536,
+      "max_files": 1,
+      "max_total_bytes": 65536,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "One source image for image-to-video generation.",
+      "extensions": [
+       ".jpeg",
+       ".jpg",
+       ".png",
+       ".webp"
+      ],
+      "id": "image",
+      "label": "Source image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/jpeg",
+       "image/png",
+       "image/webp"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 1073741824,
+    "slots": [
+     {
+      "description": "Generated MP4 video.",
+      "extensions": [
+       ".mp4"
+      ],
+      "id": "video",
+      "label": "Video",
+      "max_file_bytes": 1073741824,
+      "max_files": 1,
+      "max_total_bytes": 1073741824,
+      "media_types": [
+       "video/mp4"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-caf3ca02d5e8-618cd5b83d",
+     "id": "primary-001",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-97e453b0fa6b-b335630551",
+     "id": "primary-002",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "preprocessor-config-ec1f371074fb-ace603b1da",
+     "id": "primary-003",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "guider-config-8cc58a8bb048-5a4bb9dfdb",
+     "id": "primary-004",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-78bbe4544c7d-7408b0e2c4",
+     "id": "primary-005",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-d769e3a32a6a-239d514024",
+     "id": "primary-006",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-index-42d59fd7ad89-ee03ace9a3",
+     "id": "primary-007",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "scheduler-config-8ec387d5fa43-67ecb3dc37",
+     "id": "primary-008",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-40161074f1da-bcfd37e83e",
+     "id": "primary-009",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00003-a1b9f95e60d6-02972f2ff9",
+     "id": "primary-010",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00003-ab32a0fe73ed-6ecf8bd4b9",
+     "id": "primary-011",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00003-fe26b2e0da51-ab0456bfcf",
+     "id": "primary-012",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-3374ab25b322-5fc12c01f9",
+     "id": "primary-013",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-d9ced170e0c3-576e8524c7",
+     "id": "primary-014",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-f0a1043fa206-91d4db77fb",
+     "id": "primary-015",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "added-tokens-58b54bbe36fc-67aa73d88f",
+     "id": "primary-016",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-a0bc6f6fc7a2-875b211b57",
+     "id": "primary-017",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "merges-8831e4f1a044-ebbb0f71ea",
+     "id": "primary-018",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "special-tokens-map-76862e765266-9a6c011314",
+     "id": "primary-019",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-9c5ae00e602b-b87c178459",
+     "id": "primary-020",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-11d20a741a0e-47a6faaf45",
+     "id": "primary-021",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vocab-ca10d7e9fb3e-8c35116cc3",
+     "id": "primary-022",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "added-tokens-6dbf3df426e1-c992a97bfb",
+     "id": "primary-023",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "special-tokens-map-f9ff8c543ce7-d9a3373af2",
+     "id": "primary-024",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-56adeaeff12e-25c5334061",
+     "id": "primary-025",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-d36328fcc924-98e965502a",
+     "id": "primary-026",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-00001-of-00002-a3ce050556ba-f940099643",
+     "id": "primary-027",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-00002-of-00002-374683b899a8-48c20e2a08",
+     "id": "primary-028",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-safetensors-ind-6b4af7af91fa-322b43acad",
+     "id": "primary-029",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-903c63784f93-101abd63da",
+     "id": "primary-030",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "diffusion-pytorch-model-89dcb55c5fc9-86e9ee3b4f",
+     "id": "primary-031",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "7979f9b9bae439a3213dfba8dbd427955e4e816a77ff285bd7abe6c4f853bee3",
+    "kind": "model",
+    "publisher": "tencent",
+    "slug": "hunyuan-video-15-i2v-step-distilled"
+   }
+  }
+ ],
+ "options": [
+  {
+   "choices": [
+    {
+     "default": true,
+     "help": "Current eight-step default for this step-distilled checkpoint.",
+     "label": "8 steps",
+     "value": "eight-step"
+    },
+    {
+     "args": [
+      {
+       "name": "num-inference-steps",
+       "value": 12
+      }
+     ],
+     "help": "Upstream documents twelve-step inference for this checkpoint; it takes longer.",
+     "label": "12 steps",
+     "value": "twelve-step"
+    }
+   ],
+   "help": "Select one of the checkpoint-supported step counts. The current eight-step setting is the default; twelve steps take longer.",
+   "label": "Inference steps",
+   "name": "inference-steps"
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "tencent"
+  ],
+  "source_reference": "https://huggingface.co/hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled/tree/854c04a4c8a53d990b418c7478f0802c0fc8c726"
+ },
+ "release": {
+  "released_at": "2026-09-28",
+  "version": "1.5.0"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "video/mp4"
+   },
+   {
+    "name": "pipeline",
+    "setting": null,
+    "value": "image-to-image"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   },
+   {
+    "name": "num-inference-steps",
+    "setting": null,
+    "value": 8
+   },
+   {
+    "name": "guidance-scale",
+    "setting": null,
+    "value": "1"
+   },
+   {
+    "name": "resolution",
+    "setting": null,
+    "value": 480
+   },
+   {
+    "name": "num-frames",
+    "setting": "num-frames",
+    "value": null
+   }
+  ],
+  "engine": "diffusers",
+  "entrypoint": [
+   "/opt/vonk/bin/diffusers-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {
+   "num-frames": {
+    "change_effect": "none",
+    "value": 121
+   }
+  }
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 34636998160,
+      "image_bytes": 2000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 77273996320
+     },
+     "memory": {
+      "peak_bytes": 112000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "video-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.png",
+      "input_slots": {
+       "image": "qualification/fixtures/tiny.png",
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "video",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "video-job"
+  }
+ }
+}

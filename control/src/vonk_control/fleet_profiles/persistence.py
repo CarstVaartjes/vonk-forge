@@ -30,7 +30,14 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
-from ..models import AgentNode, CatalogDocumentRevision, FleetProfileApplication, Job
+from ..models import (
+    AgentNode,
+    CatalogDocumentRevision,
+    FleetProfileApplication,
+    Job,
+    RecipeRun,
+)
+from ..run_route_name import carries_alias
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_document, stored_document_detail
 from .activity import _profile_activity_state
@@ -557,9 +564,20 @@ def _remaining_reviewed_effects(
 ) -> FleetProfileEffects:
     """An already ended bookkeeping target consumes its reviewed no-op effect.
 
-    Only reviewed pending targets can disappear. Run, installation, adoption and
-    node effects remain exact, so this cannot authorize a newly discovered effect.
+    Only reviewed pending targets can disappear, and a reviewed rename the run
+    already carries is realized (the same rule: the effect is done). Run,
+    installation, adoption and node effects remain exact, so this cannot
+    authorize a newly discovered effect.
     """
+    runs = []
+    for run_effect in reviewed.runs:
+        if run_effect.previous_alias is not None:
+            run = session.get(RecipeRun, run_effect.run_id)
+            if run is not None and carries_alias(run, run_effect.alias):
+                run_effect = run_effect.model_copy(update={"previous_alias": None})
+        runs.append(run_effect)
+    reviewed = reviewed.model_copy()
+    reviewed.runs = runs
     pending = []
     for effect in reviewed.superseded:
         if effect.kind == ProfileProjectionKind.JOB.value:

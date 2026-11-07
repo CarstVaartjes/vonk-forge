@@ -76,7 +76,6 @@ class RunObservationMixin:
         self,
         session: Session,
         installation_id: str,
-        alias: str,
         *,
         request_id: str,
         plan_digest: str | None,
@@ -100,7 +99,6 @@ class RunObservationMixin:
         if (
             run is None
             or run.installation_id != installation_id
-            or run.alias != alias
             # The run carries the admitted authority this child was queued
             # under, so adopting a child whose run no longer matches is unsafe
             # even when the caller cannot reproduce the original digest.
@@ -109,30 +107,9 @@ class RunObservationMixin:
             return None
         return service._view(existing)
 
-    def replay_start(
-        self,
-        installation_id: str,
-        alias: str,
-        *,
-        plan_digest: str,
-        request_id: str,
-    ) -> RecipeOperationView | None:
-        """Adopt the original start child when its exact plan is still known."""
-        service = typing_cast("RecipeOperationService", self)
-
-        with service._sessions() as session:
-            return service._adopt_start_in_session(
-                session,
-                installation_id,
-                alias,
-                request_id=request_id,
-                plan_digest=plan_digest,
-            )
-
     def adopt_start(
         self,
         installation_id: str,
-        alias: str,
         *,
         request_id: str,
         kind: str = WireAgentOperation.RECIPE_START.value,
@@ -157,7 +134,6 @@ class RunObservationMixin:
             return service._adopt_start_in_session(
                 session,
                 installation_id,
-                alias,
                 request_id=request_id,
                 plan_digest=None,
                 kind=kind,

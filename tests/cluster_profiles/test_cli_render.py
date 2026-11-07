@@ -249,6 +249,47 @@ def test_preview_exposes_idle_scope_full_digest_and_blocking_reason(capsys):
     assert reason in captured.err
 
 
+def test_profile_review_shows_a_kept_run_being_renamed(capsys):
+    run_id = "11111111-1111-4111-8111-111111111111"
+    render_payload(
+        {
+            "allowed": True,
+            "profile_name": "Owner",
+            "plan_digest": "b" * 64,
+            "scope": {"node_ids": ["Atlas"], "idle_node_ids": []},
+            "summary": {},
+            "assignments": [],
+            "steps": [],
+            "preparation_decisions": [],
+            "assessments": [],
+            "effects": {
+                "runs": [
+                    {
+                        "action": "keep",
+                        "alias": "owner-alias",
+                        "previous_alias": "sweep-alias",
+                        "run_id": run_id,
+                        "node_ids": ["Atlas"],
+                    },
+                    {
+                        "action": "keep",
+                        "alias": "steady",
+                        "run_id": run_id,
+                        "node_ids": ["Atlas"],
+                    },
+                ],
+                "installations": [],
+                "superseded": [],
+            },
+        },
+        "profile",
+        action="preview",
+    )
+    out = capsys.readouterr().out
+    assert "owner-alias (rename sweep-alias → owner-alias)" in out
+    assert "steady" in out and "steady (rename" not in out
+
+
 def test_profile_review_shows_unmeasured_run_capacity_as_an_exact_range(capsys):
     run_id = "11111111-1111-4111-8111-111111111111"
     node_id = "spk_" + "a" * 32
@@ -1158,6 +1199,27 @@ def test_library_list_shared_vector_renders_without_documents(capsys):
     assert "Recipe library v2.3.0" in rendered
     assert "Qualification: Working" in rendered
     assert "Last passed: 2026-09-04 12:00:00+00:00 on 1 Spark" in rendered
+
+
+def test_library_shared_vector_shows_why_a_preparation_waits(capsys):
+    """The producer's waiting preparation renders its blocker and next check."""
+    import json
+    from pathlib import Path
+
+    from cluster_profiles.cli_render import _library_item
+    from cluster_profiles.generated_control.models.recipe_library_response import (
+        RecipeLibraryResponse,
+    )
+
+    raw = json.loads(
+        (Path(__file__).resolve().parents[1] / "fixtures/library-list.json").read_text()
+    )
+    page = RecipeLibraryResponse.from_dict(raw)
+    _library_item(page.recipes[0].to_dict(), "recipe", detail=True)
+    output = capsys.readouterr().out
+    assert "access_denied: waiting for Hugging Face access" in output
+    assert "https://huggingface.co/org/gated" in output
+    assert "Next attempt" in output and "14:04:51" in output
 
 
 def test_clock_unavailable_readings_name_reason_and_receipt_cause(capsys):
