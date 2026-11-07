@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay
+from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay, read_model
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
 if TYPE_CHECKING:
@@ -108,9 +108,9 @@ class CatalogModelEntry:
 
     @property
     def key(self) -> tuple[str, str]:
-        """(publisher, slug) of the document, validated when the index was read."""
-        identity = self.document["identity"]
-        return identity["publisher"], identity["slug"]
+        """(publisher, slug) of the document, whatever its display."""
+        identity = read_model(self.document).identity
+        return identity.publisher, identity.slug
 
 
 @dataclass(frozen=True, slots=True)
