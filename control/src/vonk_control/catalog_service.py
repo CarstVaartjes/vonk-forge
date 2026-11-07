@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from types import MappingProxyType
 from typing import IO, TYPE_CHECKING, Literal
 
 from sqlalchemy import and_, or_, select, update
@@ -20,6 +21,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     canonical_json,
@@ -453,9 +455,10 @@ class CatalogService:
         qualifications: Mapping[
             tuple[str, str, str], PublishedQualificationStatusView | None
         ],
+        apis: Mapping[tuple[str, str, str], RecipeApi | None] = MappingProxyType({}),
     ) -> None:
         CatalogEntityService(self._sessions, clock=self._clock).record_published_facts(
-            images, qualifications
+            images, qualifications, apis
         )
 
     def import_recipe_library(

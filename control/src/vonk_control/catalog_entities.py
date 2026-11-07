@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
+from types import MappingProxyType
 from typing import TYPE_CHECKING, TypedDict
 
 from sqlalchemy import select, update
@@ -23,6 +24,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     document_sha256,
@@ -70,6 +72,7 @@ class PublishedFacts(TypedDict, total=False):
 
     prebuilt_image: PrebuiltImage | None
     qualification: PublishedQualificationStatusView | None
+    api: RecipeApi | None
 
 
 class CatalogError(RuntimeError):
@@ -295,12 +298,13 @@ class CatalogEntityService:
         self,
         images: Mapping[RevisionKey, PrebuiltImage | None],
         qualifications: Mapping[RevisionKey, PublishedQualificationStatusView | None],
+        apis: Mapping[RevisionKey, RecipeApi | None] = MappingProxyType({}),
     ) -> None:
         """Record what the signed catalog publishes beside each active revision.
 
-        Both maps are keyed by ``(publisher, slug, content digest)``: a
-        prebuilt image and a qualification status belong to one exact
-        revision. In each map, omitted keys are unknown and keep their last
+        Every map is keyed by ``(publisher, slug, content digest)``: a
+        prebuilt image, a qualification status and the API facts belong to one
+        exact revision. In each map, omitted keys are unknown and keep their last
         recorded value; an observed key with None explicitly withdraws it.
 
         As in ``refresh_build_policy``, only a revision whose recorded facts
@@ -316,6 +320,8 @@ class CatalogEntityService:
                 facts["prebuilt_image"] = images[key]
             if key in qualifications:
                 facts["qualification"] = qualifications[key]
+            if key in apis:
+                facts["api"] = apis[key]
             if not facts or _published_facts_current(revision, facts):
                 continue
             with self._write() as session:

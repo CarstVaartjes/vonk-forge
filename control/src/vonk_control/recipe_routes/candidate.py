@@ -22,6 +22,7 @@ from ..interface_adapters import InterfaceAdapterError, interface_adapter
 from ..litellm import (
     LiteLlmPolicy,
     RouteState,
+    ServedModelInfo,
 )
 from ..models import (
     AgentNode,
@@ -45,6 +46,7 @@ from ..route_bundle_contract import (
     RouteRankIdentity,
     RouteRunIdentity,
 )
+from ..route_model_info import RouteModelInfoReader
 from ..security.route_authority import require_route_authority
 from .shared import (
     _UPSTREAM_MODEL,
@@ -70,11 +72,12 @@ def _candidate_once(
     include_run_id: str | None,
     exclude_run_ids: frozenset[str],
     lock: bool,
+    served: ServedModelInfo,
 ) -> _RecipeCandidate:
     now = _aware(self._clock())
     aliases: dict[str, str] = {}
     upstream_models: dict[str, str] = {}
-    model_policies: dict[str, Mapping[str, int | str]] = {}
+    model_policies: dict[str, RouteAcceptedModelPolicy] = {}
     endpoints: dict[str, _RecipeEndpoint] = {}
     included: set[str] = set()
     run_identities: list[RouteRunIdentity | RouteAcceptedRunIdentity] = []
@@ -120,6 +123,7 @@ def _candidate_once(
     if candidate_runs:
         for node in session.scalars(node_statement):
             nodes_by_run[node.run_id].append(node)
+    model_infos = RouteModelInfoReader(session, candidate_runs, self._note_model_info)
     for run in candidate_runs:
         nodes = tuple(nodes_by_run[run.id])
         # A route that already serves stays published while its ranks
@@ -261,6 +265,19 @@ def _candidate_once(
                 # only that route instead of blocking every other one.
                 error.run_id = run.id
                 raise
+            if serving:
+                # A route that already serves keeps the facts it was published
+                # with: new facts would rewrite litellm.json, and the supervisor
+                # restarts LiteLLM on any byte change, cutting every route's
+                # in-flight requests. They apply when the route next changes.
+                frozen = served.routes.get(run.alias)
+            else:
+                frozen = None
+            model_info = (
+                frozen[1]
+                if frozen is not None and frozen[0] == run.id
+                else model_infos.for_run(run, mapping)
+            )
             identity = RouteRunIdentity(
                 run_id=run.id,
                 alias=run.alias,
@@ -268,6 +285,7 @@ def _candidate_once(
                 run_generation=run.run_generation,
                 upstream_model=upstream_model,
                 upstream_provider=upstream_provider,
+                model_info=model_info,
                 ranks=[
                     RouteRankIdentity(
                         node_id=node.node_id, rank=node.rank, role=node.role
@@ -275,12 +293,11 @@ def _candidate_once(
                     for node in nodes
                 ],
             )
-            model_policies[run.alias] = {
-                "requests_per_minute": 60,
-                "tokens_per_minute": 1_000_000,
-                "upstream_model": upstream_model,
-                "upstream_provider": upstream_provider,
-            }
+            model_policies[run.alias] = RouteAcceptedModelPolicy(
+                upstream_model=upstream_model,
+                upstream_provider=upstream_provider,
+                model_info=model_info,
+            )
             aliases[run.alias] = endpoint.api_base
             upstream_models[run.alias] = upstream_model
             included.add(run.id)
@@ -300,12 +317,7 @@ def _candidate_once(
                 error, RecipeRankStopped | RecipeEndpointAuthorityRefused
             ):
                 raise
-            read_accepted = getattr(self._publisher, "accepted_run", None)
-            accepted = (
-                read_accepted(run.id, self._management_policy)
-                if read_accepted is not None
-                else None
-            )
+            accepted = self._publisher.accepted_run(run.id, self._management_policy)
             if accepted is None:
                 # Unknown history belongs to this owner. No unverifiable bytes
                 # are copied into a new bundle and unrelated requests proceed.
@@ -320,9 +332,7 @@ def _candidate_once(
                     # already selected from current authorized intent.
                     continue
                 try:
-                    accepted_policy = RouteAcceptedModelPolicy.model_validate_json(
-                        json.dumps(dict(accepted.policy.models[accepted_alias]))
-                    )
+                    accepted_policy = accepted.policy.models[accepted_alias]
                     accepted_identity = RouteAcceptedRunIdentity(
                         run_id=run.id,
                         alias=accepted_alias,
@@ -335,7 +345,7 @@ def _candidate_once(
                     self._note_retained(run.id, [str(error)])
                     continue
                 retained_aliases.append(accepted_alias)
-                model_policies[accepted_alias] = accepted.policy.models[accepted_alias]
+                model_policies[accepted_alias] = accepted_policy
                 aliases[accepted_alias] = endpoint.api_base
                 endpoints[accepted_alias] = endpoint
                 upstream_models[accepted_alias] = accepted_policy.upstream_model
@@ -346,7 +356,11 @@ def _candidate_once(
     identity = RouteIdentityDocument(runs=run_identities, aliases=aliases)
     digest = hashlib.sha256(
         json.dumps(
-            identity.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+            # An absent fact is not part of the identity, so a route without
+            # model_info keeps the digest it had before the field existed.
+            identity.model_dump(mode="json", exclude_none=True),
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode()
     ).hexdigest()
     state = RouteState(aliases=aliases, digest=digest)
@@ -480,6 +494,7 @@ def candidate_in_session(
     include_run_id: str | None,
     exclude_run_ids: frozenset[str],
     lock: bool,
+    served: ServedModelInfo,
 ) -> _RecipeCandidate:
     """One authoritative observation; the request owner retries fresh transactions."""
     try:
@@ -489,6 +504,7 @@ def candidate_in_session(
             include_run_id=include_run_id,
             exclude_run_ids=exclude_run_ids,
             lock=lock,
+            served=served,
         )
     except (ValidationError, RecipeExecutionContractError) as error:
         raise RecipeRouteNotReady(

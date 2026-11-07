@@ -27,6 +27,7 @@ from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..job_documents import DistributedRecoveryMarker
 from ..litellm import (
     LiteLlmGeneration,
+    ServedModelInfo,
 )
 from ..logging import log_event
 from ..models import (
@@ -94,6 +95,7 @@ class RecipeRouteService:
         self._clock = clock
         self._maximum_age = timedelta(seconds=maximum_age_seconds)
         self._retained: dict[str, str] = {}
+        self._degraded: dict[str, str] = {}
 
     def publish_run(self, run_id: str) -> LiteLlmGeneration:
         """Observe acquisition in fresh transactions, then reconcile the exact effect."""
@@ -111,6 +113,8 @@ class RecipeRouteService:
 
         committed_error: RecipeRouteError | None = None
         publication: _Publication | None = None
+        # Read once before any transaction opens: no file is hashed under row locks.
+        served = self.served_model_info()
 
         # The worker paces initial claims; completion reacquires with request pauses.
         def decide(session: Session) -> _Publication | None:
@@ -118,7 +122,7 @@ class RecipeRouteService:
             committed_error = None
             publication: _Publication | None = None
             try:
-                publication = self._claim_run_publication(session, run_id)
+                publication = self._claim_run_publication(session, run_id, served)
                 owner = session.get(RoutePublicationOwner, 1)
                 if owner is not None:
                     owner.reconciliation_attempts = 0
@@ -361,11 +365,13 @@ class RecipeRouteService:
                 "route ownership observation is unavailable"
             ) from error
 
-    def _claim_run_publication(self, session: Session, run_id: str) -> _Publication:
-        return self._claim_run_publication_once(session, run_id)
+    def _claim_run_publication(
+        self, session: Session, run_id: str, served: ServedModelInfo
+    ) -> _Publication:
+        return self._claim_run_publication_once(session, run_id, served)
 
     def _claim_run_publication_once(
-        self, session: Session, run_id: str
+        self, session: Session, run_id: str, served: ServedModelInfo
     ) -> _Publication:
         run = session.get(RecipeRun, run_id)
         if run is not None:
@@ -386,6 +392,7 @@ class RecipeRouteService:
             include_run_id=run_id,
             exclude_run_ids=frozenset(),
             lock=True,
+            served=served,
         )
         if run_id not in candidate.included:
             raise RecipeRouteSuperseded(
@@ -636,16 +643,25 @@ class RecipeRouteService:
             self, run_ids, reason, before_withdrawal
         )
 
+    def served_model_info(self) -> ServedModelInfo:
+        """The active bundle's per-alias facts; read before a transaction opens."""
+        return self._publisher.served_model_info()
+
     def withdrawal_complete_in_session(
-        self, session: Session, run_ids: Iterable[str]
+        self, session: Session, run_ids: Iterable[str], served: ServedModelInfo
     ) -> bool:
-        return withdrawal_steps.withdrawal_complete_in_session(self, session, run_ids)
+        return withdrawal_steps.withdrawal_complete_in_session(
+            self, session, run_ids, served
+        )
 
     def prepare_withdrawal_in_session(
-        self, session: Session, initial_run_ids: frozenset[str]
+        self,
+        session: Session,
+        initial_run_ids: frozenset[str],
+        served: ServedModelInfo,
     ) -> _RecipeWithdrawal:
         return withdrawal_steps.prepare_withdrawal_in_session(
-            self, session, initial_run_ids
+            self, session, initial_run_ids, served
         )
 
     def _withdrawal_effect(self, withdrawal: _RecipeWithdrawal) -> LiteLlmGeneration:
@@ -749,11 +765,15 @@ class RecipeRouteService:
     def _restore_abandoned_stop_withdrawals(self, session: Session) -> bool:
         return withdrawal_steps._restore_abandoned_stop_withdrawals(self, session)
 
-    def _maintenance_step_in_session(self, session: Session) -> bool | _Publication:
-        return withdrawal_steps._maintenance_step_in_session(self, session)
+    def _maintenance_step_in_session(
+        self, session: Session, served: ServedModelInfo
+    ) -> bool | _Publication:
+        return withdrawal_steps._maintenance_step_in_session(self, session, served)
 
-    def _maintain_empty_routes(self, session: Session) -> bool | _Publication:
-        return withdrawal_steps._maintain_empty_routes(self, session)
+    def _maintain_empty_routes(
+        self, session: Session, served: ServedModelInfo
+    ) -> bool | _Publication:
+        return withdrawal_steps._maintain_empty_routes(self, session, served)
 
     def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
         if self._prepare_key_routes is not None:
@@ -841,6 +861,23 @@ class RecipeRouteService:
             reason=reason,
         )
 
+    def _note_model_info(self, run_id: str, reason: str | None) -> None:
+        """Say once, when it starts or changes, why a route has no model_info."""
+
+        if self._degraded.get(run_id) == reason:
+            return
+        if reason is None:
+            self._degraded.pop(run_id, None)
+            return
+        self._degraded[run_id] = reason
+        log_event(
+            _LOGGER,
+            "recipe.route.model_info_unavailable",
+            service="control-routes",
+            run_id=run_id,
+            reason=reason,
+        )
+
     def candidate_in_session(
         self,
         session: Session,
@@ -848,6 +885,7 @@ class RecipeRouteService:
         include_run_id: str | None,
         exclude_run_ids: frozenset[str],
         lock: bool,
+        served: ServedModelInfo,
     ) -> _RecipeCandidate:
         return candidate.candidate_in_session(
             self,
@@ -855,4 +893,5 @@ class RecipeRouteService:
             include_run_id=include_run_id,
             exclude_run_ids=exclude_run_ids,
             lock=lock,
+            served=served,
         )
