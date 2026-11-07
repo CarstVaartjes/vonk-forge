@@ -44,7 +44,7 @@ from vonk_forge_contracts import EndpointAlias
 
 from .auth import MUTATION_ROLES, Actor
 from .capabilities import CapabilityUnavailableError
-from .gateway_route_grants import GatewayInferenceRoute
+from .gateway_route_grants import BASE_KEY_ROUTES, GatewayInferenceRoute
 from .operation_api import bounded_error_responses
 from .operator_acceptance import (
     OperatorReceiptResolver,
@@ -68,10 +68,7 @@ _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
 _MAX_PAGES = 100
-_KEY_ROUTES = [
-    GatewayInferenceRoute.OPENAI.value,
-    GatewayInferenceRoute.MODEL_INFO.value,
-]
+_KEY_ROUTES = list(BASE_KEY_ROUTES)
 
 
 def _safe_routes(routes: list[str]) -> bool:

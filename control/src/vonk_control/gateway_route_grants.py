@@ -20,6 +20,14 @@ class GatewayInferenceRoute(StrEnum):
     SYSTEMONE = "/vllm/systemone"
 
 
+# The routes every managed key holds; deploy/compose/hermes-agent/provision-litellm-key.py
+# mirrors this list (a test keeps them equal).
+BASE_KEY_ROUTES: tuple[str, ...] = (
+    GatewayInferenceRoute.OPENAI.value,
+    GatewayInferenceRoute.MODEL_INFO.value,
+)
+
+
 def recipe_key_routes(
     sessions: sessionmaker[Session],
     models: list[str],
@@ -31,10 +39,7 @@ def recipe_key_routes(
     Only accepted running interface intents grant native routes. The short read transaction
     ends before the caller contacts LiteLLM. Model ACLs still authorize each call.
     """
-    routes = [
-        GatewayInferenceRoute.OPENAI.value,
-        GatewayInferenceRoute.MODEL_INFO.value,
-    ]
+    routes: list[str] = list(BASE_KEY_ROUTES)
     statement = (
         select(RecipeRun.alias, CatalogDocumentRevision.document)
         .select_from(RecipeRun)

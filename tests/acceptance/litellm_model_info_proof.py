@@ -32,7 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import ClassVar
 
-from vonk_control.gateway_keys import _KEY_ROUTES
+from vonk_control.gateway_route_grants import BASE_KEY_ROUTES
 from vonk_control.litellm import (
     LiteLlmModelInfo,
     LiteLlmPolicy,
@@ -46,6 +46,9 @@ VECTORS = ROOT / "control/tests/fixtures/route_model_info/vectors.json"
 MASTER_KEY = "sk-model-info-proof"
 PORT = 4000
 DB_PORT = 55432
+POSTGRES_IMAGE = json.loads(
+    (ROOT / "deploy/compose/images.lock.json").read_text(encoding="utf-8")
+)["images"]["postgres"]
 DB_PASSWORD = "model-info-proof"
 
 
@@ -166,7 +169,7 @@ def prove_client_key() -> None:
             {
                 "key_alias": "proof-client",
                 "models": scope,
-                "allowed_routes": list(_KEY_ROUTES),
+                "allowed_routes": list(BASE_KEY_ROUTES),
                 "metadata": {"managed_by": "vonk-forge"},
             },
         )
@@ -295,7 +298,7 @@ def main() -> None:
             f"POSTGRES_PASSWORD={DB_PASSWORD}",
             "--env",
             "POSTGRES_DB=litellm",
-            "postgres:18.6@sha256:edb0c08dc33befd0262ab3b5cf1c4f3f8cfd8b09e88c05b45adee29d6761ddb6",
+            POSTGRES_IMAGE,
         ],
         check=True,
     )
