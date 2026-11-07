@@ -2285,6 +2285,8 @@ def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) ->
     assert "image reference is mutable" in result.stderr
 
 
+# Assembles a full release graph; CI runners run it 3-4x slower than local.
+@pytest.mark.slow(60)
 def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     tmp_path: Path,
 ) -> None:
