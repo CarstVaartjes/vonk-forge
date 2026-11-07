@@ -234,8 +234,8 @@ class RetirementMixin:
                     select(Job)
                     .where(
                         Job.kind == kind,
-                        Job.payload["owner_kind"].as_string() == owner_kind,
-                        Job.payload["owner_id"].as_string() == owner_id,
+                        Job.owner_kind == owner_kind,
+                        Job.owner_id == owner_id,
                     )
                     .order_by(Job.created_at.desc(), Job.id.desc())
                     .limit(1)

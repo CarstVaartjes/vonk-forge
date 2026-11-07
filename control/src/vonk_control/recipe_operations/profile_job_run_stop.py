@@ -133,7 +133,7 @@ def _issued_orders_off_link(
         or artifact_job_states.preparation_of(artifact) is not None
     ):
         return ()
-    orders = select(Job.id).where(Job.payload["owner_id"].as_string() == artifact.id)
+    orders = select(Job.id).where(Job.owner_id == artifact.id)
     return tuple(
         session.scalars(
             select(AgentOperation)

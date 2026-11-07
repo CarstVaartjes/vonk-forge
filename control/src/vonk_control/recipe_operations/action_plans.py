@@ -300,7 +300,7 @@ class ActionPlansMixin:
                     )
                 ),
                 Job.state.in_(job_states.LIVE),
-                Job.payload["owner_id"].as_string() == installation_id,
+                Job.owner_id == installation_id,
             )
             .order_by(Job.id)
             .limit(1)
@@ -314,7 +314,7 @@ class ActionPlansMixin:
                 .where(
                     Job.kind == WireAgentOperation.RECIPE_RECONCILE.value,
                     Job.state.in_(job_states.LIVE),
-                    Job.payload["owner_id"].as_string() == installation_id,
+                    Job.owner_id == installation_id,
                 )
                 .limit(1)
             )
