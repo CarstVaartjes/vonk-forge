@@ -30,7 +30,7 @@ vonk-nas-setup = { path = "../nas_setup", editable = true }
 # Resolve the public contract from the recipe repository's moving main branch.
 # control/packaging/public-contracts.lock records the exact commit consumed by
 # each lock/build update; the image build uses that same commit explicitly.
-vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "e4f98d0f3f3bb3321bf4bc85ec0350ba2876f8ba", subdirectory = "contracts" }
+vonk-forge-public-contracts = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git", rev = "16ad501e69834972ef3f1370cacd5a92ca95bf7c", subdirectory = "contracts" }
 
 [tool.uv]
 required-version = ">=0.13.5"
@@ -43,6 +43,8 @@ find-links = ["../inventory/wheels"]
 dev = [
     "vonk-nas-setup",
     "hatchling>=1.32.4",
+    # The official OpenAI SDK is the client the gateway audio proof speaks with.
+    "openai>=3.46.0",
     "openapi-python-client>=0.29.1",
     # The nodejs extra ships Node as a wheel, so pyright never downloads it.
     "pyright[nodejs]>=1.1.414",
