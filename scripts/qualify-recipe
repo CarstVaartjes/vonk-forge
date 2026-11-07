@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from importlib.machinery import SourceFileLoader
 from pathlib import Path, PurePosixPath
@@ -27,6 +27,7 @@ from types import ModuleType
 
 sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
 import os
+
 # The sibling helper, however this file is loaded.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from check_environment import ensure_catalog
@@ -448,6 +449,44 @@ def _serving_check_documents(recipe: object) -> tuple[dict[str, object], ...]:
     )
 
 
+def _chat_api(recipe: object, library_root: Path) -> object | None:
+    """The recipe's published chat facts (``api/recipes/<slug>.json``), when usable.
+
+    Facts that are absent or unreadable change nothing: the check is sent as declared.
+    """
+    try:
+        from vonk_forge_contracts.api import ChatApi, read_recipe_api
+    except ImportError:
+        return None  # a library whose contracts predate API facts publishes none
+
+    path = library_root / "api" / "recipes" / f"{recipe.identity.slug}.json"
+    try:
+        block = read_recipe_api(_load_json(path)).for_choices(recipe)
+    except (OSError, QualificationError, ValueError) as error:
+        if path.is_file():
+            print(f"recipe API facts unusable; serving checks go as declared: {error}", file=sys.stderr)
+        return None
+    return block if isinstance(block, ChatApi) else None
+
+
+def _argument_value(recipe: object) -> Callable[[str], int | None]:
+    """The integer value of the recipe's runtime argument of that name, as launched."""
+    settings = {
+        name: setting.value
+        for name in ("context_tokens", "concurrency", "max_batch_tokens")
+        if (setting := getattr(recipe.settings, name, None)) is not None
+    } | {name: setting.value for name, setting in recipe.settings.knobs.items()}
+
+    def value(name: str) -> int | None:
+        for argument in recipe.with_option_choices({}).runtime.arguments:
+            if argument.name == name:
+                found = argument.value if argument.setting is None else settings.get(argument.setting)
+                return found if type(found) is int else None
+        return None
+
+    return value
+
+
 def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Namespace) -> dict[str, object] | None:
     """Run declared HTTP checks when a real endpoint is supplied.
 
@@ -467,6 +506,7 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
     checks = _serving_check_documents(inputs.recipe)
     alias_values = tuple(inputs.recipe.interfaces[0].model_aliases) if inputs.recipe.interfaces[0].adapter == "openai" else ()
     alias = alias_values[0] if alias_values else None
+    chat_api = _chat_api(inputs.recipe, args.library_root.resolve())
     results: list[dict[str, object]] = []
     for check in checks:
         step = f"serving.{check['name']}"
@@ -474,7 +514,7 @@ def _run_declared_serving_checks(inputs: QualificationInputs, args: argparse.Nam
             raise EnvironmentLimited("job serving requires the Controller artifact-job adapter")
         started = time.monotonic()
         try:
-            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias)
+            result = execute_http_check(args.serving_url, check, timeout_seconds=args.timeout_seconds, model_alias=alias, chat_api=chat_api, argument_value=_argument_value(inputs.recipe))
         except ServingExecutionError as error:
             raise QualificationError(f"{step}: {error}") from error
         results.append({"check": check["name"], "elapsed_seconds": round(time.monotonic() - started, 6), **result})
