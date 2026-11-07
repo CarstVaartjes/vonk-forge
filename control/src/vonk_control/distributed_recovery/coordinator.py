@@ -128,6 +128,9 @@ class DistributedRecoveryCoordinator:
         # transaction below acts on a run only while that withdrawal is
         # complete. A crash in between resumes here, from the durable intent.
         withdrawn = self._withdraw_routes(now, run_id)
+        # After the withdrawal, before any transaction: the bundle is read from
+        # disk, never under row locks.
+        served = self._routes.served_model_info()
 
         def decide(session: Session) -> tuple[bool, bool]:
             queued = False
@@ -168,7 +171,7 @@ class DistributedRecoveryCoordinator:
                 )
                 singleton = len(run_nodes) == 1
                 if not self._routes.withdrawal_complete_in_session(
-                    session, frozenset({run.id})
+                    session, frozenset({run.id}), served
                 ):
                     continue  # withdrawn first on the next tick
                 if self._active_recovery(session, run.id):
@@ -434,6 +437,8 @@ class DistributedRecoveryCoordinator:
     def _withdraw_routes(self, now: datetime, run_id: str | None = None) -> bool:
         """Withdraw the routes of runs this pass may recover or settle."""
 
+        served = self._routes.served_model_info()
+
         def decide(session: Session) -> frozenset[str]:
             candidates = {
                 *session.scalars(
@@ -459,7 +464,7 @@ class DistributedRecoveryCoordinator:
                 run_id
                 for run_id in sorted(candidates)
                 if not self._routes.withdrawal_complete_in_session(
-                    session, frozenset({run_id})
+                    session, frozenset({run_id}), served
                 )
             )
 

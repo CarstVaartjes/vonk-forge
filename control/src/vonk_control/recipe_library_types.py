@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_forge_contracts import ModelDisplay, RecipeDisplay
+from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
 if TYPE_CHECKING:
@@ -67,6 +67,10 @@ class RecipeLibraryItem:
     prebuilt_image: PrebuiltImage | None = None
     # The hardware qualification the signed index derived for this revision.
     qualification: PublishedQualificationStatusView | None = None
+    # The gateway API facts the signed index carries beside this revision, read
+    # once at ingress; none when absent or unreadable (the route then publishes
+    # no model_info).
+    api: RecipeApi | None = None
 
 
 @dataclass(frozen=True, slots=True)

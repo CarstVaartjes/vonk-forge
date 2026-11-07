@@ -25,13 +25,16 @@ from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     document_sha256,
     read_model,
     read_model_display,
     read_recipe,
+    read_recipe_api,
     read_recipe_display,
+    require_api_of,
     require_display_of,
 )
 from vonk_forge_contracts.model import ModelIdentity
@@ -831,6 +834,7 @@ class RecipePackageClient:
                         slug,
                         _incompatible_detail("qualification", error),
                     )
+            api = _entry_api(recipe, document.identity)
             packages[key] = RecipePackageEntry(
                 publisher=publisher,
                 slug=slug,
@@ -864,6 +868,7 @@ class RecipePackageClient:
                     source_bundle_sha256=source_digest,
                     prebuilt_image=prebuilt_image,
                     qualification=qualification,
+                    api=api,
                 )
             )
         if [(item.publisher, item.slug) for item in items] != sorted(
@@ -1378,6 +1383,32 @@ def _entry_display[D: (RecipeDisplay, ModelDisplay)](
     display = read(raw)
     require_display_of(display, identity)
     return display
+
+
+def _entry_api(entry: Mapping, identity: RecipeIdentity) -> RecipeApi | None:
+    """The API facts an index entry carries for exactly its own recipe.
+
+    Read once here, from the signed index, and never checked again: absent,
+    unreadable (a union member a newer contract added) or foreign facts are
+    simply not published, so the route serves without model_info.
+    """
+    raw = entry.get("api")
+    if raw is None:
+        return None
+    try:
+        api = read_recipe_api(raw)
+        require_api_of(api, identity)
+    except (TypeError, ValueError) as error:
+        _LOGGER.warning(
+            "recipe api unreadable; its route publishes no model_info: "
+            "recipe=%s/%s error=%s",
+            identity.publisher,
+            identity.slug,
+            _incompatible_detail("api", error),
+        )
+    else:
+        return api
+    return None
 
 
 def _index_problem(

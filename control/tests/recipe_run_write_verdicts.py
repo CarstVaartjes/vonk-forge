@@ -38,13 +38,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_routes/candidate.py": {
         "_candidate_once": (
-            "db7e15afb012b1ee98652c50f17eef200a8b9bbad4df182e2993509af6113a3e",
+            "1f79f6595f3fe7d682c03bffed9a3591b3eb59f9e17f8bc04acfe1fecbd4af3c",
             "caller-owned: lock=True bumps every candidate; publication transition fences it; reduce churn in follow-up",
         ),
     },
     "recipe_routes/service.py": {
         "_claim_run_publication_once": (
-            "c6c3431315aedc64bc88fbc07f3c332a9bf775743493fe0c40dac61117655285",
+            "f2e9124b22a295179cd9006c793e83b2a161dc75864e77a8e54b881edcb18dbc",
             "callback: publication transition owns claim and run writes",
         ),
         "_complete_run_publication": (
@@ -74,7 +74,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "callback: publication transition reconciles abandoned intent",
         ),
         "_maintenance_step_in_session": (
-            "719ada994e350b319dd78f0796e6fbf1c9277cb1d5f9bf9f6ae17452e6ee57e9",
+            "fca4aefc9e71112ada1a3329a9fcf0a7e87ba9bcabe3a0870f9a5b9e6d5206d6",
             "callback: publication transition owns maintenance projection",
         ),
         "_withdraw_runs_once.decide.record_reason": (
@@ -132,7 +132,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "e642022cb930ec565b9fe968700fa6399b08a835416aedc0c1e38303da1e9150",
+            "6d3618fc710e5617d8d26f132da9bdaeeafbc9dd98ce24245c60b53ab7c4aaff",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (

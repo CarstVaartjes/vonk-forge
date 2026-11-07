@@ -17,20 +17,24 @@ from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
 from ..litellm import (
+    LiteLlmConfig,
     LiteLlmGeneration,
     LiteLlmPolicy,
     RouteState,
+    ServedModelInfo,
     render_config,
     render_empty_config,
 )
 from ..presence import ManagementAddressPolicy, PresenceError
 from ..route_bundle_contract import (
+    RouteAcceptedModelPolicy,
     RouteBundleDocument,
 )
 from ..route_runtime import (
     RECIPE_ROUTE_AUTHORITY_ID,
     AtomicRouteBundlePublisher,
     RouteRuntimeError,
+    VerifiedRouteBundle,
     recipe_route_run_id,
     verify_active_route_bundle,
 )
@@ -99,26 +103,10 @@ class AtomicRecipeRoutePublisher:
         self, run_id: str, policy: ManagementAddressPolicy
     ) -> _RecipeCandidate | None:
         """Reuse only the checksum-verified immutable route owned by this run."""
-        if not (self._publisher._root / "activation.json").exists():
+        active = self._active_published_bundle()
+        if active is None or isinstance(active, UnknownError):
             return None
-        bundle = verify_active_route_bundle(self._publisher._root)
-        if isinstance(bundle, UnknownError):
-            return None
-        if (
-            bundle.marker.authority_id != self._AUTHORITY_ID
-            or bundle.marker.state != GatewayRouteState.PUBLISHED
-        ):
-            return None
-        routes, runtime = bundle.routes, bundle.litellm
-        if (
-            routes is None
-            or runtime is None
-            or routes.schema_version != 2
-            or routes.state != GatewayRouteState.PUBLISHED
-            or routes.generation != bundle.marker.generation
-            or bundle.marker.evidence_set_digest != bundle.marker.plan_digest
-        ):
-            return None
+        bundle, routes, runtime = active
         found = [
             (alias, endpoint)
             for alias, endpoint in routes.routes.items()
@@ -149,7 +137,7 @@ class AtomicRecipeRoutePublisher:
         if len(entries) != 1:
             return None
         params = entries[0].litellm_params
-        model, rpm, tpm = params.model, params.rpm, params.tpm
+        model = params.model
         provider, separator, upstream_model = model.partition("/")
         if (
             not separator
@@ -159,14 +147,17 @@ class AtomicRecipeRoutePublisher:
             or params.api_key != "os.environ/LITELLM_UPSTREAM_KEY"
         ):
             return None
+        # The entry parsed as a LiteLlmConfig and the checks above hold, so the
+        # typed policy accepts exactly what the bundle carries.
         quota = LiteLlmPolicy(
             {
-                alias: {
-                    "upstream_model": upstream_model,
-                    "upstream_provider": provider,
-                    "requests_per_minute": rpm,
-                    "tokens_per_minute": tpm,
-                }
+                alias: RouteAcceptedModelPolicy.model_validate(
+                    {
+                        "upstream_model": upstream_model,
+                        "upstream_provider": provider,
+                        "model_info": entries[0].model_info,
+                    }
+                )
             }
         )
         # The renderer owns policy validation, including resource bounds.
@@ -176,6 +167,63 @@ class AtomicRecipeRoutePublisher:
         except ValueError:
             return None
         return _RecipeCandidate(state, frozenset({run_id}), quota, {alias: endpoint})
+
+    def served_model_info(self) -> ServedModelInfo:
+        """What the active bundle publishes per alias: its run and its model_info.
+
+        A route that already serves keeps the facts it was published with; new
+        facts apply when the route next changes, never by rewriting the gateway
+        file of a running route (the supervisor restarts LiteLLM on any byte
+        change, which would cut every route's in-flight requests).
+        """
+        active = self._active_published_bundle()
+        if isinstance(active, UnknownError):
+            return ServedModelInfo(unreadable=True)
+        if active is None:
+            return ServedModelInfo()
+        _, routes, runtime = active
+        info = {item.model_name: item.model_info for item in runtime.model_list}
+        return ServedModelInfo(
+            {
+                alias: (run_id, info[alias])
+                for alias, endpoint in routes.routes.items()
+                if alias in info
+                and (run_id := recipe_route_run_id(endpoint.operation_id)) is not None
+            }
+        )
+
+    def _active_published_bundle(
+        self,
+    ) -> (
+        tuple[VerifiedRouteBundle, RouteBundleDocument, LiteLlmConfig]
+        | UnknownError
+        | None
+    ):
+        """The verified active bundle this authority published, with its documents.
+
+        ``UnknownError``: a live bundle exists and does not verify or parse.
+        """
+        if not (self._publisher._root / "activation.json").exists():
+            return None
+        bundle = verify_active_route_bundle(self._publisher._root)
+        if isinstance(bundle, UnknownError):
+            return bundle
+        if (
+            bundle.marker.authority_id != self._AUTHORITY_ID
+            or bundle.marker.state != GatewayRouteState.PUBLISHED
+        ):
+            return None
+        routes, runtime = bundle.routes, bundle.litellm
+        if (
+            routes is None
+            or runtime is None
+            or routes.schema_version != 2
+            or routes.state != GatewayRouteState.PUBLISHED
+            or routes.generation != bundle.marker.generation
+            or bundle.marker.evidence_set_digest != bundle.marker.plan_digest
+        ):
+            return None
+        return bundle, routes, runtime
 
     def _next_generation(self) -> int:
         """Allocate above every staged generation, even past an unreadable marker."""

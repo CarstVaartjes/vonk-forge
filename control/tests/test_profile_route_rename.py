@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 import pytest
 from sqlalchemy import func, select
+from vonk_control.litellm import ServedModelInfo
 from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_progress import _parent_identity
@@ -395,6 +396,7 @@ def test_adopting_old_run_plans_keeps_digests_and_routes(
                     include_run_id=None,
                     exclude_run_ids=frozenset(),
                     lock=False,
+                    served=ServedModelInfo(),
                 )
                 reservations = sorted(
                     (item.id, item.resource_key, item.plan_digest)
@@ -476,6 +478,7 @@ def test_a_rename_owns_the_name_over_a_newer_run_the_same_plan_stops(
                 include_run_id=None,
                 exclude_run_ids=frozenset(),
                 lock=False,
+                served=ServedModelInfo(),
             )
             older = session.get(RecipeRun, before.id)
             holder = session.get(RecipeRun, newer.id)
@@ -638,6 +641,7 @@ def test_the_new_code_converges_to_the_normal_route_after_the_old_worker_flipped
                 include_run_id=None,
                 exclude_run_ids=frozenset(),
                 lock=False,
+                served=ServedModelInfo(),
             ).state.digest
         # The old worker could not read the stripped plan: it republished the
         # run from its accepted projection and left its reason.
@@ -665,6 +669,7 @@ def test_the_new_code_converges_to_the_normal_route_after_the_old_worker_flipped
                     include_run_id=None,
                     exclude_run_ids=frozenset(),
                     lock=False,
+                    served=ServedModelInfo(),
                 ).state.digest
                 == normal
             )

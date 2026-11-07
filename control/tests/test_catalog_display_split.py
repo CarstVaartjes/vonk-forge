@@ -321,7 +321,9 @@ def test_the_shared_document_vectors_agree_with_the_controller(sessions) -> None
     valid = [
         path.name
         for path in _EXAMPLES.iterdir()
-        if path.name.endswith(".json") and "display" not in path.name
+        if path.name.endswith(".json")
+        and "display" not in path.name
+        and not path.name.startswith("recipe-api-")  # a sibling document, not a recipe
     ]
     assert valid
     for name in valid:
