@@ -2348,7 +2348,9 @@ def test_artifact_job_canary_speaks_the_controller_contract() -> None:
 NODE = "spk_" + "1" * 32
 
 
-def _canary_lane_under_withdrawal(monkeypatch, previews: list[dict[str, object]]):
+def _canary_lane_under_withdrawal(
+    monkeypatch, previews: list[dict[str, object]], *, parked_loads: int = 0
+):
     """A lane whose Controller withdraws the canary until a preview is admitted.
 
     ``previews`` are the profile previews the Controller answers in order. The
@@ -2443,10 +2445,21 @@ def _canary_lane_under_withdrawal(monkeypatch, previews: list[dict[str, object]]
         }
     }
 
-    def reached_load(*_args, **_kwargs):
-        raise lifecycle.LifecycleError("reached the profile load")
+    lane.loads = loads = []
+    lane.awaited = awaited = []
 
-    lane._load_canary_profile = reached_load
+    def load(_preview, *, request_key):
+        loads.append(request_key)
+        if len(loads) <= parked_loads:
+            raise lifecycle.LifecycleError("the profile load parked and timed out")
+        return {}
+
+    def await_load(*_args, **_kwargs):
+        awaited.append(True)
+        raise lifecycle.LifecycleError("reached the load await")
+
+    lane._load_canary_profile = load
+    lane._await_profile_application = await_load
     lane._installation_failure = lambda stage, error: lifecycle.LifecycleError(
         f"{stage}: {error}"
     )
@@ -2488,12 +2501,30 @@ def test_a_canary_the_library_withdrew_is_offered_again_and_served(
         monkeypatch, [_WITHDRAWN_PREVIEW, _ADMITTED_PREVIEW]
     )
 
-    with pytest.raises(lifecycle.LifecycleError, match="reached the profile load"):
+    with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
         lane._run_synthetic_canary(NODE, carry=lambda: None)
 
     # One re-import, and the second attempt downloads under its own request key.
     assert len(imported) == 2 and imported[0] != imported[1]
     assert len(downloads) == 2 and downloads[0] != downloads[1]
+    assert len(lane.loads) == 1
+
+
+def test_a_canary_withdrawn_between_preview_and_load_is_offered_again(
+    monkeypatch,
+) -> None:
+    """The Controller previews again at load time: the retry covers the load too."""
+    lifecycle, lane, imported, downloads = _canary_lane_under_withdrawal(
+        monkeypatch, [_ADMITTED_PREVIEW, _ADMITTED_PREVIEW], parked_loads=1
+    )
+
+    with pytest.raises(lifecycle.LifecycleError, match="reached the load await"):
+        lane._run_synthetic_canary(NODE, carry=lambda: None)
+
+    assert len(imported) == 2 and len(downloads) == 2
+    # The second load has its own request key, and only it was awaited.
+    assert len(lane.loads) == 2 and lane.loads[0] != lane.loads[1]
+    assert lane.awaited == [True]
 
 
 def test_a_canary_withdrawn_twice_fails_with_the_catalog_sync_status(
@@ -2522,6 +2553,42 @@ def _calls(node, name: str) -> bool:
     )
 
 
+def _serves_without_admission(tree) -> list[str]:
+    """Serves offered once more that do not reach the load and its await.
+
+    The Controller previews again when it loads, so a serve that ends at the
+    preview leaves a withdrawal between preview and load outside the retry.
+    """
+    import ast
+
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    missing: list[str] = []
+    for call in ast.walk(tree):
+        if not (
+            isinstance(call, ast.Call)
+            and getattr(call.func, "attr", None) == "_offered_once_more"
+            and call.args
+        ):
+            continue
+        names = {
+            node.attr if isinstance(node, ast.Attribute) else node.id
+            for node in ast.walk(call.args[0])
+            if isinstance(node, ast.Attribute | ast.Name)
+        }
+        if not any(
+            name in functions
+            and _calls(functions[name], "_load_canary_profile")
+            and _calls(functions[name], "_await_profile_application")
+            for name in names
+        ):
+            missing.append(f"line {call.lineno}")
+    return missing
+
+
 def _unguarded_fixture_imports(node, enclosing: tuple = ()) -> list[str]:
     import ast
 
@@ -2547,18 +2614,20 @@ def test_every_fixture_import_in_the_lane_code_is_offered_once_more() -> None:
 
     The live recipe library can be republished while a lane runs, which
     withdraws the fixture by design. Each function that imports a fixture must
-    sit inside, or be, a function that calls ``_offered_once_more``. The
+    sit inside, or be, a function that calls ``_offered_once_more``, and the
+    serve it wraps must reach the profile load and its await. The
     candidate library is only imported: the carry that follows serves the
     workload that already runs.
     """
     import ast
 
     root = Path(__file__).parent / "acceptance"
-    unguarded = [
-        f"{name}:{function}"
-        for name in ("test_spark_lifecycle.py", "spark_upgrade_carry.py")
-        for function in _unguarded_fixture_imports(
-            ast.parse((root / name).read_text(encoding="utf-8"))
-        )
-    ]
+    unguarded: list[str] = []
+    for name in ("test_spark_lifecycle.py", "spark_upgrade_carry.py"):
+        tree = ast.parse((root / name).read_text(encoding="utf-8"))
+        unguarded += [f"{name}:{f}" for f in _unguarded_fixture_imports(tree)]
+        unguarded += [
+            f"{name}: no load in the serve at {w}"
+            for w in _serves_without_admission(tree)
+        ]
     assert unguarded == []

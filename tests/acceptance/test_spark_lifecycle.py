@@ -3349,8 +3349,7 @@ class SparkLifecycle:
                 raise
             raise LifecycleError(
                 f"{error}; the live recipe library withdrew the fixture again "
-                f"(library commit {again.get('commit')}; "
-                f"{self._catalog_sync_diagnostic()})"
+                f"(library commit {again.get('commit')})"
             ) from error
 
     def _run_synthetic_canary(
@@ -3413,7 +3412,7 @@ class SparkLifecycle:
                 )
 
             def serve(attempt: str) -> tuple[int, dict[str, object]]:
-                """Resolve, download and preview the canary; the profile revision and preview."""
+                """Resolve, download, preview and load the canary; the profile revision and application."""
                 nonlocal phase
                 assert self.control is not None
                 del completed[1:]
@@ -3580,39 +3579,46 @@ class SparkLifecycle:
                     raise LifecycleError(
                         "synthetic canary preparation receipts are incomplete"
                     )
-                return profile_revision, preview
+
+                # The carry lane is still running the published baseline here;
+                # journal repair is a candidate behavior exercised by the fresh lane.
+                if carry is None:
+                    phase = "start-receipt-loss"
+                    self._arm_start_receipt_loss()
+                phase = "profile-load"
+                application_payload = self._load_canary_profile(
+                    preview,
+                    request_key=self._canary_request_key(
+                        fixture, node_id, f"profile-load{attempt}"
+                    ),
+                )
+                application = self._await_profile_application(
+                    require_object(
+                        application_payload, "synthetic canary profile application"
+                    ),
+                    label="synthetic canary profile load",
+                    node_id=node_id,
+                )
+                return profile_revision, application
 
             def import_again(stage: str) -> None:
                 sync = self._import_canary_catalog(
                     fixture, self._canary_request_key(fixture, node_id, stage)
                 )
-                if sync.get("state") != "current" or sync.get("problems") != []:
+                if (
+                    sync.get("state") != "current"
+                    or sync.get("commit") != fixture.source_commit
+                    or sync.get("problems") != []
+                ):
                     raise LifecycleError(
                         "synthetic canary catalog sync is incomplete: "
                         + json.dumps(sync, sort_keys=True, default=str)[:1024]
                     )
 
-            profile_revision, preview = self._offered_once_more(
+            profile_revision, application = self._offered_once_more(
                 serve, lambda attempt: import_again(f"catalog-sync{attempt}")
             )
 
-            # The carry lane is still running the published baseline here;
-            # journal repair is a candidate behavior exercised by the fresh lane.
-            if carry is None:
-                phase = "start-receipt-loss"
-                self._arm_start_receipt_loss()
-            phase = "profile-load"
-            application_payload = self._load_canary_profile(
-                preview,
-                request_key=self._canary_request_key(fixture, node_id, "profile-load"),
-            )
-            application = self._await_profile_application(
-                require_object(
-                    application_payload, "synthetic canary profile application"
-                ),
-                label="synthetic canary profile load",
-                node_id=node_id,
-            )
             profile_progress = require_object(
                 application.get("progress"), "profile progress"
             )
