@@ -78,9 +78,11 @@ from .errors import (
     RecipeRetryLater,
     _RouteNotWithdrawn,
 )
+from .intent import _shared_workload_intent
 from .interfaces import RecipeOperationView, new_recipe_job
 from .observation_helpers import _active_recipe_revision
 from .results import _validated_result
+from .run_transitions import end_unfinished_run
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -464,6 +466,46 @@ class StopDispatchMixin:
                     reason=InvalidRequestReason.SUPERSEDED,
                 ) from error
             raise
+
+    def end_unfinished_run_in_session(
+        self,
+        session: Session,
+        run: RecipeRun,
+        now: datetime,
+        *,
+        version_before: int,
+    ) -> RunState:
+        """End a run no live work owns: its exact Stop, else lost.
+
+        The Stop is admitted under the intent its Sparks share now (it takes no
+        new intent, so it never cancels newer work); with no shared intent the
+        run is ``lost`` and its Sparks' owner finds it. The request key names
+        the run's generation and version, so ending it again after an
+        unobserved Stop is a new request, never a replay.
+        """
+
+        service = typing_cast("RecipeOperationService", self)
+        node_ids = tuple(
+            session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
+        )
+        ordinal = _shared_workload_intent(session, node_ids)
+        end_unfinished_run(
+            service,
+            session,
+            run,
+            now,
+            actor="system:run-reaper",
+            request_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"vonk:recipe-run-reaper:{run.id}:{run.run_generation}"
+                    f":{version_before}",
+                )
+            ),
+            ordinal=ordinal,
+            note="owner ended",
+        )
+        return RunState(run.state)
 
     def _exact_stop_authority(
         self,

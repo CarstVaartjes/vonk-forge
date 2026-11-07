@@ -312,6 +312,7 @@ class ReachWorld(World):
                 agent_jobs=orders,
                 clock=clock,
                 recovery_run_stops=lifecycle,
+                run_endings=lifecycle,
             ),
         )
         return ReachController(

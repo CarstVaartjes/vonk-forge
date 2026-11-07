@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import json
 import uuid
-from collections.abc import Mapping
 from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
@@ -15,10 +13,8 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
-    RecipeStopPayload,
     RouteState,
     RunState,
-    canonical_message,
 )
 
 from ..distributed_lifecycle import (
@@ -73,16 +69,13 @@ from ..recipe_progress import (
 from ..recipe_progress import (
     _topology_order as _topology_order,  # noqa: PLC0414 -- shared helper export
 )
-from ..recipe_stop_payloads import (
-    RecipeStopAuthorityError,
-    durable_run_stop_payloads,
-)
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .intent import _intent_is_current, _job_workload_intent, _shared_workload_intent
 from .observation_helpers import _active_recipe_revision
 from .rank_authority import _profile_jobrun_parent
 from .results import _recorded_result, _recorded_result_document, _validated_result
+from .run_transitions import end_unfinished_run
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -259,13 +252,6 @@ class TerminalProjectionMixin:
             run = session.get(RecipeRun, owner_id)
             assert run is not None
             if start_failed:
-                run.state = RunState.STOPPING
-                run.route_state = RouteState.WITHDRAWN
-                run.route_error = (
-                    f"{recovery_error}; cleanup queued"
-                    if recovery_error is not None
-                    else "one or more ranks failed to start; cleanup queued"
-                )
                 cleanup_request_id = str(
                     uuid.uuid5(
                         uuid.NAMESPACE_URL,
@@ -288,107 +274,22 @@ class TerminalProjectionMixin:
                     else _shared_workload_intent(session, job.targets)
                 )
                 if not intent_current:
-                    run.state = RunState.STOPPING if cleanup_ordinal else RunState.LOST
-                    run.route_error = (
-                        "start failed after a newer workload intent took over; "
-                        + (
-                            "cleanup queued"
-                            if cleanup_ordinal
-                            else "cleanup awaits the owning intent"
-                        )
-                    )
-                if (
-                    not session.scalar(
-                        select(Job.id).where(Job.request_id == cleanup_request_id)
-                    )
-                    and cleanup_ordinal is not None
+                    note = "start failed after a newer workload intent took over"
+                elif recovery_error is not None:
+                    note = str(recovery_error)
+                else:
+                    note = "one or more ranks failed to start"
+                if end_unfinished_run(
+                    service,
+                    session,
+                    run,
+                    now,
+                    actor=job.actor,
+                    request_id=cleanup_request_id,
+                    ordinal=cleanup_ordinal,
+                    note=note,
                 ):
-                    stop_nodes = tuple(
-                        session.scalars(
-                            select(RunNode)
-                            .where(RunNode.run_id == owner_id)
-                            .order_by(RunNode.rank)
-                        )
-                    )
-                    installation = session.get(RecipeInstallation, run.installation_id)
-                    revision = (
-                        _active_recipe_revision(
-                            session, installation.recipe_revision_id
-                        )
-                        if installation is not None
-                        else None
-                    )
-                    stop_order = (
-                        _topology_order(
-                            read_row_column(revision, "document"), "stop_order"
-                        )
-                        if revision is not None
-                        else None
-                    )
-                    try:
-                        exact_stop_payloads: Mapping[str, RecipeStopPayload] | None = (
-                            durable_run_stop_payloads(
-                                session,
-                                run,
-                                stop_nodes,
-                                run_generation=run.run_generation,
-                                cancel_pending_start=True,
-                                allow_missing_nodes=False,
-                            )
-                        )
-                    except RecipeStopAuthorityError:
-                        exact_stop_payloads = None
-                    if exact_stop_payloads is None:
-                        # No exact Start authority to stop from: nothing is
-                        # invented.  What the Start launched is unknown, so
-                        # the run is lost (claims held) unless its Sparks
-                        # already report it gone; their next report settles it.
-                        retire_as_unknown(
-                            "recipe.start-cleanup",
-                            run.id,
-                            BookkeepingReason.ROW_INCOMPLETE,
-                            "failed Start lacks exact cleanup authority",
-                        )
-                        run.state = ended_run_state(run, stop_nodes, now)
-                        run.route_error = (
-                            "failed recipe Start lacks exact cleanup authority; "
-                            "claims held until its Sparks report it gone"
-                        )
-                    else:
-                        stop_node_payloads = tuple(
-                            (
-                                run_node.node_id,
-                                json.loads(
-                                    canonical_message(
-                                        exact_stop_payloads[run_node.node_id]
-                                    )
-                                ),
-                            )
-                            for run_node in stop_nodes
-                        )
-                        service._queue_in_session(
-                            session,
-                            kind=WireAgentOperation.RECIPE_STOP.value,
-                            owner_kind="run",
-                            owner_id=owner_id,
-                            plan_digest=run.plan_digest,
-                            actor=job.actor,
-                            request_id=cleanup_request_id,
-                            node_payloads=stop_node_payloads,
-                            # Exact relational Stop authority above already
-                            # binds every target. An unreadable role order
-                            # changes scheduling, never target membership.
-                            phases=(
-                                _role_phases(stop_order, stop_node_payloads)
-                                if stop_order is not None
-                                else None
-                            )
-                            or (stop_node_payloads,),
-                            authority_digest=run.plan_digest.removeprefix("sha256:"),
-                            now=now,
-                            workload_intent_ordinal=cleanup_ordinal,
-                        )
-                        cleanup_queued = True
+                    cleanup_queued = True
             else:
                 run.state = RunState.RUNNING
                 run.route_state = RouteState.PENDING

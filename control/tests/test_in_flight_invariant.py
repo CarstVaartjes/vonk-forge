@@ -56,10 +56,17 @@ def test_in_flight_states_are_the_enum_minus_the_settled_ones() -> None:
     assert kind.in_flight == ("green", "blue")
 
 
-def test_only_installing_installations_are_in_flight_for_now() -> None:
-    # ``planned`` joins with the release path that owns it.
-    (installations,) = IN_FLIGHT_KINDS
-    assert installations.in_flight == (InstallationState.INSTALLING.value,)
+def test_the_kinds_checked_and_their_in_flight_states() -> None:
+    by_name = {kind.name: kind.in_flight for kind in IN_FLIGHT_KINDS}
+    # ``planned`` installations join with the release path that owns them.
+    assert by_name == {
+        "installation": (InstallationState.INSTALLING.value,),
+        "run": (
+            RunState.PLANNED.value,
+            RunState.STARTING.value,
+            RunState.STOPPING.value,
+        ),
+    }
 
 
 def test_dead_owner_states_are_states_of_the_owner() -> None:

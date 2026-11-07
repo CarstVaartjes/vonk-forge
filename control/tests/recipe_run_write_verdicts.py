@@ -160,8 +160,14 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "381aab92244881ed24e907acca256e794897dd9442bdcdd3228a65b36385efe1",
+            "cad56079288887fa60baff7b099b157a020ced1e8cbc3c73c29067eb57d21bb7",
             "caller-owned: queue result transaction owns terminal projection",
+        ),
+    },
+    "recipe_operations/run_transitions.py": {
+        "end_unfinished_run": (
+            "e905decb4ddd15367323ab9e4dc9f4134deb598dd4c1cae089e886c2d7469338",
+            "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },
     "run_route_name.py": {
