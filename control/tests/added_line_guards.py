@@ -1714,7 +1714,10 @@ def check_source(
         if "mapping" in modes:
             hits.extend(
                 (site.line, "untyped mapping")
-                for site in mappings.scan_source(source, path=path)
+                for site in (
+                    *mappings.scan_source(source, path=path),
+                    *mappings.scan_bare_class_fields(source, path=path),
+                )
             )
         if "document-reads" in modes and path.startswith(
             tuple(

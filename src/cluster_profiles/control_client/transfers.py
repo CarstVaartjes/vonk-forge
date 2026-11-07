@@ -16,6 +16,7 @@ import urllib.request
 import uuid
 from dataclasses import replace
 from pathlib import Path
+from typing import TypedDict
 
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..error_reporting import (
@@ -44,6 +45,15 @@ from .schema import (
     _response_definition,
     _response_media_contract,
 )
+
+
+class TransferReceipt(TypedDict):
+    """What one verified result download reports: where it landed and what it is."""
+
+    destination: str
+    media_type: str
+    size_bytes: int
+    sha256: str
 
 
 class ControlClient(HTTPControlClient):
@@ -249,7 +259,7 @@ class ControlClient(HTTPControlClient):
         expected_size: int,
         overwrite: bool,
         timeout_seconds: float | None = None,
-    ) -> dict[str, object]:
+    ) -> TransferReceipt:
         """Stream, verify, and atomically publish one result file."""
         if timeout_seconds is not None and (
             not math.isfinite(timeout_seconds) or timeout_seconds <= 0
@@ -267,12 +277,12 @@ class ControlClient(HTTPControlClient):
             raise ControlClientError("artifact output directory is invalid")
         if not overwrite:
             if verified_output(destination, expected_size, expected_sha256):
-                return {
-                    "destination": str(destination),
-                    "media_type": media_type,
-                    "size_bytes": expected_size,
-                    "sha256": expected_sha256,
-                }
+                return TransferReceipt(
+                    destination=str(destination),
+                    media_type=media_type,
+                    size_bytes=expected_size,
+                    sha256=expected_sha256,
+                )
             if os.path.lexists(destination):
                 raise ControlTransportError(
                     f"artifact output already exists: {destination.name}"
@@ -461,12 +471,12 @@ class ControlClient(HTTPControlClient):
                         temporary.unlink()
                 except OSError:
                     pass
-        return {
-            "destination": str(destination),
-            "media_type": media_type,
-            "size_bytes": expected_size,
-            "sha256": expected_sha256,
-        }
+        return TransferReceipt(
+            destination=str(destination),
+            media_type=media_type,
+            size_bytes=expected_size,
+            sha256=expected_sha256,
+        )
 
 
 def verified_output(path: Path, expected_size: int, expected_sha256: str) -> bool:

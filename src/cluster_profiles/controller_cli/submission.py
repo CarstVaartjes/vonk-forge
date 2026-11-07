@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from ..cli_outcome import (
     ObservationStatus,
     Submission,
+    SubmissionAcceptance,
 )
 from ..cli_states_generated import PROFILE_REFUSAL_CODES
 from ..control_client import (
@@ -27,7 +28,7 @@ from .common import ControllerClient
 
 
 def _accepted_submission(args: argparse.Namespace, operation_id: str) -> None:
-    args.submission.acceptance = "accepted"
+    args.submission.acceptance = SubmissionAcceptance.ACCEPTED
     args.submission.operation_id = operation_id
 
 
@@ -166,7 +167,7 @@ def _submit_idempotent_request(
 
     retry_error: ControlHTTPError | ControlTransportError | None = None
     retry_not_before = 0.0
-    submission.acceptance = "unknown"
+    submission.acceptance = SubmissionAcceptance.UNKNOWN
     try:
         return request("POST", path, "submit")
     except OSError:
@@ -176,7 +177,7 @@ def _submit_idempotent_request(
         if status in {400, 401, 403, 422} or (
             status == 409 and getattr(error, "code", None) in PROFILE_REFUSAL_CODES
         ):
-            submission.acceptance = "refused"
+            submission.acceptance = SubmissionAcceptance.REFUSED
             raise
         if status is not None or isinstance(
             error,

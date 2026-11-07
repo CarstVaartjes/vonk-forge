@@ -1,0 +1,3282 @@
+{
+  "$defs": {
+    "CompatibilityIdentity": {
+      "description": "Immutable inputs for an exceptional reusable preparation artifact.",
+      "properties": {
+        "hardware_profile_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hardware Profile Sha256"
+        },
+        "model_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Content Sha256",
+          "type": "string"
+        },
+        "parameters_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Parameters Sha256",
+          "type": "string"
+        },
+        "recipe_revision_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Recipe Revision Sha256",
+          "type": "string"
+        },
+        "runtime_image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Runtime Image Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "recipe_revision_sha256",
+        "model_content_sha256",
+        "runtime_image_digest",
+        "parameters_sha256"
+      ],
+      "title": "CompatibilityIdentity",
+      "type": "object"
+    },
+    "CompatibilityPreparation": {
+      "description": "Explicit reusable work that cannot be embedded in the base image.",
+      "properties": {
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Sha256"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/CompatibilityIdentity"
+        },
+        "compatibility_key_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Compatibility Key Sha256",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "engine-generation",
+            "jit",
+            "tuning"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "reusable": {
+          "const": true,
+          "title": "Reusable",
+          "type": "boolean"
+        },
+        "stage": {
+          "enum": [
+            "controller-prepare",
+            "target-prepare"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "unknown",
+            "missing",
+            "preparing",
+            "verifying",
+            "ready",
+            "failed",
+            "unsupported"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "stage",
+        "compatibility",
+        "compatibility_key_sha256",
+        "state",
+        "reusable"
+      ],
+      "title": "CompatibilityPreparation",
+      "type": "object"
+    },
+    "ConditionalPostStopMemoryCheck": {
+      "description": "Fresh inventory and ordinary memory admission required after stops.",
+      "properties": {
+        "stop_run_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "minItems": 1,
+          "title": "Stop Run Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "stop_run_ids"
+      ],
+      "title": "ConditionalPostStopMemoryCheck",
+      "type": "object"
+    },
+    "ControllerAssetState": {
+      "description": "Availability of one immutable asset in Controller/NAS storage.",
+      "properties": {
+        "expected_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Bytes"
+        },
+        "missing_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Bytes"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "source": {
+          "enum": [
+            "controller-build",
+            "nas-cache",
+            "unknown"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "unknown",
+            "missing",
+            "preparing",
+            "verifying",
+            "ready",
+            "failed",
+            "unsupported"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "verified_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Verified Bytes",
+          "type": "integer"
+        },
+        "verified_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified Sha256"
+        }
+      },
+      "required": [
+        "state",
+        "source"
+      ],
+      "title": "ControllerAssetState",
+      "type": "object"
+    },
+    "DesiredAssignmentState": {
+      "description": "What a fleet-profile assignment is asked to become on its Sparks.",
+      "enum": [
+        "installed",
+        "running"
+      ],
+      "title": "DesiredAssignmentState",
+      "type": "string"
+    },
+    "EffectiveParallelism": {
+      "description": "Derived from topology; never an editable settings field.",
+      "properties": {
+        "backend": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Backend",
+          "type": "string"
+        },
+        "data": {
+          "maximum": 31,
+          "minimum": 1,
+          "title": "Data",
+          "type": "integer"
+        },
+        "pipeline": {
+          "maximum": 31,
+          "minimum": 1,
+          "title": "Pipeline",
+          "type": "integer"
+        },
+        "tensor": {
+          "maximum": 31,
+          "minimum": 1,
+          "title": "Tensor",
+          "type": "integer"
+        },
+        "world_size": {
+          "maximum": 31,
+          "minimum": 1,
+          "title": "World Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "world_size",
+        "tensor",
+        "pipeline",
+        "data",
+        "backend"
+      ],
+      "title": "EffectiveParallelism",
+      "type": "object"
+    },
+    "EffectiveSettingsSelection": {
+      "description": "Canonical effective settings bound into the Run/Switch plan digest.",
+      "properties": {
+        "change_effects": {
+          "additionalProperties": {
+            "enum": [
+              "none",
+              "restart",
+              "reprepare",
+              "rebuild",
+              "reinstall"
+            ],
+            "type": "string"
+          },
+          "maxProperties": 64,
+          "title": "Change Effects",
+          "type": "object"
+        },
+        "concurrency": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concurrency"
+        },
+        "context_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Tokens"
+        },
+        "identity_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Identity Sha256",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "generation",
+            "decision",
+            "embedding",
+            "job"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "knobs": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
+            ]
+          },
+          "maxProperties": 64,
+          "title": "Knobs",
+          "type": "object"
+        },
+        "max_batch_tokens": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Batch Tokens"
+        },
+        "parallelism": {
+          "$ref": "#/$defs/EffectiveParallelism"
+        }
+      },
+      "required": [
+        "kind",
+        "parallelism",
+        "change_effects",
+        "identity_sha256"
+      ],
+      "title": "EffectiveSettingsSelection",
+      "type": "object"
+    },
+    "FleetProfileAdmissionDecision": {
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Alias"
+        },
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 128,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "effective_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveSettingsSelection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "post_stop_memory_check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConditionalPostStopMemoryCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileResourceRequirement"
+          },
+          "maxItems": 32,
+          "title": "Requirements",
+          "type": "array"
+        },
+        "stop_before_prepare": {
+          "title": "Stop Before Prepare",
+          "type": "boolean"
+        },
+        "stop_before_transfer": {
+          "title": "Stop Before Transfer",
+          "type": "boolean"
+        },
+        "stops": {
+          "items": {
+            "$ref": "#/$defs/StopImpact"
+          },
+          "maxItems": 128,
+          "title": "Stops",
+          "type": "array"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "alias",
+        "allowed",
+        "blockers",
+        "requirements",
+        "effective_settings",
+        "stops",
+        "stop_before_prepare",
+        "stop_before_transfer"
+      ],
+      "title": "FleetProfileAdmissionDecision",
+      "type": "object"
+    },
+    "FleetProfileAdoptedApplicationEffect": {
+      "description": "An exact continuing executor authorized by the newer reviewed snapshot.",
+      "properties": {
+        "application_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Application Id",
+          "type": "string"
+        },
+        "assignment_ids": {
+          "items": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Assignment Ids",
+          "type": "array"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "stops": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileAdoptedStopEffect"
+          },
+          "title": "Stops",
+          "type": "array"
+        },
+        "workload_intent_ordinal": {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "title": "Workload Intent Ordinal",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_id",
+        "plan_digest",
+        "workload_intent_ordinal",
+        "node_ids"
+      ],
+      "title": "FleetProfileAdoptedApplicationEffect",
+      "type": "object"
+    },
+    "FleetProfileAdoptedStopEffect": {
+      "description": "Exact original cleanup, retained by a newer whole-fleet decision.",
+      "properties": {
+        "effect": {
+          "$ref": "#/$defs/FleetProfileRunEffect"
+        },
+        "operation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "queue_index": {
+          "minimum": 0,
+          "title": "Queue Index",
+          "type": "integer"
+        },
+        "request_key": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Request Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "effect",
+        "queue_index",
+        "operation_id",
+        "request_key"
+      ],
+      "title": "FleetProfileAdoptedStopEffect",
+      "type": "object"
+    },
+    "FleetProfileAssignment": {
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alias"
+        },
+        "desired_state": {
+          "$ref": "#/$defs/DesiredAssignmentState"
+        },
+        "gpu_clock": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "model_title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Title"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileNode"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "option_choices": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Option Choices",
+          "type": "object"
+        },
+        "recipe_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Id",
+          "type": "string"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "recipe_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Recipe Title",
+          "type": "string"
+        },
+        "topology_name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Topology Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "recipe_revision_id",
+        "topology_name",
+        "desired_state",
+        "nodes",
+        "recipe_id",
+        "recipe_title"
+      ],
+      "title": "FleetProfileAssignment",
+      "type": "object"
+    },
+    "FleetProfileAssignmentAssessment": {
+      "properties": {
+        "assessment": {
+          "$ref": "#/$defs/RunSwitchAssessment"
+        },
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "assessment"
+      ],
+      "title": "FleetProfileAssignmentAssessment",
+      "type": "object"
+    },
+    "FleetProfileAssignmentInput": {
+      "description": "Permissive autosaved recipe choice, not an execution assignment.\n\nA logical model variant is selected by its canonical identity.  The\ncontent digest is resolved from that identity for a load and is never a\nprofile-pinned execution revision.  Topology/rank validation belongs to\npreview/load, so incomplete distributed drafts can be saved.",
+      "properties": {
+        "assignment_name": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Assignment Name"
+        },
+        "desired_state": {
+          "$ref": "#/$defs/DesiredAssignmentState",
+          "default": "running"
+        },
+        "gpu_clock": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model_variant": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Variant"
+        },
+        "option_choices": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Option Choices",
+          "type": "object"
+        },
+        "recipe_selector": {
+          "maxLength": 127,
+          "minLength": 5,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}/[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Recipe Selector",
+          "type": "string"
+        },
+        "spark_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Spark Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "recipe_selector",
+        "spark_ids"
+      ],
+      "title": "FleetProfileAssignmentInput",
+      "type": "object"
+    },
+    "FleetProfileAssignmentPreparation": {
+      "properties": {
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "preparation": {
+          "$ref": "#/$defs/RolloutPreparation"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "preparation"
+      ],
+      "title": "FleetProfileAssignmentPreparation",
+      "type": "object"
+    },
+    "FleetProfileAssignmentPreview": {
+      "properties": {
+        "actions": {
+          "items": {
+            "enum": [
+              "switch",
+              "keep",
+              "adopt"
+            ],
+            "type": "string"
+          },
+          "maxItems": 7,
+          "title": "Actions",
+          "type": "array"
+        },
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "current_state": {
+          "$ref": "#/$defs/ObservedAssignmentState"
+        },
+        "desired_state": {
+          "$ref": "#/$defs/DesiredAssignmentState"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "option_choices": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_-]*$",
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Option Choices",
+          "type": "object"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileReason"
+          },
+          "maxItems": 32,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "recipe_revision_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Recipe Revision Id",
+          "type": "string"
+        },
+        "recipe_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Recipe Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "recipe_revision_id",
+        "recipe_title",
+        "desired_state",
+        "current_state",
+        "node_ids",
+        "actions",
+        "reasons"
+      ],
+      "title": "FleetProfileAssignmentPreview",
+      "type": "object"
+    },
+    "FleetProfileCompatibilityDecision": {
+      "properties": {
+        "artifact_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Artifact Sha256"
+        },
+        "compatibility": {
+          "$ref": "#/$defs/CompatibilityIdentity"
+        },
+        "kind": {
+          "enum": [
+            "engine-generation",
+            "jit",
+            "tuning"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "stage": {
+          "enum": [
+            "controller-prepare",
+            "target-prepare"
+          ],
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "stage",
+        "compatibility",
+        "node_ids",
+        "artifact_sha256",
+        "ready"
+      ],
+      "title": "FleetProfileCompatibilityDecision",
+      "type": "object"
+    },
+    "FleetProfileDefinition": {
+      "description": "Saved authoring intent, independent of execution and cache projections.",
+      "properties": {
+        "assignments": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileAssignmentInput"
+          },
+          "maxItems": 64,
+          "title": "Assignments",
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Description",
+          "type": "string"
+        },
+        "favorite": {
+          "default": false,
+          "title": "Favorite",
+          "type": "boolean"
+        },
+        "installation_policy": {
+          "default": "keep-cached",
+          "enum": [
+            "keep-cached",
+            "exact"
+          ],
+          "title": "Installation Policy",
+          "type": "string"
+        },
+        "labels": {
+          "maxProperties": 16,
+          "patternProperties": {
+            "^[a-z0-9](?:[a-z0-9_.-]{0,61}[a-z0-9])?$": {
+              "maxLength": 63,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 63,
+            "minLength": 1
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "name": {
+          "default": "Default",
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "title": "FleetProfileDefinition",
+      "type": "object"
+    },
+    "FleetProfileEffects": {
+      "description": "Identified live effects, including complete distributed membership.",
+      "properties": {
+        "adopted": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileAdoptedApplicationEffect"
+          },
+          "maxItems": 64,
+          "title": "Adopted",
+          "type": "array"
+        },
+        "gpu_clocks": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FleetProfileGpuClockEffect"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Clocks"
+        },
+        "installations": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileInstallationEffect"
+          },
+          "title": "Installations",
+          "type": "array"
+        },
+        "runs": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileRunEffect"
+          },
+          "title": "Runs",
+          "type": "array"
+        },
+        "superseded": {
+          "items": {
+            "$ref": "#/$defs/FleetProfilePendingEffect"
+          },
+          "title": "Superseded",
+          "type": "array"
+        }
+      },
+      "required": [
+        "runs",
+        "installations",
+        "superseded"
+      ],
+      "title": "FleetProfileEffects",
+      "type": "object"
+    },
+    "FleetProfileGpuClockEffect": {
+      "properties": {
+        "desired": {
+          "$ref": "#/$defs/GpuClockRange"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "previous_desired": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GpuClockRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "node_id",
+        "desired"
+      ],
+      "title": "FleetProfileGpuClockEffect",
+      "type": "object"
+    },
+    "FleetProfileInstallationEffect": {
+      "properties": {
+        "action": {
+          "enum": [
+            "keep",
+            "remove"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "installation_id",
+        "node_ids",
+        "action"
+      ],
+      "title": "FleetProfileInstallationEffect",
+      "type": "object"
+    },
+    "FleetProfileNode": {
+      "description": "One rank of a profile assignment, the same shape a Spark group names it.",
+      "properties": {
+        "endpoint_owner": {
+          "default": false,
+          "title": "Endpoint Owner",
+          "type": "boolean"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 31,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "rank",
+        "role"
+      ],
+      "title": "FleetProfileNode",
+      "type": "object"
+    },
+    "FleetProfilePendingEffect": {
+      "properties": {
+        "id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "job",
+            "profile-application"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "node_ids"
+      ],
+      "title": "FleetProfilePendingEffect",
+      "type": "object"
+    },
+    "FleetProfilePlanStep": {
+      "properties": {
+        "index": {
+          "maximum": 1023,
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "switch",
+            "prepare"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Node Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "index",
+        "kind",
+        "label"
+      ],
+      "title": "FleetProfilePlanStep",
+      "type": "object"
+    },
+    "FleetProfilePlanSummary": {
+      "properties": {
+        "already_correct": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Already Correct",
+          "type": "integer"
+        },
+        "blockers": {
+          "maximum": 2048,
+          "minimum": 0,
+          "title": "Blockers",
+          "type": "integer"
+        },
+        "builds": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Builds",
+          "type": "integer"
+        },
+        "distributions": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Distributions",
+          "type": "integer"
+        },
+        "installs": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Installs",
+          "type": "integer"
+        },
+        "placements": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Placements",
+          "type": "integer"
+        },
+        "starts": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Starts",
+          "type": "integer"
+        },
+        "stops": {
+          "maximum": 512,
+          "minimum": 0,
+          "title": "Stops",
+          "type": "integer"
+        },
+        "uninstalls": {
+          "maximum": 512,
+          "minimum": 0,
+          "title": "Uninstalls",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "already_correct",
+        "placements",
+        "builds",
+        "distributions",
+        "installs",
+        "starts",
+        "stops",
+        "uninstalls",
+        "blockers"
+      ],
+      "title": "FleetProfilePlanSummary",
+      "type": "object"
+    },
+    "FleetProfilePreparationDecision": {
+      "description": "Exact assets and reuse decisions; byte counters are observations only.",
+      "properties": {
+        "assignment_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Assignment Id",
+          "type": "string"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/PreparationReason"
+          },
+          "maxItems": 128,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "exceptions": {
+          "items": {
+            "$ref": "#/$defs/FleetProfileCompatibilityDecision"
+          },
+          "maxItems": 64,
+          "title": "Exceptions",
+          "type": "array"
+        },
+        "image_controller_ready": {
+          "title": "Image Controller Ready",
+          "type": "boolean"
+        },
+        "image_reuse_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Image Reuse Node Ids",
+          "type": "array"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelArtifactIdentity"
+        },
+        "model_complete": {
+          "title": "Model Complete",
+          "type": "boolean"
+        },
+        "model_controller_ready": {
+          "title": "Model Controller Ready",
+          "type": "boolean"
+        },
+        "model_reuse_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Model Reuse Node Ids",
+          "type": "array"
+        },
+        "runtime_image": {
+          "$ref": "#/$defs/RuntimeImageIdentity"
+        }
+      },
+      "required": [
+        "assignment_id",
+        "model",
+        "runtime_image",
+        "model_complete",
+        "model_controller_ready",
+        "image_controller_ready",
+        "model_reuse_node_ids",
+        "image_reuse_node_ids",
+        "exceptions",
+        "blockers"
+      ],
+      "title": "FleetProfilePreparationDecision",
+      "type": "object"
+    },
+    "FleetProfileReason": {
+      "properties": {
+        "code": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "severity"
+      ],
+      "title": "FleetProfileReason",
+      "type": "object"
+    },
+    "FleetProfileResourceRequirement": {
+      "description": "Stable demand and eligibility, separate from observed free capacity.",
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "disk_required_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Disk Required Bytes"
+        },
+        "memory_floor_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Floor Bytes"
+        },
+        "memory_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "unified",
+                "host",
+                "accelerator"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Kind"
+        },
+        "memory_pool": {
+          "anyOf": [
+            {
+              "enum": [
+                "shared",
+                "separate"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Pool"
+        },
+        "memory_required_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Memory Required Bytes"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "ports_required": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": "Ports Required",
+          "type": "array"
+        },
+        "resource_demand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceDemandEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "node_id",
+        "allowed",
+        "ports_required",
+        "disk_required_bytes",
+        "memory_required_bytes",
+        "memory_kind",
+        "memory_pool",
+        "memory_floor_bytes",
+        "resource_demand"
+      ],
+      "title": "FleetProfileResourceRequirement",
+      "type": "object"
+    },
+    "FleetProfileRunEffect": {
+      "properties": {
+        "action": {
+          "enum": [
+            "keep",
+            "stop"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "alias": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "installation_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Installation Id",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "previous_alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Previous Alias"
+        },
+        "profile_stop_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunSwitchProfileStopScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "installation_id",
+        "alias",
+        "node_ids",
+        "action"
+      ],
+      "title": "FleetProfileRunEffect",
+      "type": "object"
+    },
+    "FleetProfileScopePreview": {
+      "properties": {
+        "idle_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Idle Node Ids",
+          "type": "array"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Node Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "node_ids"
+      ],
+      "title": "FleetProfileScopePreview",
+      "type": "object"
+    },
+    "FreshnessEvidence": {
+      "properties": {
+        "age_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Age Seconds"
+        },
+        "evidence_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Digest"
+        },
+        "maximum_age_seconds": {
+          "anyOf": [
+            {
+              "maximum": 86400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum Age Seconds"
+        },
+        "observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed At"
+        },
+        "source": {
+          "maxLength": 96,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "state"
+      ],
+      "title": "FreshnessEvidence",
+      "type": "object"
+    },
+    "GpuClockRange": {
+      "properties": {
+        "max_mhz": {
+          "description": "GPU maximum exceeds 2300 MHz hardware-safety edge: sustained load above the cap has hard-powered Sparks off",
+          "maximum": 2300,
+          "minimum": 0,
+          "title": "Max Mhz",
+          "type": "integer"
+        },
+        "min_mhz": {
+          "maximum": 2300,
+          "minimum": 0,
+          "title": "Min Mhz",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "min_mhz",
+        "max_mhz"
+      ],
+      "title": "GpuClockRange",
+      "type": "object"
+    },
+    "MemoryUsageUncertainty": {
+      "description": "Fresh aggregate capacity lacks per-run resident usage evidence.",
+      "properties": {
+        "inventory_evidence_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Inventory Evidence Digest",
+          "type": "string"
+        },
+        "inventory_observed_at": {
+          "format": "date-time",
+          "title": "Inventory Observed At",
+          "type": "string"
+        },
+        "residual_ranges": {
+          "items": {
+            "$ref": "#/$defs/RunMemoryResidualRange"
+          },
+          "maxItems": 128,
+          "title": "Residual Ranges",
+          "type": "array"
+        },
+        "source": {
+          "const": "aggregate_inventory_without_run_usage",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "inventory_observed_at",
+        "inventory_evidence_digest",
+        "residual_ranges"
+      ],
+      "title": "MemoryUsageUncertainty",
+      "type": "object"
+    },
+    "ModelArtifactIdentity": {
+      "description": "Exact model set, independent of transfer progress and verification time.",
+      "properties": {
+        "artifact_count": {
+          "minimum": 1,
+          "title": "Artifact Count",
+          "type": "integer"
+        },
+        "artifact_set_bytes": {
+          "minimum": 1,
+          "title": "Artifact Set Bytes",
+          "type": "integer"
+        },
+        "artifact_set_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Artifact Set Sha256",
+          "type": "string"
+        },
+        "dependency_model_content_sha256": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Dependency Model Content Sha256",
+          "type": "array"
+        },
+        "model_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Revision Sha256"
+        }
+      },
+      "required": [
+        "artifact_set_sha256",
+        "model_content_sha256",
+        "artifact_count",
+        "artifact_set_bytes"
+      ],
+      "title": "ModelArtifactIdentity",
+      "type": "object"
+    },
+    "ModelArtifactPreparation": {
+      "description": "Complete exact model set, including auxiliary and dependency files.",
+      "properties": {
+        "artifact_count": {
+          "minimum": 1,
+          "title": "Artifact Count",
+          "type": "integer"
+        },
+        "artifact_set_bytes": {
+          "minimum": 1,
+          "title": "Artifact Set Bytes",
+          "type": "integer"
+        },
+        "artifact_set_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Artifact Set Sha256",
+          "type": "string"
+        },
+        "completeness": {
+          "enum": [
+            "complete",
+            "incomplete",
+            "unknown"
+          ],
+          "title": "Completeness",
+          "type": "string"
+        },
+        "controller": {
+          "$ref": "#/$defs/ControllerAssetState"
+        },
+        "dependency_model_content_sha256": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Dependency Model Content Sha256",
+          "type": "array"
+        },
+        "model_content_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Model Content Sha256",
+          "type": "string"
+        },
+        "recipe_revision_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recipe Revision Sha256"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TargetAssetState"
+          },
+          "maxItems": 64,
+          "title": "Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifact_set_sha256",
+        "model_content_sha256",
+        "artifact_count",
+        "artifact_set_bytes",
+        "completeness",
+        "controller",
+        "targets"
+      ],
+      "title": "ModelArtifactPreparation",
+      "type": "object"
+    },
+    "ObservedAssignmentState": {
+      "description": "Where a fleet-profile assignment stands on the Sparks, as observed.",
+      "enum": [
+        "not-placed",
+        "placed",
+        "installing",
+        "installed",
+        "running",
+        "degraded"
+      ],
+      "title": "ObservedAssignmentState",
+      "type": "string"
+    },
+    "PreparationReason": {
+      "properties": {
+        "code": {
+          "pattern": "^[a-z][a-z0-9_.-]{0,95}$",
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "severity": {
+          "enum": [
+            "blocker",
+            "warning",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "severity"
+      ],
+      "title": "PreparationReason",
+      "type": "object"
+    },
+    "ResourceDemandEvidence": {
+      "description": "The evidence terms used for one selected rank's memory fit.",
+      "properties": {
+        "batch_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Batch Bytes"
+        },
+        "concurrency_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Concurrency Bytes"
+        },
+        "context_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Bytes"
+        },
+        "evidence_digest": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Digest"
+        },
+        "evidence_state": {
+          "enum": [
+            "declared",
+            "measured",
+            "fresh",
+            "stale",
+            "unknown"
+          ],
+          "title": "Evidence State",
+          "type": "string"
+        },
+        "runtime_overhead_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Runtime Overhead Bytes"
+        },
+        "total_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Bytes"
+        },
+        "weights_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Weights Bytes"
+        }
+      },
+      "required": [
+        "evidence_state"
+      ],
+      "title": "ResourceDemandEvidence",
+      "type": "object"
+    },
+    "RolloutPreparation": {
+      "description": "Normalized preparation identity shared by profiles, Run, web and CLI.",
+      "properties": {
+        "controller_ready": {
+          "title": "Controller Ready",
+          "type": "boolean"
+        },
+        "exceptions": {
+          "items": {
+            "$ref": "#/$defs/CompatibilityPreparation"
+          },
+          "maxItems": 64,
+          "title": "Exceptions",
+          "type": "array"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelArtifactPreparation"
+        },
+        "ready": {
+          "title": "Ready",
+          "type": "boolean"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/PreparationReason"
+          },
+          "maxItems": 128,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "runtime_image": {
+          "$ref": "#/$defs/RuntimeImagePreparation"
+        },
+        "schema_version": {
+          "const": 2,
+          "default": 2,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "target_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Target Node Ids",
+          "type": "array"
+        },
+        "targets_ready": {
+          "title": "Targets Ready",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model",
+        "runtime_image",
+        "target_node_ids",
+        "controller_ready",
+        "targets_ready",
+        "ready"
+      ],
+      "title": "RolloutPreparation",
+      "type": "object"
+    },
+    "RunMemoryResidualRange": {
+      "description": "Possible remaining bytes for one exact active run reservation.",
+      "properties": {
+        "maximum_bytes": {
+          "minimum": 0,
+          "title": "Maximum Bytes",
+          "type": "integer"
+        },
+        "minimum_bytes": {
+          "const": 0,
+          "default": 0,
+          "title": "Minimum Bytes",
+          "type": "integer"
+        },
+        "reservation_kind": {
+          "enum": [
+            "host-memory",
+            "gpu-memory",
+            "unified-memory"
+          ],
+          "title": "Reservation Kind",
+          "type": "string"
+        },
+        "run_generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Run Generation",
+          "type": "integer"
+        },
+        "run_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "run_generation",
+        "reservation_kind",
+        "maximum_bytes"
+      ],
+      "title": "RunMemoryResidualRange",
+      "type": "object"
+    },
+    "RunSwitchAssessment": {
+      "description": "Planner-owned admission and observations shared by operator reviews.",
+      "properties": {
+        "alias": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Alias"
+        },
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 128,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "effective_settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EffectiveSettingsSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fit_after_stop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SparkFit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "fit_current": {
+          "$ref": "#/$defs/SparkFit"
+        },
+        "freshness": {
+          "items": {
+            "$ref": "#/$defs/FreshnessEvidence"
+          },
+          "maxItems": 128,
+          "title": "Freshness",
+          "type": "array"
+        },
+        "post_stop_memory_check": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConditionalPostStopMemoryCheck"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preparation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RolloutPreparation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_before_prepare": {
+          "default": false,
+          "title": "Stop Before Prepare",
+          "type": "boolean"
+        },
+        "stop_before_transfer": {
+          "default": false,
+          "title": "Stop Before Transfer",
+          "type": "boolean"
+        },
+        "stops": {
+          "items": {
+            "$ref": "#/$defs/StopImpact"
+          },
+          "maxItems": 128,
+          "title": "Stops",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 128,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "alias",
+        "fit_current",
+        "fit_after_stop",
+        "stops",
+        "allowed",
+        "blockers",
+        "warnings"
+      ],
+      "title": "RunSwitchAssessment",
+      "type": "object"
+    },
+    "RunSwitchProfileStopScope": {
+      "description": "Reviewed profile-only cleanup of the reachable ranks in a lost group.\n\nThe full accepted topology remains visible even though only its reachable\nsubset is sent Stop work.  Missing ranks are explicit so a partial cleanup\ncan never be presented as a successful full-group stop.",
+      "properties": {
+        "missing_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 31,
+          "minItems": 1,
+          "title": "Missing Node Ids",
+          "type": "array"
+        },
+        "original_group": {
+          "$ref": "#/$defs/SparkGroup"
+        },
+        "target_node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Target Node Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "original_group",
+        "target_node_ids",
+        "missing_node_ids"
+      ],
+      "title": "RunSwitchProfileStopScope",
+      "type": "object"
+    },
+    "RunSwitchReason": {
+      "properties": {
+        "code": {
+          "maxLength": 96,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "scope": {
+          "enum": [
+            "model",
+            "recipe",
+            "mapping",
+            "group",
+            "node",
+            "artifact",
+            "freshness",
+            "conflict",
+            "operation"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "blocker",
+            "warning",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "stale": {
+          "default": false,
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "swap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SwapShortfallEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "code",
+        "detail",
+        "severity",
+        "scope"
+      ],
+      "title": "RunSwitchReason",
+      "type": "object"
+    },
+    "RuntimeImageIdentity": {
+      "description": "Executable OCI identity, independent of its transfer observations.",
+      "properties": {
+        "architecture": {
+          "const": "linux-arm64",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "build_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Id"
+        },
+        "image_bytes": {
+          "minimum": 0,
+          "title": "Image Bytes",
+          "type": "integer"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "oci_layout_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Oci Layout Sha256",
+          "type": "string"
+        },
+        "runtime_interface": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Runtime Interface",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image_digest",
+        "oci_layout_sha256",
+        "image_bytes",
+        "architecture",
+        "runtime_interface"
+      ],
+      "title": "RuntimeImageIdentity",
+      "type": "object"
+    },
+    "RuntimeImagePreparation": {
+      "description": "Exact executable OCI image kept separate from model payloads.",
+      "properties": {
+        "architecture": {
+          "const": "linux-arm64",
+          "title": "Architecture",
+          "type": "string"
+        },
+        "build_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Build Id"
+        },
+        "controller": {
+          "$ref": "#/$defs/ControllerAssetState"
+        },
+        "image_bytes": {
+          "minimum": 0,
+          "title": "Image Bytes",
+          "type": "integer"
+        },
+        "image_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Image Digest",
+          "type": "string"
+        },
+        "oci_layout_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Oci Layout Sha256",
+          "type": "string"
+        },
+        "runtime_interface": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Runtime Interface",
+          "type": "string"
+        },
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/TargetAssetState"
+          },
+          "maxItems": 64,
+          "title": "Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "image_digest",
+        "oci_layout_sha256",
+        "image_bytes",
+        "architecture",
+        "runtime_interface",
+        "controller",
+        "targets"
+      ],
+      "title": "RuntimeImagePreparation",
+      "type": "object"
+    },
+    "SparkFit": {
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 64,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/SparkFitNode"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 64,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "allowed",
+        "nodes"
+      ],
+      "title": "SparkFit",
+      "type": "object"
+    },
+    "SparkFitNode": {
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 32,
+          "title": "Blockers",
+          "type": "array"
+        },
+        "disk_free_after_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Free After Bytes"
+        },
+        "disk_free_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Free Bytes"
+        },
+        "disk_required_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Required Bytes"
+        },
+        "memory_available_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Available Bytes"
+        },
+        "memory_capacity_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Capacity Bytes"
+        },
+        "memory_floor_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Floor Bytes"
+        },
+        "memory_free_after_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Free After Bytes"
+        },
+        "memory_kind": {
+          "anyOf": [
+            {
+              "enum": [
+                "unified",
+                "host",
+                "accelerator"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Kind"
+        },
+        "memory_pool": {
+          "anyOf": [
+            {
+              "enum": [
+                "shared",
+                "separate"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Pool"
+        },
+        "memory_required_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Required Bytes"
+        },
+        "memory_usage_uncertainty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryUsageUncertainty"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "ports_required": {
+          "items": {
+            "maximum": 65535,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": "Ports Required",
+          "type": "array"
+        },
+        "rank": {
+          "maximum": 31,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "resource_demand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResourceDemandEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "$ref": "#/$defs/RunSwitchReason"
+          },
+          "maxItems": 32,
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "node_id",
+        "rank",
+        "role",
+        "allowed",
+        "ports_required"
+      ],
+      "title": "SparkFitNode",
+      "type": "object"
+    },
+    "SparkGroup": {
+      "description": "A complete, rank-labelled Spark group selected by the operator.",
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/SparkGroupNode"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "SparkGroup",
+      "type": "object"
+    },
+    "SparkGroupNode": {
+      "properties": {
+        "endpoint_owner": {
+          "default": false,
+          "title": "Endpoint Owner",
+          "type": "boolean"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "rank": {
+          "maximum": 31,
+          "minimum": 0,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "role": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "rank",
+        "role"
+      ],
+      "title": "SparkGroupNode",
+      "type": "object"
+    },
+    "StopImpact": {
+      "properties": {
+        "alias": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "node_ids": {
+          "items": {
+            "pattern": "^spk_[0-9a-f]{32}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Plan Digest",
+          "type": "string"
+        },
+        "reserved_bytes": {
+          "minimum": 0,
+          "title": "Reserved Bytes",
+          "type": "integer"
+        },
+        "run_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "run_plan_digest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Run Plan Digest",
+          "type": "string"
+        },
+        "state": {
+          "maxLength": 24,
+          "minLength": 1,
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "run_plan_digest",
+        "alias",
+        "state",
+        "node_ids",
+        "reserved_bytes",
+        "plan_digest"
+      ],
+      "title": "StopImpact",
+      "type": "object"
+    },
+    "SwapShortfallEvidence": {
+      "description": "The swap numbers behind one load's wait for swap, computed once at admission.",
+      "properties": {
+        "active_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Active Bytes",
+          "type": "integer"
+        },
+        "desired_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Desired Bytes"
+        },
+        "held_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Held Bytes",
+          "type": "integer"
+        },
+        "needed_setting_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Needed Setting Bytes",
+          "type": "integer"
+        },
+        "rise_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Rise Bytes",
+          "type": "integer"
+        },
+        "usable_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Usable Bytes",
+          "type": "integer"
+        },
+        "used_bytes": {
+          "maximum": 9223372036854775807,
+          "minimum": 0,
+          "title": "Used Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "active_bytes",
+        "used_bytes",
+        "held_bytes",
+        "usable_bytes",
+        "rise_bytes",
+        "needed_setting_bytes"
+      ],
+      "title": "SwapShortfallEvidence",
+      "type": "object"
+    },
+    "TargetAssetState": {
+      "description": "Staging and verification state for one immutable asset on one Spark.",
+      "properties": {
+        "expected_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Bytes"
+        },
+        "imported_image_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Imported Image Digest"
+        },
+        "missing_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Missing Bytes"
+        },
+        "node_id": {
+          "pattern": "^spk_[0-9a-f]{32}$",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "present_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Present Bytes",
+          "type": "integer"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "state": {
+          "enum": [
+            "unknown",
+            "missing",
+            "preparing",
+            "verifying",
+            "ready",
+            "failed",
+            "unsupported"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "verified_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified At"
+        },
+        "verified_sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verified Sha256"
+        }
+      },
+      "required": [
+        "node_id",
+        "state"
+      ],
+      "title": "TargetAssetState",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "admission_decisions": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileAdmissionDecision"
+      },
+      "maxItems": 64,
+      "title": "Admission Decisions",
+      "type": "array"
+    },
+    "allowed": {
+      "title": "Allowed",
+      "type": "boolean"
+    },
+    "assessments": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileAssignmentAssessment"
+      },
+      "maxItems": 64,
+      "title": "Assessments",
+      "type": "array"
+    },
+    "assignments": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileAssignmentPreview"
+      },
+      "maxItems": 64,
+      "title": "Assignments",
+      "type": "array"
+    },
+    "effects": {
+      "$ref": "#/$defs/FleetProfileEffects"
+    },
+    "effects_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Effects Digest",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "plan_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Plan Digest",
+      "type": "string"
+    },
+    "preparation_decisions": {
+      "items": {
+        "$ref": "#/$defs/FleetProfilePreparationDecision"
+      },
+      "maxItems": 64,
+      "title": "Preparation Decisions",
+      "type": "array"
+    },
+    "preparation_steps": {
+      "items": {
+        "$ref": "#/$defs/FleetProfilePlanStep"
+      },
+      "maxItems": 128,
+      "title": "Preparation Steps",
+      "type": "array"
+    },
+    "preparations": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileAssignmentPreparation"
+      },
+      "maxItems": 64,
+      "title": "Preparations",
+      "type": "array"
+    },
+    "profile_definition": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FleetProfileDefinition"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "profile_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Profile Digest",
+      "type": "string"
+    },
+    "profile_id": {
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "profile_name": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Profile Name",
+      "type": "string"
+    },
+    "profile_revision": {
+      "anyOf": [
+        {
+          "maximum": 2147483647,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Profile Revision"
+    },
+    "reasons": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileReason"
+      },
+      "maxItems": 128,
+      "title": "Reasons",
+      "type": "array"
+    },
+    "resolved_assignments": {
+      "items": {
+        "$ref": "#/$defs/FleetProfileAssignment"
+      },
+      "maxItems": 64,
+      "title": "Resolved Assignments",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/$defs/FleetProfileScopePreview"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/FleetProfilePlanStep"
+      },
+      "maxItems": 1024,
+      "title": "Steps",
+      "type": "array"
+    },
+    "summary": {
+      "$ref": "#/$defs/FleetProfilePlanSummary"
+    },
+    "waits_for_preparation": {
+      "default": false,
+      "title": "Waits For Preparation",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "schema_version",
+    "profile_id",
+    "profile_name",
+    "profile_digest",
+    "profile_revision",
+    "profile_definition",
+    "allowed",
+    "scope",
+    "summary",
+    "assignments",
+    "resolved_assignments",
+    "admission_decisions",
+    "preparation_decisions",
+    "effects",
+    "steps",
+    "reasons",
+    "generated_at",
+    "assessments",
+    "plan_digest",
+    "effects_digest"
+  ],
+  "title": "vonkctl profile-review document (schema_version 2)",
+  "type": "object"
+}

@@ -21,10 +21,13 @@ from vonk_agent_protocol import (
 )
 from vonk_control.artifact_blob_store import ArtifactBlobStore
 from vonk_control.artifact_job_api import install_artifact_job_routes
-from vonk_control.artifact_jobs import ArtifactJobResponse, ArtifactJobService
+from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.auth import Actor
 from vonk_control.models import AgentOperation, ArtifactJob, Job
 from vonk_control.strict_json import ControllerAPIRoute
+from vonk_control.vonkctl_json_contract import DOCUMENTS
+
+from cluster_profiles.cli_json_contract import DocumentKind
 
 from .test_artifact_jobs import _configure_artifact_recipe
 from .test_profile_load_installed_cli import (
@@ -43,6 +46,9 @@ OUTPUT_LIMITS: dict[str, object] = {
     "max_total_bytes": 4096,
     "allowed_media_types": ["image/png"],
 }
+
+# vonkctl prints the Controller job plus its schema_version.
+_CLI_JOB = DOCUMENTS[DocumentKind.ARTIFACT_JOB]
 
 
 def test_installed_cli_canonicalizes_media_without_contract_runtime(
@@ -468,7 +474,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             "00000000-0000-4000-8000-000000000108",
         )
         assert fresh.returncode == 0, fresh.stdout + fresh.stderr
-        fresh_job = ArtifactJobResponse.model_validate_json(fresh.stdout)
+        fresh_job = _CLI_JOB.validate_json(fresh.stdout)
         assert fresh_job.id != job_id
         fresh_submit = _run_cli(
             installed_vonkctl,
@@ -480,7 +486,7 @@ def test_installed_cli_recovers_submitted_job_and_publishes_only_verified_output
             "00000000-0000-4000-8000-000000000109",
         )
         assert fresh_submit.returncode == 0, fresh_submit.stdout + fresh_submit.stderr
-        fresh_receipt = ArtifactJobResponse.model_validate_json(fresh_submit.stdout)
+        fresh_receipt = _CLI_JOB.validate_json(fresh_submit.stdout)
         assert fresh_receipt.id == fresh_job.id
         assert fresh_receipt.operation_id is not None
         assert fresh_receipt.operation_id != operation_id

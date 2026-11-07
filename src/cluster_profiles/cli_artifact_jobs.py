@@ -35,6 +35,7 @@ from .control_client import (
     ControlTransportError,
     validate_control_document,
 )
+from .control_client.transfers import TransferReceipt
 from .control_client.transfers import download_destination as _download_destination
 from .control_client.transfers import verified_output as _existing_verified_file
 from .generated_control.media_types import canonical_media_types
@@ -96,7 +97,7 @@ class ArtifactJobClient(Protocol):
         expected_size: int,
         overwrite: bool,
         timeout_seconds: float | None = None,
-    ) -> dict[str, object]: ...
+    ) -> TransferReceipt: ...
 
 
 def add_artifact_job_commands(
