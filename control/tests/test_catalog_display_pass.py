@@ -224,10 +224,39 @@ def test_a_bad_display_is_that_entrys_problem_and_the_rest_still_apply(
 
     assert len(snapshot.problems) == 1
     assert snapshot.problems[0].detail.startswith("catalog model display is invalid")
-    assert snapshot.catalog_entities == ()
+    assert len(snapshot.catalog_entities) == 1
+    assert snapshot.catalog_entities[0].display is None
     result = world.sync()
     assert result.skipped_count == 1
     assert world.library_recipe().identity.title == "Applied despite its neighbour"
+    assert world.library_model().model_display is not None
+
+
+def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
+    world: World,
+) -> None:
+    index = copy.deepcopy(world.index)
+    shown = copy.deepcopy(index["catalog_entities"][0]["display"])
+    # A capability name a later minor added: this contract cannot read it.
+    index["catalog_entities"][0]["display"]["capabilities"] = ["not-yet-known"]
+    world.release.publish(index, world.packages)
+
+    first = world.reader.list()
+    world.sync()
+
+    assert len(first.problems) == 1
+    assert first.problems[0].detail.startswith("catalog model display is invalid")
+    assert first.catalog_entities[0].display is None
+    model = world.library_model()
+    assert model.model_display is None
+    assert world.documents()["model"]
+
+    index["catalog_entities"][0]["display"] = shown
+    world.release.publish(index, world.packages)
+    second = world.reader.list()
+    world.sync()
+
+    assert second.problems == ()
     assert world.library_model().model_display is not None
 
 
@@ -470,7 +499,9 @@ def test_every_invalid_display_vector_is_a_per_entry_problem_with_the_named_erro
     snapshot, _ = client._parse_index(
         _index(kind, document, display), publication_commit="a" * 40
     )
-    assert snapshot.items == () and snapshot.catalog_entities == ()
+    assert snapshot.items == ()
+    # A Model survives an unreadable display (without it); a Recipe does not.
+    assert (len(snapshot.catalog_entities) == 1) == (kind == "model")
     assert len(snapshot.problems) == 1
     assert "display is invalid" in snapshot.problems[0].detail
     client.close()

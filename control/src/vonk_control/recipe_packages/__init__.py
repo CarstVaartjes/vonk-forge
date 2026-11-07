@@ -679,17 +679,20 @@ class RecipePackageClient:
                     )
                 )
                 continue
+            # Display is text for people: an unreadable one (a capability name a
+            # later minor added) costs the display only, never the Model. The
+            # entry is read again on a later sync.
             try:
-                model_display = _entry_display(
+                model_display: ModelDisplay | None = _entry_display(
                     entry, model.identity, read_model_display
                 )
             except (TypeError, ValueError) as error:
+                model_display = None
                 problems.append(
                     _index_problem(
                         None, "catalog model display is invalid", entry, error
                     )
                 )
-                continue
             digest = entry.get("content_sha256")
             if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
                 problems.append(

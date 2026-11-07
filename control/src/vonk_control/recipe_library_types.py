@@ -97,10 +97,20 @@ class RecipePackageEntry:
 
 @dataclass(frozen=True, slots=True)
 class CatalogModelEntry:
-    """One index Model: the signed document and the display that travels with it."""
+    """One index Model: the signed document and the display that travels with it.
+
+    The display is optional: a display this Controller cannot read leaves the
+    Model (the execution document) importable, and is read again on a later sync.
+    """
 
     document: dict
-    display: ModelDisplay
+    display: ModelDisplay | None
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """(publisher, slug) of the document, validated when the index was read."""
+        identity = self.document["identity"]
+        return identity["publisher"], identity["slug"]
 
 
 @dataclass(frozen=True, slots=True)

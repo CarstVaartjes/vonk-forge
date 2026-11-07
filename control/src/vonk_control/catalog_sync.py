@@ -800,7 +800,11 @@ class ManagedRecipeCatalogSyncService:
         # document's problem; the next sync applies it again.
         recipe_uris = {(item.publisher, item.slug): item.uri for item in snapshot.items}
         for display, error in self._catalog.apply_displays(
-            [entry.display for entry in snapshot.catalog_entities]
+            [
+                entry.display
+                for entry in snapshot.catalog_entities
+                if entry.display is not None
+            ]
             + [item.display for item in snapshot.items]
         ):
             self._record_problem_values(
@@ -827,11 +831,7 @@ class ManagedRecipeCatalogSyncService:
                     for item in snapshot.items
                 ]
                 + [
-                    (
-                        RunSwitchReasonScopeName.MODEL,
-                        entry.display.identity.publisher,
-                        entry.display.identity.slug,
-                    )
+                    (RunSwitchReasonScopeName.MODEL, *entry.key)
                     for entry in snapshot.catalog_entities
                 ]
             )
