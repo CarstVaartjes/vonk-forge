@@ -3745,6 +3745,73 @@ def test_rust_git_is_flagged_only_inside_cfg_test_items() -> None:
     assert not check_source(path, source, {1}, modes=_GIT_FREE)
 
 
+FUTURE_WORKER_HEADER = """\
+import threading
+from concurrent.futures import Future
+
+
+def start(read):
+    future = Future()
+
+"""
+EXCEPTION_ONLY_WORKER = """\
+    def work():
+        try:
+            future.set_result(read())
+        except Exception as error:
+            future.set_exception(error)
+
+    threading.Thread(target=work, daemon=True).start()
+    return future.result()
+"""
+BASE_EXCEPTION_WORKER = EXCEPTION_ONLY_WORKER.replace(
+    "except Exception", "except BaseException"
+)
+BARE_EXCEPT_WORKER = EXCEPTION_ONLY_WORKER.replace(
+    "except Exception as error", "except"
+)
+# An unrelated bounded wait elsewhere in the module does not exempt the worker.
+TIMEOUT_WAITER = EXCEPTION_ONLY_WORKER + "    stop.wait(timeout=1)\n"
+NO_COMPLETION_WORKER = """\
+    def work():
+        read()
+
+    threading.Thread(target=work, daemon=True).start()
+"""
+
+
+def _future_worker_hits(body: str, lines: set[int] | None = None) -> list[str]:
+    source = FUTURE_WORKER_HEADER + body
+    added = lines or set(range(1, len(source.splitlines()) + 1))
+    return check_source("src/pkg/reads.py", source, added, modes=("future-workers",))
+
+
+def test_future_worker_catching_only_exception_is_flagged():
+    assert _future_worker_hits(EXCEPTION_ONLY_WORKER)
+    # Only an added line is reported.
+    assert not _future_worker_hits(EXCEPTION_ONLY_WORKER, {1})
+
+
+def test_unrelated_timeout_wait_does_not_exempt_an_exception_only_worker():
+    assert _future_worker_hits(TIMEOUT_WAITER)
+
+
+def test_edit_inside_an_existing_worker_is_flagged():
+    source = FUTURE_WORKER_HEADER + EXCEPTION_ONLY_WORKER
+    inside = source.splitlines().index("            future.set_exception(error)") + 1
+    assert _future_worker_hits(EXCEPTION_ONLY_WORKER, {inside})
+    # An added line after the worker is not part of it.
+    assert not _future_worker_hits(EXCEPTION_ONLY_WORKER, {inside + 3})
+
+
+@pytest.mark.parametrize(
+    "body",
+    [BASE_EXCEPTION_WORKER, BARE_EXCEPT_WORKER, NO_COMPLETION_WORKER],
+)
+def test_future_worker_that_cannot_hang_its_waiter_is_allowed(body):
+    assert not _future_worker_hits(body)
+
+
 _PAGE_CEILINGS = (
     "def keys(client):\n"
     "    for page in range(1, _MAX_PAGES + 1):\n"
