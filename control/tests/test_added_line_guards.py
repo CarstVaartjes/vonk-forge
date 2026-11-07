@@ -2343,6 +2343,8 @@ def test_an_alias_checked_with_the_contract_passes(source: str) -> None:
         "same = run.alias == assignment.alias\n",
         "q = select(RecipeRun.id).where(RecipeRun.alias == alias)\n",
         "other = assignment.alias != run.alias\n",
+        "same = row.alias == alias\n",
+        "same = candidate.alias != other_alias\n",
     ],
 )
 def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
@@ -2368,6 +2370,10 @@ def test_a_run_alias_compared_by_hand_is_flagged(source: str) -> None:
     [
         "run.alias = alias\n",
         "run.alias += '-x'\n",
+        "item.alias = alias\n",
+        "setattr(row, 'alias', alias)\n",
+        "stmt = insert(RecipeRun).values({'alias': alias})\n",
+        "stmt = update(RecipeRun).values({'alias': alias})\n",
         "stmt = update(RecipeRun).where(RecipeRun.id == x).values(alias=alias)\n",
         "run = RecipeRun(alias=alias, plan_digest=d)\n",
     ],
@@ -2384,6 +2390,15 @@ def test_a_run_alias_written_outside_the_rename_module_is_flagged(
         lines,
         modes=("alias-rules",),
     )
+
+
+def test_a_request_side_alias_comparison_passes() -> None:
+    for source in (
+        "same = assignment.alias == alias\n",
+        "stale = plan.alias != stop.alias\n",
+        "own = request.alias == alias\n",
+    ):
+        assert not check_source(_ALIAS_PATH, source, {1}, modes=("alias-rules",))
 
 
 def test_a_run_is_created_with_its_name_only_in_run_admission() -> None:

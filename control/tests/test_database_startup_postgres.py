@@ -63,22 +63,6 @@ def test_bookkeeping_adoption_failure_preserves_current_schema(
         assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
 
 
-def test_a_failed_run_plan_strip_aborts_startup(
-    postgres_engine: Engine,
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Strict readers refuse a plan that still carries the old key, so the strip
-    is not best-effort bookkeeping: a failure keeps the old Controller serving."""
-
-    def broken_strip(connection: Connection) -> int:
-        connection.exec_driver_sql("SELECT * FROM missing_run_plan_bookkeeping")
-        return 0
-
-    monkeypatch.setattr(startup_owner, "strip_run_plan_alias", broken_strip)
-    with pytest.raises(RuntimeError, match="startup aborts"):
-        initialize_database(postgres_engine.url.render_as_string(hide_password=False))
-
-
 _LEGACY_CONTACT_COLUMNS = """ALTER TABLE agent_nodes
     ADD COLUMN protocol_version integer,
     ADD COLUMN contact_certificate_serial varchar(128),

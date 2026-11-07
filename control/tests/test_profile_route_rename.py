@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_progress import _parent_identity
-from vonk_control.recipe_routes import RecipeRouteError
+from vonk_control.recipe_routes import RecipeRouteNotReady
 
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import PAIR, SOLO, SOLO_B, World, build_world
@@ -55,7 +55,8 @@ class _FlakyPublisher(ConcurrentPublisher):
 
     def publish_recipe(self, candidate):
         if self.down:
-            raise RecipeRouteError("the route publisher is unreachable")
+            # As the real activation reports an unreachable gateway.
+            raise RecipeRouteNotReady("the route publisher is unreachable")
         return super().publish_recipe(candidate)
 
 
@@ -486,5 +487,243 @@ def test_a_rename_owns_the_name_over_a_newer_run_the_same_plan_stops(
             assert holder.id not in candidate.included
         assert sim.settle(load) == "succeeded"
         assert [item.id for item in _runs(world, "coder")] == [before.id]
+    finally:
+        world.close()
+
+
+def _coordinator(world: World):
+    from vonk_control.agent_jobs import AgentJobService
+    from vonk_control.distributed_recovery import DistributedRecoveryCoordinator
+
+    return DistributedRecoveryCoordinator(
+        world.sessions,
+        routes=world.routes,
+        agent_jobs=AgentJobService(world.sessions, clock=world.clock),
+        clock=world.clock,
+        recovery_run_stops=world.controller.lifecycle,
+        start_timeout_seconds=60,
+    )
+
+
+def _recover(world: World, sim: Simulation, run_id: str, rounds: int = 80) -> None:
+    """A rank exits; recovery proves the run's authority and queues its own Stop.
+
+    (The simulation's Sparks do not model the following next-generation Start;
+    that leg is proven on the wire in ``test_recipe_observation_wire_bridge``.)
+    """
+
+    from vonk_control.models import RunNode
+
+    with world.sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        rank = session.scalars(
+            select(RunNode).where(RunNode.run_id == run_id, RunNode.rank == 1)
+        ).one()
+        rank.state = "failed"
+        rank.observed_run_generation = run.run_generation
+        rank.observation_process_running = False
+        rank.observation_endpoint_ready = False
+        rank.observation_observed_at = world.clock()
+        sim.sparks.spark(1).serving.discard(run_id)
+    coordinator = _coordinator(world)
+    for _ in range(rounds):
+        # Only recovery acts here: the profile worker would meet the failed rank
+        # first and stop the whole run its own way.
+        world.advance(30)
+        coordinator.tick()
+        with world.sessions() as session:
+            stops = [
+                job
+                for job in session.scalars(select(Job).where(Job.kind == "recipe.stop"))
+                if job.payload.get("recovery") is not None
+                and _parent_identity(job, "owner_id") == run_id
+            ]
+        if stops:
+            return
+    raise AssertionError("recovery did not queue the run's own Stop")
+
+
+def _renamed_pair(world: World, sim: Simulation) -> _Run:
+    assignment = world.assignment(PAIR, world.nodes)
+    assignment["assignment_name"] = "pair-old"
+    old, _number = world.create_profile("Pair old", [assignment])
+    new, _number = world.create_profile(
+        "Pair new", [{**assignment, "assignment_name": "pair-new"}]
+    )
+    assert sim.settle(_load(world, old)) == "succeeded"
+    sim.round()
+    (before,) = _runs(world, "pair-old")
+    assert sim.settle(_load(world, new)) == "succeeded"
+    sim.round()
+    assert _runs(world, "pair-new") == [before]
+    return before
+
+
+@pytest.mark.slow(60)
+def test_a_crashed_rank_is_recovered_under_the_new_name(
+    tmp_path, postgres_engine
+) -> None:
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        before = _renamed_pair(world, sim)
+        bundles = len(world.publisher.aliases)
+        _recover(world, sim, before.id)
+        # The route stays under the new name: the old one is never republished.
+        assert ("pair-old",) not in world.publisher.aliases[bundles:]
+        with world.sessions() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None and run.alias == "pair-new"
+    finally:
+        world.close()
+
+
+@pytest.mark.slow(60)
+def test_a_wait_remembered_by_an_older_reader_is_cleared_and_recovery_resumes(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """The old worker, still running while the new API strips the plans, cannot
+    read them and remembers 'unreadable' by the bytes alone.  This release reads
+    the plan again once and clears that wait."""
+
+    from hashlib import sha256
+
+    from vonk_agent_protocol import canonical_message
+    from vonk_control.distributed_recovery import common
+    from vonk_control.persisted_waits import read_wait
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        before = _renamed_pair(world, sim)
+        with world.sessions.begin() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None
+            with monkeypatch.context() as old:
+                old.setattr(
+                    common,
+                    "_plan_identity",
+                    lambda item: sha256(canonical_message(item.plan)).hexdigest(),
+                )
+                assert common._wait_for_plan_change(run, world.clock())
+            assert read_wait(run) is not None and run.route_error
+            # The remembered outcome belongs to the old reader, not to this one.
+            assert not common._unchanged_unreadable(run)
+
+        _coordinator(world).tick()
+        with world.sessions() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None
+            assert read_wait(run) is None and run.route_error is None
+
+        _recover(world, sim, before.id)
+    finally:
+        world.close()
+
+
+@pytest.mark.slow(60)
+def test_the_new_code_converges_to_the_normal_route_after_the_old_worker_flipped_it(
+    tmp_path, postgres_engine
+) -> None:
+    from vonk_control.db.startup import strip_run_plan_alias
+
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        before = _identical_runs_loaded(world, sim, "sweep-alias")
+        with world.sessions() as session:
+            normal = world.routes.candidate_in_session(
+                session,
+                include_run_id=None,
+                exclude_run_ids=frozenset(),
+                lock=False,
+            ).state.digest
+        # The old worker could not read the stripped plan: it republished the
+        # run from its accepted projection and left its reason.
+        with world.sessions.begin() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None
+            run.route_digest = "f" * 64
+            run.route_error = "stored recipe run plan is invalid"
+        with postgres_engine.begin() as connection:
+            strip_run_plan_alias(connection)
+        bundles = len(world.publisher.aliases)
+        for _ in range(12):
+            sim.round()
+        # The new code publishes the normal bundle, and from then on every
+        # bundle is that one: no flip back and forth.
+        added = world.publisher.aliases[bundles:]
+        assert added and set(added) == {("sweep-alias",)}
+        with world.sessions() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None and run.route_state == "published"
+            assert run.route_error is None
+            assert (
+                world.routes.candidate_in_session(
+                    session,
+                    include_run_id=None,
+                    exclude_run_ids=frozenset(),
+                    lock=False,
+                ).state.digest
+                == normal
+            )
+            assert run.route_digest == normal
+    finally:
+        world.close()
+
+
+@pytest.mark.slow(60)
+def test_startup_strips_old_run_plans_and_survives_a_row_it_cannot_strip(
+    tmp_path, postgres_engine
+) -> None:
+    from vonk_control.db import initialize_database
+    from vonk_control.distributed_recovery.common import _unreadable_run_ids
+
+    url = postgres_engine.url.render_as_string(hide_password=False)
+    initialize_database(url)
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        before = _identical_runs_loaded(world, sim, "sweep-alias")
+        known = before.plan_digest
+
+        def old_shape() -> None:
+            with postgres_engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "UPDATE recipe_runs SET plan = (plan::jsonb "
+                    "|| jsonb_build_object('alias', alias))::json"
+                )
+
+        def plan_and_unreadable() -> tuple[dict[str, object], list[str]]:
+            with world.sessions() as session:
+                run = session.get(RecipeRun, before.id)
+                assert run is not None
+                return dict(run.plan), _unreadable_run_ids(session)
+
+        old_shape()
+        assert plan_and_unreadable()[1] == [before.id]
+        initialize_database(url)
+        plan, unreadable = plan_and_unreadable()
+        assert "alias" not in plan and unreadable == []
+        with world.sessions() as session:
+            run = session.get(RecipeRun, before.id)
+            assert run is not None and run.plan_digest == known
+
+        # A row that cannot be rewritten does not take the Controller down: it
+        # stays as it is and the typed unreadable-run path reports it.
+        old_shape()
+        with postgres_engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE FUNCTION refuse_plan_update() RETURNS trigger AS $$ "
+                "BEGIN RAISE EXCEPTION 'row is locked down'; END $$ LANGUAGE plpgsql"
+            )
+            connection.exec_driver_sql(
+                "CREATE TRIGGER refuse_plan_update BEFORE UPDATE OF plan "
+                "ON recipe_runs FOR EACH ROW EXECUTE FUNCTION refuse_plan_update()"
+            )
+        initialize_database(url)
+        plan, unreadable = plan_and_unreadable()
+        assert plan["alias"] == "sweep-alias" and unreadable == [before.id]
     finally:
         world.close()

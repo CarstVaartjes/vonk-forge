@@ -53,16 +53,31 @@ def strip_run_plan_alias(connection: Connection) -> int:
     statement is idempotent and covers every row, history included, so no
     reader accepts the old shape.  Digests are never recomputed: the stored
     ``plan_digest`` is an admission token that the Sparks' container labels and
-    stop payloads carry.  A failure raises, so startup aborts and the running
-    workloads and the published bundle stay as they are rather than meeting
-    readers that refuse their plans.
+    stop payloads carry.
+
+    Startup never fails on one row (that would leave no Controller API): a row
+    that cannot be rewritten is logged and stays as it is, and the typed
+    unreadable-run path retains its workload and reports it.
     """
-    return connection.execute(
-        text(
-            "UPDATE recipe_runs SET plan = (plan::jsonb - 'alias')::json "
-            "WHERE jsonb_exists(plan::jsonb, 'alias')"
-        )
-    ).rowcount
+    stripped = 0
+    for (run_id,) in connection.execute(
+        text("SELECT id FROM recipe_runs WHERE jsonb_exists(plan::jsonb, 'alias')")
+    ).all():
+        try:
+            with connection.begin_nested():
+                stripped += connection.execute(
+                    text(
+                        "UPDATE recipe_runs SET plan = (plan::jsonb - 'alias')::json "
+                        "WHERE id = :id AND jsonb_exists(plan::jsonb, 'alias')"
+                    ),
+                    {"id": run_id},
+                ).rowcount
+        except SQLAlchemyError:
+            _LOGGER.exception(
+                "Run %s keeps its stored route name; it is reported as unreadable",
+                run_id,
+            )
+    return stripped
 
 
 def initialize_database(
@@ -102,8 +117,6 @@ def initialize_database(
                     try:
                         with lock_connection.begin():
                             verify_schema_is_current(lock_connection)
-                            # Not best-effort: strict readers refuse a plan that
-                            # still carries the old key, so a failure aborts.
                             stripped = strip_run_plan_alias(lock_connection)
                             if stripped:
                                 _LOGGER.info(

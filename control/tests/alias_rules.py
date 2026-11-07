@@ -35,6 +35,12 @@ RUN_ALIAS_SITES = frozenset({"control/src/vonk_control/run_route_name.py"})
 RUN_CREATION_SITES = frozenset({"control/src/vonk_control/run_admission.py"})
 #: The run named by a comparison side: ``run.alias``, ``RecipeRun.alias``.
 _RUN_NAME = re.compile(r"(?i)run$")
+#: Receivers whose ``.alias`` is the requested name of a start or an assignment,
+#: not the name a live run is routed under.
+_REQUEST_NAME = re.compile(
+    r"(?i)(assignment|plan|request|effect|stop|expected|child|intent|revision|"
+    r"endpoint|payload|body|lane|self|cls)s?$"
+)
 
 
 def in_scope(path: str) -> bool:
@@ -156,7 +162,7 @@ def scan_run_alias(source: str) -> list[int]:
             if (
                 isinstance(side, ast.Attribute)
                 and side.attr == "alias"
-                and _RUN_NAME.search(_name(side.value))
+                and not _REQUEST_NAME.search(_name(side.value))
             ):
                 hits.add(node.lineno)
         # ``RecipeRun.alias == x`` inside a query filter is a Compare as well.
@@ -171,12 +177,12 @@ def run_alias_write_in_scope(path: str) -> bool:
     )
 
 
-def _updates_run(node: ast.AST) -> bool:
-    """``update(RecipeRun)...`` somewhere down a call chain."""
+def _writes_run(node: ast.AST) -> bool:
+    """``update(RecipeRun)...`` or ``insert(RecipeRun)...`` down a call chain."""
     while isinstance(node, ast.Call | ast.Attribute):
         if (
             isinstance(node, ast.Call)
-            and _name(node.func) == "update"
+            and _name(node.func) in {"update", "insert"}
             and node.args
             and _name(node.args[0]) == "RecipeRun"
         ):
@@ -185,29 +191,46 @@ def _updates_run(node: ast.AST) -> bool:
     return False
 
 
+def _names_alias(call: ast.Call) -> bool:
+    """``alias=…`` or a ``{"alias": …}`` mapping among the call's arguments."""
+    if any(keyword.arg == "alias" for keyword in call.keywords):
+        return True
+    return any(
+        isinstance(key, ast.Constant) and key.value == "alias"
+        for argument in call.args
+        if isinstance(argument, ast.Dict)
+        for key in argument.keys
+    )
+
+
 def scan_run_alias_write(source: str, path: str) -> list[int]:
-    """Lines that write a run's alias: assignment, bulk update, construction."""
+    """Lines that write a run's alias: assignment, setattr, bulk write, construction.
+
+    Any receiver counts: the name of the variable holding the run proves nothing.
+    """
     hits: set[int] = set()
     creates = path in RUN_CREATION_SITES
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
-                if (
-                    isinstance(target, ast.Attribute)
-                    and target.attr == "alias"
-                    and _RUN_NAME.search(_name(target.value))
-                ):
+                if isinstance(target, ast.Attribute) and target.attr == "alias":
                     hits.add(node.lineno)
         elif isinstance(node, ast.Call):
-            named = any(keyword.arg == "alias" for keyword in node.keywords)
-            if not named:
-                continue
             if (
+                _name(node.func) == "setattr"
+                and len(node.args) > 1
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value == "alias"
+            ):
+                hits.add(node.lineno)
+            elif not _names_alias(node):
+                continue
+            elif (
                 _name(node.func) == "RecipeRun"
                 and not creates
                 or _name(node.func) == "values"
-                and _updates_run(node.func)
+                and _writes_run(node.func)
             ):
                 hits.add(node.lineno)
     return sorted(hits)
