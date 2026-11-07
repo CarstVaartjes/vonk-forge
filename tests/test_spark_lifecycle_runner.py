@@ -2343,3 +2343,33 @@ def test_artifact_job_canary_speaks_the_controller_contract() -> None:
     assert exit_codes == [0, 0, job.FAILURE_EXIT_CODE]
     assert len(set(request_ids)) == 6
     assert all(re.fullmatch(r"[0-9a-f-]{36}", value) for value in request_ids)
+
+
+def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
+    pytest.importorskip(
+        "fastapi", reason="Controller contract tests run in the control suite"
+    )
+    lifecycle = _module()
+    assignment_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    blocker = {
+        "code": "memory.insufficient",
+        "detail": "not enough memory",
+        "node_ids": ["spk_" + "b" * 32],
+    }
+    preview = {
+        "allowed": False,
+        "summary": {"blockers": 1},
+        "reasons": [{"code": "profile.interruption_expected", "severity": "warning"}],
+        "admission_decisions": [
+            {"assignment_id": assignment_id, "allowed": False, "blockers": [blocker]}
+        ],
+        "assessments": [
+            {"assignment_id": assignment_id, "assessment": {"blockers": [blocker]}}
+        ],
+    }
+    message = lifecycle.SparkLifecycle._preview_diagnostic(preview)
+    parsed = json.loads(message)["admission"][0]
+    assert parsed["assignment_id"] == assignment_id
+    assert parsed["blockers"][0]["code"] == "memory.insufficient"
+    assert parsed["blockers"][0]["node_ids"] == blocker["node_ids"]
+    assert parsed["assessment_blockers"][0]["detail"] == "not enough memory"

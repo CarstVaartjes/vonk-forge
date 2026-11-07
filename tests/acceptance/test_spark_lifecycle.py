@@ -4408,6 +4408,55 @@ class SparkLifecycle:
         return typed.model_dump(mode="json")
 
     @staticmethod
+    def _blocker_diagnostic(blockers: object) -> list[dict[str, object]]:
+        if not isinstance(blockers, list):
+            return []
+        return [
+            {
+                "code": blocker.get("code"),
+                "detail": str(blocker.get("detail"))[:300],
+                "node_ids": blocker.get("node_ids"),
+            }
+            for blocker in blockers[:8]
+            if isinstance(blocker, dict)
+        ]
+
+    @staticmethod
+    def _admission_diagnostic(preview: dict[str, object]) -> list[dict[str, object]]:
+        """Name the blockers each assignment's admission decision carries.
+
+        ``summary.blockers`` counts them, but the reasons list shows only
+        warnings; the decisive blocker lives on the assignment decision and its
+        assessment.
+        """
+
+        decisions = preview.get("admission_decisions")
+        assessments = preview.get("assessments")
+        by_assignment: dict[object, object] = {}
+        if isinstance(assessments, list):
+            for item in assessments:
+                if isinstance(item, dict) and isinstance(item.get("assessment"), dict):
+                    by_assignment[item.get("assignment_id")] = item["assessment"].get(
+                        "blockers"
+                    )
+        if not isinstance(decisions, list):
+            return []
+        return [
+            {
+                "assignment_id": decision.get("assignment_id"),
+                "allowed": decision.get("allowed"),
+                "blockers": SparkLifecycle._blocker_diagnostic(
+                    decision.get("blockers")
+                ),
+                "assessment_blockers": SparkLifecycle._blocker_diagnostic(
+                    by_assignment.get(decision.get("assignment_id"))
+                ),
+            }
+            for decision in decisions[:8]
+            if isinstance(decision, dict)
+        ]
+
+    @staticmethod
     def _preview_diagnostic(preview: dict[str, object]) -> str:
         """Describe a rejected profile preview instead of collapsing its cause.
 
@@ -4439,6 +4488,7 @@ class SparkLifecycle:
             ]
         return json.dumps(
             {
+                "admission": SparkLifecycle._admission_diagnostic(preview),
                 "allowed": preview.get("allowed"),
                 "preparations": rendered_preparations,
                 "reasons": rendered_reasons,
