@@ -85,7 +85,9 @@ inputs, emits SBOM and provenance, resolves all three digests, and creates the
 checksum-protected three-reference release asset. It never treats one or two
 images as a releasable publication. LiteLLM signatures use the checked-in key
 copied from immutable upstream commit
-`0112e53046018d726492c814b3644b7d376029d0`; verify the locked digest, never a
+`e82a3c646908ba0a6ee0beddc4310d7a6cac4065` (the vendor's 2026-10-23 key rotation;
+SHA-256 of the PEM `e3fe3e08c44b16407fe0b37c43b4f8b603b3a0f4ee74c29e647bc022d762c2c0`,
+as published in the vendor's October 21 incident post); verify the locked digest, never a
 mutable tag. Store scan/signature attestations with the release evidence.
 
 ## Recipe workloads
