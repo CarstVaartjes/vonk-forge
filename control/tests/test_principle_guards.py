@@ -34,6 +34,16 @@ from .principle_guards import (
             "while monotonic() < deadline:\n    sleep(1)",
             "while progress_verdict(**window) is not Verdict.STALLED:\n    sleep(1)",
         ),
+        (
+            "waits",
+            "for page in itertools.count(1):\n    fetch(page)",
+            "for page in range(2, total + 1):\n    fetch(page)",
+        ),
+        (
+            "waits",
+            "for chunk in iter(read, b''):\n    sleep(1)",
+            "for chunk in items:\n    sleep(1)",
+        ),
         ("waits", "subprocess.run(['x'])", "subprocess.run(['x'], timeout=10)"),
         ("waits", "event.wait()", "event.wait(timeout=10)"),
         (
