@@ -193,7 +193,12 @@ ARG SKOPEO_ARM64_DIGEST
 # Runtime pip is removed because this image installs nothing at startup, and
 # apt is purged for the same reason: the runtime never installs packages, so
 # the package manager is attack surface (and carries its own CVEs) for nothing.
-RUN apt-get update \
+# The day argument keys the OS upgrade layer like the dependency layer above:
+# a cached layer would otherwise keep serving packages from the day it was
+# built, so a Debian security fix reaches the next day's image.
+ARG DEPENDENCY_DAY=undated
+RUN echo "dependency day: ${DEPENDENCY_DAY}" \
+    && apt-get update \
     && apt-get upgrade --yes --no-install-recommends \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
