@@ -19,28 +19,40 @@ def test_native_grants_follow_published_accepted_recipe_and_public_alias(
         },
     )
     sessions = service.sessions
-    assert recipe_key_routes(sessions, []) == [GatewayInferenceRoute.OPENAI]
+    assert recipe_key_routes(sessions, []) == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
     with sessions.begin() as session:
         run = _recipe_run(session, run_id)
         run.route_state = RouteState.PENDING
     assert recipe_key_routes(sessions, ["public-d3"]) == [
         GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
         GatewayInferenceRoute.SYSTEMONE,
     ]
     with sessions.begin() as session:
         _recipe_run(session, run_id).route_state = RouteState.PUBLISHED
     assert recipe_key_routes(sessions, []) == [
         GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
         GatewayInferenceRoute.SYSTEMONE,
     ]
     assert recipe_key_routes(sessions, ["public-d3"]) == [
         GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
         GatewayInferenceRoute.SYSTEMONE,
     ]
-    assert recipe_key_routes(sessions, ["qwen"]) == [GatewayInferenceRoute.OPENAI]
+    assert recipe_key_routes(sessions, ["qwen"]) == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
     with sessions.begin() as session:
         _recipe_run(session, run_id).route_state = RouteState.WITHDRAWN
-    assert recipe_key_routes(sessions, []) == [GatewayInferenceRoute.OPENAI]
+    assert recipe_key_routes(sessions, []) == [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
 
 
 def test_route_publication_waits_for_key_grants_then_heals(
@@ -77,6 +89,7 @@ def test_route_publication_waits_for_key_grants_then_heals(
     def activated(_content):
         assert upstream.keys["sweep"]["allowed_routes"] == [
             GatewayInferenceRoute.OPENAI,
+            GatewayInferenceRoute.MODEL_INFO,
             GatewayInferenceRoute.SYSTEMONE,
         ]
         return True
@@ -149,10 +162,14 @@ def test_route_publication_waits_for_key_grants_then_heals(
     assert applied
     assert upstream.keys["sweep"]["key"] == original
     # Gateway drift after publication heals on an API tick after another restart.
-    upstream.keys["sweep"]["allowed_routes"] = [GatewayInferenceRoute.OPENAI]
+    upstream.keys["sweep"]["allowed_routes"] = [
+        GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
+    ]
     asyncio.run(api_restart())
     assert upstream.keys["sweep"]["allowed_routes"] == [
         GatewayInferenceRoute.OPENAI,
+        GatewayInferenceRoute.MODEL_INFO,
         GatewayInferenceRoute.SYSTEMONE,
     ]
     assert upstream.keys["sweep"]["key"] == original

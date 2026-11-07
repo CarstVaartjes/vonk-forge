@@ -68,7 +68,10 @@ _DURATION_PATTERN = r"^[1-9][0-9]{0,5}[smhd]$"
 _KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_-]{16,256}\Z")
 _PAGE_SIZE = 100
 _MAX_PAGES = 100
-_KEY_ROUTES = [GatewayInferenceRoute.OPENAI.value]
+_KEY_ROUTES = [
+    GatewayInferenceRoute.OPENAI.value,
+    GatewayInferenceRoute.MODEL_INFO.value,
+]
 
 
 def _safe_routes(routes: list[str]) -> bool:
