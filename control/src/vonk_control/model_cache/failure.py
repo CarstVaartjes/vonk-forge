@@ -9,7 +9,12 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, ModelCacheCode, WaitReason
+from vonk_agent_protocol import (
+    Disposition,
+    ModelCacheCode,
+    SecurityRefusalReason,
+    WaitReason,
+)
 
 from ..agent_operation_facts import aware as _aware
 from ..failure_classification import disposition, is_definite
@@ -180,7 +185,7 @@ class FailureMixin:
                         retryable = False
                         verdict = Disposition.FAIL
                         failure_code = ModelCacheCode.SOURCE_GONE
-                        gone_recovery = "download_again"
+                        gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                         detail = cache._source_gone_detail(
                             session,
                             manifest,
@@ -219,6 +224,9 @@ class FailureMixin:
                             # fresh exact request counts independently.
                             retryable = False
                             verdict = Disposition.FAIL
+                            # The security code of the ingress digest edge, so
+                            # no parent starts a repair download of it.
+                            failure_code = SecurityRefusalReason.DIGEST_MISMATCH
                             gone_recovery = AvailabilityRecoveryAction.DOWNLOAD_AGAIN
                             detail = ingress_mismatch_detail(
                                 pinned.path, ingress_mismatch

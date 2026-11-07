@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
-from vonk_agent_protocol import LifecycleState, OperationProgress
+from vonk_agent_protocol import LifecycleState, OperationProgress, SecurityRefusalReason
 from vonk_control.artifact_lifecycle import (
     ArtifactIdentity,
     check_removal_fence_nowait,
@@ -3387,8 +3387,16 @@ def test_recipe_retry_uses_model_access_recheck_for_terminal_auth(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize(
+    ("child_code", "repairs"),
+    [
+        ("integrity_mismatch", True),
+        # The ingress digest edge ended the download: no repair is started.
+        (SecurityRefusalReason.DIGEST_MISMATCH.value, False),
+    ],
+)
 def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
-    tmp_path: Path,
+    tmp_path: Path, child_code: str, repairs: bool
 ) -> None:
     recipe = _recipe("recipe-source-build.json")
     engine = create_engine("sqlite:///:memory:")
@@ -3483,7 +3491,7 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
             if self.failed:
                 failed.state = "failed"
                 failed.failure = {
-                    "code": "integrity_mismatch",
+                    "code": child_code,
                     "detail": "downloaded bytes did not match the pinned digest",
                     "recovery_actions": ["download_again"],
                     "retryable": False,
@@ -3542,6 +3550,10 @@ def test_automatic_reconciliation_repairs_model_child_and_reuses_image(
         assert row is not None
         schedule_wait(row, datetime(2000, 1, 1, tzinfo=UTC))
     assert service.run_pending() == 1
+    if not repairs:
+        assert model_cache.repair_calls == []
+        assert service.get(parent.id).state == LifecycleState.FAILED
+        return
     assert len(model_cache.repair_calls) == 1
     assert model_cache.repair_calls[0]["artifact_set_sha256"] == "c" * 64
     assert model_cache.repair_calls[0]["plan_digest"] == "e" * 64

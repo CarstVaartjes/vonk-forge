@@ -23,8 +23,13 @@ from vonk_control.bounded_json import (
     require_sequence,
     text,
 )
+from vonk_control.failure_classification import is_security_failure
 from vonk_control.model_cache import ModelCacheService, ModelCacheStorageError
 from vonk_control.model_cache.constants import ProviderKind
+from vonk_control.model_cache.ingress_mismatch import (
+    IngressMismatchStep,
+    observe_ingress_mismatch,
+)
 from vonk_control.model_cache_contract import (
     ModelCacheOperationProgress,
 )
@@ -34,6 +39,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     ModelCacheOperation,
 )
+from vonk_control.settings import MODEL_CACHE_PARALLEL_DOWNLOADS
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 NOW = datetime(2026, 9, 6, 12, tzinfo=UTC)
@@ -1108,6 +1114,54 @@ def test_two_consecutive_digest_mismatches_end_the_download_with_evidence(
     fresh = _start(service, [artifact], "00000000-0000-4000-8000-000000000454")
     done = _drain_until(service, fresh.id, now, {"succeeded", "failed"})
     assert done.id != ended.id and done.state == "succeeded"
+    service.close()
+    assert client is not None
+    client.close()
+
+
+def test_alternating_files_count_as_consecutive_mismatches() -> None:
+    first, step = observe_ingress_mismatch(None, artifact_key="a", sha256="1" * 64)
+    assert step is IngressMismatchStep.RETRY
+    second, step = observe_ingress_mismatch(first, artifact_key="b", sha256="2" * 64)
+    assert step is IngressMismatchStep.END
+    # The last file and its pin are the evidence.
+    assert (second.artifact_key, second.sha256) == ("b", "2" * 64)
+
+
+def test_two_files_that_both_keep_mismatching_end_the_download(
+    tmp_path: Path,
+) -> None:
+    sessions = _database(tmp_path)
+    data = b"pinned model bytes"
+    requests: list[httpx2.Request] = []
+    now = [NOW]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        requests.append(request)
+        return httpx2.Response(200, request=request, content=b"X" * len(data))
+
+    service, client = _service(
+        tmp_path,
+        sessions,
+        maximum=MODEL_CACHE_PARALLEL_DOWNLOADS,
+        handler=handler,
+        clock=lambda: now[0],
+    )
+    # Equal sizes, two pins, both served other bytes: the failures alternate.
+    first = _artifact("both-a", data)
+    second = _artifact("both-b", b"other pinned bytes")
+    assert first["download_bytes"] == second["download_bytes"]
+    operation = _start(service, [first, second], "00000000-0000-4000-8000-000000000456")
+    ended = _drain_until(service, operation.id, now, {"succeeded", "failed"})
+    assert ended.state == "failed" and ended.failure is not None
+    assert is_security_failure(str(ended.failure["code"]))
+    assert ended.failure["retryable"] is False
+    assert "2 consecutive" in str(ended.failure["detail"])
+    seen = len(requests)
+    for _ in range(3):
+        now[0] += timedelta(seconds=600)
+        service.tick()
+    assert len(requests) == seen
     service.close()
     assert client is not None
     client.close()
