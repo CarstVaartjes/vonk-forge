@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Fail closed unless the locked upstream LiteLLM base verifies against the
-# checked-in cosign key. images.lock.json is the only owner of the digest.
+# Fail closed unless the locked upstream LiteLLM base, and every FROM line of
+# the Dockerfile that is built, verify against the checked-in cosign key.
+# images.lock.json is the only owner of the digest.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 reference="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_bases"]["litellm"])' "$root/deploy/compose/images.lock.json")"
@@ -8,4 +9,20 @@ case "$reference" in
   *@sha256:????????????????????????????????????????????????????????????????) ;;
   *) echo "locked litellm base is not digest-pinned: $reference" >&2; exit 1 ;;
 esac
-exec cosign verify --key "$root/deploy/compose/trust/litellm-cosign.pub" "$reference"
+# The built Dockerfile must use exactly the locked reference.
+found=0
+while read -r from; do
+  found=$((found + 1))
+  if [[ "$from" != "$reference" ]]; then
+    echo "LiteLLM Dockerfile FROM $from differs from locked $reference" >&2
+    exit 1
+  fi
+done < <(python3 -I -c '
+import re, sys
+for m in re.finditer(r"(?mi)^FROM\s+(?:--\S+\s+)*(?!\$)(\S+)(?:\s+AS\s+\S+)?\s*$", open(sys.argv[1]).read()):
+    print(m.group(1))' "$root/deploy/compose/litellm/Dockerfile")
+if [[ "$found" -ne 2 ]]; then
+  echo "LiteLLM Dockerfile must have exactly two pinned FROM lines, found $found" >&2
+  exit 1
+fi
+exec "$root/scripts/retry-dependency-fetch" cosign verify --key "$root/deploy/compose/trust/litellm-cosign.pub" "$reference"

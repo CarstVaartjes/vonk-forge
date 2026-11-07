@@ -53,9 +53,14 @@ third-party contracts wheel digest, runtime and build image pins,
 Dockerfile/Compose relationships, and the digest of the LiteLLM cosign public
 key. Both LiteLLM `FROM` lines must carry exactly the locked
 `build_bases.litellm` digest. The verifier has no network access, so it cannot
-check signatures; CI runs `scripts/verify-litellm-base-signature`
-(`cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
-base) before every LiteLLM build, failing closed. The verifier does not require
+check signatures; every CI job that builds the LiteLLM image
+(`ci.yml`, `dev-images.yml` and the `litellm` leg of `release-acceptance.yml`)
+first runs `scripts/verify-litellm-base-signature`. It rechecks that both
+Dockerfile `FROM` lines equal the lock, then runs
+`cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
+base through `scripts/retry-dependency-fetch`, failing closed. A workflow test
+requires that step, installed cosign and ordering before every LiteLLM build.
+The verifier does not require
 generated inventory in the checkout. The
 protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
 into a separate directory:
