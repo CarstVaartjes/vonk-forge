@@ -7,7 +7,6 @@ COPY deploy/compose/python-bootstrap.lock deploy/compose/uv-bootstrap.lock /tmp/
 # Bootstrap pip against only the refreshed OS bundle; its old native-trust
 # mode would otherwise add the vendored roots back to that store.
 RUN apt-get update \
-    && apt-get upgrade --yes --no-install-recommends \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && python -m ensurepip \
