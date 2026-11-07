@@ -54,6 +54,7 @@ GUARDS: tuple[str, ...] = (
     "tests/scripts/test_hook_environment.py::test_scripts_cannot_delegate_automatic_preparation_to_users",
     "tests/test_agent_release_workflow.py::test_release_actions_are_commit_pinned_and_secrets_are_environment_scoped",
     "tests/test_spark_lifecycle_runner.py::test_every_fixture_import_in_the_lane_code_is_offered_once_more",
+    "tests/test_baseline_program_surface.py",
 )
 
 SCOPED: tuple[tuple[str, str], ...] = (
@@ -582,10 +583,6 @@ SCOPED: tuple[tuple[str, str], ...] = (
     (
         "tests/test_carry_library_contracts.py",
         "carry per-library contracts: fixed fixture behavior.",
-    ),
-    (
-        "tests/test_baseline_canary_import.py",
-        "baseline canary import: fixed fixture behavior.",
     ),
     (
         "tests/test_release_library_root.py",

@@ -561,14 +561,51 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
     )
 
 
-@pytest.mark.parametrize("predecessor", [None, "reviewed", "unreviewed"])
-def test_canary_catalog_path_calls_the_installed_service_contract(
-    tmp_path, predecessor, monkeypatch
-):
+def _release_index(recipes: list[object]) -> dict[str, object]:
+    """A release-shaped library index this Controller's parser accepts."""
+    from vonk_control.recipe_packages import (
+        PACKAGE_MEDIA_TYPE,
+        PACKAGE_REPOSITORY,
+        PACKAGE_SCHEMA_VERSION,
+    )
+    from vonk_forge_contracts import CONTRACT_MAJOR
+
+    return {
+        "schema_version": PACKAGE_SCHEMA_VERSION,
+        "kind": "recipe-library-index",
+        "repository": PACKAGE_REPOSITORY,
+        "source_commit": "c" * 40,
+        "contract_version": f"{CONTRACT_MAJOR}.0.0",
+        "updated_at": "1970-01-01T00:00:00Z",
+        "package_contract": {
+            "schema_version": PACKAGE_SCHEMA_VERSION,
+            "media_type": PACKAGE_MEDIA_TYPE,
+        },
+        "recipes": recipes,
+        "catalog_entities": [],
+    }
+
+
+def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None:
+    """A skipped canary would sync nothing and look like success; it fails here."""
+    pytest.importorskip("vonk_control", reason="requires the control environment")
+    specification = importlib.util.spec_from_file_location(
+        "canary_import_refusal",
+        ENTRY_POINT.with_name("spark_canary_catalog_import.py"),
+    )
+    assert specification is not None and specification.loader is not None
+    program = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(program)
+    unreadable = {"document": {"kind": "recipe"}, "package": {}}
+
+    with pytest.raises(ValueError, match="cannot read the canary index"):
+        program.FixtureReader(_release_index([unreadable]), {})
+
+
+def test_canary_catalog_path_calls_the_installed_service_contract(tmp_path):
     """Catches keyword drift in the executable harness, without a recipe checkout.
 
-    Predecessor facades expose their real historical signatures and forward to
-    today's real service; no stub replaces its acceptance or durable sync path.
+    The real service runs its acceptance and durable sync path; no stub.
     """
     import uuid
     from datetime import UTC, datetime
@@ -578,13 +615,7 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
     from vonk_control.auth import TokenCodec
     from vonk_control.catalog_service import CatalogService
     from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
-    from vonk_control.catalog_sync_contract import (
-        CatalogSyncTrigger,
-        ManagedCatalogSyncRequest,
-        reviewed_catalog_content,
-    )
     from vonk_control.models import Base
-    from vonk_control.recipe_library_types import RecipeLibrarySnapshot
 
     specification = importlib.util.spec_from_file_location(
         "canary_import_contract",
@@ -597,16 +628,8 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     clock = lambda: datetime(2026, 10, 9, tzinfo=UTC)
-    snapshot = RecipeLibrarySnapshot(commit="c" * 40, items=())
-    reader = program.FixtureReader(
-        {
-            "source_commit": snapshot.commit,
-            "repository": snapshot.repository,
-            "recipes": [],
-            "catalog_entities": [],
-        },
-        {},
-    )
+    reader = program.FixtureReader(_release_index([]), {})
+    snapshot = reader.snapshot
     service = ManagedRecipeCatalogSyncService(
         sessions,
         catalog=CatalogService(
@@ -616,42 +639,7 @@ def test_canary_catalog_path_calls_the_installed_service_contract(
         clock=clock,
     )
 
-    def reviewed(*, request_key, trigger, actor, reviewed_snapshot=None):
-        return service.sync(
-            ManagedCatalogSyncRequest(
-                request_key=request_key,
-                trigger=CatalogSyncTrigger(trigger),
-                actor=actor,
-                reviewed_content_sha256=reviewed_catalog_content(reviewed_snapshot)
-                if reviewed_snapshot is not None
-                else None,
-            )
-        )
-
-    def unreviewed(*, request_key, trigger, actor, expected_commit=None):
-        return service.sync(
-            ManagedCatalogSyncRequest(
-                request_key=request_key,
-                trigger=CatalogSyncTrigger(trigger),
-                actor=actor,
-            )
-        )
-
-    if predecessor is not None:
-        from typing import Literal
-
-        # Promoted Controllers expose a Literal rather than today's enum.
-        monkeypatch.setattr(
-            program,
-            "SyncTrigger",
-            Literal[CatalogSyncTrigger.MANUAL, CatalogSyncTrigger.AUTOMATIC],
-        )
-
-    installed = (
-        service
-        if predecessor is None
-        else SimpleNamespace(sync=reviewed if predecessor == "reviewed" else unreviewed)
-    )
+    installed = service
     request_key = str(uuid.uuid4())
     first = program.sync_canary_catalog(
         installed, request_key=request_key, snapshot=snapshot
