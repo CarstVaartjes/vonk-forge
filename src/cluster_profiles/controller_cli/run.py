@@ -21,6 +21,7 @@ from .profile import _profile
 from .profile_authoring import _profile_authoring
 from .profile_load import _load_profile
 from .selection import (
+    _library_pages,
     _observe_selection,
     _read_concurrently,
     _recipe_rows,
@@ -128,11 +129,6 @@ def _run(
     }
 
 
-# 512 models per page: the bound is far above any library, so only a runaway
-# cursor can reach it.
-_MAX_MODEL_LIBRARY_PAGES = 1024
-
-
 def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str]:
     """Selector -> published model title, from the paged model library.
 
@@ -141,23 +137,13 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
     from ..generated_control.models.model_display import ModelDisplay
 
     titles: dict[str, str] = {}
-    cursor: str | None = None
-    seen_cursors: set[str] = set()
-    for _ in range(_MAX_MODEL_LIBRARY_PAGES):
-        query = {"limit": 512, "sort": "name"}
-        if cursor is not None:
-            query["cursor"] = cursor
-        page = client.request(
-            "GET",
-            "/api/model/library",
-            query=query,
-            timeout_seconds=_selection_remaining(deadline),
-        )
-        models = page.get("models")
-        if not isinstance(models, list):
-            raise ControlMalformedResponse(
-                "model library response does not contain models"
-            )
+    for models in _library_pages(
+        client,
+        "/api/model/library",
+        "models",
+        {"sort": "name"},
+        deadline=deadline,
+    ):
         for row in models:
             if not isinstance(row, Mapping) or not isinstance(row.get("selector"), str):
                 raise ControlMalformedResponse(
@@ -168,18 +154,7 @@ def _model_titles(client: ControllerClient, *, deadline: float) -> dict[str, str
                 titles[cast(str, row["selector"])] = ModelDisplay.from_dict(
                     validate_control_document("ModelDisplay", display)
                 ).model_title
-        next_cursor = page.get("next_cursor")
-        if next_cursor is None:
-            return titles
-        if not isinstance(next_cursor, str) or not next_cursor:
-            raise ControlMalformedResponse(
-                "model library response contains an invalid cursor"
-            )
-        if next_cursor in seen_cursors:
-            raise ControlMalformedResponse("model library cursor repeated")
-        seen_cursors.add(next_cursor)
-        cursor = next_cursor
-    raise ControlMalformedResponse("model library has more pages than expected")
+    return titles
 
 
 def _resolve_run_recipe(
