@@ -556,6 +556,24 @@ vonkctl recipe job detail JOB_UUID
 vonkctl recipe job detail JOB_UUID --follow
 ```
 
+`recipe job contract` reads what a running recipe accepts before any job
+exists: its input and output slots (ids, media types, extensions, file counts and
+size limits), its knobs with defaults, and the maximum job timeout. It is the
+same compiled contract `recipe job create` validates against. Name the run (its id is in `vonkctl fleet`) or an exact recipe
+revision (which needs no run):
+
+```bash
+vonkctl --json recipe job contract --run RUN_UUID
+vonkctl recipe job contract --revision RECIPE_REVISION_UUID
+```
+
+A key that names nothing is an error (`vonkctl fleet` lists runs). Otherwise the
+Controller answers with a state: `available`, `not-running`, `not-a-job-recipe`
+or `contract-invalid`. Any state other than `available` exits non-zero with the
+code `job_contract.<state>` and the next command.
+`vonkctl recipe detail RECIPE_REVISION_UUID` also accepts an exact recipe
+revision id, including one that is no longer the newest.
+
 `recipe job create` takes a bounded JSON binding file. Its top-level keys are
 exactly `create` and `input_paths`. The `create` object contains the canonical
 artifact-job request fields: `interface`, optional `parameters`, optional

@@ -7,6 +7,12 @@ from collections.abc import Mapping
 
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
+from ..control_client import ControlMalformedResponse
+from ..generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse,
+)
+from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
+from ..generated_control.types import Unset
 from .common import _bytes, _field, _records, _text, _time
 
 
@@ -134,8 +140,55 @@ def _artifact_job_download(payload: Mapping[str, object]) -> None:
         _field("Verified SHA-256", item.get("sha256"))
 
 
+def _contract_slots(label: str, slots: list[ArtifactSlotContract]) -> None:
+    for slot in slots:
+        _field(label, slot.id)
+        _field(f"{label} label", slot.label)
+        _field(f"{label} media types", ", ".join(slot.media_types))
+        _field(f"{label} extensions", ", ".join(slot.extensions))
+        _field(f"{label} files", f"{slot.min_files} to {slot.max_files}")
+        _field(f"{label} max file size", _bytes(slot.max_file_bytes))
+        _field(f"{label} max total size", _bytes(slot.max_total_bytes))
+
+
+def _artifact_job_contract(answer: ArtifactJobContractResponse) -> None:
+    contract = answer.contract
+    if contract is None or isinstance(contract, Unset):
+        raise ControlMalformedResponse("job contract observation is unavailable")
+    _field("Recipe", _set(answer.recipe))
+    _field("Recipe revision", _set(answer.recipe_revision_id))
+    run_id = _set(answer.run_id)
+    if run_id is not None:
+        _field("Run", run_id)
+        _field("Alias", _set(answer.alias))
+    _field("Interface", contract.interface)
+    _field("Contract SHA-256", _set(answer.contract_sha256))
+    _field("Max job timeout", f"{contract.max_timeout_seconds} seconds")
+    _field("Input required", "yes" if contract.input_.required else "no")
+    _field("Input max bytes", _bytes(contract.input_.max_bytes))
+    _contract_slots("Input slot", contract.input_.slots)
+    _field("Output max bytes", _bytes(contract.output.max_total_bytes))
+    _contract_slots("Output slot", contract.output.slots)
+    for knob in contract.parameters:
+        _field("Knob", knob.name)
+        _field("Knob type", knob.type_)
+        _field("Knob default", knob.default)
+    _field(
+        "Next",
+        f"vonkctl recipe job create --run {shlex.quote(run_id or '<run>')} "
+        "--file <binding.json>",
+    )
+
+
+def _set[T](value: T | Unset) -> T | None:
+    """A generated optional field, absent as ``None``."""
+    return None if isinstance(value, Unset) else value
+
+
 def _artifact_job(payload: Mapping[str, object], action: str) -> None:
-    if action == "list":
+    if action == "contract":
+        _artifact_job_contract(ArtifactJobContractResponse.from_dict(dict(payload)))
+    elif action == "list":
         _artifact_job_list(payload)
     elif action == "download":
         _artifact_job_download(payload)

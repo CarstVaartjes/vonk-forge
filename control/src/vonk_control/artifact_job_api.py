@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from fastapi import FastAPI, Header, HTTPException, Path, Request, Response, status
+from fastapi import (
+    FastAPI,
+    Header,
+    HTTPException,
+    Path,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 from vonk_agent_protocol import (
@@ -16,17 +24,22 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
     SecurityRefusalReason,
     UnknownOutcomeError,
+    WaitReason,
 )
 
 from .artifact_blob_store import ArtifactBlobStore
 from .artifact_jobs import (
+    JOB_CONTRACT_NOT_FOUND,
     MAX_INPUT_FILE_BYTES,
     ArtifactJobCapabilitiesResponse,
+    ArtifactJobContractResponse,
     ArtifactJobError,
     ArtifactJobListResponse,
     ArtifactJobResponse,
     ArtifactJobService,
+    ArtifactJobUnavailableError,
     ArtifactJobView,
+    JobContractNotFound,
 )
 from .auth import Actor, agent_identity_from_scope
 from .compiled_artifact_contract import ParameterScalar
@@ -101,6 +114,36 @@ def install_artifact_job_routes(
         return ArtifactJobCapabilitiesResponse.model_validate(
             _service(service).capabilities()
         )
+
+    @app.get(
+        "/api/artifact-jobs/contract/{by}/{key}",
+        response_model=ArtifactJobContractResponse,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getArtifactJobContract",
+    )
+    def job_contract(
+        by: Literal["run", "revision"],
+        key: Annotated[str, Path(min_length=1, max_length=128)],
+        _actor: Actor = actor_dependency,
+    ) -> ArtifactJobContractResponse:
+        """The contract ``create`` validates against, keyed by a run or an exact
+        recipe revision. A key that names nothing is 404."""
+        if service is None:
+            raise ArtifactJobUnavailableError(
+                "artifact jobs are unavailable",
+                reason=WaitReason.OBSERVATION_UNAVAILABLE,
+            )
+        try:
+            return service.job_contract(
+                run_id=key if by == "run" else None,
+                recipe_revision_id=key if by == "revision" else None,
+            )
+        except JobContractNotFound as missing:
+            raise HTTPException(
+                status_code=404,
+                detail=missing.detail,
+                headers={"x-vonk-error-code": JOB_CONTRACT_NOT_FOUND},
+            ) from None
 
     @app.get(
         "/api/recipe/runs/{run_id}/artifact-jobs",
