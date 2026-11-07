@@ -85,6 +85,7 @@ def test_a_start_superseded_by_a_removal_before_any_claim_is_reaped(
         assert "running" in _states(sim).values()  # the run beside it is untouched
         assert any(_REAPED in record.getMessage() for record in caplog.records)
 
+        monkeypatch.undo()  # the Sparks claim Starts again
         sim.quiesce()
         sim.fresh_load()
     finally:
