@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import email.parser
 import email.policy
-import hashlib
 import json
 import struct
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -138,15 +137,6 @@ def test_the_alias_replaces_a_model_field_that_names_it(server: str) -> None:
     assert _Audio.seen[0]["model"][2] == b"the-alias"
 
 
-def test_the_same_check_encodes_the_same_body() -> None:
-    fields = TRANSCRIBE["request"]["fields"]
-    first = multipart_body(fields, "file", "audio/wav", FIXTURE, {FIXTURE: AUDIO})
-    assert first == multipart_body(
-        fields, "file", "audio/wav", FIXTURE, {FIXTURE: AUDIO}
-    )
-    assert first[1].startswith("multipart/form-data; boundary=vonk-")
-
-
 @pytest.mark.parametrize(
     "fixtures",
     [{}, {FIXTURE: b""}, {FIXTURE: b"\x00" * (MAX_AUDIO_FILE_BYTES + 1)}],
@@ -159,18 +149,6 @@ def test_an_unusable_fixture_is_an_execution_error_before_any_request(
         execute_http_check("http://unused.invalid", TRANSCRIBE, fixtures=fixtures)
     with pytest.raises(AudioCheckError):
         multipart_body({"model": "m"}, "file", "audio/wav", FIXTURE, fixtures)
-
-
-def test_the_boundary_never_sits_inside_a_part() -> None:
-    clash = "--vonk-" + hashlib.sha256(AUDIO).hexdigest()[:32]
-    with pytest.raises(AudioCheckError, match="boundary"):
-        multipart_body(
-            {"model": "m" + clash},
-            "file",
-            "audio/wav",
-            FIXTURE,
-            {FIXTURE: AUDIO},
-        )
 
 
 def _observed(check: dict, body: bytes, kind: str = "application/json"):

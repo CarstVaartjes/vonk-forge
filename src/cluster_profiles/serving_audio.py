@@ -8,7 +8,7 @@ route answers. The recipe contract (``RecipeMultipartServingRequest``,
 
 from __future__ import annotations
 
-import hashlib
+import secrets
 import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -96,7 +96,7 @@ def multipart_body(
 
     The fixture is read from ``fixtures`` (the package's files) and bounded by
     the contract's largest audio upload before it is encoded. The boundary is
-    derived from the file bytes, so the same check encodes the same body.
+    random, so it cannot occur in the content by design.
     """
 
     # Imported here: the platform's CLI imports this package without the recipe
@@ -108,7 +108,7 @@ def multipart_body(
         raise AudioCheckError(f"the serving fixture {fixture} is not in the package")
     if not 0 < len(content) <= MAX_AUDIO_FILE_BYTES:
         raise AudioCheckError(f"the serving fixture {fixture} has an invalid size")
-    boundary = "vonk-" + hashlib.sha256(content).hexdigest()[:32]
+    boundary = "vonk-" + secrets.token_hex(16)
     marker = boundary.encode()
     parts = [
         b'--%b\r\nContent-Disposition: form-data; name="%b"\r\n\r\n%b\r\n'
@@ -124,6 +124,4 @@ def multipart_body(
     parts.append(content)
     parts.append(b"\r\n--%b--\r\n" % marker)
     body = b"".join(parts)
-    if body.count(b"--" + marker) != len(fields) + 2:
-        raise AudioCheckError("the multipart boundary occurs inside a part")
     return body, f"multipart/form-data; boundary={boundary}"

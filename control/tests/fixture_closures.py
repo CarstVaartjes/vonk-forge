@@ -17,18 +17,38 @@ _ATTRIBUTES = frozenset({"fixture", "input_slots"})
 _REQUESTS = frozenset({"request", "req"})
 
 
-def _is_request(node: ast.expr) -> bool:
-    if isinstance(node, ast.Name):
-        return node.id in _REQUESTS
-    return isinstance(node, ast.Attribute) and node.attr in _REQUESTS
+def _under_request(node: ast.expr, aliases: set[str]) -> bool:
+    """Whether an attribute chain passes through a request (or a name bound to one)."""
+    while isinstance(node, ast.Attribute):
+        if node.attr in _REQUESTS:
+            return True
+        node = node.value
+    return isinstance(node, ast.Name) and (node.id in _REQUESTS or node.id in aliases)
+
+
+def _request_aliases(tree: ast.AST) -> set[str]:
+    """Names bound to a request, e.g. ``job = check.request``."""
+    aliases: set[str] = set()
+    for _ in range(3):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign | ast.AnnAssign | ast.NamedExpr):
+                value = node.value
+                targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                if value is not None and _under_request(value, aliases):
+                    aliases.update(t.id for t in targets if isinstance(t, ast.Name))
+    return aliases
 
 
 def scan_source(source: str) -> list[int]:
+    tree = ast.parse(source)
+    aliases = _request_aliases(tree)
     hits: set[int] = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
             if node.attr == "input_slots" or (
-                node.attr == "fixture" and _is_request(node.value)
+                node.attr == "fixture" and _under_request(node.value, aliases)
             ):
                 hits.add(node.lineno)
         elif (

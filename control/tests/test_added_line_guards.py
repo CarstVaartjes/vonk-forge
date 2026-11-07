@@ -3857,12 +3857,19 @@ _CLOSURE = ("fixture-closures",)
         'fixture = getattr(request, "fixture", None)\n',
         'slots = getattr(request, "input_slots", {})\n',
         "paths.update(check.request.input_slots.values())\n",
+        "paths.add(check.request.file.fixture)\n",
+        'paths.add(f"{check.request.file.fixture}")\n',
+        "job = check.request\npaths.add(job.fixture)\n",
     ],
 )
 def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
-    assert check_source(_CLOSURE_PATH, source, {1}, modes=_CLOSURE)
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(_CLOSURE_PATH, source, lines, modes=_CLOSURE)
     assert check_source(
-        "scripts/example", "#!/usr/bin/env python3\n" + source, {2}, modes=_CLOSURE
+        "scripts/example",
+        "#!/usr/bin/env python3\n" + source,
+        {line + 1 for line in lines},
+        modes=_CLOSURE,
     )
     assert not check_source(_CLOSURE_PATH, source, set(), modes=_CLOSURE)
 
@@ -3875,6 +3882,8 @@ def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
         # A pytest fixture and an unrelated attribute are not a closure.
         (_CLOSURE_PATH, "@pytest.fixture\ndef value(): ...\n"),
         (_CLOSURE_PATH, "name = options.fixture\n"),
+        # The executor's own typed request, not a check's.
+        (_CLOSURE_PATH, "name = declared.file.fixture\n"),
         # Building a request names its fields; reading a closure out of one is the hit.
         (_CLOSURE_PATH, 'request = Job(fixture="a", input_slots={})\n'),
         # Tests may inspect the request they built.
