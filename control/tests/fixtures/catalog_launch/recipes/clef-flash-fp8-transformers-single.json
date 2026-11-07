@@ -1,0 +1,400 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/llm/clef-flash-transformers"
+   },
+   "dockerfile": "adapters/llm/clef-flash-transformers/Dockerfile",
+   "network": {
+    "hosts": [
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "clef-flash-fp8-transformers-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "openai",
+   "health_path": "/v1/models",
+   "model_aliases": [
+    "clef-flash-fp8-transformers-single"
+   ],
+   "port": 8000
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "metadata-34448b82c17d-618cd5b83d",
+     "id": "primary-metadata-34448b82c17d-618cd5b83d",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "license-bbedc3fda330-c693279643",
+     "id": "primary-license-bbedc3fda330-c693279643",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "readme-53a3dc4ac96a-b335630551",
+     "id": "primary-readme-53a3dc4ac96a-b335630551",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "chat-template-a4aee8afcf2e-00824420d1",
+     "id": "primary-chat-template-a4aee8afcf2e-00824420d1",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "config-66f87f6fb261-587cb980af",
+     "id": "primary-config-66f87f6fb261-587cb980af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "generation-config-45707f8467bf-97dd3d578b",
+     "id": "primary-generation-config-45707f8467bf-97dd3d578b",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "joint-head-19cdcec8c81d-2873deea78",
+     "id": "primary-joint-head-19cdcec8c81d-2873deea78",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "joint-head-config-77efe959a38b-6a3b0b790c",
+     "id": "primary-joint-head-config-77efe959a38b-6a3b0b790c",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "joint-schema-model-0e304cf7c650-48e1ad477a",
+     "id": "primary-joint-schema-model-0e304cf7c650-48e1ad477a",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00001-of-00004-8b45a8e96814-1913267ec8",
+     "id": "primary-model-00001-of-00004-8b45a8e96814-1913267ec8",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00002-of-00004-7590856c713e-60f6088da9",
+     "id": "primary-model-00002-of-00004-7590856c713e-60f6088da9",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00003-of-00004-e6eac2467952-fc35f2c4d5",
+     "id": "primary-model-00003-of-00004-e6eac2467952-fc35f2c4d5",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-00004-of-00004-9fcecc6556b3-5078e75d62",
+     "id": "primary-model-00004-of-00004-9fcecc6556b3-5078e75d62",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "model-safetensors-index-941305ff9f77-0a05be8238",
+     "id": "primary-model-safetensors-index-941305ff9f77-0a05be8238",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "processor-config-d89ef49ce9cd-27f0cb76af",
+     "id": "primary-processor-config-d89ef49ce9cd-27f0cb76af",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-06b9509352d2-224931eb13",
+     "id": "primary-tokenizer-06b9509352d2-224931eb13",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "tokenizer-config-91a08f825d37-94d5c6ba8f",
+     "id": "primary-tokenizer-config-91a08f825d37-94d5c6ba8f",
+     "mount": {
+      "target": "/models"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "b02b5f123234109c78e4a3f8291ff62d3eccee1b5b062cd4e4bddb95f29cab86",
+    "kind": "model",
+    "publisher": "cloudflare",
+    "slug": "clef-flash-bf16-fb4417d3"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "amarjeet",
+   "Cloudflare"
+  ],
+  "source_reference": "https://github.com/amarjeet/dgx-spark-recipes/tree/87ea80d6eb1de0eed1690e101da8161c9c8462de"
+ },
+ "release": {
+  "released_at": "2026-10-19",
+  "version": "87ea80d6eb1d"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "served-model-name",
+    "value": "clef-flash-fp8-transformers-single"
+   },
+   {
+    "name": "max-model-len",
+    "setting": "context_tokens",
+    "value": null
+   }
+  ],
+  "engine": "pytorch-server",
+  "entrypoint": [
+   "/opt/vonk/bin/pytorch-server"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "TRANSFORMERS_OFFLINE",
+    "value": "1"
+   },
+   {
+    "name": "WEIGHTS",
+    "value": "fp8"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 30
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "context_tokens": {
+   "change_effect": "restart",
+   "value": 16384
+  },
+  "kind": "decision",
+  "knobs": {},
+  "max_batch_tokens": null
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 19083378312,
+      "image_bytes": 16000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 4000000000
+     },
+     "memory": {
+      "load_peak_bytes": 25555454771,
+      "peak_bytes": 20078972109,
+      "reserve_bytes": 2000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "endpoint.healthy"
+     ],
+     "kind": "openai.health",
+     "name": "health",
+     "request": {
+      "method": "GET",
+      "path": "/v1/models",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "decision.probabilities"
+     ],
+     "kind": "openai.systemone",
+     "name": "d3_text",
+     "request": {
+      "body": {
+       "model": "clef-flash-fp8-transformers-single",
+       "questions": {
+        "difficulty": {
+         "criteria": [
+          "easy",
+          "medium",
+          "hard"
+         ],
+         "instructions": "How difficult is this task?",
+         "type": "score"
+        },
+        "kind": {
+         "criteria": {
+          "chat": "Anything else",
+          "code": "Writing or fixing code",
+          "math": "Mathematics"
+         },
+         "instructions": "What kind of work is this?",
+         "type": "choice"
+        },
+        "reasoning": {
+         "instructions": "Does answering this need multiple reasoning steps?",
+         "type": "noul"
+        }
+       },
+       "state": "Write a Python function that merges two sorted lists."
+      },
+      "method": "POST",
+      "path": "/v1/systemone",
+      "transport": "http"
+     }
+    },
+    {
+     "assertions": [
+      "decision.probabilities"
+     ],
+     "kind": "openai.systemone",
+     "name": "d3_image",
+     "request": {
+      "body": {
+       "images": [
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAABAAAAAQBPJcTWAAAAYElEQVR4nO3PwQkAIBDAMAX3H/lwCB9BaCZo96y/HR3wqgGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQHtAgK6AfwYG1VIAAAAAElFTkSuQmCC"
+       ],
+       "model": "clef-flash-fp8-transformers-single",
+       "questions": {
+        "kind": {
+         "criteria": {
+          "shape": "A geometric shape",
+          "text": "Text"
+         },
+         "type": "choice"
+        }
+       },
+       "state": "What does the image contain?"
+      },
+      "method": "POST",
+      "path": "/v1/systemone",
+      "transport": "http"
+     }
+    }
+   ],
+   "interface": "openai"
+  }
+ }
+}
