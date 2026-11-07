@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import re
 import signal
@@ -5285,6 +5286,14 @@ def test_a_single_real_read_runs_inline_and_keeps_its_error() -> None:
     assert skipped.get() is None
     with pytest.raises(OSError):
         outcome.get()
+
+
+def test_a_read_that_dies_with_a_base_exception_does_not_hang_the_waiter() -> None:
+    def cancelled() -> object:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        _read_concurrently(cancelled, lambda: "fine")
 
 
 def test_ctrl_c_interrupts_at_once_while_reads_hang() -> None:
