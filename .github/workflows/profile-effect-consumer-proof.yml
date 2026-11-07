@@ -36,11 +36,11 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: CarstVaartjes/vonk-forge-recipes
-          ref: e4f98d0f3f3bb3321bf4bc85ec0350ba2876f8ba
+          ref: 16ad501e69834972ef3f1370cacd5a92ca95bf7c
           path: .proof-recipes
           persist-credentials: false
       - name: Verify immutable consumer source
-        run: test "$(git -C .proof-recipes rev-parse HEAD)" = e4f98d0f3f3bb3321bf4bc85ec0350ba2876f8ba
+        run: test "$(git -C .proof-recipes rev-parse HEAD)" = 16ad501e69834972ef3f1370cacd5a92ca95bf7c
       - name: Prepare locked Python and CLI dependencies
         uses: ./.github/actions/python-env
       - name: Authenticate CI image mirror reads
