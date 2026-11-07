@@ -559,8 +559,8 @@ vonkctl recipe job detail JOB_UUID --follow
 `recipe job contract` reads what a running recipe accepts before any job
 exists: its input and output slots (ids, media types, extensions, file counts and
 size limits), its knobs with defaults, and the maximum job timeout. It is the
-same compiled contract `recipe job create` validates against. Name the run, the
-route alias that run serves, or an exact recipe revision (which needs no run):
+same compiled contract `recipe job create` validates against. Name the run (its id is in `vonkctl fleet`) or an exact recipe
+revision (which needs no run):
 
 ```bash
 vonkctl --json recipe job contract --run RUN_UUID
