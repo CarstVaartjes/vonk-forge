@@ -15,16 +15,12 @@ TEMPLATE = ROOT / "deploy/compose/compose.yaml"
 DIGEST = "a" * 64
 API_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3"
 WORKER_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3"
-HERMES_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3"
 LITELLM_IMAGE = "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3"
 DEV_API_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 )
 DEV_WORKER_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'b' * 40}@sha256:{DIGEST}"
-)
-DEV_HERMES_IMAGE = (
-    f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'b' * 40}@sha256:{DIGEST}"
 )
 DEV_LITELLM_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'b' * 40}@sha256:{DIGEST}"
@@ -36,7 +32,6 @@ def _run_production(
     output: Path,
     api_image: str = API_IMAGE,
     worker_image: str = WORKER_IMAGE,
-    hermes_image: str = HERMES_IMAGE,
     litellm_image: str = LITELLM_IMAGE,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -51,8 +46,6 @@ def _run_production(
             api_image,
             "--worker-image",
             worker_image,
-            "--hermes-image",
-            hermes_image,
             "--litellm-image",
             litellm_image,
         ],
@@ -95,8 +88,6 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
             DEV_API_IMAGE,
             "--worker-image",
             DEV_WORKER_IMAGE,
-            "--hermes-image",
-            DEV_HERMES_IMAGE,
             "--litellm-image",
             DEV_LITELLM_IMAGE,
             "--channel",
@@ -117,7 +108,6 @@ def test_production_and_development_render_the_same_resolved_runtime_model(
         {
             "ghcr.io/carstvaartjes/vonk-forge-api:dev": "ghcr.io/carstvaartjes/vonk-forge-api:latest",
             "ghcr.io/carstvaartjes/vonk-forge-worker:dev": "ghcr.io/carstvaartjes/vonk-forge-worker:latest",
-            "ghcr.io/carstvaartjes/vonk-forge-hermes:dev": "ghcr.io/carstvaartjes/vonk-forge-hermes:latest",
             "ghcr.io/carstvaartjes/vonk-forge-litellm:dev": "ghcr.io/carstvaartjes/vonk-forge-litellm:latest",
             "ghcr.io/carstvaartjes/vonk-forge-ca:dev-sha-"
             + "b" * 40
@@ -147,10 +137,6 @@ def test_render_replaces_every_control_image_without_resolving_operator_inputs(
     assert (
         document["services"]["control-worker"]["image"]
         == "ghcr.io/carstvaartjes/vonk-forge-worker:latest"
-    )
-    assert (
-        document["services"]["hermes-agent"]["image"]
-        == "ghcr.io/carstvaartjes/vonk-forge-hermes:latest"
     )
     assert (
         document["services"]["litellm"]["image"]

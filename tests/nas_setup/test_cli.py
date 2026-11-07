@@ -70,7 +70,7 @@ def test_cli_upgrade_uses_no_terminal_and_preserves_private_answers(
     fresh = invoke(template, tmp_path, "--answers-file", str(answers))
     assert fresh.returncode == 0, fresh.stderr
     assert "private-hf-token" not in fresh.stdout + fresh.stderr
-    upgraded = invoke(template, tmp_path, "--upgrade", "--enable-hermes")
+    upgraded = invoke(template, tmp_path, "--upgrade")
     assert upgraded.returncode == 0, upgraded.stderr
     assert "Bundle ready" in upgraded.stdout
     assert (
@@ -81,11 +81,11 @@ def test_cli_upgrade_uses_no_terminal_and_preserves_private_answers(
 def test_cli_rejects_secret_arguments_and_conflicting_flags(
     tmp_path: Path, template: NasInstallTemplate
 ) -> None:
-    """Catch adding an argv secret surface or accepting ambiguous Hermes intent."""
+    """Catch adding an argv secret surface or accepting an unknown option."""
     result = invoke(template, tmp_path, "--answers", "unsafe-value")
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
     assert "unsafe-value" not in result.stdout + result.stderr
-    result = invoke(template, tmp_path, "--enable-hermes", "--disable-hermes")
+    result = invoke(template, tmp_path, "--enable-unknown")
     assert result.returncode != 0 and not (tmp_path / "vonk-forge").exists()
 
 

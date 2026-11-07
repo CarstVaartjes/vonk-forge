@@ -13,7 +13,6 @@ services:
   optional:
     image: optional
     profiles: [extra]
-    environment: {VONK_SELECTED_PROFILES: "${COMPOSE_PROFILES:-}"}
   watcher:
     image: watcher
     profiles: [other]
@@ -35,29 +34,3 @@ def test_required_dependency_on_an_unselected_service_fails() -> None:
     compose = BASE.replace("required: false", "required: true")
     with pytest.raises(SetupError):
         resolve_compose(compose, {"COMPOSE_PROFILES": "other"})
-
-
-def test_selection_reaches_the_consumer_and_a_rename_fails_loudly() -> None:
-    """Catch silently leaving the selection variable unsubstituted."""
-    written = yaml.safe_load(
-        resolve_compose(BASE, {"COMPOSE_PROFILES": "extra"}).decode()
-    )
-    assert written["services"]["optional"]["environment"] == {
-        "VONK_SELECTED_PROFILES": "extra"
-    }
-    with pytest.raises(SetupError):
-        resolve_compose(
-            BASE.replace("${COMPOSE_PROFILES:-}", "${PROFILES:-}"),
-            {"COMPOSE_PROFILES": "extra"},
-        )
-
-
-def test_hermes_selection_name_must_be_the_one_owner(template) -> None:
-    """Catch a payload whose Hermes variable differs from the selection owner."""
-    from vonk_nas_setup.environment import configure_hermes
-
-    other = template.model_copy(
-        update={"hermes": template.hermes.model_copy(update={"env": "OTHER_PROFILES"})}
-    )
-    with pytest.raises(SetupError):
-        configure_hermes(other, {}, True)

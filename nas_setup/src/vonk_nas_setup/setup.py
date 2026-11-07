@@ -16,7 +16,6 @@ from . import publication
 from .compose import resolve_compose
 from .environment import (
     SELECTION_ENV,
-    configure_hermes,
     profiles,
     recover_environment,
     render_environment,
@@ -53,7 +52,6 @@ from .secrets import (
 @dataclass(frozen=True)
 class SetupOutcome:
     root: Path
-    hermes_enabled: bool | None
     dropped_environment: tuple[str, ...] = ()
 
 
@@ -69,7 +67,6 @@ def fresh(
     payload: NasInstallTemplate,
     bundle: Path,
     prompt: PromptIo,
-    requested_hermes: bool | None,
 ) -> SetupOutcome:
     staging = staging_directory(bundle.parent)
     try:
@@ -110,9 +107,6 @@ def fresh(
             request = payload.step_ca_controller
             members.update(retry(lambda: generate_pki(request, environment)))
             validate_pki_material(request, environment, members)
-        if payload.hermes and requested_hermes is None:
-            requested_hermes = False if lab else prompt.confirm(payload.hermes.prompt)
-        hermes_enabled = configure_hermes(payload, environment, requested_hermes)
         ensure_directory(staging / "secrets")
         ensure_directory(staging / "secrets" / "gateway")
         for name in ("backups", "backups-offhost"):
@@ -130,7 +124,7 @@ def fresh(
         publication.sync_tree(staging)
         os.replace(staging, bundle)
         sync_directory(bundle.parent)
-        return SetupOutcome(bundle, hermes_enabled)
+        return SetupOutcome(bundle)
     except BaseException:
         discard(staging)
         raise
@@ -140,7 +134,6 @@ def upgrade_credentials(
     payload: NasInstallTemplate,
     bundle: Path,
     prompt: PromptIo,
-    requested_hermes: bool | None,
 ) -> SetupOutcome:
     for name in ("backups", "backups-offhost"):
         ensure_directory(bundle / name)
@@ -174,7 +167,6 @@ def upgrade_credentials(
                 raise ObservationUnavailable()
             value = prompt.required(required)
         environment[required.env] = value
-    hermes_enabled = configure_hermes(payload, environment, requested_hermes)
     dropped = retain_known(payload, environment)
     # The Compose file follows the same selection as .env: no profile flags.
     atomic_replace(
@@ -239,7 +231,7 @@ def upgrade_credentials(
             raise
         except OSError:
             print(WaitReason.CLEANUP_UNCONFIRMED.value, file=sys.stderr)
-    return SetupOutcome(bundle, hermes_enabled, dropped)
+    return SetupOutcome(bundle, dropped)
 
 
 def prepare(
@@ -248,15 +240,12 @@ def prepare(
     prompt: PromptIo,
     *,
     upgrade: bool = False,
-    hermes_enabled: bool | None = None,
 ) -> SetupOutcome:
     """Serialize publishers; an install response lost after rename becomes upgrade."""
     root = retry(lambda: output_root(output))
     with acquire_owner(root):
         bundle = root / "vonk-forge"
         if not upgrade and metadata(bundle) is None:
-            return fresh(payload, bundle, prompt, hermes_enabled)
+            return fresh(payload, bundle, prompt)
         real_directory(bundle)
-        return retry(
-            lambda: upgrade_credentials(payload, bundle, prompt, hermes_enabled)
-        )
+        return retry(lambda: upgrade_credentials(payload, bundle, prompt))

@@ -23,7 +23,6 @@ COMMIT = re.compile(r"^[0-9a-f]{40}$")
 PACKAGES = (
     ("api_image", "ghcr.io/carstvaartjes/vonk-forge-api"),
     ("worker_image", "ghcr.io/carstvaartjes/vonk-forge-worker"),
-    ("hermes_image", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
     ("litellm_image", "ghcr.io/carstvaartjes/vonk-forge-litellm"),
 )
 
@@ -54,7 +53,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print("latest_alias=latest")
     for name, image in PACKAGES:
         print(f"{name}={image}")
-    for name, image in (PACKAGES[0], PACKAGES[1], PACKAGES[3]):
+    for name, image in PACKAGES:
         print(f"{name.removesuffix('_image')}_dev_source={image}:dev-sha-{commit}")
     return 0
 

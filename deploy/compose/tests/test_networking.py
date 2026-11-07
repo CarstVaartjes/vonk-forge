@@ -66,7 +66,6 @@ def test_litellm_has_no_network_path_from_control_services() -> None:
     assert set(services["postgres"]["networks"]) == {"data", "litellm-data"}
     assert set(services["caddy"]["networks"]) == {
         "agent-proxy",
-        "hermes-inference",
         "ingress",
         "litellm-edge",
         "registry-edge",

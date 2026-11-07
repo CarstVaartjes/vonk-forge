@@ -16,7 +16,6 @@ tree=$5
 case "$identity" in
   api) expected_image=ghcr.io/carstvaartjes/vonk-forge-api ;;
   worker) expected_image=ghcr.io/carstvaartjes/vonk-forge-worker ;;
-  hermes) expected_image=ghcr.io/carstvaartjes/vonk-forge-hermes ;;
   litellm) expected_image=ghcr.io/carstvaartjes/vonk-forge-litellm ;;
   *) echo "unsupported published image identity: $identity" >&2; exit 64 ;;
 esac
@@ -72,7 +71,7 @@ while IFS=$'\t' read -r architecture runnable_digest attestation_digest; do
     build_revision=$observed_revision
     build_tree=$observed_tree
     if [[ "$build_tree" != "$tree" ]]; then
-      # Only isolated Hermes/LiteLLM inputs can prove equivalence to an older
+      # Only isolated LiteLLM inputs can prove equivalence to an older
       # build. API/worker remain exact-source: their tree must be this one.
       scripts/dev-image-inputs same-inputs "$identity" "$build_tree" "$tree"
     fi

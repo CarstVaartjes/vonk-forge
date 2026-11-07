@@ -150,7 +150,6 @@ def test_every_staged_runtime_asset_a_service_reads_ships_in_the_controller_imag
     readers = [
         COMPOSE_ROOT / "compose.yaml",
         COMPOSE_ROOT / "tailscale/compose.yaml",
-        COMPOSE_ROOT / "hermes-agent/compose.yaml",
         COMPOSE_ROOT / "caddy/entrypoint.sh",
         COMPOSE_ROOT / "postgres/entrypoint.sh",
         COMPOSE_ROOT / "litellm/entrypoint.sh",

@@ -37,8 +37,6 @@ SAFE_ID = re.compile(r"[A-Za-z0-9_-]{3,128}\Z")
 SAFE_DISPLAY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 '\-]{2,62}\Z")
 SERVICES = (
     ("svc:vonk-forge", "Vonk Forge"),
-    ("svc:hermes-api", "Hermes API"),
-    ("svc:hermes-dashboard", "Hermes dashboard"),
 )
 STALE_CHILD_AGE = timedelta(minutes=60)
 # Every disposable CI child is named `Vonk Forge CI <run> attempt <n>`.  Only

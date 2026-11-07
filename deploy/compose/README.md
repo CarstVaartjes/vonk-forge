@@ -51,7 +51,6 @@ below. Secure remote also asks for:
 - the control hostname (`vonk-forge.<tailnet>.ts.net`); the enrollment, agent,
   and registry names are derived from it;
 - the Tailscale OAuth client ID and secret;
-- whether to enable the optional Hermes agent.
 
 Both modes offer an optional LiteLLM upstream provider key and an optional
 Hugging Face token. The Spark management CIDRs default to the controller's own
@@ -92,7 +91,7 @@ Use the same project when upgrading. `--remove-orphans` stops and removes
 containers for services removed from the new bundle while preserving named
 volumes and retained service data.
 
-The installer resolves the install mode and the Hermes choice (`COMPOSE_PROFILES`
+The installer resolves the install mode (`COMPOSE_PROFILES`
 in `.env`) into `docker-compose.yaml`: it holds exactly the selected services and
 no `profiles:` key, so the Docker UI and a plain `docker compose` deploy the
 same set (the UGREEN redeploy was observed not to apply the `.env` profile
@@ -144,8 +143,7 @@ so a restaged Caddyfile applies without a Caddy restart.
 
 Development and production use this exact topology and configuration contract.
 They use development `:dev` or production `:latest` application images and channel-specific Spark package versions
-selected by the installer publication channel. Hermes is the sole optional
-service.
+selected by the installer publication channel.
 
 
 Generated deployment Compose and the NAS curl installer payload use floating image
@@ -184,7 +182,7 @@ bundle, with no Controller or worker package in the janitor. This keeps the
 root filesystem read-only without Compose inline-config injection.
 
 The hourly scan considers images carrying the exact Vonk Forge source label or
-an exact API, worker, LiteLLM or Hermes repository identity (including repository
+an exact API, worker or LiteLLM repository identity (including repository
 digests after a tag moves). All third-party images are excluded, including old
 PostgreSQL, Caddy and Tailscale pins. A container reference from any project,
 running or stopped, protects an image and resets its unused grace. First-seen

@@ -58,7 +58,6 @@ ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
     "compose_default",
-    "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
     "spark_arm64",
@@ -70,7 +69,6 @@ NAS_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
     "compose_default",
-    "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
 }
@@ -535,7 +533,6 @@ def assemble(arguments: argparse.Namespace) -> str:
     images = {
         "api": arguments.api_image,
         "worker": arguments.worker_image,
-        "hermes": arguments.hermes_image,
         "litellm": arguments.litellm_image,
     }
     for role, reference in images.items():
@@ -2146,7 +2143,6 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--signing-public-key", required=True, type=Path)
     build.add_argument("--api-image", required=True)
     build.add_argument("--worker-image", required=True)
-    build.add_argument("--hermes-image", required=True)
     build.add_argument("--litellm-image", required=True)
     build.add_argument("--nas-setup-wheel", type=Path, required=True)
     build.add_argument("--spark-setup", action="append", default=[])

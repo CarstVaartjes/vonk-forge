@@ -33,7 +33,6 @@ def _environment() -> dict[str, str]:
     return os.environ | {
         "CONTROL_API_IMAGE": "example/control-api:1@sha256:" + "c" * 64,
         "CONTROL_WORKER_IMAGE": "example/control-worker:1@sha256:" + "8" * 64,
-        "HERMES_AGENT_IMAGE": "example/hermes:1@sha256:" + "7" * 64,
         "LITELLM_IMAGE": "example/litellm:1@sha256:" + "d" * 64,
         "VONK_CONTROL_HOSTNAME": "control.test.example",
         "VONK_MANAGEMENT_CIDRS": "10.0.0.0/24",
@@ -376,7 +375,6 @@ def test_development_image_compose_enables_local_ca_agent_settings(
     assert api["environment"]["VONK_NAS_LAN_IP"] == "10.0.0.2"
     assert set(caddy["networks"]) == {
         "agent-proxy",
-        "hermes-inference",
         "ingress",
         "litellm-edge",
         "registry-edge",

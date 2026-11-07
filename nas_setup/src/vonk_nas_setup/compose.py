@@ -13,7 +13,6 @@ import yaml
 from .environment import SELECTION_ENV, profiles
 from .filesystem import SetupError
 
-CONSUMER = "VONK_SELECTED_PROFILES"
 _SECTIONS = ("networks", "secrets", "volumes", "configs")
 
 
@@ -70,16 +69,4 @@ def resolve_compose(compose: str, environment: dict[str, str]) -> bytes:
             for name, value in document[section].items()
             if name not in used_before or name in used_now
         }
-    # Compose does not pass its own selection into containers; the consumer
-    # gets the same literal that .env holds. A renamed variable fails here.
-    found = False
-    for service in services.values():
-        container = service.get("environment")
-        if isinstance(container, dict) and CONSUMER in container:
-            if container[CONSUMER] != f"${{{SELECTION_ENV}:-}}":
-                raise SetupError(f"{CONSUMER} must be ${{{SELECTION_ENV}:-}}")
-            container[CONSUMER] = ",".join(selected)
-            found = True
-    if CONSUMER in compose and not found:
-        raise SetupError(f"{CONSUMER} is not a mapping entry")
     return yaml.safe_dump(document, sort_keys=False, default_flow_style=False).encode()

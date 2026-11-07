@@ -20,15 +20,12 @@ DIGEST = "a" * 64
 IMAGES = {
     "api_image": "ghcr.io/carstvaartjes/vonk-forge-api:v1.2.3",
     "worker_image": "ghcr.io/carstvaartjes/vonk-forge-worker:v1.2.3",
-    "hermes_image": "ghcr.io/carstvaartjes/vonk-forge-hermes:v1.2.3",
     "litellm_image": "ghcr.io/carstvaartjes/vonk-forge-litellm:v1.2.3",
 }
 SERVICES = {
     "image-janitor",
     "tailscale-gateway",
     "tailscale-configurator",
-    "hermes-agent",
-    "hermes-litellm-key-provisioner",
     "postgres",
     "control-api",
     "control-worker",
@@ -110,19 +107,7 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     }
     generated = payload["generated_secrets"]
     assert all("prompt" not in item for group in generated.values() for item in group)
-    hermes_key = next(
-        item
-        for item in generated["random_text"]
-        if item["file"] == "hermes-litellm-key"
-    )
-    assert hermes_key["prefix"] == "sk-"
     assert payload["step_ca_controller"]["hostname_env"] == "VONK_CONTROL_HOSTNAME"
-    assert set(payload["hermes"]) == {
-        "env",
-        "prompt",
-        "enabled_value",
-        "disabled_value",
-    }
     # Runtime configuration ships in the Controller image, not the bundle.
     assert "runtime_files" not in payload
     assert "configs" not in original_compose
@@ -137,7 +122,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     installer_environment = {item["env"] for item in payload["internal_values"]} | {
         item["env"] for item in payload["required_values"]
     }
-    installer_environment.add(payload["hermes"]["env"])
 
     compose_text = payload["docker_compose_yaml"]
     compose = yaml.safe_load(compose_text)
@@ -150,10 +134,6 @@ def test_payload_is_complete_self_contained_and_fresh_install_only(
     assert compose["name"] == "vonk-forge"
     assert "version" not in compose
     assert all("build" not in service for service in compose["services"].values())
-    assert compose["services"]["hermes-agent"]["profiles"] == ["hermes"]
-    assert compose["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
-        "hermes"
-    ]
     assert compose["services"]["tailscale-gateway"]["profiles"] == ["secure-remote"]
     assert compose["services"]["tailscale-configurator"]["profiles"] == [
         "secure-remote"
@@ -311,7 +291,7 @@ def test_capability_free_services_read_secrets_through_the_installer_group(
         and service.get("cap_drop") == ["ALL"]
         and "DAC_OVERRIDE" not in service.get("cap_add", [])
     }
-    assert set(readers) == {"tailscale-gateway", "tailscale-configurator"}
+    assert set(readers) == {"tailscale-gateway"}
     group = payload["group_readable_secrets"]
     assert {service["group_add"][0] for service in readers.values()} == {
         str(group["gid"])
@@ -325,7 +305,6 @@ def test_capability_free_services_read_secrets_through_the_installer_group(
     assert expected == {
         "tailscale-oauth-client-id",
         "tailscale-oauth-client-secret",
-        "hermes-api-key",
     }
     assert set(group["files"]) == expected
     assert group["gid"] == 64400
@@ -346,15 +325,14 @@ def test_ci_secret_group_helper_uses_the_compose_gid() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mode", "hermes", "selection", "expected"),
+    ("mode", "selection", "expected"),
     [
-        ("lab", False, "", set()),
-        ("secure-remote", False, "secure-remote", {"tailscale"}),
-        ("secure-remote", True, "secure-remote,hermes", {"tailscale", "hermes"}),
+        ("lab", "", set()),
+        ("secure-remote", "secure-remote", {"tailscale"}),
     ],
 )
 def test_installer_writes_the_selected_services_without_profiles(
-    tmp_path: Path, mode: str, hermes: bool, selection: str, expected: set[str]
+    tmp_path: Path, mode: str, selection: str, expected: set[str]
 ) -> None:
     """Catch a profiled service the NAS Docker UI (no profile flags) never deploys."""
     import io
@@ -375,7 +353,7 @@ def test_installer_writes_the_selected_services_without_profiles(
     bundle = prepare(
         template,
         tmp_path / "nas",
-        PromptIo(io.StringIO(answers + ("yes\n" if hermes else "no\n"))),
+        PromptIo(io.StringIO(answers)),
     ).root
 
     assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == selection
@@ -383,37 +361,30 @@ def test_installer_writes_the_selected_services_without_profiles(
     assert all("profiles" not in service for service in written["services"].values())
     optional = {
         "tailscale": {"tailscale-gateway", "tailscale-configurator"},
-        "hermes": {"hermes-agent", "hermes-litellm-key-provisioner"},
     }
     present = set(written["services"])
     assert present == SERVICES - set().union(
         *(names for key, names in optional.items() if key not in expected)
     )
-    # Anything only an unselected service used is gone, and the selection that
-    # reaches the container is the literal one from .env.
+    # Anything only an unselected service used is gone.
     if "tailscale" not in expected:
         assert "tailscale-state" not in written["volumes"]
         assert "tailscale-oauth-client-id" not in written["secrets"]
-    else:
-        configurator = written["services"]["tailscale-configurator"]
-        assert configurator["environment"]["VONK_SELECTED_PROFILES"] == selection
 
 
 @pytest.mark.parametrize(
-    ("first", "hermes", "selection", "present", "absent"),
+    ("first", "selection", "present", "absent"),
     [
         (
-            "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\nyes\n",
-            None,
-            "secure-remote,hermes",
-            {"tailscale-gateway", "tailscale-configurator", "hermes-agent"},
+            "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n",
+            "secure-remote",
+            {"tailscale-gateway", "tailscale-configurator"},
             set(),
         ),
         (
             "lab\n192.168.1.5\n\n\n",
-            True,
-            "hermes",
-            {"hermes-agent", "hermes-litellm-key-provisioner"},
+            "",
+            {"postgres"},
             {"tailscale-gateway", "tailscale-configurator"},
         ),
     ],
@@ -421,7 +392,6 @@ def test_installer_writes_the_selected_services_without_profiles(
 def test_upgrade_rewrites_the_selected_services_without_profiles(
     tmp_path: Path,
     first: str,
-    hermes: bool | None,
     selection: str,
     present: set[str],
     absent: set[str],
@@ -441,15 +411,10 @@ def test_upgrade_rewrites_the_selected_services_without_profiles(
     bundle = prepare(template, nas, PromptIo(io.StringIO(first))).root
     # Upgrade from an older, stale file: it must be rewritten from the payload.
     (bundle / "docker-compose.yaml").write_text("services: {}\n")
-    prepare(
-        template, nas, PromptIo(io.StringIO("")), upgrade=True, hermes_enabled=hermes
-    )
+    prepare(template, nas, PromptIo(io.StringIO("")), upgrade=True)
 
     assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == selection
     written = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
     assert all("profiles" not in service for service in written["services"].values())
     assert present <= set(written["services"])
     assert not absent & set(written["services"])
-    if "tailscale-configurator" in present:
-        configurator = written["services"]["tailscale-configurator"]
-        assert configurator["environment"]["VONK_SELECTED_PROFILES"] == selection

@@ -27,15 +27,14 @@ reference and will fail if only the lock changes.
 | `images.prometheus` | `prom/prometheus` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.registry` | `registry` | `deploy/compose/images.lock.json`, `deploy/compose/compose.yaml` |
 | `images.tailscale` | `tailscale/tailscale` | `deploy/compose/images.lock.json`, `deploy/compose/tailscale/compose.yaml`, `deploy/compose/tests/test_tailscale.py` |
-| `build_bases.hermes` | `nousresearch/hermes-agent` | `deploy/compose/images.lock.json`, `deploy/compose/hermes-agent/Dockerfile`, `tests/scripts/test_verify_supply_chain.py` |
 | `build_bases.litellm` | `ghcr.io/berriai/litellm` | `deploy/compose/images.lock.json`, `deploy/compose/litellm/Dockerfile` (both `FROM` lines) |
 | `build_bases.node` | `node` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`ARG NODE_IMAGE`) |
 | `build_bases.python` | `python` | `deploy/compose/images.lock.json`, `control/Dockerfile`, `deploy/compose/litellm/Dockerfile` (`ARG PYTHON_IMAGE`, bootstrap roots) |
 | `build_bases.skopeo` | `quay.io/skopeo/stable` | `deploy/compose/images.lock.json`, `control/Dockerfile` (`SKOPEO_IMAGE` plus the three `*_DIGEST` args and labels), `scripts/verify-controller-skopeo`, `control/tests/test_controller_image_packaging.py`, `tests/scripts/test_verify_controller_skopeo.py` |
 | _(no lock key — developer lane)_ | `ubuntu` | `scripts/dev-agent-wire-linux.Dockerfile` (`FROM`, pinned by index digest) |
 
-`build_bases.litellm` and `build_bases.hermes` are the upstream bases of the
-patched `vonk-forge-litellm` and `vonk-forge-hermes` release images; see
+`build_bases.litellm` is the upstream base of the
+patched `vonk-forge-litellm` release image; see
 [Patched release images](#patched-release-images-are-a-different-flow).
 
 ### Skopeo pin details that bite
@@ -172,7 +171,7 @@ UV_CACHE_DIR=/private/tmp/vonk-forge-control-cache \
 (`name:tag` and `name:tag@digest`), compares the tag's current digest with the
 record and verifies the recorded digest still resolves, then scans
 `control/Dockerfile`, the Compose files,
-`deploy/compose/hermes-agent/Dockerfile`, `deploy/compose/litellm/Dockerfile`,
+`deploy/compose/litellm/Dockerfile`,
 and `scripts/verify-controller-skopeo` for digest-pinned references that are
 absent from the lock. It reads registries and nothing else and needs
 `docker buildx`.
@@ -197,23 +196,20 @@ merge.
 
 ## Patched release images are a different flow
 
-Bumping `build_bases.litellm` or `build_bases.hermes` changes only the upstream
+Bumping `build_bases.litellm` changes only the upstream
 **base** of the patched image:
 
 - `deploy/compose/litellm/Dockerfile` builds a Prisma- and route-activation-
   patched image from `ghcr.io/berriai/litellm`.
-- `deploy/compose/hermes-agent/Dockerfile` builds a NAS-identity-patched image
-  from `nousresearch/hermes-agent`.
 
-The result is published as `ghcr.io/carstvaartjes/vonk-forge-litellm` and
-`ghcr.io/carstvaartjes/vonk-forge-hermes`. Publishing those patched images is a
+The result is published as `ghcr.io/carstvaartjes/vonk-forge-litellm`. Publishing that patched image is a
 separate release flow from bumping an upstream pin: it builds the patched
 Dockerfile targets from an exact release commit, resolves and verifies the
 digests of all four release artifacts together, signs the LiteLLM image against
 the checked-in key `deploy/compose/trust/litellm-cosign.pub` from an exact
 upstream commit, and exposes the resulting digest-pinned references to
-operators. Never treat a new upstream `litellm` or `hermes-agent` tag as a
-published Vonk image, and never point `LITELLM_IMAGE` or `HERMES_AGENT_IMAGE` at
+operators. Never treat a new upstream `litellm` tag as a
+published Vonk image, and never point `LITELLM_IMAGE` at
 an upstream tag. See [Verify the platform supply
 chain](runbooks/supply-chain.md) and [Platform release
 publication](runbooks/platform-release-publication.md).
