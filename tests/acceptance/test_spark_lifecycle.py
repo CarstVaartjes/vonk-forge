@@ -4423,37 +4423,28 @@ class SparkLifecycle:
 
     @staticmethod
     def _admission_diagnostic(preview: dict[str, object]) -> list[dict[str, object]]:
-        """Name the blockers each assignment's admission decision carries.
+        """Name the blockers each blocking assignment decision carries.
 
         ``summary.blockers`` counts them, but the reasons list shows only
-        warnings; the decisive blocker lives on the assignment decision and its
-        assessment.
+        warnings; the decisive blocker lives on the assignment decision.
         """
 
         decisions = preview.get("admission_decisions")
-        assessments = preview.get("assessments")
-        by_assignment: dict[object, object] = {}
-        if isinstance(assessments, list):
-            for item in assessments:
-                if isinstance(item, dict) and isinstance(item.get("assessment"), dict):
-                    by_assignment[item.get("assignment_id")] = item["assessment"].get(
-                        "blockers"
-                    )
         if not isinstance(decisions, list):
             return []
+        blocking = [
+            decision
+            for decision in decisions
+            if isinstance(decision, dict) and decision.get("allowed") is not True
+        ]
         return [
             {
                 "assignment_id": decision.get("assignment_id"),
-                "allowed": decision.get("allowed"),
                 "blockers": SparkLifecycle._blocker_diagnostic(
                     decision.get("blockers")
                 ),
-                "assessment_blockers": SparkLifecycle._blocker_diagnostic(
-                    by_assignment.get(decision.get("assignment_id"))
-                ),
             }
-            for decision in decisions[:8]
-            if isinstance(decision, dict)
+            for decision in blocking[:8]
         ]
 
     @staticmethod

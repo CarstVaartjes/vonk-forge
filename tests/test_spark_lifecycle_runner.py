@@ -2349,27 +2349,53 @@ def test_preview_diagnostic_names_assignment_level_admission_blockers() -> None:
     pytest.importorskip(
         "fastapi", reason="Controller contract tests run in the control suite"
     )
+    from vonk_control.fleet_profile_contract import FleetProfileAdmissionDecision
+
     lifecycle = _module()
-    assignment_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    blocker = {
-        "code": "memory.insufficient",
-        "detail": "not enough memory",
-        "node_ids": ["spk_" + "b" * 32],
-    }
+
+    def decision(assignment_id: str, *, blocked: bool) -> dict[str, object]:
+        blockers = (
+            [
+                {
+                    "code": "memory.insufficient",
+                    "detail": "not enough memory",
+                    "severity": "blocker",
+                    "scope": "node",
+                    "node_ids": ["spk_" + "b" * 32],
+                }
+            ]
+            if blocked
+            else []
+        )
+        return FleetProfileAdmissionDecision.model_validate(
+            {
+                "assignment_id": assignment_id,
+                "alias": None,
+                "allowed": not blocked,
+                "blockers": blockers,
+                "requirements": [],
+                "effective_settings": None,
+                "stops": [],
+                "stop_before_prepare": False,
+                "stop_before_transfer": False,
+            }
+        ).model_dump(mode="json")
+
+    blocked_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    allowed = [
+        decision(f"bbbbbbbb-bbbb-4bbb-8bbb-{index:012d}", blocked=False)
+        for index in range(9)
+    ]
     preview = {
         "allowed": False,
         "summary": {"blockers": 1},
         "reasons": [{"code": "profile.interruption_expected", "severity": "warning"}],
-        "admission_decisions": [
-            {"assignment_id": assignment_id, "allowed": False, "blockers": [blocker]}
-        ],
-        "assessments": [
-            {"assignment_id": assignment_id, "assessment": {"blockers": [blocker]}}
-        ],
+        "admission_decisions": [*allowed, decision(blocked_id, blocked=True)],
     }
-    message = lifecycle.SparkLifecycle._preview_diagnostic(preview)
-    parsed = json.loads(message)["admission"][0]
-    assert parsed["assignment_id"] == assignment_id
-    assert parsed["blockers"][0]["code"] == "memory.insufficient"
-    assert parsed["blockers"][0]["node_ids"] == blocker["node_ids"]
-    assert parsed["assessment_blockers"][0]["detail"] == "not enough memory"
+    admission = json.loads(lifecycle.SparkLifecycle._preview_diagnostic(preview))[
+        "admission"
+    ]
+    assert [item["assignment_id"] for item in admission] == [blocked_id]
+    assert admission[0]["blockers"][0]["code"] == "memory.insufficient"
+    assert admission[0]["blockers"][0]["detail"] == "not enough memory"
+    assert admission[0]["blockers"][0]["node_ids"] == ["spk_" + "b" * 32]
