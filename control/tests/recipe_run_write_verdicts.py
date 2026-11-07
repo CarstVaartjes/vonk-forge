@@ -135,10 +135,6 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "6d3618fc710e5617d8d26f132da9bdaeeafbc9dd98ce24245c60b53ab7c4aaff",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
-        "end_unfinished_run_in_session": (
-            "07fcb1df4041876d26238e650adeb64942bb8c35560519010be2233fb6c8e019",
-            "caller-owned: the recovery tick's optimistic publication transaction fences the version it read",
-        ),
         "queue_recovery_stop_in_session": (
             "2c269907f69fb51b3f1571591616271befbf501a8f154dc2991067dde028a195",
             "caller-owned: recovery dispatch fences child-only effects",
@@ -164,13 +160,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/terminal_projection.py": {
         "_project_terminal_result": (
-            "caa5db52cb336246a8766dac66fbdf97494189c2ecec8acbfbba23c8aef216c3",
+            "cad56079288887fa60baff7b099b157a020ced1e8cbc3c73c29067eb57d21bb7",
             "caller-owned: queue result transaction owns terminal projection",
         ),
     },
     "recipe_operations/run_transitions.py": {
         "end_unfinished_run": (
-            "165fffc3c4fcc69fc88df520bb656c531de313bdbb3a08fb28d7c5e312f29d49",
+            "e905decb4ddd15367323ab9e4dc9f4134deb598dd4c1cae089e886c2d7469338",
             "caller-owned: the failed-start terminal projection (queue result transaction) and the recovery tick's run reaper (optimistic publication transaction) own the cleanup Stop or the lost verdict",
         ),
     },

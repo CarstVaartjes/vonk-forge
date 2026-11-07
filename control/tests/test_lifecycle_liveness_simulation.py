@@ -59,7 +59,7 @@ _SUPERSEDED_BY_RECOVERY_REVIEW = (
     " renumbered the seeds; it fails identically without the recovery coordinator"
     " and the run reaper). The sequence ends with a stacked load reviewed by an"
     " older Controller, a co-located load and an unreadable solo revision; the root"
-    " cause is not isolated."
+    " cause is not isolated (follow-up: vonk-forge #2128)."
 )
 #: Known bugs by a pattern of their violation signature (see ``Violation``).
 KNOWN_BUGS = {

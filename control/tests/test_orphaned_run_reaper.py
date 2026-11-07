@@ -36,13 +36,28 @@ from .test_recipe_operations import (
 AFTER_GRACE = NOW + OWNER_SETTLE_GRACE + timedelta(minutes=1)
 
 
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def world(request, tmp_path) -> _World:
+    engine = (
+        request.getfixturevalue("postgres_engine")
+        if request.param == "postgres"
+        else None
+    )
+    return _World(tmp_path, engine)
+
+
 class _World:
-    def __init__(self, tmp_path, *, nodes: int = 1) -> None:
+    def __init__(self, tmp_path, engine=None, *, nodes: int = 1) -> None:
         self.sessions, service, self.queue, self.mapping, self.build, self.nodes = (
-            setup_services(tmp_path, nodes=nodes)
+            setup_services(tmp_path, nodes=nodes, engine=engine)
         )
         self.service, self.routes = bind_route_publications(
             self.sessions, service, ConcurrentPublisher()
+        )
+        # A second, unused installation of the fleet: what a person or the
+        # storage sweep removes, which takes a new workload intent.
+        self.unused = installed_recipe(
+            self.service, self.mapping, self.build, self.nodes, request_id="j" * 36
         )
         self.installation = installed_recipe(
             self.service, self.mapping, self.build, self.nodes, request_id="i" * 36
@@ -96,12 +111,13 @@ class _World:
         assert self.start(str(uuid.uuid4())).state in {"queued", "running"}
 
 
-def _supersede_by_install(world: _World) -> None:
-    """A standalone install takes a newer intent: the unissued Start is settled."""
+def _supersede_by_removal(world: _World) -> None:
+    """Removing the unused installation takes a newer intent: the unissued
+    Start is settled cancelled, as a production uninstall does."""
 
-    plan = world.service.preview_install(world.mapping, world.build)
-    world.service.install(
-        plan,
+    plan = world.service.preview_uninstall(world.unused.owner_id)
+    world.service.uninstall(
+        world.unused.owner_id,
         plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
@@ -116,14 +132,13 @@ def _cancel(world: _World, start) -> None:
 
 @pytest.mark.parametrize("ending", ["supersede", "cancel"])
 def test_a_start_ended_before_any_claim_stops_its_run_and_frees_it(
-    tmp_path, ending
+    world, ending
 ) -> None:
-    world = _World(tmp_path)
     start = world.start()
     run_id = start.owner_id
     assert world.run(run_id).state == "starting"
     if ending == "supersede":
-        _supersede_by_install(world)
+        _supersede_by_removal(world)
     else:
         _cancel(world, start)
     with world.sessions() as session:
@@ -143,8 +158,7 @@ def test_a_start_ended_before_any_claim_stops_its_run_and_frees_it(
     world.fresh_start_is_admitted()
 
 
-def test_a_run_live_work_names_is_left_alone(tmp_path) -> None:
-    world = _World(tmp_path)
+def test_a_run_live_work_names_is_left_alone(world: _World) -> None:
     start = world.start()
     assert not world.tick()
     assert world.run(start.owner_id).state == "starting"
@@ -163,8 +177,7 @@ def _claimed_then_ended_unobserved(world: _World, start) -> None:
         session.execute(update(Job).where(Job.id == start.id).values(state="cancelled"))
 
 
-def test_a_claimed_start_ending_unobserved_gets_its_exact_stop(tmp_path) -> None:
-    world = _World(tmp_path)
+def test_a_claimed_start_ending_unobserved_gets_its_exact_stop(world: _World) -> None:
     start = world.start()
     _claimed_then_ended_unobserved(world, start)
 
@@ -177,10 +190,15 @@ def test_a_claimed_start_ending_unobserved_gets_its_exact_stop(tmp_path) -> None
     # A restarted worker finds the Stop its predecessor queued, not another.
     assert world.tick() is False
     assert len(world.stops(start.owner_id)) == 1
+    # The Spark proves the never-launched run absent: the Stop's result settles it.
+    for node_id in world.nodes:
+        world.service.record_node_result(stop.id, node_id, succeeded=True, evidence={})
+    assert world.run(start.owner_id).state == "stopped"
+    assert world.claims(start.owner_id) == 0
+    world.fresh_start_is_admitted()
 
 
-def test_a_stop_that_ended_unobserved_is_issued_again(tmp_path) -> None:
-    world = _World(tmp_path)
+def test_a_stop_that_ended_unobserved_is_issued_again(world: _World) -> None:
     start = world.start()
     _claimed_then_ended_unobserved(world, start)
     world.tick()
@@ -198,8 +216,7 @@ def test_a_stop_that_ended_unobserved_is_issued_again(tmp_path) -> None:
     assert len(world.stops(start.owner_id)) == 2
 
 
-def test_a_stop_whose_job_was_pruned_is_issued_again(tmp_path) -> None:
-    world = _World(tmp_path)
+def test_a_stop_whose_job_was_pruned_is_issued_again(world: _World) -> None:
     start = world.start()
     _claimed_then_ended_unobserved(world, start)
     world.tick()
@@ -216,8 +233,9 @@ def test_a_stop_whose_job_was_pruned_is_issued_again(tmp_path) -> None:
     assert len(world.stops(start.owner_id)) == 1  # the pruned one is gone, a new one
 
 
-def test_a_deferred_offline_stop_order_owns_the_run_until_it_ends(tmp_path) -> None:
-    world = _World(tmp_path)
+def test_a_deferred_offline_stop_order_owns_the_run_until_it_ends(
+    world: _World,
+) -> None:
     start = world.start()
     _claimed_then_ended_unobserved(world, start)
     world.tick()
@@ -239,9 +257,8 @@ def test_a_deferred_offline_stop_order_owns_the_run_until_it_ends(tmp_path) -> N
 
 
 def test_a_run_another_writer_took_over_is_not_undone(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    world: _World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    world = _World(tmp_path)
     start = world.start()
     _cancel(world, start)
     named = run_reaper.runs_named_by_live_work

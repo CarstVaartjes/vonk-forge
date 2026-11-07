@@ -105,10 +105,6 @@ class World:
     raised_ticks: _RaisedTicks = field(default_factory=_RaisedTicks)
     #: The world's own engine, released when it closes.
     engine: Engine | None = None
-    #: What a standalone install of the whole fleet is previewed from.
-    install_source: tuple[str, str] | None = None
-    #: Recipes whose stored revisions stopped parsing (``make_unreadable``).
-    unreadable: set[str] = field(default_factory=set)
     #: The route publisher each Controller process builds; the current one is
     #: ``publisher``, so a test can read its generations or make it fail.
     publisher_type: Callable[[], ConcurrentPublisher] = ConcurrentPublisher
@@ -236,8 +232,6 @@ class World:
         and (with ``successor``) the catalog publishes one the current contract
         accepts."""
 
-        self.unreadable.add(recipe)
-
         with self.sessions.begin() as session:
             stored = session.execute(
                 select(
@@ -314,7 +308,7 @@ def build_world(
     # connection never goes stale: no liveness ping before every session (a
     # round opens some fifty sessions; the pings were a third of its round trips).
     engine = create_engine(engine.url, pool_pre_ping=False)
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(
+    sessions, lifecycle, _queue, _mapping, build_id, nodes = setup_services(
         tmp_path, nodes=2, engine=engine, **setup_options
     )
     now = [lifecycle._clock()]
@@ -352,7 +346,6 @@ def build_world(
         template=lifecycle,
         readable=readable,
         engine=engine,
-        install_source=(mapping_id, build_id),
     )
 
 

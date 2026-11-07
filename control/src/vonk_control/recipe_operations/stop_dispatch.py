@@ -489,28 +489,22 @@ class StopDispatchMixin:
             session.scalars(select(RunNode.node_id).where(RunNode.run_id == run.id))
         )
         ordinal = _shared_workload_intent(session, node_ids)
-        if ordinal is None:
-            run.state = RunState.LOST
-            run.route_state = RouteState.WITHDRAWN
-            run.route_error = "owner ended; cleanup awaits the owning intent"
-        else:
-            run.route_error = "owner ended; cleanup queued"
-            end_unfinished_run(
-                service,
-                session,
-                run,
-                now,
-                actor="system:run-reaper",
-                request_id=str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"vonk:recipe-run-reaper:{run.id}:{run.run_generation}"
-                        f":{version_before}",
-                    )
-                ),
-                ordinal=ordinal,
-            )
-        run.updated_at = now
+        end_unfinished_run(
+            service,
+            session,
+            run,
+            now,
+            actor="system:run-reaper",
+            request_id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"vonk:recipe-run-reaper:{run.id}:{run.run_generation}"
+                    f":{version_before}",
+                )
+            ),
+            ordinal=ordinal,
+            note="owner ended",
+        )
         return RunState(run.state)
 
     def _exact_stop_authority(
