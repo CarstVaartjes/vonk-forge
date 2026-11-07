@@ -100,7 +100,9 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
 
     A single real read runs inline. Several run in daemon threads while the
     caller waits on each read's result in order; that wait is interruptible, so Ctrl-C
-    still raises KeyboardInterrupt on the main thread at once.
+    still raises KeyboardInterrupt on the main thread at once. A read that dies
+    with a non-Exception (such as CancelledError) still completes its future,
+    so the waiter re-raises it instead of waiting forever.
     """
     real = [read for read in reads if read is not _skipped_read]
     if len(real) > _MAX_CONCURRENT_READS:
@@ -115,7 +117,10 @@ def _read_concurrently(*reads: Callable[[], object]) -> list[_ReadOutcome]:
     }
 
     def work(future: Future[_ReadOutcome], read: Callable[[], object]) -> None:
-        future.set_result(_run_read(read))
+        try:
+            future.set_result(_run_read(read))
+        except BaseException as error:  # noqa: BLE001 - the waiter must always complete
+            future.set_exception(error)
 
     for index, future in pending.items():
         threading.Thread(target=work, args=(future, reads[index]), daemon=True).start()

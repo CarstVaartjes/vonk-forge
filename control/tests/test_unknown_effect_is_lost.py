@@ -26,7 +26,7 @@ from vonk_control.distributed_recovery import (
     settle_observed_absent_runs_in_session,
 )
 from vonk_control.models import AgentOperation, RecipeRun, ResourceReservation, RunNode
-from vonk_control.recipe_operations import terminal_projection
+from vonk_control.recipe_operations import run_transitions
 from vonk_control.recipe_stop_payloads import RecipeStopAuthorityError
 
 from .test_absent_run_release import _report_absent
@@ -191,7 +191,7 @@ def test_a_failed_start_without_exact_cleanup_authority_is_lost(
         raise RecipeStopAuthorityError("the revision row is gone")
 
     with monkeypatch.context() as patched:
-        patched.setattr(terminal_projection, "durable_run_stop_payloads", unbuildable)
+        patched.setattr(run_transitions, "durable_run_stop_payloads", unbuildable)
         service.record_node_result(
             start.id, nodes[0], succeeded=False, evidence={"code": "start.unconfirmed"}
         )
