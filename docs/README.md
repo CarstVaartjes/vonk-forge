@@ -81,7 +81,6 @@ flowchart LR
 - [Quickstart](QUICKSTART.md)
 - [Model cache](runbooks/model-cache.md) and
   [Hugging Face access](model-cache-huggingface-auth.md)
-- [Hermes Agent](runbooks/hermes-agent.md)
 - [Alerts and observability](runbooks/observability.md)
 - [PostgreSQL backups](postgres-backups.md)
 - [Workload recovery](operations/workload-recovery.md)

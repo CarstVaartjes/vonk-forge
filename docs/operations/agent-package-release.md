@@ -132,8 +132,7 @@ stale threshold. The production tailnet is never selected or modified.
 The child response contains a new all-scope OAuth credential for that child
 only. The workflow masks it immediately, stores it in a mode-`0600` runner file,
 never uploads it, and never exports it to the NAS installer. It uses that
-lifecycle credential to define `svc:vonk-forge`, `svc:hermes-api`, and
-`svc:hermes-dashboard`, each on `tcp:443`, plus only the exact
+lifecycle credential to define `svc:vonk-forge` on `tcp:443`, plus only the exact
 `tag:vonk-gateway` self-access grant and exact Service auto-approvals required
 by the gateway. It then creates and reads back one child-local OAuth client with
 only the `auth_keys` scope and only `tag:vonk-gateway`. That scoped client is the
@@ -280,7 +279,7 @@ uv run --isolated --no-project --python 3.14 --with "$wheel" \
 
 Here `$wheel` and `$payload` are the exact files already verified by the
 bootstrap, not independently chosen downloads. `uv` must already be installed;
-it manages the Python 3.14 runtime. Upgrade and Hermes switches, private answers,
+it manages the Python 3.14 runtime. Upgrade switch, private answers,
 Lab mode, local secrets and PKI retain the same command workflow.
 
 Release JSON is signed, and one signed, expiring `current.manifest` atomically

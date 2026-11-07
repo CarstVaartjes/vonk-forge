@@ -18,8 +18,6 @@ INPUTS = (
     "control/src",
     "control/web",
     "inventory/wheels",
-    "deploy/compose/hermes-agent/Dockerfile",
-    "deploy/compose/hermes-agent/entrypoint.sh",
     # Runtime configuration the Controller image ships and stages.
     "deploy/compose/Caddyfile",
     "deploy/compose/caddy/entrypoint.sh",
@@ -30,11 +28,9 @@ INPUTS = (
     "deploy/compose/prometheus",
     "deploy/compose/registry/config.yml",
     "deploy/compose/tailscale/configure.sh",
-    "deploy/compose/hermes-agent/provision-litellm-key.py",
     # Read only to embed the Compose template digest.
     "deploy/compose/compose.yaml",
     "deploy/compose/tailscale/compose.yaml",
-    "deploy/compose/hermes-agent/compose.yaml",
     "scripts/render-dev-compose",
     "scripts/image_policy.py",
 )

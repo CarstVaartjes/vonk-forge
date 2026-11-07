@@ -19,12 +19,11 @@ def template() -> NasInstallTemplate:
       "internal_values": [{"env":"VONK_CONTROLLER_IMAGE","value":"controller:new"}],
       "required_values": [{"env":"NAS_LAN_IP","prompt":"NAS IP","validation":"ipv4"},
                           {"env":"VONK_MANAGEMENT_CIDRS","prompt":"Management CIDRs","validation":"cidr_list"}],
-      "optional_values": ["VONK_HERMES_TIMEZONE"],
+      "optional_values": ["VONK_SITE_TIMEZONE"],
       "secrets": [{"file":"hf-token","prompt":"HF token","optional":true},
                   {"file":"tailscale-key","prompt":"Tailscale key","secure_remote_only":true}],
       "install_modes": {"prompt":"Install mode","lab_value":"lab","secure_remote_value":"secure-remote",
                         "lab_values": []},
-      "hermes": {"env":"COMPOSE_PROFILES","prompt":"Enable Hermes","enabled_value":"hermes","disabled_value":""},
       "generated_secrets": {
         "random_text": [{"file":"postgres-password","bytes":32}, {"file":"litellm-key","bytes":32,"prefix":"sk-"}],
         "ed25519_pkcs8_pem": [{"file":"signing-key"}],

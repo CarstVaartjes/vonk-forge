@@ -66,13 +66,6 @@ def run(argv: list[str] | None = None) -> None:
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("."))
     parser.add_argument("--upgrade", action="store_true")
-    hermes = parser.add_mutually_exclusive_group()
-    hermes.add_argument(
-        "--enable-hermes", dest="hermes_enabled", action="store_const", const=True
-    )
-    hermes.add_argument(
-        "--disable-hermes", dest="hermes_enabled", action="store_const", const=False
-    )
     parser.add_argument("--answers-file", type=Path)
     args = parser.parse_args(argv)
     descriptor = os.open(args.template, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -96,7 +89,6 @@ def run(argv: list[str] | None = None) -> None:
             args.output,
             prompt,
             upgrade=args.upgrade,
-            hermes_enabled=args.hermes_enabled,
         )
     finally:
         if answers is not None:

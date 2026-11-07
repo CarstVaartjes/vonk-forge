@@ -10,7 +10,7 @@ def test_dependabot_covers_every_container_and_action_location_weekly() -> None:
     config = yaml.safe_load(CONFIG.read_text())
     assert config["version"] == 2
     required = {
-        "docker": {"/control", "/deploy/compose/hermes-agent"},
+        "docker": {"/control"},
         "docker-compose": {"/deploy/compose", "/deploy/compose/tailscale"},
         "github-actions": {"/"},
         "cargo": {"/"},

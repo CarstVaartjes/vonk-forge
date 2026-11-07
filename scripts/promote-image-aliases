@@ -6,7 +6,7 @@ umask 077
 
 usage() {
   printf '%s\n' \
-    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest [HERMES_IMAGE HERMES_DIGEST [LITELLM_IMAGE LITELLM_DIGEST]] [--postcondition COMMAND [ARG...] | --commit COMMAND [ARG...]]' \
+    'usage: promote-image-aliases API_IMAGE API_DIGEST WORKER_IMAGE WORKER_DIGEST dev|latest [LITELLM_IMAGE LITELLM_DIGEST] [--postcondition COMMAND [ARG...] | --commit COMMAND [ARG...]]' \
     >&2
   exit 64
 }
@@ -32,7 +32,7 @@ if [[ "$boundary" -lt "${#arguments[@]}" && "${arguments[$boundary]}" == --commi
   postcondition=()
 fi
 (( "${#postcondition[@]}" > 0 || "${#commit[@]}" > 0 || boundary == "${#arguments[@]}" )) || usage
-(( boundary == 5 || boundary == 7 || boundary == 9 )) || usage
+(( boundary == 5 || boundary == 7 )) || usage
 set -- "${base_arguments[@]}"
 readonly api_image=$1 api_digest=$2 worker_image=$3 worker_digest=$4 alias=$5
 [[ "$api_image" == ghcr.io/carstvaartjes/vonk-forge-api ]] || usage
@@ -45,22 +45,12 @@ roles=(api worker)
 images=("$api_image" "$worker_image")
 digests=("$api_digest" "$worker_digest")
 if [[ "$#" -eq 7 ]]; then
-  readonly hermes_image=$6 hermes_digest=$7
-  [[ "$hermes_image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || usage
-  [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
-  roles+=(hermes)
-  images+=("$hermes_image")
-  digests+=("$hermes_digest")
-fi
-if [[ "$#" -ge 9 ]]; then
-  readonly hermes_image=$6 hermes_digest=$7 litellm_image=$8 litellm_digest=$9
-  [[ "$hermes_image" == ghcr.io/carstvaartjes/vonk-forge-hermes ]] || usage
-  [[ "$hermes_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
+  readonly litellm_image=$6 litellm_digest=$7
   [[ "$litellm_image" == ghcr.io/carstvaartjes/vonk-forge-litellm ]] || usage
   [[ "$litellm_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || usage
-  roles+=(hermes litellm)
-  images+=("$hermes_image" "$litellm_image")
-  digests+=("$hermes_digest" "$litellm_digest")
+  roles+=(litellm)
+  images+=("$litellm_image")
+  digests+=("$litellm_digest")
 fi
 
 

@@ -23,8 +23,6 @@ CHILD_POLICY = {
     "acls": [],
     "autoApprovers": {
         "services": {
-            "svc:hermes-api": ["tag:vonk-gateway"],
-            "svc:hermes-dashboard": ["tag:vonk-gateway"],
             "svc:vonk-forge": ["tag:vonk-gateway"],
         }
     },
@@ -32,8 +30,6 @@ CHILD_POLICY = {
         {
             "dst": [
                 "svc:vonk-forge",
-                "svc:hermes-api",
-                "svc:hermes-dashboard",
             ],
             "ip": ["tcp:443"],
             "src": ["tag:vonk-gateway"],
@@ -151,12 +147,7 @@ class _ResponsePlan(list[_Response]):
 
 def _success_create_responses() -> _ResponsePlan:
     services = [
-        {"name": service, "ports": ["tcp:443"]}
-        for service in (
-            "svc:vonk-forge",
-            "svc:hermes-api",
-            "svc:hermes-dashboard",
-        )
+        {"name": service, "ports": ["tcp:443"]} for service in ("svc:vonk-forge",)
     ]
     responses = _ResponsePlan()
     for phase, response in (
@@ -804,8 +795,6 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
         "/api/v2/oauth/token",
         "/api/v2/organizations/-/tailnets",
         "/api/v2/tailnet/tailnet_ci_123/services/svc%3Avonk-forge",
-        "/api/v2/tailnet/tailnet_ci_123/services/svc%3Ahermes-api",
-        "/api/v2/tailnet/tailnet_ci_123/services/svc%3Ahermes-dashboard",
         "/api/v2/tailnet/tailnet_ci_123/services",
         "/api/v2/tailnet/tailnet_ci_123/acl",
         "/api/v2/tailnet/tailnet_ci_123/keys",
@@ -848,8 +837,6 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
     service_requests = {str(body["name"]): body for body in service_create_requests}
     assert set(service_requests) == {
         "svc:vonk-forge",
-        "svc:hermes-api",
-        "svc:hermes-dashboard",
     }
     assert len(service_create_requests) == len(service_requests)
     for service, body in service_requests.items():
@@ -857,8 +844,6 @@ def test_create_configures_only_the_child_and_delete_uses_its_exact_id(
             "comment": "Ephemeral Vonk Forge installer acceptance",
             "displayName": {
                 "svc:vonk-forge": "Vonk Forge",
-                "svc:hermes-api": "Hermes API",
-                "svc:hermes-dashboard": "Hermes dashboard",
             }[service],
             "name": service,
             "ports": ["tcp:443"],
@@ -1023,12 +1008,9 @@ def test_configuration_failure_deletes_exact_child(
         [
             {"name": "svc:vonk-forge", "ports": ["tcp:443"]},
             {"name": "svc:vonk-forge", "ports": ["tcp:443"]},
-            {"name": "svc:hermes-dashboard", "ports": ["tcp:443"]},
         ],
         [
             {"name": "svc:vonk-forge", "ports": ["tcp:443"]},
-            {"name": "svc:hermes-api", "ports": ["tcp:443"]},
-            {"name": "svc:hermes-dashboard", "ports": ["tcp:443"]},
             "unexpected",
         ],
     ],

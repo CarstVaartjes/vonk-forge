@@ -130,13 +130,6 @@ class NasStepCaControllerRequest(WireModel):
     files: NasStepCaControllerFiles
 
 
-class NasHermesPrompt(WireModel):
-    env: str
-    prompt: str
-    enabled_value: str
-    disabled_value: str
-
-
 class NasInstallTemplate(WireModel):
     """The canonical NAS Compose template with its install questions."""
 
@@ -153,7 +146,6 @@ class NasInstallTemplate(WireModel):
     group_readable_secrets: NasGroupReadableSecrets | None = None
     install_modes: NasInstallModes | None = None
     step_ca_controller: NasStepCaControllerRequest | None = None
-    hermes: NasHermesPrompt | None = None
 
     @model_validator(mode="after")
     def validate_setup_semantics(self) -> NasInstallTemplate:
@@ -200,15 +192,6 @@ class NasInstallTemplate(WireModel):
             secret(item.file)
             if not item.prompt.strip():
                 raise ValueError(f"prompt for {item.file} is empty")
-        if self.hermes:
-            env(self.hermes.env)
-            if (
-                not self.hermes.prompt.strip()
-                or self.hermes.enabled_value == self.hermes.disabled_value
-                or not single_line(self.hermes.enabled_value)
-                or not single_line(self.hermes.disabled_value)
-            ):
-                raise ValueError("Hermes choices are invalid")
         if self.install_modes:
             modes = self.install_modes
             if (

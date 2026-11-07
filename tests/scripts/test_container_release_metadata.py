@@ -31,7 +31,6 @@ def test_stable_tag_emits_exact_public_package_metadata() -> None:
         "latest_alias=latest",
         "api_image=ghcr.io/carstvaartjes/vonk-forge-api",
         "worker_image=ghcr.io/carstvaartjes/vonk-forge-worker",
-        "hermes_image=ghcr.io/carstvaartjes/vonk-forge-hermes",
         "litellm_image=ghcr.io/carstvaartjes/vonk-forge-litellm",
         (f"api_dev_source=ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{SHA}"),
         (f"worker_dev_source=ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{SHA}"),

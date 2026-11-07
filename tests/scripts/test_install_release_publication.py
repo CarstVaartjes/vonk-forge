@@ -29,7 +29,6 @@ ACCEPTANCE_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
     "compose_default",
-    "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
     "spark_arm64",
@@ -41,7 +40,6 @@ NAS_GATES = {
     "compose_compatibility_lower",
     "compose_compatibility_ugreen",
     "compose_default",
-    "compose_hermes",
     "nas_site_secret_preservation",
     "nas_workstation",
 }
@@ -257,7 +255,6 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
     version = str(inputs["version"])
     channel = str(inputs["channel"])
     image_tag = f"v{version}" if channel == "stable" else f"dev-sha-{SOURCE_SHA}"
-    hermes_tag = version if channel == "stable" else f"dev-sha-{SOURCE_SHA}"
     command = [
         sys.executable,
         str(SCRIPT),
@@ -282,8 +279,6 @@ def _assemble_command(tmp_path: Path, inputs: dict[str, object]) -> list[str]:
         f"ghcr.io/carstvaartjes/vonk-forge-api:{image_tag}@sha256:{DIGEST}",
         "--worker-image",
         f"ghcr.io/carstvaartjes/vonk-forge-worker:{image_tag}@sha256:{DIGEST}",
-        "--hermes-image",
-        f"ghcr.io/carstvaartjes/vonk-forge-hermes:{hermes_tag}@sha256:{DIGEST}",
         "--litellm-image",
         f"ghcr.io/carstvaartjes/vonk-forge-litellm:{image_tag}@sha256:{DIGEST}",
         "--nas-payload",
@@ -990,7 +985,6 @@ def test_acceptance_authority_signs_only_the_complete_exact_generation(
                 "compose_compatibility_lower",
                 "compose_compatibility_ugreen",
                 "compose_default",
-                "compose_hermes",
                 "nas_site_secret_preservation",
                 "nas_workstation",
             },
@@ -2274,7 +2268,7 @@ def test_assemble_rejects_package_metadata_from_another_release(tmp_path: Path) 
     assert "package metadata is inconsistent" in result.stderr
 
 
-@pytest.mark.parametrize("role", ("api", "worker", "hermes", "litellm"))
+@pytest.mark.parametrize("role", ("api", "worker", "litellm"))
 def test_assemble_refuses_mutable_image_references(tmp_path: Path, role: str) -> None:
     inputs = _inputs(tmp_path)
     command = _assemble_command(tmp_path, inputs)
@@ -2298,7 +2292,7 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     command = _assemble_command(tmp_path, inputs)
     images_source_sha = "c" * 40
     command[command.index("--images-source-sha") + 1] = images_source_sha
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         option = f"--{role}-image"
         command[command.index(option) + 1] = command[command.index(option) + 1].replace(
             f"dev-sha-{SOURCE_SHA}", f"dev-sha-{images_source_sha}"
@@ -2311,6 +2305,8 @@ def test_development_assembly_reuses_images_from_an_accepted_ancestor(
     assert result.returncode == 0, result.stderr
 
 
+# Assembles and signs a whole release publication through the real script.
+@pytest.mark.slow(60)
 @pytest.mark.parametrize(
     "image_tag", (f"acceptance-{SOURCE_SHA}-123-1", "dev-sha-" + "c" * 40)
 )
@@ -2319,7 +2315,7 @@ def test_development_assembly_preserves_digest_pins_independent_of_tag_provenanc
 ) -> None:
     command = _assemble_command(tmp_path, _inputs(tmp_path, channel="dev"))
     references: dict[str, str] = {}
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         index = command.index(f"--{role}-image") + 1
         reference = (
             f"ghcr.io/carstvaartjes/vonk-forge-{role}:{image_tag}@sha256:{DIGEST}"

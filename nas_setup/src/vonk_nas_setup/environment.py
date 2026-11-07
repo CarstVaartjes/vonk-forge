@@ -14,7 +14,7 @@ from vonk_agent_protocol.installer_setup import (
     validate_environment_name,
 )
 
-from .filesystem import SetupError, read_member
+from .filesystem import read_member
 
 #: The one owner of the profile-selection name in `.env` and in the Compose file.
 SELECTION_ENV = "COMPOSE_PROFILES"
@@ -81,37 +81,12 @@ def profiles(value: str) -> list[str]:
     return [member.strip() for member in value.split(",") if member.strip()]
 
 
-def configure_hermes(
-    payload: NasInstallTemplate,
-    environment: dict[str, str],
-    requested: bool | None,
-) -> bool | None:
-    hermes = payload.hermes
-    if hermes is None:
-        return None
-    if hermes.env != SELECTION_ENV:
-        raise SetupError(f"hermes selection {hermes.env} is not {SELECTION_ENV}")
-    members = profiles(environment.get(hermes.env, ""))
-    enabled = hermes.enabled_value in members if requested is None else requested
-    members = [
-        member
-        for member in members
-        if member not in (hermes.enabled_value, hermes.disabled_value)
-    ]
-    if enabled:
-        members.append(hermes.enabled_value)
-    environment[hermes.env] = ",".join(members) if members else hermes.disabled_value
-    return enabled
-
-
 def retain_known(
     payload: NasInstallTemplate, environment: dict[str, str]
 ) -> tuple[str, ...]:
     known = {item.env for item in payload.internal_values}
     known.update(item.env for item in payload.required_values)
     known.update(payload.optional_values)
-    if payload.hermes:
-        known.add(payload.hermes.env)
     if payload.install_modes:
         known.add(SELECTION_ENV)
         known.update(item.env for item in payload.install_modes.lab_values)
