@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fail closed unless the locked upstream LiteLLM base verifies against the
+# checked-in cosign key. images.lock.json is the only owner of the digest.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+reference="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["build_bases"]["litellm"])' "$root/deploy/compose/images.lock.json")"
+case "$reference" in
+  *@sha256:????????????????????????????????????????????????????????????????) ;;
+  *) echo "locked litellm base is not digest-pinned: $reference" >&2; exit 1 ;;
+esac
+exec cosign verify --key "$root/deploy/compose/trust/litellm-cosign.pub" "$reference"

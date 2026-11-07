@@ -50,8 +50,13 @@ scripts/verify-supply-chain --json
 
 The verifier checks the Python, Rust, and web dependency lockfiles, the reviewed
 third-party contracts wheel digest, runtime and build image pins,
-Dockerfile/Compose relationships, and the LiteLLM cosign public key. It has no
-network access and does not require generated inventory in the checkout. The
+Dockerfile/Compose relationships, and the digest of the LiteLLM cosign public
+key. Both LiteLLM `FROM` lines must carry exactly the locked
+`build_bases.litellm` digest. The verifier has no network access, so it cannot
+check signatures; CI runs `scripts/verify-litellm-base-signature`
+(`cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
+base) before every LiteLLM build, failing closed. The verifier does not require
+generated inventory in the checkout. The
 protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence
 into a separate directory:
 
@@ -83,10 +88,10 @@ After future deliberate enablement, the tag-triggered GitHub Actions workflow
 is the only publication procedure. It builds all three targets, verifies their
 inputs, emits SBOM and provenance, resolves all three digests, and creates the
 checksum-protected three-reference release asset. It never treats one or two
-images as a releasable publication. LiteLLM signatures use the checked-in key
-copied from immutable upstream commit
-`0112e53046018d726492c814b3644b7d376029d0`; verify the locked digest, never a
-mutable tag. Store scan/signature attestations with the release evidence.
+images as a releasable publication. LiteLLM base signatures are checked in CI (not at
+publication) with the checked-in key copied from immutable upstream commit
+`0112e53046018d726492c814b3644b7d376029d0`; the verified reference is the
+locked digest, never a mutable tag. Store scan/signature attestations with the release evidence.
 
 ## Recipe workloads
 
