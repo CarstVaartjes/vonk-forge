@@ -138,10 +138,6 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
     "exllamav3": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
-    # A generic PyTorch server serves no engine-defined /metrics.
-    "pytorch-server": EngineTelemetryContract(
-        "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
-    ),
     "diffusers": EngineTelemetryContract(
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
@@ -154,6 +150,10 @@ _ENGINE_TELEMETRY: dict[str, EngineTelemetryContract] = {
         "unsupported", None, (("HF_HUB_DISABLE_TELEMETRY", "1"),)
     ),
 }
+
+# The generic PyTorch server serves no engine-defined /metrics: the same contract
+# as ExLlamaV3, bound once rather than restated.
+_ENGINE_TELEMETRY["pytorch-server"] = _ENGINE_TELEMETRY["exllamav3"]
 
 # DO_NOT_TRACK is the engine-independent opt-out convention; the platform sets
 # it for every runtime so recipes never carry it.

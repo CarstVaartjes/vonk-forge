@@ -112,7 +112,7 @@ CANONICAL_HARNESSES: tuple[CanonicalHarnessMetadata, ...] = (
         capability_requirements=("nvidia-gpu",),
         topology_modes=("single",),
         security_exceptions=(),
-        executables=("pytorch-server", "pytorch"),
+        executables=("pytorch-server",),
         wrapper="/opt/vonk/bin/pytorch-server",
     ),
     CanonicalHarnessMetadata(
