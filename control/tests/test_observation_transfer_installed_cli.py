@@ -25,7 +25,6 @@ from tests.test_profile_load_installed_cli import _https_api_peer, _process_envi
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
-@pytest.mark.lane
 def _fleet_document(text: str) -> dict:
     """The Controller snapshot inside ``vonkctl fleet --json`` (document + stamp)."""
 
@@ -34,6 +33,7 @@ def _fleet_document(text: str) -> dict:
     return document
 
 
+@pytest.mark.lane
 def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership(
     installed_vonkctl: Path,
     tmp_path: Path,

@@ -82,7 +82,7 @@ class ArtifactTransferClient(Protocol):
         expected_sha256: str,
         expected_size: int,
         overwrite: bool,
-    ) -> dict[str, object]: ...
+    ) -> object: ...  # the receipt is not read here
 
 
 @dataclass(frozen=True, slots=True)
