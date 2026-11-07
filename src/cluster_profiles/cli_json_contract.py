@@ -56,13 +56,6 @@ class _Word(StrEnum):
     RESULT = "result"
 
 
-class ErrorKey(StrEnum):
-    """The two keys every failure document carries."""
-
-    ERROR = "error"
-    ERROR_TYPE = "error_type"
-
-
 class CliErrorType(StrEnum):
     """Where a failure document comes from (``error_type``)."""
 
@@ -71,6 +64,12 @@ class CliErrorType(StrEnum):
     DECLINED = "declined"
     UPDATE = "update"
     ENROLLMENT_DELIVERY = "enrollment_delivery"
+
+
+def failure_document(message: str, error_type: CliErrorType, **fields) -> dict:
+    """The one constructor of a failure document: ``error``, ``error_type``, extras."""
+
+    return dict(error=message, error_type=error_type, **fields)
 
 
 #: Kinds whose Controller model owns its ``schema_version``; the stamp never

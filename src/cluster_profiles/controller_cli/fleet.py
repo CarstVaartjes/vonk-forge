@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import cast
 
 from ..cli_files import PrivateOutput, _delivery_io
-from ..cli_json_contract import CliErrorType
+from ..cli_json_contract import CliErrorType, failure_document
 from ..cli_outcome import (
     EnrollmentDeliveryError,
 )
@@ -172,8 +172,12 @@ def _deliver_enrollment(
                     if isinstance(error, KeyboardInterrupt)
                     else "failed"
                 }
-                receipt["error"] = "Enrollment grant delivery is unconfirmed."
-                receipt["error_type"] = CliErrorType.ENROLLMENT_DELIVERY
+                receipt.update(
+                    failure_document(
+                        "Enrollment grant delivery is unconfirmed.",
+                        CliErrorType.ENROLLMENT_DELIVERY,
+                    )
+                )
                 receipt["cause"] = type(error).__name__
                 refusal_status = (
                     _known_http_refusal_status(error)
@@ -236,16 +240,21 @@ def _deliver_enrollment(
         receipt["delivery"] = {
             "status": STOP_UNCONFIRMED if submission_started else PROFILE_NOT_ISSUED
         }
-        receipt["error_type"] = CliErrorType.ENROLLMENT_DELIVERY
         receipt["cause"] = type(error).__name__
         if submission_started:
-            receipt["error"] = (
-                "Enrollment delivery was interrupted; the original grant remains unconfirmed."
+            receipt.update(
+                failure_document(
+                    "Enrollment delivery was interrupted; the original grant remains unconfirmed.",
+                    CliErrorType.ENROLLMENT_DELIVERY,
+                )
             )
             receipt["reconciliation"] = STOP_UNCONFIRMED
         else:
-            receipt["error"] = (
-                "The private output file is unavailable. Enrollment was not attempted."
+            receipt.update(
+                failure_document(
+                    "The private output file is unavailable. Enrollment was not attempted.",
+                    CliErrorType.ENROLLMENT_DELIVERY,
+                )
             )
             receipt["reconciliation"] = "issuance not attempted"
             receipt["recovery"] = []

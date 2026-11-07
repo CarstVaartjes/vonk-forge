@@ -25,7 +25,7 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
-from .cli_json_contract import CliErrorType, ErrorKey, stamp_document
+from .cli_json_contract import CliErrorType, failure_document, stamp_document
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -229,21 +229,21 @@ def _control_error(
         if isinstance(error, (ControlUnavailable, ControlTransportError, OSError))
         else message
     )
-    result: dict[str, object] = {
-        "error": message,
-        "error_type": CliErrorType.CONTROL_API,
-        "code": code,
-        "detail": _sanitize_text(detail),
-        "recovery_actions": list(getattr(error, "recovery", ()) or ()),
-        "retryable": getattr(error, "retryable", False) is True,
-        "retry_time": getattr(error, "retry_time", None),
-        "retry_after_seconds": getattr(error, "retry_after_seconds", None),
-        "preserved": getattr(error, "preserved", None),
-        "required_bytes": getattr(error, "required_bytes", None),
-        "free_bytes": getattr(error, "free_bytes", None),
-        "shortfall_bytes": getattr(error, "shortfall_bytes", None),
-        "log_excerpt": getattr(error, "log_excerpt", None),
-    }
+    result = failure_document(
+        message,
+        CliErrorType.CONTROL_API,
+        code=code,
+        detail=_sanitize_text(detail),
+        recovery_actions=list(getattr(error, "recovery", ()) or ()),
+        retryable=getattr(error, "retryable", False) is True,
+        retry_time=getattr(error, "retry_time", None),
+        retry_after_seconds=getattr(error, "retry_after_seconds", None),
+        preserved=getattr(error, "preserved", None),
+        required_bytes=getattr(error, "required_bytes", None),
+        free_bytes=getattr(error, "free_bytes", None),
+        shortfall_bytes=getattr(error, "shortfall_bytes", None),
+        log_excerpt=getattr(error, "log_excerpt", None),
+    )
     observation = getattr(args, "observation", None)
     if (
         isinstance(observation, Observation)
@@ -637,15 +637,13 @@ def _report_usage_error(raw_argv: Sequence[str], error: _UsageError) -> int:
     error_args = argparse.Namespace(
         global_json="--json" in raw_argv, json=False, command="profile"
     )
-    document: dict[str, object] = {
-        "error": (
-            "invalid command arguments"
-            if _arguments_may_contain_secrets(raw_argv)
-            else str(error)
-        ),
-        "error_type": CliErrorType.ARGUMENTS,
-        "recovery_actions": [error.next_step],
-    }
+    document = failure_document(
+        "invalid command arguments"
+        if _arguments_may_contain_secrets(raw_argv)
+        else str(error),
+        CliErrorType.ARGUMENTS,
+        recovery_actions=[error.next_step],
+    )
     if error.usage is not None:
         document["usage"] = error.usage
     _emit(document, error_args, error=True)
@@ -698,10 +696,7 @@ def _main(
             cache_update_notice(result)
             status = 0
         except (CliUpdateError, OSError) as error:
-            result = {
-                ErrorKey.ERROR: _sanitize_text(error),
-                ErrorKey.ERROR_TYPE: CliErrorType.UPDATE,
-            }
+            result = failure_document(_sanitize_text(error), CliErrorType.UPDATE)
             status = 2
         if args.global_json or getattr(args, "json", False):
             print(_json_text(stamp_document(args, result, error=status != 0)))
@@ -830,11 +825,11 @@ def _main(
         raise
     except ActionDeclined as error:
         _emit(
-            {
-                "error": str(error),
-                "error_type": CliErrorType.DECLINED,
-                "recovery_actions": list(error.next_steps),
-            },
+            failure_document(
+                str(error),
+                CliErrorType.DECLINED,
+                recovery_actions=list(error.next_steps),
+            ),
             args,
             error=True,
         )
