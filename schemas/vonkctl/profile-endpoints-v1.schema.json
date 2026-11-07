@@ -246,7 +246,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -254,7 +253,8 @@
   "required": [
     "number",
     "observed_at",
-    "assignments"
+    "assignments",
+    "schema_version"
   ],
   "title": "vonkctl profile-endpoints document (schema_version 1)",
   "type": "object"

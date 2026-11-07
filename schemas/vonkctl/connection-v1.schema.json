@@ -53,7 +53,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -62,7 +61,8 @@
     "connected",
     "client",
     "authorized_read",
-    "origin"
+    "origin",
+    "schema_version"
   ],
   "title": "vonkctl connection document (schema_version 1)",
   "type": "object"

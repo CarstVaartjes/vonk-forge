@@ -25,8 +25,10 @@ from vonk_control.library_api import install_library_routes
 from vonk_control.operation_api import durable_operation_services
 from vonk_control.vonkctl_json_contract import (
     DOCUMENTS,
+    incompatibilities,
     schema_filename,
     schema_text,
+    schema_version,
 )
 
 from cluster_profiles import cli
@@ -86,10 +88,49 @@ def _published(
     document = json.loads(printed)
     kind = _kind_of(argv, document)
     kinds_seen.add(kind)
-    assert document["schema_version"] == DOCUMENT_VERSIONS[kind]
+    _prove(kind, document, printed)
+    return document
+
+
+def _prove(kind: DocumentKind, document: dict, printed: str) -> None:
+    """The printed document satisfies its published schema and its strict model."""
+
+    assert document["schema_version"] == schema_version(kind)
     schema = json.loads((SCHEMAS / schema_filename(kind)).read_text())
     jsonschema.Draft202012Validator(schema).validate(document)
     DOCUMENTS[kind].validate_json(printed)
+
+
+class _KeepsRunning:
+    """The real client, with one application reported as still running."""
+
+    def __init__(self, client: ControlClient, application_id: str) -> None:
+        self._client = client
+        self._path = f"/api/profile/applications/{application_id}"
+
+    def __getattr__(self, name: str):
+        return getattr(self._client, name)
+
+    def request(self, method, path, *args, **kwargs):
+        document = self._client.request(method, path, *args, **kwargs)
+        if method == "GET" and path == self._path:
+            return {**document, "state": "running", "result": None}
+        return document
+
+
+def _failed(client: object, capsys, *argv: str) -> dict:
+    """Run a command that prints a failure or a followed-command observation."""
+
+    status = cli.main(("--json", "--no-input", *argv), control_client=client)
+    printed = capsys.readouterr().out
+    assert status != 0, printed
+    document = json.loads(printed)
+    kind = (
+        DocumentKind.OBSERVATION
+        if "observation" in document and "error" not in document
+        else DocumentKind.ERROR
+    )
+    _prove(kind, document, printed)
     return document
 
 
@@ -100,9 +141,9 @@ def _kind_of(argv: tuple[str, ...], document: dict) -> DocumentKind:
     return kind
 
 
-def test_every_fleet_and_profile_document_matches_its_published_schema(
-    tmp_path, capsys
-) -> None:
+def _world(tmp_path: Path) -> tuple[ControlClient, TestClient, dict]:
+    """A real Controller API with one saved empty profile, and a CLI client for it."""
+
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -145,7 +186,13 @@ def test_every_fleet_and_profile_document_matches_its_published_schema(
         ).status_code
         == 200
     )
-    client = _control_client(api, tmp_path, token)
+    return _control_client(api, tmp_path, token), api, headers
+
+
+def test_every_fleet_and_profile_document_matches_its_published_schema(
+    tmp_path, capsys
+) -> None:
+    client, _, _ = _world(tmp_path)
     seen: set[DocumentKind] = set()
 
     _published(client, capsys, seen, "fleet")
@@ -155,7 +202,7 @@ def test_every_fleet_and_profile_document_matches_its_published_schema(
     review = _published(
         client, capsys, seen, "--profile", "1", "profile", "load", "--review"
     )
-    assert review["schema_version"] == 2
+    assert review["schema_version"] == schema_version(DocumentKind.PROFILE_REVIEW) == 2
     _published(
         client,
         capsys,
@@ -206,6 +253,133 @@ def test_library_documents_match_their_published_schemas(
     assert seen == {DocumentKind.RECIPE_LIBRARY, DocumentKind.RECIPE_DETAIL}
 
 
+def test_cancel_follow_and_controller_failures_match_their_published_schemas(
+    tmp_path, capsys
+) -> None:
+    client, _, _ = _world(tmp_path)
+    seen: set[DocumentKind] = set()
+    key = "44444444-4444-4444-8444-444444444444"
+    loaded = _published(
+        client,
+        capsys,
+        seen,
+        "--profile",
+        "1",
+        "profile",
+        "load",
+        "--yes",
+        "--detach",
+        "--request-key",
+        key,
+    )
+
+    # A followed command that runs out of time prints the observation wrapper:
+    # the last confirmed document, tagged by its kind. The application stays
+    # running on the wire so the follow has something to wait for.
+    running = _KeepsRunning(client, loaded["id"])
+    observed = _failed(
+        running,
+        capsys,
+        "--profile",
+        "1",
+        "profile",
+        "progress",
+        "--application",
+        loaded["id"],
+        "--follow",
+        "--timeout-seconds",
+        "1",
+        "--interval-seconds",
+        "0.1",
+    )
+    assert observed["result_kind"] == DocumentKind.PROFILE_APPLICATION
+    assert observed["result"]["schema_version"] == schema_version(
+        DocumentKind.PROFILE_APPLICATION
+    )
+
+    # The application ended, so the Controller refuses the cancel: a typed
+    # failure with its code, detail, recovery actions and unconfirmed submission.
+    refused_cancel = _failed(
+        client,
+        capsys,
+        "--profile",
+        "1",
+        "profile",
+        "cancel",
+        loaded["id"],
+        "--yes",
+        "--detach",
+    )
+    assert refused_cancel["code"] == "profile.request_invalid"
+    assert refused_cancel["submission"]["acceptance"] == "refused"
+
+    # A Controller refusal: its code, detail and recovery actions are typed.
+    refused = _failed(client, capsys, "--profile", "99", "profile", "load", "--review")
+    assert refused["error_type"] == "control_api"
+    assert refused["code"] and refused["detail"]
+    assert isinstance(refused["recovery_actions"], list)
+
+
+def test_a_changed_schema_needs_a_new_version() -> None:
+    """The committed files are what clients rely on: only compatible edits keep a version."""
+
+    for kind in DOCUMENTS:
+        committed = json.loads((SCHEMAS / schema_filename(kind)).read_text())
+        regenerated = json.loads(schema_text(kind))
+        assert incompatibilities(committed, regenerated) == [], (
+            f"{kind}: incompatible change; bump its schema_version"
+        )
+        required = committed.get("required")
+        if required is not None:
+            assert "schema_version" in required
+    base = {
+        "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
+        "required": ["a"],
+    }
+    assert incompatibilities(base, base) == []
+    # Additive changes keep the version.
+    assert (
+        incompatibilities(
+            base,
+            {
+                "properties": {**base["properties"], "c": {"type": "string"}},
+                "required": ["a"],
+            },
+        )
+        == []
+    )
+    # Removing a property, requiring more, or changing a type does not.
+    assert incompatibilities(
+        base, {"properties": {"a": {"type": "string"}}, "required": ["a"]}
+    )
+    assert incompatibilities(base, {**base, "required": ["a", "b"]})
+    assert incompatibilities(
+        base,
+        {
+            "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a"],
+        },
+    )
+
+
+def test_schema_version_is_required_and_owned_by_one_model() -> None:
+    for kind in DOCUMENTS:
+        schema = json.loads(schema_text(kind))
+        members = (
+            [schema]
+            if "properties" in schema
+            else [
+                schema["$defs"][alternative["$ref"].rsplit("/", 1)[-1]]
+                for alternative in schema.get("anyOf", schema.get("oneOf", []))
+            ]
+        )
+        assert members, kind
+        for member in members:
+            assert "schema_version" in member.get("required", []), kind
+    # The review's number lives on its Controller model alone.
+    assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS
+
+
 def test_published_schema_files_are_the_models_current_export() -> None:
     assert {path.name for path in SCHEMAS.glob("*.schema.json")} == {
         schema_filename(kind) for kind in DOCUMENTS
@@ -218,7 +392,19 @@ def test_published_schema_files_are_the_models_current_export() -> None:
 
 
 def test_every_published_kind_names_its_version_in_schema_and_file() -> None:
-    for kind, version in DOCUMENT_VERSIONS.items():
+    for kind in DOCUMENTS:
+        version = schema_version(kind)
         schema = json.loads(schema_text(kind))
         assert schema_filename(kind).endswith(f"-v{version}.schema.json")
         assert "schema_version" in json.dumps(schema)
+
+
+def test_submission_acceptance_words_are_the_clis_own() -> None:
+    from typing import get_args, get_type_hints
+
+    from vonk_control.vonkctl_json_contract import SubmissionAcceptance
+
+    from cluster_profiles.cli_outcome import Submission
+
+    cli_words = set(get_args(get_type_hints(Submission)["acceptance"]))
+    assert {word.value for word in SubmissionAcceptance} == cli_words

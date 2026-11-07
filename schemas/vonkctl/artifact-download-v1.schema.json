@@ -30,15 +30,13 @@
         "transfer": {
           "anyOf": [
             {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/$defs/TransferReceipt"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Transfer"
+          "default": null
         }
       },
       "required": [
@@ -49,6 +47,35 @@
         "state"
       ],
       "title": "DownloadedFile",
+      "type": "object"
+    },
+    "TransferReceipt": {
+      "description": "What one verified result download reports: where it landed and what it is.",
+      "properties": {
+        "destination": {
+          "title": "Destination",
+          "type": "string"
+        },
+        "media_type": {
+          "title": "Media Type",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "destination",
+        "media_type",
+        "size_bytes",
+        "sha256"
+      ],
+      "title": "TransferReceipt",
       "type": "object"
     }
   },
@@ -71,11 +98,20 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     },
     "state": {
+      "enum": [
+        "queued",
+        "running",
+        "backoff",
+        "observing",
+        "needs-operator",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
       "title": "State",
       "type": "string"
     },
@@ -90,7 +126,8 @@
     "state",
     "output_manifest_sha256",
     "files",
-    "total_bytes"
+    "total_bytes",
+    "schema_version"
   ],
   "title": "vonkctl artifact-download document (schema_version 1)",
   "type": "object"

@@ -3017,14 +3017,14 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     }
   },
   "required": [
     "generated_at",
-    "profiles"
+    "profiles",
+    "schema_version"
   ],
   "title": "vonkctl profile-list document (schema_version 1)",
   "type": "object"

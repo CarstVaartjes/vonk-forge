@@ -7198,7 +7198,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -7237,7 +7236,8 @@
     "node_count",
     "engine",
     "document",
-    "model_documents"
+    "model_documents",
+    "schema_version"
   ],
   "title": "vonkctl recipe-detail document (schema_version 1)",
   "type": "object"

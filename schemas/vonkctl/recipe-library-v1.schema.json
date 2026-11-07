@@ -6282,7 +6282,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -6292,7 +6291,8 @@
     "recipes",
     "facets",
     "next_cursor",
-    "freshness_policy"
+    "freshness_policy",
+    "schema_version"
   ],
   "title": "vonkctl recipe-library document (schema_version 1)",
   "type": "object"

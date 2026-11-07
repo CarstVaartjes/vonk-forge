@@ -27,15 +27,27 @@ number belongs to the document kind, not to the vonkctl release.
 | `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 1 | `observation-v1.schema.json` |
 | `error` | any failure | `ErrorDocument` | 1 | `error-v1.schema.json` |
 
-A document the Controller already answers is that Controller response plus
-`schema_version`; the CLI and the web client read one shape (the review
-document versions itself, so its `schema_version` is the model's own). Other
+`schema_version` is required in every published schema. A document the
+Controller already answers is that Controller response plus `schema_version`;
+the CLI and the web client read one shape. The review document versions itself:
+its `schema_version` is owned by `FleetProfilePreview` alone, and the table in
+`cli_json_contract.py` holds no second copy. Other
 documents carry no `schema_version` and no promise. Source of truth for the
 table: `DOCUMENT_VERSIONS` in `src/cluster_profiles/cli_json_contract.py`.
 
 A followed command (`--follow`, `--watch`, a deadline) that cannot finish prints
-an `observation` document instead of the kind above: `result` holds the last
-confirmed document of that kind and `observation` says where to reconnect.
+an `observation` document instead of the kind above. It is a tagged union:
+`result_kind` names the kind of the command's own document, `result` holds the
+last confirmed document of that kind (stamped, or `{}` when nothing was
+confirmed) and `observation` says where to reconnect. An ended followed command
+that fails prints the same `result_kind` / `result` / `observation` inside the
+`error` document. A wrapper around a document with no published kind is itself
+unpublished.
+
+`error` documents type `error_type` (`arguments`, `control_api`, `declined`,
+`update`), `code` (the Controller code grammar), `detail` and
+`recovery_actions`, the error context, and an unconfirmed `submission` with its
+`reconcile` command. Enrollment-delivery receipts are not part of the contract.
 
 ## Compatibility rules
 
@@ -44,9 +56,15 @@ confirmed document of that kind and `observation` says where to reconnect.
 - Removing or renaming a field, changing its type, or making an optional field
   required bumps the version. The new schema file replaces the old one and the
   change lands in the same PR as every consumer in this repository.
-- A client reads `schema_version` first and refuses a version it does not know.
-  `vonkctl --version --json` and `--check-connection --json` `.client.version`
-  identify the CLI build.
+- A client reads `schema_version` first. A version it does not know is unknown
+  data: it degrades the feature that needs that document with a typed reason
+  ("unsupported vonkctl document version") and re-checks on its next refresh;
+  it does not guess at the fields. `--check-connection --json` `.client.version`
+  identifies the CLI build.
+- Regeneration refuses to rewrite a published file with an incompatible schema
+  (a removed property, a `required` list that grew, a changed type), and a test
+  fails on the same difference: the version must be bumped, which writes a new
+  file.
 
 ## Absent and `null`
 

@@ -56,14 +56,26 @@ class _Word(StrEnum):
     RESULT = "result"
 
 
-#: Kind -> schema_version. ``PROFILE_REVIEW`` is versioned by its Controller
-#: model (2) and this table pins the same number.
+class CliErrorType(StrEnum):
+    """Where a failure document comes from (``error_type``)."""
+
+    ARGUMENTS = "arguments"
+    CONTROL_API = "control_api"
+    DECLINED = "declined"
+    UPDATE = "update"
+    ENROLLMENT_DELIVERY = "enrollment_delivery"
+
+
+#: Kinds whose Controller model owns its ``schema_version``; the stamp never
+#: sets it and this module holds no second copy of the number.
+SELF_VERSIONED = frozenset({DocumentKind.PROFILE_REVIEW})
+
+#: Kind -> schema_version, for every kind the CLI stamps.
 DOCUMENT_VERSIONS: Mapping[DocumentKind, int] = {
     DocumentKind.CONNECTION: 1,
     DocumentKind.FLEET: 1,
     DocumentKind.PROFILE_LIST: 1,
     DocumentKind.PROFILE: 1,
-    DocumentKind.PROFILE_REVIEW: 2,
     DocumentKind.PROFILE_APPLICATION: 1,
     DocumentKind.PROFILE_ENDPOINTS: 1,
     DocumentKind.RECIPE_LIBRARY: 1,
@@ -86,7 +98,9 @@ def document_kind(
     """The published kind of the document this invocation prints, if any."""
 
     if error:
-        return DocumentKind.ERROR
+        # Enrollment receipts are their own documents, not the failure contract.
+        unpublished = document.get("error_type") == CliErrorType.ENROLLMENT_DELIVERY
+        return None if unpublished else DocumentKind.ERROR
     if getattr(args, "check_connection", False):
         return DocumentKind.CONNECTION
     # A followed command's wrapper holds ``result`` beside an ``observation`` receipt.
@@ -126,16 +140,43 @@ def document_kind(
 
 
 def stamp(document: Mapping, kind: DocumentKind | None) -> Mapping:
-    """The document with its ``schema_version`` (unchanged when it has no kind).
+    """The document with its ``schema_version`` (unchanged when it has no kind)."""
 
-    A Controller model that versions itself (the profile review) keeps its own
-    number; ``DOCUMENT_VERSIONS`` pins the same one and the contract test proves
-    they agree.
+    if kind is None or kind in SELF_VERSIONED:
+        return document
+    return {**document, "schema_version": DOCUMENT_VERSIONS[kind]}
+
+
+_NO_RESULT_KINDS = frozenset(
+    {DocumentKind.CONNECTION, DocumentKind.OBSERVATION, DocumentKind.ERROR}
+)
+
+
+def stamp_document(
+    args: argparse.Namespace, document: Mapping, *, error: bool
+) -> Mapping:
+    """The document as printed: stamped, with a followed result stamped inside it.
+
+    A followed command that stops early prints the last confirmed document of
+    the command's own kind in ``result``; ``result_kind`` names that kind so
+    the wrapper is a tagged union. A wrapper around a document that has no
+    published kind is itself unpublished.
     """
 
-    if kind is None:
+    kind = document_kind(args, document, error=error)
+    if kind not in (DocumentKind.OBSERVATION, DocumentKind.ERROR):
+        return stamp(document, kind)
+    if _Word.RESULT not in document:
+        return stamp(document, kind)
+    inner = document[_Word.RESULT]
+    inner_kind = document_kind(args, inner, error=False)
+    if inner_kind is None or inner_kind in _NO_RESULT_KINDS:
         return document
-    return {
-        **document,
-        "schema_version": document.get("schema_version", DOCUMENT_VERSIONS[kind]),
-    }
+    return stamp(
+        {
+            **document,
+            "result_kind": inner_kind,
+            "result": stamp(inner, inner_kind) if inner else inner,
+        },
+        kind,
+    )

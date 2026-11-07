@@ -7704,7 +7704,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -7784,7 +7783,8 @@
     "progress",
     "result",
     "created_at",
-    "updated_at"
+    "updated_at",
+    "schema_version"
   ],
   "title": "vonkctl profile-application document (schema_version 1)",
   "type": "object"

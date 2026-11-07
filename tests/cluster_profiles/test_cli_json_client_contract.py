@@ -14,10 +14,14 @@ import jsonschema
 
 # The artifact-job fixtures own the Controller job shapes and their clock.
 from test_cli_artifact_jobs import (  # noqa: F401
+    CANCEL_KEY,
     JOB_ID,
     RUN_ID,
+    SUBMIT_KEY,
     ArtifactJobClient,
     _binding,
+    _declarations,
+    _job,
     _succeeded_job,
     artifact_clock,
 )
@@ -34,11 +38,9 @@ SCHEMAS = Path(__file__).resolve().parents[2] / "schemas" / "vonkctl"
 
 
 def _validate(kind: DocumentKind, document: dict) -> None:
-    schema = json.loads(
-        (SCHEMAS / f"{kind}-v{DOCUMENT_VERSIONS[kind]}.schema.json").read_text()
-    )
-    assert document["schema_version"] == DOCUMENT_VERSIONS[kind]
-    jsonschema.Draft202012Validator(schema).validate(document)
+    [path] = SCHEMAS.glob(f"{kind}-v*.schema.json")
+    assert path.name == f"{kind}-v{document['schema_version']}.schema.json"
+    jsonschema.Draft202012Validator(json.loads(path.read_text())).validate(document)
 
 
 def _run(client, capsys, *argv: str, request_key: str | None = None) -> dict:
@@ -99,6 +101,45 @@ class _Reachable:
         return {}
 
 
+def test_job_upload_submit_and_cancel_documents_match_their_schema(
+    tmp_path, capsys
+) -> None:
+    client = ArtifactJobClient()
+    binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
+    client.job = _job(declarations=_declarations({"input.png": b"x"}))
+    uploaded = _run(
+        client, capsys, "recipe", "job", "upload", JOB_ID, "--file", str(binding)
+    )
+    _validate(DocumentKind.ARTIFACT_JOB, uploaded)
+
+    client.job = _job(state="ready")
+    submitted = _run(
+        client,
+        capsys,
+        "recipe",
+        "job",
+        "submit",
+        JOB_ID,
+        request_key=SUBMIT_KEY,
+    )
+    _validate(DocumentKind.ARTIFACT_JOB, submitted)
+
+    client.job["state"] = "queued"
+    cancelled = _run(
+        client,
+        capsys,
+        "recipe",
+        "job",
+        "cancel",
+        JOB_ID,
+        "--yes",
+        "--reason",
+        "stop now",
+        request_key=CANCEL_KEY,
+    )
+    _validate(DocumentKind.ARTIFACT_JOB, cancelled)
+
+
 def test_connection_document_matches_its_schema(capsys, monkeypatch) -> None:
     monkeypatch.setenv("VONK_CONTROL_URL", "https://forge.example.test")
     _validate(DocumentKind.CONNECTION, _run(_Reachable(), capsys, "--check-connection"))
@@ -132,6 +173,10 @@ def test_every_kind_is_reachable_from_a_command() -> None:
             (("recipe", "job", "detail", JOB_ID), False),
             (("recipe", "job", "download", JOB_ID, "--output", "x"), False),
             (("fleet",), True),
+            (("profile", "cancel", JOB_ID), False),
+            (("recipe", "job", "upload", JOB_ID, "--file", "x"), False),
+            (("recipe", "job", "submit", JOB_ID), False),
+            (("recipe", "job", "cancel", JOB_ID), False),
         )
     } | {
         document_kind(
@@ -140,14 +185,12 @@ def test_every_kind_is_reachable_from_a_command() -> None:
             error=False,
         )
     }
-    assert printed == set(DOCUMENT_VERSIONS)
+    assert printed == set(DocumentKind)
 
 
 def test_a_document_without_a_kind_is_not_stamped() -> None:
     assert stamp({"nodes": []}, None) == {"nodes": []}
-    assert stamp(
-        {"schema_version": 2, "allowed": True}, DocumentKind.PROFILE_REVIEW
-    ) == {
-        "schema_version": 2,
-        "allowed": True,
-    }
+    # The review's Controller model owns its version; the stamp leaves it alone.
+    review = {"schema_version": 2, "allowed": True}
+    assert stamp(review, DocumentKind.PROFILE_REVIEW) == review
+    assert DocumentKind.PROFILE_REVIEW not in DOCUMENT_VERSIONS

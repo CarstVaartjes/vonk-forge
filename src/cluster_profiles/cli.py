@@ -25,7 +25,7 @@ from .cli_help import (
     subcommands,
     usage_error,
 )
-from .cli_json_contract import DocumentKind, document_kind, stamp
+from .cli_json_contract import CliErrorType, stamp_document
 from .cli_outcome import (
     CommandOutcome,
     EnrollmentDeliveryError,
@@ -231,7 +231,7 @@ def _control_error(
     )
     result: dict[str, object] = {
         "error": message,
-        "error_type": "control_api",
+        "error_type": CliErrorType.CONTROL_API,
         "code": code,
         "detail": _sanitize_text(detail),
         "recovery_actions": list(getattr(error, "recovery", ()) or ()),
@@ -512,7 +512,7 @@ def _emit(
     json_output = args.global_json or getattr(args, "json", False)
     safe = _sanitize(payload, terminal=not json_output)
     if json_output:
-        print(_json_text(safe, document_kind(args, safe, error=error)))
+        print(_json_text(stamp_document(args, safe, error=error)))
         return
     if error:
         code = safe.get("code")
@@ -571,10 +571,9 @@ def _emit(
         )
 
 
-def _json_text(document: Mapping, kind: DocumentKind | None = None) -> str:
+def _json_text(document: Mapping) -> str:
     """One versioned JSON document: indented for a person, compact for a pipe."""
 
-    document = stamp(document, kind)
     if sys.stdout.isatty():
         return json.dumps(document, sort_keys=True, indent=2)
     return json.dumps(document, sort_keys=True, separators=(",", ":"))
@@ -644,7 +643,7 @@ def _report_usage_error(raw_argv: Sequence[str], error: _UsageError) -> int:
             if _arguments_may_contain_secrets(raw_argv)
             else str(error)
         ),
-        "error_type": "arguments",
+        "error_type": CliErrorType.ARGUMENTS,
         "recovery_actions": [error.next_step],
     }
     if error.usage is not None:
@@ -830,7 +829,7 @@ def _main(
         _emit(
             {
                 "error": str(error),
-                "error_type": "declined",
+                "error_type": CliErrorType.DECLINED,
                 "recovery_actions": list(error.next_steps),
             },
             args,

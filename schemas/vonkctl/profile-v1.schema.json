@@ -887,7 +887,6 @@
         },
         "schema_version": {
           "const": 1,
-          "default": 1,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -924,7 +923,8 @@
         "profile_digest",
         "created_by",
         "created_at",
-        "updated_at"
+        "updated_at",
+        "schema_version"
       ],
       "title": "FleetProfileViewDocument",
       "type": "object"
@@ -2891,7 +2891,6 @@
         },
         "schema_version": {
           "const": 1,
-          "default": 1,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -2906,7 +2905,8 @@
         "id",
         "number",
         "revision",
-        "projection_issue"
+        "projection_issue",
+        "schema_version"
       ],
       "title": "UnavailableFleetProfileViewDocument",
       "type": "object"

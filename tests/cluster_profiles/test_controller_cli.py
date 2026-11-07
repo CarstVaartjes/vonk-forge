@@ -349,6 +349,9 @@ def run(argv: tuple[str, ...], client: FakeClient) -> tuple[int, dict[str, objec
     # The client-contract stamp is proven by test_vonkctl_json_contract; these
     # tests compare the Controller's content.
     document.pop("schema_version", None)
+    if "result_kind" in document:
+        document.pop("result_kind")
+        document["result"].pop("schema_version", None)
     return status, document
 
 

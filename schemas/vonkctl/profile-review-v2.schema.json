@@ -3232,7 +3232,6 @@
     },
     "schema_version": {
       "const": 2,
-      "default": 2,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -3257,6 +3256,7 @@
     }
   },
   "required": [
+    "schema_version",
     "profile_id",
     "profile_name",
     "profile_digest",

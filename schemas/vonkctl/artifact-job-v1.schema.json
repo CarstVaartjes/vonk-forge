@@ -1147,7 +1147,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -1234,7 +1233,8 @@
     "output_files",
     "timeout_seconds",
     "created_at",
-    "updated_at"
+    "updated_at",
+    "schema_version"
   ],
   "title": "vonkctl artifact-job document (schema_version 1)",
   "type": "object"

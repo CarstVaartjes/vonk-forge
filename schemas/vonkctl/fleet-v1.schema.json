@@ -3308,7 +3308,6 @@
     },
     "schema_version": {
       "const": 1,
-      "default": 1,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -3317,7 +3316,8 @@
     "event_cursor",
     "generated_at",
     "authority_revision",
-    "nodes"
+    "nodes",
+    "schema_version"
   ],
   "title": "vonkctl fleet document (schema_version 1)",
   "type": "object"
