@@ -44,6 +44,7 @@ from cluster_profiles.control_client import (
     ControlSchemaRejected,
 )
 from cluster_profiles.control_client import client as client_module
+from cluster_profiles.runtime_identity import RuntimeBuildIdentity
 from control.tests.observation_transfer_peer import ObservationHTTPPeer
 
 SHIPPED = "a" * 64
@@ -66,7 +67,9 @@ def observation_clock(monkeypatch: pytest.MonkeyPatch) -> None:
 def stamped(monkeypatch: pytest.MonkeyPatch) -> Callable[[str | None], None]:
     def stamp(value: str | None) -> None:
         monkeypatch.setattr(
-            client_module, "stamped_control_contract_sha256", lambda: value
+            client_module,
+            "stamped_runtime_identity",
+            lambda: RuntimeBuildIdentity(None, value, "b" * 64),
         )
 
     stamp(SHIPPED)
@@ -346,3 +349,47 @@ def test_a_generated_schema_rejection_on_the_same_contract_stays_re_readable(
         client.job(job.rsplit("/", 1)[1])
 
     assert requested.count(job) > 1
+
+
+def test_a_refusal_with_an_unknown_reason_keeps_waiting_and_heals(
+    tmp_path: Path,
+) -> None:
+    from cluster_profiles.cli_states_generated import SUCCEEDED
+    from cluster_profiles.generated_control.models.job_detail_response import (
+        JobDetailResponse,
+    )
+
+    job_id = "12345678-1234-4123-8123-123456789abc"
+    job = f"/api/jobs/{job_id}"
+    succeeded = JobDetailResponse(
+        authority_revision="a" * 64,
+        current_attempt=1,
+        id=job_id,
+        kind="run",
+        operation_total=0,
+        operations=[],
+        progress=None,
+        state=SUCCEEDED,
+        target_total=0,
+        targets=[],
+        status_reason=None,
+    ).to_dict()
+    # A newer Controller's 503 names a capability reason this CLI never heard
+    # of. A received refusal keeps its own disposition: wait, then re-read.
+    newer_refusal = {
+        "capability": "recipe-library",
+        "reason": "capability.newer_reason",
+        "retryable": True,
+    }
+    client, requested = _controller(
+        tmp_path,
+        {
+            job: iter([_Response(503, newer_refusal), _Response(200, succeeded)]),
+            "/api/cli/contract": _compatibility,
+        },
+    )
+
+    result = client.wait_job(job_id, timeout=30, interval=1)
+
+    assert result.state == SUCCEEDED
+    assert requested == [job, job]

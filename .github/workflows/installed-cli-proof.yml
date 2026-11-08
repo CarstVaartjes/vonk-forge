@@ -28,12 +28,6 @@ on:
       - 'scripts/install-release-publication'
       - 'pyproject.toml'
       - 'uv.lock'
-      # Any Controller response contract change: the compatibility report
-      # below shows what a published vonkctl would refuse.
-      - 'control/src/**'
-      - 'control/packaging/public-contracts.lock'
-      - 'src/cluster_profiles/control_client/**'
-      - 'tools/client_compatibility_report.py'
 
 permissions:
   contents: read
@@ -43,30 +37,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  client-compatibility-report:
-    name: Published vonkctl against this Controller's responses (report)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    # A report, never a gate: a deliberate break is legitimate, and vonkctl
-    # names it at runtime as client.contract_mismatch with its update action.
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-      - name: Prepare this Controller's bundled CLI contract
-        uses: ./.github/actions/python-env
-        with:
-          contracts: python
-          cli-dependencies: 'false'
-      - name: Report response shapes the published vonkctl would refuse
-        shell: bash
-        run: |
-          set -euo pipefail
-          uv run --project control --frozen python tools/client_compatibility_report.py \
-            --candidate src/cluster_profiles/schemas/control-openapi.json \
-            --channel dev --channel stable | tee -a "$GITHUB_STEP_SUMMARY"
   signed-update:
     name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap
     runs-on: ubuntu-24.04

@@ -35,7 +35,7 @@ from ..observation_transfer_reader import (
     ObservationTransferUnavailable,
     receive_observation,
 )
-from ..runtime_identity import stamped_control_contract_sha256
+from ..runtime_identity import stamped_runtime_identity
 
 if TYPE_CHECKING:
     # Importing any generated model runs the generated package initializer,
@@ -298,17 +298,20 @@ class ControlClient:
     def _raise_contract_mismatch(self, error: ControlClientError) -> None:
         """Name a schema rejection from a Controller on another control contract.
 
-        Only a well-formed answer the bundled contract rejects asks; transfer,
-        framing, media type and JSON faults stay re-readable. When the
-        Controller's stable compatibility resource names a different control
-        contract than the one this CLI was stamped with, re-reading cannot
-        help: the answer is final and its typed recovery installs the accepted
-        vonkctl. Unknown either side keeps the original error.
+        Only a well-formed success answer the bundled contract rejects asks;
+        transfer, framing, media type and JSON faults stay re-readable, and a
+        received refusal (4xx/5xx) keeps its own disposition whatever its body.
+        When the Controller's stable compatibility resource names a different
+        control contract than the one this CLI was stamped with, re-reading
+        cannot help: the answer is final and its typed recovery installs the
+        accepted vonkctl. Unknown either side keeps the original error.
         """
         context = error.context
+        status = context.http_status if context is not None else None
         if (
             not isinstance(error, ControlSchemaRejected)
             or context is None
+            or (status is not None and not 200 <= status < 300)
             or not self._controller_contract_differs()
         ):
             return
@@ -325,7 +328,7 @@ class ControlClient:
         """
         if self._contract_differs is not None:
             return self._contract_differs
-        shipped = stamped_control_contract_sha256()
+        shipped = stamped_runtime_identity().control_contract_sha256
         if (
             shipped is None
             or self._contract_reading
