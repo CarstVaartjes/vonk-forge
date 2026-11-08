@@ -151,6 +151,8 @@ def test_the_reasoning_effort_name_is_standard_only_at_top_level() -> None:
     assert OpenAiRequestParameter.REASONING_EFFORT not in info.supported_openai_params
     assert info.vonk_reasoning_effort is not None
     assert info.vonk_reasoning_effort.via == "chat_template_kwargs"
+    assert info.reasoning_effort_levels is None
+    assert info.default_reasoning_effort is None
 
 
 def test_max_tokens_is_the_output_cap() -> None:
@@ -359,6 +361,12 @@ def _source_build_api() -> dict:
     return api
 
 
+def _source_build_api_with_output(tokens: int) -> dict:
+    api = _source_build_api()
+    api["api"]["default_output_tokens"] = {"value": tokens}
+    return api
+
+
 def _published_entries(root: Path) -> dict[str, dict]:
     verified = verify_active_route_bundle(root)
     assert not isinstance(verified, UnknownError) and verified.litellm is not None
@@ -456,19 +464,21 @@ def test_a_serving_route_keeps_its_facts_until_it_changes(tmp_path: Path) -> Non
     clock = MutableClock(NOW)
     base, _, _, first = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
+    _store_api(base, _source_build_api_with_output(111))
     service.publish_run(first)
-    assert "model_info" not in _published_entries(tmp_path / "live")["qwen"]
+    entry = _published_entries(tmp_path / "live")["qwen"]
+    assert entry["model_info"]["vonk_default_output_tokens"] == 111
 
-    # Facts land for the revision the running route uses.
-    _store_api(base, _source_build_api())
+    # Other facts land for the revision the running route uses.
+    _store_api(base, _source_build_api_with_output(222))
     second = add_running_run(
         base, first, alias="qwen-next", route_state=RunRouteState.PENDING, identity=3
     )
     service.publish_run(second)
 
     entries = _published_entries(tmp_path / "live")
-    assert "model_info" not in entries["qwen"]
-    assert entries["qwen-next"]["model_info"]["mode"] == "chat"
+    assert entries["qwen"]["model_info"]["vonk_default_output_tokens"] == 111
+    assert entries["qwen-next"]["model_info"]["vonk_default_output_tokens"] == 222
 
 
 def test_the_bundle_is_never_read_inside_the_publication_transaction(
@@ -510,13 +520,16 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
     clock = MutableClock(NOW)
     base, _, _, run_id = setup(tmp_path / "database", clock=clock)
     service = atomic_service(base, tmp_path / "live", clock)
+    _store_api(base, _source_build_api_with_output(111))
     service.publish_run(run_id)
-    assert "model_info" not in _published_entries(tmp_path / "live")["qwen"]
+    entry = _published_entries(tmp_path / "live")["qwen"]
+    assert entry["model_info"]["vonk_default_output_tokens"] == 111
 
-    # Facts land while the route serves: nothing moves.
-    _store_api(base, _source_build_api())
+    # Other facts land while the route serves: nothing moves.
+    _store_api(base, _source_build_api_with_output(222))
     service.maintain()
-    assert "model_info" not in _published_entries(tmp_path / "live")["qwen"]
+    entry = _published_entries(tmp_path / "live")["qwen"]
+    assert entry["model_info"]["vonk_default_output_tokens"] == 111
 
     # Recovery restarts the same run: a new generation, route pending again.
     with base.sessions.begin() as session:
@@ -535,7 +548,8 @@ def test_a_recovery_restart_of_the_same_run_applies_the_current_facts(
             .values(observed_run_generation=RunNode.observed_run_generation + 1)
         )
     service.publish_run(run_id)
-    assert _published_entries(tmp_path / "live")["qwen"]["model_info"]["mode"] == "chat"
+    entry = _published_entries(tmp_path / "live")["qwen"]
+    assert entry["model_info"]["vonk_default_output_tokens"] == 222
 
 
 def _endpoint_read_fails(base, root: Path) -> bool:
@@ -648,3 +662,89 @@ def test_an_earlier_bundle_is_republished_once_by_maintenance(
     settled = verify_active_route_bundle(live)
     assert not isinstance(settled, UnknownError)
     assert settled.marker.litellm_sha256 == after.marker.litellm_sha256
+
+
+def test_a_route_published_without_facts_gets_them_once_after_an_upgrade(
+    tmp_path: Path,
+) -> None:
+    """The upgrade heals the served facts: an unreadable live file, then the sync.
+
+    The live ``litellm.json`` holds an effort block without ``kind``; the one
+    contract refuses it, maintenance republishes the route, and the catalog's
+    ``api`` is still dropped, so the route publishes no facts. The next sync
+    records ``api`` again; the route that serves with no facts takes them once
+    (a frozen absence is not frozen), and real facts stay frozen after that.
+    """
+    from .test_recipe_routes import NOW, MutableClock, atomic_service, setup
+
+    effort_api = _source_build_api()
+    effort_api["api"]["reasoning"] = {
+        "kind": "always-on",
+        "effort": {
+            "kind": "levels",
+            "via": "top_level",
+            "key": "reasoning_effort",
+            "levels": ["low", "high"],
+            "default": "high",
+        },
+    }
+    clock = MutableClock(NOW)
+    base, _, _, run_id = setup(tmp_path / "database", clock=clock)
+    service = atomic_service(base, tmp_path / "live", clock)
+    live = tmp_path / "live"
+    _store_api(base, effort_api)
+    service.publish_run(run_id)
+    published = verify_active_route_bundle(live)
+    assert not isinstance(published, UnknownError)
+    assert published.routes is not None and published.litellm is not None
+
+    # The live file as the earlier Controller wrote it: no effort kind.
+    earlier = json.loads(published.litellm.model_dump_json(exclude_none=True))
+    for entry in earlier["model_list"]:
+        del entry["model_info"]["vonk_reasoning_effort"]["kind"]
+    earlier_bytes = (
+        json.dumps(earlier, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    runtime = AtomicRouteBundlePublisher(live)
+    runtime._validate_litellm = lambda _bytes: True  # type: ignore[method-assign]
+    with runtime._locked() as uncertainty:
+        assert uncertainty is None
+        marker = runtime._activate(
+            generation=published.marker.generation + 1,
+            state=GatewayRouteState.PUBLISHED,
+            authority_id=RECIPE_ROUTE_AUTHORITY_ID,
+            plan_digest=published.marker.plan_digest,
+            evidence_set_digest=published.marker.plan_digest,
+            routes=published.routes.model_copy(
+                update={"generation": published.marker.generation + 1}
+            )
+            .model_dump_json()
+            .encode(),
+            litellm=earlier_bytes,
+        )
+    assert not isinstance(marker, UnknownError)
+    with service.sessions.begin() as session:
+        service.projection_in_session(
+            session,
+            SimpleNamespace(activation_marker=marker),  # type: ignore[arg-type]
+            state=RoutePublicationState.COMPLETED,
+        )
+    assert service._publisher.served_model_info().unreadable
+
+    # After the upgrade the stored projection's api is dropped on read.
+    _store_api(base, None)
+    assert service.maintain() is True
+    assert "model_info" not in _published_entries(live)["qwen"]
+    assert service._publisher.served_model_info().routes == {"qwen": (run_id, None)}
+
+    # The next sync records the facts again; the serving route takes them once.
+    _store_api(base, effort_api)
+    assert service.maintain() is True
+    entry = _published_entries(live)["qwen"]
+    assert entry["model_info"]["vonk_reasoning_effort"]["kind"] == "levels"
+
+    # Real facts stay frozen: a later change of the stored facts moves nothing.
+    _store_api(base, _source_build_api())
+    assert service.maintain() is False
+    after = _published_entries(live)["qwen"]
+    assert after["model_info"]["vonk_reasoning_effort"]["kind"] == "levels"

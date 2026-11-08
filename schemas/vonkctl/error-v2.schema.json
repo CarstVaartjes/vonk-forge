@@ -115,16 +115,32 @@
       "type": "object"
     },
     "ApiReasoningAlwaysOn": {
+      "description": "No request turns reasoning off; the checkpoint may still skip it on a turn.",
       "properties": {
         "effort": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ApiReasoningEffort"
+              "discriminator": {
+                "mapping": {
+                  "levels": "#/$defs/ApiReasoningEffortLevels",
+                  "text": "#/$defs/ApiReasoningEffortText"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortLevels"
+                },
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortText"
+                }
+              ]
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Effort"
         },
         "kind": {
           "const": "always-on",
@@ -139,7 +155,8 @@
       "title": "ApiReasoningAlwaysOn",
       "type": "object"
     },
-    "ApiReasoningEffort": {
+    "ApiReasoningEffortLevels": {
+      "description": "The request names one of ``levels`` at ``key``; another value may be refused.\n\n``default`` is the level in force when the request names none. Only the\nnames a client chooses from are listed: an engine's own numeric scale behind\nthem (an integer or float alias) is not.",
       "properties": {
         "default": {
           "maxLength": 64,
@@ -151,6 +168,11 @@
           "maxLength": 64,
           "minLength": 1,
           "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "levels",
+          "title": "Kind",
           "type": "string"
         },
         "levels": {
@@ -174,12 +196,58 @@
         }
       },
       "required": [
+        "kind",
         "via",
         "key",
         "levels",
         "default"
       ],
-      "title": "ApiReasoningEffort",
+      "title": "ApiReasoningEffortLevels",
+      "type": "object"
+    },
+    "ApiReasoningEffortText": {
+      "description": "The route takes any string at ``key`` (the template writes it into the prompt).\n\n``default`` is the text in force when the request sets none; ``null`` when\nthen no effort is written and the checkpoint decides.",
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Default"
+        },
+        "key": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "via": {
+          "enum": [
+            "chat_template_kwargs",
+            "top_level"
+          ],
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "via",
+        "key",
+        "default"
+      ],
+      "title": "ApiReasoningEffortText",
       "type": "object"
     },
     "ApiReasoningNone": {
@@ -211,12 +279,27 @@
         "effort": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ApiReasoningEffort"
+              "discriminator": {
+                "mapping": {
+                  "levels": "#/$defs/ApiReasoningEffortLevels",
+                  "text": "#/$defs/ApiReasoningEffortText"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortLevels"
+                },
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortText"
+                }
+              ]
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Effort"
         },
         "keys": {
           "items": {
@@ -2064,6 +2147,18 @@
       "title": "ChatApi",
       "type": "object"
     },
+    "CliErrorType": {
+      "description": "Where a failure document comes from (``error_type``).",
+      "enum": [
+        "arguments",
+        "control_api",
+        "declined",
+        "update",
+        "enrollment_delivery"
+      ],
+      "title": "CliErrorType",
+      "type": "string"
+    },
     "ClusterMappingCode": {
       "description": "Refusals of a cluster mapping (recipe-to-Spark assignment) request.",
       "enum": [
@@ -2620,6 +2715,25 @@
       ],
       "title": "DistributionObject",
       "type": "object"
+    },
+    "DocumentKind": {
+      "enum": [
+        "connection",
+        "fleet",
+        "profile-list",
+        "profile",
+        "profile-review",
+        "profile-application",
+        "profile-endpoints",
+        "recipe-library",
+        "recipe-detail",
+        "artifact-job",
+        "artifact-download",
+        "observation",
+        "error"
+      ],
+      "title": "DocumentKind",
+      "type": "string"
     },
     "DownloadedFile": {
       "properties": {
@@ -10683,124 +10797,6 @@
       "title": "ObservationStatus",
       "type": "string"
     },
-    "ObservedArtifactDownload": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ArtifactDownloadDocumentDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "artifact-download",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedArtifactDownload",
-      "type": "object"
-    },
-    "ObservedArtifactJob": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ArtifactJobResponseDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "artifact-job",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedArtifactJob",
-      "type": "object"
-    },
     "ObservedAssignmentState": {
       "description": "Where a fleet-profile assignment stands on the Sparks, as observed.",
       "enum": [
@@ -10813,481 +10809,6 @@
       ],
       "title": "ObservedAssignmentState",
       "type": "string"
-    },
-    "ObservedFleet": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetSnapshotDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "fleet",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedFleet",
-      "type": "object"
-    },
-    "ObservedProfile": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetProfileViewDocument"
-            },
-            {
-              "$ref": "#/$defs/UnavailableFleetProfileViewDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "profile",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedProfile",
-      "type": "object"
-    },
-    "ObservedProfileApplication": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetProfileApplicationViewDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "profile-application",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedProfileApplication",
-      "type": "object"
-    },
-    "ObservedProfileEndpoints": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetProfileEndpointsViewDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "profile-endpoints",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedProfileEndpoints",
-      "type": "object"
-    },
-    "ObservedProfileList": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetProfileListDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "profile-list",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedProfileList",
-      "type": "object"
-    },
-    "ObservedProfileReview": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FleetProfilePreviewDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "profile-review",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedProfileReview",
-      "type": "object"
-    },
-    "ObservedRecipeDetail": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeDetailResponseDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "recipe-detail",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedRecipeDetail",
-      "type": "object"
-    },
-    "ObservedRecipeLibrary": {
-      "properties": {
-        "observation": {
-          "$ref": "#/$defs/ObservationReceipt"
-        },
-        "request_key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Request Key"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeLibraryResponseDocument"
-            },
-            {
-              "$ref": "#/$defs/NothingConfirmed"
-            }
-          ],
-          "title": "Result"
-        },
-        "result_kind": {
-          "const": "recipe-library",
-          "title": "Result Kind",
-          "type": "string"
-        },
-        "schema_version": {
-          "const": 1,
-          "title": "Schema Version",
-          "type": "integer"
-        },
-        "submission": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/SubmissionReceipt"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "required": [
-        "observation",
-        "schema_version",
-        "result_kind",
-        "result"
-      ],
-      "title": "ObservedRecipeLibrary",
-      "type": "object"
     },
     "OperationBlocker": {
       "description": "One reason an operation is waiting or blocked, with the Sparks it concerns.",
@@ -14044,7 +13565,7 @@
           "$ref": "#/$defs/LibraryResourceProjection"
         },
         "schema_version": {
-          "const": 1,
+          "const": 2,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -14801,7 +14322,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 1,
+          "const": 2,
           "title": "Schema Version",
           "type": "integer"
         }
@@ -16418,6 +15939,44 @@
         "assertions"
       ],
       "title": "RecipeValidationCheck",
+      "type": "object"
+    },
+    "Reconcile": {
+      "description": "The command that settles an outcome this process could not confirm.",
+      "properties": {
+        "artifact_job_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Job Id"
+        },
+        "operation": {
+          "title": "Operation",
+          "type": "string"
+        },
+        "request_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Key"
+        }
+      },
+      "required": [
+        "operation"
+      ],
+      "title": "Reconcile",
       "type": "object"
     },
     "ReconcileCode": {
@@ -22695,6 +22254,24 @@
       "title": "UninstallPlanCode",
       "type": "string"
     },
+    "UploadedInput": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "title": "UploadedInput",
+      "type": "object"
+    },
     "WaitOwnerKind": {
       "description": "Existing durable owners of Controller waits; no independent wait queue.",
       "enum": [
@@ -22761,52 +22338,520 @@
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "discriminator": {
-    "mapping": {
-      "artifact-download": "#/$defs/ObservedArtifactDownload",
-      "artifact-job": "#/$defs/ObservedArtifactJob",
-      "fleet": "#/$defs/ObservedFleet",
-      "profile": "#/$defs/ObservedProfile",
-      "profile-application": "#/$defs/ObservedProfileApplication",
-      "profile-endpoints": "#/$defs/ObservedProfileEndpoints",
-      "profile-list": "#/$defs/ObservedProfileList",
-      "profile-review": "#/$defs/ObservedProfileReview",
-      "recipe-detail": "#/$defs/ObservedRecipeDetail",
-      "recipe-library": "#/$defs/ObservedRecipeLibrary"
+  "properties": {
+    "artifact_job_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Job Id"
     },
-    "propertyName": "result_kind"
-  },
-  "oneOf": [
-    {
-      "$ref": "#/$defs/ObservedFleet"
+    "candidates": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Candidates"
     },
-    {
-      "$ref": "#/$defs/ObservedProfileList"
+    "code": {
+      "anyOf": [
+        {
+          "pattern": "^[a-z][a-z0-9_.:-]{0,95}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Code"
     },
-    {
-      "$ref": "#/$defs/ObservedProfile"
+    "decision": {
+      "anyOf": [
+        {
+          "enum": [
+            "retry",
+            "defer",
+            "exit"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision"
     },
-    {
-      "$ref": "#/$defs/ObservedProfileReview"
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
     },
-    {
-      "$ref": "#/$defs/ObservedProfileApplication"
+    "downloaded_file_count": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Downloaded File Count"
     },
-    {
-      "$ref": "#/$defs/ObservedProfileEndpoints"
+    "downloaded_files": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/DownloadedFile"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Downloaded Files"
     },
-    {
-      "$ref": "#/$defs/ObservedRecipeLibrary"
+    "endpoint": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Endpoint"
     },
-    {
-      "$ref": "#/$defs/ObservedRecipeDetail"
+    "errno": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Errno"
     },
-    {
-      "$ref": "#/$defs/ObservedArtifactJob"
+    "error": {
+      "title": "Error",
+      "type": "string"
     },
-    {
-      "$ref": "#/$defs/ObservedArtifactDownload"
+    "error_type": {
+      "$ref": "#/$defs/CliErrorType"
+    },
+    "expected_file_count": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expected File Count"
+    },
+    "free_bytes": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Free Bytes"
+    },
+    "http_status": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Http Status"
+    },
+    "input_name": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Input Name"
+    },
+    "log_excerpt": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Log Excerpt"
+    },
+    "observation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObservationReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "operation": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Operation"
+    },
+    "partial_collection": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Partial Collection"
+    },
+    "path": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Path"
+    },
+    "preserved": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Preserved"
+    },
+    "reconcile": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Reconcile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "recovery_actions": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Recovery Actions"
+    },
+    "request_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Id"
+    },
+    "request_key": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Request Key"
+    },
+    "required_bytes": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Required Bytes"
+    },
+    "result": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FleetSnapshotDocument"
+        },
+        {
+          "$ref": "#/$defs/NothingConfirmed"
+        },
+        {
+          "$ref": "#/$defs/FleetProfileListDocument"
+        },
+        {
+          "$ref": "#/$defs/FleetProfileViewDocument"
+        },
+        {
+          "$ref": "#/$defs/UnavailableFleetProfileViewDocument"
+        },
+        {
+          "$ref": "#/$defs/FleetProfilePreviewDocument"
+        },
+        {
+          "$ref": "#/$defs/FleetProfileApplicationViewDocument"
+        },
+        {
+          "$ref": "#/$defs/FleetProfileEndpointsViewDocument"
+        },
+        {
+          "$ref": "#/$defs/RecipeLibraryResponseDocument"
+        },
+        {
+          "$ref": "#/$defs/RecipeDetailResponseDocument"
+        },
+        {
+          "$ref": "#/$defs/ArtifactJobResponseDocument"
+        },
+        {
+          "$ref": "#/$defs/ArtifactDownloadDocumentDocument"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Result"
+    },
+    "result_kind": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DocumentKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "retry_after_seconds": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retry After Seconds"
+    },
+    "retry_time": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retry Time"
+    },
+    "retryable": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Retryable"
+    },
+    "schema_version": {
+      "const": 2,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "shortfall_bytes": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Shortfall Bytes"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "enum": [
+            "remote_rejection",
+            "transport",
+            "local_io",
+            "protocol",
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source"
+    },
+    "submission": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SubmissionReceipt"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "transport": {
+      "anyOf": [
+        {
+          "enum": [
+            "dns",
+            "connect",
+            "tls",
+            "timeout",
+            "body",
+            "protocol"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Transport"
+    },
+    "upload_acceptance": {
+      "anyOf": [
+        {
+          "const": "unknown",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Upload Acceptance"
+    },
+    "uploaded_inputs": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/UploadedInput"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Uploaded Inputs"
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Usage"
     }
+  },
+  "required": [
+    "error",
+    "error_type",
+    "schema_version"
   ],
-  "title": "vonkctl observation document (schema_version 1)"
+  "title": "vonkctl error document (schema_version 2)",
+  "type": "object"
 }

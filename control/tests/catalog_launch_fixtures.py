@@ -77,11 +77,7 @@ def _package(recipe: RecipeDefinition) -> dict[str, object]:
     if build is not None:
         paths.extend(patch.path for patch in build.patches)
     for check in recipe.validation.serving.checks:
-        request = check.request
-        fixture = getattr(request, "fixture", None)
-        if fixture:
-            paths.append(fixture)
-        paths.extend(getattr(request, "input_slots", {}).values())
+        paths.extend(check.fixture_paths())
     digest = "a" * 64
     return {
         "image_digest": digest,

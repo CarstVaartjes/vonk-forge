@@ -147,6 +147,7 @@
         "effort": {
           "default": "high",
           "key": "reasoning_effort",
+          "kind": "levels",
           "levels": [
             "low",
             "high"
@@ -216,6 +217,7 @@
       "vonk_reasoning_effort": {
         "default": "high",
         "key": "reasoning_effort",
+        "kind": "levels",
         "levels": [
           "low",
           "high"
@@ -234,6 +236,524 @@
       }
     },
     "name": "options-rich",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-options.json",
+    "api_patch": {
+      "default_output_tokens": {
+        "value": 4096
+      },
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "input_modalities": {
+        "audio": false,
+        "image": false,
+        "pdf": false,
+        "text": true,
+        "video": true
+      },
+      "reasoning": {
+        "default": "on",
+        "effort": {
+          "default": null,
+          "key": "reasoning_effort",
+          "kind": "text",
+          "via": "top_level"
+        },
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "kind": "switch",
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      },
+      "tools": {
+        "kind": "supported",
+        "parallel_calls": true,
+        "tool_choice": [
+          "auto",
+          "required",
+          "named"
+        ]
+      }
+    },
+    "model_info": {
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_video_input": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_reasoning_effort": {
+        "key": "reasoning_effort",
+        "kind": "text",
+        "via": "top_level"
+      },
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "effort-text-no-default",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-options.json",
+    "api_patch": {
+      "default_output_tokens": {
+        "value": 4096
+      },
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "input_modalities": {
+        "audio": false,
+        "image": false,
+        "pdf": false,
+        "text": true,
+        "video": true
+      },
+      "reasoning": {
+        "default": "on",
+        "effort": {
+          "default": "medium-high",
+          "key": "reasoning_effort",
+          "kind": "text",
+          "via": "top_level"
+        },
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "kind": "switch",
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      },
+      "tools": {
+        "kind": "supported",
+        "parallel_calls": true,
+        "tool_choice": [
+          "auto",
+          "required",
+          "named"
+        ]
+      }
+    },
+    "model_info": {
+      "default_reasoning_effort": "medium-high",
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "reasoning_effort",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_video_input": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_reasoning_effort": {
+        "default": "medium-high",
+        "key": "reasoning_effort",
+        "kind": "text",
+        "via": "top_level"
+      },
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "effort-text-default",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-options.json",
+    "api_patch": {
+      "default_output_tokens": {
+        "value": 4096
+      },
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "input_modalities": {
+        "audio": false,
+        "image": false,
+        "pdf": false,
+        "text": true,
+        "video": true
+      },
+      "reasoning": {
+        "default": "on",
+        "effort": {
+          "default": "high",
+          "key": "reasoning_strength",
+          "kind": "text",
+          "via": "chat_template_kwargs"
+        },
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "kind": "switch",
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      },
+      "tools": {
+        "kind": "supported",
+        "parallel_calls": true,
+        "tool_choice": [
+          "auto",
+          "required",
+          "named"
+        ]
+      }
+    },
+    "model_info": {
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_video_input": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_reasoning_effort": {
+        "default": "high",
+        "key": "reasoning_strength",
+        "kind": "text",
+        "via": "chat_template_kwargs"
+      },
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "effort-text-nonstandard-key",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-options.json",
+    "api_patch": {
+      "default_output_tokens": {
+        "value": 4096
+      },
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "input_modalities": {
+        "audio": false,
+        "image": false,
+        "pdf": false,
+        "text": true,
+        "video": true
+      },
+      "reasoning": {
+        "default": "on",
+        "effort": {
+          "default": "high",
+          "key": "reasoning_effort",
+          "kind": "levels",
+          "levels": [
+            "low",
+            "high"
+          ],
+          "via": "chat_template_kwargs"
+        },
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "kind": "switch",
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      },
+      "tools": {
+        "kind": "supported",
+        "parallel_calls": true,
+        "tool_choice": [
+          "auto",
+          "required",
+          "named"
+        ]
+      }
+    },
+    "model_info": {
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_video_input": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_reasoning_effort": {
+        "default": "high",
+        "key": "reasoning_effort",
+        "kind": "levels",
+        "levels": [
+          "low",
+          "high"
+        ],
+        "via": "chat_template_kwargs"
+      },
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "effort-levels-in-chat-template-kwargs",
+    "parameters": {},
+    "recipe": "recipe-options.json"
+  },
+  {
+    "api": "recipe-api-options.json",
+    "api_patch": {
+      "default_output_tokens": {
+        "value": 4096
+      },
+      "endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "input_modalities": {
+        "audio": false,
+        "image": false,
+        "pdf": false,
+        "text": true,
+        "video": true
+      },
+      "reasoning": {
+        "default": "on",
+        "effort": {
+          "default": "high",
+          "key": "reasoning_strength",
+          "kind": "levels",
+          "levels": [
+            "low",
+            "high"
+          ],
+          "via": "top_level"
+        },
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "kind": "switch",
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      },
+      "tools": {
+        "kind": "supported",
+        "parallel_calls": true,
+        "tool_choice": [
+          "auto",
+          "required",
+          "named"
+        ]
+      }
+    },
+    "model_info": {
+      "max_input_tokens": 1024,
+      "max_output_tokens": 1024,
+      "max_tokens": 1024,
+      "mode": "chat",
+      "supported_endpoints": [
+        "/v1/chat/completions",
+        "/v1/completions"
+      ],
+      "supported_openai_params": [
+        "max_completion_tokens",
+        "max_tokens",
+        "parallel_tool_calls",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "tool_choice",
+        "tools",
+        "top_p"
+      ],
+      "supports_audio_input": false,
+      "supports_audio_output": false,
+      "supports_function_calling": true,
+      "supports_native_streaming": true,
+      "supports_parallel_function_calling": true,
+      "supports_pdf_input": false,
+      "supports_reasoning": true,
+      "supports_response_schema": true,
+      "supports_system_messages": true,
+      "supports_tool_choice": true,
+      "supports_video_input": true,
+      "supports_vision": false,
+      "thinking_always_on": false,
+      "vonk_default_output_tokens": 4096,
+      "vonk_reasoning_effort": {
+        "default": "high",
+        "key": "reasoning_strength",
+        "kind": "levels",
+        "levels": [
+          "low",
+          "high"
+        ],
+        "via": "top_level"
+      },
+      "vonk_thinking": {
+        "default": "on",
+        "keys": [
+          "enable_thinking",
+          "thinking"
+        ],
+        "off": false,
+        "on": true,
+        "via": "chat_template_kwargs"
+      }
+    },
+    "name": "effort-levels-nonstandard-key",
     "parameters": {},
     "recipe": "recipe-options.json"
   },

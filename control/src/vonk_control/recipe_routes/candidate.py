@@ -274,12 +274,14 @@ def _candidate_once(
                 # with: new facts would rewrite litellm.json, and the supervisor
                 # restarts LiteLLM on any byte change, cutting every route's
                 # in-flight requests. They apply when the route next changes.
+                # A frozen absence is not frozen: facts that become available
+                # for a route published without any apply once.
                 frozen = served.routes.get(run.alias)
             else:
                 frozen = None
             model_info = (
                 frozen[1]
-                if frozen is not None and frozen[0] == run.id
+                if frozen is not None and frozen[0] == run.id and frozen[1] is not None
                 else model_infos.for_run(run, mapping)
             )
             identity = RouteRunIdentity(
