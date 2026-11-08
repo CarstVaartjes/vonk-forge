@@ -170,6 +170,76 @@ def test_nas_responses_answer_only_the_remaining_installer_prompts() -> None:
     assert not any("CIDR" in prompt or "password" in prompt for prompt in responses)
 
 
+def _installer_payload(tmp_path: Path):
+    """The NAS installer payload this checkout publishes."""
+    from vonk_agent_protocol.installer_setup import NasInstallTemplate
+
+    rendered = tmp_path / "rendered.yaml"
+    _script_module(PRODUCTION_RENDERER, "acceptance_answers_renderer").render(
+        COMPOSE_TEMPLATE,
+        rendered,
+        **{
+            f"{role}_image": f"ghcr.io/carstvaartjes/vonk-forge-{role}:v1.2.3"
+            for role in ("api", "worker", "litellm")
+        },
+        channel="pinned",
+    )
+    payload = _script_module(PAYLOAD_BUILDER, "acceptance_answers_builder")._payload(
+        yaml.safe_load(rendered.read_text()), "dev"
+    )
+    return NasInstallTemplate.model_validate_json(json.dumps(payload))
+
+
+def test_lane_answers_are_the_installers_own_prompts_in_order(
+    tmp_path: Path,
+) -> None:
+    """Catches lane answers drifting from the prompts the real installer asks."""
+    import io
+
+    from vonk_nas_setup.prompts import PromptIo
+    from vonk_nas_setup.setup import prepare
+
+    acceptance = _acceptance_module()
+    arguments = {
+        "nas_ip": "192.0.2.10",
+        "tailnet_suffix": "acceptance.example.test",
+        "oauth_client_id": "distinct-client-id",
+        "oauth_client_secret": "distinct-client-secret",
+        "upstream_key": "distinct-upstream-key",
+        "control_service": "svc:vonk-forge-ci",
+    }
+    responses = acceptance.nas_responses(**arguments)
+    asked: list[str] = []
+
+    class RecordingPrompt(PromptIo):
+        def line(self, label: str, *, secret: bool = False) -> str:
+            asked.append(f"{label}: ")
+            return super().line(label, secret=secret)
+
+    answers = io.StringIO("".join(f"{answer}\n" for _, answer in responses))
+    bundle = prepare(
+        _installer_payload(tmp_path), tmp_path / "nas", RecordingPrompt(answers)
+    ).root
+
+    assert asked == [prompt for prompt, _ in responses]
+    assert answers.read() == ""
+    acceptance.assert_installer_answer_bindings(bundle, **arguments)
+    # The lane rewrites the installed Compose file, not a hand-made one.
+    acceptance.configure_tailnet_service_names(
+        bundle,
+        control="svc:vonk-forge-ci",
+        gateway_hostname="vonk-forge-ci-123-1",
+        require_external_tailnet_client=False,
+    )
+    services = yaml.safe_load((bundle / "docker-compose.yaml").read_text())["services"]
+    assert (
+        services["tailscale-configurator"]["environment"][
+            "VONK_TAILSCALE_CONTROL_SERVICE"
+        ]
+        == "svc:vonk-forge-ci"
+    )
+
+
 def test_installer_output_detects_permuted_secret_answers(tmp_path: Path) -> None:
     acceptance = _acceptance_module()
     arguments = {
@@ -589,7 +659,8 @@ def test_acceptance_service_override_edits_only_the_bundle_compose(
                             "printf '?ephemeral=false&preauthorized=true'",
                         ],
                     },
-                    "tailscale-configurator": {"environment": {}},
+                    # As shipped: the configurator declares no environment.
+                    "tailscale-configurator": {},
                 }
             }
         ),
