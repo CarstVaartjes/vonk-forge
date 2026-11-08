@@ -597,6 +597,15 @@ class Reconciler:
             network = networks[name]
             if network is None:
                 return None
+            if (
+                container.state == State.RUNNING
+                and container.identity not in network.members
+            ):
+                # The snapshot is shared by the tick and may predate this
+                # container joining (Compose starting it); judge it on a fresh one.
+                network = networks[name] = Network.inspect(self.docker, name)
+                if network is None:
+                    return None
             recorded = container.networks.get(name, ("", ()))[0]
             if (
                 name in owed

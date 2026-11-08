@@ -362,6 +362,28 @@ def test_each_network_is_inspected_once_per_tick(tmp_path: Path) -> None:
     assert sorted(daemon.network_reads) == sorted(daemon.networks)
 
 
+def test_container_that_joined_after_the_shared_snapshot_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    """Catches judging a container detached from a network snapshot taken before it started."""
+    daemon, reconciler, clock, _, api = fleet(tmp_path)
+    daemon.stop(api)
+    read = daemon.request
+
+    def request(method: str, path: str, body: Any = None) -> Any:
+        row = read(method, path, body)
+        if method == "GET" and path.endswith("vonk-forge_agent-proxy"):
+            daemon.request = read  # type: ignore[method-assign]
+            daemon.start(api)  # Compose starts it after the snapshot was taken.
+        return row
+
+    daemon.request = request  # type: ignore[method-assign]
+    daemon.mutations.clear()
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == []
+    assert daemon.running(api)
+
+
 def test_stop_that_times_out_after_the_daemon_stopped_is_started_later(
     tmp_path: Path,
 ) -> None:
