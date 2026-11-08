@@ -34,7 +34,6 @@ from .common import _CANONICAL_UUID as _CANONICAL_UUID
 from .common import _DIGEST as _DIGEST
 from .common import _DISTRIBUTION_ERROR_CODE as _DISTRIBUTION_ERROR_CODE
 from .common import _ENROLLMENT_TOKEN as _ENROLLMENT_TOKEN
-from .common import _IDENTIFIER_TEXT as _IDENTIFIER_TEXT
 from .common import _JSON_WHITESPACE as _JSON_WHITESPACE
 from .common import _LIVE_OPERATION_STATES as _LIVE_OPERATION_STATES
 from .common import _LOGGER as _LOGGER
