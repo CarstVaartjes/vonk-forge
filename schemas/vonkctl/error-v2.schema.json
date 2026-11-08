@@ -13565,7 +13565,7 @@
           "$ref": "#/$defs/LibraryResourceProjection"
         },
         "schema_version": {
-          "const": 1,
+          "const": 2,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -14322,7 +14322,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 1,
+          "const": 2,
           "title": "Schema Version",
           "type": "integer"
         }
@@ -21680,7 +21680,8 @@
         "dependency_unavailable",
         "rate_limited",
         "local_state_unavailable",
-        "storage_unavailable"
+        "storage_unavailable",
+        "clock_skew"
       ],
       "title": "TransientReason",
       "type": "string"
@@ -22739,7 +22740,7 @@
       "title": "Retryable"
     },
     "schema_version": {
-      "const": 1,
+      "const": 2,
       "title": "Schema Version",
       "type": "integer"
     },
@@ -22851,6 +22852,6 @@
     "error_type",
     "schema_version"
   ],
-  "title": "vonkctl error document (schema_version 1)",
+  "title": "vonkctl error document (schema_version 2)",
   "type": "object"
 }

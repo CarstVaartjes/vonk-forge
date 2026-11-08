@@ -20,12 +20,12 @@ number belongs to the document kind, not to the vonkctl release.
 | `profile-review` | `profile load --review` | `FleetProfilePreview` | 2 | `profile-review-v2.schema.json` |
 | `profile-application` | `profile load`, `progress`, `cancel` | `FleetProfileApplicationView` | 1 | `profile-application-v1.schema.json` |
 | `profile-endpoints` | `profile endpoint` | `FleetProfileEndpointsView` | 1 | `profile-endpoints-v1.schema.json` |
-| `recipe-library` | `recipe`, `recipe library` | `RecipeLibraryResponse` | 1 | `recipe-library-v1.schema.json` |
-| `recipe-detail` | `recipe detail` | `RecipeDetailResponse` | 1 | `recipe-detail-v1.schema.json` |
+| `recipe-library` | `recipe`, `recipe library` | `RecipeLibraryResponse` | 2 | `recipe-library-v2.schema.json` |
+| `recipe-detail` | `recipe detail` | `RecipeDetailResponse` | 2 | `recipe-detail-v2.schema.json` |
 | `artifact-job` | `recipe job create`, `detail`, `submit`, `cancel` | `ArtifactJobResponse` | 1 | `artifact-job-v1.schema.json` |
 | `artifact-download` | `recipe job download` | `ArtifactDownloadDocument` | 1 | `artifact-download-v1.schema.json` |
-| `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 1 | `observation-v1.schema.json` |
-| `error` | any failure | `ErrorDocument` | 1 | `error-v1.schema.json` |
+| `observation` | any followed command that timed out or was interrupted | `ObservationDocument` | 2 | `observation-v2.schema.json` |
+| `error` | any failure | `ErrorDocument` | 2 | `error-v2.schema.json` |
 
 `schema_version` is required in every published schema. A document the
 Controller already answers is that Controller response plus `schema_version`;

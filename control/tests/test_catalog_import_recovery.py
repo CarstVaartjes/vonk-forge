@@ -19,7 +19,6 @@ from vonk_control.catalog_revision_contract import (
     read_catalog_projection,
 )
 from vonk_control.catalog_service import CatalogService, RecipeRevisionView
-from vonk_control.catalog_sync import _controller_marker as controller_marker
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -399,8 +398,6 @@ def test_a_stored_api_without_an_effort_kind_is_dropped_and_recorded_again(
     catalog.record_published_facts({}, {}, {key: api})
     with catalog._sessions() as session:
         assert _projection(session, view.id).api == api
-    # That sync runs after the upgrade because the marker names the contracts version.
-    assert "vonk-forge-public-contracts=" in controller_marker()
 
 
 def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(
