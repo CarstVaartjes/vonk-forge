@@ -25,6 +25,8 @@ from vonk_forge_contracts import (
 )
 from vonk_forge_contracts.api import (
     ApiReasoningAlwaysOn,
+    ApiReasoningEffort,
+    ApiReasoningEffortLevels,
     ApiReasoningNone,
     ApiReasoningSwitch,
     ApiRemainingContext,
@@ -49,7 +51,8 @@ from .litellm import (
     OpenAiRequestParameter,
     VonkAudioSpeech,
     VonkAudioTranscription,
-    VonkReasoningEffort,
+    VonkReasoningEffortLevels,
+    VonkReasoningEffortText,
     VonkThinking,
 )
 from .models import (
@@ -244,11 +247,16 @@ def build_model_info(
     tools = block.tools
     tool_choice = tools.tool_choice if isinstance(tools, ApiToolsSupported) else []
     parallel = isinstance(tools, ApiToolsSupported) and tools.parallel_calls
-    # The standard name shows only where the request really sets it at top level.
-    top_level_effort = (
-        effort is not None
+    # LiteLLM's effort fields and the standard parameter name are published only
+    # for the one request shape they promise: the top-level ``reasoning_effort``.
+    # A route that takes its effort elsewhere (inside chat_template_kwargs, or
+    # under another key) ignores a top-level one, so no client may be told to send it.
+    standard_effort = (
+        effort
+        if effort is not None
         and effort.via == "top_level"
         and effort.key == OpenAiRequestParameter.REASONING_EFFORT
+        else None
     )
     parameters_supported = {
         *_CHAT_PARAMETERS,
@@ -261,7 +269,7 @@ def build_model_info(
         *([OpenAiRequestParameter.TOOL_CHOICE] if tool_choice else []),
         *([OpenAiRequestParameter.PARALLEL_TOOL_CALLS] if parallel else []),
         *([OpenAiRequestParameter.RESPONSE_FORMAT] if block.structured_output else []),
-        *([OpenAiRequestParameter.REASONING_EFFORT] if top_level_effort else []),
+        *([OpenAiRequestParameter.REASONING_EFFORT] if standard_effort else []),
     }
     return LiteLlmModelInfo(
         mode="chat",
@@ -275,8 +283,14 @@ def build_model_info(
         supports_video_input=modalities.video,
         supports_reasoning=not isinstance(reasoning, ApiReasoningNone),
         thinking_always_on=isinstance(reasoning, ApiReasoningAlwaysOn),
-        reasoning_effort_levels=None if effort is None else list(effort.levels),
-        default_reasoning_effort=None if effort is None else effort.default,
+        reasoning_effort_levels=(
+            list(standard_effort.levels)
+            if isinstance(standard_effort, ApiReasoningEffortLevels)
+            else None
+        ),
+        default_reasoning_effort=(
+            None if standard_effort is None else standard_effort.default
+        ),
         supports_function_calling=isinstance(tools, ApiToolsSupported),
         supports_tool_choice=bool(tool_choice),
         supports_parallel_function_calling=parallel,
@@ -296,19 +310,29 @@ def build_model_info(
             if isinstance(reasoning, ApiReasoningSwitch)
             else None
         ),
-        vonk_reasoning_effort=(
-            None
-            if effort is None
-            else VonkReasoningEffort(
-                via=effort.via,
-                key=effort.key,
-                levels=list(effort.levels),
-                default=effort.default,
-            )
-        ),
+        vonk_reasoning_effort=_vonk_reasoning_effort(effort),
         vonk_default_output_tokens=_default_output_tokens(
             recipe, block, choices, settings
         ),
+    )
+
+
+def _vonk_reasoning_effort(
+    effort: ApiReasoningEffort | None,
+) -> VonkReasoningEffortLevels | VonkReasoningEffortText | None:
+    """The recipe's effort block as stated, whichever kind it is."""
+    if effort is None:
+        return None
+    if isinstance(effort, ApiReasoningEffortLevels):
+        return VonkReasoningEffortLevels(
+            kind="levels",
+            via=effort.via,
+            key=effort.key,
+            levels=list(effort.levels),
+            default=effort.default,
+        )
+    return VonkReasoningEffortText(
+        kind="text", via=effort.via, key=effort.key, default=effort.default
     )
 
 

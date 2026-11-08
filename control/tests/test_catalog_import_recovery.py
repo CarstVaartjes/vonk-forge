@@ -6,6 +6,7 @@ import json
 from copy import deepcopy
 from datetime import UTC, datetime
 from importlib.resources import files
+from typing import Any, cast
 
 import pytest
 import vonk_control.catalog_entities as entities
@@ -333,6 +334,70 @@ def test_published_api_facts_belong_to_their_exact_revision(catalog: CatalogServ
     assert stored() == [None, api]
     catalog.record_published_facts({}, {})
     assert stored() == [None, api]
+
+
+def test_a_stored_api_without_an_effort_kind_is_dropped_and_recorded_again(
+    catalog: CatalogService,
+):
+    """The upgrade to contracts with effort kinds heals by itself on the next sync.
+
+    A projection stored before the union holds ``api`` with an effort that has no
+    ``kind``. Reading it drops that one fact (the rest of the projection stays);
+    the next sync records the API again from the signed index. The contracts
+    version is part of the Controller marker, so that sync runs after the upgrade
+    without anyone acting.
+    """
+    view = _request_import(catalog, _recipe(_model(), slug="api-kindless"))
+    key = (
+        str(RecipeDefinition.model_validate(view.document).identity.publisher),
+        view.slug,
+        str(view.content_sha256),
+    )
+    document = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-api-options.json")
+        .read_text(encoding="utf-8")
+    )
+    document["api"]["reasoning"] = {
+        "kind": "always-on",
+        "effort": {
+            "kind": "text",
+            "via": "top_level",
+            "key": "reasoning_effort",
+            "default": None,
+        },
+    }
+    api = RecipeApi.model_validate(document)
+    catalog.record_published_facts({}, {}, {key: api})
+
+    def stored_effort() -> dict[str, object]:
+        with catalog._sessions() as session:
+            row = session.get(CatalogDocumentRevision, view.id)
+            assert row is not None
+            return cast(Any, row.projected)["api"]["api"]["reasoning"]["effort"]
+
+    assert stored_effort()["kind"] == "text"
+    # What the previous release stored: the same facts, the effort without a kind.
+    with catalog._sessions.begin() as session:
+        row = session.get(CatalogDocumentRevision, view.id)
+        assert row is not None
+        projected = cast(Any, deepcopy(row.projected))
+        del projected["api"]["api"]["reasoning"]["effort"]["kind"]
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == view.id)
+            .values(projected=projected)
+        )
+    with catalog._sessions() as session:
+        read = _projection(session, view.id)
+        assert (
+            read.api is None
+        )  # dropped on read; the model_info has nothing to publish
+        assert read.runtime_engine  # the rest of the projection is unaffected
+    # The next sync's recording restores it, and a repeat changes nothing.
+    catalog.record_published_facts({}, {}, {key: api})
+    with catalog._sessions() as session:
+        assert _projection(session, view.id).api == api
 
 
 def test_kit_topology_change_promotes_head_and_preserves_exact_prior_revision(

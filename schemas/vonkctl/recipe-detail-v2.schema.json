@@ -69,16 +69,32 @@
       "type": "object"
     },
     "ApiReasoningAlwaysOn": {
+      "description": "No request turns reasoning off; the checkpoint may still skip it on a turn.",
       "properties": {
         "effort": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ApiReasoningEffort"
+              "discriminator": {
+                "mapping": {
+                  "levels": "#/$defs/ApiReasoningEffortLevels",
+                  "text": "#/$defs/ApiReasoningEffortText"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortLevels"
+                },
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortText"
+                }
+              ]
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Effort"
         },
         "kind": {
           "const": "always-on",
@@ -93,7 +109,8 @@
       "title": "ApiReasoningAlwaysOn",
       "type": "object"
     },
-    "ApiReasoningEffort": {
+    "ApiReasoningEffortLevels": {
+      "description": "The request names one of ``levels`` at ``key``; another value may be refused.\n\n``default`` is the level in force when the request names none. Only the\nnames a client chooses from are listed: an engine's own numeric scale behind\nthem (an integer or float alias) is not.",
       "properties": {
         "default": {
           "maxLength": 64,
@@ -105,6 +122,11 @@
           "maxLength": 64,
           "minLength": 1,
           "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "levels",
+          "title": "Kind",
           "type": "string"
         },
         "levels": {
@@ -128,12 +150,58 @@
         }
       },
       "required": [
+        "kind",
         "via",
         "key",
         "levels",
         "default"
       ],
-      "title": "ApiReasoningEffort",
+      "title": "ApiReasoningEffortLevels",
+      "type": "object"
+    },
+    "ApiReasoningEffortText": {
+      "description": "The route takes any string at ``key`` (the template writes it into the prompt).\n\n``default`` is the text in force when the request sets none; ``null`` when\nthen no effort is written and the checkpoint decides.",
+      "properties": {
+        "default": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Default"
+        },
+        "key": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "text",
+          "title": "Kind",
+          "type": "string"
+        },
+        "via": {
+          "enum": [
+            "chat_template_kwargs",
+            "top_level"
+          ],
+          "title": "Via",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "via",
+        "key",
+        "default"
+      ],
+      "title": "ApiReasoningEffortText",
       "type": "object"
     },
     "ApiReasoningNone": {
@@ -165,12 +233,27 @@
         "effort": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ApiReasoningEffort"
+              "discriminator": {
+                "mapping": {
+                  "levels": "#/$defs/ApiReasoningEffortLevels",
+                  "text": "#/$defs/ApiReasoningEffortText"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortLevels"
+                },
+                {
+                  "$ref": "#/$defs/ApiReasoningEffortText"
+                }
+              ]
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "title": "Effort"
         },
         "keys": {
           "items": {
@@ -584,6 +667,21 @@
       "title": "BlockingOperation",
       "type": "object"
     },
+    "BuildContext": {
+      "properties": {
+        "path": {
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*))*$",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "BuildContext",
+      "type": "object"
+    },
     "BuildModelArtifactProjection": {
       "properties": {
         "path": {
@@ -607,6 +705,38 @@
         "size_bytes"
       ],
       "title": "BuildModelArtifactProjection",
+      "type": "object"
+    },
+    "BuildNetwork": {
+      "properties": {
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Hosts",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hosts"
+      ],
+      "title": "BuildNetwork",
+      "type": "object"
+    },
+    "BuildPatch": {
+      "properties": {
+        "path": {
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*))*$",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "BuildPatch",
       "type": "object"
     },
     "BuildResourcesProjection": {
@@ -677,6 +807,38 @@
         "saved-profile"
       ],
       "title": "CacheReferenceReason",
+      "type": "string"
+    },
+    "CapabilityName": {
+      "enum": [
+        "3d-generation",
+        "audio-generation",
+        "audio-understanding",
+        "chat",
+        "code-generation",
+        "decision",
+        "image-editing",
+        "image-generation",
+        "image-understanding",
+        "image-upscaling",
+        "material-estimation",
+        "motion-capture",
+        "motion-generation",
+        "ocr",
+        "parametric-body-model",
+        "person-detection",
+        "reasoning",
+        "speculative-decoding",
+        "speech-recognition",
+        "text-generation",
+        "text-to-speech",
+        "tool-use",
+        "video-generation",
+        "video-understanding",
+        "voice-cloning",
+        "voice-design"
+      ],
+      "title": "CapabilityName",
       "type": "string"
     },
     "CatalogCode": {
@@ -1017,31 +1179,92 @@
       "title": "FailureCode",
       "type": "string"
     },
-    "FreshnessPolicy": {
+    "GitHubLfsSource": {
+      "description": "Git LFS objects at one commit of a canonical public GitHub repository.\n\nEvery model file is one LFS object: its ``sha256`` is the LFS oid, its\n``size_bytes`` the LFS size, and its ``path`` the file's path in the\nrepository at ``revision`` (the full commit SHA). The bytes are fetched by\noid and verified at ingress; the commit and path record where the binding\nof path to oid was read.",
       "properties": {
-        "inventory_fresh_seconds": {
-          "default": 300,
-          "maximum": 3600,
-          "minimum": 1,
-          "title": "Inventory Fresh Seconds",
-          "type": "integer"
+        "provider": {
+          "const": "github-lfs",
+          "title": "Provider",
+          "type": "string"
         },
-        "telemetry_delayed_seconds": {
-          "default": 20,
-          "maximum": 300,
-          "minimum": 1,
-          "title": "Telemetry Delayed Seconds",
-          "type": "integer"
+        "repository": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Repository",
+          "type": "string"
         },
-        "telemetry_live_seconds": {
-          "default": 6,
-          "maximum": 60,
-          "minimum": 1,
-          "title": "Telemetry Live Seconds",
-          "type": "integer"
+        "revision": {
+          "pattern": "^[a-f0-9]{40,64}$",
+          "title": "Revision",
+          "type": "string"
         }
       },
-      "title": "FreshnessPolicy",
+      "required": [
+        "provider",
+        "repository",
+        "revision"
+      ],
+      "title": "GitHubLfsSource",
+      "type": "object"
+    },
+    "GitHubReleaseAsset": {
+      "description": "One GitHub release asset selected for an existing model file.",
+      "properties": {
+        "asset_id": {
+          "exclusiveMinimum": 0,
+          "title": "Asset Id",
+          "type": "integer"
+        },
+        "file_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "File Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_id",
+        "asset_id"
+      ],
+      "title": "GitHubReleaseAsset",
+      "type": "object"
+    },
+    "GitHubReleaseSource": {
+      "description": "An exact asset from one release in a canonical GitHub repository.",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/GitHubReleaseAsset"
+          },
+          "minItems": 1,
+          "title": "Assets",
+          "type": "array"
+        },
+        "provider": {
+          "const": "github-release",
+          "title": "Provider",
+          "type": "string"
+        },
+        "release_id": {
+          "exclusiveMinimum": 0,
+          "title": "Release Id",
+          "type": "integer"
+        },
+        "repository": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "repository",
+        "release_id",
+        "assets"
+      ],
+      "title": "GitHubReleaseSource",
       "type": "object"
     },
     "HelperErrorCode": {
@@ -1319,291 +1542,6 @@
       "title": "LibraryAssessmentCode",
       "type": "string"
     },
-    "LibraryFacetValues": {
-      "properties": {
-        "alignment": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Alignment",
-          "type": "array"
-        },
-        "creator": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 512,
-          "title": "Creator",
-          "type": "array"
-        },
-        "engine": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Engine",
-          "type": "array"
-        },
-        "family": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 512,
-          "title": "Family",
-          "type": "array"
-        },
-        "publisher": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 512,
-          "title": "Publisher",
-          "type": "array"
-        },
-        "quantization": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 512,
-          "title": "Quantization",
-          "type": "array"
-        },
-        "sparks": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 64,
-          "title": "Sparks",
-          "type": "array"
-        },
-        "usage": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Usage",
-          "type": "array"
-        },
-        "version": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 512,
-          "title": "Version",
-          "type": "array"
-        }
-      },
-      "required": [
-        "usage",
-        "family",
-        "version",
-        "quantization"
-      ],
-      "title": "LibraryFacetValues",
-      "type": "object"
-    },
-    "LibraryFilterValues": {
-      "description": "The filters that produced a Library page, echoed to the client.\n\nThis is a typed echo rather than a free-form map so the request and the\nresponse describe the same vocabulary. Every field is optional, so a page\nthat applied no filter stays valid without inventing values.",
-      "properties": {
-        "alignment": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Alignment",
-          "type": "array"
-        },
-        "cached": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cached"
-        },
-        "creator": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Creator",
-          "type": "array"
-        },
-        "engine": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Engine",
-          "type": "array"
-        },
-        "family": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Family",
-          "type": "array"
-        },
-        "fits_fleet": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Fits Fleet"
-        },
-        "model": {
-          "items": {
-            "maxLength": 256,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Model",
-          "type": "array"
-        },
-        "publisher": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Publisher",
-          "type": "array"
-        },
-        "quantization": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Quantization",
-          "type": "array"
-        },
-        "ready": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ready"
-        },
-        "search": {
-          "anyOf": [
-            {
-              "maxLength": 256,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Search"
-        },
-        "sort": {
-          "anyOf": [
-            {
-              "enum": [
-                "updated",
-                "name"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Sort"
-        },
-        "sparks": {
-          "items": {
-            "type": "integer"
-          },
-          "maxItems": 64,
-          "title": "Sparks",
-          "type": "array"
-        },
-        "updated_since": {
-          "anyOf": [
-            {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Updated Since"
-        },
-        "usage": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Usage",
-          "type": "array"
-        },
-        "version": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Version",
-          "type": "array"
-        }
-      },
-      "title": "LibraryFilterValues",
-      "type": "object"
-    },
     "LibraryLocalProgress": {
       "description": "Observable progress for a Controller-local preparation operation.",
       "properties": {
@@ -1808,178 +1746,31 @@
       "title": "LibraryRecipeIdentity",
       "type": "object"
     },
-    "LibraryRecipeProjection": {
-      "description": "One exact canonical recipe and its model/resource/local projections.",
+    "LibraryRecipeModel": {
       "properties": {
-        "alignment": {
+        "model_display": {
           "anyOf": [
             {
-              "maxLength": 64,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Alignment"
-        },
-        "assessment": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeReadiness"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "creator": {
-          "anyOf": [
-            {
-              "maxLength": 128,
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Creator"
-        },
-        "engine": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Engine",
-          "type": "string"
-        },
-        "identity": {
-          "$ref": "#/$defs/LibraryRecipeIdentity"
-        },
-        "local": {
-          "$ref": "#/$defs/LibraryLocalState"
-        },
-        "model_selectors": {
-          "items": {
-            "maxLength": 256,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 32,
-          "minItems": 1,
-          "title": "Model Selectors",
-          "type": "array"
-        },
-        "node_count": {
-          "minimum": 1,
-          "title": "Node Count",
-          "type": "integer"
-        },
-        "prebuilt_image": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PrebuiltImage"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "projected": {
-          "$ref": "#/$defs/RecipeRevisionProjection"
-        },
-        "qualification": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PublishedQualificationStatusView"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "recipe_display": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RecipeDisplay"
+              "$ref": "#/$defs/ModelDisplay"
             },
             {
               "type": "null"
             }
           ]
         },
-        "resources": {
-          "$ref": "#/$defs/LibraryResourceProjection"
+        "model_document": {
+          "$ref": "#/$defs/ModelDefinition"
         },
-        "selector": {
-          "maxLength": 256,
-          "minLength": 1,
-          "title": "Selector",
-          "type": "string"
-        },
-        "updated_at": {
-          "format": "date-time",
-          "title": "Updated At",
-          "type": "string"
-        },
-        "usage": {
-          "items": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Usage",
-          "type": "array"
+        "selection": {
+          "$ref": "#/$defs/RecipeModelSelection"
         }
       },
       "required": [
-        "selector",
-        "identity",
-        "projected",
-        "recipe_display",
-        "model_selectors",
-        "usage",
-        "resources",
-        "local",
-        "updated_at",
-        "node_count",
-        "engine"
+        "selection",
+        "model_document",
+        "model_display"
       ],
-      "title": "LibraryRecipeProjection",
-      "type": "object"
-    },
-    "LibraryRelease": {
-      "description": "The recipe library release this Controller last synchronized.",
-      "properties": {
-        "commit": {
-          "pattern": "^[0-9a-f]{40}$",
-          "title": "Commit",
-          "type": "string"
-        },
-        "updated_at": {
-          "format": "date-time",
-          "title": "Updated At",
-          "type": "string"
-        },
-        "version": {
-          "maxLength": 64,
-          "minLength": 1,
-          "title": "Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "version",
-        "updated_at",
-        "commit"
-      ],
-      "title": "LibraryRelease",
+      "title": "LibraryRecipeModel",
       "type": "object"
     },
     "LibraryResourceProjection": {
@@ -2230,6 +2021,424 @@
       "title": "ModelCacheFailureCode",
       "type": "string"
     },
+    "ModelDefinition": {
+      "description": "One exact model version and variant, including its complete manifest.",
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/ModelReference"
+          },
+          "maxItems": 32,
+          "title": "Dependencies",
+          "type": "array"
+        },
+        "files": {
+          "items": {
+            "$ref": "#/$defs/ModelFile"
+          },
+          "minItems": 1,
+          "title": "Files",
+          "type": "array"
+        },
+        "format": {
+          "$ref": "#/$defs/ModelFormat"
+        },
+        "identity": {
+          "$ref": "#/$defs/ModelIdentity"
+        },
+        "kind": {
+          "const": "model",
+          "default": "model",
+          "title": "Kind",
+          "type": "string"
+        },
+        "requires_token": {
+          "title": "Requires Token",
+          "type": "boolean"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelSource"
+            },
+            {
+              "$ref": "#/$defs/GitHubReleaseSource"
+            },
+            {
+              "$ref": "#/$defs/GitHubLfsSource"
+            }
+          ],
+          "title": "Source"
+        }
+      },
+      "required": [
+        "identity",
+        "requires_token",
+        "dependencies",
+        "source",
+        "format",
+        "files"
+      ],
+      "title": "ModelDefinition",
+      "type": "object"
+    },
+    "ModelDisplay": {
+      "properties": {
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/CapabilityName"
+          },
+          "maxItems": 64,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "description": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "family_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Family Title",
+          "type": "string"
+        },
+        "identity": {
+          "$ref": "#/$defs/ModelDisplayIdentity"
+        },
+        "kind": {
+          "const": "model-display",
+          "default": "model-display",
+          "title": "Kind",
+          "type": "string"
+        },
+        "license": {
+          "$ref": "#/$defs/ModelLicense"
+        },
+        "modalities": {
+          "items": {
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video",
+              "3d",
+              "embeddings"
+            ],
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Modalities",
+          "type": "array"
+        },
+        "model_title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Model Title",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9.-]{0,39}$",
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "identity",
+        "family_title",
+        "model_title",
+        "description",
+        "tags",
+        "modalities",
+        "capabilities",
+        "license"
+      ],
+      "title": "ModelDisplay",
+      "type": "object"
+    },
+    "ModelDisplayIdentity": {
+      "properties": {
+        "publisher": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "slug": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publisher",
+        "slug"
+      ],
+      "title": "ModelDisplayIdentity",
+      "type": "object"
+    },
+    "ModelFamily": {
+      "properties": {
+        "publisher": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "slug": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publisher",
+        "slug"
+      ],
+      "title": "ModelFamily",
+      "type": "object"
+    },
+    "ModelFile": {
+      "description": "One entry in the complete immutable model file manifest.\n\n``sha256`` and ``size_bytes`` always describe the whole installed file.\nWhen the source publishes the file only as split parts, ``parts`` lists\nthem in joining order (byte concatenation yields the file). Omitted means\nthe source publishes the file whole, so the same bytes have the same\nidentity whether the source splits them or not.",
+      "properties": {
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "parts": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ModelFilePart"
+              },
+              "maxItems": 1024,
+              "minItems": 2,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parts"
+        },
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Roles",
+          "type": "array"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 0,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "sha256",
+        "size_bytes",
+        "roles"
+      ],
+      "title": "ModelFile",
+      "type": "object"
+    },
+    "ModelFilePart": {
+      "description": "One published piece of a file the source can only host split.\n\nA part is a transport detail: it exists only at the source (for example a\nHugging Face repository that caps files at 50 GB publishes\n``model.safetensors.part00``). It is never installed.",
+      "properties": {
+        "path": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size_bytes": {
+          "minimum": 1,
+          "title": "Size Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "title": "ModelFilePart",
+      "type": "object"
+    },
+    "ModelFormat": {
+      "properties": {
+        "precision": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Precision",
+          "type": "string"
+        },
+        "quantization": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,127}$",
+          "title": "Quantization",
+          "type": "string"
+        }
+      },
+      "required": [
+        "precision",
+        "quantization"
+      ],
+      "title": "ModelFormat",
+      "type": "object"
+    },
+    "ModelIdentity": {
+      "description": "The family, logical model, exact version, and selected variant.",
+      "properties": {
+        "family": {
+          "$ref": "#/$defs/ModelFamily"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelRecord"
+        },
+        "publisher": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "slug": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "variant": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Variant",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publisher",
+        "slug",
+        "family",
+        "model",
+        "version",
+        "variant"
+      ],
+      "title": "ModelIdentity",
+      "type": "object"
+    },
+    "ModelLicense": {
+      "properties": {
+        "attribution": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Attribution",
+          "type": "array"
+        },
+        "spdx": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Spdx",
+          "type": "string"
+        },
+        "territorial_restrictions": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelTerritorialRestrictions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "url": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "spdx",
+        "url",
+        "attribution"
+      ],
+      "title": "ModelLicense",
+      "type": "object"
+    },
+    "ModelRecord": {
+      "properties": {
+        "publisher": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Publisher",
+          "type": "string"
+        },
+        "slug": {
+          "maxLength": 63,
+          "minLength": 2,
+          "pattern": "^[a-z0-9][a-z0-9-]{1,62}$",
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publisher",
+        "slug"
+      ],
+      "title": "ModelRecord",
+      "type": "object"
+    },
     "ModelReference": {
       "properties": {
         "content_sha256": {
@@ -2263,6 +2472,53 @@
         "content_sha256"
       ],
       "title": "ModelReference",
+      "type": "object"
+    },
+    "ModelSource": {
+      "properties": {
+        "repository": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Repository",
+          "type": "string"
+        },
+        "revision": {
+          "pattern": "^[a-f0-9]{40,64}$",
+          "title": "Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "revision"
+      ],
+      "title": "ModelSource",
+      "type": "object"
+    },
+    "ModelTerritorialRestrictions": {
+      "properties": {
+        "denied_jurisdictions": {
+          "items": {
+            "pattern": "^[A-Z]{2,3}$",
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Denied Jurisdictions",
+          "type": "array"
+        },
+        "notice": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Notice",
+          "type": "string"
+        }
+      },
+      "required": [
+        "denied_jurisdictions",
+        "notice"
+      ],
+      "title": "ModelTerritorialRestrictions",
       "type": "object"
     },
     "NodeOfflineReason": {
@@ -3118,6 +3374,85 @@
       "title": "QualificationUnverifiedReason",
       "type": "string"
     },
+    "RecipeAlternative": {
+      "description": "One other recipe serving the same model, for a one-line comparison.",
+      "properties": {
+        "cache": {
+          "enum": [
+            "cached",
+            "preparing",
+            "not_cached",
+            "failed",
+            "unknown"
+          ],
+          "title": "Cache",
+          "type": "string"
+        },
+        "creator": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Creator"
+        },
+        "engine": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Engine",
+          "type": "string"
+        },
+        "fits_fleet": {
+          "enum": [
+            "ready",
+            "blocked",
+            "unavailable"
+          ],
+          "title": "Fits Fleet",
+          "type": "string"
+        },
+        "node_count": {
+          "minimum": 1,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "selector": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Selector",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "selector",
+        "title",
+        "engine",
+        "node_count",
+        "version",
+        "cache",
+        "fits_fleet"
+      ],
+      "title": "RecipeAlternative",
+      "type": "object"
+    },
     "RecipeApi": {
       "properties": {
         "api": {
@@ -3284,6 +3619,42 @@
       ],
       "title": "RecipeBuildCode",
       "type": "string"
+    },
+    "RecipeBuildDefinition": {
+      "properties": {
+        "base_image": {
+          "$ref": "#/$defs/RecipeImage"
+        },
+        "context": {
+          "$ref": "#/$defs/BuildContext"
+        },
+        "dockerfile": {
+          "maxLength": 256,
+          "pattern": "^(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*))*$",
+          "title": "Dockerfile",
+          "type": "string"
+        },
+        "network": {
+          "$ref": "#/$defs/BuildNetwork"
+        },
+        "patches": {
+          "items": {
+            "$ref": "#/$defs/BuildPatch"
+          },
+          "maxItems": 64,
+          "title": "Patches",
+          "type": "array"
+        }
+      },
+      "required": [
+        "base_image",
+        "context",
+        "dockerfile",
+        "patches",
+        "network"
+      ],
+      "title": "RecipeBuildDefinition",
+      "type": "object"
     },
     "RecipeBuildEnvironmentArgument": {
       "properties": {
@@ -3543,6 +3914,176 @@
       "title": "RecipeBuildOptions",
       "type": "object"
     },
+    "RecipeDecisionSettings": {
+      "properties": {
+        "concurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "context_tokens": {
+          "$ref": "#/$defs/RecipeIntegerSetting"
+        },
+        "kind": {
+          "const": "decision",
+          "title": "Kind",
+          "type": "string"
+        },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/RecipeSetting"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
+        },
+        "max_batch_tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "context_tokens"
+      ],
+      "title": "RecipeDecisionSettings",
+      "type": "object"
+    },
+    "RecipeDefinition": {
+      "description": "The sole public recipe authoring contract.",
+      "properties": {
+        "execution": {
+          "$ref": "#/$defs/RecipeExecution"
+        },
+        "identity": {
+          "$ref": "#/$defs/RecipeIdentity"
+        },
+        "interfaces": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "artifact-job": "#/$defs/RecipeJobInterface",
+                "audio-job": "#/$defs/RecipeJobInterface",
+                "image-job": "#/$defs/RecipeJobInterface",
+                "mesh-job": "#/$defs/RecipeJobInterface",
+                "openai": "#/$defs/RecipeOpenAIInterface",
+                "video-job": "#/$defs/RecipeJobInterface"
+              },
+              "propertyName": "adapter"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/RecipeOpenAIInterface"
+              },
+              {
+                "$ref": "#/$defs/RecipeJobInterface"
+              }
+            ]
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Interfaces",
+          "type": "array"
+        },
+        "kind": {
+          "const": "recipe",
+          "default": "recipe",
+          "title": "Kind",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/RecipeModelSelection"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Models",
+          "type": "array"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/RecipeOption"
+          },
+          "maxItems": 16,
+          "title": "Options",
+          "type": "array"
+        },
+        "provenance": {
+          "$ref": "#/$defs/RecipeProvenance"
+        },
+        "release": {
+          "$ref": "#/$defs/RecipeRelease"
+        },
+        "runtime": {
+          "$ref": "#/$defs/RecipeRuntime"
+        },
+        "settings": {
+          "discriminator": {
+            "mapping": {
+              "decision": "#/$defs/RecipeDecisionSettings",
+              "embedding": "#/$defs/RecipeEmbeddingSettings",
+              "generation": "#/$defs/RecipeGenerationSettings",
+              "job": "#/$defs/RecipeJobSettings"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RecipeGenerationSettings"
+            },
+            {
+              "$ref": "#/$defs/RecipeDecisionSettings"
+            },
+            {
+              "$ref": "#/$defs/RecipeEmbeddingSettings"
+            },
+            {
+              "$ref": "#/$defs/RecipeJobSettings"
+            }
+          ],
+          "title": "Settings"
+        },
+        "topology": {
+          "$ref": "#/$defs/RecipeTopology"
+        },
+        "validation": {
+          "$ref": "#/$defs/RecipeValidation"
+        }
+      },
+      "required": [
+        "identity",
+        "models",
+        "execution",
+        "runtime",
+        "topology",
+        "interfaces",
+        "validation",
+        "provenance",
+        "settings",
+        "release"
+      ],
+      "title": "RecipeDefinition",
+      "type": "object"
+    },
     "RecipeDiskResources": {
       "properties": {
         "artifact_bytes": {
@@ -3635,6 +4176,123 @@
       "title": "RecipeDisplay",
       "type": "object"
     },
+    "RecipeEmbeddingSettings": {
+      "properties": {
+        "concurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "embedding",
+          "title": "Kind",
+          "type": "string"
+        },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/RecipeSetting"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
+        },
+        "max_batch_tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RecipeEmbeddingSettings",
+      "type": "object"
+    },
+    "RecipeExecution": {
+      "description": "The platform builds every recipe image from its pinned base and context.",
+      "properties": {
+        "build": {
+          "$ref": "#/$defs/RecipeBuildDefinition"
+        }
+      },
+      "required": [
+        "build"
+      ],
+      "title": "RecipeExecution",
+      "type": "object"
+    },
+    "RecipeGenerationSettings": {
+      "properties": {
+        "concurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "context_tokens": {
+          "$ref": "#/$defs/RecipeIntegerSetting"
+        },
+        "kind": {
+          "const": "generation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/RecipeSetting"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
+        },
+        "max_batch_tokens": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "context_tokens"
+      ],
+      "title": "RecipeGenerationSettings",
+      "type": "object"
+    },
     "RecipeHttpServingRequest": {
       "properties": {
         "body": {
@@ -3704,6 +4362,28 @@
         "slug"
       ],
       "title": "RecipeIdentity",
+      "type": "object"
+    },
+    "RecipeImage": {
+      "properties": {
+        "digest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "title": "Digest",
+          "type": "string"
+        },
+        "repository": {
+          "maxLength": 512,
+          "minLength": 1,
+          "pattern": "^[a-z0-9][a-z0-9._/-]*$",
+          "title": "Repository",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository",
+        "digest"
+      ],
+      "title": "RecipeImage",
       "type": "object"
     },
     "RecipeImageCode": {
@@ -3836,6 +4516,31 @@
         "max_total_bytes"
       ],
       "title": "RecipeInputSlot",
+      "type": "object"
+    },
+    "RecipeIntegerSetting": {
+      "properties": {
+        "change_effect": {
+          "enum": [
+            "none",
+            "restart",
+            "reprepare",
+            "rebuild"
+          ],
+          "title": "Change Effect",
+          "type": "string"
+        },
+        "value": {
+          "minimum": 1,
+          "title": "Value",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "change_effect"
+      ],
+      "title": "RecipeIntegerSetting",
       "type": "object"
     },
     "RecipeJobInput": {
@@ -3991,6 +4696,60 @@
       "title": "RecipeJobServingRequest",
       "type": "object"
     },
+    "RecipeJobSettings": {
+      "properties": {
+        "concurrency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeIntegerSetting"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kind": {
+          "const": "job",
+          "title": "Kind",
+          "type": "string"
+        },
+        "knobs": {
+          "maxProperties": 64,
+          "patternProperties": {
+            "^[a-z][a-z0-9_-]*$": {
+              "$ref": "#/$defs/RecipeSetting"
+            }
+          },
+          "propertyNames": {
+            "maxLength": 64,
+            "minLength": 1
+          },
+          "title": "Knobs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "RecipeJobSettings",
+      "type": "object"
+    },
+    "RecipeLifecycle": {
+      "properties": {
+        "stop_timeout_seconds": {
+          "maximum": 600,
+          "minimum": 1,
+          "title": "Stop Timeout Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "stop_timeout_seconds"
+      ],
+      "title": "RecipeLifecycle",
+      "type": "object"
+    },
     "RecipeMemoryResources": {
       "description": "Unified (DGX Spark) memory one role needs.",
       "properties": {
@@ -4029,6 +4788,89 @@
         "reserve_bytes"
       ],
       "title": "RecipeMemoryResources",
+      "type": "object"
+    },
+    "RecipeModelFile": {
+      "properties": {
+        "file_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "File Id",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]{0,63}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "mount": {
+          "$ref": "#/$defs/RecipeMount"
+        },
+        "roles": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "file_id",
+        "roles",
+        "mount"
+      ],
+      "title": "RecipeModelFile",
+      "type": "object"
+    },
+    "RecipeModelSelection": {
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/RecipeModelFile"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "title": "Files",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "model": {
+          "$ref": "#/$defs/ModelReference"
+        }
+      },
+      "required": [
+        "id",
+        "model",
+        "files"
+      ],
+      "title": "RecipeModelSelection",
+      "type": "object"
+    },
+    "RecipeMount": {
+      "properties": {
+        "target": {
+          "maxLength": 256,
+          "pattern": "^/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*)(?:/(?:[A-Za-z0-9_-][A-Za-z0-9._-]*|\\.[A-Za-z0-9_-][A-Za-z0-9._-]*))*$",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "title": "RecipeMount",
       "type": "object"
     },
     "RecipeMultipartFile": {
@@ -4852,6 +5694,56 @@
       "title": "RecipeRoleResources",
       "type": "object"
     },
+    "RecipeRuntime": {
+      "properties": {
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/RecipeRuntimeArgument"
+          },
+          "maxItems": 128,
+          "title": "Arguments",
+          "type": "array"
+        },
+        "engine": {
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_-]*$",
+          "title": "Engine",
+          "type": "string"
+        },
+        "entrypoint": {
+          "items": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Entrypoint",
+          "type": "array"
+        },
+        "environment": {
+          "items": {
+            "$ref": "#/$defs/RecipeRuntimeEnvironment"
+          },
+          "maxItems": 128,
+          "title": "Environment",
+          "type": "array"
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/RecipeLifecycle"
+        }
+      },
+      "required": [
+        "engine",
+        "entrypoint",
+        "arguments",
+        "environment",
+        "lifecycle"
+      ],
+      "title": "RecipeRuntime",
+      "type": "object"
+    },
     "RecipeRuntimeArgument": {
       "properties": {
         "name": {
@@ -4895,6 +5787,39 @@
       "title": "RecipeRuntimeArgument",
       "type": "object"
     },
+    "RecipeRuntimeEnvironment": {
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "name",
+        "value"
+      ],
+      "title": "RecipeRuntimeEnvironment",
+      "type": "object"
+    },
     "RecipeServingValidation": {
       "properties": {
         "checks": {
@@ -4924,6 +5849,43 @@
         "checks"
       ],
       "title": "RecipeServingValidation",
+      "type": "object"
+    },
+    "RecipeSetting": {
+      "properties": {
+        "change_effect": {
+          "enum": [
+            "none",
+            "restart",
+            "reprepare",
+            "rebuild"
+          ],
+          "title": "Change Effect",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value",
+        "change_effect"
+      ],
+      "title": "RecipeSetting",
       "type": "object"
     },
     "RecipeTopology": {
@@ -6483,10 +7445,11 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
-    "catalog_observed_at": {
+    "alignment": {
       "anyOf": [
         {
-          "format": "date-time",
+          "maxLength": 64,
+          "minLength": 1,
           "type": "string"
         },
         {
@@ -6494,26 +7457,20 @@
         }
       ],
       "default": null,
-      "title": "Catalog Observed At"
+      "title": "Alignment"
     },
-    "facets": {
-      "$ref": "#/$defs/LibraryFacetValues"
+    "alternatives": {
+      "items": {
+        "$ref": "#/$defs/RecipeAlternative"
+      },
+      "maxItems": 512,
+      "title": "Alternatives",
+      "type": "array"
     },
-    "filters": {
-      "$ref": "#/$defs/LibraryFilterValues"
-    },
-    "freshness_policy": {
-      "$ref": "#/$defs/FreshnessPolicy"
-    },
-    "generated_at": {
-      "format": "date-time",
-      "title": "Generated At",
-      "type": "string"
-    },
-    "library": {
+    "assessment": {
       "anyOf": [
         {
-          "$ref": "#/$defs/LibraryRelease"
+          "$ref": "#/$defs/RecipeReadiness"
         },
         {
           "type": "null"
@@ -6521,40 +7478,140 @@
       ],
       "default": null
     },
-    "next_cursor": {
+    "creator": {
       "anyOf": [
         {
-          "maxLength": 1024,
+          "maxLength": 128,
+          "minLength": 1,
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "title": "Next Cursor"
+      "default": null,
+      "title": "Creator"
     },
-    "recipes": {
+    "document": {
+      "$ref": "#/$defs/RecipeDefinition"
+    },
+    "engine": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Engine",
+      "type": "string"
+    },
+    "identity": {
+      "$ref": "#/$defs/LibraryRecipeIdentity"
+    },
+    "local": {
+      "$ref": "#/$defs/LibraryLocalState"
+    },
+    "model_documents": {
       "items": {
-        "$ref": "#/$defs/LibraryRecipeProjection"
+        "$ref": "#/$defs/LibraryRecipeModel"
       },
-      "maxItems": 512,
-      "title": "Recipes",
+      "maxItems": 32,
+      "title": "Model Documents",
       "type": "array"
     },
+    "model_selectors": {
+      "items": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "title": "Model Selectors",
+      "type": "array"
+    },
+    "node_count": {
+      "minimum": 1,
+      "title": "Node Count",
+      "type": "integer"
+    },
+    "prebuilt_image": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PrebuiltImage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "projected": {
+      "$ref": "#/$defs/RecipeRevisionProjection"
+    },
+    "qualification": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PublishedQualificationStatusView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "recipe_display": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RecipeDisplay"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resources": {
+      "$ref": "#/$defs/LibraryResourceProjection"
+    },
     "schema_version": {
-      "const": 1,
+      "const": 2,
       "title": "Schema Version",
       "type": "integer"
+    },
+    "selector": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Selector",
+      "type": "string"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    },
+    "usage": {
+      "items": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 64,
+      "title": "Usage",
+      "type": "array"
     }
   },
   "required": [
-    "generated_at",
-    "recipes",
-    "facets",
-    "next_cursor",
-    "freshness_policy",
+    "selector",
+    "identity",
+    "projected",
+    "recipe_display",
+    "model_selectors",
+    "usage",
+    "resources",
+    "local",
+    "updated_at",
+    "node_count",
+    "engine",
+    "document",
+    "model_documents",
     "schema_version"
   ],
-  "title": "vonkctl recipe-library document (schema_version 1)",
+  "title": "vonkctl recipe-detail document (schema_version 2)",
   "type": "object"
 }

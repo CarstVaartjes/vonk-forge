@@ -26,7 +26,7 @@ INPUTS = (
     "deploy/compose/tailscale/compose.yaml",
     "deploy/compose/litellm/Dockerfile",
     "deploy/compose/trust/litellm-cosign.pub",
-    "inventory/wheels/vonk_forge_public_contracts-4.4.0-py3-none-any.whl",
+    "inventory/wheels/vonk_forge_public_contracts-4.7.0-py3-none-any.whl",
 )
 SUBPROCESS_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 
