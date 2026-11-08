@@ -151,10 +151,8 @@ def release_expressions() -> dict[str, str]:
         "${{ needs.release-metadata.outputs.image_version_tag }}": "v1.2.3",
         "${{ needs.release-metadata.outputs.api_image }}": "ghcr.io/example/api",
         "${{ needs.release-metadata.outputs.worker_image }}": "ghcr.io/example/worker",
-        "${{ needs.release-metadata.outputs.hermes_image }}": "ghcr.io/example/hermes",
         "${{ needs.publish-images.outputs.api_digest }}": digest,
         "${{ needs.publish-images.outputs.worker_digest }}": digest,
-        "${{ needs.publish-images.outputs.hermes_digest }}": digest,
     }
 
 
@@ -335,7 +333,6 @@ def test_development_images_build_supported_linux_architectures_with_targeted_ca
     for role, image in (
         ("api", "${{ steps.metadata.outputs.api_image }}"),
         ("worker", "${{ steps.metadata.outputs.worker_image }}"),
-        ("hermes", "ghcr.io/carstvaartjes/vonk-forge-hermes"),
         ("litellm", "ghcr.io/carstvaartjes/vonk-forge-litellm"),
     ):
         assert (
@@ -398,7 +395,7 @@ def test_publisher_deep_scans_local_oci_content_without_uploading_archives() -> 
     ]
     assert jobs_with_package_write == ["publish-development-images"]
     assert "scripts/accept-development-image-archive" in publisher
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         assert f"vonk-forge-{role}.oci.tar" in publisher
         assert f"development-role-receipt-{role}-${{{{ github.sha }}}}" in publisher
     assert "Upload exact OCI archive" not in text
@@ -502,7 +499,7 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
     run_attempt = "2"
     manifest = b'{"mediaType":"application/vnd.oci.image.index.v1+json"}'
     expected_digest = f"sha256:{hashlib.sha256(manifest).hexdigest()}"
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         result = subprocess.run(
             [
@@ -556,7 +553,6 @@ def _create_v3_receipt(tmp_path: Path) -> tuple[Path, Path, str]:
     assert collected.stdout.splitlines() == [
         f"api_digest={expected_digest}",
         f"worker_digest={expected_digest}",
-        f"hermes_digest={expected_digest}",
         f"litellm_digest={expected_digest}",
     ]
     assert aggregated.returncode == 0, aggregated.stderr
@@ -572,8 +568,8 @@ def test_role_receipts_aggregate_without_retransferring_archives(
 
     assert document["schema"] == "vonk-forge.dev-image-acceptance.v3"
     assert document["run_attempt"] == "2"
-    assert set(document["roles"]) == {"api", "worker", "hermes", "litellm"}
-    for role in ("api", "worker", "hermes", "litellm"):
+    assert set(document["roles"]) == {"api", "worker", "litellm"}
+    for role in ("api", "worker", "litellm"):
         image = f"ghcr.io/carstvaartjes/vonk-forge-{role}"
         assert document["roles"][role] == {
             "artifact": (f"development-role-receipt-{role}-{'a' * 40}-12345-2"),
@@ -648,7 +644,7 @@ def test_development_image_receipt_rejects_invalid_registry_identity(
     elif mutation == "wrong_digest":
         api["manifest_digest"] = f"sha256:{'f' * 64}"
     elif mutation == "missing_role":
-        del document["roles"]["hermes"]
+        del document["roles"]["litellm"]
     else:
         api["unexpected"] = True
     receipt.write_text(json.dumps(document))
@@ -854,7 +850,6 @@ def test_each_protected_production_mutation_revalidates_exact_tag_authority() ->
             "Promote accepted API image",
             "Promote accepted worker image",
             "Promote accepted LiteLLM image",
-            "Build and push Hermes image",
         ),
         "release-manifest": ("Create public GitHub Release",),
     }
@@ -888,16 +883,11 @@ def test_alias_reconciliation_binds_selected_release_to_signed_tag_revision() ->
 def test_production_release_retries_reconcile_immutable_outputs_before_completion() -> (
     None
 ):
-    publisher = job("publish-images")
     release = workflow_step("release-manifest", "Create public GitHub Release")
     aliases = installer_step(
         "promote", "Promote accepted images and advance installer pointer last"
     )
 
-    assert "Reconcile existing Hermes release image" in publisher
-    assert "Verify and record Hermes release image" in publisher
-    assert "scripts/reconcile-hermes-release-image" in publisher
-    assert "Attest Hermes release provenance" in publisher
     assert "scripts/reconcile-github-release" in release
     assert "SOURCE_SHA: ${{ github.sha }}" in release
     assert "scripts/promote-accepted-channel" in aliases
@@ -955,7 +945,6 @@ def test_production_compose_binds_actual_digest_pinned_build_outputs() -> None:
     assert "scripts/render-production-compose" in build
     assert "steps.api.outputs.digest" in build
     assert "steps.worker.outputs.digest" in build
-    assert "steps.hermes.outputs.digest" in build
     assert "docker-compose.production.yml" in build
     assert "control-deployment" not in builder
     assert "platform-release.json" not in builder
@@ -1126,60 +1115,33 @@ def test_publisher_uses_pinned_docker_actions_and_exact_artifacts() -> None:
     text = workflow()
     publisher = job("publish-images")
     for action in (
-        "docker/setup-qemu-action",
         "docker/setup-buildx-action",
         "docker/login-action",
         "docker/build-push-action",
     ):
         assert re.search(_pinned(action), text), action
-    assert "docker/build-push-action@" in publisher
-    assert (
-        "docker/build-push-action@"
-        not in publisher.partition("docker/build-push-action@")[2]
-    )
+    assert "docker/build-push-action@" not in publisher
     metadata = (ROOT / "scripts/container-release-metadata").read_text()
     for package in (
         "vonk-forge-api",
         "vonk-forge-worker",
-        "vonk-forge-hermes",
         "vonk-forge-litellm",
     ):
         assert package in metadata
-    assert publisher.index("docker/setup-qemu-action@") < publisher.index(
-        "docker/setup-buildx-action@"
-    )
-    assert (
-        # The emulator stays digest-pinned, whether it is read from the CI
-        # mirror or from upstream.
-        "400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0" in publisher
-    )
-    assert "platforms: linux/amd64,linux/arm64" in publisher
-    assert (
-        "platforms: linux/amd64,linux/arm64"
-        not in publisher.partition("platforms: linux/amd64,linux/arm64")[2]
-    )
-    assert "provenance: mode=max" in text
-    assert "provenance: mode=max" not in text.partition("provenance: mode=max")[2]
-    assert "sbom: true" in text
-    assert "sbom: true" not in text.partition("sbom: true")[2]
-    assert "push: true" in text
-    assert "push: true" not in text.partition("push: true")[2]
 
 
-def test_complete_summary_uses_all_four_build_digests() -> None:
+def test_complete_summary_uses_all_three_build_digests() -> None:
     summary = workflow_step("publish-images", "Write digest-pinned image summary")
     run = step_run("publish-images", "Write digest-pinned image summary")
     for variable in (
         "CONTROL_API_IMAGE",
         "CONTROL_WORKER_IMAGE",
-        "HERMES_AGENT_IMAGE",
         "LITELLM_IMAGE",
     ):
         assert variable in run
     for digest in (
         "steps.api.outputs.digest",
         "steps.worker.outputs.digest",
-        "steps.hermes.outputs.digest",
         "steps.litellm.outputs.digest",
     ):
         assert digest in run
@@ -1194,7 +1156,6 @@ def test_public_input_scanner_runs_before_every_image_build() -> None:
     assert "scripts/verify-supply-chain --output-dir" in validator
     assert "scripts/verify-public-image-inputs" not in publisher
     assert "scripts/verify-supply-chain" not in publisher
-    assert "Build and push Hermes image" in publisher
 
 
 def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
@@ -1220,11 +1181,7 @@ def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> No
     publisher = job("publish-images")
     assert "Build and push API image" not in publisher
     assert "Build and push worker image" not in publisher
-    assert "docker/build-push-action@" in publisher
-    assert (
-        "docker/build-push-action@"
-        not in publisher.partition("docker/build-push-action@")[2]
-    )
+    assert "docker/build-push-action@" not in publisher
 
     for role in ("API", "worker", "LiteLLM"):
         validation = workflow_step(
@@ -1248,38 +1205,6 @@ def test_api_worker_and_litellm_are_promoted_from_accepted_dev_manifests() -> No
         assert "GITHUB_OUTPUT" in promotion
         assert ":latest" not in promotion
         assert ":dev" not in promotion
-
-
-def test_hermes_build_keeps_its_existing_release_tags() -> None:
-    image = "${{ needs.release-metadata.outputs.hermes_image }}"
-    assert step_block("publish-images", "Build and push Hermes image", "tags") == [
-        f"{image}:${{{{ needs.release-metadata.outputs.version }}}}",
-        f"{image}:${{{{ needs.release-metadata.outputs.commit_tag }}}}",
-    ]
-    reconciliation = workflow_step(
-        "publish-images", "Reconcile existing Hermes release image"
-    )
-    verification = workflow_step(
-        "publish-images", "Verify and record Hermes release image"
-    )
-    assert "scripts/reconcile-hermes-release-image" in reconciliation
-    assert "scripts/reconcile-hermes-release-image" in verification
-    assert "--require-attestation" in verification
-    assert "--repair-tags" in verification
-    assert "if: steps.existing-hermes.outputs.exists" not in workflow_step(
-        "publish-images", "Attest Hermes release provenance"
-    )
-    assert (
-        "gh attestation verify"
-        in (ROOT / "scripts/reconcile-hermes-release-image").read_text()
-    )
-
-
-def test_hermes_release_reuse_is_the_only_existing_version_path() -> None:
-    publisher = job("publish-images")
-
-    assert "Reconcile existing Hermes release image" in publisher
-    assert "Attest Hermes release provenance" in publisher
 
 
 def test_latest_alias_advances_only_after_release_evidence() -> None:
@@ -1333,7 +1258,6 @@ def test_manifest_receives_digests_only_through_environment() -> None:
     for name, output in (
         ("CONTROL_API_DIGEST", "api_digest"),
         ("CONTROL_WORKER_DIGEST", "worker_digest"),
-        ("HERMES_AGENT_DIGEST", "hermes_digest"),
         ("LITELLM_DIGEST", "litellm_digest"),
     ):
         assert f"{name}: ${{{{ needs.publish-images.outputs.{output} }}}}" in step
@@ -1367,10 +1291,9 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
     )
     valid = f"sha256:{'a' * 64}"
     invalid_sets = (
-        ("", valid, valid, valid),
-        (valid, "sha256:abc", valid, valid),
-        (valid, valid, f"sha256:{'A' * 64}", valid),
-        (valid, valid, valid, "sha256:nope"),
+        ("", valid, valid),
+        (valid, "sha256:abc", valid),
+        (valid, valid, f"sha256:{'A' * 64}"),
     )
 
     for index, digests in enumerate(invalid_sets):
@@ -1383,12 +1306,10 @@ def test_manifest_rejects_invalid_digests_before_creating_assets(
                 **os.environ,
                 "CONTROL_API_IMAGE": "ghcr.io/example/api:1.2.3",
                 "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker:1.2.3",
-                "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes:1.2.3",
                 "LITELLM_IMAGE": "ghcr.io/example/litellm:1.2.3",
                 "CONTROL_API_DIGEST": digests[0],
                 "CONTROL_WORKER_DIGEST": digests[1],
-                "HERMES_AGENT_DIGEST": digests[2],
-                "LITELLM_DIGEST": digests[3],
+                "LITELLM_DIGEST": digests[2],
             },
             check=False,
             capture_output=True,
@@ -1414,11 +1335,9 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
             **os.environ,
             "CONTROL_API_IMAGE": "ghcr.io/example/api:1.2.3",
             "CONTROL_WORKER_IMAGE": "ghcr.io/example/worker:1.2.3",
-            "HERMES_AGENT_IMAGE": "ghcr.io/example/hermes:1.2.3",
             "LITELLM_IMAGE": "ghcr.io/example/litellm:1.2.3",
             "CONTROL_API_DIGEST": digest,
             "CONTROL_WORKER_DIGEST": digest,
-            "HERMES_AGENT_DIGEST": digest,
             "LITELLM_DIGEST": digest,
         },
         check=False,
@@ -1430,7 +1349,6 @@ def test_manifest_accepts_valid_digests_and_checksums_the_asset(
     assert (tmp_path / "vonk-forge-images.env").read_text() == (
         f"CONTROL_API_IMAGE=ghcr.io/example/api:1.2.3@{digest}\n"
         f"CONTROL_WORKER_IMAGE=ghcr.io/example/worker:1.2.3@{digest}\n"
-        f"HERMES_AGENT_IMAGE=ghcr.io/example/hermes:1.2.3@{digest}\n"
         f"LITELLM_IMAGE=ghcr.io/example/litellm:1.2.3@{digest}\n"
     )
     checksum = subprocess.run(
@@ -1505,7 +1423,7 @@ def _image_inputs(repo: Path, *args: str):
     )
 
 
-@pytest.mark.parametrize("role", ["hermes", "litellm"])
+@pytest.mark.parametrize("role", ["litellm"])
 def test_image_cache_inputs_are_the_actual_isolated_build_context(
     reusable_image_repo, tmp_path, role
 ):
@@ -1520,14 +1438,8 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(
     result = _image_inputs(repo, "prepare", role, current, str(context))
     assert result.returncode == 0, result.stderr
     assert not (context / "unrelated-controller.py").exists()
-    copied = (
-        "deploy/compose/hermes-agent/entrypoint.sh"
-        if role == "hermes"
-        else "agent_protocol/src/vonk_agent_protocol/route_activation.py"
-    )
-    source = repo / (
-        "deploy/compose/hermes-agent/entrypoint.sh" if role == "hermes" else copied
-    )
+    copied = "agent_protocol/src/vonk_agent_protocol/route_activation.py"
+    source = repo / copied
     assert (context / copied).read_bytes() == source.read_bytes()
     assert (context / copied).stat().st_mode & 0o777 == source.stat().st_mode & 0o777
     source.write_text(source.read_text() + "\n# changed input\n")
@@ -1535,28 +1447,9 @@ def test_image_cache_inputs_are_the_actual_isolated_build_context(
     assert _image_inputs(repo, "matches", role, original, changed).returncode != 0
 
 
-def test_uv_owner_change_invalidates_the_prepared_hermes_image(
-    reusable_image_repo, tmp_path
-):
-    # Wrong implementation: a uv-only upgrade reuses an image with the old embedded bundle.
-    repo = reusable_image_repo
-    owner = repo / ".tool-versions"
-    owner.write_bytes((ROOT / ".tool-versions").read_bytes())
-    original = _image_commit(repo)
-    context = tmp_path / "context"
-    prepared = _image_inputs(repo, "prepare", "hermes", original, str(context))
-    assert prepared.returncode == 0, prepared.stderr
-    assert (context / owner.name).read_bytes() == owner.read_bytes()
-    owner.write_text("uv " + "99" + ".1.2\n")
-    changed = _image_commit(repo)
-    assert _image_inputs(repo, "matches", "hermes", original, changed).returncode != 0
-
-
 @pytest.mark.parametrize(
     ("role", "lock"),
     [
-        ("hermes", "python-bootstrap.lock"),
-        ("hermes", "uv-bootstrap.lock"),
         ("litellm", "python-bootstrap.lock"),
     ],
 )
@@ -1584,7 +1477,7 @@ def test_image_reuse_rejects_changed_or_unrelated_source(
 ):
     repo = reusable_image_repo
     original = _image_commit(repo)
-    source = repo / "deploy/compose/hermes-agent/entrypoint.sh"
+    source = repo / "deploy/compose/litellm/entrypoint.sh"
     if change == "mode":
         source.chmod(0o644)
     elif change == "delete":
@@ -1611,7 +1504,7 @@ def test_image_reuse_rejects_changed_or_unrelated_source(
         )
         (repo / "second").write_text("two")
     current = _image_commit(repo)
-    assert _image_inputs(repo, "matches", "hermes", original, current).returncode != 0
+    assert _image_inputs(repo, "matches", "litellm", original, current).returncode != 0
     trees = [
         subprocess.check_output(
             ["git", "rev-parse", f"{commit}^{{tree}}"], cwd=repo, text=True
@@ -1620,13 +1513,13 @@ def test_image_reuse_rejects_changed_or_unrelated_source(
     ]
     # Image labels name trees: equal isolated content is one image whatever
     # branch built it; any changed input still refuses.
-    assert (_image_inputs(repo, "same-inputs", "hermes", *trees).returncode == 0) == (
+    assert (_image_inputs(repo, "same-inputs", "litellm", *trees).returncode == 0) == (
         change == "sibling"
     )
     if change == "symlink":
         assert (
             _image_inputs(
-                repo, "prepare", "hermes", current, str(tmp_path / "context")
+                repo, "prepare", "litellm", current, str(tmp_path / "context")
             ).returncode
             != 0
         )

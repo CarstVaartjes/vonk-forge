@@ -25,14 +25,24 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
-from typing import Any
+from typing import Any, NotRequired, TypedDict
 from urllib.parse import quote
 
 INTERVAL = 3600
 NETWORK_INTERVAL = 30
 PROJECT_LABEL = "com.docker.compose.project"
+SERVICE_LABEL = "com.docker.compose.service"
+ONEOFF_LABEL = "com.docker.compose.oneoff"
+# The services the rendered bundle defines; empty (unrendered) retires nothing.
+COMPOSE_SERVICES = frozenset(
+    name for name in os.environ.get("VONK_COMPOSE_SERVICES", "").split(",") if name
+)
+# A redeploy that adds a service creates it while the previous janitor, with its
+# older list, still runs; only containers older than this process are retired.
+STARTED = time.time()
 GRACE = 24 * INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
+# "hermes" is a retired service; it stays listed so its old image is reclaimed.
 REPOSITORIES = frozenset(
     f"ghcr.io/carstvaartjes/vonk-forge-{role}"
     for role in ("api", "worker", "litellm", "hermes")
@@ -41,6 +51,15 @@ IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
 STATE = Path("/state/unused.json")
 REPAIRING = Path("/state/repairing.json")
 LOGGER = logging.getLogger("image-janitor")
+
+
+class Row(TypedDict):
+    """The fields of a Docker container listing row this module reads."""
+
+    Id: str
+    Names: NotRequired[list[str]]
+    Created: NotRequired[int]
+    Labels: NotRequired[dict[str, str] | None]
 
 
 class Reason(StrEnum):
@@ -58,6 +77,7 @@ class Reason(StrEnum):
     START_RETRIED = "start-retried"
     REPAIR_FAILED = "network-repair-failed"
     NO_PROJECT = "not-in-a-compose-project"
+    RETIRED = "retired-service-container-removed"
     MARKS_INVALID = "repair-journal-invalid-reset"
 
 
@@ -483,9 +503,49 @@ class Reconciler:
             journal[identity] = entry
         publish(self.journal, journal)
 
-    def tick(self, project: str) -> None:
+    def retire(
+        self, rows: list[Row], services: frozenset[str], started: float = STARTED
+    ) -> list[Row]:
+        """Remove project containers of services the bundle no longer defines.
+
+        An upgrade redeploys the new Compose file but never removes the
+        containers of a service it dropped. Only this project's containers, only
+        a service named by its Compose label and absent from `services`, created before
+        this process started, never a one-off; the volumes stay.
+        """
+        kept = []
+        for row in rows:
+            labels = row.get("Labels") or {}
+            service = labels.get(SERVICE_LABEL)
+            if (
+                not services
+                or service is None
+                or service in services
+                or labels.get(ONEOFF_LABEL) == "True"
+                or row.get("Created", started) >= started
+            ):
+                kept.append(row)
+                continue
+            identity = quote(row["Id"], safe="")
+            try:
+                self.docker.request("POST", f"/containers/{identity}/stop?t=30")
+            except DockerNotFound:
+                pass
+            except DockerError as error:
+                # Docker answers 304 for an already stopped container.
+                if "304" not in str(error):
+                    raise
+            try:
+                self.docker.request("DELETE", f"/containers/{identity}?v=false")
+            except DockerNotFound:
+                pass  # Gone already: Compose or an operator removed it first.
+            log(Reason.RETIRED, service=service, container=row.get("Names"))
+        return kept
+
+    def tick(self, project: str, services: frozenset[str] = frozenset()) -> None:
         selector = quote(json.dumps({"label": [f"{PROJECT_LABEL}={project}"]}), safe="")
         rows = self.docker.request("GET", f"/containers/json?all=1&filters={selector}")
+        rows = self.retire(rows, services)
         # One inspect per network per tick, shared by every container.
         networks: dict[str, Network | None] = {}
         for row in rows:
@@ -665,7 +725,7 @@ def main() -> None:
             if project is None:
                 log(Reason.NO_PROJECT, next_attempt=time.time() + NETWORK_INTERVAL)
             else:
-                reconciler.tick(project)
+                reconciler.tick(project, COMPOSE_SERVICES)
         except (
             DockerError,
             OSError,

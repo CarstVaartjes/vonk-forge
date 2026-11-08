@@ -25,7 +25,7 @@ def test_overlay_contains_only_exact_accepted_images(tmp_path: Path) -> None:
                         f"ghcr.io/carstvaartjes/vonk-forge-{role}:"
                         f"dev-sha-x@sha256:{digest}"
                     )
-                    for role in ("api", "worker", "hermes", "litellm")
+                    for role in ("api", "worker", "litellm")
                 },
             },
             sort_keys=True,
@@ -105,9 +105,8 @@ def test_overlay_contains_only_exact_accepted_images(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     rendered = output.read_text()
     assert "control-api:" in rendered
-    assert "hermes-litellm-key-provisioner:" in rendered
     services = yaml.safe_load(rendered)["services"]
-    for service in ("litellm", "hermes-litellm-key-provisioner"):
+    for service in ("litellm",):
         assert services[service]["image"] == (
             "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-x@sha256:" + digest
         )
@@ -164,7 +163,7 @@ def test_overlay_rejects_bad_signature_and_wrong_repository(tmp_path: Path) -> N
                     role: (
                         f"ghcr.io/carstvaartjes/vonk-forge-{role}:dev-sha-x@sha256:{digest}"
                     )
-                    for role in ("api", "worker", "hermes", "litellm")
+                    for role in ("api", "worker", "litellm")
                 },
                 "schema_version": 2,
             },

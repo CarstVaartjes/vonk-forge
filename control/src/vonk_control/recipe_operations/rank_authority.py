@@ -252,8 +252,8 @@ def _run_is_one_shot(session: Session, run: RecipeRun) -> bool:
                 select(Job.id)
                 .where(
                     Job.kind == "recipe.job.activate.v1",
-                    Job.payload["owner_kind"].as_string() == "run",
-                    Job.payload["owner_id"].as_string() == run.id,
+                    Job.owner_kind == "run",
+                    Job.owner_id == run.id,
                 )
                 .limit(1)
             )

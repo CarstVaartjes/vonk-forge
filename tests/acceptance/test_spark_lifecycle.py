@@ -189,7 +189,6 @@ def _agent_journal_fault_command(journal: Path) -> list[str]:
 COMPOSE_IMAGE_ROLES = {
     "api": "control-api",
     "worker": "control-worker",
-    "hermes": "hermes-agent",
     "litellm": "litellm",
 }
 
@@ -200,8 +199,6 @@ ED25519_PKCS8_V1_PREFIX = bytes.fromhex("302e020100")
 TAILSCALE_CONTROLLER_SERVICES = TAILSCALE_SERVICES
 LOCAL_CONTROLLER_SERVICES = LOCAL_SERVICES
 LOCAL_CONTROL_SERVICE = "svc:vonk-forge-spark-local"
-LOCAL_HERMES_API_SERVICE = "svc:hermes-api-spark-local"
-LOCAL_HERMES_DASHBOARD_SERVICE = "svc:hermes-dashboard-spark-local"
 LOCAL_DNS_SUFFIX = "spark.acceptance.invalid"
 # The installer derives every controller SNI name from the control hostname.
 LOCAL_CONTROL_HOSTNAME = (
@@ -216,8 +213,6 @@ FORBIDDEN_SPARK_TAILNET_INPUTS = (
     "VONK_ACCEPTANCE_TAILNET_KIND",
     "VONK_ACCEPTANCE_TAILSCALE_CONTROL_SERVICE",
     "VONK_ACCEPTANCE_TAILSCALE_GATEWAY_HOSTNAME",
-    "VONK_ACCEPTANCE_TAILSCALE_HERMES_API_SERVICE",
-    "VONK_ACCEPTANCE_TAILSCALE_HERMES_DASHBOARD_SERVICE",
     "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_ID",
     "VONK_ACCEPTANCE_TAILSCALE_OAUTH_CLIENT_SECRET",
 )
@@ -1362,8 +1357,6 @@ class SparkLifecycle:
         _require_loopback_controller_boundary()
         self.tailnet_services = {
             "control": LOCAL_CONTROL_SERVICE,
-            "hermes_api": LOCAL_HERMES_API_SERVICE,
-            "hermes_dashboard": LOCAL_HERMES_DASHBOARD_SERVICE,
         }
         try:
             self.control_hostname = tailscale_service_hostname(
@@ -1771,9 +1764,7 @@ class SparkLifecycle:
             upstream_key=self._required_environment(
                 "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
             ),
-            hermes=False,
             control_service=self.tailnet_services["control"],
-            hermes_dashboard_service=self.tailnet_services["hermes_dashboard"],
         )
         release_url = (
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
@@ -2452,7 +2443,7 @@ class SparkLifecycle:
         ):
             raise LifecycleError("candidate controller generation is invalid")
         configured = self._run_command(
-            self._compose("--profile", "hermes", "config", "--format", "json"),
+            self._compose("config", "--format", "json"),
             cwd=self.bundle,
         )
         try:
@@ -2468,8 +2459,6 @@ class SparkLifecycle:
                 "compose",
                 "--project-name",
                 self.project,
-                "--profile",
-                "hermes",
                 "config",
                 "--format",
                 "json",
@@ -2505,17 +2494,6 @@ class SparkLifecycle:
                 or configured_service.get("image") != expected_image
             ):
                 raise LifecycleError("Compose image graph differs from publication")
-        provisioner = services.get("hermes-litellm-key-provisioner")
-        provisioner_expected = str(images["litellm"])
-        if not os.environ.get("VONK_ACCEPTANCE_COMPOSE_OVERLAY"):
-            provisioner_expected = provisioner_expected.split("@", 1)[0].rsplit(":", 1)[
-                0
-            ] + (":dev" if self.arguments.channel == "dev" else ":latest")
-        if (
-            not isinstance(provisioner, dict)
-            or provisioner.get("image") != provisioner_expected
-        ):
-            raise LifecycleError("Compose image graph differs from publication")
         for service in services.values():
             image = service.get("image") if isinstance(service, dict) else None
             if (

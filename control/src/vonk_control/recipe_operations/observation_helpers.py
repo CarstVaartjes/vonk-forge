@@ -51,6 +51,7 @@ from ..models import (
     RecipeRun,
     RunNode,
 )
+from ..owner_liveness import OwnerKind
 from ..profile_stop_authority import (
     ProfileJobRunStopJob,
 )
@@ -83,8 +84,8 @@ def wait_for_installation_upkeep(session: Session, installation_id: str) -> None
                 )
             ),
             Job.state.in_(job_states.LIVE),
-            Job.payload["owner_kind"].as_string() == "installation",
-            Job.payload["owner_id"].as_string() == installation_id,
+            Job.owner_kind == OwnerKind.INSTALLATION,
+            Job.owner_id == installation_id,
         )
         .order_by(Job.id)
         .limit(1)

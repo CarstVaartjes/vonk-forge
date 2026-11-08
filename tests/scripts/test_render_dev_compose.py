@@ -21,9 +21,6 @@ API_IMAGE = f"ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-{'a' * 40}@sha256:{DI
 WORKER_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
-HERMES_IMAGE = (
-    f"ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-{'a' * 40}@sha256:{DIGEST}"
-)
 LITELLM_IMAGE = (
     f"ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-{'a' * 40}@sha256:{DIGEST}"
 )
@@ -48,7 +45,6 @@ def _run_renderer(
     *,
     api_image: str = API_IMAGE,
     worker_image: str = WORKER_IMAGE,
-    hermes_image: str = HERMES_IMAGE,
     litellm_image: str = LITELLM_IMAGE,
     channel: str = "pinned",
 ) -> subprocess.CompletedProcess[str]:
@@ -64,8 +60,6 @@ def _run_renderer(
             api_image,
             "--worker-image",
             worker_image,
-            "--hermes-image",
-            hermes_image,
             "--litellm-image",
             litellm_image,
             "--channel",
@@ -91,15 +85,14 @@ def test_render_produces_a_single_self_contained_compose_file(
     document = yaml.safe_load(text)
     assert "\ninclude:" not in text
     assert "tailscale-gateway" in document["services"]
-    assert "hermes-agent" in document["services"]
-    assert document["services"]["hermes-agent"]["profiles"] == ["hermes"]
-    assert document["services"]["hermes-litellm-key-provisioner"]["profiles"] == [
-        "hermes"
-    ]
     assert document["services"]["control-api"]["image"] == API_IMAGE
     assert document["services"]["control-worker"]["image"] == WORKER_IMAGE
     assert document["services"]["litellm"]["image"] == LITELLM_IMAGE
     assert {path.name for path in tmp_path.iterdir()} == {"docker-compose.yaml"}
+    # The janitor learns the bundle's services, to retire those an upgrade drops.
+    assert document["services"]["image-janitor"]["environment"] == {
+        "VONK_COMPOSE_SERVICES": ",".join(sorted(document["services"]))
+    }
     # Runtime configuration ships in the Controller image instead.
     assert "configs" not in document
     assert not any(
@@ -121,24 +114,22 @@ def test_render_produces_a_single_self_contained_compose_file(
         for image in images
     )
 
-    for profile in ([], ["--profile", "hermes"]):
-        config = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "--env-file",
-                str(ROOT / "deploy/compose/tests/test.env"),
-                "-f",
-                str(output),
-                *profile,
-                "config",
-                "-q",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        assert config.returncode == 0, config.stderr
+    config = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(ROOT / "deploy/compose/tests/test.env"),
+            "-f",
+            str(output),
+            "config",
+            "-q",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert config.returncode == 0, config.stderr
 
 
 # Starts a real PostgreSQL container and runs initdb (~8-12 s on CI runners).
@@ -292,10 +283,6 @@ def test_render_dev_keeps_third_party_pins_and_channel_images(
     assert services["control-worker"]["image"] == DEV_WORKER_IMAGE
     assert services["control-worker"]["pull_policy"] == "always"
     assert (
-        services["hermes-agent"]["image"]
-        == "ghcr.io/carstvaartjes/vonk-forge-hermes:dev"
-    )
-    assert (
         services["litellm"]["image"] == "ghcr.io/carstvaartjes/vonk-forge-litellm:dev"
     )
     lock = json.loads((ROOT / "deploy/compose/images.lock.json").read_text())
@@ -320,3 +307,22 @@ def test_render_dev_rejects_role_swapped_mutable_aliases(tmp_path: Path) -> None
 
     assert result.returncode != 0
     assert "immutable published development image" in result.stderr
+
+
+def test_a_hermes_enabled_install_upgrades_to_a_compose_without_hermes(
+    tmp_path: Path,
+) -> None:
+    """Catches a stale `hermes` profile or secret still shaping the upgraded bundle."""
+    from vonk_nas_setup.compose import resolve_compose
+
+    output = tmp_path / "docker-compose.yaml"
+    assert _run_renderer(output).returncode == 0
+    text = output.read_text(encoding="utf-8")
+    old_env = {"COMPOSE_PROFILES": "secure-remote,hermes"}
+    resolved = yaml.safe_load(resolve_compose(text, old_env))
+    for section in ("services", "secrets", "networks", "volumes"):
+        assert not [name for name in resolved.get(section, {}) if "hermes" in name]
+    # The unknown profile member changes nothing against a plain secure-remote.
+    assert resolved == yaml.safe_load(
+        resolve_compose(text, {"COMPOSE_PROFILES": "secure-remote"})
+    )

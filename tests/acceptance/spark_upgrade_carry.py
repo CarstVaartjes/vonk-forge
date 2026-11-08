@@ -334,28 +334,22 @@ def resolve_release(
     images = require_object(document.get("images"), "signed release images")
     # Match this release's rendered services to its signed image identities,
     # not the candidate's role map: the baseline may include retired services.
+    # A baseline published before Hermes was removed also renders its key
+    # provisioner; that retired service goes with the retired role.
+    retired = {"hermes-litellm-key-provisioner"} if "hermes" in images else set()
     compose_image_roles = {
         role: service
         for role, image in images.items()
         for service, definition in image_services.items()
-        if service != "hermes-litellm-key-provisioner"
+        if service not in retired
         and require_object(definition, "rendered image service").get("image") == image
     }
     if set(compose_image_roles) != set(images):
         raise LifecycleError(
             "source-bound renderer image roles differ from publication"
         )
-    if set(image_services) != set(compose_image_roles.values()) | {
-        "hermes-litellm-key-provisioner"
-    }:
+    if set(image_services) != set(compose_image_roles.values()) | retired:
         raise LifecycleError("source-bound renderer adds an unbound service")
-    provisioner = require_object(
-        image_services["hermes-litellm-key-provisioner"], "rendered key provisioner"
-    )
-    if provisioner.get("image") != images.get("litellm"):
-        raise LifecycleError(
-            "source-bound key provisioner image differs from publication"
-        )
     for role, service in compose_image_roles.items():
         rendered_service = require_object(
             image_services[service], "rendered image service"

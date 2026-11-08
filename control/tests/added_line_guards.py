@@ -19,6 +19,7 @@ from . import (
     fixture_closures,
     git_free_test_lines,
     intent_ordinal_writers,
+    job_owner_payload,
     legacy_tolerance,
     lifecycle_sets,
     locked_io,
@@ -111,6 +112,7 @@ MODES = (
     "barriers",
     "sync-in-async",
     "git-free-tests",
+    "job-owner-payload",
     "fixture-closures",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
@@ -1703,6 +1705,8 @@ def check_source(
             )
         if "legacy" in modes and legacy_tolerance.in_scope(path):
             hits.extend(legacy_tolerance.scan_source(source))
+        if "job-owner-payload" in modes and job_owner_payload.in_scope(path):
+            hits.extend(job_owner_payload.scan_source(source))
         if "lifecycle-sets" in modes and lifecycle_sets.in_scope(path):
             hits.extend(
                 (line, lifecycle_sets.KIND)
@@ -1716,7 +1720,10 @@ def check_source(
         if "mapping" in modes:
             hits.extend(
                 (site.line, "untyped mapping")
-                for site in mappings.scan_source(source, path=path)
+                for site in (
+                    *mappings.scan_source(source, path=path),
+                    *mappings.scan_bare_class_fields(source, path=path),
+                )
             )
         if "document-reads" in modes and path.startswith(
             tuple(

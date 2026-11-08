@@ -87,7 +87,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ github.token }}
       - name: Prepare digest-pinned CI dependency mirrors
-        run: scripts/pull-test-images --dockerfile control/Dockerfile --dockerfile deploy/compose/hermes-agent/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile --image docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+        run: scripts/pull-test-images --dockerfile control/Dockerfile --dockerfile deploy/compose/litellm/Dockerfile --image docker.io/tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
       - name: Set up ARM64 emulation
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
         with:
@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for role in hermes litellm; do
+          for role in litellm; do
             scripts/dev-image-inputs prepare "$role" "$GITHUB_SHA" \
               "$RUNNER_TEMP/image-contexts/$role" >> "$GITHUB_OUTPUT"
           done
@@ -150,17 +150,6 @@ jobs:
             echo "Images are built: pull request run $REUSE_RUN_ID has no reusable images for this tree" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Restore accepted hermes digest and signed evidence
-        id: cache_hermes
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/accepted-image-cache/hermes
-          # A saved entry can never be overwritten, so each accepted digest gets
-          # its own key and the newest entry for these inputs wins: the cache
-          # follows what main shipped last, including a pull request's image.
-          key: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: accepted-hermes-${{ steps.image_inputs.outputs.hermes_key }}-
-
       - name: Restore accepted litellm digest and signed evidence
         id: cache_litellm
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -168,18 +157,6 @@ jobs:
           path: ${{ runner.temp }}/accepted-image-cache/litellm
           key: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: accepted-litellm-${{ steps.image_inputs.outputs.litellm_key }}-
-
-      - name: Revalidate accepted hermes image for reuse
-        id: reuse_hermes
-        if: steps.pr_images.outputs.reused != 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          scripts/reuse-development-image hermes "$GITHUB_SHA" \
-            "$RUNNER_TEMP/accepted-image-cache/hermes" \
-            "$RUNNER_TEMP/hermes.role-receipt.json" \
-            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Revalidate accepted litellm image for reuse
         id: reuse_litellm
@@ -254,27 +231,6 @@ jobs:
           # Reuse it without exporting the same intermediate layers twice.
           cache-from: type=registry,ref=${{ steps.metadata.outputs.api_image }}:buildcache
 
-      - name: Build Hermes once to local OCI and exact registry digest
-        id: build_hermes
-        if: steps.reuse_hermes.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ${{ runner.temp }}/image-contexts/hermes
-          file: ${{ runner.temp }}/image-contexts/hermes/deploy/compose/hermes-agent/Dockerfile
-          target: managed
-          platforms: linux/amd64,linux/arm64
-          outputs: |
-            type=oci,dest=${{ runner.temp }}/vonk-forge-hermes.oci.tar
-            type=image,name=ghcr.io/carstvaartjes/vonk-forge-hermes,push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true
-          sbom: true
-          provenance: mode=max
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            ai.vonkforge.source.tree=${{ steps.metadata.outputs.tree }}
-          cache-from: type=gha,scope=vonk-forge-hermes
-          cache-to: type=gha,mode=max,scope=vonk-forge-hermes
-
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Verify the locked LiteLLM base signature
@@ -320,7 +276,6 @@ jobs:
           REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
           API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
           WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
-          HERMES_DIGEST: ${{ steps.pr_images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
         run: scripts/reuse-pr-image-security "$RUNNER_TEMP/pr-security" "$REUSE_RUN_ID" >> "$GITHUB_OUTPUT"
 
@@ -362,18 +317,6 @@ jobs:
         with:
           sarif_file: trivy-results/development-worker.sarif
           category: trivy-development-worker
-      - name: Scan the hermes image and smoke its runtime
-        if: steps.pr_security.outputs.reused != 'true' && steps.reuse_hermes.outputs.digest == ''
-        uses: ./.github/actions/image-security
-        with:
-          image: ghcr.io/carstvaartjes/vonk-forge-hermes@${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}
-          role: hermes
-      - name: Upload reused hermes findings under main's category
-        if: steps.pr_security.outputs.reused == 'true'
-        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
-        with:
-          sarif_file: trivy-results/development-hermes.sarif
-          category: trivy-development-hermes
       - name: Scan the litellm image and smoke its runtime
         if: steps.pr_security.outputs.reused != 'true' && steps.reuse_litellm.outputs.digest == ''
         uses: ./.github/actions/image-security
@@ -395,14 +338,13 @@ jobs:
           REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
           API_DIGEST: ${{ steps.pr_images.outputs.api_digest }}
           WORKER_DIGEST: ${{ steps.pr_images.outputs.worker_digest }}
-          HERMES_DIGEST: ${{ steps.pr_images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ steps.pr_images.outputs.litellm_digest }}
         run: |
           set -euo pipefail
           # The pull request's candidate lane and scripts/reuse-pr-candidate-images
           # verified each digest for this tree. A deep scan binds a local build
           # to its remote digest; these images have no local build to bind.
-          for role in api worker hermes litellm; do
+          for role in api worker litellm; do
             digest_variable="${role^^}_DIGEST"
             scripts/dev-image-acceptance-receipt create-role \
               "$RUNNER_TEMP/$role.role-receipt.json" \
@@ -433,17 +375,6 @@ jobs:
             "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" \
             "$RUNNER_TEMP/worker.role-receipt.json"
 
-      - name: Deep-scan exact Hermes build and bind its remote digest
-        if: steps.reuse_hermes.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
-        shell: bash
-        run: |
-          scripts/accept-development-image-archive \
-            hermes "$RUNNER_TEMP/vonk-forge-hermes.oci.tar" \
-            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
-            ghcr.io/carstvaartjes/vonk-forge-hermes \
-            "${{ steps.pr_images.outputs.hermes_digest || steps.build_hermes.outputs.digest }}" \
-            "$RUNNER_TEMP/hermes.role-receipt.json"
-
       - name: Deep-scan exact LiteLLM build and bind its remote digest
         if: steps.reuse_litellm.outputs.digest == '' && steps.pr_images.outputs.reused != 'true'
         shell: bash
@@ -471,14 +402,6 @@ jobs:
           retention-days: 1
           path: ${{ runner.temp }}/worker.role-receipt.json
 
-      - name: Upload exact Hermes acceptance receipt
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: development-role-receipt-hermes-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          if-no-files-found: error
-          retention-days: 1
-          path: ${{ runner.temp }}/hermes.role-receipt.json
-
       - name: Upload exact LiteLLM acceptance receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -500,7 +423,6 @@ jobs:
         shell: bash
         env:
           API_DIGEST: ${{ steps.images.outputs.api_digest }}
-          HERMES_DIGEST: ${{ steps.images.outputs.hermes_digest }}
           LITELLM_DIGEST: ${{ steps.images.outputs.litellm_digest }}
           WORKER_DIGEST: ${{ steps.images.outputs.worker_digest }}
         run: |
@@ -510,14 +432,12 @@ jobs:
             --output "$RUNNER_TEMP/accepted/docker-compose.pinned.yml" \
             --api-image "ghcr.io/carstvaartjes/vonk-forge-api:dev-sha-$GITHUB_SHA@$API_DIGEST" \
             --worker-image "ghcr.io/carstvaartjes/vonk-forge-worker:dev-sha-$GITHUB_SHA@$WORKER_DIGEST" \
-            --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
             --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
             --channel pinned
           scripts/render-dev-compose --template deploy/compose/compose.yaml \
             --output "$RUNNER_TEMP/accepted/docker-compose.dev.yml" \
             --api-image ghcr.io/carstvaartjes/vonk-forge-api:dev \
             --worker-image ghcr.io/carstvaartjes/vonk-forge-worker:dev \
-            --hermes-image "ghcr.io/carstvaartjes/vonk-forge-hermes:dev-sha-$GITHUB_SHA@$HERMES_DIGEST" \
             --litellm-image "ghcr.io/carstvaartjes/vonk-forge-litellm:dev-sha-$GITHUB_SHA@$LITELLM_DIGEST" \
             --channel dev
           docker compose --env-file deploy/compose/tests/test.env \
@@ -552,15 +472,6 @@ jobs:
           "${{ steps.metadata.outputs.worker_image }}"
           "${{ steps.pr_images.outputs.worker_digest || steps.build_worker.outputs.digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
-      - name: Verify exact digest-only Hermes manifest and attestations
-        # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
-        if: steps.pr_images.outputs.reused != 'true'
-        shell: bash
-        run: >-
-          scripts/verify-published-image hermes
-          ghcr.io/carstvaartjes/vonk-forge-hermes
-          "${{ steps.images.outputs.hermes_digest }}" - "$(git rev-parse "$GITHUB_SHA^{tree}")"
-
       - name: Verify exact digest-only LiteLLM manifest and attestations
         # scripts/reuse-pr-candidate-images ran this exact check for a reused image.
         if: steps.pr_images.outputs.reused != 'true'
@@ -589,7 +500,7 @@ jobs:
             "$RUNNER_TEMP/accepted/acceptance-receipt.json" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
             "$RUNNER_TEMP/accepted"
-          for role in api worker hermes litellm; do
+          for role in api worker litellm; do
             accepted_digest=$(jq -er \
               --arg role "$role" \
               '.roles[$role].manifest_digest | select(test("^sha256:[0-9a-f]{64}$"))' \
@@ -634,17 +545,6 @@ jobs:
             "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
             "$RUNNER_TEMP/worker.accepted-digest"
 
-      - name: Publish immutable tested Hermes image
-        shell: bash
-        env:
-          IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-          DIGEST: ${{ steps.accepted.outputs.hermes_digest }}
-          IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: |
-          scripts/publish-immutable-image hermes \
-            "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" \
-            "$RUNNER_TEMP/hermes.accepted-digest"
-
       - name: Publish immutable tested LiteLLM image
         shell: bash
         env:
@@ -661,7 +561,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for identity in api worker hermes litellm; do
+          for identity in api worker litellm; do
             digest_file="$RUNNER_TEMP/$identity.accepted-digest"
             [[ -f "$digest_file" && ! -L "$digest_file" ]]
             digest=$(tr -d '\r\n' < "$digest_file")
@@ -684,14 +584,6 @@ jobs:
           IMAGE: ${{ steps.metadata.outputs.worker_image }}
           IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
         run: scripts/verify-published-image worker "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
-
-      - name: Verify immutable Hermes manifest and attestations
-        shell: bash
-        env:
-          DIGEST: ${{ steps.publish.outputs.hermes_digest }}
-          IMAGE: ghcr.io/carstvaartjes/vonk-forge-hermes
-          IMMUTABLE_TAG: ${{ steps.metadata.outputs.immutable_tag }}
-        run: scripts/verify-published-image hermes "$IMAGE" "$DIGEST" "$IMMUTABLE_TAG" "$(git rev-parse "$GITHUB_SHA^{tree}")"
 
       - name: Verify immutable LiteLLM manifest and attestations
         shell: bash
@@ -723,14 +615,6 @@ jobs:
           subject-digest: ${{ steps.publish.outputs.worker_digest }}
           push-to-registry: true
 
-      - name: Sign accepted Hermes image provenance
-        id: sign_hermes
-        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
-        with:
-          subject-name: ghcr.io/carstvaartjes/vonk-forge-hermes
-          subject-digest: ${{ steps.publish.outputs.hermes_digest }}
-          push-to-registry: true
-
       - name: Sign accepted LiteLLM image provenance
         id: sign_litellm
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -738,33 +622,6 @@ jobs:
           subject-name: ghcr.io/carstvaartjes/vonk-forge-litellm
           subject-digest: ${{ steps.publish.outputs.litellm_digest }}
           push-to-registry: true
-
-      - name: Retain signed hermes acceptance for identical future inputs
-        if: steps.reuse_hermes.outputs.digest == ''
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BUNDLE: ${{ steps.sign_hermes.outputs.bundle-path }}
-          DIGEST: ${{ steps.publish.outputs.hermes_digest }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 "$RUNNER_TEMP/accepted-image-cache/hermes"
-          jq -n --arg digest "$DIGEST" --arg build_commit "$GITHUB_SHA" \
-            '{digest: $digest, build_commit: $build_commit}' \
-            > "$RUNNER_TEMP/accepted-image-cache/hermes/image.json"
-          cp -- "$BUNDLE" "$RUNNER_TEMP/accepted-image-cache/hermes/provenance.json"
-          # Exercise the real signed-cache consumer before saving this entry.
-          scripts/reuse-development-image hermes "$GITHUB_SHA" \
-            "$RUNNER_TEMP/accepted-image-cache/hermes" \
-            "$RUNNER_TEMP/hermes.cache-check.json" \
-            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
-
-      - name: Save signed hermes acceptance for identical future inputs
-        if: steps.reuse_hermes.outputs.digest == ''
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/accepted-image-cache/hermes
-          key: ${{ steps.cache_hermes.outputs.cache-primary-key }}
 
       - name: Retain signed litellm acceptance for identical future inputs
         if: steps.reuse_litellm.outputs.digest == ''
@@ -805,7 +662,6 @@ jobs:
             ${{ runner.temp }}/accepted/Caddyfile
             ${{ runner.temp }}/accepted/bin
             ${{ runner.temp }}/accepted/caddy
-            ${{ runner.temp }}/accepted/hermes-agent
             ${{ runner.temp }}/accepted/litellm
             ${{ runner.temp }}/accepted/prometheus
             ${{ runner.temp }}/accepted/registry

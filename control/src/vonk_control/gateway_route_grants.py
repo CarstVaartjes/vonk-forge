@@ -20,8 +20,7 @@ class GatewayInferenceRoute(StrEnum):
     SYSTEMONE = "/vllm/systemone"
 
 
-# The routes every managed key holds; deploy/compose/hermes-agent/provision-litellm-key.py
-# mirrors this list (a test keeps them equal).
+# The routes every managed key holds.
 BASE_KEY_ROUTES: tuple[str, ...] = (
     GatewayInferenceRoute.OPENAI.value,
     GatewayInferenceRoute.MODEL_INFO.value,

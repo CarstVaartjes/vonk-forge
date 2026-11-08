@@ -60,7 +60,6 @@ services:
     networks:
       - tailnet-control-plane
       - tailnet-web-edge
-      - tailnet-hermes-edge
     healthcheck:
       test: [CMD-SHELL, "tailscale --socket=/var/run/tailscale/tailscaled.sock status --json | tr -d '[:space:]' | grep -Fq '\"BackendState\":\"Running\"'"]
       interval: 10s
@@ -73,26 +72,16 @@ services:
     restart: unless-stopped
     logging: *tailscale-logging
     read_only: true
-    # hermes-api-key is 0640 group 64400 (see tailscale-gateway); no capability.
     cap_drop: [ALL]
-    group_add: ["64400"]
     security_opt: [no-new-privileges:true]
     network_mode: service:tailscale-gateway
     entrypoint:
       - /bin/sh
       - -c
       - 'attempts=0; until [ -f /run/vonk-runtime-assets/tailscale/configure.sh ]; do attempts=$$((attempts + 1)); if [ "$$attempts" -ge 120 ]; then echo "vonk-startup: runtime-asset-timeout: /run/vonk-runtime-assets/tailscale/configure.sh; retry via restart policy" >&2; exit 1; fi; sleep 1; done; exec /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh'
-    environment:
-      # Compose profiles are a client-side selection and are not inherited by
-      # containers. Pass the selection explicitly so the healthcheck cannot
-      # report the default topology healthy while a selected Hermes route is
-      # still absent.
-      VONK_SELECTED_PROFILES: ${COMPOSE_PROFILES:-}
     volumes:
       - tailscale-socket:/var/run/tailscale
       - runtime-assets:/run/vonk-runtime-assets:ro
-    secrets:
-      - hermes-api-key
     tmpfs:
       - /tmp:size=16m,mode=1777
     depends_on:
@@ -109,7 +98,6 @@ services:
     healthcheck:
       test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh"]
       interval: 15s
-      # Two sequential Hermes probes are each bounded to 3s.
       timeout: 8s
       retries: 12
 
@@ -122,8 +110,6 @@ secrets:
 networks:
   tailnet-control-plane: {}
   tailnet-web-edge:
-    internal: true
-  tailnet-hermes-edge:
     internal: true
 
 volumes:

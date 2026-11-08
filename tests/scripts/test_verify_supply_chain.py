@@ -24,8 +24,6 @@ INPUTS = (
     "deploy/compose/images.lock.json",
     "deploy/compose/compose.yaml",
     "deploy/compose/tailscale/compose.yaml",
-    "deploy/compose/hermes-agent/compose.yaml",
-    "deploy/compose/hermes-agent/Dockerfile",
     "deploy/compose/litellm/Dockerfile",
     "deploy/compose/trust/litellm-cosign.pub",
     "inventory/wheels/vonk_forge_public_contracts-4.4.0-py3-none-any.whl",
@@ -205,7 +203,7 @@ def test_platform_version_tags_without_digests_are_refused(tmp_path: Path) -> No
     )
 
 
-@pytest.mark.parametrize("name", ("hermes", "litellm", "node", "python"))
+@pytest.mark.parametrize("name", ("litellm", "node", "python"))
 def test_image_lock_rejects_floating_build_bases(tmp_path: Path, name: str) -> None:
     repository = _copy(tmp_path)
     lock_path = repository / "deploy/compose/images.lock.json"

@@ -362,7 +362,7 @@ class InstallationPreparationMixin:
                     .where(
                         Job.kind == WireAgentOperation.RECIPE_INSTALL.value,
                         Job.state == LifecycleState.SUCCEEDED.value,
-                        Job.payload["owner_id"].as_string() == installation_id,
+                        Job.owner_id == installation_id,
                         Job.payload["plan_digest"].as_string()
                         == installation.plan_digest,
                     )
@@ -388,7 +388,7 @@ class InstallationPreparationMixin:
                     Job.state.in_(
                         (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
                     ),
-                    Job.payload["owner_id"].as_string() == installation_id,
+                    Job.owner_id == installation_id,
                     Job.payload["plan_digest"].as_string() == installation.plan_digest,
                 )
                 .order_by(Job.updated_at.desc(), Job.id)

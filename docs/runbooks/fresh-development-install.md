@@ -53,7 +53,7 @@ selection is the only installation-flow difference.
 
 `tailscale-gateway` and `tailscale-configurator` drop every Linux capability
 and add none. They read their Compose file secrets (`tailscale-oauth-client-id`,
-`tailscale-oauth-client-secret`, `hermes-api-key`) through the supplementary
+`tailscale-oauth-client-secret`) through the supplementary
 group `64400` (Compose `group_add`). The installer writes exactly those files
 mode `0640` with group `64400` and leaves the owner unchanged; the list comes
 from the Compose file, so it cannot drift. Only root, or a member of the group,

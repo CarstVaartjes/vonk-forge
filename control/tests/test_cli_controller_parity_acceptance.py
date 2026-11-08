@@ -450,7 +450,10 @@ def _cli(transport: HTTPTransport, *argv: str) -> dict[str, object]:
             request_id_factory=lambda: REQUEST_KEY,
         )
     assert code == 0, output.getvalue()
-    return json.loads(output.getvalue())
+    document = json.loads(output.getvalue())
+    # The CLI prints the API document plus its client-contract version.
+    document.pop("schema_version", None)
+    return document
 
 
 def test_bearer_cli_and_cookie_csrf_operator_outputs_match() -> None:

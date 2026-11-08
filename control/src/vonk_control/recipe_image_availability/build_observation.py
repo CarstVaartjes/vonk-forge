@@ -42,7 +42,7 @@ def accepted_build_request(
         .join(Job, Job.id == AgentOperation.parent_job_id)
         .where(
             AgentOperation.kind == WireAgentOperation.RECIPE_BUILD.value,
-            Job.payload["owner_id"].as_string() == build.id,
+            Job.owner_id == build.id,
         )
         .order_by(AgentOperation.created_at.desc(), AgentOperation.id)
     )
@@ -84,7 +84,7 @@ def reconcile_abandoned_builds(
             select(RecipeBuild)
             .join(
                 Job,
-                Job.payload["owner_id"].as_string() == RecipeBuild.id,
+                Job.owner_id == RecipeBuild.id,
             )
             .join(CatalogDocumentRevision)
             .where(
@@ -102,7 +102,7 @@ def reconcile_abandoned_builds(
                 session.scalars(
                     select(Job.id).where(
                         Job.kind == WireAgentOperation.RECIPE_BUILD.value,
-                        Job.payload["owner_id"].as_string() == build.id,
+                        Job.owner_id == build.id,
                         Job.state.in_(
                             job_states.words(
                                 LifecycleState.QUEUED, LifecycleState.RUNNING

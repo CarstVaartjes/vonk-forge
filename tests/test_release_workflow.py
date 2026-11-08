@@ -348,7 +348,7 @@ def test_pr_image_references_pass_the_publication_ingress_check(
     assert spec is not None
     publication = importlib.util.module_from_spec(spec)
     loader.exec_module(publication)
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         reference = (
             f"ghcr.io/carstvaartjes/vonk-forge-{role}:acceptance-{'b' * 40}-123-1"
             f"@sha256:{'a' * 64}"
@@ -391,7 +391,7 @@ def test_ephemeral_publication_leaves_controller_listener_available() -> None:
         assert set(re.findall(r"https://localhost:\d+", path.read_text())) == {origin}
 
 
-@pytest.mark.parametrize("role", ["api", "hermes", "litellm"])
+@pytest.mark.parametrize("role", ["api", "litellm"])
 def test_candidate_shared_builder_preserves_both_compose_image_identities(
     tmp_path: Path, role: str
 ) -> None:
@@ -439,7 +439,7 @@ def test_candidate_shared_builder_preserves_both_compose_image_identities(
     )
     # Exercise the real downstream assembly after merging per-job artifacts.
     identities.rename(tmp_path / "images")
-    for auxiliary in ("hermes", "litellm"):
+    for auxiliary in ("litellm",):
         (tmp_path / "images" / auxiliary).write_text(
             f"ghcr.io/carstvaartjes/vonk-forge-{auxiliary}:acceptance-{source}-123-2@{digest}\n"
         )
@@ -551,16 +551,16 @@ def test_main_reuses_the_images_of_the_pull_request_that_tested_its_tree() -> No
     reuse = by_id["pr_images"]
     assert "scripts/reuse-pr-candidate-images" in reuse["run"]
     order = [step.get("id") for step in steps]
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         build = by_id[f"build_{role}"]
         assert "steps.pr_images.outputs.reused != 'true'" in build["if"], role
         assert order.index("pr_images") < order.index(f"build_{role}")
-    for role in ("hermes", "litellm"):
+    for role in ("litellm",):
         assert (
             by_id[f"reuse_{role}"]["if"] == "steps.pr_images.outputs.reused != 'true'"
         )
     text = (WORKFLOWS / "dev-images.yml").read_text()
-    for role in ("api", "worker", "hermes", "litellm"):
+    for role in ("api", "worker", "litellm"):
         bare = f"${{{{ steps.build_{role}.outputs.digest }}}}"
         assert bare not in text, role
         assert (
@@ -597,7 +597,7 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
 
     reproofs = ("Verify exact digest-only", "Deep-scan exact")
     for prefix in reproofs:
-        assert count(prefix) == (0 if pr_proof else 4), prefix
+        assert count(prefix) == (0 if pr_proof else 3), prefix
     assert count("Accept the pull request images") == (1 if pr_proof else 0)
     for prefix in (
         "Scan the",
@@ -605,12 +605,12 @@ def test_main_reruns_no_image_proof_the_pull_request_holds(pr_proof, tmp_path) -
         "Verify immutable",
         "Sign accepted",
     ):
-        assert count(prefix) == 4, prefix
+        assert count(prefix) == 3, prefix
     if not pr_proof:
         return
     (step,) = (step for step in _image_steps() if step.get("id") == "pr_acceptance")
-    roles = ("api", "worker", "hermes", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abde")}
+    roles = ("api", "worker", "litellm")
+    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abd")}
     outputs = {
         f"steps.pr_images.outputs.{role}_digest": digest
         for role, digest in digests.items()
@@ -754,7 +754,7 @@ def ship_component_image(
     return context[f"steps.publish.outputs.{role}_digest"]
 
 
-@pytest.mark.parametrize("role", ["hermes", "litellm"])
+@pytest.mark.parametrize("role", ["litellm"])
 @pytest.mark.parametrize(
     ("releases", "shipped"),
     [
@@ -836,7 +836,6 @@ def test_main_reuses_the_setup_programs_of_the_pull_request_that_tested_its_tree
                 "acceptance-agent-package",
                 "acceptance-agent-baseline",
                 "acceptance-image-api",
-                "acceptance-image-hermes",
                 "acceptance-image-litellm",
             ],
             "",
@@ -1182,8 +1181,8 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
     losing main's SARIF, and treating denied evidence access as permission."""
     from datetime import UTC, datetime, timedelta
 
-    roles = ("api", "worker", "hermes", "litellm")
-    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abcd")}
+    roles = ("api", "worker", "litellm")
+    digests = {role: "sha256:" + digit * 64 for role, digit in zip(roles, "abc")}
     pr = load(WORKFLOWS / "release-acceptance.yml")["jobs"]["image-security"]
     assert pr["needs"] == ["source", "images"]
     # The scan runs beside acceptance, with no candidate consumer waiting on it.
@@ -1288,9 +1287,9 @@ def test_main_reuses_only_fresh_digest_bound_pr_security(fault, tmp_path):
         for step in _image_steps()
         if step.get("uses") == "./.github/actions/image-security"
     ]
-    assert len(scans) == 4
+    assert len(scans) == 3
     assert sum(bool(evaluate(step["if"], context)) for step in scans) == (
-        0 if reused else 4
+        0 if reused else 3
     )
     if reused:
         assert "reused from pull request run 42" in summary.read_text()

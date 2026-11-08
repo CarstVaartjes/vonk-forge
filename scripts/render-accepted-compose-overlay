@@ -19,14 +19,12 @@ from pathlib import Path
 IMAGE_REPOSITORIES = {
     "api": "ghcr.io/carstvaartjes/vonk-forge-api",
     "worker": "ghcr.io/carstvaartjes/vonk-forge-worker",
-    "hermes": "ghcr.io/carstvaartjes/vonk-forge-hermes",
     "litellm": "ghcr.io/carstvaartjes/vonk-forge-litellm",
 }
 ROLE_SERVICES = {
     "api": ("control-api",),
     "worker": ("control-worker",),
-    "hermes": ("hermes-agent",),
-    "litellm": ("litellm", "hermes-litellm-key-provisioner"),
+    "litellm": ("litellm",),
 }
 
 

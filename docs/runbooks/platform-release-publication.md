@@ -1,7 +1,7 @@
 # Platform release publication
 
 Vonk Forge publishes one immutable release from a signed tag. The release contains
-digest-pinned API, worker, Hermes, and LiteLLM images, the rendered production
+digest-pinned API, worker, and LiteLLM images, the rendered production
 Compose file, the portable Python NAS setup wheel, and the native `arm64`
 Spark installer and agent package with checksums, SBOMs, provenance, and
 Sigstore bundles. A signed installer-channel manifest binds those assets to
@@ -156,7 +156,7 @@ unknown or stale provenance continue through normal scheduled recovery.
 
 ### Controller CA cutover
 
-The installer graph contains API, worker, Hermes and LiteLLM images. Certificate
+The installer graph contains API, worker and LiteLLM images. Certificate
 signing ships in the Controller image and uses the existing installer PKI files.
 Re-running the installer regenerates Compose without the CA service while
 preserving the intermediate, `.env`, secrets and named volumes. Existing unused

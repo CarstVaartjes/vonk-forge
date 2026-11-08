@@ -253,7 +253,6 @@ FROM runtime-root AS worker-root
 FROM runtime-root AS compose-bundle-digest
 COPY deploy/compose/compose.yaml /compose/compose.yaml
 COPY deploy/compose/tailscale/compose.yaml /compose/tailscale/compose.yaml
-COPY deploy/compose/hermes-agent/compose.yaml /compose/hermes-agent/compose.yaml
 COPY deploy/compose/image-janitor/janitor.py /compose/image-janitor/janitor.py
 COPY scripts/render-dev-compose /compose/render-dev-compose
 COPY scripts/image_policy.py /compose/image_policy.py
@@ -271,7 +270,6 @@ COPY deploy/compose/litellm/bootstrap-config.json deploy/compose/litellm/entrypo
 COPY deploy/compose/prometheus/ /usr/local/share/vonk-forge/runtime-assets/prometheus/
 COPY deploy/compose/registry/config.yml /usr/local/share/vonk-forge/runtime-assets/registry/
 COPY deploy/compose/tailscale/configure.sh /usr/local/share/vonk-forge/runtime-assets/tailscale/
-COPY deploy/compose/hermes-agent/provision-litellm-key.py /usr/local/share/vonk-forge/runtime-assets/hermes-agent/
 COPY --from=compose-bundle-digest /compose-bundle-digest /usr/local/share/vonk-forge/compose-bundle-digest
 
 RUN python -c "import sys; from pathlib import Path; from vonk_control.runtime_init import write_runtime_asset_inventory; sys.exit(0 if write_runtime_asset_inventory(Path('/usr/local/share/vonk-forge/runtime-assets')) else 1)"

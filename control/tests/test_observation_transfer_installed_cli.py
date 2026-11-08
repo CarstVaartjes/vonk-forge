@@ -25,6 +25,14 @@ from tests.test_profile_load_installed_cli import _https_api_peer, _process_envi
 pytest_plugins = ("tests.test_profile_load_installed_cli",)
 
 
+def _fleet_document(text: str) -> dict:
+    """The Controller snapshot inside ``vonkctl fleet --json`` (document + stamp)."""
+
+    document = json.loads(text)
+    assert document.pop("schema_version") == 1
+    return document
+
+
 @pytest.mark.lane
 def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership(
     installed_vonkctl: Path,
@@ -86,7 +94,7 @@ def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership
             assert result.returncode == 0, result.stderr
             return result.stdout
 
-        fleet = fleet_authority(json.loads(command("fleet")))
+        fleet = fleet_authority(_fleet_document(command("fleet")))
         assert fleet == snapshot
         assert len(fleet.nodes) == 2
         workers = PlatformObservation.model_validate_json(
@@ -108,5 +116,5 @@ def test_installed_cli_receives_complete_large_fleet_and_mixed_worker_membership
         # its bytes into the complete prior observation.
         snapshot.nodes.pop()
         snapshot.event_cursor += 1
-        assert fleet_authority(json.loads(command("fleet"))) == snapshot
+        assert fleet_authority(_fleet_document(command("fleet"))) == snapshot
     engine.dispose()

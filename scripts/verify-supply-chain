@@ -302,7 +302,6 @@ def image_errors(root: Path) -> list[str]:
     compose_paths = (
         "deploy/compose/compose.yaml",
         "deploy/compose/tailscale/compose.yaml",
-        "deploy/compose/hermes-agent/compose.yaml",
     )
     try:
         compose = "\n".join((root / path).read_text() for path in compose_paths)
@@ -353,14 +352,6 @@ def image_errors(root: Path) -> list[str]:
         },
         {
             "context": ".",
-            "dockerfile": "deploy/compose/hermes-agent/Dockerfile",
-            "environment": "HERMES_AGENT_IMAGE",
-            "package": "vonk-forge-hermes",
-            "required": True,
-            "target": "managed",
-        },
-        {
-            "context": ".",
             "dockerfile": "deploy/compose/litellm/Dockerfile",
             "environment": "LITELLM_IMAGE",
             "package": "vonk-forge-litellm",
@@ -368,29 +359,11 @@ def image_errors(root: Path) -> list[str]:
             "target": "runtime",
         },
     ]
-    required_deployment_releases = [
-        expected_releases[0],
-        expected_releases[1],
-        expected_releases[3],
-    ]
-    hermes_is_opt_in = (
-        "profiles: [hermes]" in compose
-        and "HERMES_AGENT_IMAGE:-ghcr.io/carstvaartjes/vonk-forge-hermes:profile-required"
-        in compose
-    )
-    if (
-        releases != expected_releases
-        or any(
-            f"${{{release['environment']}:?" not in compose
-            for release in required_deployment_releases
-        )
-        or not (
-            f"${{{expected_releases[2]['environment']}:?" in compose or hermes_is_opt_in
-        )
+    if releases != expected_releases or any(
+        f"${{{release['environment']}:?" not in compose for release in expected_releases
     ):
         errors.append(
-            "API, worker, and LiteLLM release images must be explicitly "
-            "version-pinned; Hermes must be either version-pinned or explicitly opt-in"
+            "API, worker, and LiteLLM release images must be explicitly version-pinned"
         )
     for release in expected_releases:
         context = root / release["context"]
@@ -400,7 +373,6 @@ def image_errors(root: Path) -> list[str]:
                 f"{release['package']} release build context or Dockerfile is missing"
             )
     dockerfile = (root / "control/Dockerfile").read_text()
-    hermes_dockerfile = (root / "deploy/compose/hermes-agent/Dockerfile").read_text()
     for name in ("node", "python"):
         reference = build_bases.get(name)
         if not isinstance(reference, str):
@@ -413,11 +385,6 @@ def image_errors(root: Path) -> list[str]:
             not in (root / "deploy/compose/litellm/Dockerfile").read_text()
         ):
             errors.append("Python bootstrap base is absent from LiteLLM Dockerfile")
-    hermes_reference = build_bases.get("hermes")
-    if not isinstance(hermes_reference, str):
-        errors.append("hermes build base is missing or invalid")
-    elif hermes_reference not in hermes_dockerfile:
-        errors.append("hermes build base is absent from Hermes Dockerfile")
     litellm_reference = build_bases.get("litellm")
     litellm_dockerfile = (root / "deploy/compose/litellm/Dockerfile").read_text()
     litellm_froms = [
@@ -450,15 +417,6 @@ def image_errors(root: Path) -> list[str]:
         errors.append(
             "control image does not install the standalone protocol wheel from root context"
         )
-    hermes_base = re.search(r"(?m)^ARG HERMES_IMAGE=(\S+)$", hermes_dockerfile)
-    locked_hermes = build_bases.get("hermes")
-    if (
-        hermes_base is None
-        or hermes_base.group(1) != locked_hermes
-        or re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", hermes_base.group(1)) is None
-        or "FROM ${HERMES_IMAGE} AS managed" not in hermes_dockerfile
-    ):
-        errors.append("Hermes build base is not the exact versioned locked image")
     return errors
 
 

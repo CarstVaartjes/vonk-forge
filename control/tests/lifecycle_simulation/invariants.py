@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
     InvalidRequestError,
+    RunState,
     SecurityRefusalError,
     UnknownOutcomeError,
 )
@@ -33,7 +34,10 @@ from vonk_control.models import (
     RecipeRun,
     ResourceReservation,
 )
-from vonk_control.owner_liveness import installations_named_by_live_jobs
+from vonk_control.owner_liveness import (
+    installations_named_by_live_jobs,
+    runs_named_by_live_work,
+)
 from vonk_control.reservation_owners import OWNER_SETTLE_GRACE
 
 from .fleet_match import fleet_mismatch
@@ -107,6 +111,14 @@ IN_FLIGHT_KINDS = (
             }
         ),
         installations_named_by_live_jobs,
+    ),
+    InFlightKind(
+        "run",
+        RecipeRun,
+        RunState,
+        # ``running`` has live observation; ``lost`` has no owner by design.
+        frozenset({RunState.RUNNING, RunState.STOPPED, RunState.FAILED, RunState.LOST}),
+        runs_named_by_live_work,
     ),
 )
 _NUMBERS = re.compile(r"\d+")
@@ -259,6 +271,9 @@ class Monitor:
     _healthy_since: datetime | None = None
     #: Loads an operator asked to cancel.
     cancel_requested: set[str] = field(default_factory=set)
+    #: When an operator took a workload intent outside any load (an unused
+    #: installation removed): it supersedes every load accepted at or before it.
+    standalone_intents: list[datetime] = field(default_factory=list)
     _repeats: dict[str, int] = field(default_factory=dict)
     _dead_since: dict[str, datetime] = field(default_factory=dict)
     _orphaned_since: dict[str, datetime] = field(default_factory=dict)
@@ -373,7 +388,7 @@ class Monitor:
             newer = any(
                 other_id != request_id and other.accepted_at >= request.accepted_at
                 for other_id, other in current.requests.items()
-            )
+            ) or any(taken >= request.accepted_at for taken in self.standalone_intents)
             if newer:
                 continue
             if request.state == "superseded":

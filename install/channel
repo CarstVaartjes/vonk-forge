@@ -14,22 +14,16 @@ fail() {
 validate_arguments() {
     case "$kind" in
         nas)
-            hermes_option=
             answers_file=
             while [ "$#" -gt 0 ]; do
                 case "$1" in
-                    --enable-hermes|--disable-hermes)
-                        [ -z "$hermes_option" ] || fail "the Hermes mode may be selected only once"
-                        hermes_option=$1
-                        shift
-                        ;;
                     --answers-file)
                         [ -z "$answers_file" ] || fail "the answers file may be selected only once"
                         [ "$#" -ge 2 ] && [ -n "$2" ] || fail "--answers-file requires a path"
                         answers_file=$2
                         shift 2
                         ;;
-                    *) fail "this installer accepts only a Hermes mode and --answers-file PATH" ;;
+                    *) fail "this installer accepts only --answers-file PATH" ;;
                 esac
             done
             ;;

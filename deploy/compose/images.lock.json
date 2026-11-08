@@ -9,7 +9,6 @@
     "python": "python:3.14-slim-trixie@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1"
   },
   "build_bases": {
-    "hermes": "nousresearch/hermes-agent:v2026.9.24@sha256:fca358f12efd65bfaaca05884166f15c0e2788375ca30d77061ac1ebc96452b7",
     "litellm": "ghcr.io/berriai/litellm:v1.106.7@sha256:be24d7da11f4063ca23fbff6689bac5ded14fe4fc645e07f36588636969f1c27",
     "node": "node:26-trixie-slim@sha256:36793bcbb160a6a16cede1e62b93f84e26b78a972a8a4c0b879c1c12f22761ec",
     "python": "python:3.14-slim-trixie@sha256:0514bc76712d64f8bb48adcb95b1ab0d88c69fee95d62fe4c18ee948bee9b1e1",
@@ -31,14 +30,6 @@
       "package": "vonk-forge-worker",
       "required": true,
       "target": "worker"
-    },
-    {
-      "context": ".",
-      "dockerfile": "deploy/compose/hermes-agent/Dockerfile",
-      "environment": "HERMES_AGENT_IMAGE",
-      "package": "vonk-forge-hermes",
-      "required": true,
-      "target": "managed"
     },
     {
       "context": ".",

@@ -1,0 +1,69 @@
+{
+  "$defs": {
+    "ConnectionClient": {
+      "properties": {
+        "source_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Source Sha"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "source_sha"
+      ],
+      "title": "ConnectionClient",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "authorized_read": {
+      "title": "Authorized Read",
+      "type": "string"
+    },
+    "client": {
+      "$ref": "#/$defs/ConnectionClient"
+    },
+    "connected": {
+      "const": true,
+      "title": "Connected",
+      "type": "boolean"
+    },
+    "origin": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Origin"
+    },
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "connected",
+    "client",
+    "authorized_read",
+    "origin",
+    "schema_version"
+  ],
+  "title": "vonkctl connection document (schema_version 1)",
+  "type": "object"
+}
