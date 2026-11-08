@@ -145,8 +145,16 @@ class ControlMalformedResponse(ControlClientError):
         super().__init__(message, context=context)
 
 
+class ControlSchemaRejected(ControlMalformedResponse):
+    """A well-formed answer that this client's bundled contract rejects.
+
+    Raised only where a decoded document fails the bundled schema. Transfer,
+    framing, media type and JSON faults stay plain ``ControlMalformedResponse``.
+    """
+
+
 class ControlContractMismatch(ControlMalformedResponse):
-    """A response outside this vonkctl's contract from a Controller serving another.
+    """A schema rejection from a Controller that serves another control contract.
 
     Re-reading cannot change the answer, so it is final; the typed recovery is
     to install the accepted vonkctl that matches the Controller.

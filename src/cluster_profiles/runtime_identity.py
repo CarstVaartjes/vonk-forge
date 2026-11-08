@@ -85,6 +85,25 @@ def packaged_runtime_identity() -> RuntimeBuildIdentity:
     return RuntimeBuildIdentity(source, control, worker, tree)
 
 
+def stamped_control_contract_sha256() -> str | None:
+    """The control contract fingerprint this build was stamped with.
+
+    The build hook fingerprinted the bundled OpenAPI when it wrote the stamp;
+    the installed copy is read, never hashed again. Unstamped is unknown.
+    """
+    try:
+        stamp = files("cluster_profiles").joinpath("build-identity.json").read_text()
+    except FileNotFoundError:
+        return None
+    value = json.loads(stamp)
+    if not isinstance(value, dict) or value.get("schema_version") != 2:
+        return None
+    control = value.get("control_contract_sha256")
+    if not isinstance(control, str) or re.fullmatch(r"[0-9a-f]{64}", control) is None:
+        return None
+    return control
+
+
 def installed_content_identity() -> str | None:
     """Observe installed package bytes within a byte and time budget."""
     deadline = time.monotonic() + 5

@@ -23,6 +23,7 @@ from .errors import ControlMalformedResponse as ControlMalformedResponse
 from .errors import ControlNotFound as ControlNotFound
 from .errors import ControlObservationUnavailable as ControlObservationUnavailable
 from .errors import ControlResponseTooLarge as ControlResponseTooLarge
+from .errors import ControlSchemaRejected as ControlSchemaRejected
 from .errors import ControlTimeout as ControlTimeout
 from .errors import ControlTransportError as ControlTransportError
 from .errors import ControlUnauthorized as ControlUnauthorized

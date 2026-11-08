@@ -42,13 +42,18 @@ Controller responses carry `X-Request-ID` on every response and
 the typed JSON problem fields. This keeps early middleware failures
 correlatable even when their response body has no detail field.
 
-A 2xx response that the CLI's bundled OpenAPI rejects is
-`controller.protocol_invalid` and is re-read while it may be transient. Before
-re-reading, the client reads the stable `/api/cli/contract` once: when its
-`api.control_contract_sha256` differs from the contract this vonkctl ships, the
-failure is `client.contract_mismatch`, final (`decision: exit`, no re-read),
-with `recovery_actions: ["vonkctl update --apply"]`. An unstamped CLI or an
-unreadable compatibility resource keeps `controller.protocol_invalid`.
+A well-formed response that the CLI's bundled OpenAPI rejects
+(`ControlSchemaRejected`) is `controller.protocol_invalid` and is re-read while
+it may be transient. Before re-reading, the client reads the stable
+`/api/cli/contract`: when its `api.control_contract_sha256` differs from the
+contract stamped into this vonkctl's `build-identity.json`, the failure is
+`client.contract_mismatch`, final (`decision: exit`, no re-read), with
+`recovery_actions: ["vonkctl update --apply"]`. Only an answered read is kept;
+an unanswered one is asked again on a later rejection, at most three times per
+client. Transfer, framing, media type and JSON faults never ask: they stay
+re-readable. An unstamped CLI keeps `controller.protocol_invalid`. The
+installed-CLI proof workflow reports, without gating, every response shape the
+published vonkctl would refuse (`tools/client_compatibility_report.py`).
 
 HTTP 401 means authentication is absent or invalid. HTTP 403 means the
 request was rejected after authentication; the middleware uses the generic

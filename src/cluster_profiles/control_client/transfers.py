@@ -34,6 +34,7 @@ from .errors import (
     ControlHTTPError,
     ControlMalformedResponse,
     ControlResponseTooLarge,
+    ControlSchemaRejected,
     ControlTransportError,
     _retry_after_seconds,
     _structured_http_error_fields,
@@ -247,6 +248,7 @@ class ControlClient(HTTPControlClient):
                     http_status=status,
                     request_id=safe_request_id(response_headers.get("x-request-id")),
                 )
+            self._raise_contract_mismatch(error)
             raise
 
     def download_file(
@@ -454,6 +456,11 @@ class ControlClient(HTTPControlClient):
                 os.link(temporary, destination, follow_symlinks=False)
                 temporary.unlink()
             temporary = Path()
+        except ControlSchemaRejected as error:
+            if error.context is None:
+                error.context = protocol_context(operation=f"GET {path}", endpoint=path)
+            self._raise_contract_mismatch(error)
+            raise
         except FileExistsError:
             raise ControlTransportError(
                 "artifact output publication raced with another writer"

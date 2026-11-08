@@ -30,6 +30,7 @@ from .errors import (
     ControlClientError,
     ControlMalformedResponse,
     ControlResponseTooLarge,
+    ControlSchemaRejected,
     ControlTransportError,
     _OpenedResponse,
     _retry_after_seconds,
@@ -237,7 +238,13 @@ class _RecordingTransport(httpx2.BaseTransport):
         try:
             _validate_generated_response(request, response)
         except ControlClientError as error:
-            raise ControlMalformedResponse(
+            # A schema rejection keeps its type; other faults stay re-readable.
+            failure = (
+                ControlSchemaRejected
+                if isinstance(error, ControlSchemaRejected)
+                else ControlMalformedResponse
+            )
+            raise failure(
                 str(error),
                 context=replace(
                     protocol_context(
