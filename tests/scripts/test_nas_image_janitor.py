@@ -367,7 +367,10 @@ def test_container_that_joined_after_the_shared_snapshot_is_left_alone(
 ) -> None:
     """Catches judging a container detached from a network snapshot taken before it started."""
     daemon, reconciler, clock, _, api = fleet(tmp_path)
-    daemon.stop(api)
+    daemon.containers[api]["State"]["Status"] = (
+        "created"  # Compose has not started it yet.
+    )
+    del daemon.networks["vonk-forge_agent-proxy"]["Containers"][api]
     read = daemon.request
 
     def request(method: str, path: str, body: Any = None) -> Any:
