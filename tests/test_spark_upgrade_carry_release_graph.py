@@ -264,11 +264,17 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
         )
     wheel_content = valid_wheel
     valid_payload = nas_payload
-    nas_payload = b"tampered payload"
-    with pytest.raises(LifecycleError, match="NAS payload"):
-        carry.resolve_release(
-            "https://install.example", "dev", GENERATION, tmp_path / "bad-payload"
-        )
+    # Each tamper still parses or still has the signed size, so only the
+    # matching ingress check (size, then sha256) can refuse it.
+    for name, tampered in (
+        ("longer-payload", valid_payload + b" "),
+        ("same-size-payload", bytes([valid_payload[0] ^ 1]) + valid_payload[1:]),
+    ):
+        nas_payload = tampered
+        with pytest.raises(LifecycleError, match="signed digest"):
+            carry.resolve_release(
+                "https://install.example", "dev", GENERATION, tmp_path / name
+            )
     nas_payload = valid_payload
     carry.resolve_release(
         "https://install.example", "dev", GENERATION, tmp_path / "fresh-wheel"
