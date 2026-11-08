@@ -16,6 +16,7 @@ from math import isfinite
 from pathlib import Path
 
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts.recipe import MAX_RUNTIME_ARGV_TOKEN_BYTES
 from vonk_forge_contracts.resolver import (
     ContractResolutionError,
     validate_recipe_models,
@@ -45,8 +46,6 @@ _BUILTINS = frozenset(metadata.slug for metadata in CANONICAL_HARNESSES)
 _JOB_INTERFACES = frozenset(
     {"image-job", "audio-job", "video-job", "mesh-job", "artifact-job"}
 )
-_MAX_RUNTIME_ARGUMENTS = 128
-_MAX_ARGV_TOKEN_BYTES = 65_536
 # The compiled argv total budget, derived from the canonical host-runtime
 # request ceiling rather than restated as 1 MiB.
 _MAX_ARGV_BYTES = MAX_ARGV_BYTES
@@ -113,7 +112,10 @@ def _scalar(value: object, label: str) -> str:
             raise HarnessCompileError(f"{label} is not JSON serializable") from error
     else:
         raise HarnessCompileError(f"{label} has an unsupported value type")
-    if len(rendered.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES or "\x00" in rendered:
+    if (
+        len(rendered.encode("utf-8")) > MAX_RUNTIME_ARGV_TOKEN_BYTES
+        or "\x00" in rendered
+    ):
         raise HarnessCompileError(f"{label} exceeds the bounded argv value contract")
     return rendered
 
@@ -123,7 +125,7 @@ def _validate_argv_size(command: Sequence[str]) -> None:
     for item in command:
         if (
             type(item) is not str
-            or len(item.encode("utf-8")) > _MAX_ARGV_TOKEN_BYTES
+            or len(item.encode("utf-8")) > MAX_RUNTIME_ARGV_TOKEN_BYTES
             or "\x00" in item
         ):
             raise HarnessCompileError("compiled harness argv token exceeds its bound")
@@ -212,8 +214,6 @@ def _argv(recipe: RecipeDefinition, settings: Mapping[str, object]) -> tuple[str
     ):
         raise HarnessCompileError("recipe entrypoint contains invalid argv data")
     result = list(entrypoint[1:])
-    if len(recipe.runtime.arguments) > _MAX_RUNTIME_ARGUMENTS:
-        raise HarnessCompileError("recipe has too many runtime arguments")
     for argument in recipe.runtime.arguments:
         name = argument.name.removeprefix("--")
         if _SAFE_ARG_NAME.fullmatch(name) is None:
