@@ -93,12 +93,27 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         assert not any(token in command for token in process_only), name
 
 
-def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
-    """Catches service-started/completed dependencies and readiness cycles.
+def test_dependencies_only_order_startup_and_are_acyclic() -> None:
+    """Catches a required healthy/completed edge that aborts `compose up`.
 
-    The one exception: consumers of the Controller-staged runtime assets depend
-    on the Controller only to restart with it, never to wait for its health.
+    Compose aborts dependents when a required service_healthy or
+    service_completed_successfully dependency is unhealthy or exited, leaving
+    them Created forever (restart policies never act on never-started
+    containers). Every dependent waits or crash-restarts itself instead.
     """
+    for selection in (True, False):
+        services = _rendered(secure_remote=selection)["services"]
+        assert isinstance(services, dict)
+        for name, service in services.items():
+            assert isinstance(service, dict)
+            for dependency_name, dependency in service.get("depends_on", {}).items():
+                if dependency.get("required") is False:
+                    continue
+                assert dependency["condition"] == "service_started", (
+                    name,
+                    dependency_name,
+                )
+
     services = _rendered()["services"]
     assert isinstance(services, dict)
     graph: dict[str, set[str]] = {}
@@ -107,18 +122,6 @@ def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
         dependencies = service.get("depends_on", {})
         assert isinstance(dependencies, dict)
         graph[name] = set(dependencies)
-        for dependency_name, dependency in dependencies.items():
-            assert isinstance(dependency, dict)
-            if dependency_name == "control-api" and dependency["condition"] != (
-                "service_healthy"
-            ):
-                assert dependency == {
-                    "condition": "service_started",
-                    "required": False,
-                    "restart": True,
-                }, name
-                continue
-            assert dependency["condition"] == "service_healthy"
 
     def visit(name: str, path: tuple[str, ...]) -> None:
         assert name not in path, " -> ".join(path + (name,))

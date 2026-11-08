@@ -86,14 +86,14 @@ services:
       - /tmp:size=16m,mode=1777
     depends_on:
       tailscale-gateway:
-        condition: service_healthy
+        condition: service_started
         restart: true
       control-api:
         condition: service_started
         required: false
         restart: true
       caddy:
-        condition: service_healthy
+        condition: service_started
         restart: true
     healthcheck:
       test: [CMD-SHELL, "TS_HEALTHCHECK_ONLY=1 /bin/sh /run/vonk-runtime-assets/tailscale/configure.sh"]

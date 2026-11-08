@@ -260,12 +260,12 @@ def test_retired_runtime_signer_and_agent_update_surfaces_are_absent() -> None:
         assert retired not in serialized
 
 
-def test_former_bootstrap_dependants_wait_for_real_service_health() -> None:
+def test_former_bootstrap_dependants_only_order_after_the_controller() -> None:
     services = _rendered()["services"]
 
     for name in ("control-worker",):
         dependency = services[name]["depends_on"]["control-api"]
-        assert dependency["condition"] == "service_healthy"
+        assert dependency["condition"] == "service_started"
         assert dependency["required"] is True
 
 
