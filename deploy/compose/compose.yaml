@@ -164,7 +164,8 @@ services:
     # publish worker ports; the API and database retain internal networks.
     networks: [data, artifact-egress]
     # Start order only: a down dependency must never leave this service Created.
-    # The worker waits for the database itself (wait_for_database).
+    # The worker itself waits for the API-staged database URL and for the
+    # API-owned schema (wait_for_staged_secret, wait_for_database).
     depends_on:
       postgres: {condition: service_started}
       control-api: {condition: service_started}

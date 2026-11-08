@@ -17,6 +17,8 @@ import os
 import re
 import secrets
 import stat
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
@@ -150,6 +152,29 @@ def _read_secret(path: Path) -> bytes:
         return path.read_bytes()
     except OSError as error:
         raise SettingsError(f"secret {path.name} is unreadable") from error
+
+
+def wait_for_staged_secret(
+    name: str,
+    *,
+    root: Path = SECRETS_ROOT,
+    attempts: int = 120,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait, a second per attempt, for the API pre-exec to stage one secret.
+
+    The worker starts beside the API, not after it, and reads secrets the API
+    pre-exec stages. Only absence waits: the reader still fails closed on any
+    other state, and on an absence that outlives the attempts (a restart then
+    asks again).
+    """
+    path = root / name
+    for attempt in range(attempts):
+        if os.path.lexists(path):
+            return
+        if not attempt:
+            _LOGGER.warning("waiting for the API to stage secret %s", name)
+        sleep(1.0)
 
 
 def _regular_file(path: Path) -> Path | None:

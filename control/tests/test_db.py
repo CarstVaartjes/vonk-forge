@@ -358,3 +358,45 @@ def test_startup_log_names_the_exception_when_the_driver_message_is_empty(
     log = _startup_log(OperationalError("connect", {}, ConnectionResetError()), capsys)
 
     assert "ConnectionResetError" in log
+
+
+def test_worker_database_wait_holds_until_the_api_commits_the_schema(
+    postgres_engine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a worker that starts on an empty database and crashes instead."""
+    from vonk_control import db
+    from vonk_control.models import Base
+
+    sleeps: list[float] = []
+
+    def api_commits_schema_while_worker_waits(seconds: float) -> None:
+        sleeps.append(seconds)
+        Base.metadata.create_all(postgres_engine)
+
+    db.wait_for_database(
+        postgres_engine.url.render_as_string(hide_password=False),
+        timeout_seconds=30,
+        sleep=api_commits_schema_while_worker_waits,
+    )
+
+    assert len(sleeps) == 1
+    assert "schema is not current yet" in capsys.readouterr().err
+
+
+def test_worker_database_wait_needs_every_mapped_column(postgres_engine) -> None:
+    """Catches a worker that runs on a schema the API has not reconciled yet."""
+    from vonk_control import db
+    from vonk_control.models import Base
+
+    Base.metadata.create_all(postgres_engine)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats DROP COLUMN step_started_at"
+        )
+
+    with pytest.raises(RuntimeError, match="schema is not current yet"):
+        db.wait_for_database(
+            postgres_engine.url.render_as_string(hide_password=False),
+            timeout_seconds=0,
+            sleep=lambda _seconds: None,
+        )

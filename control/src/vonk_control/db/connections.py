@@ -7,12 +7,13 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import (
     DBAPIError,
     InterfaceError,
     OperationalError,
+    ProgrammingError,
     TimeoutError,
 )
 from sqlalchemy.orm import Session, sessionmaker
@@ -207,18 +208,47 @@ def run_with_database_startup_retry[T](
             delay = min(delay * 2, 10.0)
 
 
-def wait_for_database(database_url: str) -> None:
-    """Wait for one bounded, authenticated PostgreSQL connection."""
+#: SQLSTATEs of a table or column this image maps but the live catalog lacks.
+_SCHEMA_NOT_YET_CURRENT = frozenset({"42P01", "42703"})
+
+
+def wait_for_database(
+    database_url: str,
+    *,
+    timeout_seconds: float = _DATABASE_STARTUP_TIMEOUT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait until PostgreSQL answers and carries every table and column mapped here.
+
+    The API owns schema creation and reconciliation and starts beside the
+    worker, not before it: an absent mapped table or column means the owner has
+    not committed this image's schema yet, so startup waits within the same
+    bounded deadline. Any other refusal stays fatal.
+    """
+    from ..models import Base
 
     def connect_once() -> None:
         engine = build_engine(database_url)
         try:
             with engine.connect() as connection:
-                connection.execute(text("SELECT 1"))
+                for table in Base.metadata.sorted_tables:
+                    connection.execute(select(*table.columns).limit(0))
+        except ProgrammingError as error:
+            if _database_sqlstate(error) not in _SCHEMA_NOT_YET_CURRENT:
+                raise
+            raise _DatabaseStartupContention(
+                "Controller schema is not current yet "
+                f"({_driver_detail(error)}); the API owns it"
+            ) from None
         finally:
             engine.dispose()
 
-    run_with_database_startup_retry(connect_once, label="PostgreSQL")
+    run_with_database_startup_retry(
+        connect_once,
+        timeout_seconds=timeout_seconds,
+        sleep=sleep,
+        label="PostgreSQL",
+    )
 
 
 def upgrade_schema(
