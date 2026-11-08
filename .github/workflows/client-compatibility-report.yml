@@ -1,0 +1,49 @@
+name: Published vonkctl against this Controller's responses (report)
+
+# A report, never a gate: a deliberate break is legitimate. It shows, before
+# the deploy, every response shape the published vonkctl would refuse.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/client-compatibility-report.yml'
+      - 'tools/client_compatibility_report.py'
+      - 'tests/test_client_compatibility_report.py'
+      # What the bundled control OpenAPI is generated from and validated by.
+      - 'scripts/generate-control-clients'
+      - 'control/packaging/public-contracts.lock'
+      - 'inventory/wheels/vonk_forge_public_contracts-*.whl'
+      - 'control/src/**'
+      - 'agent_protocol/**'
+      - 'src/cluster_profiles/control_client/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vonk-forge-client-compatibility-report-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Response shapes the published vonkctl would refuse
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Prepare this Controller's bundled CLI contract
+        uses: ./.github/actions/python-env
+        with:
+          contracts: python
+          cli-dependencies: 'false'
+      - name: Report against the published dev and stable vonkctl
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --project control --frozen python tools/client_compatibility_report.py \
+            --candidate src/cluster_profiles/schemas/control-openapi.json \
+            --channel dev --channel stable | tee -a "$GITHUB_STEP_SUMMARY"

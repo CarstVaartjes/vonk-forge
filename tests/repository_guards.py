@@ -524,6 +524,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "agent release workflow: fixed entrypoint/fixture behavior. The cross-area scan is selected separately in GUARDS.",
     ),
     (
+        "tests/test_client_compatibility_report.py",
+        "client compatibility report: fixed in-memory contract fixtures.",
+    ),
+    (
         "tests/test_cli_dependencies_platform.py",
         "cli dependencies platform: fixed entrypoint/fixture behavior.",
     ),
