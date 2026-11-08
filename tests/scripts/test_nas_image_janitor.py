@@ -192,6 +192,7 @@ class Networks(janitor.Docker):
         self.containers[identity] = {
             "Id": identity,
             "Name": f"/{name}",
+            "Created": "1970-01-01T00:00:00.123456789Z",
             "State": {"Status": "created", "Error": ""},
             "HostConfig": {
                 "NetworkMode": mode or networks[0],
@@ -495,7 +496,8 @@ def test_repair_waits_for_compose_and_respects_stops_of_a_running_container(
     daemon.stop(configurator)
     daemon.containers[configurator]["State"]["Error"] = "netns gone"
     ticks(reconciler, clock, 1)
-    assert daemon.mutations == []
+    # Its failed start is retried; no network of the shared namespace is touched.
+    assert daemon.mutations == [("start", configurator)]
     daemon.network("vonk-forge_ingress")  # The next `compose up` creates it.
     with pytest.raises(janitor.DockerError):
         daemon.start(caddy)
@@ -770,3 +772,68 @@ def test_container_created_after_the_janitor_started_is_never_retired(
         ("POST", "/containers/n1/stop?t=30"),
         ("DELETE", "/containers/n1?v=false"),
     ]
+
+
+def created(daemon: Networks, identity: str, stamp: str, **state: str) -> None:
+    record = daemon.containers[identity]
+    record["State"].update(Status="created", **state)
+    record["Created"] = stamp  # clock.now = 1_000_000 is 1970-01-12T13:46:40Z
+
+
+def test_container_left_created_by_an_aborted_up_is_started_after_the_grace(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Catches Created containers with a restart policy that nothing ever starts."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    created(daemon, caddy, "1970-01-12T13:46:40.987654321Z")
+    with caplog.at_level("INFO", logger=janitor.LOGGER.name):
+        ticks(reconciler, clock, 1)
+    assert daemon.mutations == [] and not daemon.running(caddy)
+    assert {
+        "reason": janitor.Reason.CREATED_WAIT,
+        "container": "vonk-forge-caddy-1",
+        "next_attempt": 1_000_000.987654 + janitor.CREATED_GRACE,
+    } in [
+        {**row, "next_attempt": round(row["next_attempt"], 6)}
+        if "next_attempt" in row
+        else row
+        for row in map(json.loads, (r.message for r in caplog.records))
+    ]
+    clock.now += janitor.CREATED_GRACE
+    caplog.clear()
+    with caplog.at_level("INFO", logger=janitor.LOGGER.name):
+        ticks(reconciler, clock, 1)
+    assert daemon.mutations == [("start", caddy)]
+    assert daemon.running(caddy)
+    assert janitor.Reason.CREATED_STARTED in [
+        json.loads(r.message)["reason"] for r in caplog.records
+    ]
+
+
+def test_created_container_in_a_shared_network_namespace_is_started_after_the_grace(
+    tmp_path: Path,
+) -> None:
+    """Catches skipping containers without networks of their own (tailscale-configurator)."""
+    daemon, reconciler, clock, _, api = fleet(tmp_path)
+    configurator = daemon.container(
+        "vonk-forge-tailscale-configurator-1", [], mode=f"container:{api}"
+    )
+    created(daemon, configurator, "1970-01-01T00:00:00Z")
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == [("start", configurator)]
+    assert daemon.running(configurator)
+
+
+def test_created_container_that_should_not_be_running_is_not_abandoned(
+    tmp_path: Path,
+) -> None:
+    """Catches starting a Created container without a restart policy, or retrying an error as abandoned."""
+    daemon, reconciler, clock, caddy, api = fleet(tmp_path)
+    created(daemon, caddy, "1970-01-01T00:00:00Z")
+    daemon.containers[caddy]["HostConfig"]["RestartPolicy"]["Name"] = "no"
+    created(daemon, api, "1970-01-01T00:00:00Z", Error="boom")
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == [
+        ("start", api)
+    ]  # The recorded-error path, not abandonment.
+    assert not daemon.running(caddy)
