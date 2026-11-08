@@ -247,6 +247,7 @@ class ControlClient(HTTPControlClient):
                     http_status=status,
                     request_id=safe_request_id(response_headers.get("x-request-id")),
                 )
+            self._raise_contract_mismatch(error)
             raise
 
     def download_file(

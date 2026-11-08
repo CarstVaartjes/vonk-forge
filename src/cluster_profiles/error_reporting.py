@@ -14,6 +14,7 @@ import ssl
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Literal
 
 import httpx2
@@ -23,6 +24,14 @@ ErrorSource = Literal[
 ]
 TransportKind = Literal["dns", "connect", "tls", "timeout", "body", "protocol"]
 ErrorDecision = Literal["retry", "defer", "exit"]
+
+
+class ClientCode(StrEnum):
+    """Codes the client concludes itself; the Controller's come with its answer."""
+
+    #: The Controller serves another control contract than this CLI ships.
+    CONTRACT_MISMATCH = "client.contract_mismatch"
+
 
 #: The grammar of a surfaced error code: matched whole, and published in schemas.
 CODE_PATTERN = r"[a-z][a-z0-9_.:-]{0,95}\Z"
@@ -232,6 +241,7 @@ def protocol_context(*, operation: str, endpoint: object = None) -> ErrorContext
 
 
 __all__ = [
+    "ClientCode",
     "ErrorContext",
     "ErrorDecision",
     "ErrorSource",

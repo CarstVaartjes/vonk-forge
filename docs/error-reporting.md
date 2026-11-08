@@ -42,6 +42,19 @@ Controller responses carry `X-Request-ID` on every response and
 the typed JSON problem fields. This keeps early middleware failures
 correlatable even when their response body has no detail field.
 
+A well-formed success (2xx) response that the CLI's bundled OpenAPI rejects
+(`ControlSchemaRejected`) is `controller.protocol_invalid` and is re-read while
+it may be transient. Before re-reading, the client reads the stable
+`/api/cli/contract`: when its `api.control_contract_sha256` differs from the
+contract stamped into this vonkctl's `build-identity.json`, the failure is
+`client.contract_mismatch`, final (`decision: exit`, no re-read), with
+`recovery_actions: ["vonkctl update --apply"]`. Only an answered read is kept;
+an unanswered one is asked again on a later rejection, at most three times per
+client. Transfer, framing, media type and JSON faults never ask: they stay
+re-readable. A received refusal (4xx/5xx) keeps its own disposition whatever
+its body says, so a 503 with a reason this CLI does not know still waits. An
+unstamped or damaged stamp is unknown and keeps `controller.protocol_invalid`.
+
 HTTP 401 means authentication is absent or invalid. HTTP 403 means the
 request was rejected after authentication; the middleware uses the generic
 `controller.request_rejected` code because it cannot safely infer whether the

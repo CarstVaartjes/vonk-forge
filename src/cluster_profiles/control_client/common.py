@@ -13,6 +13,7 @@ from ..cli_states_generated import (
 )
 from .errors import (
     ControlClientError,
+    ControlContractMismatch,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlTransportError,
@@ -54,6 +55,8 @@ def observation_disposition(error: ControlClientError) -> str:
         return DISPOSITION_FAIL
     if status is not None and status >= 400:
         return _status_disposition(status)
+    if isinstance(error, ControlContractMismatch):
+        return DISPOSITION_FAIL
     if isinstance(error, ControlTransportError):
         return DISPOSITION_WAIT
     if isinstance(error, ControlMalformedResponse) and (

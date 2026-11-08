@@ -57,32 +57,55 @@ def verified_wheel_identity(
     return RuntimeBuildIdentity(source, control, worker)
 
 
-def packaged_runtime_identity() -> RuntimeBuildIdentity:
-    """An unstamped or damaged package has unknown provenance, never guessed."""
+def _hex(value: object, length: int) -> str | None:
+    if isinstance(value, str) and re.fullmatch(f"[0-9a-f]{{{length}}}", value):
+        return value
+    return None
+
+
+def stamped_runtime_identity() -> RuntimeBuildIdentity:
+    """The identity the build stamped, as written; unstamped or damaged is unknown.
+
+    The one reader of ``build-identity.json``. The build hook fingerprinted the
+    bundled OpenAPI when it wrote the stamp, so the fingerprint is read here,
+    not computed again.
+    """
     unknown = RuntimeBuildIdentity(None, None, None)
     try:
-        package = files("cluster_profiles")
-        value = json.loads(package.joinpath("build-identity.json").read_text())
-        schema = json.loads(
-            package.joinpath("schemas/control-openapi.json").read_text()
+        value = json.loads(
+            files("cluster_profiles").joinpath("build-identity.json").read_text()
         )
     except (OSError, ValueError):
         return unknown
     if not isinstance(value, dict) or value.get("schema_version") != 2:
         return unknown
-    source = value.get("source_sha")
-    control = value.get("control_contract_sha256")
-    worker = value.get("worker_contract_sha256")
-    if not isinstance(source, str) or re.fullmatch(r"[0-9a-f]{40}", source) is None:
-        source = None  # history cannot erase valid content compatibility
-    tree = value.get("source_tree")
-    if not isinstance(tree, str) or re.fullmatch(r"[0-9a-f]{40}", tree) is None:
-        tree = None
-    if not isinstance(control, str) or control != contract_fingerprint(schema):
+    return RuntimeBuildIdentity(
+        # History cannot erase valid content compatibility.
+        _hex(value.get("source_sha"), 40),
+        _hex(value.get("control_contract_sha256"), 64),
+        _hex(value.get("worker_contract_sha256"), 64),
+        _hex(value.get("source_tree"), 40),
+    )
+
+
+def packaged_runtime_identity() -> RuntimeBuildIdentity:
+    """An unstamped or damaged package has unknown provenance, never guessed."""
+    unknown = RuntimeBuildIdentity(None, None, None)
+    stamped = stamped_runtime_identity()
+    try:
+        schema = json.loads(
+            files("cluster_profiles")
+            .joinpath("schemas/control-openapi.json")
+            .read_text()
+        )
+    except (OSError, ValueError):
         return unknown
-    if not isinstance(worker, str) or re.fullmatch(r"[0-9a-f]{64}", worker) is None:
+    if (
+        stamped.control_contract_sha256 != contract_fingerprint(schema)
+        or stamped.worker_contract_sha256 is None
+    ):
         return unknown
-    return RuntimeBuildIdentity(source, control, worker, tree)
+    return stamped
 
 
 def installed_content_identity() -> str | None:
