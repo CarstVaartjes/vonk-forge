@@ -3894,6 +3894,10 @@ def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
         {line + 1 for line in lines},
         modes=_CLOSURE,
     )
+    # A test harness that fakes a package closure is held to the same rule.
+    assert check_source(
+        "control/tests/example_fixtures.py", source, lines, modes=_CLOSURE
+    )
     assert not check_source(_CLOSURE_PATH, source, set(), modes=_CLOSURE)
 
 
@@ -3909,8 +3913,6 @@ def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
         (_CLOSURE_PATH, "name = declared.file.fixture\n"),
         # Building a request names its fields; reading a closure out of one is the hit.
         (_CLOSURE_PATH, 'request = Job(fixture="a", input_slots={})\n'),
-        # Tests may inspect the request they built.
-        ("control/tests/test_example.py", "assert request.input_slots == {}\n"),
     ],
 )
 def test_fixture_closure_guard_leaves_other_lines_alone(path: str, source: str) -> None:

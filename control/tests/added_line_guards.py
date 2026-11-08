@@ -2360,7 +2360,7 @@ def check_source(
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
         )
-    if python and not is_test and "fixture-closures" in modes:
+    if python and "fixture-closures" in modes:
         hits.extend(
             (line, fixture_closures.KIND)
             for line in fixture_closures.scan_source(source)

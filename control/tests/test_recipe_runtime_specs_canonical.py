@@ -655,11 +655,7 @@ def _published_recipe_context(
         *(patch.path for patch in build.patches),
     ]
     for check in recipe.validation.serving.checks:
-        request = check.request
-        fixture = getattr(request, "fixture", None)
-        if fixture:
-            paths.append(fixture)
-        paths.extend(getattr(request, "input_slots", {}).values())
+        paths.extend(check.fixture_paths())
     package: dict[str, object] = {
         "image_digest": digest,
         "image_reference": f"localhost/vonk/build@sha256:{digest}",

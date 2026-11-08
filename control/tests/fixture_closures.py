@@ -5,7 +5,8 @@ its fixture and input slots, a multipart check names its audio file. The recipe
 contract owns that list as ``RecipeValidationCheck.fixture_paths()``; a closure
 written by hand (``request.fixture``, ``request.input_slots``) knows only the
 transports it was written for. The Controller's package check once missed
-``request.file.fixture`` that way. Ask the check for its paths.
+``request.file.fixture`` that way, and so did two test harnesses that faked a
+package closure. Ask the check for its paths; tests are no exception.
 """
 
 from __future__ import annotations
