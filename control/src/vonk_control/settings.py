@@ -157,8 +157,8 @@ def _read_secret(path: Path) -> bytes:
 def wait_for_staged_secret(
     name: str,
     *,
+    attempts: int,
     root: Path = SECRETS_ROOT,
-    attempts: int = 120,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Wait, a second per attempt, for the API pre-exec to stage one secret.

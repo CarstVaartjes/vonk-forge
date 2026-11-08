@@ -247,7 +247,10 @@ def test_worker_waits_for_the_api_to_stage_its_database_secret(
         secret.write_text(staged)
 
     settings_module.wait_for_staged_secret(
-        "database-url", root=secrets_root, sleep=api_stages_while_worker_waits
+        "database-url",
+        attempts=120,
+        root=secrets_root,
+        sleep=api_stages_while_worker_waits,
     )
 
     assert sleeps == [1.0]

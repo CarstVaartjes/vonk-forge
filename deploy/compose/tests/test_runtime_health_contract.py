@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -91,6 +92,32 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         command = _health_command(service)
         assert all(token in command for token in expected_evidence[name]), name
         assert not any(token in command for token in process_only), name
+
+
+def _seconds(duration: str) -> float:
+    units = {"h": 3600, "m": 60, "s": 1}
+    return sum(
+        float(value) * units[unit]
+        for value, unit in re.findall(r"([0-9.]+)([hms])", duration)
+    )
+
+
+def test_worker_health_grace_covers_its_startup_waits() -> None:
+    """Catches a worker marked unhealthy while it still waits for the API.
+
+    The worker waits for the API-staged secret and then for the API-owned
+    schema, each within the startup budget; one probe may overrun it by a lock
+    wait. `compose up --wait` must not see that wait as a failure.
+    """
+    from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
+    from vonk_control.settings import DATABASE_WAIT_BUDGETS
+
+    healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
+    waits = (
+        2 * _DATABASE_STARTUP_TIMEOUT_SECONDS
+        + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
+    )
+    assert _seconds(healthcheck["start_period"]) > waits
 
 
 def test_dependencies_only_order_startup_and_are_acyclic() -> None:
