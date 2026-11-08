@@ -23,7 +23,6 @@ from cluster_profiles.serving_audio import (
     AudioCheckError,
     assert_speech,
     multipart_body,
-    read_wav,
 )
 from cluster_profiles.serving_execution import (
     HttpObservation,
@@ -195,14 +194,24 @@ def test_speech_that_is_not_audible_wav_fails_the_check(body: bytes, kind: str) 
 
 
 def test_a_streamed_wav_with_a_placeholder_size_counts_the_bytes_it_has() -> None:
-    audio = read_wav(wav(1.0, data_size=0xFFFFFFFF))
-    assert audio.frames == 16000 and audio.seconds == 1.0
+    audio = assert_speech({"content-type": "audio/wav"}, wav(1.0, data_size=0xFFFFFFFF))
+    assert audio.seconds == 1.0 and audio.sample_rate == 16000
 
 
 def test_a_wav_whose_data_chunk_precedes_fmt_is_refused() -> None:
     body = b"RIFF\x00\x00\x00\x00WAVEdata" + struct.pack("<I", 2) + b"\x00\x00"
-    with pytest.raises(AudioCheckError, match="precedes"):
-        read_wav(body)
+    with pytest.raises(AudioCheckError, match="decodable"):
+        assert_speech({"content-type": "audio/wav"}, body)
+
+
+def test_the_speech_minimum_is_the_contracts_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    headers = {"content-type": "audio/wav"}
+    assert_speech(headers, wav(0.6))
+    monkeypatch.setattr("vonk_forge_contracts.recipe.MIN_SPEECH_SECONDS", 2.0)
+    with pytest.raises(AudioCheckError, match="under 2.0 s"):
+        assert_speech(headers, wav(0.6))
 
 
 def test_the_speech_check_posts_json_and_reads_the_wav(server: str) -> None:
