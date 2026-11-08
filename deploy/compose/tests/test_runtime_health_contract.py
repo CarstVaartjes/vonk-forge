@@ -100,6 +100,12 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
     service_completed_successfully dependency is unhealthy or exited, leaving
     them Created forever (restart policies never act on never-started
     containers). Every dependent waits or crash-restarts itself instead.
+
+    Scope: this covers compose dependency edges only. Namespace/volume joins
+    (see test_joins_on_restartable_services_are_explicitly_allowed) and
+    outright dependency start failures (e.g. a port bind) can still leave a
+    container Created; the image-janitor's Created-start net (PR #2166)
+    starts those after CREATED_GRACE.
     """
     for selection in (True, False):
         services = _rendered(secure_remote=selection)["services"]
@@ -131,6 +137,41 @@ def test_dependencies_only_order_startup_and_are_acyclic() -> None:
 
     for service_name in graph:
         visit(service_name, ())
+
+
+# A join (network namespace, container, volumes_from) is refused by the daemon
+# while the target is restarting, which leaves the joiner Created; compose
+# edges cannot prevent that. Each allowed joiner needs a reason.
+ALLOWED_JOINS = {
+    "tailscale-configurator": (
+        "image-janitor starts Created containers after CREATED_GRACE, "
+        "including shared-network ones (PR #2166)"
+    ),
+}
+
+
+def test_joins_on_restartable_services_are_explicitly_allowed() -> None:
+    """Catches an undocumented join on a service that restarts."""
+    for selection in (True, False):
+        services = _rendered(secure_remote=selection)["services"]
+        for name, service in services.items():
+            joins: list[str] = []
+            mode = str(service.get("network_mode", ""))
+            for prefix in ("service:", "container:"):
+                if mode.startswith(prefix):
+                    joins.append(mode.removeprefix(prefix))
+            for entry in service.get("volumes_from", []):
+                joins.append(str(entry).split(":")[0].removeprefix("container:"))
+            for target in joins:
+                restartable = (
+                    target not in services
+                    or services[target].get("restart", "no") != "no"
+                )
+                if restartable:
+                    assert ALLOWED_JOINS.get(name), (
+                        name,
+                        target,
+                    )
 
 
 def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:
