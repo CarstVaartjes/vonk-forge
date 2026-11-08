@@ -387,6 +387,29 @@ def test_container_that_joined_after_the_shared_snapshot_is_left_alone(
     assert daemon.running(api)
 
 
+def test_container_that_exits_between_its_inspect_and_the_fresh_read_is_left_alone(
+    tmp_path: Path,
+) -> None:
+    """Catches condemning a container from an inspect that predates its exit."""
+    daemon, reconciler, clock, _, api = fleet(tmp_path)
+    del daemon.networks["vonk-forge_agent-proxy"]["Containers"][api]
+    read = daemon.request
+    reads: list[str] = []
+
+    def request(method: str, path: str, body: Any = None) -> Any:
+        row = read(method, path, body)
+        if method == "GET" and path.endswith("vonk-forge_agent-proxy"):
+            reads.append(path)
+            if len(reads) == 2:  # The fresh read; the container exits meanwhile.
+                daemon.containers[api]["State"]["Status"] = "exited"
+        return row
+
+    daemon.request = request  # type: ignore[method-assign]
+    ticks(reconciler, clock, 1)
+    assert len(reads) == 2
+    assert daemon.mutations == []
+
+
 def test_stop_that_times_out_after_the_daemon_stopped_is_started_later(
     tmp_path: Path,
 ) -> None:

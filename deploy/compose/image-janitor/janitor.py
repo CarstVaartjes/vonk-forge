@@ -341,6 +341,8 @@ class Container:
     error: str
     policy: str
     mode: str
+    # State.StartedAt: tells a restarted container from the one inspected.
+    started: str
     # Network name -> (recorded network ID, recorded aliases).
     networks: dict[str, tuple[str, tuple[str, ...]]]
 
@@ -363,6 +365,7 @@ class Container:
             error=str(row["State"].get("Error") or ""),
             policy=str(row["HostConfig"]["RestartPolicy"]["Name"]),
             mode=str(row["HostConfig"]["NetworkMode"]),
+            started=str(row["State"].get("StartedAt") or ""),
             networks=networks,
         )
 
@@ -597,26 +600,33 @@ class Reconciler:
             network = networks[name]
             if network is None:
                 return None
-            if (
-                container.state == State.RUNNING
-                and container.identity not in network.members
-            ):
+            if name not in owed and self.detached(container, name, network):
                 # The snapshot is shared by the tick and may predate this
-                # container joining (Compose starting it); judge it on a fresh one.
+                # container joining; condemn only on a fresh read, and only if
+                # the container is still in the state it was observed in.
                 network = networks[name] = Network.inspect(self.docker, name)
                 if network is None:
                     return None
-            recorded = container.networks.get(name, ("", ()))[0]
-            if (
-                name in owed
-                or (recorded and recorded != network.identity)
-                or (
-                    container.state == State.RUNNING
-                    and container.identity not in network.members
-                )
-            ):
+                if not (
+                    self.detached(container, name, network) and self.observed(container)
+                ):
+                    continue
+            if name in owed or self.detached(container, name, network):
                 broken.append(name)
         return broken
+
+    @staticmethod
+    def detached(container: Container, name: str, network: Network) -> bool:
+        recorded = container.networks.get(name, ("", ()))[0]
+        return bool(recorded and recorded != network.identity) or (
+            container.state == State.RUNNING
+            and container.identity not in network.members
+        )
+
+    def observed(self, container: Container) -> bool:
+        """The container is still in the state `container` was inspected in."""
+        now = Container.inspect(self.docker, container.identity)
+        return (now.state, now.started) == (container.state, container.started)
 
     def repair(self, container: Container, networks: dict[str, Network | None]) -> None:
         if not container.own_networks:
