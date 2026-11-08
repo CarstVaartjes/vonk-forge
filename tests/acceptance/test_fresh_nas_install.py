@@ -304,7 +304,9 @@ def configure_tailnet_service_names(
     gateway["hostname"] = gateway_hostname
     gateway["environment"]["TS_HOSTNAME"] = gateway_hostname
     required = "1" if require_external_tailnet_client else "0"
-    configurator["environment"].update(
+    # The configurator defaults every one of these; the shipped service may
+    # declare no environment of its own.
+    configurator.setdefault("environment", {}).update(
         services
         | {
             "VONK_TAILSCALE_EPHEMERAL": "true",

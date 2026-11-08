@@ -1549,6 +1549,9 @@ class SparkLifecycle:
     def _expected_controller_services(self) -> set[str]:
         return set(LOCAL_CONTROLLER_SERVICES)
 
+    def _retired_installer_responses(self) -> tuple[tuple[str, str], ...]:
+        return ()
+
     def _controller_health_failure(self, reason: str, status: str) -> LifecycleError:
         """Keep health and signer startup evidence before cleanup removes it."""
         evidence: dict[str, object] = {"phase": "controller-health", "reason": reason}
@@ -1756,16 +1759,20 @@ class SparkLifecycle:
             tempfile.mkdtemp(prefix="vonk-spark-lifecycle-", dir=self.workspace)
         )
         child_environment = command_environment(self.temporary_root / "workstation")
-        responses = nas_responses(
-            nas_ip="127.0.0.1",
-            tailnet_suffix=LOCAL_DNS_SUFFIX,
-            oauth_client_id=DISABLED_TAILSCALE_CREDENTIAL,
-            oauth_client_secret=DISABLED_TAILSCALE_CREDENTIAL,
-            upstream_key=self._required_environment(
-                "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
+        responses = [
+            *nas_responses(
+                nas_ip="127.0.0.1",
+                tailnet_suffix=LOCAL_DNS_SUFFIX,
+                oauth_client_id=DISABLED_TAILSCALE_CREDENTIAL,
+                oauth_client_secret=DISABLED_TAILSCALE_CREDENTIAL,
+                upstream_key=self._required_environment(
+                    "VONK_ACCEPTANCE_LITELLM_UPSTREAM_KEY", secret=True
+                ),
+                control_service=self.tailnet_services["control"],
             ),
-            control_service=self.tailnet_services["control"],
-        )
+            # The installed release's installer may still ask a retired prompt.
+            *self._retired_installer_responses(),
+        ]
         release_url = (
             f"{self.origin}/artifacts/{self.arguments.channel}/releases/"
             f"{getattr(self, 'controller_generation', self.arguments.generation)}"
