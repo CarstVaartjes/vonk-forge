@@ -24,6 +24,7 @@ from ..cli_states import FAILED_JOB_STATES, NEEDS_OPERATOR, SUCCEEDED
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..control_transport import open_https
 from ..error_reporting import (
+    ClientCode,
     protocol_context,
     safe_endpoint,
     safe_request_id,
@@ -34,6 +35,7 @@ from ..observation_transfer_reader import (
     ObservationTransferUnavailable,
     receive_observation,
 )
+from ..runtime_identity import packaged_runtime_identity
 
 if TYPE_CHECKING:
     # Importing any generated model runs the generated package initializer,
@@ -52,6 +54,7 @@ from .common import observation_delay, observation_unknown
 from .errors import (
     _STATUS_ERRORS,
     ControlClientError,
+    ControlContractMismatch,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlObservationUnavailable,
@@ -117,6 +120,9 @@ class ControlClient:
         self._transport = _OpenerTransport(self._opener, timeout_seconds)
         self._timeout = timeout_seconds
         self._artifact_transfer_timeout = artifact_transfer_timeout_seconds
+        #: Whether the Controller serves another control contract; None until
+        #: a response outside this CLI's contract asks.
+        self._contract_differs: bool | None = None
 
     @property
     def request_timeout_seconds(self) -> float:
@@ -262,6 +268,7 @@ class ControlClient:
                     error.retry_after_seconds = _retry_after_seconds(
                         transport.response.headers.get("retry-after")
                     )
+                self._raise_contract_mismatch(error)
                 # Generated functions declare their method through _get_kwargs;
                 # the actual request is recorded below, rather than inferred
                 # from an endpoint's name. Only read-only calls can be retried.
@@ -281,6 +288,53 @@ class ControlClient:
                 attempt += 1
                 if time.monotonic() >= deadline:
                     raise
+
+    def _raise_contract_mismatch(self, error: ControlClientError) -> None:
+        """Name an unreadable answer from a Controller on another contract.
+
+        A 2xx response this CLI's bundled OpenAPI rejects is re-read only while
+        it may be a transient fault. When the Controller's own stable
+        compatibility resource names a different control contract than this
+        CLI ships, re-reading cannot help: the answer is final and its typed
+        recovery installs the accepted vonkctl. Unknown either side keeps the
+        original error.
+        """
+        context = error.context
+        if (
+            type(error) is not ControlMalformedResponse
+            or context is None
+            or context.source != "protocol"
+            or (
+                context.http_status is not None and not 200 <= context.http_status < 300
+            )
+            or not self._controller_contract_differs()
+        ):
+            return
+        raise ControlContractMismatch(
+            f"{error}; this vonkctl and the Controller run different control "
+            "contracts",
+            context=replace(context, code=ClientCode.CONTRACT_MISMATCH),
+        ) from None
+
+    def _controller_contract_differs(self) -> bool:
+        if self._contract_differs is None:
+            # Settled before the read, so its own failure cannot ask again.
+            self._contract_differs = False
+            shipped = packaged_runtime_identity().control_contract_sha256
+            if shipped is None:
+                return False
+            try:
+                compatibility = self.request(
+                    "GET", "/api/cli/contract", timeout_seconds=5, retry=False
+                )
+            except ControlClientError:
+                return False
+            api = compatibility.get("api")
+            served = (
+                api.get("control_contract_sha256") if isinstance(api, dict) else None
+            )
+            self._contract_differs = isinstance(served, str) and served != shipped
+        return self._contract_differs
 
     def _request_timeout(self, requested: float | None) -> float:
         if requested is not None and (not math.isfinite(requested) or requested <= 0):
@@ -442,6 +496,7 @@ class ControlClient:
                     error.retry_after_seconds = _retry_after_seconds(
                         response_headers.get("retry-after")
                     )
+                self._raise_contract_mismatch(error)
                 if (
                     not retry
                     or (method != "GET" and dispatched)

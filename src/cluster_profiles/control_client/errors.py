@@ -145,6 +145,16 @@ class ControlMalformedResponse(ControlClientError):
         super().__init__(message, context=context)
 
 
+class ControlContractMismatch(ControlMalformedResponse):
+    """A response outside this vonkctl's contract from a Controller serving another.
+
+    Re-reading cannot change the answer, so it is final; the typed recovery is
+    to install the accepted vonkctl that matches the Controller.
+    """
+
+    recovery = ("vonkctl update --apply",)
+
+
 class ControlResponseTooLarge(ControlMalformedResponse):
     pass
 

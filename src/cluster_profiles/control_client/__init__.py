@@ -16,6 +16,7 @@ from .errors import _STATUS_ERRORS as _STATUS_ERRORS
 from .errors import _URL_CREDENTIALS as _URL_CREDENTIALS
 from .errors import ControlClientError as ControlClientError
 from .errors import ControlConflict as ControlConflict
+from .errors import ControlContractMismatch as ControlContractMismatch
 from .errors import ControlForbidden as ControlForbidden
 from .errors import ControlHTTPError as ControlHTTPError
 from .errors import ControlMalformedResponse as ControlMalformedResponse
