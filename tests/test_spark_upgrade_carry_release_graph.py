@@ -84,6 +84,12 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             b'{"paths":{},"components":{"schemas":{}}}',
         )
     wheel_content = wheel.getvalue()
+    # A payload from before Hermes was removed still asks whether to enable it.
+    nas_payload = json.dumps(
+        {"hermes": {"prompt": "Enable the optional Hermes agent?"}}
+        if historical
+        else {}
+    ).encode()
     document: dict[str, object] = {
         "schema_version": 2,
         "generation": GENERATION,
@@ -97,6 +103,11 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
                 "path": f"artifacts/dev/releases/{GENERATION}/cli/test.whl",
                 "size": len(wheel_content),
                 "sha256": hashlib.sha256(wheel_content).hexdigest(),
+            },
+            "nas-payload": {
+                "path": f"artifacts/dev/releases/{GENERATION}/nas/current/payload.json",
+                "size": len(nas_payload),
+                "sha256": hashlib.sha256(nas_payload).hexdigest(),
             },
         },
     }
@@ -112,6 +123,11 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             f"https://install.example/artifacts/dev/releases/{GENERATION}/cli/test.whl"
         ):
             content = wheel_content
+        elif url == (
+            "https://install.example/artifacts/dev/releases/"
+            f"{GENERATION}/nas/current/payload.json"
+        ):
+            content = nas_payload
         elif url.endswith("/release.json"):
             content = raw
         elif url.endswith("/release.sig"):
@@ -147,6 +163,12 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     if ephemeral:
         assert resolved.package_version == document["version"]
         assert not any("raw.githubusercontent.com" in url for url in fetched)
+        # The acceptance baseline installs with the candidate's own installer.
+        assert resolved.retired_installer_responses == ()
+    else:
+        assert resolved.retired_installer_responses == (
+            (("Enable the optional Hermes agent? [y/N]: ", "n"),) if historical else ()
+        )
     assert set(resolved.compose_image_roles) == set(roles)
     assert all(source in url for url in fetched if "raw.githubusercontent.com" in url)
     # Exercise the inherited Compose checks with the baseline's verified graph,
@@ -195,6 +217,19 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
     assert ("step-ca" in configured_services) is historical
     assert ("step-ca" in lane._local_controller_up_command()) is historical
     assert ("step-ca" in lane._expected_controller_services()) is historical
+    # A retired service the baseline did not install (Hermes declined) only
+    # has its overlay image: it is neither started nor expected.
+    installed = dict(base_services)
+    installed.pop("hermes-agent", None)
+    (tmp_path / "docker-compose.yaml").write_text(
+        yaml.safe_dump({"services": installed})
+    )
+    assert "hermes-agent" not in lane._expected_controller_services()
+    assert "hermes-agent" not in lane._local_controller_up_command()
+    assert ("step-ca" in lane._expected_controller_services()) is historical
+    (tmp_path / "docker-compose.yaml").write_text(
+        yaml.safe_dump({"services": base_services})
+    )
     lane.controller_generation = lane.candidate.generation
     assert "step-ca" not in lane._local_controller_up_command()
     assert "step-ca" not in lane._expected_controller_services()
@@ -228,6 +263,19 @@ def test_signed_source_renderer_preserves_its_complete_image_graph(
             "https://install.example", "dev", GENERATION, tmp_path / "bad-wheel"
         )
     wheel_content = valid_wheel
+    valid_payload = nas_payload
+    # Each tamper still parses or still has the signed size, so only the
+    # matching ingress check (size, then sha256) can refuse it.
+    for name, tampered in (
+        ("longer-payload", valid_payload + b" "),
+        ("same-size-payload", bytes([valid_payload[0] ^ 1]) + valid_payload[1:]),
+    ):
+        nas_payload = tampered
+        with pytest.raises(LifecycleError, match="signed digest"):
+            carry.resolve_release(
+                "https://install.example", "dev", GENERATION, tmp_path / name
+            )
+    nas_payload = valid_payload
     carry.resolve_release(
         "https://install.example", "dev", GENERATION, tmp_path / "fresh-wheel"
     )

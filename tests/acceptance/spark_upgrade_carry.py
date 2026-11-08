@@ -137,6 +137,8 @@ class ReleaseInput:
     # The request contract this release's Controller publishes with its source.
     contract: ControllerContract
     compose_image_roles: dict[str, str]
+    # Answers to prompts this release's NAS installer asks that the lane retired.
+    retired_installer_responses: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -214,6 +216,46 @@ def _fetch(url: str, destination: Path) -> None:
             destination.write_bytes(response.read(16 * 1024 * 1024))
 
     _retry_transient(f"release input {url}", attempt)
+
+
+def _retired_installer_responses(
+    origin: str, document: dict[str, object], directory: Path
+) -> tuple[tuple[str, str], ...]:
+    """Answers for the prompts this release's own NAS installer asks and the
+    lane no longer knows: a release from before Hermes was removed still asks
+    whether to enable it, and the lane declines it."""
+    from vonk_agent_protocol.installer_release import InstallerReleaseObject
+
+    record = InstallerReleaseObject.model_validate_json(
+        json.dumps(
+            require_object(
+                require_object(document.get("artifacts"), "release artifacts").get(
+                    "nas-payload"
+                ),
+                "release NAS payload",
+            )
+        )
+    )
+    path = directory / "nas-payload.json"
+    _fetch(f"{origin}/{record.path}", path)
+    content = path.read_bytes()
+    if (
+        len(content) != record.size
+        or hashlib.sha256(content).hexdigest() != record.sha256
+    ):
+        raise LifecycleError("published NAS payload does not match its signed digest")
+    try:
+        payload = json.loads(content)
+    except ValueError as error:
+        raise LifecycleError("published NAS payload is invalid") from error
+    hermes = require_object(payload, "published NAS payload").get("hermes")
+    if hermes is None:
+        return ()
+    prompt = require_object(hermes, "NAS payload Hermes selection").get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        raise LifecycleError("published NAS payload Hermes prompt is invalid")
+    # The installer's yes/no prompt appends its own choice suffix.
+    return ((f"{prompt} [y/N]: ", "n"),)
 
 
 def resolve_release(
@@ -424,6 +466,10 @@ def resolve_release(
         ),
         contract=contract,
         compose_image_roles=compose_image_roles,
+        # The acceptance baseline reuses the candidate's NAS installer.
+        retired_installer_responses=()
+        if acceptance_baseline
+        else _retired_installer_responses(origin, document, directory),
     )
 
 
@@ -702,10 +748,15 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             if role not in COMPOSE_IMAGE_ROLES
         }
 
+    def _retired_installer_responses(self) -> tuple[tuple[str, str], ...]:
+        return self._current_release().retired_installer_responses
+
     def _expected_controller_services(self) -> set[str]:
-        services = super()._expected_controller_services()
+        services = super()._expected_controller_services() | self._retired_services()
         if self._current_release() is not self.candidate:
-            # An added candidate service is absent from the published baseline.
+            # An added candidate service is absent from the published baseline,
+            # and a retired one runs only when the baseline installed it (the
+            # lane declines the optional Hermes agent; only its overlay remains).
             # Consume that installed schema-2 bundle, not the candidate roster.
             assert self.bundle is not None
             document = require_object(
@@ -714,7 +765,7 @@ class UpgradeCarryLifecycle(SparkLifecycle):
             )
             declared = require_object(document.get("services"), "baseline services")
             services.intersection_update(declared)
-        return services | self._retired_services()
+        return services
 
     def _acceptance_caddyfile(self) -> str | None:
         return self._current_release().caddyfile

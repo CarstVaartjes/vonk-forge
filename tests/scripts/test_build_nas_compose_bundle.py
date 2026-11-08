@@ -418,3 +418,46 @@ def test_upgrade_rewrites_the_selected_services_without_profiles(
     assert all("profiles" not in service for service in written["services"].values())
     assert present <= set(written["services"])
     assert not absent & set(written["services"])
+
+
+def test_upgrade_of_a_hermes_enabled_install_asks_nothing(tmp_path: Path) -> None:
+    """Catch an install from before Hermes was removed needing answers to upgrade."""
+    import io
+
+    from vonk_agent_protocol.installer_setup import NasInstallTemplate
+    from vonk_nas_setup.environment import parse_environment
+    from vonk_nas_setup.prompts import PromptIo
+    from vonk_nas_setup.setup import prepare
+
+    payload = tmp_path / "payload.json"
+    assert _build(_render(tmp_path), payload).returncode == 0
+    template = NasInstallTemplate.model_validate_json(payload.read_text("utf-8"))
+    nas = tmp_path / "nas"
+    bundle = prepare(
+        template,
+        nas,
+        PromptIo(
+            io.StringIO(
+                "secure-remote\n192.168.1.5\nvonk-forge.example.ts.net\nid\nsecret\n\n\n"
+            )
+        ),
+    ).root
+    # What a Hermes-enabled install left behind: its profile and its keys.
+    environment = (bundle / ".env").read_text("utf-8")
+    (bundle / ".env").write_text(
+        environment.replace(
+            "COMPOSE_PROFILES=secure-remote\n",
+            "COMPOSE_PROFILES=secure-remote,hermes\n",
+        ),
+        "utf-8",
+    )
+    for name in ("hermes-api-key", "hermes-litellm-key"):
+        (bundle / "secrets" / name).write_text("leftover\n")
+
+    prepare(template, nas, PromptIo(io.StringIO("")), upgrade=True)
+
+    assert parse_environment(bundle / ".env")["COMPOSE_PROFILES"] == (
+        "secure-remote,hermes"
+    )
+    written = yaml.safe_load((bundle / "docker-compose.yaml").read_text("utf-8"))
+    assert set(written["services"]) == SERVICES
