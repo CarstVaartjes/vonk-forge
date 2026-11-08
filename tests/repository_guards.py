@@ -235,6 +235,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
+        "tests/cluster_profiles/test_control_contract_mismatch.py",
+        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
+    ),
+    (
         "tests/cluster_profiles/test_control_transport_deadline.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),

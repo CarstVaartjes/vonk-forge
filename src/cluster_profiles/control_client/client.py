@@ -24,6 +24,7 @@ from ..cli_states import FAILED_JOB_STATES, NEEDS_OPERATOR, SUCCEEDED
 from ..control_limits import MAX_CONTROL_DOCUMENT_BYTES
 from ..control_transport import open_https
 from ..error_reporting import (
+    ClientCode,
     protocol_context,
     safe_endpoint,
     safe_request_id,
@@ -34,6 +35,7 @@ from ..observation_transfer_reader import (
     ObservationTransferUnavailable,
     receive_observation,
 )
+from ..runtime_identity import stamped_runtime_identity
 
 if TYPE_CHECKING:
     # Importing any generated model runs the generated package initializer,
@@ -52,10 +54,12 @@ from .common import observation_delay, observation_unknown
 from .errors import (
     _STATUS_ERRORS,
     ControlClientError,
+    ControlContractMismatch,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlObservationUnavailable,
     ControlResponseTooLarge,
+    ControlSchemaRejected,
     ControlTimeout,
     ControlTransportError,
     JobFailed,
@@ -79,6 +83,9 @@ from .transport import (
     _read_token_file,
     _RecordingTransport,
 )
+
+#: Compatibility reads one client may make while none has answered.
+_CONTRACT_READS = 3
 
 
 class ControlClient:
@@ -117,6 +124,11 @@ class ControlClient:
         self._transport = _OpenerTransport(self._opener, timeout_seconds)
         self._timeout = timeout_seconds
         self._artifact_transfer_timeout = artifact_transfer_timeout_seconds
+        #: Whether the Controller serves another control contract: None until
+        #: a schema rejection asks and the compatibility read answers.
+        self._contract_differs: bool | None = None
+        self._contract_reads = 0
+        self._contract_reading = False
 
     @property
     def request_timeout_seconds(self) -> float:
@@ -262,6 +274,7 @@ class ControlClient:
                     error.retry_after_seconds = _retry_after_seconds(
                         transport.response.headers.get("retry-after")
                     )
+                self._raise_contract_mismatch(error)
                 # Generated functions declare their method through _get_kwargs;
                 # the actual request is recorded below, rather than inferred
                 # from an endpoint's name. Only read-only calls can be retried.
@@ -281,6 +294,62 @@ class ControlClient:
                 attempt += 1
                 if time.monotonic() >= deadline:
                     raise
+
+    def _raise_contract_mismatch(self, error: ControlClientError) -> None:
+        """Name a schema rejection from a Controller on another control contract.
+
+        Only a well-formed success answer the bundled contract rejects asks;
+        transfer, framing, media type and JSON faults stay re-readable, and a
+        received refusal (4xx/5xx) keeps its own disposition whatever its body.
+        When the Controller's stable compatibility resource names a different
+        control contract than the one this CLI was stamped with, re-reading
+        cannot help: the answer is final and its typed recovery installs the
+        accepted vonkctl. Unknown either side keeps the original error.
+        """
+        context = error.context
+        status = context.http_status if context is not None else None
+        if (
+            not isinstance(error, ControlSchemaRejected)
+            or context is None
+            or (status is not None and not 200 <= status < 300)
+            or not self._controller_contract_differs()
+        ):
+            return
+        raise ControlContractMismatch(
+            f"{error}; this vonkctl and the Controller run different control contracts",
+            context=replace(context, code=ClientCode.CONTRACT_MISMATCH),
+        ) from None
+
+    def _controller_contract_differs(self) -> bool:
+        """Read the Controller's contract identity; keep only an answer.
+
+        A failed read is asked again on a later rejection, at most
+        ``_CONTRACT_READS`` times per client; a read in flight never re-enters.
+        """
+        if self._contract_differs is not None:
+            return self._contract_differs
+        shipped = stamped_runtime_identity().control_contract_sha256
+        if (
+            shipped is None
+            or self._contract_reading
+            or self._contract_reads >= _CONTRACT_READS
+        ):
+            return False
+        self._contract_reading = True
+        self._contract_reads += 1
+        try:
+            compatibility = self.request(
+                "GET", "/api/cli/contract", timeout_seconds=5, retry=False
+            )
+        except ControlClientError:
+            return False
+        finally:
+            self._contract_reading = False
+        api = compatibility.get("api")
+        served = api.get("control_contract_sha256") if isinstance(api, dict) else None
+        if isinstance(served, str):
+            self._contract_differs = served != shipped
+        return self._contract_differs is True
 
     def _request_timeout(self, requested: float | None) -> float:
         if requested is not None and (not math.isfinite(requested) or requested <= 0):
@@ -315,7 +384,7 @@ class ControlClient:
         ):
             request = transport.request
             received = transport.response
-            raise ControlMalformedResponse(
+            raise ControlSchemaRejected(
                 "control API response does not match the generated schema",
                 context=replace(
                     protocol_context(
@@ -442,6 +511,7 @@ class ControlClient:
                     error.retry_after_seconds = _retry_after_seconds(
                         response_headers.get("retry-after")
                     )
+                self._raise_contract_mismatch(error)
                 if (
                     not retry
                     or (method != "GET" and dispatched)
@@ -536,10 +606,10 @@ class ControlClient:
 
                 def schema_failure(
                     error: ControlClientError,
-                ) -> ControlMalformedResponse:
+                ) -> ControlSchemaRejected:
                     # Only the owning canonical validators reach this boundary.
                     # Their bounded reasons name schema rules, not payload values.
-                    return ControlMalformedResponse(
+                    return ControlSchemaRejected(
                         f"Complete observation unavailable: {error}",
                         context=replace(
                             protocol_context(operation=f"GET {path}", endpoint=path),

@@ -16,7 +16,12 @@ import httpx2
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import SchemaError, ValidationError, best_match
 
-from .errors import ControlClientError, ControlMalformedResponse, _ControlValidator
+from .errors import (
+    ControlClientError,
+    ControlMalformedResponse,
+    ControlSchemaRejected,
+    _ControlValidator,
+)
 
 
 def _schema_unavailable(message: str) -> Never:
@@ -243,7 +248,7 @@ def _response_contract(path: str, method: str, status: int, decoded: object) -> 
                 message="control API response does not match the OpenAPI schema",
             )
         except ControlClientError as error:
-            raise ControlMalformedResponse(str(error)) from None
+            raise ControlSchemaRejected(str(error)) from None
 
 
 def _response_media_contract(

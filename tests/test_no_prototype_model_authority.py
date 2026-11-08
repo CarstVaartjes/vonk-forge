@@ -32,6 +32,9 @@ def test_root_tests_do_not_import_control_implementation() -> None:
         # Exact native-producer receipt/transport regressions consume owning
         # Controller schemas; they do not define prototype model authority.
         ROOT / "tests/cluster_profiles/test_control_client_requests.py",
+        # The contract-mismatch regression serves the Controller's own library,
+        # compatibility and platform answers to the bundled CLI contract.
+        ROOT / "tests/cluster_profiles/test_control_contract_mismatch.py",
         ROOT / "tests/cluster_profiles/test_control_transport_deadline.py",
         ROOT / "tests/cluster_profiles/test_observation_attempt_deadline.py",
         # Error correlation consumes the native streamed fleet producer too.
