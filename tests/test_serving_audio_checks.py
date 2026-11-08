@@ -209,8 +209,8 @@ def test_the_speech_minimum_is_the_contracts_value(
 ) -> None:
     headers = {"content-type": "audio/wav"}
     assert_speech(headers, wav(0.6))
-    monkeypatch.setattr("vonk_forge_contracts.recipe.MIN_SPEECH_SECONDS", 2.0)
-    with pytest.raises(AudioCheckError, match="under 2.0 s"):
+    monkeypatch.setattr("vonk_forge_contracts.recipe.MIN_SPEECH_SECONDS", 6.0)
+    with pytest.raises(AudioCheckError, match="under 6.0 s"):
         assert_speech(headers, wav(0.6))
 
 
