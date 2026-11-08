@@ -192,6 +192,7 @@ class Networks(janitor.Docker):
         self.containers[identity] = {
             "Id": identity,
             "Name": f"/{name}",
+            "Created": "1970-01-01T00:00:00.123456789Z",
             "State": {"Status": "created", "Error": ""},
             "HostConfig": {
                 "NetworkMode": mode or networks[0],
@@ -360,6 +361,23 @@ def test_each_network_is_inspected_once_per_tick(tmp_path: Path) -> None:
     daemon, reconciler, clock, _, _ = fleet(tmp_path)
     ticks(reconciler, clock, 1)
     assert sorted(daemon.network_reads) == sorted(daemon.networks)
+
+
+def test_container_left_created_by_an_aborted_up_is_started_after_the_grace(
+    tmp_path: Path,
+) -> None:
+    """Catches Created containers with a restart policy that nothing ever starts."""
+    daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
+    daemon.stop(caddy)
+    record = daemon.containers[caddy]
+    record["State"]["Status"] = "created"
+    record["Created"] = "1970-01-12T13:46:40.987654321Z"  # = clock.now
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == [] and not daemon.running(caddy)
+    clock.now += janitor.CREATED_GRACE
+    ticks(reconciler, clock, 1)
+    assert daemon.mutations == [("start", caddy)]
+    assert daemon.running(caddy)
 
 
 def test_stop_that_times_out_after_the_daemon_stopped_is_started_later(

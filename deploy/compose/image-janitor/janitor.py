@@ -22,6 +22,7 @@ import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
@@ -41,6 +42,9 @@ COMPOSE_SERVICES = frozenset(
 # older list, still runs; only containers older than this process are retired.
 STARTED = time.time()
 GRACE = 24 * INTERVAL
+# Compose starts a container it just created within moments; one still Created
+# after this long was abandoned (an aborted `up`).
+CREATED_GRACE = 10 * NETWORK_INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
 # "hermes" is a retired service; it stays listed so its old image is reclaimed.
 REPOSITORIES = frozenset(
@@ -324,6 +328,12 @@ class Network:
         return cls(str(row["Id"]), frozenset(row.get("Containers") or {}))
 
 
+def created_at(stamp: str) -> float:
+    """Docker's RFC 3339 creation time (nanoseconds) as epoch seconds."""
+    trimmed = re.sub(r"(\.\d{1,6})\d*Z\Z", r"\1Z", stamp)
+    return datetime.fromisoformat(trimmed).timestamp()
+
+
 class Action(StrEnum):
     NONE = "none"
     REATTACH = "reattach"
@@ -341,6 +351,7 @@ class Container:
     error: str
     policy: str
     mode: str
+    created: float
     # Network name -> (recorded network ID, recorded aliases).
     networks: dict[str, tuple[str, tuple[str, ...]]]
 
@@ -363,6 +374,7 @@ class Container:
             error=str(row["State"].get("Error") or ""),
             policy=str(row["HostConfig"]["RestartPolicy"]["Name"]),
             mode=str(row["HostConfig"]["NetworkMode"]),
+            created=created_at(row["Created"]),
             networks=networks,
         )
 
@@ -420,7 +432,9 @@ def decide(
         return Action.WAIT_NETWORK
     if broken:
         planned = Action.REATTACH
-    elif should_run(container, pending) and container.state != State.RUNNING:
+    elif container.state != State.RUNNING and (
+        should_run(container, pending) or abandoned(container, now)
+    ):
         planned = Action.START
     else:
         return Action.NONE
@@ -434,6 +448,16 @@ def should_run(container: Container, pending: Pending | None) -> bool:
         container.state == State.RUNNING
         or (pending is not None and pending.start)
         or (bool(container.error) and container.policy in set(Policy))
+    )
+
+
+def abandoned(container: Container, now: float) -> bool:
+    # Created, never started, no error: the restart policy never fires for it.
+    return (
+        container.state == State.CREATED
+        and not container.error
+        and container.policy in set(Policy)
+        and now - container.created >= CREATED_GRACE
     )
 
 
