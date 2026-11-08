@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field, model_validator
 from vonk_forge_contracts import EndpointAlias
@@ -203,13 +203,29 @@ class OpenAiRequestParameter(StrEnum):
     VOICE = "voice"
 
 
-class VonkReasoningEffort(_ConfigModel):
-    """Where a request sets the reasoning effort, and the levels it accepts."""
+class VonkReasoningEffortLevels(_ConfigModel):
+    """The request names one of ``levels`` at ``key``; ``default`` applies when it names none."""
 
+    kind: Literal["levels"]
     via: RequestPlacement
     key: str
     levels: list[str] = Field(min_length=1)
     default: str
+
+
+class VonkReasoningEffortText(_ConfigModel):
+    """The route takes any string at ``key``; ``default`` None leaves it to the checkpoint."""
+
+    kind: Literal["text"]
+    via: RequestPlacement
+    key: str
+    # The published entry omits every null, so an absent default reads as None.
+    default: str | None = None
+
+
+VonkReasoningEffort = Annotated[
+    VonkReasoningEffortLevels | VonkReasoningEffortText, Field(discriminator="kind")
+]
 
 
 class VonkThinking(_ConfigModel):

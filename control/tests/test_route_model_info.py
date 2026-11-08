@@ -151,6 +151,8 @@ def test_the_reasoning_effort_name_is_standard_only_at_top_level() -> None:
     assert OpenAiRequestParameter.REASONING_EFFORT not in info.supported_openai_params
     assert info.vonk_reasoning_effort is not None
     assert info.vonk_reasoning_effort.via == "chat_template_kwargs"
+    assert info.reasoning_effort_levels is None
+    assert info.default_reasoning_effort is None
 
 
 def test_max_tokens_is_the_output_cap() -> None:

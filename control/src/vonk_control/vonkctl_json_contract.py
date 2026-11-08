@@ -347,7 +347,8 @@ def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
 
     A removed property, a ``required`` list that grew, a changed ``type`` or a
     shorter alternative list all need a new ``schema_version``; added
-    properties and added alternatives do not.
+    properties and added alternatives do not. A ``$ref`` that became a
+    ``oneOf``/``anyOf`` of references is an added alternative, not a removal.
     """
 
     problems: list[str] = []
@@ -357,6 +358,11 @@ def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
             if key not in new:
                 if path.endswith("/properties"):
                     problems.append(f"{where}: property removed")
+                elif key == "$ref" and ("oneOf" in new or "anyOf" in new):
+                    # A reference that became a union of references (a type
+                    # that gained a member) keeps its old shape as a member;
+                    # the alternatives are compared where they sit.
+                    pass
                 elif key in ("type", "const", "$ref"):
                     problems.append(f"{where}: removed")
                 continue

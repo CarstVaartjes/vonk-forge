@@ -348,6 +348,15 @@ def test_a_changed_schema_needs_a_new_version() -> None:
         )
         == []
     )
+    # A reference that became a union of references is an added alternative.
+    reference = {"properties": {"a": {"$ref": "#/$defs/One"}}}
+    union = {
+        "properties": {
+            "a": {"oneOf": [{"$ref": "#/$defs/One"}, {"$ref": "#/$defs/Two"}]}
+        }
+    }
+    assert incompatibilities(reference, union) == []
+    assert incompatibilities(reference, {"properties": {"a": {"type": "null"}}})
     # Removing a property, requiring more, or changing a type does not.
     assert incompatibilities(
         base, {"properties": {"a": {"type": "string"}}, "required": ["a"]}
