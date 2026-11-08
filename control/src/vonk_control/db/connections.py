@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import (
     DBAPIError,
@@ -207,18 +207,51 @@ def run_with_database_startup_retry[T](
             delay = min(delay * 2, 10.0)
 
 
-def wait_for_database(database_url: str) -> None:
-    """Wait for one bounded, authenticated PostgreSQL connection."""
+#: SQLSTATEs that mean the API has not finished this image's schema: a mapped
+#: table or column is absent, or the upgrade holds the table (lock, deadlock).
+_SCHEMA_OWNER_AT_WORK = frozenset({"42P01", "42703", "55P03", "40P01"})
+
+
+def wait_for_database(
+    database_url: str,
+    *,
+    timeout_seconds: float = _DATABASE_STARTUP_TIMEOUT_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait until PostgreSQL answers and carries every table and column mapped here.
+
+    The API owns schema creation and reconciliation and starts beside the
+    worker, not before it: while the owner is still at work startup waits
+    within the same bounded deadline. Any other refusal stays fatal.
+    """
+    from ..models import Base
 
     def connect_once() -> None:
         engine = build_engine(database_url)
         try:
             with engine.connect() as connection:
-                connection.execute(text("SELECT 1"))
+                # One statement per transaction: the probe never keeps a lock
+                # while it waits for the next table, so it cannot deadlock the
+                # API's schema upgrade.
+                connection.execution_options(isolation_level="AUTOCOMMIT")
+                for table in Base.metadata.sorted_tables:
+                    connection.execute(select(*table.columns).limit(0))
+        except DBAPIError as error:
+            if _database_sqlstate(error) not in _SCHEMA_OWNER_AT_WORK:
+                raise
+            raise _DatabaseStartupContention(
+                "Controller schema is not current yet "
+                f"({_driver_detail(error)}); the API owns it"
+            ) from None
         finally:
             engine.dispose()
 
-    run_with_database_startup_retry(connect_once, label="PostgreSQL")
+    run_with_database_startup_retry(
+        connect_once,
+        timeout_seconds=timeout_seconds,
+        sleep=sleep,
+        label="PostgreSQL",
+    )
 
 
 def upgrade_schema(

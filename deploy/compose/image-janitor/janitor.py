@@ -22,6 +22,7 @@ import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
@@ -41,6 +42,9 @@ COMPOSE_SERVICES = frozenset(
 # older list, still runs; only containers older than this process are retired.
 STARTED = time.time()
 GRACE = 24 * INTERVAL
+# Compose starts a container it just created within moments; one still Created
+# after this long was abandoned (an aborted `up`).
+CREATED_GRACE = 10 * NETWORK_INTERVAL
 SOURCE = "https://github.com/CarstVaartjes/vonk-forge"
 # "hermes" is a retired service; it stays listed so its old image is reclaimed.
 REPOSITORIES = frozenset(
@@ -75,6 +79,8 @@ class Reason(StrEnum):
     BACKOFF_WAIT = "repair-backoff"
     NETWORK_REPAIRED = "network-reattached"
     START_RETRIED = "start-retried"
+    CREATED_WAIT = "created-grace-wait"
+    CREATED_STARTED = "abandoned-created-started"
     REPAIR_FAILED = "network-repair-failed"
     NO_PROJECT = "not-in-a-compose-project"
     RETIRED = "retired-service-container-removed"
@@ -331,6 +337,7 @@ class Action(StrEnum):
     WAIT_STATE = "wait-state"
     WAIT_NETWORK = "wait-network"
     WAIT_BACKOFF = "wait-backoff"
+    WAIT_CREATED = "wait-created"
 
 
 @dataclass(frozen=True)
@@ -341,6 +348,9 @@ class Container:
     error: str
     policy: str
     mode: str
+    # State.StartedAt: tells a restarted container from the one inspected.
+    started: str
+    created: float
     # Network name -> (recorded network ID, recorded aliases).
     networks: dict[str, tuple[str, tuple[str, ...]]]
 
@@ -363,6 +373,8 @@ class Container:
             error=str(row["State"].get("Error") or ""),
             policy=str(row["HostConfig"]["RestartPolicy"]["Name"]),
             mode=str(row["HostConfig"]["NetworkMode"]),
+            started=str(row["State"].get("StartedAt") or ""),
+            created=datetime.fromisoformat(row["Created"]).timestamp(),
             networks=networks,
         )
 
@@ -420,7 +432,11 @@ def decide(
         return Action.WAIT_NETWORK
     if broken:
         planned = Action.REATTACH
-    elif should_run(container, pending) and container.state != State.RUNNING:
+    elif container.state != State.RUNNING and should_run(container, pending):
+        planned = Action.START
+    elif abandoned(container):
+        if now < container.created + CREATED_GRACE:
+            return Action.WAIT_CREATED
         planned = Action.START
     else:
         return Action.NONE
@@ -434,6 +450,15 @@ def should_run(container: Container, pending: Pending | None) -> bool:
         container.state == State.RUNNING
         or (pending is not None and pending.start)
         or (bool(container.error) and container.policy in set(Policy))
+    )
+
+
+def abandoned(container: Container) -> bool:
+    # Created, never started, no error: the restart policy never fires for it.
+    return (
+        container.state == State.CREATED
+        and not container.error
+        and container.policy in set(Policy)
     )
 
 
@@ -597,24 +622,41 @@ class Reconciler:
             network = networks[name]
             if network is None:
                 return None
-            recorded = container.networks.get(name, ("", ()))[0]
-            if (
-                name in owed
-                or (recorded and recorded != network.identity)
-                or (
-                    container.state == State.RUNNING
-                    and container.identity not in network.members
-                )
-            ):
+            if name not in owed and self.detached(container, name, network):
+                # The snapshot is shared by the tick and may predate this
+                # container joining; condemn only on a fresh read, and only if
+                # the container is still in the state it was observed in.
+                network = networks[name] = Network.inspect(self.docker, name)
+                if network is None:
+                    return None
+                if not (
+                    self.detached(container, name, network) and self.observed(container)
+                ):
+                    continue
+            if name in owed or self.detached(container, name, network):
                 broken.append(name)
         return broken
 
+    @staticmethod
+    def detached(container: Container, name: str, network: Network) -> bool:
+        recorded = container.networks.get(name, ("", ()))[0]
+        return bool(recorded and recorded != network.identity) or (
+            container.state == State.RUNNING
+            and container.identity not in network.members
+        )
+
+    def observed(self, container: Container) -> bool:
+        """The container is still in the state `container` was inspected in."""
+        now = Container.inspect(self.docker, container.identity)
+        return (now.state, now.started) == (container.state, container.started)
+
     def repair(self, container: Container, networks: dict[str, Network | None]) -> None:
-        if not container.own_networks:
-            return
         identity, now = container.identity, self.clock()
         pending = self.pending().get(identity)
-        broken = self.broken(container, pending, networks)
+        # A shared-namespace container has no networks of its own to repair.
+        broken = (
+            self.broken(container, pending, networks) if container.own_networks else []
+        )
         keys = [(identity, network) for network in broken or [""]]
         action = decide(
             container,
@@ -633,6 +675,13 @@ class Reconciler:
         if action == Action.WAIT_NETWORK:
             log(Reason.NETWORK_WAIT, container=container.name)
             return
+        if action == Action.WAIT_CREATED:
+            log(
+                Reason.CREATED_WAIT,
+                container=container.name,
+                next_attempt=container.created + CREATED_GRACE,
+            )
+            return
         if action == Action.WAIT_BACKOFF:
             log(
                 Reason.BACKOFF_WAIT,
@@ -648,12 +697,19 @@ class Reconciler:
         if action == Action.START:
             self.docker.request("POST", f"{target}/start")
             self.record(identity, None)
-            log(
-                Reason.START_RETRIED,
-                container=container.name,
-                previous_error=container.error,
-                next_attempt_if_unhealed=next_attempt,
-            )
+            if start:
+                log(
+                    Reason.START_RETRIED,
+                    container=container.name,
+                    previous_error=container.error,
+                    next_attempt_if_unhealed=next_attempt,
+                )
+            else:
+                log(
+                    Reason.CREATED_STARTED,
+                    container=container.name,
+                    next_attempt_if_unhealed=next_attempt,
+                )
             return
         # Journalled before the first effect, so a janitor that dies mid-way
         # leaves the next one the rest. A running container cannot leave a

@@ -358,3 +358,131 @@ def test_startup_log_names_the_exception_when_the_driver_message_is_empty(
     log = _startup_log(OperationalError("connect", {}, ConnectionResetError()), capsys)
 
     assert "ConnectionResetError" in log
+
+
+def test_worker_database_wait_holds_until_the_api_commits_the_schema(
+    postgres_engine, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Catches a worker that starts on an empty database and crashes instead."""
+    from vonk_control import db
+    from vonk_control.models import Base
+
+    sleeps: list[float] = []
+
+    def api_commits_schema_while_worker_waits(seconds: float) -> None:
+        sleeps.append(seconds)
+        Base.metadata.create_all(postgres_engine)
+
+    db.wait_for_database(
+        postgres_engine.url.render_as_string(hide_password=False),
+        timeout_seconds=30,
+        sleep=api_commits_schema_while_worker_waits,
+    )
+
+    assert len(sleeps) == 1
+    assert "schema is not current yet" in capsys.readouterr().err
+
+
+def test_worker_database_wait_needs_every_mapped_column(postgres_engine) -> None:
+    """Catches a worker that runs on a schema the API has not reconciled yet."""
+    from vonk_control import db
+    from vonk_control.models import Base
+
+    Base.metadata.create_all(postgres_engine)
+    with postgres_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE control_process_heartbeats DROP COLUMN step_started_at"
+        )
+
+    with pytest.raises(RuntimeError, match="schema is not current yet"):
+        db.wait_for_database(
+            postgres_engine.url.render_as_string(hide_password=False),
+            timeout_seconds=0,
+            sleep=lambda _seconds: None,
+        )
+
+
+def test_worker_database_wait_never_deadlocks_the_api_schema_upgrade(
+    postgres_engine,
+) -> None:
+    """Catches a probe that keeps read locks while the API alters its tables.
+
+    The API's upgrade holds one table while it alters another the probe has
+    already read. A probe in one transaction would hold that read and deadlock
+    the upgrade; one statement per transaction lets the upgrade go on.
+    """
+    import threading
+    import time
+
+    from sqlalchemy import text
+    from vonk_control import db
+    from vonk_control.models import Base
+
+    Base.metadata.create_all(postgres_engine)
+    first, last = Base.metadata.sorted_tables[0], Base.metadata.sorted_tables[-1]
+    failures: list[BaseException] = []
+    retries: list[float] = []
+
+    def worker() -> None:
+        try:
+            db.wait_for_database(
+                postgres_engine.url.render_as_string(hide_password=False),
+                timeout_seconds=30,
+                sleep=retries.append,
+            )
+        except BaseException as error:  # noqa: BLE001 - reported to the test
+            failures.append(error)
+
+    observer = postgres_engine.execution_options(isolation_level="AUTOCOMMIT")
+    with postgres_engine.connect() as upgrade, observer.connect() as watch:
+        upgrade.exec_driver_sql("SET lock_timeout = '5s'")
+        upgrade.exec_driver_sql(f"ALTER TABLE {last.name} ADD COLUMN upgrade_b int")
+        probe = threading.Thread(target=worker, daemon=True)
+        probe.start()
+        for _attempt in range(200):
+            if watch.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() "
+                    "AND application_name = 'vonk:control' "
+                    "AND wait_event_type = 'Lock'"
+                )
+            ):
+                break
+            time.sleep(0.05)
+        else:
+            pytest.fail("the probe never reached the table the upgrade holds")
+        # The probe already read the first table; the upgrade alters it now.
+        upgrade.exec_driver_sql(f"ALTER TABLE {first.name} ADD COLUMN upgrade_a int")
+        upgrade.commit()
+    probe.join(timeout=30)
+
+    assert not probe.is_alive()
+    assert failures == []
+    # Neither side was a deadlock victim: the probe simply waited for the lock.
+    assert retries == []
+
+
+def test_worker_database_wait_keeps_other_refusals_fatal(monkeypatch) -> None:
+    """Catches a wait that retries a permission refusal as if schema were late."""
+    from sqlalchemy.exc import ProgrammingError
+
+    class _PermissionDenied(Exception):
+        sqlstate = "42501"
+
+    class _Engine:
+        def connect(self):
+            raise ProgrammingError("SELECT", {}, _PermissionDenied("denied"))
+
+        def dispose(self) -> None:
+            pass
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(connection_owner, "build_engine", lambda _url: _Engine())
+
+    with pytest.raises(ProgrammingError):
+        connection_owner.wait_for_database(
+            "postgresql+psycopg://control@postgres/control", sleep=sleeps.append
+        )
+
+    assert sleeps == []

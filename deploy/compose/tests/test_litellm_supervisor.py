@@ -9,6 +9,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -16,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SUPERVISOR = ROOT / "deploy/compose/litellm/config_supervisor.py"
 
 
-def _module():
+def _module() -> Any:
     sys.path.insert(0, str(ROOT / "agent_protocol/src/vonk_agent_protocol"))
     spec = importlib.util.spec_from_file_location(
         "litellm_config_supervisor", SUPERVISOR
@@ -500,6 +501,7 @@ def _live_child(pid: int):
     class LiveChild:
         returncode = None
         terminated = False
+        pid = 0
 
         def poll(self):
             return self.returncode
@@ -619,7 +621,7 @@ def test_compose_initializes_route_volume_for_unprivileged_control_worker() -> N
         "SETGID",
     }
     assert services["control-worker"]["depends_on"]["control-api"] == {
-        "condition": "service_healthy",
+        "condition": "service_started",
         "required": True,
     }
     assert services["litellm"]["depends_on"]["control-api"] == {

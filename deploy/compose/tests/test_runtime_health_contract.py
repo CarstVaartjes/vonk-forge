@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -93,12 +94,59 @@ def test_every_default_service_has_a_service_specific_readiness_probe() -> None:
         assert not any(token in command for token in process_only), name
 
 
-def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
-    """Catches service-started/completed dependencies and readiness cycles.
+def _seconds(duration: str) -> float:
+    units = {"h": 3600, "m": 60, "s": 1}
+    return sum(
+        float(value) * units[unit]
+        for value, unit in re.findall(r"([0-9.]+)([hms])", duration)
+    )
 
-    The one exception: consumers of the Controller-staged runtime assets depend
-    on the Controller only to restart with it, never to wait for its health.
+
+def test_worker_health_grace_covers_its_startup_waits() -> None:
+    """Catches a worker marked unhealthy while it still waits for the API.
+
+    The worker waits for the API-staged secret and then for the API-owned
+    schema, each within the startup budget; one probe may overrun it by a lock
+    wait. `compose up --wait` must not see that wait as a failure.
     """
+    from vonk_control.db.constants import _DATABASE_STARTUP_TIMEOUT_SECONDS
+    from vonk_control.settings import DATABASE_WAIT_BUDGETS
+
+    healthcheck = _rendered()["services"]["control-worker"]["healthcheck"]
+    waits = (
+        2 * _DATABASE_STARTUP_TIMEOUT_SECONDS
+        + DATABASE_WAIT_BUDGETS.lock_timeout_ms / 1000
+    )
+    assert _seconds(healthcheck["start_period"]) > waits
+
+
+def test_dependencies_only_order_startup_and_are_acyclic() -> None:
+    """Catches a required healthy/completed edge that aborts `compose up`.
+
+    Compose aborts dependents when a required service_healthy or
+    service_completed_successfully dependency is unhealthy or exited, leaving
+    them Created forever (restart policies never act on never-started
+    containers). Every dependent waits or crash-restarts itself instead.
+
+    Scope: this covers compose dependency edges only. Namespace/volume joins
+    (see test_joins_on_restartable_services_are_explicitly_allowed) and
+    outright dependency start failures (e.g. a port bind) can still leave a
+    container Created; the image-janitor's Created-start net (PR #2166)
+    starts those after CREATED_GRACE.
+    """
+    for selection in (True, False):
+        services = _rendered(secure_remote=selection)["services"]
+        assert isinstance(services, dict)
+        for name, service in services.items():
+            assert isinstance(service, dict)
+            for dependency_name, dependency in service.get("depends_on", {}).items():
+                if dependency.get("required") is False:
+                    continue
+                assert dependency["condition"] == "service_started", (
+                    name,
+                    dependency_name,
+                )
+
     services = _rendered()["services"]
     assert isinstance(services, dict)
     graph: dict[str, set[str]] = {}
@@ -107,18 +155,6 @@ def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
         dependencies = service.get("depends_on", {})
         assert isinstance(dependencies, dict)
         graph[name] = set(dependencies)
-        for dependency_name, dependency in dependencies.items():
-            assert isinstance(dependency, dict)
-            if dependency_name == "control-api" and dependency["condition"] != (
-                "service_healthy"
-            ):
-                assert dependency == {
-                    "condition": "service_started",
-                    "required": False,
-                    "restart": True,
-                }, name
-                continue
-            assert dependency["condition"] == "service_healthy"
 
     def visit(name: str, path: tuple[str, ...]) -> None:
         assert name not in path, " -> ".join(path + (name,))
@@ -128,6 +164,41 @@ def test_health_dependencies_are_acyclic_and_wait_only_for_readiness() -> None:
 
     for service_name in graph:
         visit(service_name, ())
+
+
+# A join (network namespace, container, volumes_from) is refused by the daemon
+# while the target is restarting, which leaves the joiner Created; compose
+# edges cannot prevent that. Each allowed joiner needs a reason.
+ALLOWED_JOINS = {
+    "tailscale-configurator": (
+        "image-janitor starts Created containers after CREATED_GRACE, "
+        "including shared-network ones (PR #2166)"
+    ),
+}
+
+
+def test_joins_on_restartable_services_are_explicitly_allowed() -> None:
+    """Catches an undocumented join on a service that restarts."""
+    for selection in (True, False):
+        services = _rendered(secure_remote=selection)["services"]
+        for name, service in services.items():
+            joins: list[str] = []
+            mode = str(service.get("network_mode", ""))
+            for prefix in ("service:", "container:"):
+                if mode.startswith(prefix):
+                    joins.append(mode.removeprefix(prefix))
+            for entry in service.get("volumes_from", []):
+                joins.append(str(entry).split(":")[0].removeprefix("container:"))
+            for target in joins:
+                restartable = (
+                    target not in services
+                    or services[target].get("restart", "no") != "no"
+                )
+                if restartable:
+                    assert ALLOWED_JOINS.get(name), (
+                        name,
+                        target,
+                    )
 
 
 def test_tailscale_browser_forwarding_crosses_only_an_internal_edge() -> None:

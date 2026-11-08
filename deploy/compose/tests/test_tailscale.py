@@ -330,14 +330,14 @@ def test_configurator_has_no_profile_dependency() -> None:
     assert configurator["restart"] == "unless-stopped"
     assert not configurator.get("environment")
     assert configurator["depends_on"] == {
-        "caddy": {"condition": "service_healthy", "required": True, "restart": True},
+        "caddy": {"condition": "service_started", "required": True, "restart": True},
         "control-api": {
             "condition": "service_started",
             "required": False,
             "restart": True,
         },
         "tailscale-gateway": {
-            "condition": "service_healthy",
+            "condition": "service_started",
             "required": True,
             "restart": True,
         },

@@ -231,3 +231,42 @@ def test_ca_identity_is_reread_after_the_public_key_is_repaired(secrets_root):
     assert settings.agent_ca_provisioner_kid == "old-key"
     jwk.write_text(json.dumps({"kid": "repaired-key"}))
     assert settings.agent_ca_provisioner_kid == "repaired-key"
+
+
+def test_worker_waits_for_the_api_to_stage_its_database_secret(
+    secrets_root: Path,
+) -> None:
+    """Catches a worker that reads the staged secret before the API wrote it."""
+    secret = secrets_root / "database-url"
+    staged = secret.read_text()
+    secret.unlink()
+    sleeps: list[float] = []
+
+    def api_stages_while_worker_waits(seconds: float) -> None:
+        sleeps.append(seconds)
+        secret.write_text(staged)
+
+    settings_module.wait_for_staged_secret(
+        "database-url",
+        attempts=120,
+        root=secrets_root,
+        sleep=api_stages_while_worker_waits,
+    )
+
+    assert sleeps == [1.0]
+    assert Settings.from_env_and_secrets().database_url.startswith("postgresql")
+
+
+def test_a_secret_never_staged_still_fails_closed_after_the_wait(
+    secrets_root: Path,
+) -> None:
+    (secrets_root / "database-url").unlink()
+    sleeps: list[float] = []
+
+    settings_module.wait_for_staged_secret(
+        "database-url", root=secrets_root, attempts=3, sleep=sleeps.append
+    )
+
+    assert sleeps == [1.0, 1.0, 1.0]
+    with pytest.raises(SettingsError, match="missing"):
+        Settings.from_env_and_secrets()

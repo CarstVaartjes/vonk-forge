@@ -1103,7 +1103,12 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from .agent_jobs import AgentJobService
-    from .db import build_engine, session_factory, wait_for_database
+    from .db import (
+        _DATABASE_STARTUP_TIMEOUT_SECONDS,
+        build_engine,
+        session_factory,
+        wait_for_database,
+    )
     from .execution_plan_service import ControllerExecutionPlanService
     from .logging import configure_controller_logging
     from .model_cache import ModelCacheService
@@ -1134,6 +1139,7 @@ if __name__ == "__main__":
         WORKER_MEMORY_TRACE_RSS_BYTES,
         WORKER_MEMORY_TRACE_WINDOW_SECONDS,
         Settings,
+        wait_for_staged_secret,
     )
     from .worker_memory import (
         LinuxProcessProbe,
@@ -1145,6 +1151,11 @@ if __name__ == "__main__":
 
     configure_controller_logging()
     capabilities = CapabilityRegistry()
+    # The API starts beside this worker and owns what it reads first: the
+    # staged database URL and the schema. Wait for both instead of crashing.
+    wait_for_staged_secret(
+        "database-url", attempts=int(_DATABASE_STARTUP_TIMEOUT_SECONDS)
+    )
     settings = Settings.from_env_and_secrets()
     wait_for_database(settings.database_url)
     engine = build_engine(settings.database_url, component="worker")
