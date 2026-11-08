@@ -46,7 +46,6 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 _REFERENCE = "#/components/schemas/"
 _OPENAPI_MEMBER = "cluster_profiles/schemas/control-openapi.json"
-_ORIGIN = "https://install.vonkforge.ai"
 
 
 class _Read(BaseModel):
@@ -361,6 +360,7 @@ def breaks(prior: JsonValue, candidate: JsonValue) -> list[str]:
 def _published_contract(channel: str) -> tuple[str, JsonValue]:
     """The OpenAPI inside the accepted signed CLI wheel of ``channel``."""
     from cluster_profiles.cli_update import (
+        _NOTICE_ORIGIN,
         INSTALLER_PUBLIC_KEY,
         CliUpdateIngressError,
         _download,
@@ -370,7 +370,7 @@ def _published_contract(channel: str) -> tuple[str, JsonValue]:
     release, base = _signed_release(
         channel=channel,
         public_key=INSTALLER_PUBLIC_KEY,
-        origin=_ORIGIN,
+        origin=_NOTICE_ORIGIN,
         download=_download,
     )
     artifact = release["artifacts"]["cli-wheel"]  # type: ignore[index]

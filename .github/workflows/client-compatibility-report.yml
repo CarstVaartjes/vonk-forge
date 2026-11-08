@@ -13,7 +13,8 @@ on:
       - 'scripts/generate-control-clients'
       - 'control/packaging/public-contracts.lock'
       - 'inventory/wheels/vonk_forge_public_contracts-*.whl'
-      - 'control/src/vonk_control/**/*contract*'
+      - 'control/src/**'
+      - 'agent_protocol/**'
       - 'src/cluster_profiles/control_client/**'
 
 permissions:
