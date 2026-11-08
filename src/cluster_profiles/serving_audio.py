@@ -9,74 +9,35 @@ route answers. The recipe contract (``RecipeMultipartServingRequest``,
 from __future__ import annotations
 
 import secrets
-import struct
 from collections.abc import Mapping
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-#: ``speech.audio`` asks for at least this much decoded audio.
-MIN_SPEECH_SECONDS = 0.5
-_RIFF_HEADER = 12
-_CHUNK_HEADER = 8
-_FMT_MINIMUM = 16
+if TYPE_CHECKING:
+    from vonk_forge_contracts.recipe import WavFacts
 
 
 class AudioCheckError(ValueError):
     """The declared audio request cannot be built, or the answer is not audio."""
 
 
-@dataclass(frozen=True, slots=True)
-class WavAudio:
-    sample_rate: int
-    channels: int
-    frames: int
+def assert_speech(headers: Mapping[str, str], body: bytes) -> WavFacts:
+    """``speech.audio``: an ``audio/*`` response that decodes to enough samples.
 
-    @property
-    def seconds(self) -> float:
-        return self.frames / self.sample_rate
-
-
-def read_wav(body: bytes) -> WavAudio:
-    """The format and length of a RIFF/WAVE body with ``fmt `` and ``data`` chunks.
-
-    A ``data`` size that overruns the body (a streamed WAV with a placeholder
-    size) counts the bytes that are there.
+    The WAV reader and the minimum length are the recipe contract's own.
     """
 
-    if len(body) < _RIFF_HEADER or body[:4] != b"RIFF" or body[8:12] != b"WAVE":
-        raise AudioCheckError("the response is not a RIFF/WAVE file")
-    fmt: tuple[int, int, int] | None = None
-    offset = _RIFF_HEADER
-    while offset + _CHUNK_HEADER <= len(body):
-        name = body[offset : offset + 4]
-        (size,) = struct.unpack_from("<I", body, offset + 4)
-        start = offset + _CHUNK_HEADER
-        if name == b"fmt ":
-            if size < _FMT_MINIMUM or start + _FMT_MINIMUM > len(body):
-                raise AudioCheckError("the WAV fmt chunk is truncated")
-            _tag, channels, rate, _rate_bytes, align, _bits = struct.unpack_from(
-                "<HHIIHH", body, start
-            )
-            fmt = (channels, rate, align)
-        elif name == b"data":
-            if fmt is None:
-                raise AudioCheckError("the WAV data chunk precedes its fmt chunk")
-            channels, rate, align = fmt
-            if channels < 1 or rate < 1 or align < 1:
-                raise AudioCheckError("the WAV fmt chunk is invalid")
-            return WavAudio(rate, channels, min(size, len(body) - start) // align)
-        offset = start + size + (size & 1)
-    raise AudioCheckError("the WAV has no fmt and data chunks")
-
-
-def assert_speech(headers: Mapping[str, str], body: bytes) -> WavAudio:
-    """``speech.audio``: an ``audio/*`` response that decodes to enough samples."""
+    # Imported here: the platform's CLI imports this package without the recipe
+    # contracts, which only a recipe's own checks need.
+    from vonk_forge_contracts.recipe import MIN_SPEECH_SECONDS, wav_facts
 
     content_type = next(
         (value for key, value in headers.items() if key.lower() == "content-type"), ""
     )
     if not content_type.split(";", 1)[0].strip().lower().startswith("audio/"):
         raise AudioCheckError(f"the response content type is {content_type!r}")
-    audio = read_wav(body)
+    audio = wav_facts(body)
+    if audio is None:
+        raise AudioCheckError("the response is not a decodable WAV")
     if audio.seconds < MIN_SPEECH_SECONDS:
         raise AudioCheckError(
             f"the response holds {audio.seconds:.2f} s of audio, under "

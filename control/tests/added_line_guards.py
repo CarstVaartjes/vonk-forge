@@ -15,6 +15,7 @@ from typing import TypeGuard
 from . import (
     alias_rules,
     bare_savepoints,
+    contract_constant_copies,
     docker_listings,
     fixture_closures,
     git_free_test_lines,
@@ -114,6 +115,7 @@ MODES = (
     "git-free-tests",
     "job-owner-payload",
     "fixture-closures",
+    "contract-constants",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2359,6 +2361,11 @@ def check_source(
                 if is_test
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
+        )
+    if python and not is_test and "contract-constants" in modes:
+        hits.extend(
+            (line, contract_constant_copies.KIND)
+            for line in contract_constant_copies.scan_source(path, source)
         )
     if python and "fixture-closures" in modes:
         hits.extend(

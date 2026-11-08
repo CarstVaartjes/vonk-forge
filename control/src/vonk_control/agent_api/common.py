@@ -95,9 +95,6 @@ _CANONICAL_UUID = re.compile(
 )
 
 
-_IDENTIFIER_TEXT = r"^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$"
-
-
 _LIVE_OPERATION_STATES = frozenset({"queued", "running"})
 
 
