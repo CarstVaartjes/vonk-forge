@@ -311,8 +311,7 @@ class ControlClient:
         ):
             return
         raise ControlContractMismatch(
-            f"{error}; this vonkctl and the Controller run different control "
-            "contracts",
+            f"{error}; this vonkctl and the Controller run different control contracts",
             context=replace(context, code=ClientCode.CONTRACT_MISMATCH),
         ) from None
 
