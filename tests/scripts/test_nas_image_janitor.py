@@ -368,7 +368,6 @@ def test_container_left_created_by_an_aborted_up_is_started_after_the_grace(
 ) -> None:
     """Catches Created containers with a restart policy that nothing ever starts."""
     daemon, reconciler, clock, caddy, _ = fleet(tmp_path)
-    daemon.stop(caddy)
     record = daemon.containers[caddy]
     record["State"]["Status"] = "created"
     record["Created"] = "1970-01-12T13:46:40.987654321Z"  # = clock.now
