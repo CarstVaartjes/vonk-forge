@@ -269,7 +269,7 @@ services:
   # the volume keeps the last release, so the gateway keeps serving while the
   # Controller is down.
   caddy:
-    image: caddy:2.11.7@sha256:3095ad245c353e3bdb27a38f22a095c1cfa9e295ab21c0214c3e72b0e2960525
+    image: caddy:2.11.8@sha256:4fcafa98afd1c2e642e353e3c5cf9ddbe892fcee14bc990e7ba2c5b78e51f9cf
     restart: unless-stopped
     logging: *bounded-logging
     read_only: true
