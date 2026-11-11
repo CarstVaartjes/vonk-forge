@@ -135,50 +135,65 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
     digest_column = CatalogDocumentRevision.projected[
         "source_bundle_sha256"
     ].as_string()
+    package_column = CatalogDocumentRevision.projected[
+        ("package_handle", "package_sha256")
+    ].as_string()
+    candidates: dict[str, list[str]] = {}
     with self._sessions() as session:
-        # Only the id and the bundle digest: no document, no re-validation.
-        # One representative revision per digest; same digest, same bytes.
-        representatives = {
-            digest: revision_id
-            for digest, revision_id in session.execute(
-                select(digest_column, func.min(CatalogDocumentRevision.id))
-                .where(
-                    CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
-                    CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
-                    digest_column.is_not(None),
-                )
-                .group_by(digest_column)
+        # Only ids and digests: no document, no re-validation. Healing reads the
+        # recipe package's closure, so one representative per (digest, package).
+        for digest, revision_id in session.execute(
+            select(digest_column, func.min(CatalogDocumentRevision.id))
+            .where(
+                CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
+                CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                digest_column.is_not(None),
             )
-        }
-    wanted = {digest for digest in representatives if _SHA256.fullmatch(digest)}
-    for digest in representatives.keys() - wanted:
+            .group_by(digest_column, package_column)
+            .order_by(digest_column, func.min(CatalogDocumentRevision.id))
+        ):
+            candidates.setdefault(digest, []).append(revision_id)
+    wanted = {digest for digest in candidates if _SHA256.fullmatch(digest)}
+    for digest in candidates.keys() - wanted:
         _LOGGER.warning("source verification pending: invalid digest %s", digest)
     repaired = False
     for digest in sorted(self._bundles.missing(wanted)):
-        revision_id = representatives[digest]
-        try:
-            with self._sessions() as session:
-                revision = session.get(CatalogDocumentRevision, revision_id)
-            if revision is None:
-                continue
-            projected = _read_recipe_projection(revision)
-            build = _canonical_build(
-                _canonical_recipe_document(revision.document), projected
-            )
-            context = build.get("context")
-            path = context.get("path") if isinstance(context, Mapping) else None
-            if self._heal_source_bundle(projected, path, digest):
-                repaired = True
-            else:
+        # Siblings differ only by package; stop at the first that heals.
+        for revision_id in candidates[digest]:
+            try:
+                if _heal_revision_source(self, revision_id, digest):
+                    repaired = True
+                    break
+            except (
+                SourceBundleError,
+                UnknownOutcomeError,
+                RecipeBuildRefused,
+            ) as error:
                 _LOGGER.warning(
-                    "source %s awaits exact catalog closure; worker retries in 30 seconds",
-                    digest,
+                    "source verification pending for revision %s: %s",
+                    revision_id,
+                    error,
                 )
-        except (SourceBundleError, UnknownOutcomeError, RecipeBuildRefused) as error:
+        else:
             _LOGGER.warning(
-                "source verification pending for revision %s: %s", revision_id, error
+                "source %s awaits exact catalog closure; worker retries in 30 seconds",
+                digest,
             )
     return repaired
+
+
+def _heal_revision_source(
+    self: RecipeBuildService, revision_id: str, digest: str
+) -> bool:
+    with self._sessions() as session:
+        revision = session.get(CatalogDocumentRevision, revision_id)
+    if revision is None:
+        return False
+    projected = _read_recipe_projection(revision)
+    build = _canonical_build(_canonical_recipe_document(revision.document), projected)
+    context = build.get("context")
+    path = context.get("path") if isinstance(context, Mapping) else None
+    return self._heal_source_bundle(projected, path, digest)
 
 
 def check_source(

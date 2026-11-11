@@ -413,13 +413,10 @@ class DatabaseSourceBundleStore:
                 .join(SourceBundleArchive)
                 .where(RecipeSourceBundle.sha256 == sha256)
             ).one_or_none()
-        if row is None or row[1] != f"postgres:{sha256}:{row[2]}":
-            raise _verification_pending()
-        try:
-            manifest = parse_source_bundle_manifest(row[0])
-        except SourceBundleError as error:
-            raise _verification_pending() from error
-        if manifest.sha256 != sha256:
+        manifest = (
+            None if row is None else _stored_manifest(sha256, row[1], row[2], row[0])
+        )
+        if row is None or manifest is None:
             raise _verification_pending()
         return manifest, row[3] if include_archive else b""
 
@@ -446,20 +443,29 @@ class DatabaseSourceBundleStore:
                 .join(SourceBundleArchive)
                 .where(RecipeSourceBundle.sha256.in_(wanted))
             ).all()
-        present: set[str] = set()
-        for sha256, storage_key, version, manifest in rows:
-            if storage_key != f"postgres:{sha256}:{version}":
-                continue
-            try:
-                if parse_source_bundle_manifest(manifest).sha256 == sha256:
-                    present.add(sha256)
-            except SourceBundleError:
-                continue
+        present = {
+            sha256
+            for sha256, storage_key, version, manifest in rows
+            if _stored_manifest(sha256, storage_key, version, manifest) is not None
+        }
         return wanted - present
 
     def get(self, sha256: str) -> GeneratedSourceBundle:
         manifest, archive = self._read(sha256, include_archive=True)
         return _generated_bundle(archive, manifest, self._limits)
+
+
+def _stored_manifest(
+    sha256: str, storage_key: str, version: str, manifest: object
+) -> SourceBundleManifest | None:
+    """The manifest when the receipt names this archive version and reads, else None."""
+    if storage_key != f"postgres:{sha256}:{version}":
+        return None
+    try:
+        parsed = parse_source_bundle_manifest(manifest)
+    except SourceBundleError:
+        return None
+    return parsed if parsed.sha256 == sha256 else None
 
 
 def _verification_pending() -> SourceBundleUnknown:

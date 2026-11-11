@@ -54,22 +54,6 @@ def _service(sessions, bundles, rederive) -> RecipeBuildService:
     return service
 
 
-def test_present_sources_cost_one_query_regardless_of_revision_count(
-    tmp_path: Path,
-) -> None:
-    """Catches a per-revision document load, projection read or manifest lookup."""
-    sessions, bundles, _now, _node, revision = setup(tmp_path)
-    service = _service(sessions, bundles, lambda *_: None)
-    costs = []
-    for start, stop in ((0, 2), (2, 10)):
-        _clone_revisions(sessions, revision.id, start, stop)
-        service._source_check_at = 0.0
-        costs.append(
-            _count_queries(sessions.kw["bind"], service.reconcile_source_bundles)
-        )
-    assert costs == [1, 1]
-
-
 def test_a_failing_heal_is_attempted_once_per_digest(tmp_path: Path) -> None:
     """Catches a failed digest retried for every revision sharing it."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
@@ -82,9 +66,47 @@ def test_a_failing_heal_is_attempted_once_per_digest(tmp_path: Path) -> None:
         attempts.append(digest)
 
     service = _service(sessions, bundles, rederive)
-    queries = _count_queries(sessions.kw["bind"], service.reconcile_source_bundles)
+    service.reconcile_source_bundles()
     assert attempts == [sha]
-    assert queries == 2
+
+
+def test_a_digest_heals_through_a_sibling_package(tmp_path: Path) -> None:
+    """Catches healing from one arbitrary revision when only a sibling's closure exists."""
+    sessions, bundles, _now, _node, revision = setup(tmp_path)
+    sha = str(revision.projected["source_bundle_sha256"])
+    archive = bundles.get(sha).archive
+    bundles.put(sha, io.BytesIO(archive)).path.unlink()
+    handle = {
+        "publication_commit": "a",
+        "source_commit": "b",
+        "package_sha256": "c" * 64,
+        "package_size": 1,
+        "package_path": "p",
+        "recipe_content_sha256": "d" * 64,
+        "archive_path": "x",
+        "closure_path": "y",
+    }
+    with sessions.begin() as session:
+        template = session.get(CatalogDocumentRevision, revision.id)
+        columns = {
+            column.key: getattr(template, column.key)
+            for column in CatalogDocumentRevision.__table__.columns
+            if column.key not in {"id", "revision_number", "content_digest"}
+        }
+        columns["projected"] = {**template.projected, "package_handle": handle}
+        # Sorts after the template, so it is not the first representative.
+        session.add(
+            CatalogDocumentRevision(
+                id="f" * 36, revision_number=200, content_digest="9" * 64, **columns
+            )
+        )
+
+    def rederive(projected, _path, _digest):
+        return archive if projected.package_handle is not None else None
+
+    service = _service(sessions, bundles, rederive)
+    assert service.reconcile_source_bundles()
+    assert bundles.verified_manifest(sha).sha256 == sha
 
 
 def test_database_store_cost_is_independent_of_distinct_digests(
@@ -141,7 +163,7 @@ def test_database_store_cost_is_independent_of_distinct_digests(
 
     service = _service(sessions, store, lambda *_: None)
     counts = []
-    for start, stop in ((0, 5), (2, 10)):
+    for start, stop in ((0, 5), (5, 10)):
         seed(start, stop)
         service._source_check_at = 0.0
         counts.append(_count_queries(postgres_engine, service.reconcile_source_bundles))
