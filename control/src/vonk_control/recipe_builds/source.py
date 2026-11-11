@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, select
+from sqlalchemy import case, func, select
 from vonk_agent_protocol import (
     LifecycleState,
     RecipeBuildCode,
@@ -132,36 +132,42 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
     if time.monotonic() < self._source_check_at:
         return False
     self._source_check_at = time.monotonic() + 30.0
+    digest_column = CatalogDocumentRevision.projected[
+        "source_bundle_sha256"
+    ].as_string()
     with self._sessions() as session:
-        revisions = list(
-            session.scalars(
-                select(CatalogDocumentRevision).where(
+        # Only the id and the bundle digest: no document, no re-validation.
+        # One representative revision per digest; same digest, same bytes.
+        representatives = {
+            digest: revision_id
+            for digest, revision_id in session.execute(
+                select(digest_column, func.min(CatalogDocumentRevision.id))
+                .where(
                     CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
                     CatalogDocumentRevision.state == ProfileDocumentState.ACTIVE.value,
+                    digest_column.is_not(None),
                 )
+                .group_by(digest_column)
             )
-        )
+        }
+    wanted = {digest for digest in representatives if _SHA256.fullmatch(digest)}
+    for digest in representatives.keys() - wanted:
+        _LOGGER.warning("source verification pending: invalid digest %s", digest)
     repaired = False
-    seen: set[str] = set()
-    for revision in revisions:
+    for digest in sorted(self._bundles.missing(wanted)):
+        revision_id = representatives[digest]
         try:
+            with self._sessions() as session:
+                revision = session.get(CatalogDocumentRevision, revision_id)
+            if revision is None:
+                continue
             projected = _read_recipe_projection(revision)
-            digest = _source_bundle_handle(projected)
-            if digest in seen:
-                continue
-            try:
-                self._bundles.verified_manifest(digest)
-                seen.add(digest)
-                continue
-            except SourceBundleUnknown:
-                pass
             build = _canonical_build(
                 _canonical_recipe_document(revision.document), projected
             )
             context = build.get("context")
             path = context.get("path") if isinstance(context, Mapping) else None
             if self._heal_source_bundle(projected, path, digest):
-                seen.add(digest)
                 repaired = True
             else:
                 _LOGGER.warning(
@@ -170,7 +176,7 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
                 )
         except (SourceBundleError, UnknownOutcomeError, RecipeBuildRefused) as error:
             _LOGGER.warning(
-                "source verification pending for revision %s: %s", revision.id, error
+                "source verification pending for revision %s: %s", revision_id, error
             )
     return repaired
 
