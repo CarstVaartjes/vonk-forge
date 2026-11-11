@@ -192,11 +192,17 @@ class _World:
                 .values(projected=pinned_projection(self._recipe))
             )
 
-    def recipe_set(self, service, state: str) -> ModelCacheSet:
-        """The set the service resolves for the recipe, as a download stores it."""
+    def recipe_set(
+        self, service, state: str, revision_id: str | None = None
+    ) -> ModelCacheSet:
+        """The set the service resolves for the recipe, as a download stores it.
+
+        ``revision_id`` is the recipe whose request cached it first; the row keeps
+        that recipe as provenance.
+        """
 
         manifest = service.resolve_artifact_set(
-            recipe_revision_id=self.recipe_revision_id
+            recipe_revision_id=revision_id or self.recipe_revision_id
         )
         row = _cache_set(
             manifest.digest,
@@ -508,7 +514,7 @@ def test_a_sibling_recipe_sharing_the_prebuilt_image_and_models_is_cached(
         "resolver-recipe": world.recipe_revision_id,
         "resolver-dual": world.sibling_revision_id,
     }
-    row = world.recipe_set(service, "cached")
+    row = world.recipe_set(service, "cached", revisions[first])
     _put_image(service, True)
     with sessions.begin() as session:
         session.add_all([row, world.build(revision_id=revisions[first])])
@@ -522,3 +528,45 @@ def test_a_sibling_recipe_sharing_the_prebuilt_image_and_models_is_cached(
             recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
         )
         assert resolution.blockers == [], slug
+
+
+@pytest.mark.parametrize("first", ["resolver-recipe", "resolver-dual"])
+def test_a_sibling_recipe_follows_the_shared_set_while_it_downloads(
+    cache,  # noqa: F811
+    first: str,
+):
+    """Cache facts follow the recipe's own artifact set, not the recipe that
+    requested it first: both recipes share the download and its progress, and
+    the finished build does not make either of them cached before the set is."""
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    revisions = {
+        "resolver-recipe": world.recipe_revision_id,
+        "resolver-dual": world.sibling_revision_id,
+    }
+    row = world.recipe_set(service, "downloading", revisions[first])
+    download = _operation(
+        row.artifact_set_sha256, kind="download", state="running", at=NOW, completed=40
+    )
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build(revision_id=revisions[first])])
+        session.flush()
+        session.add(download)
+
+    recipes = _recipes(
+        _projection(sessions, archive=service._runtime_archive_available)
+    )
+    for slug in revisions:
+        local = recipes[f"vonk-forge/{slug}"].local
+        assert local.controller == "preparing", slug
+        assert local.preparation is not None
+        assert local.preparation.operation_id == download.id, slug
+        assert local.preparation.completed_bytes == 40, slug
+        resolution = service.resolve_latest_cached(
+            recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
+        )
+        assert "model-not-cached" in resolution.blockers, slug
+

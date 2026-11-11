@@ -213,14 +213,12 @@ def _old_latest_cache_operations(digests: set[str]):
             requested,
             or_(
                 payload["model_content_sha256"].as_string() == requested.c.digest,
-                payload["recipe_revision_sha256"].as_string() == requested.c.digest,
                 select(ModelCacheSet.artifact_set_sha256)
                 .where(
                     ModelCacheSet.artifact_set_sha256
                     == ModelCacheOperation.artifact_set_sha256,
                     or_(
                         ModelCacheSet.model_content_sha256 == requested.c.digest,
-                        ModelCacheSet.recipe_revision_sha256 == requested.c.digest,
                         reference_match,
                     ),
                 )
@@ -285,10 +283,11 @@ def _assert_old_and_new_agree(engine: Engine, monkeypatch) -> None:
             before = _read(projection, digests)
         assert new == before, digests
     every = _read(projection, list(d.values()))
-    # The fixture reaches each path: a verified alias, a recipe, ties.
+    # The fixture reaches each path: a verified alias, ties. A set's recorded
+    # first-requester digest is provenance: it gives a digest no state.
     assert every[d["a1"]].preparation is not None
     assert every[d["m4"]].preparation is not None
-    assert every[d["r1"]].preparation is not None
+    assert d["r1"] not in every
     # Removals are not download history; an absent digest has no state.
     assert every[d["m5"]].preparation is None
     assert d["absent"] not in every

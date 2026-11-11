@@ -3917,3 +3917,18 @@ def test_a_hand_written_fixture_closure_is_flagged(source: str) -> None:
 )
 def test_fixture_closure_guard_leaves_other_lines_alone(path: str, source: str) -> None:
     assert not check_source(path, source, {1, 2}, modes=_CLOSURE)
+
+
+def test_a_readiness_reader_does_not_key_on_the_asking_recipe():
+    reader = "control/src/vonk_control/library_projection/local_state.py"
+    column = (
+        "select(ModelCacheSet).where(ModelCacheSet.recipe_revision_sha256.in_(d))\n"
+    )
+    assert check_source(PATH, column, {1}, modes=("identity",))
+    assert not check_source(PATH, column, {2}, modes=("identity",))
+    for line in (
+        "stmt = select(RecipeBuild.recipe_revision_id)\n",
+        "other = revisions.document_id\n",
+    ):
+        assert check_source(reader, line, {1}, modes=("identity",))
+        assert not check_source(PATH, line, {1}, modes=("identity",))

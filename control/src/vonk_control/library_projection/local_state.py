@@ -41,7 +41,9 @@ from ..library_contract import (
 )
 from ..library_image_presence import ImageKey, ImagePresence
 from ..machine_states import INSTALLATION_ACTIVE
+from ..model_cache.errors import ModelCacheError
 from ..model_cache.lineage import verifies_model
+from ..model_cache.resolution import resolve_recipe_set
 from ..model_cache_contract import (
     CacheManifest,
     CacheOperationKind,
@@ -255,13 +257,38 @@ def _database_local_state(
         return {}
     requested_digests = set(digests)
     with self._sessions() as session:
+        revisions = session.execute(
+            select(
+                CatalogDocumentRevision.id,
+                CatalogDocumentRevision.content_digest,
+                and_(
+                    CatalogDocumentRevision.state == "active",
+                    active_head_revision(),
+                ),
+            ).where(
+                CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
+                CatalogDocumentRevision.content_digest.in_(digests),
+            )
+        ).all()
+        # A recipe's cache facts belong to its own artifact set, resolved the way
+        # admission resolves it; the recipe that cached the set first is
+        # provenance on the row, never the key a reader joins on.
+        recipe_sets: dict[str, str] = {}
+        for revision_id, recipe_digest, _ in revisions:
+            if recipe_digest in recipe_sets:
+                continue
+            try:
+                recipe_sets[recipe_digest] = resolve_recipe_set(
+                    session, revision_id
+                ).digest
+            except (ModelCacheError, TypeError, ValueError):
+                continue  # no own set is resolvable: no cache fact is claimed
         # The shared manifest reader decides exact content membership, so damage
         # in one manifest cannot discard unrelated local state.
         cache_sets = [
             (
                 row.artifact_set_sha256,
                 row.model_content_sha256,
-                row.recipe_revision_sha256,
                 row.state,
                 read_row_column(row, "manifest"),
             )
@@ -271,7 +298,6 @@ def _database_local_state(
                     load_only(
                         ModelCacheSet.artifact_set_sha256,
                         ModelCacheSet.model_content_sha256,
-                        ModelCacheSet.recipe_revision_sha256,
                         ModelCacheSet.state,
                         ModelCacheSet.manifest,
                     )
@@ -279,7 +305,9 @@ def _database_local_state(
                 .where(
                     or_(
                         ModelCacheSet.model_content_sha256.in_(digests),
-                        ModelCacheSet.recipe_revision_sha256.in_(digests),
+                        ModelCacheSet.artifact_set_sha256.in_(
+                            sorted(set(recipe_sets.values()))
+                        ),
                         verifies_model(session, requested_digests),
                     )
                 )
@@ -294,13 +322,21 @@ def _database_local_state(
                     else []
                 )
             }
-            for set_id, _, _, _, manifest in cache_sets
+            for set_id, _, _, manifest in cache_sets
         }
+        # The recipes whose own artifact set this is.
+        own_digests: dict[str, set[str]] = {}
+        for recipe_digest, set_id in recipe_sets.items():
+            own_digests.setdefault(set_id, set()).add(recipe_digest)
         set_members = sorted(
             (set_id, digest)
-            for set_id, model_digest, recipe_digest, _, _ in cache_sets
+            for set_id, model_digest, _, _ in cache_sets
             for digest in requested_digests.intersection(
-                (model_digest, recipe_digest, *reference_digests[set_id])
+                (
+                    model_digest,
+                    *own_digests.get(set_id, ()),
+                    *reference_digests[set_id],
+                )
             )
         )
         cache_operations = session.scalars(
@@ -317,19 +353,6 @@ def _database_local_state(
             )
             .where(ModelCacheOperation.id.in_(_latest_cache_operations(set_members)))
             .order_by(ModelCacheOperation.created_at, ModelCacheOperation.id)
-        ).all()
-        revisions = session.execute(
-            select(
-                CatalogDocumentRevision.id,
-                CatalogDocumentRevision.content_digest,
-                and_(
-                    CatalogDocumentRevision.state == "active",
-                    active_head_revision(),
-                ),
-            ).where(
-                CatalogDocumentRevision.kind == ReceiptOwner.RECIPE,
-                CatalogDocumentRevision.content_digest.in_(digests),
-            )
         ).all()
         builds = session.execute(
             select(
@@ -411,7 +434,7 @@ def _database_local_state(
     # (see _fold_local_facts); every other digest keeps the highest.
     cache_facts: dict[str, LibraryLocalState] = {}
     asset_facts: dict[str, LibraryLocalState] = {}
-    for set_id, model_digest, recipe_digest, set_state, _manifest in cache_sets:
+    for set_id, model_digest, set_state, _manifest in cache_sets:
         controller = _controller_state(
             {
                 "cached": "cached",
@@ -425,9 +448,18 @@ def _database_local_state(
             "persisted cache set state is invalid",
         )
         self._merge_local(cache_facts, model_digest, controller=controller)
-        self._merge_local(cache_facts, recipe_digest, controller=controller)
+        for recipe_digest in own_digests.get(set_id, ()):
+            self._merge_local(cache_facts, recipe_digest, controller=controller)
         for digest in reference_digests[set_id] & set(digests):
             self._merge_local(cache_facts, digest, controller=controller)
+    for recipe_digest in recipe_sets:
+        # The recipe's own set resolves, so an absent or unrequested row says
+        # it is not cached; only a recipe with no resolvable set has no cache
+        # fact, and then what was built or run is the whole evidence.
+        cache_facts.setdefault(
+            recipe_digest,
+            LibraryLocalState(controller=LibraryCacheState.NOT_CACHED.value),
+        )
     cache_sets_by_id = {row[0]: row for row in cache_sets}
     for cache_operation in cache_operations:
         operation_id = cache_operation.id
@@ -438,10 +470,9 @@ def _database_local_state(
         if artifact_set_sha256:
             digest_values.update(reference_digests.get(artifact_set_sha256, ()))
             cache_set = cache_sets_by_id.get(artifact_set_sha256)
-            if cache_set is not None:
-                digest_values.update(
-                    digest for digest in cache_set[1:3] if digest is not None
-                )
+            if cache_set is not None and cache_set[1] is not None:
+                digest_values.add(cache_set[1])
+            digest_values.update(own_digests.get(artifact_set_sha256, ()))
         # Read complete JSON through the database JSON decoder. Numeric
         # subpath extraction on SQLite converts wide integers to floats
         # before Python can validate their canonical meaning.
