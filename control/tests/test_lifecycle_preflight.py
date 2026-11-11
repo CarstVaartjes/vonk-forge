@@ -417,7 +417,7 @@ def test_successful_probe_execution_with_failed_findings_blocks_expensive_work(
     assert failed in error
 
 
-@pytest.mark.parametrize("change", ["fingerprint", "age", "request"])
+@pytest.mark.parametrize("change", ["fingerprint", "request"])
 def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
     tmp_path, change
 ):
@@ -431,8 +431,6 @@ def test_only_preflight_checkpoint_refreshes_when_dependent_identity_changes(
             node = session.get(AgentNode, node_id)
             assert node is not None
             set_inventory_fingerprint(node, "b" * 64)
-    elif change == "age":
-        clock.now += timedelta(seconds=301)
     else:
         arguments["nodes"] = {node_id: True}
     refreshed, error = service.ensure(**arguments, previous=completed)
@@ -789,41 +787,28 @@ def test_checkpoint_rederivation_keeps_existing_children_after_upgrade(tmp_path)
         assert len(list(session.scalars(select(AgentOperation)))) == 1
 
 
-@pytest.mark.parametrize("intermediate_pass", [False, True])
-@pytest.mark.parametrize("receipt_span", [240, 301])
-def test_probe_round_freshness_bounds_rank_span_not_worker_delay(
-    tmp_path, receipt_span, intermediate_pass
-):
-    """A delayed worker consumes one round; ranks over 300s apart still refresh."""
-    sessions, _, clock, _, service, arguments = _setup(tmp_path, node_count=2)
-    with sessions() as session:
-        nodes = sorted(session.scalars(select(AgentNode.node_id)))
-    arguments["nodes"] = dict.fromkeys(nodes, False)
+def test_one_round_admits_every_later_phase_on_an_unchanged_host(tmp_path):
+    """A receipt is valid by identity, never by age.
+
+    Catches the wall-clock window that re-aged receipts at every later phase:
+    a switch whose phases outlast five minutes (plan, copy, verify, compile)
+    ran a second probe round at stop/start on an unchanged host. The same
+    requirements on the same host fingerprint need no further round.
+    """
+    sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
     pending, error = service.ensure(previous=None, **arguments)
     assert error is None
-    for index, node_id in enumerate(nodes):
-        member = pending.model_copy(
-            update={"pending_jobs": {node_id: pending.pending_jobs[node_id]}}
+    _finish(sessions, pending, clock.now)
+    # The Controller's fake clock moves past the old 300 s window, then a day.
+    for phase_index, minutes in ((0, 0), (1, 6), (2, 24 * 60)):
+        clock.now = NOW + timedelta(minutes=minutes)
+        pending, error = service.ensure(
+            previous=pending, **{**arguments, "phase_index": phase_index}
         )
-        _finish(sessions, member, NOW + timedelta(seconds=index * receipt_span))
-        if index == 0 and intermediate_pass:
-            clock.now = NOW + timedelta(seconds=180)
-            pending, error = service.ensure(previous=pending, **arguments)
-            assert error is None and set(pending.pending_jobs) == {nodes[1]}
-            assert nodes[0] in pending.receipts
-    clock.now = NOW + timedelta(seconds=receipt_span + 360)
-    completed, error = service.ensure(previous=pending, **arguments)
-    assert error is None
-    if receipt_span > 300:
-        assert completed.last_failure_code is RuntimePreflightCode.STALE
-        assert completed.next_check_at is not None
-        assert nodes[0] not in completed.receipts
-    else:
-        assert completed.next_check_at is None
-        assert set(completed.receipts) == set(nodes)
-        # Consumption does not turn this round into indefinitely reusable evidence.
-        reused, error = service.ensure(previous=completed, **arguments)
-        assert error is None and reused.pending_jobs
+        assert error is None and not pending.pending_jobs
+        assert pending.next_check_at is None and node_id in pending.receipts
+    with sessions() as session:
+        assert len(list(session.scalars(select(AgentOperation)))) == 1
 
 
 def _heartbeating_build(sessions, node_id, now, kind=OperationKind.RECIPE_BUILD):
@@ -891,9 +876,9 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
 ):
     """Catches projecting the reason a probe round started as its current wait.
 
-    Incident 2026-10-26: both receipts aged out, the round re-probed both
-    Sparks, and node B's probe queued behind a long build for hours while the
-    load showed ``runtime_preflight.stale``. A build now runs beside the claim
+    Incident 2026-10-26: both receipts were invalidated, the round re-probed
+    both Sparks, and node B's probe queued behind a long build for hours while
+    the load showed the round-start reason (then ``runtime_preflight.stale``). A build now runs beside the claim
     lane, so the probe waits only for node B's next poll, and says so.
     """
     from dataclasses import replace
@@ -919,18 +904,21 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
     complete, error = service.ensure(**arguments, previous=first)
     assert error is None and set(complete.receipts) == {node_a, node_b}
 
-    # Both receipts age out: the new round starts because they are stale.
+    # Both Sparks reboot: the new round starts because their hosts changed.
     clock.now += timedelta(seconds=301)
+    for node_id in (node_a, node_b):
+        _claim_reports(sessions, node_id, "b" * 64)
     build_id = _heartbeating_build(sessions, node_b, clock.now)
     probing, error = service.ensure(**arguments, previous=complete)
     assert error is None and set(probing.pending_jobs) == {node_a, node_b}
-    assert probing.last_failure_code == RuntimePreflightCode.STALE
+    assert probing.last_failure_code == RuntimePreflightCode.HOST_CHANGED
     _finish(
         sessions,
         probing.model_copy(
             update={"pending_jobs": {node_a: probing.pending_jobs[node_a]}}
         ),
         clock.now,
+        fingerprint="b" * 64,
     )
     _heartbeat(sessions, build_id, node_b, clock.now)
 
@@ -977,7 +965,8 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
     assert projected.reason == WaitReason.OBSERVATION_UNAVAILABLE
     assert projected.blockers == child_wait.blockers
     assert all(
-        blocker.code != RuntimePreflightCode.STALE for blocker in projected.blockers
+        blocker.code != RuntimePreflightCode.HOST_CHANGED
+        for blocker in projected.blockers
     )
     assert waiting.child_waits == child_wait.blockers
 
@@ -1026,16 +1015,19 @@ def test_only_the_checkpoint_reads_its_round_reason():
 
 
 def test_a_claimed_probe_shows_itself_running_never_the_round_start_reason(tmp_path):
-    """Catches a claimed probe (whose queue wait clears) falling back to stale."""
+    """Catches a claimed probe (whose queue wait clears) falling back to the
+    reason its round started."""
     sessions, _, clock, node_id, service, arguments = _setup(tmp_path)
     first, error = service.ensure(**arguments, previous=None)
     assert error is None
     _finish(sessions, first, clock.now)
     complete, error = service.ensure(**arguments, previous=first)
     assert error is None
-    clock.now += timedelta(seconds=301)
+    _claim_reports(sessions, node_id, "b" * 64)
     probing, error = service.ensure(**arguments, previous=complete)
-    assert error is None and probing.last_failure_code == RuntimePreflightCode.STALE
+    assert (
+        error is None and probing.last_failure_code == RuntimePreflightCode.HOST_CHANGED
+    )
     with sessions.begin() as session:
         probe = session.scalar(
             select(AgentOperation).where(

@@ -101,8 +101,8 @@ class RunSwitchPostStopEvidencePending(UnknownOutcomeError, RunSwitchOperationCo
 class RunSwitchInstallPreflightExpired(UnknownOutcomeError, RunSwitchOperationConflict):
     """A compile needs a fresh runtime preflight probe before it is accepted.
 
-    The preflight window it was admitted on may have passed, or the host
-    fingerprint or requirements moved while it compiled.  Nothing was accepted.
+    The host fingerprint or requirements moved while it compiled (a receipt
+    never expires by age).  Nothing was accepted.
     ``_advance`` holds the runtime-plan checkpoint so the next tick re-enters
     ``LifecyclePreflight.ensure`` for a bounded refresh; any handler that does
     not know this subclass keeps failing the phase, which is the safe reading.

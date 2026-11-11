@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -86,9 +85,7 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
         result=result,
         received_at=datetime.now(UTC),
     )
-    blockers = admission_blockers(
-        request, receipt, current_fingerprint=FINGERPRINT, now=time.time()
-    )
+    blockers = admission_blockers(request, receipt, current_fingerprint=FINGERPRINT)
     assert any(
         item.code is RuntimePreflightCode.REQUIREMENT_UNKNOWN for item in blockers
     )
@@ -99,7 +96,6 @@ def test_agent_preflight_result_is_admitted_by_the_controller(tmp_path: Path) ->
             request,
             receipt.model_copy(update={"result": restored}),
             current_fingerprint=FINGERPRINT,
-            now=time.time(),
         )
         == blockers
     )

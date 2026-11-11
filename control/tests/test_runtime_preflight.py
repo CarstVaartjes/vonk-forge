@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
+from vonk_agent_protocol import RuntimePreflightCode
 from vonk_agent_protocol.runtime_preflight import (
     RuntimePreflightFinding,
     RuntimePreflightRequest,
@@ -43,7 +44,7 @@ def result(req, **changes):
 
 
 def blockers(req, res, **changes):
-    args = {"current_fingerprint": "a" * 64, "now": 101}
+    args = {"current_fingerprint": "a" * 64}
     args.update(changes)
     return admission_blockers(
         req,
@@ -126,10 +127,18 @@ def test_fabric_requirement_missing_evidence_blocks():
     assert not blockers(req, result(req))
 
 
-def test_stale_evidence_cannot_admit():
+def test_a_receipt_is_valid_by_identity_not_age():
+    """Catches a wall-clock window: an old receipt on the same host and the
+    same requirements still admits; a new host fingerprint does not."""
     req = request()
-    assert blockers(req, result(req), now=401)
-    assert not blockers(req, result(req))
+    old = PreflightInventoryItem(
+        requirements_sha256=request_digest(req),
+        result=result(req),
+        received_at=datetime.fromtimestamp(100, UTC) - timedelta(days=30),
+    )
+    assert not admission_blockers(req, old, current_fingerprint="a" * 64)
+    [changed] = admission_blockers(req, old, current_fingerprint="b" * 64)
+    assert changed.code is RuntimePreflightCode.HOST_CHANGED
 
 
 def test_missing_current_fingerprint_and_missing_result_fail_clearly():
@@ -203,26 +212,7 @@ def test_controller_receipt_clock_ignores_agent_clock(tmp_path):
         receipt = latest_result(
             session, node_id, requirements_sha256=request_digest(req)
         )
-        assert not admission_blockers(
-            req, receipt, current_fingerprint="a" * 64, now=int(clock.now.timestamp())
-        )
-
-
-def test_receipt_age_uses_controller_subsecond_precision():
-    req = request()
-    receipt = PreflightInventoryItem(
-        requirements_sha256=request_digest(req),
-        result=result(req, observed_at=900),
-        received_at=datetime.fromtimestamp(100.25, UTC),
-    )
-    assert not admission_blockers(req, receipt, current_fingerprint="a" * 64, now=100.5)
-    assert admission_blockers(req, receipt, current_fingerprint="a" * 64, now=400.5)
-    assert admission_blockers(
-        req,
-        receipt.model_copy(update={"received_at": None}),
-        current_fingerprint="a" * 64,
-        now=100.5,
-    )
+        assert not admission_blockers(req, receipt, current_fingerprint="a" * 64)
 
 
 def test_receipt_committed_after_gate_clock_read_stays_fresh(tmp_path):
@@ -237,8 +227,3 @@ def test_receipt_committed_after_gate_clock_read_stays_fresh(tmp_path):
     completed, error = gate.ensure(previous=None, **arguments)
     assert error is None and completed.next_check_at is None
     assert not completed.pending_jobs and node_id in completed.receipts
-
-
-def test_controller_receipt_newer_than_clock_sample_is_fresh():
-    req = request()
-    assert not blockers(req, result(req), now=99)
