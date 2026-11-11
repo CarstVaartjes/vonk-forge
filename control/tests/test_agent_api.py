@@ -1394,6 +1394,97 @@ def test_inventory_identity_conflict_answers_422(agent_system) -> None:
     )
 
 
+def test_post_stop_inventory_makes_the_waiting_switch_due_on_arrival(
+    agent_system, monkeypatch
+) -> None:
+    """Wrong implementation this catches: only the worker's run-switch tick
+    checked whether the awaited inventory had landed, once per rotation, so a
+    load waited 90-129 s after a stop for evidence that was already stored.
+    The ingest makes the wait due as the inventory commits; a collection that
+    is not newer than the 30 s post-stop floor wakes nothing, and a failing
+    wake never costs the Spark its accepted report."""
+    from vonk_control.agent_api import observations
+    from vonk_control.run_switch_contract import (
+        RunSwitchAwaitedInventory,
+        RunSwitchOperationResult,
+    )
+    from vonk_control.run_switch_operations.errors import (
+        RunSwitchPostStopEvidencePending,
+    )
+
+    client, services, _, clock = agent_system
+    floor = clock.now
+    held_until = floor + timedelta(seconds=300)
+    with services.sessions.begin() as session:
+        job = Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind="recipe.run-switch.v2",
+            state="running",
+            actor="admin",
+            authority_revision="a" * 64,
+            targets=[NODE_A],
+            payload_digest="a" * 64,
+            payload={},
+            created_at=floor,
+            updated_at=floor,
+            next_action_at=held_until,
+            result=RunSwitchOperationResult(
+                awaited_inventory=RunSwitchAwaitedInventory(
+                    node_id=NODE_A, observed_after=floor
+                ),
+                retry_reason=RunSwitchPostStopEvidencePending.code,
+            ).model_dump(mode="json"),
+        )
+        session.add(job)
+    payload = {
+        "schema_version": 1,
+        "disk_total_bytes": 1000,
+        "disk_free_bytes": 700,
+        "host_memory_total_bytes": 2000,
+        "host_memory_free_bytes": 1500,
+        "gpu_memory_total_bytes": 1000,
+        "gpu_memory_free_bytes": 800,
+        "gpu_count": 1,
+        "memory_pool": "separate",
+        "artifact_store_read_only": False,
+        "capabilities": ["runtime.vonk.v1"],
+        "nvidia_driver_version": "580.65.06",
+        "container_runtime_version": "28.3.3",
+    }
+
+    def report(observed_at: datetime) -> int:
+        return client.post(
+            "/agent/inventory",
+            headers=agent_headers(NODE_A, "serial-a"),
+            json=payload | {"observed_at": observed_at.isoformat()},
+        ).status_code
+
+    def due() -> datetime:
+        with services.sessions() as session:
+            stored = session.get(Job, job.id)
+            assert stored is not None and stored.next_action_at is not None
+            return stored.next_action_at.replace(tzinfo=UTC)
+
+    # A collection at the floor cannot settle the wait.
+    assert report(floor) == 204
+    assert due() == held_until
+    # A wake that fails leaves the report accepted and the wait as it was.
+    clock.now = floor + timedelta(seconds=5)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("wake unavailable")
+
+    monkeypatch.setattr(observations, "wake_evidence_waits", broken, raising=False)
+    assert report(clock.now) == 204
+    assert due() == held_until
+    monkeypatch.undo()
+    # The next newer collection makes the switch due now, without a tick.
+    clock.now = floor + timedelta(seconds=10)
+    assert report(clock.now) == 204
+    assert due() == clock.now
+
+
 def test_an_internal_fault_waits_and_the_same_bytes_are_accepted_once_it_clears(
     agent_system, monkeypatch
 ) -> None:
