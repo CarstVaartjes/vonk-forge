@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from threading import RLock
 from typing import Any, cast
 
@@ -49,6 +49,11 @@ from ..strict_json import read_stored_model
 from ..worker_memory_contract import WorkerMemoryComponent
 
 _LOGGER = logging.getLogger(__name__)
+
+# A preparation that is already satisfied (image present) finishes within this
+# bound of submission and is collected in the same call, so a no-op never costs
+# a durable waiting round trip.  The worker thread never blocks longer.
+_RUNTIME_IMAGE_IMMEDIATE_SECONDS = 2.0
 
 
 from .background import BackgroundPreparations
@@ -151,13 +156,16 @@ class CompositeDistributionPhaseExecutor(
                             self._clock().isoformat(),
                         )
                     future.add_done_callback(self._background_completed)
-                    return PhaseExecution(
-                        waiting=True,
-                        status_reason=(
-                            "Runtime image preparation is running in the background; "
-                            "the durable checkpoint will be resumed after a restart."
-                        ),
-                    )
+                    wait([future], timeout=_RUNTIME_IMAGE_IMMEDIATE_SECONDS)
+                    if not future.done():
+                        return PhaseExecution(
+                            waiting=True,
+                            status_reason=(
+                                "Runtime image preparation is running in the background; "
+                                "the durable checkpoint will be resumed after a restart."
+                            ),
+                        )
+                    submitted = (future, "")
                 future, started_at = submitted
                 if not future.done():
                     # The durable parent observation deadline bounds this wait;

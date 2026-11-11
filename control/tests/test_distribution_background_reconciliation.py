@@ -189,18 +189,8 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             ),
             actor="admin",
         )
-        assert executor.execute(
-            plan,
-            phase,
-            item_index=0,
-            actor="admin",
-            request_key=fresh.request_key,
-            progress=progress,
-        ).waiting
-        assert fresh_entered.wait(30)
-        with executor._runtime_image_lock:
-            future = executor._runtime_image_futures[(fresh.request_key, 2, 0)][0]
-        assert future.result(timeout=30) == prepared
+        # The fresh preparation finishes at once: it is collected in the same
+        # call although the stalled one still holds a slot.
         result = executor.execute(
             plan,
             phase,
@@ -209,6 +199,7 @@ def test_stalled_ended_parent_cannot_monopolize_unrelated_preparation(
             request_key=fresh.request_key,
             progress=progress,
         )
+        assert fresh_entered.is_set()
         assert not result.waiting and result.result is not None
         assert not old_future.done()
     finally:

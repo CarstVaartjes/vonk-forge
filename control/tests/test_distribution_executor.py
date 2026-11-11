@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -1954,6 +1955,70 @@ def test_runtime_image_phase_hands_preparation_to_background_executor() -> None:
         assert observed.waiting
         assert "still running" in (observed.status_reason or "")
         assert "started 2026-09-30T12:00:00+00:00" in (observed.status_reason or "")
+    finally:
+        release.set()
+        executor.close()
+
+
+def _async_executor(prepare) -> Any:
+    executor = cast(Any, object.__new__(CompositeDistributionPhaseExecutor))
+    executor._async_runtime_image_preparation = True
+    executor._runtime_image_pool = ThreadPoolExecutor(max_workers=1)
+    executor._runtime_image_futures = {}
+    executor._runtime_image_lock = threading.RLock()
+    executor._runtime_image_inflight = set()
+    executor._runtime_image_parallelism = 4
+    executor.reconcile_background = lambda: False
+    executor._clock = lambda: datetime(2026, 9, 30, 12, tzinfo=UTC)
+    executor._prepare_runtime_image = prepare
+    return executor
+
+
+def test_immediately_complete_runtime_image_preparation_is_collected_in_one_call(
+    monkeypatch,
+) -> None:
+    receipt = object()
+    monkeypatch.setattr(
+        "vonk_control.distribution_executor.preparation._phase_receipt",
+        lambda value, *, phase: value,
+    )
+    executor = _async_executor(lambda *_a, **_k: receipt)
+    try:
+        result = executor.execute(
+            _plan(),
+            _phase(index=2, kind="prepare", subphase="runtime-image"),
+            item_index=0,
+            actor="operator",
+            request_key=str(uuid4()),
+            progress=RunSwitchOperationResult(),
+        )
+        assert not result.waiting
+        assert result.result is receipt
+        assert not executor._runtime_image_futures
+    finally:
+        executor.close()
+
+
+def test_slow_runtime_image_preparation_waits_only_the_bound(monkeypatch) -> None:
+    release = threading.Event()
+    monkeypatch.setattr(
+        "vonk_control.distribution_executor.preparation."
+        "_RUNTIME_IMAGE_IMMEDIATE_SECONDS",
+        0.2,
+    )
+    executor = _async_executor(lambda *_a, **_k: release.wait(30))
+    try:
+        started = time.monotonic()
+        result = executor.execute(
+            _plan(),
+            _phase(index=2, kind="prepare", subphase="runtime-image"),
+            item_index=0,
+            actor="operator",
+            request_key=str(uuid4()),
+            progress=RunSwitchOperationResult(),
+        )
+        assert result.waiting
+        assert time.monotonic() - started < 5
     finally:
         release.set()
         executor.close()
