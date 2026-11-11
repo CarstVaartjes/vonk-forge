@@ -695,7 +695,7 @@ def test_preflight_delayed_passes_and_completion_wake_reach_transfer(
                 assert receipt is not None and receipt.received_at == clock.now
 
     if completion_wake:
-        queue.set_preflight_completed(service.preflight_completed)
+        service.wake_on_child_end()
     report_probes()
     assert not artifacts.children  # Agent POST /result never advances phases.
     clock.now = NOW + timedelta(seconds=latency)

@@ -13,6 +13,7 @@ from vonk_agent_protocol import LifecycleState
 from ..logging import redact_text
 from ..models import AgentNode, Job
 from ..run_switch_contract import RunSwitchRuntimeImageResult
+from ..run_switch_operations.child_wake import wake_owners
 from ..run_switch_operations.observation_window import checkpoint_verdict
 from ..run_switch_operations.planning_helpers import _run_switch_payload
 from ..run_switch_operations.result_helpers import _parse_persisted_result
@@ -36,9 +37,12 @@ class BackgroundPreparations:
             executor._runtime_image_inflight.discard(future)
         # Database observation belongs to the worker tick, outside the future
         # callback: completion can race the transaction that submitted it.
+        # ``reconcile_background`` wakes the owner from the worker thread,
+        # after that transaction has committed its waiting checkpoint.
 
     def reconcile_background(self) -> bool:
-        """Cancel queued obsolete work and collect results even after parent end.
+        """Cancel queued obsolete work, collect results even after parent end,
+        and make the owner of a finished preparation due now.
 
         Running filesystem work cannot be killed safely in a Python thread. Its
         publication callback revalidates the exact parent/phase/intent; removing
@@ -51,6 +55,7 @@ class BackgroundPreparations:
         with self._runtime_image_lock:
             pending = tuple(executor._runtime_image_futures.items())
         removed = False
+        finished: set[str] = set()
         for key, submitted in pending:
             request_key, _phase, _item = key
             future, _started = submitted
@@ -104,6 +109,8 @@ class BackgroundPreparations:
                     # An unreadable live projection is observed by the parent;
                     # its immutable deadline ends it, never a new publication.
                     if active:
+                        if future.done() and parent is not None:
+                            finished.add(parent.id)
                         continue
             except (SQLAlchemyError, OSError, TypeError, ValueError) as error:
                 _LOGGER.warning(
@@ -122,6 +129,10 @@ class BackgroundPreparations:
                         "abandoned image preparation ended: %s", redact_text(error)
                     )
             removed = True
+        # Runs on the worker thread, after the visit that submitted the
+        # preparation committed its waiting checkpoint, so its five-second
+        # next check cannot overwrite this wake.
+        wake_owners(executor._sessions, frozenset(finished), executor._clock())
         return removed
 
     def end_background(self, request_key: str) -> None:

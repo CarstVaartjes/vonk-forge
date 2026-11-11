@@ -4941,8 +4941,9 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
         )
 
 
-def test_failed_preflight_wake_preserves_committed_receipt(service, caplog):
-    """A failed notification cannot turn an already committed report into loss."""
+def test_failed_child_end_wake_preserves_committed_receipt(service):
+    """A failed owner wake cannot turn an already committed report into loss."""
+    from vonk_control.run_switch_operations.child_wake import ChildEndWake
     from vonk_control.runtime_preflight import latest_result, request_digest
 
     from .test_runtime_preflight import request as preflight_request
@@ -4959,10 +4960,10 @@ def test_failed_preflight_wake_preserves_committed_receipt(service, caplog):
         request.model_dump(mode="json"),
     )
 
-    def lost_wake(_child_id: str, _node_id: str) -> None:
+    def lost_wake() -> datetime:
         raise OSError("injected completion wake loss")
 
-    queue.set_preflight_completed(lost_wake)
+    ChildEndWake.install(sessions, lost_wake)
     claim = claim_agent(queue, NODE_A, "serial-a", preflight_fingerprint="a" * 64)
     assert claim is not None
     queue.succeed(
@@ -4975,7 +4976,6 @@ def test_failed_preflight_wake_preserves_committed_receipt(service, caplog):
         assert receipt is not None and receipt.received_at == clock.now
         committed = session.get(Job, job.id)
         assert committed is not None and committed.state == LifecycleState.SUCCEEDED
-    assert "Runtime preflight owner wake deferred" in caplog.text
 
 
 @pytest.mark.parametrize("contact_path", ("claim", "heartbeat"))
