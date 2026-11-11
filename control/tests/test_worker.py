@@ -1419,3 +1419,53 @@ def test_due_run_switch_wait_is_redriven_within_one_step_of_any_number_of_slow_s
     assert now[0] >= sources * step_seconds
     assert redriven, "the due wait was never redriven"
     assert redriven[0] <= step_seconds + 1
+
+
+def _over_budget_steps(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "worker.step_over_budget" in record.getMessage()
+    ]
+
+
+def test_slow_recipe_subtask_is_named_in_the_over_budget_alarm(
+    tmp_path, caplog, monkeypatch
+) -> None:
+    """Catches the coarse `recipes` step hiding which sub-task is slow."""
+    from datetime import UTC, datetime
+
+    from vonk_control.recipe_operation_worker import RecipeOperationWorker
+    from vonk_control.worker import _STEP_BUDGET_SECONDS
+
+    monotonic = [1000.0]
+    monkeypatch.setattr("vonk_control.worker.time.monotonic", lambda: monotonic[0])
+
+    def slow_build_cleanup() -> bool:
+        monotonic[0] += _STEP_BUDGET_SECONDS + 1
+        return False
+
+    recipes = RecipeOperationWorker(
+        None,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+        clock=lambda: datetime(2026, 1, 1, tzinfo=UTC),
+        reconcile_routes=False,
+        build_cleanup=slow_build_cleanup,
+        order_reconcile=lambda: False,
+    )
+    monkeypatch.setattr(
+        recipes, "_expire_initial_observation_deadline", lambda run_id=None: False
+    )
+    worker = Worker(
+        _service(tmp_path),
+        "worker-1",
+        {},
+        recipes=recipes,
+        coordinator_failures=_failures(tmp_path),
+    )
+    recipes.timed = worker._timed
+    with caplog.at_level(logging.INFO, logger="vonk-control-worker"):
+        worker.run_once()
+    alarms = _over_budget_steps(caplog)
+    assert any('"recipes:build-cleanup"' in alarm for alarm in alarms)
+    assert not any("recipes:order-reconcile" in alarm for alarm in alarms)
