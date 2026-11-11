@@ -21,6 +21,10 @@ import pytest
 from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_control.auth import TokenCodec
+from vonk_control.catalog_revision_contract import (
+    rederive_projection,
+    write_catalog_projection,
+)
 from vonk_control.library_contract import LibraryLocalState, LibraryRecipeProjection
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_projection.common import compose_recipe_state
@@ -49,6 +53,58 @@ from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
 
 NOW = datetime(2026, 11, 5, 12, tzinfo=UTC)
 LIBRARY_SRC = Path(__file__).parents[1] / "src/vonk_control/library_projection"
+
+
+PINNED = {
+    "reference": "ghcr.io/vonk/resolver@sha256:" + "6" * 64,
+    "build_key": "9" * 64,
+}
+
+
+def _catalog_rows(
+    kind: str,
+    definition,
+    revision_id: str,
+    digest: str,
+    projected: dict[str, object] | None = None,
+    execution_key: str = "a" * 64,
+) -> list[CatalogDocument | CatalogDocumentRevision | CatalogDocumentHead]:
+    document_id = str(uuid.uuid4())
+    publisher, slug = definition.identity.publisher, definition.identity.slug
+    return [
+        CatalogDocument(
+            id=document_id,
+            kind=kind,
+            publisher=publisher,
+            slug=slug,
+            title=slug,
+            created_by="test",
+            created_at=NOW,
+            updated_at=NOW,
+        ),
+        CatalogDocumentRevision(
+            id=revision_id,
+            document_id=document_id,
+            kind=kind,
+            publisher=publisher,
+            slug=slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document=definition.model_dump(mode="json"),
+            content_digest=digest,
+            execution_key=execution_key if kind == "recipe" else None,
+            projected=projected or {},
+            created_by="test",
+            created_at=NOW,
+        ),
+        CatalogDocumentHead(
+            kind=kind,
+            publisher=publisher,
+            slug=slug,
+            active_revision_id=revision_id,
+        ),
+    ]
 
 
 class _World:
@@ -94,47 +150,47 @@ class _World:
             ],
             ("recipe", recipe, self.recipe_revision_id, self.recipe_digest),
         ]:
-            document_id = str(uuid.uuid4())
-            publisher, slug = definition.identity.publisher, definition.identity.slug
-            rows += [
-                CatalogDocument(
-                    id=document_id,
-                    kind=kind,
-                    publisher=publisher,
-                    slug=slug,
-                    title=slug,
-                    created_by="test",
-                    created_at=NOW,
-                    updated_at=NOW,
-                ),
-                CatalogDocumentRevision(
-                    id=revision_id,
-                    document_id=document_id,
-                    kind=kind,
-                    publisher=publisher,
-                    slug=slug,
-                    revision_number=1,
-                    schema_version=2,
-                    state="active",
-                    document=definition.model_dump(mode="json"),
-                    content_digest=digest,
-                    execution_key="a" * 64 if kind == "recipe" else None,
-                    projected={},
-                    created_by="test",
-                    created_at=NOW,
-                ),
-                CatalogDocumentHead(
-                    kind=kind,
-                    publisher=publisher,
-                    slug=slug,
-                    active_revision_id=revision_id,
-                ),
-            ]
+            rows += _catalog_rows(kind, definition, revision_id, digest)
         with sessions.begin() as session:
             for row in rows:
                 session.add(row)
                 session.flush()
             session.add(AgentNode(node_id="builder", state="active"))
+        self._document = document
+        self._recipe = recipe
+
+    def add_sibling(self) -> None:
+        """A second recipe document over the same models and the same pinned image."""
+
+        document = copy.deepcopy(self._document)
+        document["identity"] = {"publisher": "vonk-forge", "slug": "resolver-dual"}
+        recipe = RecipeDefinition.model_validate(document)
+        self.sibling_digest = document_sha256(recipe.model_dump(mode="json"))
+        self.sibling_revision_id = str(uuid.uuid4())
+
+        def pinned_projection(definition: RecipeDefinition) -> dict[str, object]:
+            return write_catalog_projection(
+                rederive_projection({"prebuilt_image": PINNED}, definition),
+                kind="recipe",
+            )
+
+        pinned = pinned_projection(recipe)
+        with self.sessions.begin() as session:
+            for row in _catalog_rows(
+                "recipe",
+                recipe,
+                self.sibling_revision_id,
+                self.sibling_digest,
+                pinned,
+                execution_key="b" * 64,
+            ):
+                session.add(row)
+                session.flush()
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == self.recipe_revision_id)
+                .values(projected=pinned_projection(self._recipe))
+            )
 
     def recipe_set(self, service, state: str) -> ModelCacheSet:
         """The set the service resolves for the recipe, as a download stores it."""
@@ -161,10 +217,12 @@ class _World:
                 _write_object_receipt(service, artifact.sha256, artifact.expected_bytes)
         return row
 
-    def build(self, state: str = "succeeded") -> RecipeBuild:
+    def build(
+        self, state: str = "succeeded", revision_id: str | None = None
+    ) -> RecipeBuild:
         return RecipeBuild(
             id=str(uuid.uuid4()),
-            recipe_revision_id=self.recipe_revision_id,
+            recipe_revision_id=revision_id or self.recipe_revision_id,
             builder_node_id="builder",
             source_bundle_sha256="2" * 64,
             build_input_sha256="3" * 64,
@@ -178,6 +236,13 @@ class _World:
             created_at=NOW,
             updated_at=NOW,
         )
+
+
+def _recipes(projection: LibraryProjection) -> dict[str, LibraryRecipeProjection]:
+    return {
+        f"{recipe.identity.publisher}/{recipe.identity.slug}": recipe
+        for recipe in projection.recipe_library(limit=10).recipes
+    }
 
 
 def _projection(sessions: sessionmaker[Session], *, archive=None) -> LibraryProjection:
@@ -422,3 +487,38 @@ def test_a_recipes_facts_reach_the_result_only_through_the_fold():
     targets = re.findall(r"_merge_local\(\s*(\w+)", body)
     assert targets and set(targets) <= {"cache_facts", "asset_facts"}
     assert "_fold_local_facts(" in body
+
+
+@pytest.mark.parametrize("first", ["resolver-recipe", "resolver-dual"])
+def test_a_sibling_recipe_sharing_the_prebuilt_image_and_models_is_cached(
+    cache,  # noqa: F811
+    first: str,
+):
+    """The recipe that reached the build first does not own it: identity is content.
+
+    The second recipe reuses the first one's succeeded build without a build row
+    of its own, and the model set names the first as provenance. Both read cached
+    in the Library and have nothing missing at admission.
+    """
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    revisions = {
+        "resolver-recipe": world.recipe_revision_id,
+        "resolver-dual": world.sibling_revision_id,
+    }
+    row = world.recipe_set(service, "cached")
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add_all([row, world.build(revision_id=revisions[first])])
+
+    recipes = _recipes(
+        _projection(sessions, archive=service._runtime_archive_available)
+    )
+    for slug in revisions:
+        assert recipes[f"vonk-forge/{slug}"].local.controller == "cached", slug
+        resolution = service.resolve_latest_cached(
+            recipe_identity=f"vonk-forge/{slug}", model_variant="fp16"
+        )
+        assert resolution.blockers == [], slug
