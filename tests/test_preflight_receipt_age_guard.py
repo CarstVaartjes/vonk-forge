@@ -9,9 +9,9 @@ re-checked at every later phase and at install admission, so every switch whose
 phases outlasted five minutes ran a second probe round on an unchanged host
 (15-130 s per load).
 
-This guard fails when code that reads preflight receipts orders a receipt's
-``received_at`` or ``observed_at`` against anything (an age or freshness check)
-or reintroduces a preflight age constant. Selection by newest (``max(...,
+This guard fails when code that reads preflight receipts orders or subtracts a
+receipt's ``received_at`` or ``observed_at`` (an age or freshness check) or
+reintroduces a preflight age constant. Selection by newest (``max(...,
 key=...)``) and presence checks (``is None``) remain allowed.
 """
 
@@ -62,13 +62,13 @@ def age_comparisons(tree: ast.AST) -> list[int]:
             continue
         if not _names(function) & RECEIPT_MARKERS:
             continue
-        for compare in ast.walk(function):
-            if not isinstance(compare, ast.Compare):
-                continue
-            if not any(isinstance(op, ORDERING) for op in compare.ops):
-                continue
-            if _names(compare) & RECEIPT_TIMES:
-                lines.append(compare.lineno)
+        for node in ast.walk(function):
+            ordering = isinstance(node, ast.Compare) and any(
+                isinstance(op, ORDERING) for op in node.ops
+            )
+            age = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)
+            if (ordering or age) and _names(node) & RECEIPT_TIMES:
+                lines.append(node.lineno)
     for node in ast.walk(tree):
         name = (
             node.id
@@ -86,6 +86,7 @@ FLAGGED = (
     "def valid(receipt: PreflightInventoryItem, now, maximum_age):\n    return now - receipt.received_at.timestamp() > maximum_age",
     "def keep(items, now):\n    return [i for i in items.preflights if i.received_at >= now - 300]",
     "def fresh(receipt: PreflightInventoryItem, now):\n    return receipt.result.observed_at < now",
+    "def age(receipt: PreflightInventoryItem, now):\n    return now - receipt.received_at",
     "PREFLIGHT_MAX_AGE_SECONDS = 300",
     "PREFLIGHT_TTL = 300",
 )

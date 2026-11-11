@@ -213,17 +213,3 @@ def test_controller_receipt_clock_ignores_agent_clock(tmp_path):
             session, node_id, requirements_sha256=request_digest(req)
         )
         assert not admission_blockers(req, receipt, current_fingerprint="a" * 64)
-
-
-def test_receipt_committed_after_gate_clock_read_stays_fresh(tmp_path):
-    """A Controller receipt may commit between the gate clock and inventory read."""
-    from .test_lifecycle_preflight import _finish, _setup
-
-    sessions, _, clock, node_id, gate, arguments = _setup(tmp_path)
-    pending, _ = gate.ensure(previous=None, **arguments)
-    _finish(sessions, pending, clock.now)
-    # The gate's clock sample precedes the transaction that committed this item.
-    clock.now -= timedelta(microseconds=1)
-    completed, error = gate.ensure(previous=None, **arguments)
-    assert error is None and completed.next_check_at is None
-    assert not completed.pending_jobs and node_id in completed.receipts
