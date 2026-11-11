@@ -134,10 +134,12 @@ class RecipeOperationWorker:
             ),
         ):
             progressed = self._advance(task, name) or progressed
-        if self._advance(self._expire_initial_observation_deadline):
+        if self._advance(
+            self._expire_initial_observation_deadline, "expire-initial-observation"
+        ):
             progressed = True
             if self._recoveries is not None:
-                self._advance(self._recoveries.tick)
+                self._advance(self._recoveries.tick, "recoveries-after-expiry")
         if self._reconcile_routes:
             progressed = self.reconcile_routes() or progressed
         return progressed
