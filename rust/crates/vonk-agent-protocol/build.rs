@@ -72,26 +72,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         )?;
     }
-    // List limits the agent enforces itself: one owner, the Pydantic maxItems.
-    let mut limits = Vec::new();
-    for (model, field, constant) in [(
-        "InventoryRequest",
-        "stop_fences",
-        "MAX_REPORTED_STOP_FENCES",
-    )] {
-        let property = &graph["$defs"][model]["properties"][field];
-        let limit = property["anyOf"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .chain([property])
-            .find_map(|schema| schema["maxItems"].as_u64())
-            .ok_or("wire list needs a typed maxItems limit")?;
-        limits.push(format!(
-            "/// `{model}.{field}` holds at most this many entries.\npub const {constant}: usize = {limit};"
-        ));
-    }
-    fs::write(output.join("wire_limits.rs"), limits.join("\n"))?;
+    // The list limit the agent enforces itself: one owner, the Pydantic maxItems.
+    let fences = &graph["$defs"]["InventoryRequest"]["properties"]["stop_fences"];
+    let limit = fences["anyOf"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain([fences])
+        .find_map(|schema| schema["maxItems"].as_u64())
+        .ok_or("InventoryRequest.stop_fences needs a typed maxItems limit")?;
+    fs::write(
+        output.join("wire_limits.rs"),
+        format!(
+            "/// `InventoryRequest.stop_fences` holds at most this many entries.\npub const MAX_REPORTED_STOP_FENCES: usize = {limit};"
+        ),
+    )?;
     fs::write(
         output.join("generated.rs"),
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,
