@@ -8,8 +8,10 @@ watches the rows a child is stored in and, once the transaction that ended one
 has committed and returned its connection, makes every live run-switch that
 names it due now. The worker's due-waits backstop then redrives it within a
 step. The wake only writes the due clock; advancing stays with the worker.
-``wake_owners`` is the one primitive: a finished background runtime-image
-preparation (``reconcile_background``) wakes its owner through it too.
+
+``after_commit`` also fires when a savepoint is released, so an end inside a
+savepoint whose outer transaction later rolls back can still wake its owner:
+an early look, which the advance answers idempotently.
 
 A lost wake (a skipped locked parent, a failed dispatch, a process exit) costs
 only the old latency: the parent is still observed on the ``recipes`` turn.
@@ -24,11 +26,12 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
+from vonk_agent_protocol import WaitReason
 
 from .. import job_states, model_cache_states
 from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import read_wait, schedule_wait
 from ..stored_json import read_row_column
 from .constants import _OPERATION_KINDS
 from .planning_helpers import _aware
@@ -124,7 +127,7 @@ class ChildEndWake:
                 exc_info=True,
             )
         else:
-            wake_owners(self._sessions, owners, now)
+            _wake_owners(self._sessions, owners, now)
 
 
 def _waits_on(job: Job, child_ids: frozenset[str]) -> bool:
@@ -141,13 +144,15 @@ def _waits_on(job: Job, child_ids: frozenset[str]) -> bool:
     return not child_ids.isdisjoint(probes.values())
 
 
-def wake_owners(
+def _wake_owners(
     sessions: sessionmaker[Session], owner_ids: frozenset[str], now: datetime
 ) -> None:
-    """Make each live run-switch in ``owner_ids`` due now; the one wake primitive.
+    """Make each live run-switch in ``owner_ids`` due now.
 
     Never blocks: a parent locked by its own advance is skipped (that advance
-    or the next turn sees what ended). A parent already due is left alone.
+    or the next turn sees what ended). A parent already due is left alone. A
+    parent with a typed wait keeps it; one without names the ended child's
+    receipt, which its next advance reads, instead of a generic fallback.
     Any failure is logged, never raised into the caller, whose own effect is
     already durable; the parent then waits for its ordinary turn.
     """
@@ -166,8 +171,17 @@ def wake_owners(
                 .with_for_update(skip_locked=True)
             ):
                 due = job.next_action_at
-                if due is None or _aware(due) > now:
+                if due is not None and _aware(due) <= now:
+                    continue
+                if read_wait(job) is not None:
                     schedule_wait(job, now)
+                else:
+                    schedule_wait(
+                        job,
+                        now,
+                        reason=WaitReason.RECEIPT_MISSING,
+                        detail="a child ended; its receipt is read next",
+                    )
     except Exception:
         _LOGGER.warning(
             "run-switch wake deferred to the next worker turn", exc_info=True

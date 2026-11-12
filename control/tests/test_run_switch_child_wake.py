@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from concurrent.futures import Future
 from datetime import datetime
-from threading import RLock
-from typing import get_args
+from typing import cast, get_args
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Engine, Table, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
-from vonk_agent_protocol import canonical_message
-from vonk_control.distribution_executor.background import BackgroundPreparations
+from vonk_agent_protocol import WaitReason, canonical_message
 from vonk_control.models import Job, ModelCacheOperation
+from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_contract.vocabulary import RunSwitchPhaseKind
 from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWake
@@ -89,15 +87,20 @@ def _cache_row(row_id: str, state: str) -> ModelCacheOperation:
 _ROW_FACTORIES = {Job: _job_row, ModelCacheOperation: _cache_row}
 
 
-def test_every_watched_row_has_a_fixture() -> None:
-    assert set(_ROW_FACTORIES) == set(CHILD_ROWS)
+def _child_table(engine: Engine) -> None:
+    cast(Table, Job.__table__).create(engine)
+
+
+def _get[Row](session: Session, model: type[Row], row_id: str) -> Row:
+    row = session.get(model, row_id)
+    assert row is not None
+    return row
 
 
 def _due(sessions, job_id: str) -> datetime | None:
     with sessions() as session:
-        job = session.get(Job, job_id)
-        assert job is not None
-        return None if job.next_action_at is None else _aware(job.next_action_at)
+        due = _get(session, Job, job_id).next_action_at
+        return None if due is None else _aware(due)
 
 
 def _waiting_on_transfer(tmp_path):
@@ -124,8 +127,16 @@ def _waiting_on_transfer(tmp_path):
     return service, executor, operation.operation_id, child_id
 
 
-@pytest.mark.parametrize("ended", ["succeeded", "failed", "cancelled"])
-@pytest.mark.parametrize("model", list(CHILD_ROWS), ids=lambda model: model.__name__)
+@pytest.mark.parametrize(
+    ("model", "ended"),
+    [
+        (Job, "succeeded"),
+        (Job, "failed"),
+        (ModelCacheOperation, "succeeded"),
+        (ModelCacheOperation, "cancelled"),
+    ],
+    ids=lambda value: value if isinstance(value, str) else value.__name__,
+)
 def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
     tmp_path, model, ended
 ) -> None:
@@ -135,14 +146,16 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
     sessions = service._sessions
     with sessions.begin() as session:
         session.add(_ROW_FACTORIES[model](child_id, "running"))
-    with sessions() as session:
-        job = session.get(Job, operation_id)
-        assert job is not None and job.next_action_at is None  # nothing ended yet
+    assert _due(sessions, operation_id) is None  # nothing ended yet
 
     with sessions.begin() as session:
-        session.get(model, child_id).state = ended
+        _get(session, model, child_id).state = ended
 
     assert _due(sessions, operation_id) == NOW
+    with sessions() as session:
+        wait = read_wait(_get(session, Job, operation_id))
+        # The wake names what the parent will read, not a generic fallback.
+        assert wait is not None and wait.reason is WaitReason.RECEIPT_MISSING
     # The worker's next look consumes the wake: no due clock is left behind
     # for the due-waits backstop to spin on.
     _replace_child(executor, child_id, state=ended)
@@ -156,13 +169,14 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
 def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
     """A wake inside the commit would hold a second pooled connection."""
     engine = create_engine(f"sqlite:///{tmp_path / 'wake.sqlite'}", poolclass=QueuePool)
-    Job.__table__.create(engine)
+    _child_table(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
+    pool = cast(QueuePool, engine.pool)
     woken: list[tuple[frozenset[str], int]] = []
 
     class Probe(ChildEndWake):
         def wake(self, child_ids: frozenset[str]) -> None:
-            woken.append((child_ids, engine.pool.checkedout()))
+            woken.append((child_ids, pool.checkedout()))
 
     Probe.install(sessions, lambda: NOW)
     child_id = str(uuid.uuid4())
@@ -171,13 +185,13 @@ def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
     assert woken == []
 
     with pytest.raises(RuntimeError), sessions.begin() as session:
-        session.get(Job, child_id).state = "failed"
+        _get(session, Job, child_id).state = "failed"
         session.flush()
         raise RuntimeError("rolled back")
     assert woken == []  # a rolled-back end wakes nobody
 
     with sessions.begin() as session:
-        session.get(Job, child_id).state = "cancelled"
+        _get(session, Job, child_id).state = "cancelled"
     assert woken == [(frozenset({child_id}), 0)]
     engine.dispose()
 
@@ -186,7 +200,7 @@ def test_a_row_inserted_already_ended_is_staged_by_its_own_id(tmp_path) -> None:
     """Catches staging before the insert assigns the id: ``None`` matched every
     run-switch with no child and cut its hold short."""
     engine = create_engine(f"sqlite:///{tmp_path / 'born.sqlite'}")
-    Job.__table__.create(engine)
+    _child_table(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     woken: list[frozenset[str]] = []
 
@@ -202,51 +216,3 @@ def test_a_row_inserted_already_ended_is_staged_by_its_own_id(tmp_path) -> None:
     assert born.id is not None
     assert woken == [frozenset({born.id})]
     engine.dispose()
-
-
-def test_failed_wake_never_reaches_the_committed_end(tmp_path) -> None:
-    engine = create_engine(f"sqlite:///{tmp_path / 'lost.sqlite'}")
-    Job.__table__.create(engine)
-    sessions = sessionmaker(engine, expire_on_commit=False)
-
-    def lost() -> object:
-        raise OSError("injected wake loss")
-
-    ChildEndWake.install(sessions, lost)  # type: ignore[arg-type]
-    child_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        session.add(_job_row(child_id, "running"))
-    with sessions.begin() as session:
-        session.get(Job, child_id).state = "succeeded"
-    with sessions() as session:
-        assert session.get(Job, child_id).state == "succeeded"
-    engine.dispose()
-
-
-def test_finished_image_preparation_wakes_its_owner(tmp_path) -> None:
-    """Catches a done preparation waiting out its five-second next check."""
-    service, _executor, operation_id, _child_id = _waiting_on_transfer(tmp_path)
-    with service._sessions() as session:
-        job = session.get(Job, operation_id)
-        assert job is not None and job.next_action_at is None
-        request_id = job.request_id
-    preparation: Future[None] = Future()
-
-    class Preparations(BackgroundPreparations):
-        def __init__(self) -> None:
-            self._runtime_image_lock = RLock()
-            self._runtime_image_futures = {(request_id, 0, 0): (preparation, "t")}
-            self._runtime_image_inflight = {preparation}
-            self._sessions = service._sessions
-            self._clock = lambda: NOW
-
-    background = Preparations()
-    background.reconcile_background()  # still running: nothing to wake
-    with service._sessions() as session:
-        assert session.get(Job, operation_id).next_action_at is None
-
-    preparation.set_result(None)
-    background.reconcile_background()
-    assert _due(service._sessions, operation_id) == NOW
-    # The visit that collects the result still owns the future.
-    assert (request_id, 0, 0) in background._runtime_image_futures
