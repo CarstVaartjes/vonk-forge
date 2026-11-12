@@ -8,16 +8,22 @@ from datetime import datetime
 from typing import cast, get_args
 
 import pytest
-from sqlalchemy import Engine, Table, create_engine
+from sqlalchemy import Engine, Table, create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import QueuePool
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason, canonical_message
+from vonk_control.job_documents import RecipeStartParent, controller_recipe_document
 from vonk_control.models import Job, ModelCacheOperation
 from vonk_control.persisted_waits import read_wait
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
 from vonk_control.run_switch_contract.vocabulary import RunSwitchPhaseKind
+from vonk_control.run_switch_operations.awaited_children import start_request_key
 from vonk_control.run_switch_operations.child_wake import CHILD_ROWS, ChildEndWake
 from vonk_control.run_switch_operations.planning_helpers import _aware
+from vonk_control.run_switch_operations.result_helpers import _read_progress
+from vonk_control.run_switch_operations.results import _persisted_result
+from vonk_control.stored_json import read_row_column
 
 from .test_run_switch_operations import (
     NOW,
@@ -164,6 +170,103 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
     assert due is None or due > NOW
     if ended == "succeeded":
         assert "transfer" in _result(service.get(operation_id)).completed_phases
+
+
+def test_a_recovery_child_ending_wakes_its_parent(tmp_path) -> None:
+    """Catches the wake forgetting a job the observation window waits on."""
+    service, _executor, operation_id, _child_id = _waiting_on_transfer(tmp_path)
+    service.wake_on_child_end()
+    sessions = service._sessions
+    recovery_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        parent = _get(session, Job, operation_id)
+        progress = _read_progress(read_row_column(parent, "result"))
+        progress.child_operation_id = None
+        progress.recovery_child_operation_id = recovery_id
+        parent.result = _persisted_result(progress)
+        session.add(_job_row(recovery_id, "running"))
+    assert _due(sessions, operation_id) is None
+
+    with sessions.begin() as session:
+        _get(session, Job, recovery_id).state = "succeeded"
+
+    assert _due(sessions, operation_id) == NOW
+
+
+def test_the_start_a_run_switch_issued_ending_wakes_its_parent(tmp_path) -> None:
+    """Catches a parent left for the rotation when its own start ended."""
+    service, _executor, operation_id, _child_id = _waiting_on_transfer(tmp_path)
+    service.wake_on_child_end()
+    sessions = service._sessions
+    start_id = str(uuid.uuid4())
+    with sessions.begin() as session:
+        start = _job_row(start_id, "running")
+        start.kind = WireAgentOperation.RECIPE_START.value
+        start.request_id = start_request_key(_get(session, Job, operation_id))
+        start.payload = cast(
+            dict[str, object],
+            controller_recipe_document(
+                RecipeStartParent(
+                    schema_version=1,
+                    owner_kind="run",
+                    owner_id=str(uuid.uuid4()),
+                    plan_digest="a" * 64,
+                )
+            ),
+        )
+        start.payload_digest = hashlib.sha256(
+            canonical_message(start.payload)
+        ).hexdigest()
+        session.add(start)
+    assert _due(sessions, operation_id) is None
+
+    with sessions.begin() as session:
+        _get(session, Job, start_id).state = "succeeded"
+
+    assert _due(sessions, operation_id) == NOW
+
+
+def test_wake_queries_do_not_grow_with_the_live_run_switches(tmp_path) -> None:
+    """Catches a per-row lookup in the wake that fires after every ended child."""
+    service, _executor, operation_id, _child_id = _waiting_on_transfer(tmp_path)
+    sessions = service._sessions
+    ended = frozenset({str(uuid.uuid4())})  # not a start, not any parent's child
+
+    def queries_with(clones: int) -> int:
+        with sessions.begin() as session:
+            parent = _get(session, Job, operation_id)
+            for _ in range(clones):
+                session.add(
+                    Job(
+                        id=str(uuid.uuid4()),
+                        request_id=str(uuid.uuid4()),
+                        kind=parent.kind,
+                        state=parent.state,
+                        actor=parent.actor,
+                        authority_revision=parent.authority_revision,
+                        targets=parent.targets,
+                        payload_digest=parent.payload_digest,
+                        payload=parent.payload,
+                        result=parent.result,
+                        current_attempt=0,
+                        created_at=NOW,
+                        updated_at=NOW,
+                    )
+                )
+        count: list[str] = []
+
+        def record(_conn, _cursor, statement, *_rest) -> None:
+            count.append(statement)
+
+        engine = sessions.kw["bind"]
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            ChildEndWake(sessions, lambda: NOW).wake(ended)
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return len(count)
+
+    assert queries_with(1) == queries_with(8)
 
 
 def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
