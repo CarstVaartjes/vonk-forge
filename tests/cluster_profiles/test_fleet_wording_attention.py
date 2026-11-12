@@ -14,9 +14,9 @@ _VECTORS = json.loads(
 
 
 def test_alerts_read_as_plain_words_the_web_shows():
-    payload = {"attention": _VECTORS["alerts"]}
-    assert _alert_notes(payload, _VECTORS["nodes"]) == _VECTORS["expected"]
-    assert _alert_notes({"attention_unavailable": True}, []) == [
+    payload = {"nodes": _VECTORS["nodes"], "attention": _VECTORS["alerts"]}
+    assert _alert_notes(payload) == _VECTORS["expected"]
+    assert _alert_notes({"nodes": [], "attention_unavailable": True}) == [
         _VECTORS["unavailable"]
     ]
     assert ALERTS_UNAVAILABLE == _VECTORS["unavailable"]

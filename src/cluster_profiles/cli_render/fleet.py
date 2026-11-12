@@ -371,22 +371,24 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
-def _alert_notes(
-    payload: Mapping[str, object], nodes: Sequence[Mapping[str, object]]
-) -> list[str]:
+def _alert_notes(payload: object) -> list[str]:
     """Firing Prometheus alerts as `Severity: summary (Spark)`, as the Controller web says them."""
-    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
+    document = _object(payload, "Fleet")
+    names = {
+        node.get("id"): _text(node.get("display_name"))
+        for node in _records(document, "nodes")
+    }
     notes: list[str] = []
-    alerts = payload.get("attention")
+    alerts = document.get("attention")
     for alert in alerts if isinstance(alerts, list) else []:
-        labels = _optional(alert.get("labels"), "alert labels")
-        node_id = labels.get("node_id")
-        severity = _text(alert.get("severity"))
+        record = _object(alert, "alert")
+        node_id = _optional(record.get("labels"), "alert labels").get("node_id")
+        severity = _text(record.get("severity"))
         notes.append(
-            f"{severity[:1].upper()}{severity[1:]}: {_text(alert.get('summary'))}"
+            f"{severity[:1].upper()}{severity[1:]}: {_text(record.get('summary'))}"
             + (f" ({names.get(node_id, _text(node_id))})" if node_id else "")
         )
-    if payload.get("attention_unavailable"):
+    if document.get("attention_unavailable"):
         notes.append(ALERTS_UNAVAILABLE)
     return notes
 
@@ -546,7 +548,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     _table(labels, rows)
     print()
     notes = (
-        _alert_notes(payload, nodes)
+        _alert_notes(payload)
         + _fleet_attention(nodes)
         + _fleet_workloads(nodes, wide=wide)
     )
