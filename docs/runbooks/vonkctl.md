@@ -985,6 +985,10 @@ alias narrows the result. An absent, stale, revoked, or unpublished route is not
 replaced with a guessed address. Endpoint discovery does not issue credentials
 or prove physical model quality.
 
+The output opens with `Serving now:`, one `alias · recipe title · published` line
+per published route. The Fleet page's "Serving now" block shows the same lines
+for the loaded Profile, each with the same connection example.
+
 The client endpoint is the Controller's inference gateway, not a Spark:
 `API base` is `https://<controller host>/v1` (the same origin as
 `VONK_CONTROL_URL`; over Tailscale, the `svc:vonk-forge` service), where Caddy

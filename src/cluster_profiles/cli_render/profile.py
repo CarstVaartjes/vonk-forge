@@ -6,6 +6,9 @@ import json
 from collections.abc import Mapping
 
 from .. import cli_states
+from ..generated_control.models.fleet_profile_endpoints_view import (
+    FleetProfileEndpointsView,
+)
 from .common import (
     _actions,
     _field,
@@ -150,6 +153,20 @@ def _connection_examples(api_base: str, alias: str) -> None:
     print(CONNECTION_NOTE)
 
 
+def _serving_now(view: FleetProfileEndpointsView) -> None:
+    """One line per published alias, worded like the dashboard's "Serving now"."""
+    published = [
+        item
+        for item in view.assignments or []
+        if item.state == cli_states.PUBLISHED and item.alias
+    ]
+    if not published:
+        return
+    print("Serving now:")
+    for item in published:
+        print(f"  {item.alias} · {item.recipe_title} · {item.state}")
+
+
 def _profile_endpoints(payload: Mapping[str, object]) -> None:
     number = payload.get("number")
     application_id = payload.get("application_id")
@@ -170,6 +187,7 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
     if not assignments:
         print("The loaded application has no endpoint assignments.")
         return
+    _serving_now(FleetProfileEndpointsView.from_dict(dict(payload)))
     for assignment in assignments:
         print()
         _field("Assignment", assignment.get("recipe_title"))
