@@ -45,8 +45,9 @@ under `/lib/systemd/system`, `/usr/share/keyrings/vonk-forge-release.pub`,
 `/etc/vonk-forge-agent/containers-storage.conf`. The package has no `postrm`, so
 everything below is cleaned up by hand.
 
-If a package upgrade is mid-recovery, `dpkg --purge` retires that recovery
-intent first (an explicit removal is the latest request).
+If a package upgrade is mid-recovery, `dpkg --purge` normally retires that
+recovery intent first (an explicit removal is the latest request); if it refuses,
+see "If a purge ran during a package upgrade" below.
 
 ### 1c. Remove workloads and runtime images (`sudo`)
 
@@ -128,14 +129,14 @@ agent depends on (podman, crun, and so on) are left installed; remove them with
 find /etc/systemd/system /lib/systemd/system -name 'vonk-forge*'
 ```
 
-should list nothing. The package has no `postrm`, so the enablement link
+should list only the link below. The package has no `postrm`, so the enablement link
 `/etc/systemd/system/multi-user.target.wants/vonk-forge-package-rollback.service`
 is left dangling by the purge. Remove it and the package's enablement records,
 then reload:
 
 ```sh
 sudo find /etc/systemd/system -type l -name 'vonk-forge*' -delete
-sudo rm -f /var/lib/systemd/deb-systemd-helper-*/{,*/}vonk-forge*
+sudo rm -f /var/lib/systemd/deb-systemd-helper-*/vonk-forge* /var/lib/systemd/deb-systemd-helper-*/*/vonk-forge*
 sudo systemctl daemon-reload
 ```
 
@@ -149,8 +150,9 @@ sudo systemctl set-default graphical.target
 ### If a purge ran during a package upgrade
 
 `prerm` can refuse with exit 1 ("cannot remove package during durable upgrade
-recovery"). Retry once the recovery has finished, or remove the files below by
-hand. The preinst recovery writes `/var/lib/vonk-forge/package-upgrade/`
+recovery"). Recovery fails closed on the same check, so waiting does not help:
+remove `/var/lib/vonk-forge/package-upgrade` (step 1f), then re-run step 1b, or
+remove the files below by hand. The preinst recovery writes `/var/lib/vonk-forge/package-upgrade/`
 (`intent`, `lock`, `agent-blocked`, `recovery-capsule/`) and
 `/var/lib/vonk-forge/helper-upgrade.pending`, which 1f removes, and these
 systemd files, which it does not:
@@ -227,7 +229,8 @@ cd .. && sudo rm -rf vonk-forge && sudo rm -f .vonk-setup.lock
 ```
 
 If you set `VONK_BACKUP_OFFHOST_PATH` in `.env`, that directory is outside the
-project and stays until you delete it. 
+project and stays until you delete it.
+
 ### 2d. Secure remote only: Tailscale
 
 Removing the project stops the gateway but does not remove it from your
