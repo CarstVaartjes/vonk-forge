@@ -120,7 +120,7 @@ class StopDispatchMixin:
                     session,
                     request_id,
                     WireAgentOperation.RECIPE_STOP.value,
-                    plan_digest,
+                    None,
                     owner_kind="run",
                     owner_id=run_id,
                 )
@@ -183,7 +183,7 @@ class StopDispatchMixin:
                 lambda: service._idempotent(
                     request_id,
                     WireAgentOperation.RECIPE_STOP.value,
-                    plan_digest,
+                    None,
                     owner_kind="run",
                     owner_id=run_id,
                 )

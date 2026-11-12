@@ -126,13 +126,13 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_run_stop.py": {
         "_stop_logical_job_run": (
-            "d30099e5589b3f655baf5aaea9e7a7d8a27852c1b62f5bf690c276421e92e8b7",
+            "4b7cf368767e47b54c3b902f1389f2f8db6a17a12ee7836ed7a8415b7d241960",
             "retain: exact logical Stop admission owns run settlement",
         ),
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "6d3618fc710e5617d8d26f132da9bdaeeafbc9dd98ce24245c60b53ab7c4aaff",
+            "7009cf49e277b6b0b9cb55fdf8350f4fdfff595cd1ae2df5ab0d06aa647114ea",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (

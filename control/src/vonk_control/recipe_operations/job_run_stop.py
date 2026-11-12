@@ -99,6 +99,14 @@ class JobRunStopMixin:
                     "partial one-shot Stop requires current profile ownership"
                 )
         with service._sessions.begin() as session:
+            # The locked plan read takes the run fence every Stop continuation
+            # commits under, so the lookup behind it sees this key's Stop.
+            admitted = service._stop_plan_in_session(
+                session,
+                run_id,
+                lock=True,
+                profile_target_node_ids=profile_target_node_ids,
+            )
             pending_job = session.scalar(
                 select(Job).where(Job.request_id == request_id)
             )
@@ -119,7 +127,6 @@ class JobRunStopMixin:
                     if (
                         typed_parent.profile_application_id != profile_application_id
                         or typed_parent.owner_id != run_id
-                        or typed_parent.plan_digest != plan_digest
                         or typed_parent.workload_intent_ordinal
                         != workload_intent_ordinal
                     ):
@@ -179,12 +186,6 @@ class JobRunStopMixin:
                     return service._view(pending_job, session=session)
                 workload_intent_ordinal = bound
             run = session.get(RecipeRun, run_id, with_for_update=True)
-            if pending_job is not None:
-                # Continuations mutate under the run fence. The earlier plain
-                # request lookup may predate another continuation's commit.
-                session.refresh(pending_job)
-                if not _one_shot_stop_awaits_continuation(pending_job):
-                    return service._view(pending_job, session=session)
             # The run passed this check before the lock: the reviewed Stop names
             # a run whose records moved on, which the owner re-plans.
             if run is None or not _run_is_one_shot(session, run):
@@ -192,22 +193,12 @@ class JobRunStopMixin:
                     "logical recipe run changed while stopping",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
-            admitted = service._stop_plan_in_session(
-                session,
-                run_id,
-                lock=True,
-                profile_target_node_ids=profile_target_node_ids,
-            )
-            # A Stop plan the records no longer back is drift the owner re-plans
-            # under a fresh request, as the service Stop's acceptance does.
+            # Stop is declarative: it stops the run as it is now, so a plan
+            # that moved on since the caller's preview is re-planned, never
+            # refused; only a run that cannot be stopped is.
             if not admitted.allowed:
                 raise RecipeRequestInvalid(
-                    "stop plan is stale or blocked",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            if pending_job is None and plan_digest != admitted.plan_digest:
-                raise RecipeRequestInvalid(
-                    "reviewed Stop plan digest does not match current effects",
+                    "stop plan is blocked",
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
             plan_digest = admitted.plan_digest

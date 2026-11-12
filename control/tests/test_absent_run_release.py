@@ -89,6 +89,35 @@ def test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases(tmp_path):
         )
 
 
+def test_a_stale_stop_of_a_gone_run_replays_under_its_key(tmp_path):
+    sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path)
+    installed = installed_recipe(service, mapping, build, nodes, request_id="i" * 36)
+    started = started_recipe(
+        sessions, service, installed.owner_id, nodes, request_id="r" * 36
+    )
+    stale = service.preview_stop(started.owner_id)
+    _report_absent(sessions, started.owner_id)
+    assert service.preview_stop(started.owner_id).plan_digest != stale.plan_digest
+
+    def stop():
+        return service.stop(
+            started.owner_id,
+            plan_digest=stale.plan_digest,
+            actor="admin",
+            request_id="s" * 36,
+        )
+
+    first = stop()
+    assert first.state == "succeeded"
+    # The same key on the same run is the same Stop.
+    assert stop().id == first.id
+    plan = service.preview_run(installed.owner_id, "after-the-stop")
+    fresh = service.start(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="f" * 36
+    )
+    assert fresh.state in {"queued", "running"}
+
+
 def _superseded_failed_run(tmp_path, *, reported_absent: bool):
     """A run whose ranks are recorded failed while a newer intent owns its Sparks."""
 

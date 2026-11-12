@@ -63,7 +63,7 @@ def test_selected_stop_recovers_after_repeated_conflict_clears_and_worker_restar
             replacement, request_key=str(uuid.uuid4()), actor="admin"
         )
 
-        refusal = "stop plan is stale or blocked"
+        refusal = "stop plan is blocked"
         waits: set[str] = set()
         live: list[FleetProfileApplication] = []
         for _ in range(60 * RECOVERY.max_failures):
