@@ -421,7 +421,9 @@ class RecipeBuild(Base):
         nullable=False,
         index=True,
     )
-    source_bundle_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_bundle_sha256: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )
     build_input_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     policy_report: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)

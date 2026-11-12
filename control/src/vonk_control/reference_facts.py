@@ -16,6 +16,7 @@ facts only; they never read assignments or plans to answer these questions.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Mapping
 
 from pydantic import TypeAdapter
@@ -34,6 +35,8 @@ from .models import (
     InstallationNode,
     RecipeInstallation,
 )
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
@@ -135,7 +138,8 @@ def fill_revision_source_bundles(connection: Connection) -> int:
     ``projected`` JSON. For each revision with no column value and a digest in
     its projection, one update records the column and removes the JSON key, so
     the column is the only copy. A revision whose projection names no digest
-    stays empty, which is an unknown source. Returns the revisions moved.
+    stays empty, which is an unknown source; so does one whose stored value is not
+    a digest (it never fits the column). Returns the revisions moved.
     """
     moved = 0
     for revision_id, projected in connection.execute(
@@ -144,9 +148,12 @@ def fill_revision_source_bundles(connection: Connection) -> int:
             CatalogDocumentRevision.source_bundle_sha256.is_(None),
         )
     ).all():
-        if not isinstance(projected, Mapping) or not isinstance(
-            projected.get("source_bundle_sha256"), str
-        ):
+        digest = (
+            projected.get("source_bundle_sha256")
+            if isinstance(projected, Mapping)
+            else None
+        )
+        if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
             continue
         moved += connection.execute(
             update(CatalogDocumentRevision)
@@ -155,7 +162,7 @@ def fill_revision_source_bundles(connection: Connection) -> int:
                 CatalogDocumentRevision.source_bundle_sha256.is_(None),
             )
             .values(
-                source_bundle_sha256=projected["source_bundle_sha256"],
+                source_bundle_sha256=digest,
                 projected={
                     key: value
                     for key, value in projected.items()

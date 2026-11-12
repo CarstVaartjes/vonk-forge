@@ -10,7 +10,10 @@ import io
 from pathlib import Path
 
 from sqlalchemy import update
-from vonk_control.catalog_revision_contract import read_recipe_projection
+from vonk_control.catalog_revision_contract import (
+    read_recipe_projection,
+    write_catalog_projection,
+)
 from vonk_control.models import CatalogDocumentRevision
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.reference_facts import fill_revision_source_bundles
@@ -67,3 +70,15 @@ def test_a_revision_that_names_no_source_stays_unknown(tmp_path: Path) -> None:
         assert fill_revision_source_bundles(session.connection()) == 0
         row = session.get(CatalogDocumentRevision, revision.id)
         assert row is not None and row.source_bundle_sha256 is None
+
+
+def test_a_stored_projection_never_holds_the_digest(tmp_path: Path) -> None:
+    """The response view may carry the digest; what is stored does not."""
+    sessions, _bundles, _now, _node, revision = setup(tmp_path)
+    with sessions() as session:
+        row = session.get(CatalogDocumentRevision, revision.id)
+        assert row is not None
+        viewed = read_recipe_projection(row).model_copy(
+            update={"source_bundle_sha256": row.source_bundle_sha256}
+        )
+    assert "source_bundle_sha256" not in write_catalog_projection(viewed)
