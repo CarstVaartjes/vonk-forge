@@ -179,20 +179,17 @@ def end_unclaimed_children(
     from .. import agent_operation_states
     from ..agent_jobs import abandon_idempotent_job_in_session
     from ..agent_jobs.contracts import _ABANDONABLE_OPERATIONS
+    from ..run_switch_operations.awaited_children import child_job_ids
 
-    children = (
-        list(progress.preflight.pending_jobs.values()) if progress.preflight else []
-    )
+    children = child_job_ids(progress)
+    probes = progress.preflight.pending_jobs.values() if progress.preflight else ()
     if progress.preflight is not None:
         end_unclaimed_probes(session, progress.preflight, now)
-    if progress.child_operation_id is not None:
-        children.append(progress.child_operation_id)
-        abandon_idempotent_job_in_session(
-            session,
-            progress.child_operation_id,
-            now,
-            reason=WaitReason.SCOPE_CHANGED.value,
-        )
+    for child in children:
+        if child not in probes:
+            abandon_idempotent_job_in_session(
+                session, child, now, reason=WaitReason.SCOPE_CHANGED.value
+            )
     return bool(children) and (
         session.scalar(
             select(StoredOperation.id)

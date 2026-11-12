@@ -19,6 +19,9 @@ export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
 export type NodeStatus = "online" | "needs attention" | "offline";
 
+/** What an empty Fleet says, here and in `vonkctl fleet`. */
+const NO_SPARKS = "No Sparks are enrolled.";
+
 const LIVE_MAXIMUM_MS = 6_000;
 const DELAYED_MAXIMUM_MS = 20_000;
 
@@ -99,8 +102,10 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
-/** One workload's state in a word: degraded, unknown health, or its run state. */
+/** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */
 function runStateWord(run: VisualFleetNode["loaded"][number]): string {
+  if (run.run_state == null) return "state unknown";
+  if (run.run_state !== RunState.RUNNING) return run.run_state;
   if (run.healthy == null) return "state unknown";
   return run.healthy === false ? "degraded" : run.run_state;
 }
@@ -136,6 +141,8 @@ export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[
 export type FleetSummary = {
   enrolled: number;
   online: number;
+  /** Online Sparks that reported a free-memory sample; the sum covers only these. */
+  reporting: number;
   freeMemoryBytes: WireNumber | null;
 };
 
@@ -149,35 +156,56 @@ export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSum
   return {
     enrolled: fleet.nodes.length,
     online: online.length,
+    reporting: samples.length,
     freeMemoryBytes: samples.length
       ? samples.reduce<WireNumber>((total, value) => addWire(total, value), 0)
       : null,
   };
 }
 
+/** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */
+export function freeMemoryText(summary: FleetSummary): string | null {
+  if (summary.freeMemoryBytes === null) return null;
+  const free = `${formatBytes(summary.freeMemoryBytes)} unified memory free`;
+  return summary.reporting === summary.online
+    ? free
+    : `${free} on ${summary.reporting} of ${summary.online} online Sparks`;
+}
+
+/** A Spark needs attention when it is offline or warns, or its inventory is stale. */
+export function nodeNeedsAttention(node: VisualFleetNode, now: Date): boolean {
+  return nodeStatus(node, now).status !== "online" || node.inventory?.freshness === "stale";
+}
+
+/** A workload is serving while it is running and reported healthy. */
+function isServing(run: VisualFleetNode["loaded"][number]): boolean {
+  return run.run_state === RunState.RUNNING && run.healthy === true;
+}
+
 /**
- * The Fleet in one line: Sparks online, unified memory free, workloads serving, and how many
- * Sparks need attention. `vonkctl fleet` prints the same line.
+ * The Fleet in one line: Sparks online, unified memory free, workloads serving, and what needs
+ * attention (Sparks, then firing alerts). `vonkctl fleet` prints the same line.
  */
 export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
+  if (fleet.nodes.length === 0) return NO_SPARKS;
   const summary = summarizeFleet(fleet) as FleetSummary;
   const serving = new Set(
-    fleet.nodes.flatMap((node) =>
-      node.loaded.filter((run) => runStateWord(run) === RunState.RUNNING).map((run) => run.run_id),
-    ),
+    fleet.nodes.flatMap((node) => node.loaded.filter(isServing).map((run) => run.run_id)),
   ).size;
-  const attention = fleet.nodes.filter((node) => nodeStatus(node, now).status !== "online").length;
+  const sparks = fleet.nodes.filter((node) => nodeNeedsAttention(node, now)).length;
+  const alerts = fleet.attention?.length ?? 0;
+  const attention = [
+    sparks > 0 ? `${sparks} ${sparks === 1 ? "Spark needs" : "Sparks need"} attention` : null,
+    alerts > 0 ? `${alerts} ${alerts === 1 ? "alert" : "alerts"} firing` : null,
+    alerts === 0 && fleet.attention_unavailable ? "alerts not reported" : null,
+  ].filter((part): part is string => part !== null);
   return [
     `${summary.online} of ${summary.enrolled} ${summary.enrolled === 1 ? "Spark" : "Sparks"} online`,
-    summary.freeMemoryBytes === null
-      ? "unified memory not reported"
-      : `${formatBytes(summary.freeMemoryBytes)} unified memory free`,
+    freeMemoryText(summary) ?? "unified memory not reported",
     serving === 0
       ? "no workloads serving"
       : `${serving} ${serving === 1 ? "workload" : "workloads"} serving`,
-    attention === 0
-      ? "nothing needs attention"
-      : `${attention} ${attention === 1 ? "needs" : "need"} attention`,
+    ...(attention.length > 0 ? attention : ["nothing needs attention"]),
   ].join(" · ");
 }
 

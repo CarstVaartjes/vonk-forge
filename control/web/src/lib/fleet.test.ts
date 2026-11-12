@@ -1,9 +1,7 @@
-import { readFileSync } from "node:fs";
 import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
-import type { VisualFleetNode, VisualFleetSnapshot } from "../api/types";
+import type { VisualFleetNode } from "../api/types";
 import {
-  fleetStatusLine,
   formatBytes,
   nodeDisplayName,
   nodeMemory,
@@ -11,7 +9,6 @@ import {
   nodeSecondaryName,
   nodeStatus,
   nodeSwap,
-  nodeWorkloadLines,
   offlineReasonLabel,
   telemetryFreshnessAt,
 } from "./fleet";
@@ -220,26 +217,6 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
   expect(nodeMemory(observed)).toEqual({ usedPercent: 50, totalBytes: total });
   expect(formatBytes(total)).toBe("17179869184.0 GiB");
   expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
-});
-
-test("a Spark serves in the words `vonkctl fleet` prints", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-workloads.json", "utf8"),
-  ) as { nodes: Partial<VisualFleetNode>[]; expected: Record<string, string[]> };
-  const fleet = vectors.nodes.map((input) => node(input));
-  for (const member of fleet) {
-    expect(nodeWorkloadLines(member, fleet)).toEqual(vectors.expected[member.id]);
-  }
-});
-
-test("the Fleet status line uses the words `vonkctl fleet` prints", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-status.json", "utf8"),
-  ) as { now: string; cases: { nodes: Partial<VisualFleetNode>[]; expected: string }[] };
-  for (const { nodes, expected } of vectors.cases) {
-    const snapshot = { nodes: nodes.map((input) => node(input)) } as VisualFleetSnapshot;
-    expect(fleetStatusLine(snapshot, new Date(vectors.now))).toBe(expected);
-  }
 });
 
 test("GPU reset warnings retain the operator fix while a Spark remains online", () => {

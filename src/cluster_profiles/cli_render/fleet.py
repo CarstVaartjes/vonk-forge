@@ -6,7 +6,12 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
+from ..cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    RUN_RUNNING,
+    UNKNOWN,
+    GpuClockMetric,
+)
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.display_memory_observation import (
@@ -37,6 +42,8 @@ from .common import (
     _warn,
     _words,
 )
+
+NO_SPARKS = "No Sparks are enrolled."
 
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
@@ -144,7 +151,12 @@ def _memory(node: Mapping[str, object]) -> str:
 
 
 def _run_state_word(healthy: object, run_state: object) -> str:
-    """One workload's state in a word, as the Controller web Fleet page says it."""
+    """One workload's state in a word, as the Controller web Fleet page says it.
+
+    Health only qualifies a run that is running; any other run state is shown as is.
+    """
+    if run_state != RUN_RUNNING:
+        return _text(run_state)
     if healthy is None:
         return "state unknown"
     return "degraded" if healthy is False else _text(run_state)
@@ -401,44 +413,87 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
+def _needs_attention(node: object) -> bool:
+    """A Spark needs attention when it is offline or warns, or its inventory is stale."""
+    return bool(_fleet_attention([_object(node, "Fleet node")]))
+
+
+def _is_serving(run: object) -> bool:
+    """A workload is serving while it is running and reported healthy."""
+    document = _object(run, "run")
+    return document.get("run_state") == RUN_RUNNING and document.get("healthy") is True
+
+
+def _free_memory_text(online: Sequence[object]) -> str:
+    """Free memory across the online Sparks, saying so when only some reported it."""
+    samples = [
+        _optional(
+            _optional(
+                _object(node, "Fleet node").get("telemetry"),
+                "fleet telemetry evidence",
+            ).get("sample"),
+            "fleet telemetry sample",
+        ).get("memory_available_bytes")
+        for node in online
+    ]
+    free = [value for value in samples if type(value) is int]
+    if not free:
+        return "unified memory not reported"
+    text = f"{_size(sum(free))} unified memory free"
+    return (
+        text
+        if len(free) == len(online)
+        else f"{text} on {len(free)} of {len(online)} online Sparks"
+    )
+
+
 def _fleet_status_line(payload: object) -> str:
     """The Fleet in one line, in the words the Controller web Fleet page uses."""
-    nodes = _records(_object(payload, "Fleet"), "nodes")
+    document = _object(payload, "Fleet")
+    nodes = _records(document, "nodes")
+    if not nodes:
+        return NO_SPARKS
     online = [
         node
         for node in nodes
         if _object(node.get("connection"), "connection").get("online_state") == "online"
     ]
-    sample = [
-        _optional(
-            _optional(node.get("telemetry"), "fleet telemetry evidence").get("sample"),
-            "fleet telemetry sample",
-        ).get("memory_available_bytes")
-        for node in online
-    ]
-    free = [value for value in sample if type(value) is int]
     serving = len(
         {
             run.get("run_id")
             for node in nodes
             for run in _records(node, "loaded")
-            if _run_state_word(run.get("healthy"), run.get("run_state"))
-            == cli_states.RUNNING
+            if _is_serving(run)
         }
     )
-    attention = sum(1 for node in nodes if _fleet_attention([node]))
+    sparks = sum(1 for node in nodes if _needs_attention(node))
+    firing = document.get("attention")
+    alerts = len(firing) if isinstance(firing, list) else 0
+    attention = [
+        *(
+            [f"{sparks} {'Spark needs' if sparks == 1 else 'Sparks need'} attention"]
+            if sparks
+            else []
+        ),
+        *(
+            [f"{alerts} {'alert' if alerts == 1 else 'alerts'} firing"]
+            if alerts
+            else []
+        ),
+        *(
+            ["alerts not reported"]
+            if not alerts and document.get("attention_unavailable")
+            else []
+        ),
+    ]
     return " · ".join(
         (
             f"{len(online)} of {len(nodes)} {'Spark' if len(nodes) == 1 else 'Sparks'} online",
-            f"{_size(sum(free))} unified memory free"
-            if free
-            else "unified memory not reported",
+            _free_memory_text(online),
             f"{serving} {'workload' if serving == 1 else 'workloads'} serving"
             if serving
             else "no workloads serving",
-            f"{attention} {'needs' if attention == 1 else 'need'} attention"
-            if attention
-            else "nothing needs attention",
+            *(attention or ["nothing needs attention"]),
         )
     )
 
@@ -556,7 +611,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
 def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     nodes = _records(payload, "nodes")
     if not nodes:
-        print("No Sparks are enrolled.")
+        print(_fleet_status_line(payload))
         print("Next: vonkctl fleet enroll <name> --output <file>")
         return
     print(_fleet_status_line(payload))
@@ -575,7 +630,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
             _memory(node),
             _size(inventory.get("disk_free_bytes")),
             _gpu(node),
-            "; ".join(_node_workloads(node, names)) or "idle",
+            "; ".join(_node_workloads(node, names)) or "Idle",
         ]
         if wide:
             row.insert(5, _cpu_clock(node))

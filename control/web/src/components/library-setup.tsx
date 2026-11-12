@@ -1,6 +1,6 @@
 import { compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetSnapshot } from "../api/types";
-import { formatBytes, summarizeFleet, type FleetSummary } from "../lib/fleet";
+import { freeMemoryText, summarizeFleet, type FleetSummary } from "../lib/fleet";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   filterLibraryRecipeRecords,
@@ -194,9 +194,7 @@ export function LibrarySetupStrip({
             {summary === undefined
               ? "Fleet state is not available yet; pick a Spark count to narrow the Library."
               : `${summary.online} of ${summary.enrolled} Spark${summary.enrolled === 1 ? "" : "s"} online` +
-                (summary.freeMemoryBytes === null
-                  ? "."
-                  : ` · ${formatBytes(summary.freeMemoryBytes)} unified memory free.`)}
+                (freeMemoryText(summary) === null ? "." : ` · ${freeMemoryText(summary)}.`)}
             {assessed
               ? ` ${fit.fits} of ${fit.fits + fit.nonFit} assessed ${noun} fit it now.`
               : " The Controller has not assessed placement for this page yet."}

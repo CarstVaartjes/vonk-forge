@@ -39,6 +39,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     RecipeLibrarySyncRun,
 )
+from vonk_control.owner_liveness import SYNC_HEARTBEAT_WINDOW
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import (
     CatalogModelEntry,
@@ -691,6 +692,50 @@ def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> No
     repeated = sync.automatic()
     assert repeated.id == first.id
     assert reader.fetches == [reader.snapshot.items[0].uri]
+
+
+def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
+    tmp_path: Path,
+) -> None:
+    """Catches the worker re-running the whole sync on its thread at every due time."""
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    now = [datetime(2026, 9, 5, tzinfo=UTC)]
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=service, reader=reader, clock=lambda: now[0]
+    )
+    sync.advance_automatic(60)
+    latest = sync.latest()
+    assert latest is not None and latest.wait is not None
+    reads: list[str] = []
+    listed = reader.list
+
+    def counted() -> RecipeLibrarySnapshot:
+        reads.append("list")
+        return listed()
+
+    reader.list = counted
+
+    now[0] = latest.wait.next_check
+    assert sync.redrive(latest.id, 60) is False
+    assert reads == []
+
+    now[0] = latest.wait.next_check + timedelta(seconds=61)
+    with sessions.begin() as session:
+        run = session.get(RecipeLibrarySyncRun, latest.id)
+        run.state, run.active_slot = "running", "managed-recipes"
+        run.completed_at, run.heartbeat_at = None, now[0]
+    assert sync.redrive(latest.id, 60) is False  # a long API import holds the slot
+    assert reads == []
+
+    with sessions.begin() as session:
+        run = session.get(RecipeLibrarySyncRun, latest.id)
+        run.heartbeat_at = now[0] - SYNC_HEARTBEAT_WINDOW - timedelta(seconds=1)
+    # A dead claim no longer holds the slot: the worker observes the library
+    # and the stale run is replaced.
+    assert sync.redrive(latest.id, 60) is True
+    assert reads
+    with sessions() as session:
+        assert session.get(RecipeLibrarySyncRun, latest.id).state != "running"
 
 
 def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(

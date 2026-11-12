@@ -234,9 +234,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
         </div>
       )}
       {fleet.snapshot && (
-        <p className="fleet-status-line" role="status">
-          {fleetStatusLine(fleet.snapshot, fleet.now)}
-        </p>
+        <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && fleet.snapshot.nodes.length > 0 && (
         <section className="fleet-discovery" aria-label="Find a Spark">
