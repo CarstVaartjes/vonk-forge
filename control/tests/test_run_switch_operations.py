@@ -8588,11 +8588,38 @@ def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
     assert fresh.state not in {"cancelled", "failed"}
 
 
-def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path):
+def test_a_live_probe_keeps_the_dependency_window_waiting(tmp_path):
+    """Catches a switch ended as exhausted while its own probe is still live.
+
+    A probe ends by its own report, the gone-target sweep, supersession or the
+    parent's cancel, so the dependency window only runs while none is live.
+    """
+    from datetime import timedelta
+
+    from vonk_control.run_switch_operations import _read_progress
+    from vonk_control.run_switch_operations.observation_window import (
+        DEPENDENCY_WINDOW,
+        checkpoint_verdict,
+    )
+    from vonk_control.stall_window import Verdict
+
+    switch = _probing_switch(tmp_path)
+    assert _probe_ids(switch) is not None
+    late = NOW + DEPENDENCY_WINDOW + timedelta(hours=1)
+    with switch.sessions() as session:
+        job = session.get(Job, switch.operation.operation_id)
+        assert job is not None
+        progress = _read_progress(job.result)
+        assert checkpoint_verdict(job, progress, late) is Verdict.WAITING
+
+
+@pytest.mark.parametrize("field", ["child_operation_id", "recovery_child_operation_id"])
+def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path, field):
     """Catches idempotent children outliving a run-switch that failed.
 
     The same class as the cancelled probe: a queued transfer child of an ended
-    owner kept retrying for nobody. Copied bytes stay on the Spark for reuse.
+    owner kept retrying for nobody, whether its phase child or the child a
+    damaged checkpoint's recovery recorded. Copied bytes stay for reuse.
     """
     from dataclasses import replace
 
@@ -8634,7 +8661,7 @@ def test_a_failed_run_switch_ends_its_unclaimed_probe_and_transfer(tmp_path):
         job = session.get(Job, switch.operation.operation_id)
         assert job is not None
         progress = _read_progress(job.result)
-        progress.child_operation_id = transfer.id
+        setattr(progress, field, transfer.id)
         adapter = RunSwitchAdapter(session)
         before = adapter.lifecycle(job, progress, NOW)
         adapter.apply(job, progress, before, replace(before, state=State.FAILED), NOW)
