@@ -1337,6 +1337,12 @@ def test_recipe_detail_prints_the_served_release_labels_and_json_never_asks() ->
     assert run(("recipe", "detail", "qwen", "--json"), client)[0] == 0
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen"]
 
+    # The plain table never needs the words.
+    client.calls.clear()
+    with redirect_stdout(StringIO()):
+        cli.main(("recipe", "library"), control_client=client)
+    assert "/api/library/vocabulary" not in [call[1] for call in client.calls]
+
 
 def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:
     detail = FakeClient(
