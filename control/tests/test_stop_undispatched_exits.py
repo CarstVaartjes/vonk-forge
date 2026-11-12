@@ -39,9 +39,13 @@ def _view() -> RecipeOperationView:
 
 class _Row:
     status_reason: str | None = None
+    state = None
 
 
 class _Sessions:
+    def __call__(self):
+        return self
+
     def begin(self):
         return self
 
