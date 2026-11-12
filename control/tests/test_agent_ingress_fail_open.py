@@ -315,14 +315,7 @@ CASES: list[
             "nvme_temperature_c": _SAMPLE | {"nvme_temperature_c": 900},
             "nic_temperature_c": _SAMPLE | {"nic_temperature_c": 900},
             "fan_rpm_max": _SAMPLE | {"fan_rpm_max": 10**6},
-            # More engine readings than a Spark runs endpoints for.
-            "engines": _SAMPLE
-            | {
-                "engines": [
-                    _ENGINE | {"run_id": str(uuid.UUID(int=n, version=4))}
-                    for n in range(1, 10)
-                ]
-            },
+            "engines": _SAMPLE | {"engines": "not-a-list"},
         },
     ),
     (

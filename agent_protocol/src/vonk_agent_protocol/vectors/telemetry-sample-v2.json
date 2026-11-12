@@ -1,7 +1,7 @@
 {
   "captures": {
     "spark": "spark-3542 (GB10), 2026-11-12, read-only as the login user",
-    "note": "Verbatim file contents; tensorfold_metrics is the allow-listed subset of GET 127.0.0.1:8888/metrics. Its kv_cache_usage_ratio lines are per pool; the expected sample carries the largest. The second engine entry is synthetic (no vLLM capture yet), and the only one with kv_pool_bytes: no capture proves a TensorFold name for it.",
+    "note": "Verbatim file contents; tensorfold_metrics is the allow-listed subset of GET 127.0.0.1:8888/metrics. Its kv_cache_usage_ratio lines are per pool; the expected sample carries the largest. The second engine entry is synthetic (no vLLM capture yet).",
     "proc_stat_cpu_line": "cpu  43289912 1747719 38264669 3576438620 11820201 0 1902301 0 0 0\n",
     "proc_loadavg": "2.35 2.47 2.34 3/702 3129124\n",
     "proc_vmstat_oom_kill": "oom_kill 124\n",
@@ -146,8 +146,7 @@
         "run_id": "22222222-2222-4222-8222-222222222222",
         "format": "vllm",
         "requests_running": 1,
-        "requests_waiting": 0,
-        "kv_pool_bytes": 8589934592
+        "requests_waiting": 0
       }
     ]
   },

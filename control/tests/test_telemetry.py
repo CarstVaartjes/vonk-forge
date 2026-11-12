@@ -582,7 +582,7 @@ def _run(session, run_id: str, alias: str, route_state: str) -> None:
 def test_live_engine_readings_are_the_newest_per_run_with_a_published_alias(
     telemetry,
 ) -> None:
-    repository, sessions, _engine, _clock = telemetry
+    repository, sessions, _engine, clock = telemetry
     first, second = (e["run_id"] for e in _vector_v2()["sample"]["engines"])
     unpublished = "44444444-4444-4444-8444-444444444444"
     with sessions.begin() as session:
@@ -604,18 +604,49 @@ def test_live_engine_readings_are_the_newest_per_run_with_a_published_alias(
         )
 
     repository.record_batch(NODE_A, (reported(1, 10, first, second, unpublished),))
+    clock.now = NOW + timedelta(seconds=9)
     repository.record_batch(NODE_A, (reported(10, 20, first, unpublished),))
 
     # `second` answered slowly: it is missing from the newest sample but its
     # earlier reading still stands inside the live window.
-    live = repository.live_engine_readings(START + timedelta(seconds=11))
+    live = repository.live_engine_readings(clock.now + timedelta(seconds=1))
     assert {(item.alias, item.reading.generation_tokens) for item in live} == {
         ("glm-5-flash", 20),
         ("other-model", 10),
     }
 
-    # Past the window nothing stands for it.
+    # Once the first sample is past the window only the newer run remains.
+    later = repository.live_engine_readings(
+        NOW + ENGINE_LIVE_WINDOW + timedelta(seconds=5)
+    )
+    assert {item.alias for item in later} == {"glm-5-flash"}
     past = repository.live_engine_readings(
-        START + timedelta(seconds=10) + ENGINE_LIVE_WINDOW + timedelta(seconds=1)
+        NOW + ENGINE_LIVE_WINDOW + timedelta(seconds=15)
     )
     assert past == []
+
+
+def test_the_engine_window_counts_by_receive_time_so_a_slow_spark_clock_counts(
+    telemetry,
+) -> None:
+    repository, sessions, _engine, clock = telemetry
+    run = _vector_v2()["sample"]["engines"][0]["run_id"]
+    with sessions.begin() as session:
+        _run(session, run, "glm-5-flash", "published")
+    # The Spark's clock is 40 s behind: observed long ago, received now.
+    skewed = TelemetrySample.model_validate_json(
+        canonical_message(
+            {
+                **sample(observed_at=NOW - timedelta(seconds=40)).model_dump(
+                    mode="json"
+                ),
+                "engines": [{"run_id": run, "format": "vllm", "generation_tokens": 7}],
+            }
+        )
+    )
+    repository.record_batch(NODE_A, (skewed,))
+    live = repository.live_engine_readings(clock.now)
+    assert [(item.alias, item.reading.generation_tokens) for item in live] == [
+        ("glm-5-flash", 7)
+    ]
+    assert repository.live_engine_readings(clock.now + ENGINE_LIVE_WINDOW * 2) == []

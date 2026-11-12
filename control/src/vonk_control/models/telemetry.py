@@ -341,7 +341,6 @@ class NodeEngineSample(Base):
     requests_running: Mapped[int | None] = mapped_column(BigInteger)
     requests_waiting: Mapped[int | None] = mapped_column(BigInteger)
     kv_cache_usage_ratio: Mapped[float | None] = mapped_column(Float)
-    kv_pool_bytes: Mapped[int | None] = mapped_column(BigInteger)
     ttft_seconds_sum: Mapped[float | None] = mapped_column(Float)
     ttft_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
     time_per_output_token_seconds_sum: Mapped[float | None] = mapped_column(Float)

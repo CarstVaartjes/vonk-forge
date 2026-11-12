@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, PrivateAttr, field_validator, model_validator
 from pydantic_core import ValidationError
 
 from .contracts import (
@@ -61,7 +62,6 @@ class TelemetryWireModel(WireModel):
     pass
 
 
-MAX_ENGINE_READINGS = 8
 _COUNTER_MAX = 2**63 - 1
 
 
@@ -103,8 +103,7 @@ class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
     The ``*_seconds_sum`` / ``*_seconds_count`` pairs are a histogram's sum and
     count, so a mean over any window is the difference of the sums over the
     difference of the counts. There are no percentiles: the gateway carries
-    those. ``kv_pool_bytes`` is reported only by an engine whose capture proves
-    the source name. An invalid reading is dropped alone.
+    those. An invalid reading is dropped alone.
     """
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = tuple(
@@ -121,7 +120,6 @@ class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
             (("requests_running",),),
             (("requests_waiting",),),
             (("kv_cache_usage_ratio",),),
-            (("kv_pool_bytes",),),
             (
                 ("ttft_seconds_sum",),
                 ("ttft_seconds_count",),
@@ -160,12 +158,6 @@ class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
         ge=0,
         le=1,
         allow_inf_nan=False,
-        exclude_if=lambda value: value is None,
-    )
-    kv_pool_bytes: int | None = Field(
-        default=None,
-        ge=0,
-        le=MAX_TELEMETRY_CAPACITY_BYTES,
         exclude_if=lambda value: value is None,
     )
     ttft_seconds_sum: float | None = _seconds()
@@ -398,40 +390,58 @@ class _TelemetryReadings(OptionalEvidenceModel, HostResourceSample):
 TelemetryReadings = _TelemetryReadings
 
 
-class TelemetrySample(TelemetryReadings):
-    """One sample: the host readings plus the engine readings (4.4).
+class _EngineEntries(TelemetryWireModel):
+    """The ``engines`` list of a sample. An entry that is invalid is dropped
+    alone (counted), and a repeated ``run_id`` keeps its first entry. It is a
+    base listed after the readings, so its validator runs inside the sample's
+    optional-evidence recovery, which must stay outermost."""
 
-    ``engines`` carries at most one reading per running endpoint. An entry that
-    is invalid is dropped alone, and a repeated ``run_id`` keeps its first entry.
-    The Controller stores engine readings in their own table and never puts them
-    on the fleet point.
-    """
+    engines: list[EngineReading] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    _dropped_engine_entries: int = PrivateAttr(default=0)
+
+    @property
+    def dropped_engine_entries(self) -> int:
+        """Engine entries this sample lost because they were invalid or repeated."""
+
+        return self._dropped_engine_entries
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def keep_valid_engines(cls, data: Any, handler: Any) -> Any:
+        dropped = 0
+        entries = data.get("engines") if isinstance(data, Mapping) else None
+        if isinstance(entries, list):
+            kept: list[EngineReading] = []
+            for entry in entries:
+                try:
+                    reading = EngineReading.model_validate_json(
+                        canonical_message(entry)
+                    )
+                except (ValidationError, TypeError, ValueError):
+                    dropped += 1
+                    continue
+                if any(reading.run_id == earlier.run_id for earlier in kept):
+                    dropped += 1
+                else:
+                    kept.append(reading)
+            data = {**data, "engines": kept}
+        sample = handler(data)
+        sample._dropped_engine_entries = dropped
+        return sample
+
+
+class TelemetrySample(TelemetryReadings, _EngineEntries):
+    """One sample: the host readings plus the engine readings (4.4). The
+    Controller stores engine readings in their own table and never puts them on
+    the fleet point. ``engines`` is optional evidence: a value that is not a
+    list is dropped (each list entry is already judged on its own)."""
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
         *TelemetryReadings.EVIDENCE_GROUPS,
         EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("engines",),)),
     )
-
-    engines: list[EngineReading] | None = Field(
-        default=None,
-        max_length=MAX_ENGINE_READINGS,
-        exclude_if=lambda value: value is None,
-    )
-
-    @field_validator("engines", mode="before")
-    @classmethod
-    def keep_valid_engines(cls, value: object) -> object:
-        if not isinstance(value, list):
-            return value
-        kept: list[EngineReading] = []
-        for entry in value:
-            try:
-                reading = EngineReading.model_validate_json(canonical_message(entry))
-            except (ValidationError, TypeError, ValueError):
-                continue
-            if all(reading.run_id != earlier.run_id for earlier in kept):
-                kept.append(reading)
-        return kept
 
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
@@ -473,7 +483,6 @@ class TelemetryRequest(TelemetryWireModel):
 
 
 __all__ = [
-    "MAX_ENGINE_READINGS",
     "MAX_TELEMETRY_CAPACITY_BYTES",
     "MAX_TELEMETRY_REPORT_BYTES",
     "EngineFormat",

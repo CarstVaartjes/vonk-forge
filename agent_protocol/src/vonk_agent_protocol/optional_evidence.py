@@ -26,7 +26,6 @@ of the sentence is kept, and the report's core is never refused for it.
 from __future__ import annotations
 
 import copy
-import itertools
 import re
 from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
@@ -191,23 +190,23 @@ def _smallest_valid(
     handler: ValidatorFunctionWrapHandler,
     data: Any,
     named: tuple[EvidenceGroup, ...],
-) -> tuple[EvidenceGroup, ...] | None:
-    """``named`` less every group the report is valid without dropping, or ``None``
-    when dropping all of them is not enough."""
+) -> tuple[tuple[EvidenceGroup, ...], Any] | None:
+    """``named`` less every group the report is valid without dropping, with the
+    model that validated; ``None`` when dropping all of them is not enough."""
 
     try:
-        handler(_without(data, named))
+        model = handler(_without(data, named))
     except ValidationError:
         return None
     kept = list(named)
     for group in reversed(named):
         trial = tuple(item for item in kept if item is not group)
         try:
-            handler(_without(data, trial))
+            model = handler(_without(data, trial))
         except ValidationError:
             continue
         kept = list(trial)
-    return tuple(kept)
+    return tuple(kept), model
 
 
 def _refused_groups(
@@ -294,32 +293,21 @@ def _drop_invalid_optional_evidence(
             for group in cls.EVIDENCE_GROUPS
             if any(_present(data, path) for path in group.paths)
         )
-        # The groups the refusal names are the first candidate, then each is
-        # kept if the report is valid without dropping it: one attempt per
-        # group, so a sensor-reading agent that sends many invalid readings at
-        # once costs a few validations, not a search over every subset. A
-        # refusal that names no group (a check across fields) falls back to
-        # the search: fewest groups first, to lose as little as the core allows.
+        # Drop what the refusal names, keeping each group only if the report is
+        # valid without dropping it. A refusal that names no group (a check
+        # across fields) starts from every present group. Either way the cost
+        # is at most one validation per group plus one: a report whose core is
+        # invalid fails the first trial and is refused unchanged.
         named = _refused_groups(present, data, refusal)
-        first = _smallest_valid(handler, data, named) if named else None
-        for dropped in itertools.chain(
-            () if first is None else (first,),
-            (
-                dropped
-                for size in range(1, len(present) + 1)
-                for dropped in itertools.combinations(present, size)
-            ),
-        ):
-            try:
-                model = handler(_without(data, dropped))
-            except ValidationError:
-                continue
-            model._evidence_warnings = redacted + tuple(group.code for group in dropped)
-            model._evidence_drops = tuple(
-                _drop(group, data, refusal) for group in dropped
-            )
-            return model
-        raise
+        found = _smallest_valid(handler, data, named) if named else None
+        if found is None and set(named) != set(present):
+            found = _smallest_valid(handler, data, present)
+        if found is None:
+            raise
+        dropped, model = found
+        model._evidence_warnings = redacted + tuple(group.code for group in dropped)
+        model._evidence_drops = tuple(_drop(group, data, refusal) for group in dropped)
+        return model
 
 
 def fail_open_on_optional_evidence() -> Any:

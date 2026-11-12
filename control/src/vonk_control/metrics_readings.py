@@ -52,7 +52,6 @@ _ENGINE = (
     Reading("requests_running", "vonk_engine_requests_running", "gauge", "Requests being served"),
     Reading("requests_waiting", "vonk_engine_requests_waiting", "gauge", "Requests queued"),
     Reading("kv_cache_usage_ratio", "vonk_engine_kv_cache_usage_ratio", "gauge", "Share of the KV cache in use"),
-    Reading("kv_pool_bytes", "vonk_engine_kv_pool_bytes", "gauge", "Size of the KV cache pool in bytes"),
     *(
         Reading(f"{name}_{part}", f"vonk_engine_{short}_{part}", "counter", f"{what} ({part})")
         for name, short, what in (
@@ -102,8 +101,9 @@ def host_reading_lines(samples: Mapping[str, TelemetryReadings]) -> list[str]:
 
 def engine_reading_lines(readings: Sequence[LiveEngineReading]) -> list[str]:
     """Labels are the node and the run's alias (a validated name, so it needs
-    no escaping). Two runs of one alias on one node would repeat a series, so
-    the later reading (the repository lists oldest first) stands for both."""
+    no escaping). A route name is published by one run, so a (node, alias) pair
+    is one run; if a switch ever shows two, one reading stands for the pair and
+    the series is never repeated."""
 
     by_series = {(item.node_id, item.alias): item.reading for item in readings}
     return _lines(

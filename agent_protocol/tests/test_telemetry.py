@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -215,11 +214,14 @@ def test_an_invalid_engine_reading_is_dropped_alone(invalid: dict[str, float]) -
     assert kept_first["generation_tokens"] == first["generation_tokens"]
 
 
-def test_many_invalid_readings_at_once_are_dropped_without_a_search() -> None:
-    """A subset search over the groups takes seconds for eight bad readings."""
-
-    invalid = {k: v for item in VECTOR_V2["invalid_readings"] for k, v in item.items()}
-    started = time.monotonic()
-    parsed = TelemetryRequest.parse({"samples": [{**VECTOR_V2["sample"], **invalid}]})
-    assert time.monotonic() - started < 1
-    assert not set(invalid) & set(parsed.document()["samples"][0])
+def test_a_ninth_engine_is_kept_and_a_dropped_entry_is_counted() -> None:
+    first = VECTOR_V2["sample"]["engines"][0]
+    engines = [
+        {**first, "run_id": f"{n:08x}-1111-4111-8111-111111111111"} for n in range(9)
+    ]
+    bad = VECTOR_V2["invalid_engine_entries"][0]
+    sample = TelemetryRequest.parse(
+        {"samples": [{**VECTOR_V2["sample"], "engines": [bad, *engines, engines[0]]}]}
+    ).samples[0]
+    assert sample.engines is not None and len(sample.engines) == 9
+    assert sample.dropped_engine_entries == 2

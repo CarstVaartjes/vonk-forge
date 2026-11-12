@@ -4,8 +4,7 @@ from importlib.resources import files
 from typing import Any, Literal
 
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import NodeOfflineReason, canonical_message
-from vonk_agent_protocol.telemetry import EngineReading
+from vonk_agent_protocol import NodeOfflineReason
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection import (
@@ -19,6 +18,7 @@ from vonk_control.fleet_projection import (
     TelemetryState,
 )
 from vonk_control.metrics import MetricsRegistry, runnable_job_ages
+from vonk_control.models import NodeEngineSample
 from vonk_control.telemetry import LiveEngineReading
 
 NODE = "spk_00000000000000000000000000000001"
@@ -391,8 +391,7 @@ def test_metrics_export_host_and_engine_readings_and_omit_what_is_not_reported()
     )["sample"]
     host = {k: v for k, v in vector.items() if k not in v1 and k != "engines"}
     tensorfold, partial = (
-        EngineReading.model_validate_json(canonical_message(e))
-        for e in vector["engines"]
+        NodeEngineSample(sample_id="s", **e) for e in vector["engines"]
     )
     metrics = MetricsRegistry()
     metrics.set_fleet_source(lambda: _fleet_snapshot(readings=host))

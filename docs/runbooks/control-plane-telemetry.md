@@ -37,13 +37,13 @@ literal reports them as absent.
 
 ### Engine readings
 
-`engines` (at most 8, one per running endpoint) carries each run's metrics as
+`engines` (one per running endpoint) carries each run's metrics as
 the monitor reads them from the engine's own `/metrics` on loopback. An entry
 with an invalid `run_id` or `format` is dropped alone, and a repeated `run_id`
 keeps its first entry. Counters are cumulative since the engine started:
 prompt, generation and cached prompt tokens, preemptions, speculative draft and
-accepted tokens. Gauges: requests running and waiting, KV cache usage ratio, KV
-pool bytes (only where a verbatim capture proves the source name). Histogram
+accepted tokens. Gauges: requests running and waiting, KV cache usage ratio.
+Histogram
 sums and counts (no percentiles; the gateway carries those): time to first
 token, time per output token, prefill, decode and end to end. The Controller
 stores them in `node_engine_samples` (one row per sample and run, removed with
@@ -53,7 +53,7 @@ Prometheus exports them from control-api `/metrics` as `vonk_node_*` (host) and
 `vonk_engine_*` series with labels `{node_id, alias}`. The alias is the run's
 published route name, joined once from the Controller's run table; a run with
 no published route is not exported. Each series is the newest reading of that
-(node, run) within 30 seconds, not only the latest sample, so a slow engine
+(node, run) received within 30 seconds, not only the latest sample, so a slow engine
 does not gap the series. Rates are computed in Prometheus, once.
 
 The Controller derives one more value for the fleet view, `system_memory_bytes`

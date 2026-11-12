@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.telemetry import (
-    EngineReading,
     HostResourceSample,
     TelemetryReadings,
     TelemetryRequest,
@@ -164,12 +163,17 @@ def _advance_latest(
 ENGINE_LIVE_WINDOW = timedelta(seconds=30)
 
 
+#: A sample is accepted only within this long of its observation time.
+ENGINE_SCAN_BOUND = timedelta(minutes=5)
+
+
 @dataclass(frozen=True)
 class LiveEngineReading:
     node_id: str
     #: The run's published route name.
     alias: str
-    reading: EngineReading
+    #: The stored row; its columns are the wire ``EngineReading`` fields.
+    reading: NodeEngineSample
 
 
 class TelemetryRepository:
@@ -418,7 +422,12 @@ class TelemetryRepository:
         return recent
 
     def live_engine_readings(self, now: datetime) -> list[LiveEngineReading]:
-        """The newest reading of each (node, run) seen within ``ENGINE_LIVE_WINDOW``.
+        """The newest reading of each (node, run) received within ``ENGINE_LIVE_WINDOW``.
+
+        The window is by receive time, the Controller's clock, so a Spark whose
+        clock runs behind still counts; ``observed_at`` only orders readings and
+        bounds the scan (a sample is accepted within 5 minutes of its
+        observation, so the bound loses nothing).
 
         Not only the latest sample: an engine that answered slowly is missing
         from it, and its series would gap exactly when it is busy. A run whose
@@ -435,26 +444,16 @@ class TelemetryRepository:
                 )
                 .join(RecipeRun, RecipeRun.id == NodeEngineSample.run_id)
                 .where(
-                    NodeTelemetrySample.observed_at >= since,
+                    NodeTelemetrySample.received_at >= since,
+                    NodeTelemetrySample.observed_at >= since - ENGINE_SCAN_BOUND,
                     RecipeRun.route_state == RouteState.PUBLISHED.value,
                 )
                 .order_by(NodeTelemetrySample.observed_at)
             ).all()
-        newest: dict[tuple[str, str], LiveEngineReading] = {}
-        for node_id, alias, row in rows:
-            try:
-                reading = EngineReading.model_validate_json(
-                    canonical_message(
-                        {
-                            name: getattr(row, name)
-                            for name in EngineReading.model_fields
-                        }
-                    )
-                )
-            except ValueError:
-                warn_unreadable_once("engine reading", f"{row.sample_id}:{row.run_id}")
-                continue
-            newest[(node_id, row.run_id)] = LiveEngineReading(node_id, alias, reading)
+        newest = {
+            (node_id, row.run_id): LiveEngineReading(node_id, alias, row)
+            for node_id, alias, row in rows
+        }
         return list(newest.values())
 
     def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:

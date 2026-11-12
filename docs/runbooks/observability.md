@@ -30,8 +30,8 @@ control-api `/metrics` exports, per `node_id`: `vonk_node_cpu_busy_seconds_total
 `vonk_node_fan_rpm`. Per `{node_id, alias}` (the run's published route name):
 `vonk_engine_{prompt,generation,cached_prompt}_tokens_total`,
 `vonk_engine_preemptions_total`, `vonk_engine_spec_decode_{draft,accepted}_total`,
-`vonk_engine_requests_{running,waiting}`, `vonk_engine_kv_cache_usage_ratio`,
-`vonk_engine_kv_pool_bytes` and `vonk_engine_{ttft,tpot,prefill,decode,e2e}_seconds_{sum,count}`.
+`vonk_engine_requests_{running,waiting}`, `vonk_engine_kv_cache_usage_ratio` and
+`vonk_engine_{ttft,tpot,prefill,decode,e2e}_seconds_{sum,count}`.
 Counters are exported as reported; take rates in Prometheus. A reading an agent
 or engine does not report has no series. See `control-plane-telemetry.md` for
 what each reading is.
