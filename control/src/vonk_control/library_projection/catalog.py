@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import defer
+from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import (
@@ -74,6 +75,23 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
             updated_at=_utc(run.library_updated_at),
             commit=run.observed_commit,
         )
+
+
+def library_vocabulary(self: LibraryProjection) -> CatalogVocabulary | None:
+    """The words of the release the newest finished sync read; ``None`` if none yet.
+
+    A sync writes them whenever the newest run lacks them but the release has
+    them, so a missing or unreadable copy is rewritten by the next tick.
+    """
+
+    with self._sessions() as session:
+        stored = session.scalar(
+            select(RecipeLibrarySyncRun.vocabulary)
+            .where(RecipeLibrarySyncRun.state == LifecycleState.SUCCEEDED.value)
+            .order_by(RecipeLibrarySyncRun.completed_at.desc())
+            .limit(1)
+        )
+    return stored if isinstance(stored, CatalogVocabulary) else None
 
 
 def _model_projection(

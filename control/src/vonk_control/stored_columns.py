@@ -38,6 +38,7 @@ from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
 from vonk_forge_contracts import (
+    CatalogVocabulary,
     ModelDefinition,
     ModelDisplay,
     RecipeDefinition,
@@ -207,6 +208,7 @@ bind(
     discriminator="kind",
 )
 bind("recipe_library_sync_runs", "result", ManagedCatalogSyncResult)
+bind("recipe_library_sync_runs", "vocabulary", CatalogVocabulary, nullable=True)
 bind("recipe_source_bundles", "manifest", SourceBundleManifest)
 bind("model_cache_sets", "manifest", CacheManifest)
 bind(

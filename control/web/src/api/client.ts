@@ -36,6 +36,7 @@ import type {
   FleetProfileApplicationView,
   FleetProfileLoadInput,
   CatalogSyncStatus,
+  LibraryVocabulary,
   ProfileDefinition,
   ReconcilePlan,
   ActivityFilters,
@@ -676,6 +677,13 @@ export class ApiClient implements ControlApi {
   async catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null> {
     // 404 means the sync has never run, which is a state, not a failure.
     const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", { signal });
+    if (result.response.status === 404) return null;
+    return resultData(result);
+  }
+
+  async libraryVocabulary(signal?: AbortSignal): Promise<LibraryVocabulary | null> {
+    // 404 means the synced release publishes none: the words are then the names.
+    const result = await this.generated.GET("/api/library/vocabulary", { signal });
     if (result.response.status === 404) return null;
     return resultData(result);
   }

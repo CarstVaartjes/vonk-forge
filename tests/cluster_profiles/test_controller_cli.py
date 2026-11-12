@@ -86,6 +86,10 @@ class FakeClient:
         retry=True,
     ):
         self._validate_request(method, path, payload, query)
+        if path == "/api/library/vocabulary" and (method, path) not in self.responses:
+            # The release words are informative and fetched aside by the
+            # library commands; a release without them answers 404.
+            raise ControlNotFound(404, "the synced release publishes no vocabulary")
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
         if method == "POST" and path.endswith("/preview") and not response:
@@ -191,6 +195,7 @@ class FakeClient:
             "/api/fleet/upgrade",
             "/api/recipe/update",
             "/api/recipe/operations/op-cancel/cancel",
+            "/api/library/vocabulary",
         }
         known = known or re.fullmatch(r"/api/jobs/[^/]+", path) is not None
         known = (
@@ -1306,6 +1311,37 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
     )
     assert status == 0 and result["id"] == repaired["id"]
     assert [call[0] for call in client.calls].count("POST") == 2
+
+
+def test_recipe_detail_prints_the_served_release_labels_and_json_never_asks() -> None:
+    recipes = json.loads(
+        (Path(__file__).parents[1] / "fixtures/library-list.json").read_text()
+    )["recipes"]
+    vocabulary = json.loads(
+        (
+            Path(__file__).parents[1] / "fixtures/library-vocabulary-wording.json"
+        ).read_text()
+    )["vocabulary"]
+    client = FakeClient(
+        {
+            ("GET", "/api/recipe/qwen"): recipes[0] | {"usage": ["chat"]},
+            ("GET", "/api/library/vocabulary"): vocabulary,
+        }
+    )
+    output = StringIO()
+    with redirect_stdout(output):
+        assert cli.main(("recipe", "detail", "qwen"), control_client=client) == 0
+    assert "Usage: Chat" in output.getvalue().splitlines()
+
+    client.calls.clear()
+    assert run(("recipe", "detail", "qwen", "--json"), client)[0] == 0
+    assert [call[1] for call in client.calls] == ["/api/recipe/qwen"]
+
+    # The plain table never needs the words.
+    client.calls.clear()
+    with redirect_stdout(StringIO()):
+        cli.main(("recipe", "library"), control_client=client)
+    assert "/api/library/vocabulary" not in [call[1] for call in client.calls]
 
 
 def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None:

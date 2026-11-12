@@ -19,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import LifecycleState, LifecycleSubject
+from vonk_forge_contracts import CatalogVocabulary
 
 from ..exact_integer_storage import (
     DecimalIntegerAtMost,
@@ -32,6 +33,7 @@ from ..model_primitives import (
     _state_in,
     _uuid_shape,
 )
+from ..stored_json import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
@@ -343,6 +345,12 @@ class RecipeLibrarySyncRun(Base):
     # last changed, read from the signed catalog index.
     library_version: Mapped[str | None] = mapped_column(String(32))
     library_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The words that release publishes for capabilities and statuses, as the
+    # contract's ``CatalogVocabulary`` JSON; the Controller serves the newest.
+    vocabulary: Mapped[CatalogVocabulary | Residue | None] = mapped_column(
+        ContractJSON[CatalogVocabulary](__tablename__, "vocabulary", none_as_null=True),
+        nullable=True,
+    )
     total_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     processed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

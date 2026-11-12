@@ -11,6 +11,7 @@ import { formatBytes } from "../lib/fleet";
 import { modelLibraryPath, modelKey, recipeLibraryPath } from "../lib/library-route";
 import { LibraryCacheAction } from "./library-cache-action";
 import { LibrarySetupStrip } from "./library-setup";
+import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   EMPTY_LIBRARY_WORKCELL_FILTERS,
@@ -55,6 +56,7 @@ export function LibraryModelsView({
   path,
   query,
 }: LibraryModelsViewProps) {
+  const words = useCapabilityWords();
   const models = modelInventory ?? [];
   const filteredRecipes = filterLibraryRecipeRecords(entries, filters, query);
   const normalizedQuery = query.trim().toLowerCase();
@@ -155,7 +157,7 @@ export function LibraryModelsView({
             <option value="">All usage</option>
             {[...new Set(models.flatMap((model) => model.usage))].sort().map((value) => (
               <option key={value} value={value}>
-                {value}
+                {words.label(value)}
               </option>
             ))}
           </select>
@@ -352,6 +354,7 @@ function ModelRevisionsRow({
     revisions[0]!;
   const key = modelKey(model.model);
   const bytes = model.model_bytes;
+  const words = useCapabilityWords();
   const capabilities = model.usage;
   const running = (model.local.running_on ?? []).length;
   const preparation = model.local.preparation;
@@ -375,9 +378,13 @@ function ModelRevisionsRow({
         </a>
         <div className="library-model-badges">
           {capabilities.length ? (
-            capabilities.map((capability) => <span key={capability}>{capability}</span>)
+            capabilities.map((capability) => (
+              <span key={capability} title={words.title(capability)}>
+                {words.label(capability)}
+              </span>
+            ))
           ) : (
-            <span>Capabilities unknown</span>
+            <span>{NOT_REPORTED}</span>
           )}
         </div>
         {revisions.length > 1 && (

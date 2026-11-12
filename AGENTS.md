@@ -350,6 +350,18 @@ it does not prove container or physical model acceptance. A candidate with a
 valid contract may proceed under normal authority, capacity, and exact-cache
 checks without prior physical qualification. Keep that unproven status visible.
 
+## Catalog words in the Controller web and `vonkctl`
+
+Capability labels and categories and qualification status meanings are the
+release's own words: the Controller stores them at sync and serves
+`GET /api/library/vocabulary`, and the Library page and `vonkctl model|recipe
+library|detail` render them from there. Never type one in a client; a name the
+release does not list shows as the name, and a missing value is `Not reported`
+in both clients. Any change to this wording updates
+`tests/fixtures/library-vocabulary-wording.json`, which the web test
+(`library-vocabulary.test.tsx`) and the vonkctl test
+(`test_library_vocabulary_wording.py`) both compare exactly.
+
 ## Deployment and fleet safety
 
 Routine Spark package upgrades are Controller-authorized and signed; do not use

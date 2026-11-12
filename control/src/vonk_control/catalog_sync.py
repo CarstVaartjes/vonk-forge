@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import RecipeDisplay, document_sha256
+from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay, document_sha256
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capabilities import CapabilityUnavailableError
@@ -563,6 +563,12 @@ class ManagedRecipeCatalogSyncService:
                     # a stored result that disagrees is replaced by one sync.
                     and has_newer_major_note(_result(current.result).problems)
                     == has_newer_major_note(snapshot.display_notes)
+                    # A Controller upgraded onto the same release has not stored
+                    # the vocabulary yet: a normal sync writes it.
+                    and (
+                        snapshot.vocabulary is None
+                        or isinstance(current.vocabulary, CatalogVocabulary)
+                    )
                 )
                 else None
             )
@@ -969,6 +975,7 @@ class ManagedRecipeCatalogSyncService:
             run.observed_commit = snapshot.commit
             run.library_version = snapshot.version
             run.library_updated_at = snapshot.updated_at
+            run.vocabulary = snapshot.vocabulary
             run.total_count = (
                 len(snapshot.items)
                 + len(snapshot.catalog_entities)

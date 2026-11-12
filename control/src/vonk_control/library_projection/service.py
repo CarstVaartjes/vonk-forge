@@ -41,6 +41,7 @@ from .catalog import (
     _model_projection,
     _recipe_facet_values,
     _recipe_projection,
+    library_vocabulary,
     refresh_catalog,
 )
 from .common import (
@@ -343,6 +344,7 @@ class LibraryProjection:
     _database_local_state = _database_local_state
     _apply_image_presence = _apply_image_presence
     _library_release = _library_release
+    library_vocabulary = library_vocabulary
     _model_projection = _model_projection
     _recipe_projection = _recipe_projection
     refresh_catalog = refresh_catalog
