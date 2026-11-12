@@ -74,7 +74,10 @@ class AtomicRecipeRoutePublisher:
         self._publisher = publisher
 
     def publish_recipe(
-        self, candidate: _RecipeCandidate, *, required: SupervisorPhase = "ready"
+        self,
+        candidate: _RecipeCandidate,
+        *,
+        required: SupervisorPhase = SupervisorPhase.READY,
     ) -> LiteLlmGeneration:
         """Activate the candidate's routes; a withdrawal requires only ``drained``."""
         return self._activate(
@@ -93,7 +96,7 @@ class AtomicRecipeRoutePublisher:
             render_empty_config(),
             endpoints={},
             state=GatewayRouteState.MAINTENANCE,
-            required="drained",
+            required=SupervisorPhase.DRAINED,
         )
 
     def active_marker_digest(self) -> str | None:

@@ -155,13 +155,12 @@ class FileSupervisorAcknowledger:
             return False
         try:
             content = path.read_bytes()
-            raw: Any = json.loads(content)
-        except (OSError, json.JSONDecodeError):
+        except OSError:
             return False
         if len(content) > 4096:
             return False
         try:
-            acknowledgement = SupervisorAcknowledgement.model_validate(raw)
+            acknowledgement = SupervisorAcknowledgement.model_validate_json(content)
         except ValidationError:
             return False
         if (

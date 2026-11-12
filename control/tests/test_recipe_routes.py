@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -129,7 +130,7 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
     def served_model_info(self):
         return ServedModelInfo()
 
-    def publish_recipe(self, candidate, *, required="ready"):
+    def publish_recipe(self, candidate, *, required=SupervisorPhase.READY):
         return self._record(
             tuple(sorted(candidate.state.aliases)), candidate.state.digest
         )

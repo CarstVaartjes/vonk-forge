@@ -263,20 +263,22 @@ def _write_drained_ack(request: ActiveRequest, *, now: datetime) -> None:
     """
     marker = request.marker
     try:
+        # Imported here: this script ships in the Controller API image, but the
+        # contract module is baked into the LiteLLM image. An older LiteLLM
+        # image has no drained phase: acknowledge nothing early, and the ready
+        # acknowledgement still follows.
+        from route_activation import SupervisorPhase
+
         acknowledgement = SupervisorAcknowledgement(
             acknowledged_at=now.astimezone(UTC).isoformat(),
             activation_sha256=request.activation_sha256,
             generation=marker["generation"],
             litellm_sha256=marker["litellm_sha256"],
-            phase="drained",
+            phase=SupervisorPhase.DRAINED,
             schema_version=1,
             state=marker["state"],
         )
-    except ValidationError:
-        # This script ships in the Controller API image; the contract module is
-        # baked into the LiteLLM image. An older LiteLLM image has no drained
-        # phase: acknowledge nothing early, and the ready acknowledgement
-        # still follows.
+    except (ImportError, ValidationError):
         return
     _atomic_write(ACK, acknowledgement.canonical_bytes())
 

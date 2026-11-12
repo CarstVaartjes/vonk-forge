@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from enum import StrEnum
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -29,11 +30,16 @@ ROUTE_ACK_TIMEOUT_SECONDS = (
 ROUTE_EVIDENCE_MAX_AGE_SECONDS = 120
 
 
-#: What one supervisor acknowledgement proves about its exact activation.
-#: ``drained``: every child that loaded an older activation has exited and only
-#: this one can start, so nothing serves a route it removed. ``ready``: a live
-#: child loaded it and answered health. Ready implies drained.
-SupervisorPhase = Literal["drained", "ready"]
+class SupervisorPhase(StrEnum):
+    """What one supervisor acknowledgement proves about its exact activation.
+
+    ``drained``: every child that loaded an older activation has exited and only
+    this one can start, so nothing serves a route it removed. ``ready``: a live
+    child loaded it and answered health. Ready implies drained.
+    """
+
+    DRAINED = "drained"
+    READY = "ready"
 
 
 class SupervisorAcknowledgement(BaseModel):
@@ -56,7 +62,7 @@ class SupervisorAcknowledgement(BaseModel):
     child_pid: Annotated[int, Field(gt=0, le=2**31 - 1)] | None = None
     generation: Annotated[int, Field(gt=0, le=2**63 - 1)]
     litellm_sha256: Digest
-    phase: SupervisorPhase = "ready"
+    phase: SupervisorPhase = SupervisorPhase.READY
     state: ActivationState
 
     @field_validator("schema_version", mode="before")
@@ -68,12 +74,14 @@ class SupervisorAcknowledgement(BaseModel):
 
     @model_validator(mode="after")
     def child_matches_phase(self) -> SupervisorAcknowledgement:
-        if (self.phase == "ready") != (self.child_pid is not None):
+        if (self.phase is SupervisorPhase.READY) != (self.child_pid is not None):
             raise ValueError("only a ready acknowledgement names its live child")
         return self
 
     def satisfies(self, required: SupervisorPhase) -> bool:
-        return self.phase == "ready" or required == "drained"
+        return (
+            self.phase is SupervisorPhase.READY or required is SupervisorPhase.DRAINED
+        )
 
     def canonical_bytes(self) -> bytes:
         return (

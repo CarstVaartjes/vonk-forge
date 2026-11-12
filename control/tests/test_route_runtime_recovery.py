@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     UnknownError,
 )
-from vonk_agent_protocol.route_activation import ActivationMarker
+from vonk_agent_protocol.route_activation import ActivationMarker, SupervisorPhase
 from vonk_control.lifecycle.types import Lifecycle
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_bundle_contract import RouteBundleDocument
@@ -136,7 +136,7 @@ def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_pat
         monotonic=lambda: elapsed[0],
         sleep=advance,
     )
-    observed = acknowledge(marker, "ready")
+    observed = acknowledge(marker, SupervisorPhase.READY)
     assert isinstance(observed, UnknownError)
     assert elapsed[0] == 1
     assert publisher.inspect(expected=marker) == marker

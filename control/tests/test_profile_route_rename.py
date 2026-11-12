@@ -55,7 +55,9 @@ class _FlakyPublisher(ConcurrentPublisher):
         super().__init__()
         self.down = False
 
-    def publish_recipe(self, candidate, *, required: SupervisorPhase = "ready"):
+    def publish_recipe(
+        self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+    ):
         if self.down:
             # As the real activation reports an unreachable gateway.
             raise RecipeRouteNotReady("the route publisher is unreachable")

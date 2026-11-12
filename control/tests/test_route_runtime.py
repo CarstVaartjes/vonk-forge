@@ -13,6 +13,7 @@ import pytest
 from vonk_agent_protocol.route_activation import (
     ROUTE_ACK_TIMEOUT_SECONDS,
     ActivationMarker,
+    SupervisorPhase,
 )
 from vonk_control.litellm import render_empty_config
 from vonk_control.route_runtime import (
@@ -80,7 +81,7 @@ def _publish(
             litellm=render_empty_config(),
         )
         marker = ActivationMarker.model_validate_json(marker.model_dump_json())
-        uncertainty = publisher._require_supervisor_ack(marker, "ready")
+        uncertainty = publisher._require_supervisor_ack(marker, SupervisorPhase.READY)
         assert uncertainty is None
         return marker
 
@@ -201,7 +202,7 @@ def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp
 
     publisher = _publisher(tmp_path, await_supervisor_ack=unavailable)
     marker = _publish(_publisher(tmp_path))
-    publisher._require_supervisor_ack(marker, "ready")
+    publisher._require_supervisor_ack(marker, SupervisorPhase.READY)
     assert _inspected(_publisher(tmp_path)).generation == 1
     fresh = _publish(_publisher(tmp_path))
     assert fresh.generation == 2
@@ -267,7 +268,9 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
             json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()
     )
-    FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, "ready")
+    FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(
+        marker, SupervisorPhase.READY
+    )
 
     acknowledgement["activation_sha256"] = "f" * 64
     ack_path.write_bytes(
@@ -284,7 +287,7 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    mismatched(marker, "ready")
+    mismatched(marker, SupervisorPhase.READY)
     fresh = _publish(_publisher(tmp_path))
     acknowledgement.update(
         activation_sha256=fresh.digest,
@@ -293,7 +296,10 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
     )
     ack_path.write_bytes(_encoded(acknowledgement))
     assert (
-        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(fresh, "ready") is None
+        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(
+            fresh, SupervisorPhase.READY
+        )
+        is None
     )
     assert fresh.generation > marker.generation
 
@@ -314,7 +320,9 @@ def test_a_drained_ack_completes_a_withdrawal_but_never_a_publication(
     }
     ack_path.write_bytes(_encoded({**exact, "phase": "drained"}))
     assert (
-        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, "drained")
+        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(
+            marker, SupervisorPhase.DRAINED
+        )
         is None
     )
     moments = iter((0.0, 1.0))
@@ -326,12 +334,12 @@ def test_a_drained_ack_completes_a_withdrawal_but_never_a_publication(
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    assert publication(marker, "ready") is not None
+    assert publication(marker, SupervisorPhase.READY) is not None
 
     # A ready ack, in the bytes every supervisor has always written, still
     # completes both.
     ack_path.write_bytes(_encoded({**exact, "child_pid": 123}))
-    for required in ("drained", "ready"):
+    for required in SupervisorPhase:
         assert (
             FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, required)
             is None
@@ -365,7 +373,7 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
         monotonic=lambda: elapsed[0],
         sleep=sleep,
         poll_seconds=1,
-    )(marker, "ready")
+    )(marker, SupervisorPhase.READY)
     assert elapsed[0] == ack_after
 
 
@@ -407,7 +415,7 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
         monotonic=lambda: elapsed[0],
         sleep=sleep,
         poll_seconds=1,
-    )(marker, "ready")
+    )(marker, SupervisorPhase.READY)
     assert ROUTE_ACK_TIMEOUT_SECONDS <= elapsed[0] <= ROUTE_ACK_TIMEOUT_SECONDS + 1
     marker = _publish(_publisher(tmp_path))
     repaired[0] = True
@@ -418,7 +426,7 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
             monotonic=lambda: elapsed[0],
             sleep=sleep,
             poll_seconds=1,
-        )(marker, "ready")
+        )(marker, SupervisorPhase.READY)
         is None
     )
 

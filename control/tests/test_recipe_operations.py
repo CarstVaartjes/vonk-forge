@@ -221,7 +221,7 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
     def served_model_info(self):
         return ServedModelInfo()
 
-    def publish_recipe(self, candidate, *, required="ready"):
+    def publish_recipe(self, candidate, *, required=SupervisorPhase.READY):
         state = candidate.state
         with self._guard:
             self._generation += 1
@@ -5363,7 +5363,9 @@ def test_recovery_publication_crossing_deadline_retains_acknowledged_route(
     current = {"now": NOW}
 
     class DeadlineCrossingPublisher(ConcurrentPublisher):
-        def publish_recipe(self, candidate, *, required: SupervisorPhase = "ready"):
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
             generation = super().publish_recipe(candidate, required=required)
             current["now"] = _recovery_deadline(restart)
             return generation
@@ -5441,7 +5443,9 @@ def test_expired_recovery_route_never_needs_compensating_withdrawal(
         def served_model_info(self):
             return ServedModelInfo()
 
-        def publish_recipe(self, candidate, *, required: SupervisorPhase = "ready"):
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
             generation = atomic.publish_recipe(candidate, required=required)
             current["now"] = _recovery_deadline(restart)
             return generation
@@ -5566,7 +5570,9 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
         def served_model_info(self):
             return ServedModelInfo()
 
-        def publish_recipe(self, candidate, *, required: SupervisorPhase = "ready"):
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
             return atomic.publish_recipe(candidate, required=required)
 
         def publish_empty(self, route_digest):

@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.route_activation import SupervisorPhase
 
 from ..litellm import (
     LiteLlmGeneration,
@@ -250,7 +251,7 @@ def _withdrawal_effect(
     # a gateway that the previous route change may still be restarting, and
     # the API's grant loop narrows the grants afterwards.
     return (
-        self._publisher.publish_recipe(candidate, required="drained")
+        self._publisher.publish_recipe(candidate, required=SupervisorPhase.DRAINED)
         if candidate.state.aliases
         else self._publish_empty(candidate.state.digest)
     )
