@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import ModelCacheCode
 from vonk_control.auth import TokenCodec
 from vonk_control.catalog_revision_contract import (
     rederive_projection,
@@ -606,7 +607,7 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
 ):
     from vonk_control.library_projection import local_state
     from vonk_control.model_cache.errors import (
-        ModelCacheError,
+        ModelCacheResolutionInvalid,
         ModelCacheResolutionRefused,
     )
 
@@ -621,7 +622,10 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
     def refuse(session, revision_id):
         if refused:
             raise ModelCacheResolutionRefused("source-refused", "source policy refused")
-        raise ModelCacheError("set is not resolvable")
+        raise ModelCacheResolutionInvalid(
+            ModelCacheCode.RECIPE_MODEL_MISSING,
+            "recipe does not bind an exact model definition",
+        )
 
     monkeypatch.setattr(local_state, "resolve_recipe_set", refuse)
     recipes = _recipes(

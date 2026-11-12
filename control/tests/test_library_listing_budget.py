@@ -34,6 +34,7 @@ from vonk_control.library_storage_observation import (
     STORAGE_OBSERVATION_DEADLINE_SECONDS,
     LibraryStorageObserver,
 )
+from vonk_control.model_cache.resolution import resolve_recipe_set
 from vonk_control.model_cache_contract import (
     CacheOperationKind,
     ModelCacheUsage,
@@ -163,11 +164,43 @@ def _seed_recipes_with_images(fixture, *, recipes: int, history: int) -> int:
     return recipes
 
 
+def _cache_own_sets(sessions) -> None:
+    """Every current recipe's own artifact set is cached, as its download stores it."""
+
+    with sessions.begin() as session:
+        heads = session.scalars(
+            select(CatalogDocumentHead.active_revision_id).where(
+                CatalogDocumentHead.kind == "recipe"
+            )
+        ).all()
+        for revision_id in heads:
+            manifest = resolve_recipe_set(session, revision_id)
+            if session.get(ModelCacheSet, manifest.digest) is not None:
+                continue
+            session.add(
+                ModelCacheSet(
+                    artifact_set_sha256=manifest.digest,
+                    schema_version=2,
+                    model_content_sha256=manifest.model_content_sha256,
+                    manifest={},
+                    expected_bytes=1,
+                    verified_bytes=1,
+                    state="cached",
+                    created_at=NOW,
+                    updated_at=NOW,
+                    verified_at=NOW,
+                    last_accessed_at=NOW,
+                )
+            )
+            session.flush()
+
+
 def test_listing_asks_about_each_current_image_once_whatever_the_history(
     assessed_library,  # noqa: F811
 ):
     _, sessions, _, _, _, _, _, _, _, storage = assessed_library
     images = _seed_recipes_with_images(assessed_library, recipes=8, history=5)
+    _cache_own_sets(sessions)
     asked: list[tuple[str, int]] = []
 
     def counting(archive: str, size: int) -> bool:
@@ -195,6 +228,7 @@ def test_a_blocked_image_read_makes_the_recipe_unknown_not_the_listing_slow(
     assessed_library,  # noqa: F811
 ):
     _, sessions, _, _, _, _, _, _, _, storage = assessed_library
+    _cache_own_sets(sessions)
     release = threading.Event()
     blocked = threading.Event()
     answered = threading.Event()
@@ -513,23 +547,8 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
         )
         assert head is not None
         head.active_revision_id = successor.id
-        session.add(
-            ModelCacheSet(
-                artifact_set_sha256=_hex("successor-set"),
-                schema_version=2,
-                model_content_sha256=_hex("successor-model"),
-                recipe_revision_sha256=successor.content_digest,
-                manifest={},
-                expected_bytes=1,
-                verified_bytes=1,
-                state="cached",
-                created_at=NOW,
-                updated_at=NOW,
-                verified_at=NOW,
-                last_accessed_at=NOW,
-            )
-        )
         slug = successor.slug
+    _cache_own_sets(sessions)
 
     def controller() -> str:
         page = _library(sessions, storage).recipe_library(assess=False, limit=100)
