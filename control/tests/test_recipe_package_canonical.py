@@ -357,7 +357,8 @@ def test_candidate_package_imports_into_canonical_controller_documents(
             and revision.content_digest == item.content_sha256
         )
         assert receipt.projected["package_sha256"] == package_sha256
-        assert receipt.projected["source_bundle_sha256"] == item.source_bundle_sha256
+        assert receipt.source_bundle_sha256 == item.source_bundle_sha256
+        assert "source_bundle_sha256" not in receipt.projected
         package_handle_projection = require_mapping(
             receipt.projected["package_handle"],
             "recipe revision package handle projection",

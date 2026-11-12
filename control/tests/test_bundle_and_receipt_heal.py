@@ -104,7 +104,7 @@ def test_damaged_database_rows_are_rewritten_from_the_verified_archive(
 def test_a_changed_bundle_waits_for_background_reingress(tmp_path: Path) -> None:
     """Catches a reader repairing source inline instead of observing a cache miss."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    sha = str(revision.projected["source_bundle_sha256"])
+    sha = str(revision.source_bundle_sha256)
     archive = bundles.get(sha).archive
     stored = bundles.put(sha, io.BytesIO(archive))
     stored.path.write_bytes(b"damaged")
@@ -122,7 +122,7 @@ def test_a_bundle_that_cannot_be_derived_again_waits_instead_of_failing(
 ) -> None:
     """Catches a missing closure permanently poisoning a later fresh source ingress."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    sha = str(revision.projected["source_bundle_sha256"])
+    sha = str(revision.source_bundle_sha256)
     archive = bundles.get(sha).archive
     bundles.put(sha, io.BytesIO(archive)).path.unlink()
     service = RecipeBuildService(
@@ -140,7 +140,7 @@ def test_incomplete_local_evidence_after_reingress_remains_unknown(
 ) -> None:
     """Catches damage after repair silently passing, or poisoning a restarted worker."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    sha = str(revision.projected["source_bundle_sha256"])
+    sha = str(revision.source_bundle_sha256)
     archive = bundles.get(sha).archive
     stored = bundles.put(sha, io.BytesIO(archive))
     service = RecipeBuildService(

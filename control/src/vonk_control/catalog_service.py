@@ -294,9 +294,7 @@ class CatalogService:
                         release_version=_release_version(row.document),
                         node_count=_node_count(row.document),
                         package_sha256=_projected_package_sha256(row),
-                        source_bundle_sha256=read_catalog_projection(
-                            row
-                        ).source_bundle_sha256,
+                        source_bundle_sha256=row.source_bundle_sha256,
                     )
         return result
 
@@ -499,6 +497,13 @@ class CatalogService:
                 CatalogCode.SOURCE_INVALID,
                 "recipe library publication identity is invalid",
             )
+        if source_bundle_sha256 is not None and not _SHA256.fullmatch(
+            source_bundle_sha256
+        ):
+            raise CatalogValidationError(
+                CatalogCode.SOURCE_INVALID,
+                "recipe source bundle digest is invalid",
+            )
         if (release_version is None) != (release_released_at is None):
             raise CatalogValidationError(
                 CatalogCode.RELEASE_INVALID,
@@ -564,7 +569,6 @@ class CatalogService:
                     "publication_commit": library_commit,
                     "source_path": source_path,
                     "package_sha256": package_sha256,
-                    "source_bundle_sha256": source_bundle_sha256,
                     "package_handle": _package_handle_metadata(
                         package_handle,
                         recipe_digest=expected_content_sha256,
@@ -580,10 +584,11 @@ class CatalogService:
                 update(CatalogDocumentRevision)
                 .where(CatalogDocumentRevision.id == revision.id)
                 .values(
-                    projected=write_catalog_projection(projected, kind=revision.kind)
+                    projected=write_catalog_projection(projected, kind=revision.kind),
+                    source_bundle_sha256=source_bundle_sha256,
                 )
             )
-            session.expire(revision, ["projected"])
+            session.expire(revision, ["projected", "source_bundle_sha256"])
             return _view(revision)
 
     def _select_imported_recipe_head(

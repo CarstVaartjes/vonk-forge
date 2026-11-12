@@ -10,11 +10,6 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from ..catalog_revision_contract import (
-    CatalogRevisionContractError,
-    RecipeRevisionProjection,
-    read_catalog_projection,
-)
 from ..inventory_items import inventory_artifacts, inventory_items
 from ..models import (
     AgentNode,
@@ -64,21 +59,13 @@ class BuildEvidenceMixin:
         blockers: list[RunSwitchReason] = []
         warnings: list[RunSwitchReason] = []
         # Source packages are catalog-owned; recipe context paths carry no digest.
-        projected: RecipeRevisionProjection | None = None
-        if revision is not None:
-            try:
-                projection = read_catalog_projection(revision)
-                if isinstance(projection, RecipeRevisionProjection):
-                    projected = projection
-            except CatalogRevisionContractError:
-                pass
         # Every recipe image is built for the DGX Spark platform.
         expected_architecture = "linux/arm64"
         source_digest = (
             candidate.source_bundle_sha256
             if candidate is not None
-            else projected.source_bundle_sha256
-            if projected is not None
+            else revision.source_bundle_sha256
+            if revision is not None
             else None
         )
         source_row = (

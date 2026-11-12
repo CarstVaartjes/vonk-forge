@@ -57,7 +57,7 @@ def _service(sessions, bundles, rederive) -> RecipeBuildService:
 def test_a_failing_heal_is_attempted_once_per_digest(tmp_path: Path) -> None:
     """Catches a failed digest retried for every revision sharing it."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    sha = str(revision.projected["source_bundle_sha256"])
+    sha = str(revision.source_bundle_sha256)
     bundles.put(sha, io.BytesIO(bundles.get(sha).archive)).path.unlink()
     _clone_revisions(sessions, revision.id, 0, 10)
     attempts: list[str] = []
@@ -73,7 +73,7 @@ def test_a_failing_heal_is_attempted_once_per_digest(tmp_path: Path) -> None:
 def test_a_digest_heals_through_a_sibling_package(tmp_path: Path) -> None:
     """Catches healing from one arbitrary revision when only a sibling's closure exists."""
     sessions, bundles, _now, _node, revision = setup(tmp_path)
-    sha = str(revision.projected["source_bundle_sha256"])
+    sha = str(revision.source_bundle_sha256)
     archive = bundles.get(sha).archive
     bundles.put(sha, io.BytesIO(archive)).path.unlink()
     handle = {
@@ -156,7 +156,7 @@ def test_database_store_cost_is_independent_of_distinct_digests(
                         state="active",
                         document={},
                         content_digest=f"{number + 1:064x}",
-                        projected={"source_bundle_sha256": bundle.sha256},
+                        source_bundle_sha256=bundle.sha256,
                         created_by="test",
                         created_at=datetime.now(UTC),
                     )

@@ -235,7 +235,7 @@ def _prepare_plan_once(
         document = _canonical_recipe_document(revision.document)
         build = _canonical_build(document, projected)
         adapter = _resolved_adapter(projected)
-        source_sha256 = _source_bundle_handle(projected)
+        source_sha256 = _source_bundle_handle(revision)
         public_network = _public_build_network(build)
     bundle = self._verified_bundle(build, source_sha256)
     # Inspection is diagnostic. Acceptance of declarative build policy belongs

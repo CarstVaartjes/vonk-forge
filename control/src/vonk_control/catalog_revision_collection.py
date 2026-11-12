@@ -417,6 +417,13 @@ class CatalogRevisionCollector:
                 deadline=deadline,
             )
             | frozenset(session.scalars(select(RecipeBuild.source_bundle_sha256)))
+            | frozenset(
+                digest
+                for digest in session.scalars(
+                    select(CatalogDocumentRevision.source_bundle_sha256)
+                )
+                if digest is not None
+            )
         )
 
     def _remove_batch(

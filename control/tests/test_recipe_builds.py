@@ -284,9 +284,9 @@ def setup(
     with sessions.begin() as session:
         stored_revision = session.get(CatalogDocumentRevision, recipe_draft.id)
         assert stored_revision is not None
+        stored_revision.source_bundle_sha256 = bundle.sha256
         stored_revision.projected = {
             **stored_revision.projected,
-            "source_bundle_sha256": bundle.sha256,
             "build_resources": {
                 "cpu_cores": 6,
                 "download_bytes": 100,
@@ -351,10 +351,7 @@ def test_build_plan_is_typed_sandboxed_and_durable(tmp_path: Path) -> None:
         }
     ]
     assert plan.agent_payload["base_image_storage_bytes"] == 100
-    assert (
-        plan.agent_payload["source_bundle_sha256"]
-        == revision.projected["source_bundle_sha256"]
-    )
+    assert plan.agent_payload["source_bundle_sha256"] == revision.source_bundle_sha256
     with sessions() as session:
         stored = session.get(RecipeBuild, plan.build_id)
         assert stored is not None and stored.state == "planned"
@@ -1083,6 +1080,7 @@ def test_build_resolution_reuses_notes_only_revision_when_inputs_match(
             content_digest=content_digest,
             artifact_key="e" * 64,
             execution_key="f" * 64,
+            source_bundle_sha256=current.source_bundle_sha256,
             projected=copy.deepcopy(current.projected),
             created_by="test",
             created_at=now,
@@ -1185,6 +1183,7 @@ def test_build_plan_rejects_a_stale_resolution_but_keeps_live_admission(
             content_digest=content_digest,
             artifact_key="e" * 64,
             execution_key="f" * 64,
+            source_bundle_sha256=current.source_bundle_sha256,
             projected=copy.deepcopy(current.projected),
             created_by="test",
             created_at=now,
@@ -2097,9 +2096,7 @@ def test_build_plan_rejects_disk_below_concurrent_oci_export_peak(
     sessions, bundles, now, node_id, revision = setup(tmp_path)
     projected = revision.projected
     build_resources = _json_object(projected["build_resources"])
-    source_bytes = len(
-        bundles.get(_json_text(projected["source_bundle_sha256"])).archive
-    )
+    source_bytes = len(bundles.get(str(revision.source_bundle_sha256)).archive)
     temporary_bytes = require_integer(
         build_resources["temporary_bytes"], "temporary bytes"
     )
@@ -2440,6 +2437,7 @@ def test_persisted_canonical_settings_preserve_build_identity_and_rebuild_change
             stored = session.get(CatalogDocumentRevision, draft.id)
             assert stored is not None
             stored.projected = copy.deepcopy(revision.projected)
+            stored.source_bundle_sha256 = revision.source_bundle_sha256
         return catalog.resolve(draft.id, actor="admin")
 
     selected = publish(canonical.model_dump(mode="json"))

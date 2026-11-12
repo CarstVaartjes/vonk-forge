@@ -23,7 +23,6 @@ from ..admission_locking import (
     lock_admission_rows,
     node_admission_key,
 )
-from ..catalog_revision_contract import read_recipe_projection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import runtime_value
@@ -140,13 +139,10 @@ def persist_plan_in_session(
         ),
     )
     revision = next(iter(locked["build-recipe-revision"]), None)
-    source_digest = (
-        read_recipe_projection(revision).source_bundle_sha256 if revision else None
-    )
     if (
         revision is None
         or revision.content_digest != plan.recipe_content_sha256
-        or source_digest != plan.source_bundle_sha256
+        or revision.source_bundle_sha256 != plan.source_bundle_sha256
     ):
         raise RecipeBuildUnknown(
             RecipeBuildCode.DEPENDENCIES_STALE,
@@ -398,15 +394,12 @@ def _reserve_in_session(
     node = next(iter(locked["build-builder-node"]), None)
     revision = next(iter(locked["build-recipe-revision"]), None)
     build = next(iter(locked["build-recipe-build"]), None)
-    source_digest = (
-        read_recipe_projection(revision).source_bundle_sha256 if revision else None
-    )
     if (
         revision is None
         or revision.kind != "recipe"
         or revision.state != "active"
         or revision.content_digest != plan.recipe_content_sha256
-        or source_digest != plan.source_bundle_sha256
+        or revision.source_bundle_sha256 != plan.source_bundle_sha256
     ):
         raise RecipeBuildUnknown(
             RecipeBuildCode.DEPENDENCIES_STALE, "exact recipe dependencies changed"

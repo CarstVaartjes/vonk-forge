@@ -221,7 +221,7 @@ def test_recipe_download_api_reuses_verified_cached_source_build(
         ]
         current = session.get(CatalogDocumentRevision, revision.id)
         assert current is not None
-        source_digest = current.projected["source_bundle_sha256"]
+        source_digest = current.source_bundle_sha256
         assert isinstance(source_digest, str)
     catalog = CatalogService(
         sessions, clock=lambda: now, cursors=TokenCodec(b"c" * 32).cursor_codec()

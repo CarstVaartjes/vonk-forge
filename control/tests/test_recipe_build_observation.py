@@ -11,7 +11,7 @@ from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.source_bundles import SourceBundleRefused, SourceBundleUnknown
 
 from .non_blocking import assert_no_orphaned_holds
-from .test_recipe_builds import _json_text, setup
+from .test_recipe_builds import setup
 
 
 @pytest.mark.parametrize("action", ["check_source", "resolve", "prepare_plan"])
@@ -154,9 +154,7 @@ def test_builder_inventory_recovers_before_plan_is_returned(tmp_path, monkeypatc
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize(
-    "field", ["build_resources", "build_security", "source_bundle_sha256"]
-)
+@pytest.mark.parametrize("field", ["build_resources", "build_security"])
 @pytest.mark.parametrize("repairs", [True, False])
 def test_missing_stored_dependency_reobserves_exact_authority_and_admits_fresh(
     tmp_path, field, repairs
@@ -246,7 +244,7 @@ def test_damaged_stored_source_is_a_miss_until_background_ingress(tmp_path):
     from vonk_control.recipe_builds import RecipeBuildUnknown
 
     sessions, bundles, now, node_id, revision = setup(tmp_path)
-    digest = _json_text(revision.projected["source_bundle_sha256"])
+    digest = str(revision.source_bundle_sha256)
     bundle = bundles.get(digest)
     rederived = []
 

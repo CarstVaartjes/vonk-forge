@@ -79,6 +79,8 @@ class _CatalogRevisionProjection(StrictJSONModel):
     publication_commit: str | None = None
     source_path: str | None = None
     package_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    # Response only: the revision column owns the digest, so a stored projection
+    # never holds it (the writer drops it) and the library view fills it in.
     source_bundle_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     package_handle: RecipePackageHandleProjection | None = None
     release_version: str | None = None
@@ -295,11 +297,13 @@ def write_catalog_projection(
             raise ValueError("catalog projection kind is required")
     except (TypeError, ValueError, ValidationError) as error:
         raise CatalogRevisionContractError("catalog projection is invalid") from error
-    return dict(
+    stored = dict(
         require_mapping(
             serialize_json_value(parsed), "catalog projection is not a JSON object"
         )
     )
+    stored.pop("source_bundle_sha256", None)
+    return stored
 
 
 # Bound retained source and parsed trees by source bytes, rather than catalog

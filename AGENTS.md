@@ -151,7 +151,11 @@ writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `control/tests/intent_ordinal_writers.py`. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never
-lock `agent_nodes` (`test_agent_node_lock_tree.py`). Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+lock `agent_nodes` (`test_agent_node_lock_tree.py`). A recipe revision's source bundle digest is the typed, indexed column
+`catalog_document_revisions.source_bundle_sha256`, written by the import and read
+by every lookup (build planning, reconcile, collection); the `projected` JSON
+carries no copy. Revisions from before it are moved by `fill_revision_source_bundles`
+at startup. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The

@@ -71,7 +71,7 @@ def revision_images(
             )
         )
     }
-    # Each projection is read once: it states the source bundle and the pin.
+    # Each projection is read once: it states the pin (the source bundle is a column).
     projections = {
         revision_id: _read_projection(revision)
         for revision_id, revision in revisions.items()
@@ -120,7 +120,7 @@ def revision_images(
     for revision_id, revision in revisions.items():
         sources = (
             build_source_bundles(
-                _stated(projections[revision_id], "source_bundle_sha256"),
+                revision.source_bundle_sha256,
                 recorded.get(revision_id, ()),
             )
             if same_source
@@ -223,4 +223,4 @@ def _pinned_digest(projected: object | None) -> str | None:
 def revision_source_bundle(revision: CatalogDocumentRevision) -> str | None:
     """The source bundle digest the revision was imported with; None if unknown."""
 
-    return _stated(_read_projection(revision), "source_bundle_sha256")
+    return revision.source_bundle_sha256

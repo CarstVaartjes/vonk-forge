@@ -70,6 +70,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         row = session.get(CatalogDocumentRevision, runnable_draft.id)
         assert row is not None
         row.projected = deepcopy(original.projected)
+        row.source_bundle_sha256 = original.source_bundle_sha256
     original = catalog.resolve(runnable_draft.id, actor="admin")
     storage = FilesystemRuntimeImageStorage(tmp_path / "artifacts")
     builds = RecipeBuildService(
@@ -114,6 +115,7 @@ def _prepared_successor(tmp_path, *, change="runtime"):
         successor = session.get(CatalogDocumentRevision, draft.id)
         assert successor is not None
         successor.projected = deepcopy(original.projected)
+        successor.source_bundle_sha256 = original.source_bundle_sha256
     successor = catalog.resolve(draft.id, actor="admin")
     resolution = builds.resolve(successor.id)
     if change == "build":

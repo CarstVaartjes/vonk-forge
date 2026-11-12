@@ -158,6 +158,7 @@ def _recipe_projection(
                 "artifact_inputs": None,
                 "package_handle": None,
                 "qualification": None,
+                "source_bundle_sha256": revision.source_bundle_sha256,
             }
         ),
         prebuilt_image=projected.prebuilt_image,
