@@ -12,10 +12,11 @@ from pathlib import Path
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine
+from sqlalchemy import Engine, update
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library_api import install_library_routes
 from vonk_control.library_projection import LibraryProjection
+from vonk_control.models import RecipeLibrarySyncRun
 from vonk_forge_contracts import catalog_vocabulary
 
 from .signed_recipe_release import signed_recipe_releases
@@ -65,3 +66,21 @@ def test_sync_stores_the_release_vocabulary_and_a_newer_release_replaces_it(
         world.sessions, cursors=TokenCodec(b"d" * 32).cursor_codec()
     )
     assert _client(restarted).get(_URL).json() == newer
+
+
+@pytest.mark.usefixtures(signed_recipe_releases.__name__)
+def test_a_tick_on_an_unchanged_release_writes_a_missing_vocabulary(
+    postgres_engine: Engine, tmp_path: Path
+) -> None:
+    world = World(postgres_engine, tmp_path)
+    index = copy.deepcopy(world.index)
+    index["vocabulary"] = catalog_vocabulary().model_dump(mode="json")
+    world.release.publish(index, world.packages)
+    world.sync()
+    # A Controller upgraded onto the same release: same commit, no vocabulary yet.
+    with world.sessions.begin() as session:
+        session.execute(update(RecipeLibrarySyncRun).values(vocabulary=None))
+    assert world.projection.library_vocabulary() is None
+
+    world.sync_service.automatic()
+    assert world.projection.library_vocabulary() == catalog_vocabulary()

@@ -101,16 +101,17 @@ def install_library_routes(
     @app.get(
         "/api/library/vocabulary",
         response_model=CatalogVocabulary,
-        responses=bounded_error_responses(401, 404),
+        responses=bounded_error_responses(401, 404, 503),
         operation_id="getLibraryVocabulary",
     )
     def library_vocabulary(_actor: Any = authenticated) -> CatalogVocabulary:
         """The capability, category and status words of the synced release."""
-        vocabulary = projection.library_vocabulary() if projection else None
+        try:
+            vocabulary = library().library_vocabulary()
+        except AVAILABILITY_ERRORS as error:
+            raise _error(error) from None
         if vocabulary is None:
-            raise HTTPException(
-                status_code=404, detail="the synced release publishes no vocabulary"
-            )
+            raise HTTPException(status_code=404, detail="no vocabulary synced yet")
         return vocabulary
 
     @app.get(

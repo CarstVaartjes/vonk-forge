@@ -77,20 +77,19 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
 
 
 def library_vocabulary(self: LibraryProjection) -> CatalogVocabulary | None:
-    """The words of the release the newest finished sync read; ``None`` if it has none.
+    """The words of the release the newest finished sync read; ``None`` if none yet.
 
-    An unreadable stored copy is the same as none: the next sync of a changed
-    Controller or release writes it again.
+    A sync writes them whenever the newest run lacks them but the release has
+    them, so a missing or unreadable copy is rewritten by the next tick.
     """
 
     with self._sessions() as session:
-        run = session.scalar(
-            select(RecipeLibrarySyncRun)
+        stored = session.scalar(
+            select(RecipeLibrarySyncRun.vocabulary)
             .where(RecipeLibrarySyncRun.state == LifecycleState.SUCCEEDED.value)
             .order_by(RecipeLibrarySyncRun.completed_at.desc())
             .limit(1)
         )
-        stored = run.vocabulary if run is not None else None
     return stored if isinstance(stored, CatalogVocabulary) else None
 
 
