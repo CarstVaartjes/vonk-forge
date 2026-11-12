@@ -238,7 +238,7 @@ export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
 }
 
 /** A gauge: its fill, and the words that sit beside it (`vonkctl fleet` prints the same words). */
-export type Vital = { percent: number; text: string };
+type Vital = { percent: number; text: string };
 
 /** The three gauges of a Fleet row; a vital the Spark does not report is null. */
 export function nodeVitals(node: VisualFleetNode): {

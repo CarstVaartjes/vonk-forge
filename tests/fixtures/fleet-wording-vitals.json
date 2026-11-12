@@ -1,5 +1,5 @@
 {
-  "comment": "One set of vitals wording for the Controller web Fleet row and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording.py both render these nodes and must produce the expected strings.",
+  "comment": "One set of vitals wording for the Controller web Fleet row and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_vitals.py both render these nodes and must produce the expected strings.",
   "cases": [
     {
       "name": "live sample",

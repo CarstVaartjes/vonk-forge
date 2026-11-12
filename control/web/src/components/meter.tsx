@@ -1,5 +1,3 @@
-import type { Vital } from "../lib/fleet";
-
 /** A gauge with its words beside it, so colour is never the only signal. */
 export function Meter({
   label,
@@ -7,7 +5,7 @@ export function Meter({
   note,
 }: {
   label: string;
-  vital: Vital;
+  vital: { percent: number; text: string };
   note?: string | null;
 }) {
   return (
