@@ -812,9 +812,9 @@ withdrawal) needs only `drained`: nothing serves the removed route any more, and
 the remaining routes come back with the new child. A publication waits for
 `ready`. The ready acknowledgement keeps the bytes it always had. An older
 Controller rejects the `phase` key and waits for `ready`, and an older LiteLLM
-image, whose baked contract has no drained phase, makes the new supervisor raise
-after the old child exited; the supervisor is PID 1, so the container restarts
-and writes `ready` (crash-only, no compatibility code). Each publication has a finite 180-second lease,
+image, whose baked contract has no drained phase, makes the new supervisor fail
+at import before any child starts; the container restarts until the matching
+LiteLLM image runs (crash-only, deploy-ordered, no compatibility code). Each publication has a finite 180-second lease,
 capped at 300 seconds after its oldest admitted observation; observations must
 be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies
