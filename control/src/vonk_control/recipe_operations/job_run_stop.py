@@ -195,12 +195,8 @@ class JobRunStopMixin:
                 )
             # Stop is declarative: it stops the run as it is now, so a plan
             # that moved on since the caller's preview is re-planned, never
-            # refused; a run already stopped answers with the Stop that
-            # stopped it; only a run that cannot be stopped is refused.
+            # refused; only a run that cannot be stopped is.
             if not admitted.allowed:
-                stopped_by = service._stop_of_stopped_run(session, admitted)
-                if stopped_by is not None:
-                    return service._view(stopped_by, session=session)
                 raise RecipeRequestInvalid(
                     "stop plan is blocked",
                     reason=InvalidRequestReason.SUPERSEDED,

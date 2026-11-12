@@ -43,7 +43,7 @@ from ..recipe_action_plans import (
     StopPlan,
 )
 from ..stored_json import read_row_column
-from .errors import RecipeRequestInvalid, RecipeRetryLater, _ServiceStopReplay
+from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import new_recipe_job
 
 if TYPE_CHECKING:
@@ -266,13 +266,9 @@ class StopAcceptanceMixin:
                 return existing
             # Stop is declarative: it stops the run as it is now. A plan that
             # moved on since the caller's preview is re-planned, never refused;
-            # a run already stopped answers with the Stop that stopped it; only
-            # a run that cannot be stopped is refused. This check precedes any
+            # only a run that cannot be stopped is. This check precedes any
             # ordinal, accepted Job or route effect.
             if not admitted.allowed:
-                stopped_by = service._stop_of_stopped_run(session, admitted)
-                if stopped_by is not None:
-                    raise _ServiceStopReplay(service._view(stopped_by, session=session))
                 raise RecipeRequestInvalid(
                     "stop plan is blocked",
                     reason=InvalidRequestReason.SUPERSEDED,
