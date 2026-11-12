@@ -935,6 +935,51 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
         client.close()
 
 
+def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_applies(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """The consumer-first backstop: a Controller behind the newest contract says so.
+
+    The note follows the release listing, so it is present on the tick that
+    answers 304 and on one served from the cached snapshot, and it clears when
+    the newer major is withdrawn; the catalog of this Controller's own major is
+    applied throughout.
+    """
+    index, _row, package = _canonical_package_fixture()
+    release = _release_for(index, package)
+    newer: list[dict[str, object]] = [
+        {"tag_name": "v5.0.0", "draft": False, "assets": []}
+    ]
+
+    def transport(request: httpx2.Request) -> httpx2.Response:
+        if request.url.path != RELEASES:
+            return release.handler(request)
+        etag = f'"listing-{len(newer)}"'
+        if request.headers.get("if-none-match") == etag:
+            return httpx2.Response(304)
+        listing = json.loads(release.handler(request).content) + newer
+        return httpx2.Response(200, json=listing, headers={"etag": etag})
+
+    client = RecipePackageClient(
+        api_url="http://127.0.0.1",
+        cache_root=tmp_path / "packages",
+        transport=httpx2.MockTransport(transport),
+    )
+    try:
+        notes = []
+        for _tick in range(2):  # the second tick answers 304
+            snapshot = client.list()
+            assert snapshot.items
+            notes.append([note.detail for note in snapshot.display_notes])
+        assert notes == [["contract v5 is published; this Controller reads v4"]] * 2
+        assert not snapshot.problems
+
+        newer.clear()
+        assert client.list().display_notes == ()
+    finally:
+        client.close()
+
+
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)
 def test_context_publication_must_precede_controller_rollout(tmp_path: Path) -> None:
     # Wrong implementation: silently deriving an unpublished identity lets this

@@ -68,6 +68,8 @@ from .contracts import (
     _RELEASE_TAG,
     RecipePackageRequestInvalid,
     RecipePackageUnsettled,
+    _newer_major_note,
+    _newest_major,
     _ReleaseResponse,
     _select_release,
     _snapshot_content,
@@ -263,6 +265,8 @@ class RecipePackageClient:
         # The GitHub digest of the library bundle last ingested.
         self._library_digest: str | None = None
         self._listing_unchanged = False
+        # The highest contract major the last release listing showed.
+        self._newest_major: int | None = None
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
         self._remove_orphans()
@@ -305,6 +309,21 @@ class RecipePackageClient:
                     )
 
     def list(self) -> RecipeLibrarySnapshot:
+        """The snapshot, with a visible note while a newer contract major exists.
+
+        The note follows the listing on every tick, so it is never stored in the
+        cached snapshot (an unchanged release returns that snapshot as is).
+        """
+        snapshot = self._list_snapshot()
+        published = self._newest_major
+        if published is None or published <= CONTRACT_MAJOR:
+            return snapshot
+        return replace(
+            snapshot,
+            display_notes=(_newer_major_note(published), *snapshot.display_notes),
+        )
+
+    def _list_snapshot(self) -> RecipeLibrarySnapshot:
         try:
             resolved = self._resolve_release()
             if (
@@ -583,6 +602,7 @@ class RecipePackageClient:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
             ) from error
+        self._newest_major = _newest_major(releases)
         release = _select_release(releases, self._release_selector)
         if release is None:
             raise RecipePackageUnsettled(

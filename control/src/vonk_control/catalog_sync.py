@@ -58,6 +58,7 @@ from .recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
+from .recipe_packages.contracts import has_newer_major_note
 from .source_bundles import SourceBundleUnknown
 from .wait_contract import QueueWait
 
@@ -558,6 +559,10 @@ class ManagedRecipeCatalogSyncService:
                     and not policy_problems
                     and _result(current.result).state == CatalogSyncState.CURRENT
                     and current.controller_marker == _controller_marker()
+                    # The newer-major note appears or clears with the listing:
+                    # a stored result that disagrees is replaced by one sync.
+                    and has_newer_major_note(_result(current.result).problems)
+                    == has_newer_major_note(snapshot.display_notes)
                 )
                 else None
             )
