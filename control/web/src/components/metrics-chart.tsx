@@ -138,7 +138,7 @@ function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): s
     return [
       left <= 0
         ? `${name}: certificate expired`
-        : `${name}: certificate renews in ${formatTimeLeft(left)}`,
+        : `${name}: certificate expires in ${formatTimeLeft(left)}`,
     ];
   });
 }

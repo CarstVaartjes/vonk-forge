@@ -41,7 +41,7 @@ const stable = (value: number): MetricsSeriesResponse => ({
   ],
 });
 
-test("shows memory in GiB with Spark names and the certificate as a renewal time", async () => {
+test("shows memory in GiB with Spark names and the certificate as a time left", async () => {
   // Break caught: raw bytes or node ids reach the page, or the certificate stays a chart of seconds.
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "host_memory_used"
@@ -57,7 +57,7 @@ test("shows memory in GiB with Spark names and the certificate as a renewal time
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
   expect(memory).toHaveTextContent("64 GiB");
-  expect(await screen.findByText("Kitchen: certificate renews in 12 days")).toBeVisible();
+  expect(await screen.findByText("Kitchen: certificate expires in 12 days")).toBeVisible();
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
 
