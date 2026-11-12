@@ -55,7 +55,7 @@ test.each(wording.statuses)("the $status badge title is the published meaning", 
   );
 });
 
-test("without a vocabulary the names show and the badge has no meaning", () => {
+test("without a vocabulary the names show", () => {
   const model = { ...libraryViewSnapshot.models[0]!, usage: ["chat"] };
   const { container } = render(
     <LibraryModelsView

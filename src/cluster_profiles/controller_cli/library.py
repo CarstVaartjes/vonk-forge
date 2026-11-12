@@ -61,7 +61,7 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
 
 
 def _release_words(client: ControllerClient, args: argparse.Namespace) -> None:
-    """Fetch the release's words once, for the terminal view of this command.
+    """Fetch the release's words once, for the detailed terminal view of a command.
 
     They are informative: a Controller without them (none published, or older)
     leaves the names as they are, and ``--json`` output never needs them.
@@ -82,7 +82,9 @@ def _model(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
-    if action in {None, "library", "detail"}:
+    if action == "detail" or (
+        action in {None, "library"} and getattr(args, "wide", False)
+    ):
         _release_words(client, args)
     if action == "progress":
         return _cache_progress(client, "model", args, factory)
@@ -165,7 +167,9 @@ def _recipe(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
-    if action in {None, "library", "detail"}:
+    if action == "detail" or (
+        action in {None, "library"} and getattr(args, "wide", False)
+    ):
         _release_words(client, args)
     if action == "progress":
         try:
