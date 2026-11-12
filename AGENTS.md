@@ -82,6 +82,13 @@ helper, agent, Controller, and clients under the
 [error policy](docs/error-reporting.md). Do not truncate away the cause or invent
 an ETA, percentage, missing value, or success when evidence is unknown.
 
+The Fleet words (vitals, what a Spark serves, the status line, attention items)
+are shown identically by the web Fleet page and `vonkctl fleet`. A change to one
+changes the other in the same PR. Each screen has one fixture,
+`tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the
+exact text: the page's DOM text and the string `vonkctl` prints. Missing values read
+"Not reported" on both sides, and .5 rounds up on both.
+
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or
 Ctrl-C stops observation; remote cancellation is explicit and retains its own
@@ -151,7 +158,11 @@ writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `control/tests/intent_ordinal_writers.py`. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never
-lock `agent_nodes` (`test_agent_node_lock_tree.py`). Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+lock `agent_nodes` (`test_agent_node_lock_tree.py`). A recipe revision's source bundle digest is the typed, indexed column
+`catalog_document_revisions.source_bundle_sha256`, written by the import and read
+by every lookup (build planning, reconcile, collection); the `projected` JSON
+carries no copy. Revisions from before it are moved by `fill_revision_source_bundles`
+at startup. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The
@@ -345,6 +356,18 @@ it does not prove container or physical model acceptance. A candidate with a
 valid contract may proceed under normal authority, capacity, and exact-cache
 checks without prior physical qualification. Keep that unproven status visible.
 
+## Catalog words in the Controller web and `vonkctl`
+
+Capability labels and categories and qualification status meanings are the
+release's own words: the Controller stores them at sync and serves
+`GET /api/library/vocabulary`, and the Library page and `vonkctl model|recipe
+library|detail` render them from there. Never type one in a client; a name the
+release does not list shows as the name, and a missing value is `Not reported`
+in both clients. Any change to this wording updates
+`tests/fixtures/library-vocabulary-wording.json`, which the web test
+(`library-vocabulary.test.tsx`) and the vonkctl test
+(`test_library_vocabulary_wording.py`) both compare exactly.
+
 ## Deployment and fleet safety
 
 Routine Spark package upgrades are Controller-authorized and signed; do not use
@@ -367,6 +390,11 @@ a normal upgrade. An explicitly authorized NAS Compose redeploy may use SSH as
 its host transport; do not request another approval merely for that transport
 when the operation is already authorized. This exception does not permit SSH
 Spark rollouts or bypass a Controller authorization decision.
+
+Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
+derived from what the installers create. A change that makes an installer, the
+Compose bundle or the agent package create a new file, volume, unit, host entry
+or account updates that page in the same PR.
 
 ## Profile cache contract
 

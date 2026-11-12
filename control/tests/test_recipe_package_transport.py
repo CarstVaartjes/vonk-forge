@@ -25,7 +25,6 @@ from vonk_agent_protocol import (
 from vonk_control import recipe_packages
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_revision_contract import read_recipe_projection
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog_sync_contract import (
@@ -1114,7 +1113,7 @@ def test_adapter_only_publication_changes_accepted_build_identity(
         )
         assert revision is not None
         revision_id = revision.id
-        original = read_recipe_projection(revision)
+        original = revision.source_bundle_sha256
     old = builds.plan(revision_id, node_id, now=now)
     builds.record_success(
         old.build_id,
@@ -1136,17 +1135,14 @@ def test_adapter_only_publication_changes_accepted_build_identity(
     with sessions() as session:
         revision = session.get(CatalogDocumentRevision, revision_id)
         assert revision is not None
-        current = read_recipe_projection(revision)
-        assert current.source_bundle_sha256 != original.source_bundle_sha256
-        assert (
-            current.source_bundle_sha256
-            == changed["recipes"][0]["source_bundle_sha256"]
-        )
+        current = revision.source_bundle_sha256
+        assert current != original
+        assert current == changed["recipes"][0]["source_bundle_sha256"]
         count_before = len(session.scalars(select(RecipeBuild)).all())
-    assert original.source_bundle_sha256 is not None
-    assert current.source_bundle_sha256 is not None
-    before = dict(bundles.get(original.source_bundle_sha256).files)
-    after = dict(bundles.get(current.source_bundle_sha256).files)
+    assert original is not None
+    assert current is not None
+    before = dict(bundles.get(original).files)
+    after = dict(bundles.get(current).files)
     assert {path for path in before if before[path] != after[path]} == {"adapter.py"}
     assert not builds.resolve(revision_id).cached
     with pytest.raises(RecipeBuildUnknown) as stale, sessions.begin() as session:
@@ -1155,11 +1151,9 @@ def test_adapter_only_publication_changes_accepted_build_identity(
     with sessions() as session:
         assert len(session.scalars(select(RecipeBuild)).all()) == count_before
     fresh = builds.prepare_plan(revision_id, node_id, now=now)
-    assert fresh.source_bundle_sha256 == current.source_bundle_sha256
+    assert fresh.source_bundle_sha256 == current
     assert fresh.build_input_sha256 != old.build_input_sha256
     with sessions.begin() as session:
         accepted = builds.persist_plan_in_session(session, fresh, now=now)
     assert accepted.build_id != old.build_id
-    assert (
-        accepted.agent_payload["source_bundle_sha256"] == current.source_bundle_sha256
-    )
+    assert accepted.agent_payload["source_bundle_sha256"] == current

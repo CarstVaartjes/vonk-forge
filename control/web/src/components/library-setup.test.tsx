@@ -2,7 +2,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 import type { VisualFleetSnapshot } from "../api/types";
 import { libraryViewSnapshot } from "../test-fixtures/library";
-import { countFleetFit, isYourFleet, LibrarySetupStrip, summarizeFleet } from "./library-setup";
+import { summarizeFleet } from "../lib/fleet";
+import { countFleetFit, isYourFleet, LibrarySetupStrip } from "./library-setup";
 import {
   buildLibraryRecipeRecords,
   EMPTY_LIBRARY_WORKCELL_FILTERS,
@@ -65,7 +66,7 @@ test("summarises the fleet from online nodes and their free memory", () => {
   const summary = summarizeFleet(
     fleetOf([{ online: true, free: 10 }, { online: true }, { online: false, free: 99 }]),
   );
-  expect(summary).toEqual({ enrolled: 3, online: 2, freeMemoryBytes: 10 });
+  expect(summary).toEqual({ enrolled: 3, online: 2, reporting: 1, freeMemoryBytes: 10 });
   expect(isYourFleet(summary, 2)).toBe(true);
   expect(isYourFleet(summary, 1)).toBe(false);
   expect(isYourFleet(summarizeFleet(fleetOf([{ online: false }])), 1)).toBe(false);

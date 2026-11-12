@@ -1,0 +1,68 @@
+{
+  "note": "Input -> the exact lines the dashboard's version line shows and `vonkctl platform` / `vonkctl recipe sync-status` print. Times are UTC in the CLI's format. Missing values read 'Not reported'.",
+  "cases": [
+    {
+      "name": "synced",
+      "platform": {
+        "source_sha": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "sync": {
+        "state": "current",
+        "library_version": "1.4.0",
+        "completed_at": "2026-11-12T08:00:00Z",
+        "created_at": "2026-11-12T07:59:00Z"
+      },
+      "lines": [
+        "Controller build: 0123456789ab",
+        "Library version: 1.4.0",
+        "Last sync: 2026-11-12 08:00:00+00:00 (current)"
+      ]
+    },
+    {
+      "name": "run without a completion time uses its start",
+      "platform": {
+        "source_sha": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "sync": {
+        "state": "failed",
+        "library_version": null,
+        "completed_at": null,
+        "created_at": "2026-11-12T07:59:00Z"
+      },
+      "lines": [
+        "Controller build: 0123456789ab",
+        "Library version: Not reported",
+        "Last sync: 2026-11-12 07:59:00+00:00 (failed)"
+      ]
+    },
+    {
+      "name": "never synced",
+      "platform": {
+        "source_sha": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "sync": null,
+      "lines": [
+        "Controller build: 0123456789ab",
+        "Library version: Not reported",
+        "Last sync: none yet"
+      ]
+    },
+    {
+      "name": "no build reported",
+      "platform": {
+        "source_sha": null
+      },
+      "sync": {
+        "state": "partial",
+        "library_version": "1.4.0",
+        "completed_at": "2026-11-12T08:00:00Z",
+        "created_at": "2026-11-12T07:59:00Z"
+      },
+      "lines": [
+        "Controller build: Not reported",
+        "Library version: 1.4.0",
+        "Last sync: 2026-11-12 08:00:00+00:00 (partial)"
+      ]
+    }
+  ]
+}

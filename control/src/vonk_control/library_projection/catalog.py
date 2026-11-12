@@ -7,8 +7,9 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import defer
+from vonk_agent_protocol import LifecycleState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import CatalogVocabulary, ModelDefinition, RecipeDefinition
 
 from ..catalog_queries import active_head_revision
 from ..catalog_revision_contract import (
@@ -44,6 +45,7 @@ from .common import (
     _model_identity,
     _readable_document,
     _recipe_creator,
+    _recipe_usage,
 )
 
 if TYPE_CHECKING:
@@ -73,6 +75,23 @@ def _library_release(self: LibraryProjection) -> LibraryRelease | None:
             updated_at=_utc(run.library_updated_at),
             commit=run.observed_commit,
         )
+
+
+def library_vocabulary(self: LibraryProjection) -> CatalogVocabulary | None:
+    """The words of the release the newest finished sync read; ``None`` if none yet.
+
+    A sync writes them whenever the newest run lacks them but the release has
+    them, so a missing or unreadable copy is rewritten by the next tick.
+    """
+
+    with self._sessions() as session:
+        stored = session.scalar(
+            select(RecipeLibrarySyncRun.vocabulary)
+            .where(RecipeLibrarySyncRun.state == LifecycleState.SUCCEEDED.value)
+            .order_by(RecipeLibrarySyncRun.completed_at.desc())
+            .limit(1)
+        )
+    return stored if isinstance(stored, CatalogVocabulary) else None
 
 
 def _model_projection(
@@ -129,12 +148,13 @@ def _recipe_projection(
         self.selector(reference.publisher, reference.slug)
         for reference in projected.models
     ]
-    usage = sorted(
-        {
+    usage = _recipe_usage(
+        [
             item
             for reference in projected.models
             for item in usage_by_model.get(reference.content_sha256, ())
-        }
+        ],
+        projected.api,
     )
     resources = self._recipe_resources(document)
     return LibraryRecipeProjection(
@@ -158,6 +178,7 @@ def _recipe_projection(
                 "artifact_inputs": None,
                 "package_handle": None,
                 "qualification": None,
+                "source_bundle_sha256": revision.source_bundle_sha256,
             }
         ),
         prebuilt_image=projected.prebuilt_image,

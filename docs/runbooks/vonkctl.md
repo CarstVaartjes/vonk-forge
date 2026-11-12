@@ -343,7 +343,7 @@ vonkctl recipe library --model "Qwen 3.8"
 vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2
 vonkctl recipe library --fits-fleet
 vonkctl recipe library --ready
-vonkctl recipe detail qwen-code
+vonkctl recipe detail qwen-code         # Usage and the status Meaning use the release's published words
 vonkctl recipe detail qwen-code --watch
 vonkctl recipe download qwen-code       # repeat to refresh a completed copy
 vonkctl recipe download qwen-code --detach
@@ -984,6 +984,10 @@ assignments, with their exact run identity and publication state. An optional
 alias narrows the result. An absent, stale, revoked, or unpublished route is not
 replaced with a guessed address. Endpoint discovery does not issue credentials
 or prove physical model quality.
+
+The output opens with `Serving now`, one `alias · recipe title · published` line
+per published route. The Fleet page's "Serving now" block shows the same lines
+for the loaded Profile, each with the same connection example.
 
 The client endpoint is the Controller's inference gateway, not a Spark:
 `API base` is `https://<controller host>/v1` (the same origin as

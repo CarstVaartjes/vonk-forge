@@ -191,6 +191,10 @@ export function SparkDetail({
                     </dd>
                   </div>
                   <div>
+                    <dt>Agent version</dt>
+                    <dd>{node.agent_runtime?.semantic_version ?? "Not reported"}</dd>
+                  </div>
+                  <div>
                     <dt>Display memory</dt>
                     <dd>{nodeDisplayMemory(node)}</dd>
                   </div>

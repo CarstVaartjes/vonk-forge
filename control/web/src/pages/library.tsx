@@ -7,6 +7,7 @@ import type {
   LibraryViewRecipe,
   LibraryViewRecipeDetail,
   LibraryViewSnapshot,
+  LibraryVocabulary,
   ModelLibrary,
   RecipeDetail,
   RecipeLibrary,
@@ -19,6 +20,7 @@ import { SkeletonRows } from "../components/skeleton";
 import { LibraryBrowser } from "../components/library-browser";
 import type { LibrarySubview } from "../components/library-browser";
 import { LibraryNodeNamesProvider } from "../components/library-node-names";
+import { LibraryVocabularyProvider } from "../components/library-vocabulary";
 import { libraryFiltersFromSearch, libraryRecencySince } from "../components/library-workcell";
 import { nodeDisplayName } from "../lib/fleet";
 import { libraryRoute, modelKey } from "../lib/library-route";
@@ -236,6 +238,7 @@ export function LibraryPage({
     () => new URL(path, location.origin).searchParams.get("q") ?? "",
   );
   const [nodeNames, setNodeNames] = useState<Record<string, string>>({});
+  const [vocabulary, setVocabulary] = useState<LibraryVocabulary | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const route = useMemo(() => libraryRoute(new URL(path, location.origin).pathname), [path]);
   const view = subview(path);
@@ -265,6 +268,19 @@ export function LibraryPage({
       });
     return () => controller.abort();
   }, [api, attempt, librarySort, libraryUpdated, libraryFits]);
+  useEffect(() => {
+    // The release's words, read once per page. They are informative: without
+    // them (none published, or unreachable) the page shows the names.
+    if (!api.libraryVocabulary) return;
+    const controller = new AbortController();
+    api
+      .libraryVocabulary(controller.signal)
+      .then((value) => {
+        if (!controller.signal.aborted) setVocabulary(value);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [api]);
   useEffect(() => {
     if (!api.visualFleet) return;
     const controller = new AbortController();
@@ -447,27 +463,29 @@ export function LibraryPage({
       )}
       {!snapshot && !error && <SkeletonRows columns={3} label="Loading Library" />}
       {snapshot && (
-        <LibraryNodeNamesProvider names={names}>
-          <LibraryStorageObservation snapshot={snapshot} />
-          <LibraryBrowser
-            api={api}
-            detail={observedDetail}
-            detailError={detailError}
-            detailLoading={detailLoading}
-            fleet={fleet}
-            onBusyChange={onBusyChange}
-            onNavigate={contextualNavigate}
-            onNavigatePath={onNavigatePath}
-            onQueryChange={updateQuery}
-            onRefresh={refresh}
-            onRetryDetail={() => setDetailAttempt((value) => value + 1)}
-            path={path}
-            query={query}
-            route={route}
-            snapshot={snapshot}
-            subview={view}
-          />
-        </LibraryNodeNamesProvider>
+        <LibraryVocabularyProvider vocabulary={vocabulary}>
+          <LibraryNodeNamesProvider names={names}>
+            <LibraryStorageObservation snapshot={snapshot} />
+            <LibraryBrowser
+              api={api}
+              detail={observedDetail}
+              detailError={detailError}
+              detailLoading={detailLoading}
+              fleet={fleet}
+              onBusyChange={onBusyChange}
+              onNavigate={contextualNavigate}
+              onNavigatePath={onNavigatePath}
+              onQueryChange={updateQuery}
+              onRefresh={refresh}
+              onRetryDetail={() => setDetailAttempt((value) => value + 1)}
+              path={path}
+              query={query}
+              route={route}
+              snapshot={snapshot}
+              subview={view}
+            />
+          </LibraryNodeNamesProvider>
+        </LibraryVocabularyProvider>
       )}
     </div>
   );

@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control import recipe_routes
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_profile_contract import (
@@ -129,7 +130,7 @@ class OverlapPublisher(AtomicRecipeRoutePublisher):
     def served_model_info(self):
         return ServedModelInfo()
 
-    def publish_recipe(self, candidate):
+    def publish_recipe(self, candidate, *, required=SupervisorPhase.READY):
         return self._record(
             tuple(sorted(candidate.state.aliases)), candidate.state.digest
         )
@@ -1997,7 +1998,7 @@ def test_postgres_publication_recovers_after_worker_restart_without_new_effect(
     acknowledgements: list[int] = []
     fail_ack = [failure_point == "after-activation"]
 
-    def acknowledge(marker):
+    def acknowledge(marker, _required):
         acknowledgements.append(marker.generation)
         if fail_ack[0]:
             raise OSError("supervisor acknowledgement lost")

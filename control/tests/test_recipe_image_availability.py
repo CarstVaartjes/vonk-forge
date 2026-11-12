@@ -430,14 +430,10 @@ def _ensure_builder_node(session: Session) -> None:
         session.add(AgentNode(node_id="spark-builder", state="active"))
 
 
-def _recipe_projection(
-    recipe: RecipeDefinition, source_bundle_sha256: str = "b" * 64
-) -> dict[str, object]:
-    """The stored catalog projection of one recipe, with its source bundle."""
+def _recipe_projection(recipe: RecipeDefinition) -> dict[str, object]:
+    """The stored catalog projection of one recipe."""
 
-    projected = recipe_document_projection(recipe)
-    projected["source_bundle_sha256"] = source_bundle_sha256
-    return write_catalog_projection(projected, kind="recipe")
+    return write_catalog_projection(recipe_document_projection(recipe), kind="recipe")
 
 
 def _add_revision(
@@ -464,6 +460,7 @@ def _add_revision(
         content_digest=document_sha256(recipe.model_dump(mode="json")),
         artifact_key="b" * 64,
         execution_key="a" * 64,
+        source_bundle_sha256="b" * 64,
         projected=_recipe_projection(recipe),
         created_by="test",
         created_at=datetime.now(UTC),

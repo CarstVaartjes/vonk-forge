@@ -1,4 +1,5 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { FleetPage } from "./fleet-simplified";
@@ -8,10 +9,12 @@ import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
+let attentionUnavailable = false;
+let fleetNow = new Date("2026-09-27T10:00:00Z");
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
-    snapshot: { nodes, attention },
-    now: new Date("2026-09-27T10:00:00Z"),
+    snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },
+    now: fleetNow,
     loading: false,
     error: null,
     retry: vi.fn(),
@@ -153,20 +156,128 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
-test("firing Prometheus alerts are visible in Fleet attention", () => {
-  attention = [
+test("Fleet vitals cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-vitals.json", "utf8"),
+  ) as {
+    cases: {
+      node: Record<string, unknown>;
+      expected: { memory: string; disk: string; gpu: string };
+    }[];
+  };
+  for (const { node, expected } of vectors.cases) {
+    nodes = [{ ...spark("Alpha", 40, 250), ...node }];
+    const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+    const cell = (label: string) =>
+      container.querySelector(`td[data-label="${label}"]`)?.textContent;
+    expect(cell("Memory used")).toBe(expected.memory);
+    expect(cell("Disk free")).toBe(expected.disk);
+    expect(cell("GPU")).toBe(expected.gpu);
+    unmount();
+  }
+  nodes = [];
+});
+
+test("Fleet meters turn amber for full memory and disk, never for GPU utilisation", () => {
+  nodes = [
     {
-      source: "prometheus",
-      name: "NodeHot",
-      summary: "GPU is hot",
-      severity: "critical",
-      labels: { node_id: "Spark A" },
-      active_at: "2026-10-10T00:00:00Z",
+      ...spark("Alpha", 5, 50),
+      telemetry: {
+        freshness: "live",
+        sample: {
+          observed_at: "2026-09-27T10:00:00Z",
+          memory_total_bytes: 100,
+          memory_available_bytes: 5,
+          gpu_utilization_percent: 99,
+        },
+      },
     },
   ];
   render(<FleetPage api={{} as ControlApi} />);
-  expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("GPU is hot");
+  const [memory, disk, gpu] = within(screen.getAllByRole("row")[1]!).getAllByRole("meter");
+  expect(memory!.className).toContain("meter-high");
+  expect(disk!.className).toContain("meter-high");
+  expect(gpu!.className).not.toContain("meter-high");
+  expect(disk!.getAttribute("aria-label")).toBe("Alpha disk free");
+  nodes = [];
+});
+
+test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-workloads.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    expected: Record<string, { page: string[] }>;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  const { container } = render(<FleetPage api={{} as ControlApi} />);
+  for (const node of vectors.nodes) {
+    const row = [...container.querySelectorAll("tbody tr")].find((candidate) =>
+      candidate.querySelector("th")?.textContent?.includes(node.display_name),
+    );
+    const lines = [...(row?.querySelectorAll('td[data-label="Serving"] > strong') ?? [])].map(
+      (line) => line.textContent,
+    );
+    expect(lines).toEqual(vectors.expected[node.id]!.page);
+  }
+  nodes = [];
+});
+
+test("Fleet status line reads exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-status.json", "utf8"),
+  ) as {
+    now: string;
+    cases: {
+      nodes: Record<string, unknown>[];
+      attention?: unknown[];
+      attention_unavailable?: boolean;
+      expected: string;
+    }[];
+  };
+  fleetNow = new Date(vectors.now);
+  for (const vector of vectors.cases) {
+    nodes = vector.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+    attention = vector.attention ?? [];
+    attentionUnavailable = vector.attention_unavailable ?? false;
+    const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+    expect(container.querySelector(".fleet-status-line")?.textContent).toBe(vector.expected);
+    expect(container.querySelector(".fleet-status-line")?.getAttribute("role")).toBeNull();
+    unmount();
+  }
+  fleetNow = new Date("2026-09-27T10:00:00Z");
+  attentionUnavailable = false;
+  nodes = [];
   attention = [];
+});
+
+test("firing alerts read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-attention.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    alerts: unknown[];
+    expected: string[];
+    unavailable: string;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  attention = vectors.alerts;
+  const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+  const region = screen.getByRole("region", { name: "Needs attention" });
+  expect(
+    within(region)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(vectors.expected);
+  expect(within(region).queryByRole("button")).toBeNull();
+  expect(container.textContent).not.toContain("NodeHot");
+  unmount();
+  attention = [];
+  attentionUnavailable = true;
+  render(<FleetPage api={{} as ControlApi} />);
+  expect(screen.getByText(vectors.unavailable)).toBeVisible();
+  attentionUnavailable = false;
+  nodes = [];
 });
 
 test("Fleet shows the Controller headless memory recommendation without an apply action", () => {

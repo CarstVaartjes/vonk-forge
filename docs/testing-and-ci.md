@@ -446,6 +446,9 @@ npm test --prefix control/web -- --run
 npm run build --prefix control/web
 ```
 
+The web tests include `styles-live.test.ts`: every class a stylesheet selects must be
+named by production source, so deleting a component also deletes its CSS.
+
 Generated clients and wire outputs are ignored build inputs. Test setup prepares
 them, and `tests/test_generated_contracts.py` compares them with their Pydantic
 producers alongside the remaining checked-in installer and qualification
@@ -653,8 +656,8 @@ they were built from. Acceptance and reuse bind an image to the tree of the
 commit they verify, while `org.opencontainers.image.revision` and the embedded
 `VONK_BUILD_SOURCE_SHA` keep naming the commit that built it, for operators.
 Identical content built for a pull request and for main is therefore one image.
-`vonkctl platform` shows both: `API source` is the commit that built the
-Controller (for a reused image, the pull request's test merge) and `API source
+`vonkctl platform` shows both: `Controller build` is the commit that built the
+Controller (first 12 characters; `--json` has all of it; for a reused image, the pull request's test merge) and `Controller build
 tree` is its tree, which equals the release commit's
 (`git rev-parse <release commit>^{tree}`).
 An image without the tree label is refused.

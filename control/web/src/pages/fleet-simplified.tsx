@@ -4,15 +4,19 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import {
-  formatBytes,
+  fleetStatusLine,
   nodeDiskFreeBytes,
   nodeDisplayName,
   nodeMemory,
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
+  nodeVitals,
+  nodeWorkloadLines,
   type NodeStatus,
 } from "../lib/fleet";
+import { Meter } from "../components/meter";
+import { AttentionItem } from "../components/attention-item";
 import { SortHeader, useSort } from "../components/sort-header";
 import { StatusPill } from "../components/status-pill";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -21,6 +25,7 @@ import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
 import { useToast } from "../components/toast";
 import { EnrollmentGrant } from "../components/enrollment-grant";
+import { ServingNow, servingKey } from "../components/serving-now";
 import { SparkDetail } from "../components/spark-detail";
 import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
@@ -31,11 +36,6 @@ function statusTone(status: NodeStatus): "healthy" | "warning" | "danger" {
 
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
-
-function memoryLabel(node: VisualFleetNode): string {
-  const memory = nodeMemory(node);
-  return memory ? `${memory.usedPercent}% of ${formatBytes(memory.totalBytes)}` : "Not reported";
-}
 
 function selectedSpark(): string | null {
   return new URLSearchParams(location.search).get("spark");
@@ -154,17 +154,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
       {!!fleet.snapshot?.attention?.length && (
         <section aria-label="Needs attention">
           <h2>Needs attention</h2>
-          <ul>
+          <ul className="attention-list">
             {fleet.snapshot.attention.map((alert) => (
-              <li key={JSON.stringify(alert.labels)}>
-                <StatusPill
-                  tone={alert.severity === "critical" ? "danger" : ProfileReasonSeverity.WARNING}
-                >
-                  {alert.severity}
-                </StatusPill>{" "}
-                <strong>{alert.name}</strong> · {alert.summary}
-                {alert.labels.node_id && <> · {alert.labels.node_id}</>}
-              </li>
+              <AttentionItem
+                key={JSON.stringify(alert.labels)}
+                alert={alert}
+                nodes={fleet.snapshot?.nodes ?? []}
+              />
             ))}
           </ul>
         </section>
@@ -232,64 +228,14 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
         </div>
       )}
       {fleet.snapshot && (
-        <section className="fleet-command-summary" aria-label="Fleet summary">
-          <div className="fleet-command-fact">
-            <strong>{fleet.snapshot.nodes.length}</strong>
-            <span>Sparks</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {
-                fleet.snapshot.nodes.filter((node) => node.connection.online_state === "online")
-                  .length
-              }
-            </strong>
-            <span>Online</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {
-                fleet.snapshot.nodes.filter(
-                  (node) => nodeStatus(node, fleet.now).status !== "online",
-                ).length
-              }
-            </strong>
-            <span>Need attention</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {fleet.snapshot.nodes.reduce(
-                (count, node) => count + node.loaded.filter((item) => item.healthy === true).length,
-                0,
-              )}
-              {fleet.snapshot.nodes.some((node) => node.loaded.some((item) => item.healthy == null))
-                ? " confirmed"
-                : ""}
-            </strong>
-            <span>Running recipes</span>
-            {fleet.snapshot.nodes.some((node) =>
-              node.loaded.some((item) => item.healthy == null),
-            ) && <small>Some run health is unknown</small>}
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {fleet.snapshot.nodes.reduce(
-                (count, node) =>
-                  count + node.installed.filter((item) => item.complete === true).length,
-                0,
-              )}
-              {fleet.snapshot.nodes.some((node) =>
-                node.installed.some((item) => item.complete == null),
-              )
-                ? " confirmed"
-                : ""}
-            </strong>
-            <span>Installed recipes</span>
-            {fleet.snapshot.nodes.some((node) =>
-              node.installed.some((item) => item.complete == null),
-            ) && <small>Some installation completeness is unknown</small>}
-          </div>
-        </section>
+        <ServingNow
+          api={api}
+          refreshKey={servingKey(fleet.snapshot.nodes)}
+          pollKey={fleet.snapshot.generated_at}
+        />
+      )}
+      {fleet.snapshot && (
+        <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && fleet.snapshot.nodes.length > 0 && (
         <section className="fleet-discovery" aria-label="Find a Spark">
@@ -341,14 +287,15 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                   <SortHeader column="memory" label="Memory used" sort={sort} onSort={toggle} />
                   <SortHeader column="disk" label="Disk free" sort={sort} onSort={toggle} />
                   <th scope="col">GPU</th>
-                  <th scope="col">Recipes</th>
+                  <th scope="col">Serving</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((node) => {
                   const { status, reasons } = nodeStatus(node, fleet.now);
                   const name = nodeDisplayName(node);
-                  const disk = nodeDiskFreeBytes(node);
+                  const vitals = nodeVitals(node);
+                  const workloads = nodeWorkloadLines(node, fleet.snapshot?.nodes ?? []);
                   return (
                     <tr key={node.id}>
                       <th scope="row">
@@ -364,7 +311,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                         </a>
                         {nodeSecondaryName(node) && <small>{nodeSecondaryName(node)}</small>}
                       </th>
-                      <td>
+                      <td data-label="Status">
                         <StatusPill tone={statusTone(status)}>{status}</StatusPill>
                         {reasons.length > 0 && (
                           <small title={reasons.join("\n")}>
@@ -373,27 +320,28 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                           </small>
                         )}
                       </td>
-                      <td>{memoryLabel(node)}</td>
-                      <td>{disk === null ? "Not reported" : formatBytes(disk)}</td>
-                      <td>
-                        {typeof node.telemetry?.sample.gpu_utilization_percent === "number"
-                          ? `${node.telemetry.sample.gpu_utilization_percent.toFixed(1)}%`
-                          : "Not reported"}
+                      <td data-label="Memory used">
+                        <Meter label={`${name} memory used`} vital={vitals.memory} />
                       </td>
-                      <td>
-                        <strong>
-                          {node.loaded.filter((item) => item.healthy === true).length}
-                          {node.loaded.some((item) => item.healthy == null) ? " confirmed" : ""}{" "}
-                          running
-                        </strong>
+                      <td data-label="Disk free">
+                        <Meter label={`${name} disk free`} vital={vitals.disk} />
+                      </td>
+                      <td data-label="GPU">
+                        <Meter label={`${name} GPU utilisation`} vital={vitals.gpu} />
+                      </td>
+                      <td data-label="Serving">
+                        {workloads.length === 0 ? (
+                          <strong>Idle</strong>
+                        ) : (
+                          workloads.map((line) => <strong key={line}>{line}</strong>)
+                        )}
                         <small>
                           {node.installed.filter((item) => item.complete === true).length}
                           {node.installed.some((item) => item.complete == null) ? " confirmed" : ""}{" "}
                           installed
                         </small>
-                        {(node.loaded.some((item) => item.healthy == null) ||
-                          node.installed.some((item) => item.complete == null)) && (
-                          <small>Some workload state is unknown</small>
+                        {node.installed.some((item) => item.complete == null) && (
+                          <small>Some installation state is unknown</small>
                         )}
                         {nodeRecipeUpdates(node).length > 0 && (
                           <small>
@@ -409,7 +357,12 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
           </div>
         </section>
       )}
-      <MetricsChart api={api} />
+      <MetricsChart
+        api={api}
+        names={Object.fromEntries(
+          (fleet.snapshot?.nodes ?? []).map((node) => [node.id, nodeDisplayName(node)]),
+        )}
+      />
       {spark && <SparkDetail api={api} id={spark} onClose={() => selectSpark(null)} />}
     </div>
   );

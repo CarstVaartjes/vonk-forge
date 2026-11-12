@@ -93,7 +93,6 @@ def _add_revision(
     state: str = "active",
 ) -> None:
     projected = _projection(recipe)
-    projected["source_bundle_sha256"] = "c" * 64
     session.add(
         CatalogDocumentRevision(
             id=revision_id,
@@ -108,6 +107,7 @@ def _add_revision(
             content_digest=document_sha256(recipe.model_dump(mode="json")),
             artifact_key="b" * 64,
             execution_key="a" * 64,
+            source_bundle_sha256="c" * 64,
             projected=projected,
             created_by="test",
             created_at=datetime.now(UTC),

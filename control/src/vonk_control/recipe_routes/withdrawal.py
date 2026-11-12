@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import RouteState as RunRouteState
 from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
+from vonk_agent_protocol.route_activation import SupervisorPhase
 
 from ..litellm import (
     LiteLlmGeneration,
@@ -242,8 +243,15 @@ def _withdrawal_effect(
     self: RecipeRouteService, withdrawal: _RecipeWithdrawal
 ) -> LiteLlmGeneration:
     candidate = withdrawal.candidate
+    # A withdrawal is live once the supervisor confirms that no child serves
+    # the routes it removed. The remaining routes come back with the new
+    # child; waiting for its health would hold up the caller (a Stop
+    # dispatch) for the whole LiteLLM restart. A withdrawal exposes nothing
+    # new, so like the empty bundle it prepares no key grants: it never needs
+    # a gateway that the previous route change may still be restarting, and
+    # the API's grant loop narrows the grants afterwards.
     return (
-        self._publish(candidate)
+        self._publisher.publish_recipe(candidate, required=SupervisorPhase.DRAINED)
         if candidate.state.aliases
         else self._publish_empty(candidate.state.digest)
     )

@@ -100,7 +100,7 @@ Each fact has one authoritative owner. The following is the target contract:
 | Fact | Owner | Other representations |
 | --- | --- | --- |
 | Users, sessions, enrollment, certificates, revocations, and execution authorization | PostgreSQL | Files cannot grant or restore this authority. |
-| Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. |
+| Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. A recipe revision's source bundle digest is the indexed column `catalog_document_revisions.source_bundle_sha256`, not part of its projection JSON. |
 | One current selected-profile record pointing to the immutable accepted application snapshot as standing desired state for the whole fleet | PostgreSQL | The selected record is an explicit authority fact; do not infer it from latest application or audit history. Unselected profiles are drafts. |
 | Operation intent, idempotency keys, queue/attempt ownership, cancellation, reservations, and route decisions | PostgreSQL | Local work records carry the owning request/attempt identity; they do not schedule or authorize work. |
 | Model bytes, image archives, complete artifact manifests, and verification receipts | Managed artifact storage | A disposable index may accelerate discovery; readiness resolves through the storage owner. |
@@ -409,6 +409,13 @@ permission to delete.
   an effect's deadline. At expiry, reconcile, retry safely, or report an
   actionable failure. A temporary failure never permanently bans a fresh
   authorized request for that artifact.
+- A long transfer writes durable progress on one fixed cadence per operation,
+  never per stream or per second: in-process samples are coalesced, and the
+  cadence is at most a third of the shortest window that reads the write
+  (progress staleness, stall flag, lease). A completion, failure or stop
+  writes at once. Resume reads the bytes retained on disk, not the progress
+  record, and whole-set projections such as verified bytes are recomputed at
+  finalization or when read, not in the heartbeat.
 - Leases and attempt fences protect every result and transition. Takeover
   checks exact process/runtime/storage effects; an expired heartbeat is not
   proof of death. Stale attempts cannot publish current references, renew
@@ -803,7 +810,18 @@ expired, or withdrawn state.
 The shared route activation contract allows 30 seconds to stop and reap the old
 LiteLLM child, then 120 seconds for all replacement preparation, startup retries,
 and readiness checks. The Controller waits up to 165 seconds for the exact
-generation acknowledgement. Each publication has a finite 180-second lease,
+generation acknowledgement. Any new generation restarts LiteLLM, so every route
+is unavailable while the replacement child starts. The supervisor acknowledges
+twice. A `drained` acknowledgement is written once the old child's exit is
+confirmed, before the new child starts. A `ready` acknowledgement follows when
+the new child answers health. A withdrawal (a Stop, a recovery or a maintenance
+withdrawal) needs only `drained`: nothing serves the removed route any more, and
+the remaining routes come back with the new child. A publication waits for
+`ready`. The ready acknowledgement keeps the bytes it always had. An older
+Controller rejects the `phase` key and waits for `ready`, and an older LiteLLM
+image, whose baked contract has no drained phase, makes the new supervisor fail
+at import before any child starts; the container restarts until the matching
+LiteLLM image runs (crash-only, deploy-ordered, no compatibility code). Each publication has a finite 180-second lease,
 capped at 300 seconds after its oldest admitted observation; observations must
 be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies

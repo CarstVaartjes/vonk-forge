@@ -214,8 +214,8 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
       host_memory_free_bytes: free,
     } as VisualFleetNode["inventory"],
   });
-  expect(nodeMemory(observed)).toEqual({ usedPercent: 50, totalBytes: total });
-  expect(formatBytes(total)).toBe("17179869184.0 GiB");
+  expect(nodeMemory(observed)).toMatchObject({ usedPercent: 50, totalBytes: total });
+  expect(formatBytes(total)).toBe("16777216.0 TiB");
   expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
 });
 

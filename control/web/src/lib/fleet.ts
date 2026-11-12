@@ -1,4 +1,5 @@
 import {
+  addWire,
   compareWire,
   displayRatio,
   formatWire,
@@ -6,12 +7,20 @@ import {
   subtractWire,
   type WireNumber,
 } from "../api/contract-numeric";
-import type { SwapShortfallEvidence, VisualFleetNode } from "../api/types";
-import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
+import type { SwapShortfallEvidence, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
+import {
+  NodeOfflineReason,
+  OutcomeKind,
+  ProjectionCode,
+  RunState,
+} from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
 export type NodeStatus = "online" | "needs attention" | "offline";
+
+/** What an empty Fleet says, here and in `vonkctl fleet`. */
+const NO_SPARKS = "No Sparks are enrolled.";
 
 const LIVE_MAXIMUM_MS = 6_000;
 const DELAYED_MAXIMUM_MS = 20_000;
@@ -93,6 +102,131 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
+/** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */
+function runStateWord(run: VisualFleetNode["loaded"][number]): string {
+  if (run.run_state == null) return "state unknown";
+  if (run.run_state !== RunState.RUNNING) return run.run_state;
+  if (run.healthy == null) return "state unknown";
+  return run.healthy === false ? "degraded" : run.run_state;
+}
+
+/**
+ * What a Spark serves, one line per run: title, alias, state, and the other Sparks of a
+ * multi-Spark run. `vonkctl fleet` prints the same lines.
+ */
+export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+  const names = new Map(fleet.map((member) => [member.id, nodeDisplayName(member)]));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const run of node.loaded) {
+    if (seen.has(run.run_id)) continue;
+    seen.add(run.run_id);
+    const partners = (run.member_node_ids ?? [])
+      .filter((id) => id !== node.id)
+      .map((id) => names.get(id) ?? id);
+    lines.push(
+      [
+        run.title ?? run.run_id,
+        run.alias,
+        runStateWord(run),
+        partners.length ? `with ${partners.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    );
+  }
+  return lines;
+}
+
+export type FleetSummary = {
+  enrolled: number;
+  online: number;
+  /** Online Sparks that reported a free-memory sample; the sum covers only these. */
+  reporting: number;
+  freeMemoryBytes: WireNumber | null;
+};
+
+export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSummary | undefined {
+  if (!fleet) return undefined;
+  const online = fleet.nodes.filter((node) => node.connection.online_state === "online");
+  const samples = online.flatMap((node) => {
+    const value = node.telemetry?.sample.memory_available_bytes;
+    return value === null || value === undefined ? [] : [value as WireNumber];
+  });
+  return {
+    enrolled: fleet.nodes.length,
+    online: online.length,
+    reporting: samples.length,
+    freeMemoryBytes: samples.length
+      ? samples.reduce<WireNumber>((total, value) => addWire(total, value), 0)
+      : null,
+  };
+}
+
+/** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */
+export function freeMemoryText(summary: FleetSummary): string | null {
+  if (summary.freeMemoryBytes === null) return null;
+  const free = `${formatBytes(summary.freeMemoryBytes)} unified memory free`;
+  return summary.reporting === summary.online
+    ? free
+    : `${free} on ${summary.reporting} of ${summary.online} online Sparks`;
+}
+
+/** A Spark needs attention when it is offline or warns, or its inventory is stale. */
+export function nodeNeedsAttention(node: VisualFleetNode, now: Date): boolean {
+  return nodeStatus(node, now).status !== "online" || node.inventory?.freshness === "stale";
+}
+
+/** A workload is serving while it is running and reported healthy. */
+function isServing(run: VisualFleetNode["loaded"][number]): boolean {
+  return run.run_state === RunState.RUNNING && run.healthy === true;
+}
+
+/**
+ * The Fleet in one line: Sparks online, unified memory free, workloads serving, and what needs
+ * attention (Sparks, then firing alerts). `vonkctl fleet` prints the same line.
+ */
+export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
+  if (fleet.nodes.length === 0) return NO_SPARKS;
+  const summary = summarizeFleet(fleet) as FleetSummary;
+  const serving = new Set(
+    fleet.nodes.flatMap((node) => node.loaded.filter(isServing).map((run) => run.run_id)),
+  ).size;
+  const sparks = fleet.nodes.filter((node) => nodeNeedsAttention(node, now)).length;
+  const alerts = fleet.attention?.length ?? 0;
+  const attention = [
+    sparks > 0 ? `${sparks} ${sparks === 1 ? "Spark needs" : "Sparks need"} attention` : null,
+    alerts > 0 ? `${alerts} ${alerts === 1 ? "alert" : "alerts"} firing` : null,
+    alerts === 0 && fleet.attention_unavailable ? "alerts not reported" : null,
+  ].filter((part): part is string => part !== null);
+  return [
+    `${summary.online} of ${summary.enrolled} ${summary.enrolled === 1 ? "Spark" : "Sparks"} online`,
+    freeMemoryText(summary) ?? "unified memory not reported",
+    serving === 0
+      ? "no workloads serving"
+      : `${serving} ${serving === 1 ? "workload" : "workloads"} serving`,
+    ...(attention.length > 0 ? attention : ["nothing needs attention"]),
+  ].join(" · ");
+}
+
+/**
+ * A firing alert in plain words: its severity as a word, and its summary with the Spark it
+ * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.
+ */
+export function attentionText(
+  alert: NonNullable<VisualFleetSnapshot["attention"]>[number],
+  fleet: VisualFleetNode[],
+): { severity: string; text: string } {
+  const spark = fleet.find((node) => node.id === alert.labels.node_id);
+  const named = alert.labels.node_id
+    ? ` (${spark ? nodeDisplayName(spark) : alert.labels.node_id})`
+    : "";
+  return {
+    severity: alert.severity.charAt(0).toLocaleUpperCase() + alert.severity.slice(1),
+    text: `${alert.summary}${named}`,
+  };
+}
+
 /** Running workloads on an older recipe revision, once per run; informational and never an error. */
 export function nodeRecipeUpdates(
   node: VisualFleetNode,
@@ -133,6 +267,11 @@ export function offlineReasonLabel(
   return reason ? OFFLINE_REASON_LABELS[reason] : "Offline reason unavailable";
 }
 
+/** .5 rounds up on every Fleet number; `vonkctl` does the same (Python's round() goes to even). */
+export function halfUp(value: number): number {
+  return Math.floor(value + 0.5);
+}
+
 export function formatMetric(
   value: number | null | undefined,
   format: (value: number) => string,
@@ -148,10 +287,12 @@ export function formatBytes(value: WireNumber | null | undefined): string {
       ? ([1024, "KiB"] as const)
       : compareWire(value, 1024 ** 3) < 0
         ? ([1024 ** 2, "MiB"] as const)
-        : ([1024 ** 3, "GiB"] as const);
+        : compareWire(value, 1024 ** 4) < 0
+          ? ([1024 ** 3, "GiB"] as const)
+          : ([1024 ** 4, "TiB"] as const);
   const displayed = displayRatio(value, unit[0]);
   return Number.isFinite(displayed)
-    ? `${displayed.toFixed(1)} ${unit[1]}`
+    ? `${(halfUp(displayed * 10) / 10).toFixed(1)} ${unit[1]}`
     : `${formatWire(value)} B`;
 }
 
@@ -215,22 +356,92 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
     : hostname;
 }
 
-/** Used share and total of the Spark's memory, from the live sample when there is one. */
+/** The live telemetry sample while its freshness is live; otherwise the Spark shows its inventory. */
+function liveSample(node: VisualFleetNode) {
+  return node.telemetry?.freshness === "live" ? node.telemetry.sample : null;
+}
+
+/** Used and total memory of the Spark, from the live sample when there is one. */
 export function nodeMemory(
   node: VisualFleetNode,
-): { usedPercent: number; totalBytes: WireNumber } | null {
-  const sample = node.telemetry?.sample;
-  const total = sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
-  const free = sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes;
+): { usedPercent: number; usedBytes: WireNumber; totalBytes: WireNumber } | null {
+  const sample = liveSample(node);
+  const total = sample ? sample.memory_total_bytes : node.inventory?.host_memory_total_bytes;
+  const free = sample ? sample.memory_available_bytes : node.inventory?.host_memory_free_bytes;
   if (!isWireNumber(total) || !isWireNumber(free) || compareWire(total, 0) <= 0) return null;
+  const used = subtractWire(total, free);
   return {
-    usedPercent: Math.round(100 * displayRatio(subtractWire(total, free), total)),
+    usedPercent: halfUp(100 * displayRatio(used, total)),
+    usedBytes: used,
     totalBytes: total,
   };
 }
 
 export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
+}
+
+/** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
+type Vital = { percent: number | null; text: string; amber: boolean };
+
+const NOT_REPORTED: Vital = { percent: null, text: "Not reported", amber: false };
+
+/** Free disk and its total: the inventory's pair, else the live sample's. */
+function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber } | null {
+  for (const source of [node.inventory, liveSample(node)]) {
+    const free = source?.disk_free_bytes;
+    const total = source?.disk_total_bytes;
+    if (isWireNumber(free) && isWireNumber(total) && compareWire(total, 0) > 0) {
+      return { free, total };
+    }
+  }
+  return null;
+}
+
+/** The three vitals of a Fleet row; `vonkctl fleet` prints the same words (shared vectors). */
+export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital; gpu: Vital } {
+  const memory = nodeMemory(node);
+  const disk = diskPair(node);
+  const sample = liveSample(node);
+  const utilisation = sample?.gpu_utilization_percent;
+  const temperature = sample?.gpu_temperature_c;
+  const readings = [
+    typeof utilisation === "number" && Number.isFinite(utilisation)
+      ? `${halfUp(utilisation)}%`
+      : null,
+    typeof temperature === "number" ? `${temperature} °C` : null,
+  ].filter((reading): reading is string => reading !== null);
+  const reason = sample?.gpu_unavailable_reason;
+  const usedDisk =
+    disk && halfUp(100 * displayRatio(subtractWire(disk.total, disk.free), disk.total));
+  return {
+    memory: memory
+      ? {
+          percent: memory.usedPercent,
+          text: `${formatBytes(memory.usedBytes)} of ${formatBytes(memory.totalBytes)} (${memory.usedPercent}%)`,
+          amber: memory.usedPercent >= 90,
+        }
+      : NOT_REPORTED,
+    disk:
+      disk && usedDisk !== null
+        ? {
+            percent: Math.min(100, Math.max(0, 100 - usedDisk)),
+            text: `${formatBytes(disk.free)} free of ${formatBytes(disk.total)}`,
+            amber: usedDisk >= 90,
+          }
+        : NOT_REPORTED,
+    // GPU utilisation is never amber: a busy GPU is the point of the machine.
+    gpu: readings.length
+      ? {
+          percent:
+            typeof utilisation === "number" && Number.isFinite(utilisation)
+              ? Math.min(100, Math.max(0, utilisation))
+              : null,
+          text: readings.join(", "),
+          amber: false,
+        }
+      : { ...NOT_REPORTED, text: reason ? `Not reported (${reason})` : "Not reported" },
+  };
 }
 
 /** Average current CPU clock against the hardware maximum, with the temperature it runs at. */

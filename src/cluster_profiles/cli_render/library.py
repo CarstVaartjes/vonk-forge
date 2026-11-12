@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 from enum import StrEnum
+from urllib.parse import quote
 
 from ..cli_states_generated import QualificationOutcome, QualificationStatus
 from ..cli_telemetry_render import size as _size
@@ -12,12 +13,14 @@ from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
 from ..generated_control.models.model_cache_usage import ModelCacheUsage
+from ..generated_control.models.model_display import ModelDisplay
 from ..generated_control.models.published_qualification_status_view import (
     PublishedQualificationStatusView,
 )
 from ..generated_control.models.qualification_evidence_record import (
     QualificationEvidenceRecord,
 )
+from ..generated_control.types import Unset
 from .common import (
     _bytes,
     _field,
@@ -34,6 +37,7 @@ from .common import (
     _words,
 )
 from .progress import progress_line
+from .vocabulary import NOT_REPORTED, capability_label, status_meaning
 
 
 class LibraryNoun(StrEnum):
@@ -83,6 +87,13 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
     return ("Last failure", f"{record.cause_summary} ({tested})")
 
 
+def _capability_words(value: object) -> str:
+    """The capabilities by their published labels; none declared is not reported."""
+    if not isinstance(value, list):
+        return _words(value)
+    return ", ".join(capability_label(_text(name)) for name in value) or NOT_REPORTED
+
+
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
     identity = _object(item.get("identity"), "identity")
     local = _object(item.get("local"), "local")
@@ -100,7 +111,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     )
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
-    _field("Usage", _words(item.get("usage")))
+    _field("Usage", _capability_words(item.get("usage")))
     _field("Disk", _bytes(resources.disk_bytes))
     if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
@@ -141,7 +152,10 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         else:
             _field("Readiness", "not assessed")
         # Informative only: the published hardware status never gates a step.
-        _field("Qualification", _qualification_status(item.get("qualification")))
+        status = _qualification_status(item.get("qualification"))
+        _field("Qualification", status)
+        if (meaning := status_meaning(status)) is not None:
+            _field("Meaning", meaning)
         if (evidence := _qualification_evidence(item.get("qualification"))) is not None:
             _field(*evidence)
     preparation = _optional(local.get("preparation"), "preparation")
@@ -228,6 +242,45 @@ def _alternative_line(alternative: Mapping[str, object]) -> str:
         f"v{_text(alternative.get('version'))}, "
         f"{_cache_word(alternative.get('cache'))}, {fit}"
     )
+
+
+def _recipe_links(detail: object) -> None:
+    """Where the recipe comes from, in the dashboard's words. Licences are information only.
+
+    Only the model displays are parsed into the generated model; the rest is read as plain
+    fields. The lines are shared with the dashboard (tests/fixtures/recipe-links.json).
+    """
+    payload = _object(detail, "recipe detail")
+    identity = _object(payload.get("identity"), "identity")
+    publisher = quote(_text(identity.get("publisher")), safe="")
+    slug = quote(_text(identity.get("slug")), safe="")
+    _field(
+        "Creator and details on vonkforge.ai",
+        f"https://vonkforge.ai/recipes/{publisher}/{slug}",
+    )
+    provenance = _optional(
+        _object(payload.get("document"), "document").get("provenance"), "provenance"
+    )
+    source = provenance.get("source_reference")
+    if isinstance(source, str) and source:
+        _field("Recipe source", source)
+    for model in _records(payload, "model_documents"):
+        if model.get("model_display") is None:
+            continue
+        display = ModelDisplay.from_dict(
+            dict(_object(model["model_display"], "model_display"))
+        )
+        license_ = display.license_
+        _field(
+            f"{display.model_title} licence",
+            f"{license_.spdx} (terms: {license_.url})",
+        )
+        limits = license_.territorial_restrictions
+        if limits is not None and not isinstance(limits, Unset):
+            _field(
+                f"Regional limits ({_words(limits.denied_jurisdictions)})",
+                limits.notice,
+            )
 
 
 def _recipe_alternatives(item: Mapping[str, object]) -> None:
@@ -358,6 +411,8 @@ def _library(
             )
     if detail:
         _library_item(payload, noun, detail=True)
+        if noun == LibraryNoun.RECIPE:
+            _recipe_links(payload)
         return
     rows = _records(payload, "models" if noun == LibraryNoun.MODEL else "recipes")
     cursor = payload.get("next_cursor")

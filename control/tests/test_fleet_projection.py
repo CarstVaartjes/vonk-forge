@@ -1362,7 +1362,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
-    assert "3 workloads running" in rendered.out
+    assert "1 workload serving" in rendered.out
     assert rendered.out.count("Recipe: Pair Recipe") == 3
     attention = rendered.out[rendered.out.index("Needs attention") :]
     assert "pair-healthy" not in attention
@@ -3013,3 +3013,37 @@ def test_contact_committed_between_clock_read_and_postgres_snapshot_stays_online
     assert connection.last_seen_at == NOW + timedelta(seconds=2)
     assert connection.offline_reason is None
     assert connection.last_seen_age_seconds == 0
+
+
+@pytest.mark.parametrize(
+    ("changes", "expected"),
+    [
+        ({}, 7_400_108_032),
+        ({"gpu_process_memory_bytes": 130_000_000_000}, 0),
+        ({"gpu_process_memory_bytes": None}, None),
+        ({"memory_total_bytes": None, "memory_available_bytes": None}, None),
+    ],
+)
+def test_system_memory_is_everything_in_use_outside_gpu_processes(
+    changes: dict[str, int | None], expected: int | None
+) -> None:
+    from vonk_control.fleet_projection import telemetry_point
+    from vonk_control.telemetry import TelemetrySampleView
+
+    vector = json.loads(
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
+        ).read_text()
+    )
+    view = TelemetrySampleView.model_validate_json(
+        canonical_message(
+            {
+                **vector["sample"],
+                **changes,
+                "id": "00000000-0000-4000-8000-000000000012",
+                "node_id": NODE_A,
+                "received_at": "2026-09-05T12:00:00.250000Z",
+            }
+        )
+    )
+    assert telemetry_point(view).system_memory_bytes == expected

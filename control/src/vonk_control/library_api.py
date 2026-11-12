@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query
+from vonk_forge_contracts import CatalogVocabulary
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
@@ -29,6 +30,7 @@ from .request_fault import RequestFault
 _SELECTOR_PATTERN = r"^[^\x00-\x1f\x7f]{1,256}$"
 
 LIBRARY_OPERATION_IDS = {
+    ("get", "/api/library/vocabulary"): "getLibraryVocabulary",
     ("get", "/api/model/library"): "listModelLibrary",
     ("get", "/api/model/{selector}"): "getModel",
     ("get", "/api/recipe/library"): "listRecipeLibrary",
@@ -95,6 +97,19 @@ def install_library_routes(
                 status_code=503, detail="library projection unavailable"
             )
         return projection
+
+    @app.get(
+        "/api/library/vocabulary",
+        response_model=CatalogVocabulary,
+        responses=bounded_error_responses(401, 404, 503),
+        operation_id="getLibraryVocabulary",
+    )
+    def library_vocabulary(_actor: Any = authenticated) -> CatalogVocabulary:
+        """The capability, category and status words of the synced release."""
+        vocabulary = projection.library_vocabulary() if projection else None
+        if vocabulary is None:
+            raise HTTPException(status_code=404, detail="no vocabulary synced yet")
+        return vocabulary
 
     @app.get(
         "/api/model/library",

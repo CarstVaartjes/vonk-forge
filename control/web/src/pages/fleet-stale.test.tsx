@@ -62,7 +62,7 @@ test("a failed background refresh keeps the last snapshot and says it is disconn
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
-  expect(screen.getByText("Online")).toBeVisible();
+  expect(screen.getByText(/^1 of 1 Spark online/)).toBeVisible();
   expect(screen.queryByText("disconnected")).toBeNull();
   expect(fleetEvents).toHaveBeenCalledOnce();
   act(() => {

@@ -46,6 +46,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.host_helper import HostRuntimeRequest
+from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.agent_contacts import record_contact
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
@@ -220,7 +221,7 @@ class ConcurrentPublisher(AtomicRecipeRoutePublisher):
     def served_model_info(self):
         return ServedModelInfo()
 
-    def publish_recipe(self, candidate):
+    def publish_recipe(self, candidate, *, required=SupervisorPhase.READY):
         state = candidate.state
         with self._guard:
             self._generation += 1
@@ -5367,8 +5368,10 @@ def test_recovery_publication_crossing_deadline_retains_acknowledged_route(
     current = {"now": NOW}
 
     class DeadlineCrossingPublisher(ConcurrentPublisher):
-        def publish_recipe(self, candidate):
-            generation = super().publish_recipe(candidate)
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
+            generation = super().publish_recipe(candidate, required=required)
             current["now"] = _recovery_deadline(restart)
             return generation
 
@@ -5445,8 +5448,10 @@ def test_expired_recovery_route_never_needs_compensating_withdrawal(
         def served_model_info(self):
             return ServedModelInfo()
 
-        def publish_recipe(self, candidate):
-            generation = atomic.publish_recipe(candidate)
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
+            generation = atomic.publish_recipe(candidate, required=required)
             current["now"] = _recovery_deadline(restart)
             return generation
 
@@ -5528,7 +5533,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
     ack_path = tmp_path / "supervisor/ack.json"
     ack_path.parent.mkdir()
 
-    def expire_while_waiting_for_ack(marker) -> None:
+    def expire_while_waiting_for_ack(marker, required) -> None:
         acknowledgement = {
             "acknowledged_at": current["now"].isoformat(),
             "activation_sha256": marker.digest,
@@ -5554,7 +5559,7 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
             poll_seconds=0.1,
             monotonic=lambda: next(moments),
             sleep=acknowledge_at_exact_deadline,
-        )(marker)
+        )(marker, required)
 
     runtime = AtomicRouteBundlePublisher(
         live_root,
@@ -5570,8 +5575,10 @@ def test_recovery_expiry_inside_real_supervisor_ack_retains_live_route(
         def served_model_info(self):
             return ServedModelInfo()
 
-        def publish_recipe(self, candidate):
-            return atomic.publish_recipe(candidate)
+        def publish_recipe(
+            self, candidate, *, required: SupervisorPhase = SupervisorPhase.READY
+        ):
+            return atomic.publish_recipe(candidate, required=required)
 
         def publish_empty(self, route_digest):
             self.withdrawal_attempts += 1

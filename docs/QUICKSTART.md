@@ -56,3 +56,7 @@ Tailscale gateway and retains its MagicDNS, scoped OAuth, Services, and grants
 requirements. For a Lab install, do not turn it on by starting Tailscale
 services manually; create a Secure remote project through the installer so its
 scoped credentials and environment are configured together.
+
+## Remove it
+
+To remove a lab controller, follow [Remove Vonk Forge](operations/uninstall.md).

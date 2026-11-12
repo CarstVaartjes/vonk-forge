@@ -46,6 +46,7 @@ def cli_words() -> str:
     from vonk_agent_protocol.agent_words import ProfileEffectState
     from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
+    from vonk_agent_protocol.state_machines import RunState
     from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
@@ -63,6 +64,7 @@ def cli_words() -> str:
         "NEEDS_OPERATOR": LifecycleState.NEEDS_OPERATOR,
         "QUEUED": LifecycleState.QUEUED,
         "RUNNING": LifecycleState.RUNNING,
+        "RUN_RUNNING": RunState.RUNNING,
         "BACKOFF": LifecycleState.BACKOFF,
         "OBSERVING": LifecycleState.OBSERVING,
         "SUCCEEDED": LifecycleState.SUCCEEDED,

@@ -14,6 +14,7 @@ plane; the recipe repository owns the reviewed model and recipe material.
 | Catalog index and independent recipe packages | Signed `vonk-forge-recipes` GitHub release built from that commit |
 | Installed state, active runs, routes, and local acceptance evidence | Local control-plane PostgreSQL |
 | Weights, OCI layers, secrets, and fleet state | Never stored in the recipe repository |
+| Which inputs a recipe accepts (`usage`: image, audio and video understanding) | The recipe's API document, read with the contracts `accepted_modalities` (chat, decision, transcription and speech modes alike); the Model display only describes the Model itself |
 
 The library is public because recipes are declarative metadata and build input.
 That does not make every upstream model or dependency freely redistributable;
@@ -69,6 +70,13 @@ carries one note in its `problems`, `contract vN is published; this Controller r
 listing, so it clears once a Controller of the new major is deployed. A major is
 deployed consumer-first: the Controller waits visibly for its major to be
 published and adopts it within a minute.
+
+The release's index also publishes its **vocabulary**: the label, description and
+category of every capability and the meaning of every qualification status. A
+sync stores the newest release's vocabulary once (a JSON column of the sync run,
+read through `CatalogVocabulary`) and `GET /api/library/vocabulary` serves it (404
+when the synced release publishes none). The dashboard and `vonkctl` render these
+words from that endpoint; neither keeps a hand copy.
 
 Each sync verifies, before importing anything:
 

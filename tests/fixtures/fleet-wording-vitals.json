@@ -1,0 +1,126 @@
+{
+  "comment": "One set of vitals wording for the Controller web Fleet row and `vonkctl fleet`. The web test renders the Fleet page and compares each cell's DOM text; the vonkctl test runs the fleet overview and compares each printed cell. Both must equal `expected` exactly. Rules: telemetry counts only while its freshness is live, otherwise the inventory is shown; .5 rounds up on both sides; a missing value or total reads Not reported.",
+  "cases": [
+    {
+      "name": "live sample",
+      "node": {
+        "inventory": {
+          "freshness": "fresh",
+          "host_memory_total_bytes": 137438953472,
+          "host_memory_free_bytes": 71940702208,
+          "disk_free_bytes": 442721857536,
+          "disk_total_bytes": 1999844147200
+        },
+        "telemetry": {
+          "freshness": "live",
+          "sample": {
+            "memory_total_bytes": 137438953472,
+            "memory_available_bytes": 71940702208,
+            "gpu_utilization_percent": 41.6,
+            "gpu_temperature_c": 55
+          }
+        }
+      },
+      "expected": {
+        "memory": "61.0 GiB of 128.0 GiB (48%)",
+        "disk": "412.3 GiB free of 1.8 TiB",
+        "gpu": "42%, 55 °C"
+      }
+    },
+    {
+      "name": "halves round up",
+      "node": {
+        "inventory": {
+          "freshness": "fresh",
+          "disk_free_bytes": 1342177280,
+          "disk_total_bytes": 10737418240
+        },
+        "telemetry": {
+          "freshness": "live",
+          "sample": {
+            "memory_total_bytes": 8,
+            "memory_available_bytes": 7,
+            "gpu_utilization_percent": 42.5
+          }
+        }
+      },
+      "expected": {
+        "memory": "1 B of 8 B (13%)",
+        "disk": "1.3 GiB free of 10.0 GiB",
+        "gpu": "43%"
+      }
+    },
+    {
+      "name": "delayed telemetry shows the inventory and no GPU",
+      "node": {
+        "inventory": {
+          "freshness": "fresh",
+          "host_memory_total_bytes": 100,
+          "host_memory_free_bytes": 40,
+          "disk_free_bytes": 250,
+          "disk_total_bytes": 1000
+        },
+        "telemetry": {
+          "freshness": "delayed",
+          "sample": {
+            "memory_total_bytes": 100,
+            "memory_available_bytes": 99,
+            "gpu_utilization_percent": 90,
+            "gpu_temperature_c": 70
+          }
+        }
+      },
+      "expected": {
+        "memory": "60 B of 100 B (60%)",
+        "disk": "250 B free of 1000 B",
+        "gpu": "Not reported"
+      }
+    },
+    {
+      "name": "missing totals",
+      "node": {
+        "inventory": {
+          "freshness": "fresh",
+          "host_memory_free_bytes": 40,
+          "disk_free_bytes": 250
+        },
+        "telemetry": null
+      },
+      "expected": {
+        "memory": "Not reported",
+        "disk": "Not reported",
+        "gpu": "Not reported"
+      }
+    },
+    {
+      "name": "GPU failure reason",
+      "node": {
+        "inventory": null,
+        "telemetry": {
+          "freshness": "live",
+          "sample": { "gpu_unavailable_reason": "gpu.command-failed" }
+        }
+      },
+      "expected": {
+        "memory": "Not reported",
+        "disk": "Not reported",
+        "gpu": "Not reported (gpu.command-failed)"
+      }
+    },
+    {
+      "name": "temperature only",
+      "node": {
+        "inventory": null,
+        "telemetry": {
+          "freshness": "live",
+          "sample": { "gpu_temperature_c": 61 }
+        }
+      },
+      "expected": {
+        "memory": "Not reported",
+        "disk": "Not reported",
+        "gpu": "61 °C"
+      }
+    }
+  ]
+}

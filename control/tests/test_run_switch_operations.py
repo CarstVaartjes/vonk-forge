@@ -31,7 +31,6 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import CursorCodec
 from vonk_control.catalog_revision_contract import (
-    read_catalog_projection,
     read_recipe_projection,
     write_catalog_projection,
 )
@@ -3179,6 +3178,7 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             content_digest=document_sha256(canonical.model_dump(mode="json")),
             artifact_key="b" * 64,
             execution_key="c" * 64,
+            source_bundle_sha256=revision.source_bundle_sha256,
             projected=copy.deepcopy(revision.projected),
             created_by="test",
             created_at=NOW,
@@ -3474,13 +3474,13 @@ def _build_service_that_reaches_the_archive_check(
         assert build is not None
         revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
         assert revision is not None
-        projected = read_recipe_projection(revision).model_copy(
-            update={"source_bundle_sha256": bundle.sha256}
-        )
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision.id)
-            .values(projected=write_catalog_projection(projected))
+            .values(
+                projected=write_catalog_projection(read_recipe_projection(revision)),
+                source_bundle_sha256=bundle.sha256,
+            )
         )
         build.source_bundle_sha256 = bundle.sha256
         build.policy_report = {
@@ -3714,12 +3714,10 @@ def test_republished_source_bundle_builds_a_new_image_for_the_same_revision(
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         revision = session.get(CatalogDocumentRevision, old_build.recipe_revision_id)
         assert revision is not None
-        projected = read_catalog_projection(revision).model_dump(mode="json")
-        projected["source_bundle_sha256"] = new_source
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision.id)
-            .values(projected=write_catalog_projection(projected, kind="recipe"))
+            .values(source_bundle_sha256=new_source)
         )
         lifecycle._builds = PendingBuilds(
             sessions,
@@ -7653,6 +7651,7 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
                         document=document,
                         content_digest=document_sha256(document),
                         projected=template.projected,
+                        source_bundle_sha256=template.source_bundle_sha256,
                         created_by="admin",
                         created_at=NOW,
                     )

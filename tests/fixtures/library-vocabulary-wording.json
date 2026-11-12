@@ -1,0 +1,98 @@
+{
+  "comment": "Capability labels and status meanings for the Controller web Library and `vonkctl recipe detail`. `vocabulary` is a hand-kept excerpt in the contract's published shape (only the entries the cases use), so a newer release never turns a test red. The web test renders each case under that vocabulary and compares the capability chips' text and titles and the status badge title; the vonkctl test renders the same input and compares the printed `Usage` and `Meaning` lines. Both must equal the literals here exactly. A capability the release does not list shows its name; none declared shows `Not reported`.",
+  "vocabulary": {
+    "categories": [
+      {
+        "id": "language",
+        "label": "Language"
+      },
+      {
+        "id": "code",
+        "label": "Code"
+      }
+    ],
+    "capabilities": [
+      {
+        "name": "chat",
+        "label": "Chat",
+        "description": "Holds a conversation in turns.",
+        "category": "language"
+      },
+      {
+        "name": "code-generation",
+        "label": "Code generation",
+        "description": "Writes and edits program code.",
+        "category": "code"
+      }
+    ],
+    "statuses": [
+      {
+        "status": "Working",
+        "meaning": "Passed on a real DGX Spark for this exact recipe, runtime image and model.",
+        "verified": true
+      },
+      {
+        "status": "Not yet verified",
+        "meaning": "No hardware verdict yet; the reason is shown under the badge.",
+        "verified": false
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "name": "published labels",
+      "usage": [
+        "chat",
+        "code-generation"
+      ],
+      "web": [
+        "Chat",
+        "Code generation"
+      ],
+      "web_titles": [
+        "Language: Holds a conversation in turns.",
+        "Code: Writes and edits program code."
+      ],
+      "vonkctl": "Usage: Chat, Code generation"
+    },
+    {
+      "name": "a capability the release does not list shows its name",
+      "usage": [
+        "chat",
+        "hologram"
+      ],
+      "web": [
+        "Chat",
+        "hologram"
+      ],
+      "web_titles": [
+        "Language: Holds a conversation in turns.",
+        null
+      ],
+      "vonkctl": "Usage: Chat, hologram"
+    },
+    {
+      "name": "none declared",
+      "usage": [],
+      "web": [
+        "Not reported"
+      ],
+      "web_titles": [
+        null
+      ],
+      "vonkctl": "Usage: Not reported"
+    }
+  ],
+  "statuses": [
+    {
+      "status": "Working",
+      "web_title": "Passed on a real DGX Spark for this exact recipe, runtime image and model.",
+      "vonkctl": "Meaning: Passed on a real DGX Spark for this exact recipe, runtime image and model."
+    },
+    {
+      "status": "Not yet verified",
+      "web_title": "No hardware verdict yet; the reason is shown under the badge.",
+      "vonkctl": "Meaning: No hardware verdict yet; the reason is shown under the badge."
+    }
+  ]
+}

@@ -6,8 +6,13 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
-from ..cli_telemetry_render import gpu_readings
+from ..cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    RUN_RUNNING,
+    UNKNOWN,
+    GpuClockMetric,
+)
+from ..cli_telemetry_render import NOT_REPORTED, gpu_readings, round_half_up
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.display_memory_observation import (
     DisplayMemoryObservation,
@@ -37,6 +42,8 @@ from .common import (
     _warn,
     _words,
 )
+
+NO_SPARKS = "No Sparks are enrolled."
 
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
@@ -125,29 +132,96 @@ def _display_memory(observation: DisplayMemoryObservation | None) -> str:
     return f"reserved {amount} · SoC {version} · UEFI {_text(observation.bios_version) if isinstance(observation.bios_version, str) else UNKNOWN} · display connected {display}"
 
 
-def _memory(node: Mapping[str, object]) -> str:
-    """Used share of the Spark's memory, preferring the live telemetry sample."""
-    telemetry = _optional(node.get("telemetry"), "telemetry")
-    sample = _optional(telemetry.get("sample"), "telemetry sample")
-    inventory = _optional(node.get("inventory"), "inventory")
+def _live(node: object) -> bool:
+    telemetry = _optional(
+        _object(node, "Fleet node").get("telemetry"), "telemetry state"
+    )
+    return telemetry.get("freshness") == "live"
+
+
+def _live_sample(node: object):
+    """The telemetry sample while telemetry is live, otherwise nothing."""
+    telemetry = _optional(
+        _object(node, "Fleet node").get("telemetry"), "telemetry state"
+    )
+    if telemetry.get("freshness") != "live":
+        return {}
+    return _optional(telemetry.get("sample"), "telemetry sample")
+
+
+def _memory(node: object) -> str:
+    """Used memory beside the total, in the words the Controller web uses."""
+    sample = _live_sample(node)
+    inventory = _optional(
+        _object(node, "Fleet node").get("inventory"), "node inventory"
+    )
     total, free = (
         (sample.get("memory_total_bytes"), sample.get("memory_available_bytes"))
-        if telemetry.get("freshness") == "live"
+        if _live(node)
         else (
             inventory.get("host_memory_total_bytes"),
             inventory.get("host_memory_free_bytes"),
         )
     )
     if type(total) is not int or type(free) is not int or total <= 0:
-        return ENDPOINT_UNAVAILABLE
-    return f"{round(100 * (total - free) / total)}% of {_size(total)}"
+        return NOT_REPORTED
+    percent = round_half_up(100 * ((total - free) / total))
+    return f"{_size(total - free)} of {_size(total)} ({percent}%)"
 
 
-def _gpu(node: Mapping[str, object]) -> str:
-    telemetry = _optional(node.get("telemetry"), "telemetry")
-    sample = _optional(telemetry.get("sample"), "telemetry sample")
-    if telemetry.get("freshness") != "live":
-        return ENDPOINT_UNAVAILABLE
+def _run_state_word(healthy: object, run_state: object) -> str:
+    """One workload's state in a word, as the Controller web Fleet page says it.
+
+    Health only qualifies a run that is running; any other run state is shown as is.
+    """
+    if run_state != RUN_RUNNING:
+        return _text(run_state)
+    if healthy is None:
+        return "state unknown"
+    return "degraded" if healthy is False else _text(run_state)
+
+
+def _node_workloads(node: object, names: dict[object, str]) -> list[str]:
+    """What a Spark serves, one line per run: title, alias, state, and its partners."""
+    document = _object(node, "Fleet node")
+    seen: set[object] = set()
+    lines: list[str] = []
+    for run in _records(document, "loaded"):
+        if run.get("run_id") in seen:
+            continue
+        seen.add(run.get("run_id"))
+        members = run.get("member_node_ids")
+        partners = [
+            names.get(member, _text(member))
+            for member in (members if isinstance(members, list) else [])
+            if member != document.get("id")
+        ]
+        parts = [
+            _text(run.get("title") or run.get("run_id")),
+            _text(run.get("alias")) if run.get("alias") else "",
+            _run_state_word(run.get("healthy"), run.get("run_state")),
+            f"with {', '.join(partners)}" if partners else "",
+        ]
+        lines.append(" · ".join(part for part in parts if part))
+    return lines
+
+
+def _disk(node: object) -> str:
+    """Free disk beside the total: the inventory's pair, else the live sample's."""
+    inventory = _optional(
+        _object(node, "Fleet node").get("inventory"), "node inventory"
+    )
+    for source in (inventory, _live_sample(node)):
+        free, total = source.get("disk_free_bytes"), source.get("disk_total_bytes")
+        if type(free) is int and type(total) is int and total > 0:
+            return f"{_size(free)} free of {_size(total)}"
+    return NOT_REPORTED
+
+
+def _gpu(node: object) -> str:
+    sample = _live_sample(node)
+    if not _live(node):
+        return NOT_REPORTED
     return gpu_readings(
         sample.get("gpu_utilization_percent"),
         sample.get("gpu_temperature_c"),
@@ -369,6 +443,113 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
+def _needs_attention(node: object) -> bool:
+    """A Spark needs attention when it is offline or warns, or its inventory is stale."""
+    return bool(_fleet_attention([_object(node, "Fleet node")]))
+
+
+def _is_serving(run: object) -> bool:
+    """A workload is serving while it is running and reported healthy."""
+    document = _object(run, "run")
+    return document.get("run_state") == RUN_RUNNING and document.get("healthy") is True
+
+
+def _free_memory_text(online: Sequence[object]) -> str:
+    """Free memory across the online Sparks, saying so when only some reported it."""
+    samples = [
+        _optional(
+            _optional(
+                _object(node, "Fleet node").get("telemetry"),
+                "fleet telemetry evidence",
+            ).get("sample"),
+            "fleet telemetry sample",
+        ).get("memory_available_bytes")
+        for node in online
+    ]
+    free = [value for value in samples if type(value) is int]
+    if not free:
+        return "unified memory not reported"
+    text = f"{_size(sum(free))} unified memory free"
+    return (
+        text
+        if len(free) == len(online)
+        else f"{text} on {len(free)} of {len(online)} online Sparks"
+    )
+
+
+def _fleet_status_line(payload: object) -> str:
+    """The Fleet in one line, in the words the Controller web Fleet page uses."""
+    document = _object(payload, "Fleet")
+    nodes = _records(document, "nodes")
+    if not nodes:
+        return NO_SPARKS
+    online = [
+        node
+        for node in nodes
+        if _object(node.get("connection"), "connection").get("online_state") == "online"
+    ]
+    serving = len(
+        {
+            run.get("run_id")
+            for node in nodes
+            for run in _records(node, "loaded")
+            if _is_serving(run)
+        }
+    )
+    sparks = sum(1 for node in nodes if _needs_attention(node))
+    firing = document.get("attention")
+    alerts = len(firing) if isinstance(firing, list) else 0
+    attention = [
+        *(
+            [f"{sparks} {'Spark needs' if sparks == 1 else 'Sparks need'} attention"]
+            if sparks
+            else []
+        ),
+        *(
+            [f"{alerts} {'alert' if alerts == 1 else 'alerts'} firing"]
+            if alerts
+            else []
+        ),
+        *(
+            ["alerts not reported"]
+            if not alerts and document.get("attention_unavailable")
+            else []
+        ),
+    ]
+    return " · ".join(
+        (
+            f"{len(online)} of {len(nodes)} {'Spark' if len(nodes) == 1 else 'Sparks'} online",
+            _free_memory_text(online),
+            f"{serving} {'workload' if serving == 1 else 'workloads'} serving"
+            if serving
+            else "no workloads serving",
+            *(attention or ["nothing needs attention"]),
+        )
+    )
+
+
+def _alert_notes(payload: object) -> list[str]:
+    """Firing Prometheus alerts as `Severity: summary (Spark)`, as the Controller web says them."""
+    document = _object(payload, "Fleet")
+    names = {
+        node.get("id"): _text(node.get("display_name"))
+        for node in _records(document, "nodes")
+    }
+    notes: list[str] = []
+    alerts = document.get("attention")
+    for alert in alerts if isinstance(alerts, list) else []:
+        record = _object(alert, "alert")
+        node_id = _optional(record.get("labels"), "alert labels").get("node_id")
+        severity = _text(record.get("severity"))
+        notes.append(
+            f"{severity[:1].upper()}{severity[1:]}: {_text(record.get('summary'))}"
+            + (f" ({names.get(node_id, _text(node_id))})" if node_id else "")
+        )
+    if document.get("attention_unavailable"):
+        notes.append("Prometheus alerts unavailable. Retrying automatically.")
+    return notes
+
+
 def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> list[str]:
     """Show each run once, its members by name, and return its problems."""
     names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
@@ -482,40 +663,25 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
 def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     nodes = _records(payload, "nodes")
     if not nodes:
-        print("No Sparks are enrolled.")
+        print(_fleet_status_line(payload))
         print("Next: vonkctl fleet enroll <name> --output <file>")
         return
-    online = sum(
-        1
-        for node in nodes
-        if _object(node.get("connection"), "connection").get("online_state") == "online"
-    )
-    run_ids = {
-        presence.get("run_id")
-        for node in nodes
-        for presence in _records(node, "loaded")
-    }
-    plural = "" if len(nodes) == 1 else "s"
-    workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
-    print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
+    print(_fleet_status_line(payload))
     print()
-    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "RUNNING"]
+    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "SERVING"]
     if wide:
         labels[5:5] = ["CPU"]
         labels.append("ID")
+    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
     rows = []
     for node in nodes:
-        inventory = _optional(node.get("inventory"), "inventory")
-        loaded = _records(node, "loaded")
         row: list[object] = [
             node.get("display_name"),
             _status(node),
             _memory(node),
-            _size(inventory.get("disk_free_bytes")),
+            _disk(node),
             _gpu(node),
-            "idle"
-            if not loaded
-            else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
+            "; ".join(_node_workloads(node, names)) or "Idle",
         ]
         if wide:
             row.insert(5, _cpu_clock(node))
@@ -523,7 +689,11 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
         rows.append(row)
     _table(labels, rows)
     print()
-    notes = _fleet_attention(nodes) + _fleet_workloads(nodes, wide=wide)
+    notes = (
+        _alert_notes(payload)
+        + _fleet_attention(nodes)
+        + _fleet_workloads(nodes, wide=wide)
+    )
     if notes:
         print("Needs attention")
         for note in notes:

@@ -54,7 +54,7 @@ def test_busy_retry_after_lost_ack_keeps_the_activated_generation(
 ) -> None:
     acknowledged: list[int] = []
 
-    def acknowledge(marker: ActivationMarker) -> None:
+    def acknowledge(marker: ActivationMarker, _required: str) -> None:
         acknowledged.append(marker.generation)
         if len(acknowledged) == 1:
             raise OSError("lost supervisor acknowledgement")

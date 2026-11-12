@@ -25,6 +25,7 @@ import type {
   MetricRange,
   CliTokenDownload,
   ControlApi,
+  PlatformObservation,
   FleetProfileInput,
   FleetProfileList,
   FleetProfileEndpoints,
@@ -35,6 +36,7 @@ import type {
   FleetProfileApplicationView,
   FleetProfileLoadInput,
   CatalogSyncStatus,
+  LibraryVocabulary,
   ProfileDefinition,
   ReconcilePlan,
   ActivityFilters,
@@ -441,13 +443,8 @@ export class ApiClient implements ControlApi {
     return (await this.observation("/api/fleet", signal)) as VisualFleetSnapshot;
   }
 
-  async platformObservation(
-    signal?: AbortSignal,
-  ): Promise<components["schemas"]["PlatformObservation"]> {
-    return (await this.observation(
-      "/api/platform",
-      signal,
-    )) as components["schemas"]["PlatformObservation"];
+  async platformObservation(signal?: AbortSignal): Promise<PlatformObservation> {
+    return (await this.observation("/api/platform", signal)) as PlatformObservation;
   }
 
   async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {
@@ -680,6 +677,13 @@ export class ApiClient implements ControlApi {
   async catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null> {
     // 404 means the sync has never run, which is a state, not a failure.
     const result = await this.generated.GET("/api/catalog/managed-recipes/sync-status", { signal });
+    if (result.response.status === 404) return null;
+    return resultData(result);
+  }
+
+  async libraryVocabulary(signal?: AbortSignal): Promise<LibraryVocabulary | null> {
+    // 404 means the synced release publishes none: the words are then the names.
+    const result = await this.generated.GET("/api/library/vocabulary", { signal });
     if (result.response.status === 404) return null;
     return resultData(result);
   }

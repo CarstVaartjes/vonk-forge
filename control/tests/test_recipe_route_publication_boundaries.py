@@ -46,7 +46,8 @@ def _service(
     base: RecipeRouteService,
     root: Path,
     clock: Callable[[], datetime],
-    acknowledge: Callable[[ActivationMarker], None] | None = None,
+    acknowledge: Callable[[ActivationMarker, str], None] | None = None,
+    prepare_key_routes: Callable[[frozenset[str]], None] | None = None,
 ) -> RecipeRouteService:
     return RecipeRouteService(
         base.sessions,
@@ -56,6 +57,7 @@ def _service(
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
+        prepare_key_routes=prepare_key_routes,
     )
 
 
@@ -72,7 +74,7 @@ class _BlockedAcknowledgement:
     def arm(self) -> None:
         self._armed = True
 
-    def __call__(self, marker: ActivationMarker) -> None:
+    def __call__(self, marker: ActivationMarker, _required: str) -> None:
         if not self._armed:
             return
         self._armed = False
@@ -191,7 +193,7 @@ def test_postgres_slow_acknowledgement_outlasting_the_idle_timeout_publishes(
         assert base.sessions.kw["bind"] is engine
         root = tmp_path / "live"
 
-        def slow_acknowledgement(_marker: ActivationMarker) -> None:
+        def slow_acknowledgement(_marker: ActivationMarker, _required: str) -> None:
             time.sleep(2.5)
 
         service = _service(base, root, clock, slow_acknowledgement)
@@ -224,7 +226,10 @@ def _crash_between_effect_and_completion_is_recovered(
     root = tmp_path / "live"
     acknowledged: list[int] = []
     service = _service(
-        base, root, clock, lambda marker: acknowledged.append(marker.generation)
+        base,
+        root,
+        clock,
+        lambda marker, _required: acknowledged.append(marker.generation),
     )
 
     def die(*_args, **_kwargs):
@@ -245,7 +250,10 @@ def _crash_between_effect_and_completion_is_recovered(
         assert _recipe_run(session, run_id).route_state == "pending"
 
     restarted = _service(
-        base, root, clock, lambda marker: acknowledged.append(marker.generation)
+        base,
+        root,
+        clock,
+        lambda marker, _required: acknowledged.append(marker.generation),
     )
     assert RecipeOperationWorker(base.sessions, restarted, clock=clock).tick() is True
 
@@ -322,7 +330,7 @@ def test_lost_acknowledgement_reconciles_the_same_generation(tmp_path, fault):
     base, _publisher, _applied, run_id = setup(tmp_path / "database")
     observed = []
 
-    def acknowledge(marker):
+    def acknowledge(marker, _required):
         observed.append(marker.generation)
         if len(observed) == 1:
             raise fault("acknowledgement connection lost")
@@ -500,7 +508,7 @@ def test_security_acknowledgement_is_never_retried_or_adopted(tmp_path):
     base, _publisher, _applied, run_id = setup(tmp_path)
     calls = []
 
-    def denied(marker):
+    def denied(marker, _required):
         calls.append(marker.digest)
         raise SecurityRefusalError(
             "denied acknowledgement", reason=SecurityRefusalReason.FORBIDDEN
@@ -600,7 +608,7 @@ def test_target_change_during_activation_owes_cleanup_across_restart(tmp_path):
     changed = [False]
     broken = [False]
 
-    def acknowledge(_marker):
+    def acknowledge(_marker, _required):
         if not changed[0]:
             with base.sessions.begin() as session:
                 row = session.get(RecipeRun, target)
@@ -713,6 +721,34 @@ def test_owner_scoped_damage_never_blocks_an_unrelated_publication(tmp_path, dam
     assert _live_aliases(root) == {"qwen", "second"}
     service.withdraw_run(second)
     assert _live_aliases(root) == {"qwen"}
+
+
+def test_withdrawals_wait_for_drained_and_publications_for_ready(tmp_path):
+    base, _publisher, _applied, first = setup(tmp_path)
+    second = add_running_run(
+        base, first, alias="second", route_state="pending", identity=4
+    )
+    root = tmp_path / "live"
+    required: list[str] = []
+    prepared: list[frozenset[str]] = []
+    service = _service(
+        base,
+        root,
+        lambda: NOW,
+        lambda _marker, phase: required.append(phase),
+        prepared.append,
+    )
+    service.publish_run(first)
+    service.publish_run(second)
+    service.withdraw_run(second)
+    assert _live_aliases(root) == {"qwen"}
+    service.withdraw_run(first)
+    assert _live_aliases(root) == set()
+    # A Stop of one run must not wait for the gateway restart that brings the
+    # remaining routes back, whether any remain or none do, nor call the
+    # gateway that restart takes down.
+    assert required == ["ready", "ready", "drained", "drained"]
+    assert prepared == [frozenset({first}), frozenset({first, second})]
 
 
 def test_authenticated_observation_producer_repairs_between_passes(

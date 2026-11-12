@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 try:
     from .route_activation_words import ActivationState
@@ -29,8 +30,27 @@ ROUTE_ACK_TIMEOUT_SECONDS = (
 ROUTE_EVIDENCE_MAX_AGE_SECONDS = 120
 
 
+class SupervisorPhase(StrEnum):
+    """What one supervisor acknowledgement proves about its exact activation.
+
+    ``drained``: every child that loaded an older activation has exited and only
+    this one can start, so nothing serves a route it removed. ``ready``: a live
+    child loaded it and answered health. Ready implies drained.
+    """
+
+    DRAINED = "drained"
+    READY = "ready"
+
+
 class SupervisorAcknowledgement(BaseModel):
-    """One live, ready child acknowledging an exact route activation."""
+    """The supervisor acknowledging one exact route activation.
+
+    A ``ready`` acknowledgement names its live child; a ``drained`` one has no
+    child yet. The canonical bytes leave out default values, so a ready
+    acknowledgement keeps the exact bytes it had before ``phase`` existed and
+    an older Controller, which forbids the ``phase`` key, keeps waiting for
+    the ready acknowledgement instead of mistaking a drained one for it.
+    """
 
     model_config = ConfigDict(extra="forbid", strict=True, frozen=True)
 
@@ -39,9 +59,10 @@ class SupervisorAcknowledgement(BaseModel):
     activation_sha256: Digest
     # Popen.pid is the native signed pid_t; route identities are stored in the
     # Controller's PostgreSQL BIGINT route-generation column.
-    child_pid: Annotated[int, Field(gt=0, le=2**31 - 1)]
+    child_pid: Annotated[int, Field(gt=0, le=2**31 - 1)] | None = None
     generation: Annotated[int, Field(gt=0, le=2**63 - 1)]
     litellm_sha256: Digest
+    phase: SupervisorPhase = SupervisorPhase.READY
     state: ActivationState
 
     @field_validator("schema_version", mode="before")
@@ -51,9 +72,25 @@ class SupervisorAcknowledgement(BaseModel):
             raise ValueError("acknowledgement schema must be integer 1")
         return value
 
+    @model_validator(mode="after")
+    def child_matches_phase(self) -> SupervisorAcknowledgement:
+        if (self.phase is SupervisorPhase.READY) != (self.child_pid is not None):
+            raise ValueError("only a ready acknowledgement names its live child")
+        return self
+
+    def satisfies(self, required: SupervisorPhase) -> bool:
+        return (
+            self.phase is SupervisorPhase.READY or required is SupervisorPhase.DRAINED
+        )
+
     def canonical_bytes(self) -> bytes:
         return (
-            json.dumps(self.model_dump(), sort_keys=True, separators=(",", ":")) + "\n"
+            json.dumps(
+                self.model_dump(exclude_defaults=True),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
         ).encode()
 
 

@@ -6,6 +6,8 @@
   model_artifact_set_sha256``, written with the plan at install admission.
 * How many payload bytes a rank must have materialized:
   ``installation_nodes.required_payload_bytes``, written with the rank.
+* Which source bundle a recipe revision was imported with:
+  ``catalog_document_revisions.source_bundle_sha256``, written by the import.
 
 Rows written before these facts existed are filled from their own stored
 documents at Controller startup (``fill_reference_facts``). Readers ask the
@@ -14,6 +16,7 @@ facts only; they never read assignments or plans to answer these questions.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection, Mapping
 
 from pydantic import TypeAdapter
@@ -26,11 +29,15 @@ from vonk_agent_protocol import InstallationState
 from .content_identity import catalog_selector_membership
 from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .models import (
+    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileRecipe,
     InstallationNode,
     RecipeInstallation,
 )
+from .operator_receipt_contract import ReceiptOwner
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
@@ -121,7 +128,50 @@ def fill_reference_facts(connection: Connection) -> int:
         filled
         + _fill_profile_recipes(connection)
         + fill_installation_payload_bytes(connection)
+        + fill_revision_source_bundles(connection)
     )
+
+
+def fill_revision_source_bundles(connection: Connection) -> int:
+    """Move each recipe revision's stored source bundle digest to its column.
+
+    Revisions imported before the column existed carry the digest in their
+    ``projected`` JSON. For each revision with no column value and a digest in
+    its projection, one update records the column and removes the JSON key, so
+    the column is the only copy. A revision whose projection names no digest
+    stays empty, which is an unknown source; so does one whose stored value is not
+    a digest (it never fits the column). Returns the revisions moved.
+    """
+    moved = 0
+    for revision_id, projected in connection.execute(
+        select(CatalogDocumentRevision.id, CatalogDocumentRevision.projected).where(
+            CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
+            CatalogDocumentRevision.source_bundle_sha256.is_(None),
+        )
+    ).all():
+        digest = (
+            projected.get("source_bundle_sha256")
+            if isinstance(projected, Mapping)
+            else None
+        )
+        if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
+            continue
+        moved += connection.execute(
+            update(CatalogDocumentRevision)
+            .where(
+                CatalogDocumentRevision.id == revision_id,
+                CatalogDocumentRevision.source_bundle_sha256.is_(None),
+            )
+            .values(
+                source_bundle_sha256=digest,
+                projected={
+                    key: value
+                    for key, value in projected.items()
+                    if key != "source_bundle_sha256"
+                },
+            )
+        ).rowcount
+    return moved
 
 
 def plan_model_set(plan: object) -> str | None:

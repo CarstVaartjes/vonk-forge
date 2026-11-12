@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from .common import _actions, _bytes, _field, _optional, _records, _text, _time
+from .common import (
+    _actions,
+    _bytes,
+    _field,
+    _optional,
+    _records,
+    _reported,
+    _text,
+    _time,
+)
 
 
 def _enrollment(payload: Mapping[str, object]) -> None:
@@ -32,16 +41,25 @@ def _enrollment(payload: Mapping[str, object]) -> None:
     _actions(payload.get("recovery"))
 
 
+def last_sync_at(completed_at: object, created_at: object) -> object:
+    """The one rule for when a sync run happened: when it finished, else when it started."""
+    return completed_at or created_at
+
+
 def _catalog_sync(payload: Mapping[str, object]) -> None:
+    # Wording shared with the dashboard's version line (tests/fixtures/version-line.json).
     if payload.get("state") == "never-run":
-        print("The recipe catalog has not synced yet.")
+        _reported("Library version", None)
+        _field("Last sync", "none yet")
         print("Next: vonkctl recipe library")
         return
-    _field("State", payload.get("state"))
-    _field("Last run", _time(payload.get("completed_at") or payload.get("created_at")))
+    _field(
+        "Last sync",
+        f"{_time(last_sync_at(payload.get('completed_at'), payload.get('created_at')))} ({_text(payload.get('state'))})",
+    )
     _field("Trigger", payload.get("trigger"))
     _field("Repository", payload.get("repository"))
-    _field("Library version", payload.get("library_version"))
+    _reported("Library version", payload.get("library_version"))
     _field("Library updated", _time(payload.get("library_updated_at")))
     commit, expected = payload.get("commit"), payload.get("expected_commit")
     _field("Commit", commit)
