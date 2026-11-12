@@ -114,7 +114,8 @@ export function SeriesChart({
   );
 }
 
-type Tile = { data: MetricsSeriesResponse | null; error: string | null };
+// A tile holds its series, or the message of the read that failed.
+type Tile = MetricsSeriesResponse | string;
 
 function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): string[] {
   return data.series.flatMap((series) => {
@@ -151,27 +152,23 @@ export function MetricsChart({
     for (const metric of wanted) {
       api.metricsSeries(metric, range, node, controller.signal).then(
         (data) => {
-          if (!controller.signal.aborted)
-            setTiles((current) => ({ ...current, [metric]: { data, error: null } }));
+          if (!controller.signal.aborted) setTiles((current) => ({ ...current, [metric]: data }));
         },
         (cause) => {
           if (!controller.signal.aborted)
             setTiles((current) => ({
               ...current,
-              [metric]: {
-                data: null,
-                error: safeErrorText(
-                  cause instanceof Error ? cause.message : "Metrics unavailable",
-                ),
-              },
+              [metric]: safeErrorText(
+                cause instanceof Error ? cause.message : "Metrics unavailable",
+              ),
             }));
         },
       );
     }
     return () => controller.abort();
-    // biome-ignore lint/correctness/useExhaustiveDependencies: `wanted` is derived from `node`
   }, [api, range, node, retry]);
-  const expiry = tiles.certificate_expiry?.data;
+  const expiryRead = tiles.certificate_expiry;
+  const expiry = typeof expiryRead === "object" ? expiryRead : undefined;
   return (
     <section aria-labelledby={id} className="fleet-metrics">
       <h2 id={id}>Trends</h2>
@@ -203,10 +200,10 @@ export function MetricsChart({
           return (
             <section key={tile.metric} className="metric-tile" aria-label={tile.title}>
               <h3>{tile.title}</h3>
-              {state?.error ? (
-                <p role="status">Metrics unavailable: {state.error}</p>
-              ) : state?.data ? (
-                <SeriesChart data={state.data} unit={tile.unit} scale={tile.scale} names={names} />
+              {typeof state === "string" ? (
+                <p role="status">Metrics unavailable: {state}</p>
+              ) : state ? (
+                <SeriesChart data={state} unit={tile.unit} scale={tile.scale} names={names} />
               ) : (
                 <p role="status">Reading metrics…</p>
               )}
