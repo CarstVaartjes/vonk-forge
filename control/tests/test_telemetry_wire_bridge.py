@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from importlib.resources import files
 from pathlib import Path
 
 import pytest
@@ -25,17 +26,11 @@ def telemetry_wire_probe() -> Path:
 
 
 def _sample(observed_at: str) -> dict[str, object]:
-    return {
-        "boot_id": "00000000-0000-4000-8000-000000000001",
-        "observed_at": observed_at,
-        "memory_total_bytes": 128_000_000_000,
-        "memory_available_bytes": 64_000_000_000,
-        "disk_total_bytes": 1_000_000_000_000,
-        "disk_free_bytes": 750_000_000_000,
-        "gpu_utilization_percent": 25.0,
-        "gpu_memory_total_bytes": 128_000_000_000,
-        "gpu_memory_free_bytes": 63_000_000_000,
-    }
+    vector = json.loads(
+        (files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json")
+        .read_text()
+    )
+    return {**vector["sample"], "observed_at": observed_at}
 
 
 def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
@@ -51,7 +46,8 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
         check=True,
     )
     report = TelemetryRequest.parse(json.loads(produced.stdout))
-    assert report.samples[0].gpu_utilization_percent == 25.0
+    assert report.samples[0].gpu_power_watts == 9.14
+    assert report.samples[0].gpu_process_memory_bytes == 113_668_784_128
 
     response = client.post(
         "/agent/telemetry",
@@ -62,4 +58,5 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
     with services.sessions() as session:
         row = session.scalar(select(NodeTelemetrySample))
         assert row is not None
-        assert row.gpu_utilization_percent == 25.0
+        assert (row.gpu_power_watts, row.uptime_seconds) == (9.14, 1_804_535)
+        assert row.gpu_process_memory_bytes == 113_668_784_128

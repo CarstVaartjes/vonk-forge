@@ -147,7 +147,6 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
     gpu_power_watts: float | None = Field(
         default=None,
         ge=0,
-        le=10_000,
         allow_inf_nan=False,
         exclude_if=lambda value: value is None,
     )
