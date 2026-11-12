@@ -321,6 +321,12 @@ struct CustodyExecutor<'a, E> {
 /// and then stops; the regular 120 s cadence covers anything longer.
 const POST_STOP_INVENTORY_SECONDS: [u64; 4] = [31, 46, 61, 91];
 
+/// What the claim lane shares with the inventory lane.
+struct InventoryLink {
+    verdict: LatestVerdict,
+    stops: PostStopInventory,
+}
+
 /// The claim lane tells the inventory lane when a stop completed; the inventory
 /// lane then collects at each offset. A newer stop restarts the schedule. The
 /// regular cadence is never moved by these collections.
