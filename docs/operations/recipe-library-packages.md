@@ -38,6 +38,10 @@ integrity or transport failure rejects the whole candidate. A model or recipe
 document that is intact but does not validate against this Controller's
 contract is skipped on its own and reported as a
 `recipe_package.document_incompatible` problem; the rest of the release still
+applies. When a release of a newer contract major is published than this
+Controller reads, the sync result carries one note, code
+`catalog.sync_newer_contract_published` (`contract vN is published; this
+Controller reads vM`); the release of this Controller's own major still
 applies. Package cache files are written with an fsync and atomic rename, and
 the release signature material is kept beside the cached index, so a restart
 re-verifies and imports the previous generation offline. A failed candidate is

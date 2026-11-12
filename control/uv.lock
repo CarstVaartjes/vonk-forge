@@ -1491,7 +1491,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 wheels = [
-    { path = "vonk_agent_protocol-4.3.0-py3-none-any.whl", hash = "sha256:7377b28e5b702793f4579c1a0b5fbeaa2c1178132bae9a4eed722800af83ca87" },
+    { path = "vonk_agent_protocol-4.3.0-py3-none-any.whl", hash = "sha256:301b3398f632f18cac0e07f75b6a6b78266d3f778ffb831f84409aa5e269eb96" },
 ]
 
 [[package]]
@@ -1583,7 +1583,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.54.0" },
     { name = "vonk-agent-protocol" },
     { name = "vonk-cluster-profiles", editable = "../" },
-    { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=9eaf4fe69749935e05483f4b73883aa3ac5df61e" },
+    { name = "vonk-forge-public-contracts", git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=59821cafd42fbd974ef0f1bf8b433359a78c1c8e" },
 ]
 
 [package.metadata.requires-dev]
@@ -1601,8 +1601,8 @@ dev = [
 
 [[package]]
 name = "vonk-forge-public-contracts"
-version = "4.7.0"
-source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=9eaf4fe69749935e05483f4b73883aa3ac5df61e#9eaf4fe69749935e05483f4b73883aa3ac5df61e" }
+version = "4.8.0"
+source = { git = "https://github.com/CarstVaartjes/vonk-forge-recipes.git?subdirectory=contracts&rev=59821cafd42fbd974ef0f1bf8b433359a78c1c8e#59821cafd42fbd974ef0f1bf8b433359a78c1c8e" }
 dependencies = [
     { name = "pydantic" },
 ]

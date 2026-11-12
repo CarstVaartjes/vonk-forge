@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Move the reviewed public-contracts pin to one vonk-forge-recipes commit.
+
+    scripts/refresh-public-contracts <recipes-commit>
+
+Builds the wheel from that commit (the build is byte-reproducible), then rewrites
+every place that names the pin: the control/pyproject.toml revision, control/uv.lock
+(``uv lock``, then ``scripts/refresh-protocol-wheel-lock`` restores the protocol
+wheel digest), control/packaging/public-contracts.lock, the acceptance
+library revision, the wheel in inventory/wheels and the wheel name in the files
+that must spell it. The version is read from the built wheel, never typed. ``scripts/verify-supply-chain`` checks
+the result.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+from collections.abc import Callable
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behind
+
+ROOT = Path(__file__).resolve().parents[1]
+LOCK = "control/packaging/public-contracts.lock"
+# The acceptance suites read the library at the same commit as the contracts.
+LIBRARY_REVISION = "tests/acceptance/recipe-library-revision.txt"
+WHEELS = "inventory/wheels"
+COMMAND_TIMEOUT = 600
+WHEEL_PREFIX = "vonk_forge_public_contracts-"
+# The files that spell the wheel name; verify-supply-chain checks the Dockerfile
+# and tests/scripts/test_resolve_publication_producer.py checks the producer list.
+SPELLING_FILES = ("control/Dockerfile", "scripts/resolve-publication-producer")
+SHA = re.compile(r"[0-9a-f]{40}")
+PIN = re.compile(
+    r'(?m)^(vonk-forge-public-contracts = \{ git = "[^"]+", rev = ")[0-9a-f]{40}(")'
+)
+
+
+def build_wheel(source: str, commit: str, work: Path) -> Path:
+    """Build the wheel of ``contracts/`` at ``commit`` from the recipes repository."""
+
+    checkout = work / "recipes"
+    for command in (
+        ["git", "init", "-q", str(checkout)],
+        ["git", "-C", str(checkout), "fetch", "-q", "--depth", "1", source, commit],
+        ["git", "-C", str(checkout), "checkout", "-q", "FETCH_HEAD"],
+        [
+            "uv",
+            "build",
+            "--wheel",
+            "--out-dir",
+            str(work / "out"),
+            str(checkout / "contracts"),
+        ],
+    ):
+        subprocess.run(
+            command, check=True, stdout=subprocess.DEVNULL, timeout=COMMAND_TIMEOUT
+        )
+    [wheel] = (work / "out").glob(f"{WHEEL_PREFIX}*-py3-none-any.whl")
+    return wheel
+
+
+def relock(root: Path) -> None:
+    # uv resolves vonk-agent-protocol from the local wheel directory.
+    subprocess.run(
+        [str(root / "scripts/build-control-wheel")],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        timeout=COMMAND_TIMEOUT,
+    )
+    subprocess.run(
+        ["uv", "lock", "--project", str(root / "control")],
+        check=True,
+        timeout=COMMAND_TIMEOUT,
+    )
+    # uv lock drops the protocol wheel's digest; put it back.
+    subprocess.run(
+        [sys.executable, str(root / "scripts/refresh-protocol-wheel-lock")],
+        check=True,
+        timeout=COMMAND_TIMEOUT,
+    )
+
+
+def apply_pin(
+    root: Path, commit: str, wheel: Path, relock: Callable[[Path], None] = relock
+) -> None:
+    """Rewrite the pin files of ``root`` to ``commit`` and its built ``wheel``."""
+
+    old = tomllib.loads((root / LOCK).read_text())
+    old_name = Path(old["wheel"]).name
+    new_name = wheel.name
+    project = root / "control/pyproject.toml"
+    pinned, count = PIN.subn(rf"\g<1>{commit}\g<2>", project.read_text())
+    if count != 1:
+        raise SystemExit(
+            "Expected one public-contracts source pin in control/pyproject.toml"
+        )
+    project.write_text(pinned)
+    relock(root)
+    version = new_name.removeprefix(WHEEL_PREFIX).removesuffix("-py3-none-any.whl")
+    (root / LOCK).write_text(
+        f"source = {_quote(old['source'])}\n"
+        f"# Resolved from the reviewed recipe contract at {commit}.\n"
+        f"revision = {_quote(commit)}\n"
+        f"subdirectory = {_quote(old['subdirectory'])}\n"
+        f"package = {_quote('vonk-forge-public-contracts==' + version)}\n"
+        f"wheel = {_quote(f'{WHEELS}/{new_name}')}\n"
+        f"sha256 = {_quote(hashlib.sha256(wheel.read_bytes()).hexdigest())}\n"
+    )
+    (root / LIBRARY_REVISION).write_text(f"{commit}\n")
+    for stale in (root / WHEELS).glob(f"{WHEEL_PREFIX}*.whl"):
+        stale.unlink()
+    shutil.copy2(wheel, root / WHEELS / new_name)
+    for relative in SPELLING_FILES:
+        path = root / relative
+        text = path.read_text()
+        if old_name not in text:
+            raise SystemExit(f"{relative} does not name {old_name}")
+        path.write_text(text.replace(old_name, new_name))
+
+
+def _quote(value: str) -> str:
+    return f'"{value}"'
+
+
+def main() -> None:
+    if len(sys.argv) != 2 or SHA.fullmatch(sys.argv[1]) is None:
+        raise SystemExit(
+            "usage: scripts/refresh-public-contracts <40-hex recipes commit>"
+        )
+    commit = sys.argv[1]
+    source = tomllib.loads((ROOT / LOCK).read_text())["source"]
+    with tempfile.TemporaryDirectory() as work:
+        apply_pin(ROOT, commit, build_wheel(source, commit, Path(work)))
+
+
+if __name__ == "__main__":
+    main()

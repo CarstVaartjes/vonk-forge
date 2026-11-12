@@ -47,6 +47,7 @@ from vonk_control.recipe_library_types import (
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
 )
+from vonk_control.recipe_packages.contracts import _newer_major_note
 from vonk_control.source_bundles import (
     SourceBundleStore,
     generate_source_bundle,
@@ -756,6 +757,33 @@ def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(
     assert [problem.detail for problem in first.problems] == [note.detail]
     assert repeated.id == first.id
     assert reader.fetches == [reader.snapshot.items[0].uri]
+
+
+def test_the_newer_major_note_reaches_the_stored_sync_and_clears_with_the_listing(
+    tmp_path: Path,
+) -> None:
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    note = _newer_major_note(5)
+    ticks = iter(
+        datetime(2026, 9, 5, tzinfo=UTC) + timedelta(minutes=n) for n in range(99)
+    )
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=service, reader=reader, clock=lambda: next(ticks)
+    )
+    quiet = reader.snapshot
+
+    before = sync.automatic()
+    reader.snapshot = replace(quiet, display_notes=(note,))
+    noted = sync.automatic()  # the same commit, but the stored sync lacks the note
+    repeated = sync.automatic()
+    reader.snapshot = quiet
+    cleared = sync.automatic()
+
+    assert before.problems == ()
+    assert noted.id != before.id and noted.state == "current"
+    assert [problem.detail for problem in noted.problems] == [note.detail]
+    assert repeated.id == noted.id
+    assert cleared.id != noted.id and cleared.problems == ()
 
 
 def test_automatic_sync_retries_partial_same_commit_without_refetching_successes(

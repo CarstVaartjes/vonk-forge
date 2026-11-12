@@ -13,6 +13,9 @@ from scripts.protocol_wheel import protocol_wheel_name
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-supply-chain"
+PUBLIC_CONTRACT_WHEEL = tomllib.loads(
+    (ROOT / "control/packaging/public-contracts.lock").read_text()
+)["wheel"]
 INPUTS = (
     "Cargo.lock",
     "control/uv.lock",
@@ -26,7 +29,7 @@ INPUTS = (
     "deploy/compose/tailscale/compose.yaml",
     "deploy/compose/litellm/Dockerfile",
     "deploy/compose/trust/litellm-cosign.pub",
-    "inventory/wheels/vonk_forge_public_contracts-4.7.0-py3-none-any.whl",
+    PUBLIC_CONTRACT_WHEEL,
 )
 SUBPROCESS_ENV = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"}
 

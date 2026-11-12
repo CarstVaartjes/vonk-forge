@@ -15,6 +15,18 @@ from functools import cache
 from pathlib import Path
 
 KIND = "constant restated from vonk_forge_contracts; import it from the contract"
+LITERAL_KIND = (
+    "index kind or package media type written as a literal; "
+    "read the index through read_catalog_index and import the constant"
+)
+# The published index's kind and package media type, spelled by the contract only.
+_SPELLS_LITERALS = frozenset(
+    {
+        "control/tests/contract_constant_copies.py",
+        "control/tests/test_contract_constant_copies.py",
+    }
+)
+_INDEX_LITERALS = ("recipe-library-index", "application/vnd.vonk-forge.recipe-package.")
 SCOPES = ("src/", "control/src/", "agent_protocol/src/")
 _UPPER = re.compile(r"[A-Z][A-Z0-9_]*")
 
@@ -63,4 +75,17 @@ def scan_source(
     )
     return [
         line for line, text in enumerate(source.splitlines(), 1) if pattern.match(text)
+    ]
+
+
+def scan_literals(path: str, source: str) -> list[int]:
+    """Lines spelling the index kind or package media type outside the contracts."""
+
+    # Named exemption: the guard and its test must spell the literals they look for.
+    if "vonk_forge_contracts" in path or path in _SPELLS_LITERALS:
+        return []
+    return [
+        line
+        for line, text in enumerate(source.splitlines(), 1)
+        if any(f'"{literal}' in text for literal in _INDEX_LITERALS)
     ]

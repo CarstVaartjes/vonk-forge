@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from vonk_agent_protocol import (
+    CatalogSyncCode,
     InvalidRequestError,
     InvalidRequestReason,
     RecipePackageCode,
@@ -17,6 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import CONTRACT_MAJOR, document_sha256
 
+from ..catalog_sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
 
 _RELEASE_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
@@ -59,6 +61,35 @@ def _select_release(
         if best is None or key > best[0]:
             best = (key, release)
     return None if best is None else best[1]
+
+
+def _newest_major(releases: list[_ReleaseResponse]) -> int | None:
+    """The highest contract major any non-draft release is published under."""
+
+    majors = [
+        int(tag[1])
+        for release in releases
+        if not release.draft and (tag := _RELEASE_TAG.fullmatch(release.tag_name))
+    ]
+    return max(majors, default=None)
+
+
+def _newer_major_note(published: int) -> ManagedCatalogSyncProblem:
+    """The visible note while this Controller reads an older major than published.
+
+    A sync-owned code: the catalog was applied, a newer major merely exists.
+    """
+
+    return ManagedCatalogSyncProblem(
+        code=CatalogSyncCode.NEWER_CONTRACT_PUBLISHED,
+        detail=f"contract v{published} is published; this Controller reads v{CONTRACT_MAJOR}",
+    )
+
+
+def has_newer_major_note(problems: Iterable[ManagedCatalogSyncProblem]) -> bool:
+    return any(
+        item.code == CatalogSyncCode.NEWER_CONTRACT_PUBLISHED for item in problems
+    )
 
 
 @dataclass(frozen=True, slots=True)

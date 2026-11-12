@@ -405,6 +405,10 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "qualify recipe: fixed entrypoint/fixture behavior.",
     ),
     (
+        "tests/scripts/test_refresh_public_contracts.py",
+        "refresh public contracts: fixed entrypoint/fixture behavior.",
+    ),
+    (
         "tests/scripts/test_release_reconcilers.py",
         "release reconcilers: fixed entrypoint/fixture behavior.",
     ),
