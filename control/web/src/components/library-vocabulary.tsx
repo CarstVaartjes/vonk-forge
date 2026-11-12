@@ -18,21 +18,16 @@ export function LibraryVocabularyProvider({
   return <VocabularyContext.Provider value={vocabulary}>{children}</VocabularyContext.Provider>;
 }
 
-export type CapabilityWords = {
-  label(name: string): string;
-  /** "Category: what it does", or undefined for a name the release does not publish. */
-  title(name: string): string | undefined;
-};
-
 /** A capability the release does not publish (a newer one) is shown by its name. */
-export function useCapabilityWords(): CapabilityWords {
+export function useCapabilityWords() {
   const vocabulary = useContext(VocabularyContext);
   return useMemo(() => {
     const categories = new Map(vocabulary?.categories.map((item) => [item.id, item.label]));
     const capabilities = new Map(vocabulary?.capabilities.map((item) => [item.name, item]));
     return {
-      label: (name) => capabilities.get(name)?.label ?? name,
-      title: (name) => {
+      label: (name: string) => capabilities.get(name)?.label ?? name,
+      /** "Category: what it does", or undefined for a name the release does not publish. */
+      title: (name: string) => {
         const item = capabilities.get(name);
         return item && `${categories.get(item.category) ?? item.category}: ${item.description}`;
       },
@@ -45,6 +40,6 @@ export function useStatusMeaning(): (status: string) => string | undefined {
   const vocabulary = useContext(VocabularyContext);
   return useMemo(() => {
     const meanings = new Map(vocabulary?.statuses.map((item) => [item.status, item.meaning]));
-    return (status) => meanings.get(status);
+    return (status: string) => meanings.get(status);
   }, [vocabulary]);
 }

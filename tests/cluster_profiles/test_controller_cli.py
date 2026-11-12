@@ -191,6 +191,7 @@ class FakeClient:
             "/api/fleet/upgrade",
             "/api/recipe/update",
             "/api/recipe/operations/op-cancel/cancel",
+            "/api/library/vocabulary",
         }
         known = known or re.fullmatch(r"/api/jobs/[^/]+", path) is not None
         known = (

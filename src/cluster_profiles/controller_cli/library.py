@@ -72,7 +72,7 @@ def _release_words(client: ControllerClient, args: argparse.Namespace) -> None:
     try:
         document = client.request("GET", "/api/library/vocabulary", retry=False)
         use_vocabulary(CatalogVocabulary.from_dict(document))
-    except ControlClientError:
+    except (ControlClientError, KeyError, TypeError, ValueError):
         pass
 
 
