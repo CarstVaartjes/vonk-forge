@@ -211,8 +211,9 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
 # Every change lands through an integration pull request (head branch
 # integration/*, labelled release-acceptance), which runs every suite and proof
 # once for its whole batch. A member pull request runs no CI jobs (only the
-# selector and a gate that cannot satisfy the required check). This is the one owner of that rule: ci.yml and the separate proof
-# workflows (through ci-scope.yml) read its `full` output. Anything that is not
+# selector and a gate that cannot satisfy the required check). This is the one
+# owner of that rule: ci.yml and the separate proof workflows (through
+# ci-scope.yml) read its `full` output. Anything that is not
 # positively a member pull request (integration PR, merge queue, main's release,
 # a dispatch, an unknown payload) runs everything.
 INTEGRATION_HEAD = "integration/"

@@ -1158,7 +1158,7 @@ def test_public_input_scanner_runs_before_every_image_build() -> None:
     assert "scripts/verify-supply-chain" not in publisher
 
 
-def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
+def test_supply_chain_evidence_gate_runs_on_every_full_run() -> None:
     """A stale manifest must fail a pull request, not only a release tag.
 
     ``validate-release-images`` needs release metadata and image attestations,

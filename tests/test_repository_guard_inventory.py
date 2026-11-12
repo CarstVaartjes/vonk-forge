@@ -67,7 +67,7 @@ def test_guard_runner_and_heavy_suite_use_complementary_selections() -> None:
     ]
 
 
-def test_ci_guards_are_unconditional_prepared_and_required() -> None:
+def test_ci_guards_run_on_full_runs_prepared_and_required() -> None:
     jobs = yaml.safe_load(ROOT.joinpath(".github/workflows/ci.yml").read_text())["jobs"]
     guards = jobs["repository-guards"]
     assert guards["if"] == FULL_ONLY

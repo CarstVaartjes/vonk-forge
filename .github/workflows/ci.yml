@@ -63,8 +63,9 @@ jobs:
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
       # The one owner of the member/integration rule (scripts/select-ci-areas):
-      # a member pull request runs the fast tier; every other run, including
-      # an integration pull request, runs every suite and proof.
+      # a member pull request runs no jobs (only this selector and the gate);
+      # every other run, including an integration pull request, runs every
+      # suite and proof.
       full: ${{ steps.areas.outputs.full }}
       lane: ${{ steps.areas.outputs.lane }}
       upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
@@ -1363,7 +1364,7 @@ jobs:
       - name: Record the exact source and successful check selection
         # A merge-queue run tests the commit main will carry; its receipt lets
         # the release reuse these checks without running them again. A member
-        # run proves only its fast tier, so it leaves no receipt to reuse.
+        # run runs no jobs, so it leaves no receipt to reuse.
         if: >-
           needs.changes.outputs.full == 'true' && (github.event_name == 'merge_group' ||
           (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
