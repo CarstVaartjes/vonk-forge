@@ -302,7 +302,7 @@ def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
     for its next two-minute report. A Spark that names the Stop it completed
     before collecting proves the order; one that does not keeps the clock rule."""
 
-    sessions, _service, node_id, run_id, plan, gate, now, stopped_at = _stopped_gate(
+    sessions, service, node_id, run_id, plan, gate, now, stopped_at = _stopped_gate(
         tmp_path
     )
     with sessions() as session:
@@ -342,6 +342,18 @@ def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
         stopped_runs=[{"run_id": run_id, "run_generation": generation}],
     )
     gate._require_post_stop_inventory(plan)
+
+    # The settled wait leaves nothing behind: a fresh Switch for the Spark is
+    # admitted.
+    service._clock = lambda: now[0]
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **_request(sessions, node_id, action="switch").model_dump(),
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
 def test_a_repeated_preflight_refresh_keeps_one_progress_signature(

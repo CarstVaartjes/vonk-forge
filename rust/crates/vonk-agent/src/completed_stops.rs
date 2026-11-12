@@ -51,7 +51,8 @@ impl CompletedStops {
         let mut ledger = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         ledger.recorded = ledger.recorded.wrapping_add(1);
         ledger.runs.push_back(run);
-        while ledger.runs.len() > MAX_REPORTED_STOPPED_RUNS {
+        // One in, at most one out: the list never exceeds the wire limit.
+        if ledger.runs.len() > MAX_REPORTED_STOPPED_RUNS {
             ledger.runs.pop_front();
         }
     }
