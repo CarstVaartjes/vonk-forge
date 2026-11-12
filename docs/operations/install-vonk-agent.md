@@ -55,7 +55,7 @@ Connected idle agents refresh their hardware inventory after two minutes, with
 at most one additional minute for an in-flight idle claim. This keeps builder
 and workload admission current without restarting the agent. A failed report
 does not advance the refresh deadline; normal bounded retries still apply.
-After a completed `recipe.stop` the agent also collects once at 31 s, just past the Controller's 30 s inventory freshness bound (`MAX_INVENTORY_FUTURE_SKEW`), so a run switch does not wait for the next regular report.
+After a completed `recipe.stop` the agent also collects at 31, 46, 61 and 91 s, then stops, without moving the regular two-minute cadence. 31 s is just past the Controller's 30 s inventory freshness bound (`MAX_INVENTORY_FUTURE_SKEW`); the later samples cover a multi-Spark run, whose stop time is set when the last rank's stop is projected, up to about 60 s after this Spark's stop. Other inventory waits gated on the same skew (`disk_reservations.py`, `covered_installation_claims.py`, `owner_liveness.py`) are not changed and still follow the regular cadence.
 The systemd unit uses `Type=notify` and a watchdog. The agent reports readiness
 after local state recovery, then refreshes its watchdog after a completed
 control-loop step or a handled retry, and on every accepted lease renewal while

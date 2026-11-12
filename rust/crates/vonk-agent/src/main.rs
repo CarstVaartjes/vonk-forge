@@ -311,42 +311,49 @@ struct CustodyExecutor<'a, E> {
     stops: PostStopInventory,
 }
 
-/// Seconds after a completed `recipe.stop` at which the next inventory is
-/// collected. The Controller accepts an inventory as proof the stop is
-/// reflected only when observed_at > stopped_at + MAX_INVENTORY_FUTURE_SKEW
-/// (30 s, control/src/vonk_control/inventory_repository.py:32), so 31 s is the
-/// first instant an observation can count.
-const POST_STOP_INVENTORY_SECONDS: u64 = 31;
-
-/// What the claim lane shares with the inventory lane.
-struct InventoryLink {
-    verdict: LatestVerdict,
-    stops: PostStopInventory,
-}
+/// Seconds after a completed `recipe.stop` at which an inventory is collected.
+/// The Controller counts an inventory as proof the stop is reflected only when
+/// observed_at > stopped_at + MAX_INVENTORY_FUTURE_SKEW (30 s,
+/// control/src/vonk_control/inventory_repository.py:32), so 31 s is the first
+/// instant one can count. A multi-Spark run's stopped_at is set when its LAST
+/// rank's result is projected, up to about 60 s after this Spark's stop, so the
+/// collection repeats at +46, +61 and +91 s (covering a peer up to ~60 s later)
+/// and then stops; the regular 120 s cadence covers anything longer.
+const POST_STOP_INVENTORY_SECONDS: [u64; 4] = [31, 46, 61, 91];
 
 /// The claim lane tells the inventory lane when a stop completed; the inventory
-/// lane then collects once just past the Controller's freshness bound instead
-/// of waiting for the regular cadence. Cleared only by a successful report.
+/// lane then collects at each offset. A newer stop restarts the schedule. The
+/// regular cadence is never moved by these collections.
 #[derive(Clone, Default)]
-struct PostStopInventory(std::sync::Arc<std::sync::Mutex<Option<tokio::time::Instant>>>);
+struct PostStopInventory(std::sync::Arc<std::sync::Mutex<Option<(tokio::time::Instant, usize)>>>);
 
 impl PostStopInventory {
     fn stopped(&self) {
-        let at = tokio::time::Instant::now() + Duration::from_secs(POST_STOP_INVENTORY_SECONDS);
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some((tokio::time::Instant::now(), 0));
     }
 
     fn due(&self, now: tokio::time::Instant) -> bool {
         self.0
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .is_some_and(|at| now >= at)
+            .is_some_and(|(stopped_at, next)| {
+                now >= stopped_at + Duration::from_secs(POST_STOP_INVENTORY_SECONDS[next])
+            })
     }
 
-    fn reported(&self, now: tokio::time::Instant) {
-        let mut at = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if at.is_some_and(|at| now >= at) {
-            *at = None;
+    /// A stop-triggered collection was reported: skip every offset already
+    /// passed; the schedule ends after the last one.
+    fn collected(&self, now: tokio::time::Instant) {
+        let mut pending = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((stopped_at, next)) = pending.as_mut() {
+            while *next < POST_STOP_INVENTORY_SECONDS.len()
+                && now >= *stopped_at + Duration::from_secs(POST_STOP_INVENTORY_SECONDS[*next])
+            {
+                *next += 1;
+            }
+            if *next == POST_STOP_INVENTORY_SECONDS.len() {
+                *pending = None;
+            }
         }
     }
 }
@@ -803,7 +810,9 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
     let mut inventory_reported_at = None;
     loop {
         let now = tokio::time::Instant::now();
-        if inventory_refresh_due(inventory_reported_at, now) || stops.due(now) {
+        let regular = inventory_refresh_due(inventory_reported_at, now);
+        let after_stop = stops.due(now);
+        if regular || after_stop {
             let collected = collect_inventory_until_ready(
                 &mut collect,
                 &mut failures,
@@ -837,8 +846,13 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
             match report(inventory).await {
                 Ok(()) => {
                     failures = 0;
-                    inventory_reported_at = Some(tokio::time::Instant::now());
-                    stops.reported(now);
+                    // A stop-triggered report never moves the regular cadence.
+                    if regular {
+                        inventory_reported_at = Some(tokio::time::Instant::now());
+                    }
+                    if after_stop {
+                        stops.collected(now);
+                    }
                     systemd_notify::watchdog();
                 }
                 Err(error) => {
@@ -1257,11 +1271,78 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn completed_stop_brings_next_inventory_just_past_the_freshness_bound() {
-        // Wrong implementation: the next inventory waits for the 120 s cadence.
+    async fn completed_stop_collects_on_a_bounded_schedule_and_leaves_the_cadence_alone() {
+        // Wrong implementations: waiting for the 120 s cadence; a stop-triggered
+        // report moving the cadence; the schedule repeating without end.
         let times = inventory_collections(Some(10)).await;
-        assert_eq!(times.len(), 2, "{times:?}");
-        assert!((41..=43).contains(&times[1]), "{times:?}");
+        assert_eq!(times.len(), 6, "{times:?}");
+        for (collected, offset) in times[1..5].iter().zip([31, 46, 61, 91]) {
+            assert!((10 + offset..=12 + offset).contains(collected), "{times:?}");
+        }
+        assert!((120..=122).contains(&times[5]), "{times:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_a_done_recipe_stop_arms_the_post_stop_schedule() {
+        use vonk_agent::{executor::Executor as _, outcome::ExecutionResult};
+        use vonk_agent_protocol::generated::{AgentOperation, RecipeStopResult};
+        struct Fake(ExecutionResult);
+        #[async_trait::async_trait(?Send)]
+        impl vonk_agent::executor::Executor for Fake {
+            async fn observe(
+                &self,
+                _: &vonk_agent_protocol::AgentClaim,
+            ) -> Option<vonk_agent::executor::operation_observation::OperationObservation>
+            {
+                None
+            }
+            async fn execute(
+                &self,
+                _: &vonk_agent_protocol::AgentClaim,
+                _: tokio::sync::watch::Receiver<chrono::DateTime<chrono::FixedOffset>>,
+                _: tokio::sync::watch::Receiver<bool>,
+            ) -> ExecutionResult {
+                self.0.clone()
+            }
+        }
+        let template: vonk_agent_protocol::AgentClaim = serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/recipe-job-run-claim-v1.json"
+        ))
+        .unwrap();
+        let (_, lease) = tokio::sync::watch::channel(chrono::Utc::now().fixed_offset());
+        let (_, cancel) = tokio::sync::watch::channel(false);
+        let done = || ExecutionResult::done(RecipeStopResult::default());
+        let unknown = ExecutionResult::unknown(
+            vonk_agent_protocol::generated::WaitReason::RuntimeEffectUnconfirmed,
+            "unconfirmed",
+            vonk_agent::outcome::UnknownEvidence::at(
+                vonk_agent_protocol::generated::FailureStage::AgentRestart,
+            ),
+        );
+        for (operation, result, armed) in [
+            (AgentOperation::RecipeStop, done(), true),
+            (
+                AgentOperation::RecipeStop,
+                ExecutionResult::failed("no"),
+                false,
+            ),
+            (AgentOperation::RecipeStop, unknown, false),
+            (AgentOperation::RecipeStart, done(), false),
+        ] {
+            let stops = PostStopInventory::default();
+            let executor = super::CustodyExecutor {
+                executor: &Fake(result),
+                available: true,
+                stops: stops.clone(),
+            };
+            let mut claim = template.clone();
+            claim.operation = operation;
+            executor
+                .execute(&claim, lease.clone(), cancel.clone())
+                .await;
+            let first = tokio::time::Instant::now() + Duration::from_secs(31);
+            assert_eq!(stops.due(first), armed, "{:?}", claim.operation);
+        }
     }
 
     #[tokio::test(start_paused = true)]
