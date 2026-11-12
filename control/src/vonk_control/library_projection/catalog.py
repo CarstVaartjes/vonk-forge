@@ -44,6 +44,7 @@ from .common import (
     _model_identity,
     _readable_document,
     _recipe_creator,
+    _recipe_usage,
 )
 
 if TYPE_CHECKING:
@@ -129,12 +130,13 @@ def _recipe_projection(
         self.selector(reference.publisher, reference.slug)
         for reference in projected.models
     ]
-    usage = sorted(
-        {
+    usage = _recipe_usage(
+        [
             item
             for reference in projected.models
             for item in usage_by_model.get(reference.content_sha256, ())
-        }
+        ],
+        projected.api,
     )
     resources = self._recipe_resources(document)
     return LibraryRecipeProjection(

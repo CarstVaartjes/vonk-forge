@@ -13,8 +13,12 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel
 from vonk_agent_protocol import AssetAvailability, RunState, UnknownOutcomeError
 from vonk_forge_contracts import (
+    CapabilityName,
+    ChatApi,
+    DecisionApi,
     ModelDefinition,
     ModelDisplay,
+    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
 )
@@ -382,6 +386,37 @@ def _model_identity(
         slug=document.identity.slug,
         content_sha256=revision.content_digest,
     )
+
+
+_UNDERSTANDING_BY_MODALITY = (
+    ("image", str(CapabilityName.IMAGE_UNDERSTANDING.value)),
+    ("audio", str(CapabilityName.AUDIO_UNDERSTANDING.value)),
+    ("video", str(CapabilityName.VIDEO_UNDERSTANDING.value)),
+)
+
+
+def _recipe_usage(model_usage: Sequence[str], api: RecipeApi | None) -> list[str]:
+    """The recipe's capabilities: its Models' display, with the input
+    understanding tags taken from what its API accepts.
+
+    The API document is the one owner of a route's input modalities (the same
+    source ``route_model_info`` publishes), so a launch that turns video off
+    shows no ``video-understanding`` even when the Model could. A modality any
+    option choice accepts counts. A recipe without chat or decision blocks
+    (audio, image, 3D) keeps its Models' display.
+    """
+
+    blocks = [] if api is None else [api.api, *(c.api for c in api.option_choices)]
+    served = [b for b in blocks if isinstance(b, ChatApi | DecisionApi)]
+    if not served:
+        return sorted(set(model_usage))
+    derived = {name for _, name in _UNDERSTANDING_BY_MODALITY}
+    accepted = {
+        name
+        for modality, name in _UNDERSTANDING_BY_MODALITY
+        if any(getattr(b.input_modalities, modality) for b in served)
+    }
+    return sorted((set(model_usage) - derived) | accepted)
 
 
 def _recipe_creator(

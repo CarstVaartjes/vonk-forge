@@ -14,6 +14,7 @@ plane; the recipe repository owns the reviewed model and recipe material.
 | Catalog index and independent recipe packages | Signed `vonk-forge-recipes` GitHub release built from that commit |
 | Installed state, active runs, routes, and local acceptance evidence | Local control-plane PostgreSQL |
 | Weights, OCI layers, secrets, and fleet state | Never stored in the recipe repository |
+| Which inputs a recipe accepts (`usage`: image, audio and video understanding) | The recipe's API document `input_modalities`, the source route `model_info` also uses; the Model display only describes the Model itself |
 
 The library is public because recipes are declarative metadata and build input.
 That does not make every upstream model or dependency freely redistributable;

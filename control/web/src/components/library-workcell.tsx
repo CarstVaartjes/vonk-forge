@@ -330,7 +330,8 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
       modelBytes: bytes,
       cacheUsage: model.cache_usage,
       modelCached,
-      capabilities: [...new Set([...capabilities, ...recipe.capabilities])],
+      // The recipe's own capabilities: the Controller derives them from its API document.
+      capabilities: recipe.capabilities,
     }));
   });
 }
