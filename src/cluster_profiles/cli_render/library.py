@@ -13,13 +13,13 @@ from ..generated_control.models.library_resource_projection import (
     LibraryResourceProjection,
 )
 from ..generated_control.models.model_cache_usage import ModelCacheUsage
+from ..generated_control.models.model_display import ModelDisplay
 from ..generated_control.models.published_qualification_status_view import (
     PublishedQualificationStatusView,
 )
 from ..generated_control.models.qualification_evidence_record import (
     QualificationEvidenceRecord,
 )
-from ..generated_control.models.recipe_detail_response import RecipeDetailResponse
 from ..generated_control.types import Unset
 from .common import (
     _bytes,
@@ -233,21 +233,31 @@ def _alternative_line(alternative: Mapping[str, object]) -> str:
     )
 
 
-def _recipe_links(detail: RecipeDetailResponse) -> None:
-    """Where the recipe comes from, in the dashboard's words. Licences are information only."""
-    publisher = quote(detail.identity.publisher, safe="")
-    slug = quote(detail.identity.slug, safe="")
+def _recipe_links(payload: Mapping[str, object]) -> None:
+    """Where the recipe comes from, in the dashboard's words. Licences are information only.
+
+    Only the model displays are parsed into the generated model; the rest is read as plain
+    fields. The lines are shared with the dashboard (tests/fixtures/recipe-links.json).
+    """
+    identity = _object(payload.get("identity"), "identity")
+    publisher = quote(_text(identity.get("publisher")), safe="")
+    slug = quote(_text(identity.get("slug")), safe="")
     _field(
         "Creator and details on vonkforge.ai",
         f"https://vonkforge.ai/recipes/{publisher}/{slug}",
     )
-    source = detail.document.provenance.source_reference
+    provenance = _optional(
+        _object(payload.get("document"), "document").get("provenance"), "provenance"
+    )
+    source = provenance.get("source_reference")
     if isinstance(source, str) and source:
         _field("Recipe source", source)
-    for model in detail.model_documents:
-        display = model.model_display
-        if display is None:
+    for model in _records(payload, "model_documents"):
+        if model.get("model_display") is None:
             continue
+        display = ModelDisplay.from_dict(
+            dict(_object(model["model_display"], "model_display"))
+        )
         license_ = display.license_
         _field(
             f"{display.model_title} licence",
@@ -390,7 +400,7 @@ def _library(
     if detail:
         _library_item(payload, noun, detail=True)
         if noun == LibraryNoun.RECIPE:
-            _recipe_links(RecipeDetailResponse.from_dict(dict(payload)))
+            _recipe_links(payload)
         return
     rows = _records(payload, "models" if noun == LibraryNoun.MODEL else "recipes")
     cursor = payload.get("next_cursor")

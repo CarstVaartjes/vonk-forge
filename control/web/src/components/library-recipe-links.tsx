@@ -14,7 +14,7 @@ function Address({ value, children }: { value: string | null | undefined; childr
 
 /**
  * Where the recipe comes from: the creator's page on the public site, each model's licence and the
- * recipe source. Licences and regional limits are information for the operator; nothing here gates
+ * recipe source. Each line reads exactly as `vonkctl recipe detail` prints it (tests/fixtures/recipe-links.json). Licences and regional limits are information for the operator; nothing here gates
  * a download, install or load.
  */
 export function LibraryRecipeLinks({ detail }: { detail: RecipeDetail }) {
@@ -37,27 +37,29 @@ export function LibraryRecipeLinks({ detail }: { detail: RecipeDetail }) {
       </header>
       <ul className="library-recipe-links">
         <li>
-          <a href={recipePublicUrl(detail.recipe)} target="_blank" rel="noreferrer">
-            Creator and details on vonkforge.ai
-          </a>
+          Creator and details on vonkforge.ai:{" "}
+          <Address value={recipePublicUrl(detail.recipe)}>{recipePublicUrl(detail.recipe)}</Address>
         </li>
         {source && (
           <li>
             Recipe source: <Address value={source}>{source}</Address>
           </li>
         )}
-        {licences.map(({ key, title, license }) => (
+        {licences.flatMap(({ key, title, license }) => [
           <li key={key}>
-            {title} licence: {license.spdx} (<Address value={license.url}>terms</Address>)
-            {license.territorial_restrictions && (
-              <>
-                . Regional limits (
-                {license.territorial_restrictions.denied_jurisdictions.join(", ")}):{" "}
-                {license.territorial_restrictions.notice}
-              </>
-            )}
-          </li>
-        ))}
+            {title} licence: {license.spdx} (terms:{" "}
+            <Address value={license.url}>{license.url}</Address>)
+          </li>,
+          ...(license.territorial_restrictions
+            ? [
+                <li key={`${key}/regions`}>
+                  Regional limits (
+                  {license.territorial_restrictions.denied_jurisdictions.join(", ")}
+                  ): {license.territorial_restrictions.notice}
+                </li>,
+              ]
+            : []),
+        ])}
       </ul>
     </section>
   );

@@ -1315,12 +1315,16 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "2 B unique" in output
 
 
-def test_recipe_detail_links_creator_licence_and_source_like_the_dashboard(capsys):
-    """`vonkctl recipe detail` names the creator page, source and licence as the dashboard does.
+_RECIPE_LINKS_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "recipe-links.json").read_text()
+)
 
-    Wrong implementation caught: the CLI omits where a recipe comes from, or prints a
-    licence as something to confirm rather than information.
-    """
+
+@pytest.mark.parametrize(
+    "case", _RECIPE_LINKS_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_recipe_detail_prints_the_links_the_dashboard_shows(case, capsys):
+    # The web test renders the same fixture, so the two clients cannot drift.
     corpus = json.loads(
         (
             Path(__file__).parents[2]
@@ -1328,21 +1332,18 @@ def test_recipe_detail_links_creator_licence_and_source_like_the_dashboard(capsy
         ).read_text()
     )
     display = next(iter(corpus["seedDisplays"]["models"].values()))
-    display["license"]["territorial_restrictions"] = {
-        "denied_jurisdictions": ["CN", "US"],
-        "notice": "Not for use in listed regions.",
-    }
-    document = cast(dict[str, Any], _recipe_document("tiny"))
-    source = "https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json"
-    document["provenance"]["source_reference"] = source
+    document = cast(dict[str, Any], _recipe_document(case["slug"]))
+    document["identity"]["publisher"] = case["publisher"]
+    document["provenance"]["source_reference"] = case["source_reference"]
     models = cast(dict[str, Any], _library_detail(document)["detail"])[
         "model_documents"
+    ][:1]
+    models = [
+        {**models[0], "model_display": {**display, **item}} for item in case["models"]
     ]
-    for model in models:
-        model["model_display"] = display
     render_payload(
         {
-            **_recipe_projection("vonk/tiny", "Tiny"),
+            **_recipe_projection(f"{case['publisher']}/{case['slug']}", "Tiny"),
             "document": document,
             "model_documents": models,
         },
@@ -1350,14 +1351,5 @@ def test_recipe_detail_links_creator_licence_and_source_like_the_dashboard(capsy
         action="detail",
     )
 
-    output = capsys.readouterr().out
-    assert (
-        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny"
-        in output
-    )
-    assert f"Recipe source: {source}" in output
-    assert (
-        f"{display['model_title']} licence: {display['license']['spdx']} (terms: "
-        in output
-    )
-    assert "Regional limits (CN, US): Not for use in listed regions." in output
+    printed = capsys.readouterr().out.splitlines()
+    assert [line for line in printed if line in case["lines"]] == case["lines"]
