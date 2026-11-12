@@ -200,6 +200,16 @@ class JobRunStopMixin:
             )
             # A Stop plan the records no longer back is drift the owner re-plans
             # under a fresh request, as the service Stop's acceptance does.
+            if (
+                pending_job is None
+                and (not admitted.allowed or plan_digest != admitted.plan_digest)
+                and service._stop_committed_for_request(
+                    session, run_id, request_id, plan_digest
+                )
+            ):
+                # A duplicate that missed the lookup before the fence lost to its
+                # own first Stop; the retry replays it from the lookup.
+                raise RecipeRetryLater("this request's Stop was just accepted")
             if not admitted.allowed:
                 raise RecipeRequestInvalid(
                     "stop plan is stale or blocked",
