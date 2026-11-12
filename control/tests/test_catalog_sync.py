@@ -693,6 +693,36 @@ def test_automatic_sync_reuses_same_commit_without_refetch(tmp_path: Path) -> No
     assert reader.fetches == [reader.snapshot.items[0].uri]
 
 
+def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
+    tmp_path: Path,
+) -> None:
+    """Catches the worker re-running the whole sync on its thread at every due time."""
+    sessions, service, reader, _item_value = _fixture(tmp_path)
+    now = [datetime(2026, 9, 5, tzinfo=UTC)]
+    sync = ManagedRecipeCatalogSyncService(
+        sessions, catalog=service, reader=reader, clock=lambda: now[0]
+    )
+    sync.advance_automatic(60)
+    latest = sync.latest()
+    assert latest is not None and latest.wait is not None
+    reads: list[str] = []
+    listed = reader.list
+
+    def counted() -> RecipeLibrarySnapshot:
+        reads.append("list")
+        return listed()
+
+    reader.list = counted
+
+    now[0] = latest.wait.next_check
+    assert sync.redrive(latest.id, 60) is False
+    assert reads == []
+
+    now[0] = latest.wait.next_check + timedelta(seconds=61)
+    assert sync.redrive(latest.id, 60) is True
+    assert len(reads) == 1
+
+
 def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(
     tmp_path: Path,
 ) -> None:

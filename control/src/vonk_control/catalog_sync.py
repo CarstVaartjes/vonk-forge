@@ -427,6 +427,13 @@ class ManagedRecipeCatalogSyncService:
         return _AutomaticSyncStep(failures, delay)
 
     def redrive(self, sync_id: str, interval_seconds: int) -> bool:
+        """Backstop the API's sync cadence only once it is an interval late.
+
+        ``run_automatic_sync`` wakes exactly at the due time it recorded, so a
+        redrive at that instant would run the whole sync a second time on the
+        worker's only thread. The worker takes over only when that cadence has
+        missed its turn by a full interval (for example, the API is down).
+        """
         with self._sessions() as session:
             current = session.scalar(
                 select(RecipeLibrarySyncRun)
@@ -442,7 +449,8 @@ class ManagedRecipeCatalogSyncService:
             if current is None or current.id != sync_id:
                 return False
             wait = read_wait(current)
-            if wait is None or wait.next_check > self._clock():
+            late = timedelta(seconds=interval_seconds)
+            if wait is None or wait.next_check + late > self._clock():
                 return False
         self.advance_automatic(interval_seconds)
         return True
