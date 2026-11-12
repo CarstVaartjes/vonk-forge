@@ -197,6 +197,22 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             gpu_power_watts: accelerator.as_ref().and_then(|value| value.power_watts),
             uptime_seconds: read_uptime(&self.paths.uptime),
             gpu_process_memory_bytes,
+            cpu_busy_seconds: None,
+            cpu_total_seconds: None,
+            load_average_1m: None,
+            network_lan_rx_bytes: None,
+            network_lan_tx_bytes: None,
+            fabric_rx_bytes: None,
+            fabric_tx_bytes: None,
+            fabric_ports_active: None,
+            disk_read_bytes: None,
+            disk_written_bytes: None,
+            oom_kills: None,
+            board_temperature_max_c: None,
+            nvme_temperature_c: None,
+            nic_temperature_c: None,
+            fan_rpm_max: None,
+            engines: None,
         }
     }
 

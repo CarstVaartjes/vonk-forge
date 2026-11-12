@@ -18,6 +18,43 @@ are nullable because a platform may not expose a value at a given sample:
 | GPU power | watts | The GPU's power draw (`nvidia-smi power.draw`), not the whole host. |
 | Uptime | seconds | Whole seconds since boot (`/proc/uptime`). |
 | GPU process memory ("Models") | bytes | Memory the driver says GPU compute processes hold: weights, KV cache and CUDA workspace. Reported only on a shared-pool accelerator, where it is part of memory total minus available. |
+| CPU time busy/total | seconds (counters) | `/proc/stat` jiffies over USER_HZ since boot. Utilization is a Prometheus rate of busy over total. |
+| Load average | 1m | `/proc/loadavg`. |
+| LAN receive/transmit | bytes (counters) | The default-route interface's netdev counters. |
+| Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of ACTIVE ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
+| Disk read/written | bytes (counters) | The disk that holds the model store. |
+| OOM kills | count (counter) | `/proc/vmstat` `oom_kill` since boot. |
+| Board, NVMe, NIC temperature | °C | Hottest unlabelled `acpitz` zone (never called "CPU"), NVMe Composite, hottest ConnectX ASIC. |
+| Fan | RPM | Fastest board fan. |
+
+Protocol 4.4 adds the rows from CPU time down and the per-run engine readings below.
+Every one is optional: an older agent omits them and the Controller stores NULL
+and exports nothing for them (a gap, never a zero). An invalid reading is
+dropped alone, and the optional-evidence recovery starts from the groups the
+validation error names, so many invalid readings cost a few validations. The agent collects the host readings
+(M5a) and the engine readings (M5b) in later changes; until then the Rust
+literal reports them as absent.
+
+### Engine readings
+
+`engines` (one per running endpoint) carries each run's metrics as
+the monitor reads them from the engine's own `/metrics` on loopback. An entry
+with an invalid `run_id` or `format` is dropped alone, and a repeated `run_id`
+keeps its first entry. Counters are cumulative since the engine started:
+prompt, generation and cached prompt tokens, preemptions, speculative draft and
+accepted tokens. Gauges: requests running and waiting, KV cache usage ratio.
+Histogram
+sums and counts (no percentiles; the gateway carries those): time to first
+token, time per output token, prefill, decode and end to end. The Controller
+stores them in `node_engine_samples` (one row per sample and run, removed with
+the sample after 24 h) and never puts them on the Fleet point.
+
+Prometheus exports them from control-api `/metrics` as `vonk_node_*` (host) and
+`vonk_engine_*` series with labels `{node_id, alias}`. The alias is the run's
+published route name, joined once from the Controller's run table; a run with
+no published route is not exported. Each series is the newest reading of that
+(node, run) received within 30 seconds, not only the latest sample, so a slow engine
+does not gap the series. Rates are computed in Prometheus, once.
 
 The Controller derives one more value for the fleet view, `system_memory_bytes`
 ("System"): memory total minus available minus GPU process memory, never below

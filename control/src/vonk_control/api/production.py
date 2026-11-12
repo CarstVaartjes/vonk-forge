@@ -246,6 +246,9 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     )
     metrics = MetricsRegistry()
     metrics.set_fleet_source(visual_fleet.read)
+    metrics.set_engine_source(
+        lambda: telemetry_repository.live_engine_readings(clock())
+    )
     metrics.set_compose_bundle(compose_bundle())
     operational_metrics = OperationalMetricsCollector(
         metrics,

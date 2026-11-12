@@ -26,7 +26,6 @@ of the sentence is kept, and the report's core is never refused for it.
 from __future__ import annotations
 
 import copy
-import itertools
 import re
 from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
@@ -187,6 +186,37 @@ def _drop(group: EvidenceGroup, data: Any, refusal: ValidationError) -> Evidence
     )
 
 
+def _validated(
+    handler: ValidatorFunctionWrapHandler, data: Any, dropped: tuple[EvidenceGroup, ...]
+) -> tuple[Any, ValidationError | None]:
+    """The model for ``data`` without the ``dropped`` groups, or why it was refused."""
+
+    try:
+        return handler(_without(data, dropped)), None
+    except ValidationError as refusal:
+        return None, refusal
+
+
+def _smallest_valid(
+    handler: ValidatorFunctionWrapHandler,
+    data: Any,
+    named: tuple[EvidenceGroup, ...],
+) -> tuple[tuple[EvidenceGroup, ...], Any] | None:
+    """``named`` less every group the report is valid without dropping, with the
+    model that validated; ``None`` when dropping all of them is not enough."""
+
+    model, refusal = _validated(handler, data, named)
+    if refusal is not None:
+        return None
+    kept = list(named)
+    for group in reversed(named):
+        trial = tuple(item for item in kept if item is not group)
+        trial_model, refusal = _validated(handler, data, trial)
+        if refusal is None:
+            model, kept = trial_model, list(trial)
+    return tuple(kept), model
+
+
 class OptionalEvidenceModel(BaseModel):
     """Mixin: drop invalid optional evidence instead of refusing the report."""
 
@@ -252,21 +282,17 @@ def _drop_invalid_optional_evidence(
             for group in cls.EVIDENCE_GROUPS
             if any(_present(data, path) for path in group.paths)
         )
-        # Fewest groups first: lose as little as the core allows.
-        for size in range(1, len(present) + 1):
-            for dropped in itertools.combinations(present, size):
-                try:
-                    model = handler(_without(data, dropped))
-                except ValidationError:
-                    continue
-                model._evidence_warnings = redacted + tuple(
-                    group.code for group in dropped
-                )
-                model._evidence_drops = tuple(
-                    _drop(group, data, refusal) for group in dropped
-                )
-                return model
-        raise
+        # Drop every present group, then keep each one only if the report is
+        # valid without dropping it, so the cost is at most one validation per
+        # group. A report whose core is invalid fails the first trial and is
+        # refused unchanged.
+        found = _smallest_valid(handler, data, present)
+        if found is None:
+            raise
+        dropped, model = found
+        model._evidence_warnings = redacted + tuple(group.code for group in dropped)
+        model._evidence_drops = tuple(_drop(group, data, refusal) for group in dropped)
+        return model
 
 
 def fail_open_on_optional_evidence() -> Any:

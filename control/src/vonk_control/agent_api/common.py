@@ -158,6 +158,20 @@ def _log_evidence_warnings(
 ) -> None:
     for code in body.evidence_warnings:
         _log_evidence_dropped(code, endpoint=endpoint, node_id=node_id)
+    # A telemetry sample also reports what its engine entries lost: a reading
+    # inside an entry, and whole entries that were invalid or repeated.
+    for engine in getattr(body, "engines", None) or ():
+        for code in engine.evidence_warnings:
+            _log_evidence_dropped(code, endpoint=endpoint, node_id=node_id)
+    if dropped := getattr(body, "dropped_engine_entries", 0):
+        log_event(
+            _LOGGER,
+            "agent.engine_entries_dropped",
+            service="control-api",
+            count=dropped,
+            endpoint=endpoint,
+            node_id=node_id,
+        )
 
 
 _MAX_ENROLLMENT_TOKEN_PREFIX_BYTES = 2 * 1024

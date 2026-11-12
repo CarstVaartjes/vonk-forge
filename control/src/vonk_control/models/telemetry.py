@@ -292,6 +292,21 @@ class NodeTelemetrySample(Base):
     gpu_power_watts: Mapped[float | None] = mapped_column(Float)
     uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
     gpu_process_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    cpu_busy_seconds: Mapped[float | None] = mapped_column(Float)
+    cpu_total_seconds: Mapped[float | None] = mapped_column(Float)
+    load_average_1m: Mapped[float | None] = mapped_column(Float)
+    network_lan_rx_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    network_lan_tx_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    fabric_rx_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    fabric_tx_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    fabric_ports_active: Mapped[int | None] = mapped_column(Integer)
+    disk_read_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    disk_written_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    oom_kills: Mapped[int | None] = mapped_column(BigInteger)
+    board_temperature_max_c: Mapped[int | None] = mapped_column(Integer)
+    nvme_temperature_c: Mapped[int | None] = mapped_column(Integer)
+    nic_temperature_c: Mapped[int | None] = mapped_column(Integer)
+    fan_rpm_max: Mapped[int | None] = mapped_column(Integer)
 
     resource_snapshot: Mapped[NodeInventoryResourceSnapshot] = relationship(
         foreign_keys=[
@@ -301,6 +316,41 @@ class NodeTelemetrySample(Base):
         lazy="joined",
         uselist=False,
     )
+
+
+class NodeEngineSample(Base):
+    """One run's engine readings inside one telemetry sample (protocol 4.4).
+
+    The readings are the wire ``EngineReading`` columns, so a row is stored and
+    read back without translation. The row goes with its sample after 24 h.
+    """
+
+    __tablename__ = "node_engine_samples"
+    sample_id: Mapped[str] = mapped_column(
+        ForeignKey("node_telemetry_samples.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    format: Mapped[str] = mapped_column(String(16), nullable=False)
+    prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    generation_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    cached_prompt_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    preemptions: Mapped[int | None] = mapped_column(BigInteger)
+    spec_decode_draft_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    spec_decode_accepted_tokens: Mapped[int | None] = mapped_column(BigInteger)
+    requests_running: Mapped[int | None] = mapped_column(BigInteger)
+    requests_waiting: Mapped[int | None] = mapped_column(BigInteger)
+    kv_cache_usage_ratio: Mapped[float | None] = mapped_column(Float)
+    ttft_seconds_sum: Mapped[float | None] = mapped_column(Float)
+    ttft_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
+    time_per_output_token_seconds_sum: Mapped[float | None] = mapped_column(Float)
+    time_per_output_token_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
+    prefill_seconds_sum: Mapped[float | None] = mapped_column(Float)
+    prefill_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
+    decode_seconds_sum: Mapped[float | None] = mapped_column(Float)
+    decode_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
+    e2e_seconds_sum: Mapped[float | None] = mapped_column(Float)
+    e2e_seconds_count: Mapped[int | None] = mapped_column(BigInteger)
 
 
 class NodeTelemetryLatest(Base):
