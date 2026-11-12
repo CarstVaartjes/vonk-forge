@@ -195,7 +195,7 @@ class StopMixin:
         profile_application_id: str | None,
     ) -> RecipeOperationView:
         # Claim, effect, conditional completion. The accepted Stop is checked
-        # durably first so a stale or blocked request withdraws nothing; the
+        # durably first so a blocked request withdraws nothing; the
         # route is then withdrawn with no transaction open (the withdrawal
         # intent is durable with its claim, and a crash resumes from it); only
         # then is the Stop dispatched, in its own short transaction, and only
