@@ -28,7 +28,6 @@ from ..reference_facts import profiles_naming
 from ..revision_images import (
     revision_archives,
     revision_images,
-    revisions_running_archives,
 )
 from ..runtime_image_preparation.contracts import read_runtime_image_reference_intent
 from .intents import (
@@ -274,7 +273,7 @@ def runtime_image_reference_findings(
 
     from ..recipe_image_availability import OPERATION_KIND
 
-    image_revisions = revisions_running_archives(session, selected)
+    revision_runs: dict[str, frozenset[str]] = {}
 
     for operation in session.scalars(
         select(Job)
@@ -292,11 +291,13 @@ def runtime_image_reference_findings(
                 "active artifact operation payload is malformed; removal was deferred",
                 retryable=True,
             )
-        associated_archives = [
-            archive
-            for archive, revisions in image_revisions.items()
-            if operation.authority_revision in revisions
-        ]
+        if operation.authority_revision not in revision_runs:
+            revision_runs[operation.authority_revision] = revision_archives(
+                session, [operation.authority_revision]
+            )
+        associated_archives = sorted(
+            revision_runs[operation.authority_revision] & selected
+        )
         if associated_archives:
             account(payload)
             for archive in associated_archives:
