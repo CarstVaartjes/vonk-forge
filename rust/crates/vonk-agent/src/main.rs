@@ -1161,8 +1161,9 @@ mod tests {
         // Wrong implementation: a refused upload permanently returns from inventory.
         let started = tokio::time::Instant::now();
         let recovered = Cell::new(false);
+        let stops = CompletedStops::default();
         let lane = super::inventory_lane(
-            &Default::default(),
+            &stops,
             || {
                 future::ready(Ok(
                     test_inventory().to_request(chrono::Utc::now().fixed_offset())
