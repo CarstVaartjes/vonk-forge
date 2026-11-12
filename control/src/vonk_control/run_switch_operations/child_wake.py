@@ -24,26 +24,25 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
-from vonk_agent_protocol import LifecycleState
 
 from .. import job_states, model_cache_states
+from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import schedule_wait
+from ..stored_json import read_row_column
 from .constants import _OPERATION_KINDS
 from .planning_helpers import _aware
+from .result_helpers import _read_progress
 
 _LOGGER = logging.getLogger(__name__)
-_ENDED = (LifecycleState.SUCCEEDED, LifecycleState.FAILED, LifecycleState.CANCELLED)
-#: Every row a run-switch child is stored in, with its ended words: recipe
-#: install/start/stop/uninstall, build, distribution and preflight children are
-#: ``Job`` rows; a model download is a ``ModelCacheOperation``.
+#: Every row a run-switch child is stored in, with its live words (any other
+#: word has ended): recipe install/start/stop/uninstall, build, distribution
+#: and preflight children are ``Job`` rows; a model download is a
+#: ``ModelCacheOperation``.
 CHILD_ROWS: dict[type[object], frozenset[str]] = {
-    Job: frozenset(job_states.words(*_ENDED)),
-    ModelCacheOperation: frozenset(model_cache_states.words(*_ENDED)),
+    Job: frozenset(job_states.LIVE),
+    ModelCacheOperation: frozenset(model_cache_states.LIVE),
 }
-_LIVE = job_states.words(
-    LifecycleState.QUEUED, LifecycleState.RUNNING, LifecycleState.OBSERVING
-)
 _STAGED = "vonk.child_wake.staged"
 _COMMITTED = "vonk.child_wake.committed"
 _INSTALLED = "_vonk_child_wake"
@@ -76,8 +75,8 @@ class ChildEndWake:
     @staticmethod
     def _stage(session: Session, _context: object, _instances: object) -> None:
         for row in (*session.new, *session.dirty):
-            ended = CHILD_ROWS.get(type(row))
-            if ended is None or row.state not in ended:  # type: ignore[attr-defined]
+            live = CHILD_ROWS.get(type(row))
+            if live is None or row.state in live:  # type: ignore[attr-defined]
                 continue
             if row in session.new or inspect(row).attrs.state.history.added:
                 session.info.setdefault(_STAGED, set()).add(row.id)  # type: ignore[attr-defined]
@@ -102,30 +101,36 @@ class ChildEndWake:
         """Make each live run-switch waiting on one of ``child_ids`` due now."""
         try:
             with self._sessions() as session:
-                waiting = session.execute(
-                    select(
-                        Job.id,
-                        Job.result["child_operation_id"].as_string(),
-                        Job.result["preflight"]["pending_jobs"],
-                    ).where(Job.kind.in_(_OPERATION_KINDS), Job.state.in_(_LIVE))
-                ).all()
-            owners = frozenset(
-                owner
-                for owner, child, probes in waiting
-                if child in child_ids
-                or (
-                    isinstance(probes, dict)
-                    and not child_ids.isdisjoint(probes.values())
+                owners = frozenset(
+                    job.id
+                    for job in session.scalars(
+                        select(Job).where(
+                            Job.kind.in_(_OPERATION_KINDS),
+                            Job.state.in_(job_states.LIVE),
+                        )
+                    )
+                    if _waits_on(job, child_ids)
                 )
-            )
             now = self._clock()
         except Exception:
             _LOGGER.warning(
                 "run-switch child-end wake deferred to the next worker turn",
                 exc_info=True,
             )
-            return
-        wake_owners(self._sessions, owners, now)
+        else:
+            wake_owners(self._sessions, owners, now)
+
+
+def _waits_on(job: Job, child_ids: frozenset[str]) -> bool:
+    stored = read_row_column(job, "result")
+    if isinstance(stored, Residue):
+        # A damaged checkpoint names no child; its own advance repairs it.
+        return False
+    progress = _read_progress(stored)
+    if progress.child_operation_id in child_ids:
+        return True
+    probes = progress.preflight.pending_jobs if progress.preflight else {}
+    return not child_ids.isdisjoint(probes.values())
 
 
 def wake_owners(
@@ -147,7 +152,7 @@ def wake_owners(
                 .where(
                     Job.id.in_(sorted(owner_ids)),
                     Job.kind.in_(_OPERATION_KINDS),
-                    Job.state.in_(_LIVE),
+                    Job.state.in_(job_states.LIVE),
                 )
                 .order_by(Job.id)
                 .with_for_update(skip_locked=True)
