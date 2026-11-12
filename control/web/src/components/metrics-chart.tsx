@@ -10,7 +10,17 @@ const TILES: Array<{ metric: Metric; title: string; unit: Unit; scale: number }>
   { metric: "gpu_temperature", title: "GPU temperature", unit: "°C", scale: 1 },
   { metric: "request_rate", title: "Requests per model", unit: "requests/s", scale: 1 },
 ];
-const COLORS = ["var(--mint)", "var(--text)", "var(--warning)", "var(--info)", "var(--titanium)"];
+const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
+
+/**
+ * A Spark keeps one colour in every tile: its position in `names`, which the Fleet page builds in
+ * the snapshot's node order. Series that are not Sparks (models) take the colour of their order
+ * in the tile.
+ */
+function seriesColor(labels: Record<string, string>, names: Record<string, string>, index: number) {
+  const position = labels.node_id ? Object.keys(names).indexOf(labels.node_id) : -1;
+  return SERIES_COLORS[(position >= 0 ? position : index) % SERIES_COLORS.length];
+}
 
 function formatValue(value: number, unit: Unit): string {
   const text = Math.abs(value) >= 100 ? value.toFixed(0) : value.toPrecision(3);
@@ -19,7 +29,6 @@ function formatValue(value: number, unit: Unit): string {
 
 /** "12 days", "5 hours", "20 minutes": the time left, in the largest whole unit. */
 export function formatTimeLeft(seconds: number): string {
-  if (seconds <= 0) return "now";
   const [size, name] =
     seconds >= 86400 ? [86400, "day"] : seconds >= 3600 ? [3600, "hour"] : [60, "minute"];
   const count = Math.max(1, Math.floor(seconds / size));
@@ -89,7 +98,7 @@ export function SeriesChart({
               key={JSON.stringify(series.labels)}
               d={path}
               fillOpacity={0}
-              stroke={COLORS[index % COLORS.length]}
+              stroke={seriesColor(series.labels, names, index)}
               strokeWidth="2"
             >
               <title>{Object.values(series.labels).join(" · ")}</title>
@@ -105,7 +114,10 @@ export function SeriesChart({
       </svg>
       <ul aria-label="Series legend">
         {data.series.map((series, index) => (
-          <li key={JSON.stringify(series.labels)} style={{ color: COLORS[index % COLORS.length] }}>
+          <li
+            key={JSON.stringify(series.labels)}
+            style={{ color: seriesColor(series.labels, names, index) }}
+          >
             {seriesName(series.labels, names)} · {unit}
           </li>
         ))}
@@ -120,11 +132,14 @@ type Tile = MetricsSeriesResponse | string;
 function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): string[] {
   return data.series.flatMap((series) => {
     const last = [...series.points].reverse().find((point) => point.value !== null);
-    return last
-      ? [
-          `${seriesName(series.labels, names)}: certificate expires in ${formatTimeLeft(Number(last.value))}`,
-        ]
-      : [];
+    if (!last) return [];
+    const left = Number(last.value);
+    const name = seriesName(series.labels, names);
+    return [
+      left <= 0
+        ? `${name}: certificate expired`
+        : `${name}: certificate renews in ${formatTimeLeft(left)}`,
+    ];
   });
 }
 
