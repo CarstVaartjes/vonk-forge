@@ -1,28 +1,18 @@
-"""`vonkctl fleet` alert words, checked against the vectors the Controller web also renders."""
+"""`vonkctl fleet` prints the alert words the Controller web renders from the same vectors."""
 
 import json
 from pathlib import Path
 
 from cluster_profiles.cli_render import render_payload
-from cluster_profiles.cli_render.fleet import ALERTS_UNAVAILABLE, _alert_notes
 
-_VECTORS = json.loads(
-    (
-        Path(__file__).parents[1] / "fixtures" / "fleet-wording-attention.json"
-    ).read_text()
+_FIXTURES = Path(__file__).parents[1] / "fixtures"
+_VECTORS = json.loads((_FIXTURES / "fleet-wording-attention.json").read_text())
+_ALERTS_YAML = (
+    _FIXTURES.parents[1] / "deploy" / "compose" / "prometheus" / "alerts.yaml"
 )
 
 
-def test_alerts_read_as_plain_words_the_web_shows():
-    payload = {"nodes": _VECTORS["nodes"], "attention": _VECTORS["alerts"]}
-    assert _alert_notes(payload) == _VECTORS["expected"]
-    assert _alert_notes({"nodes": [], "attention_unavailable": True}) == [
-        _VECTORS["unavailable"]
-    ]
-    assert ALERTS_UNAVAILABLE == _VECTORS["unavailable"]
-
-
-def test_fleet_overview_lists_alerts_under_needs_attention(capsys):
+def _overview(capsys, **fleet):
     nodes = [
         {
             **node,
@@ -35,7 +25,31 @@ def test_fleet_overview_lists_alerts_under_needs_attention(capsys):
         }
         for node in _VECTORS["nodes"]
     ]
-    render_payload({"nodes": nodes, "attention": _VECTORS["alerts"]}, "fleet")
-    output = capsys.readouterr().out
-    attention = output[output.index("Needs attention") :]
-    assert all(f"  {line}" in attention for line in _VECTORS["expected"])
+    render_payload({"nodes": nodes, **fleet}, "fleet")
+    return capsys.readouterr().out.splitlines()
+
+
+def _needs_attention(lines):
+    start = lines.index("Needs attention") + 1
+    return [line.strip() for line in lines[start : lines.index("", start)]]
+
+
+def test_alerts_print_the_vector_lines(capsys):
+    lines = _overview(capsys, attention=_VECTORS["alerts"])
+    assert _needs_attention(lines) == _VECTORS["expected"]
+
+
+def test_unreadable_alerts_print_the_vector_sentence(capsys):
+    lines = _overview(capsys, attention=[], attention_unavailable=True)
+    assert _needs_attention(lines) == [_VECTORS["unavailable"]]
+
+
+def test_vector_alerts_carry_the_summaries_of_the_shipped_rules():
+    rules = {
+        rule["alert"]: rule["annotations"]["summary"]
+        for group in json.loads(_ALERTS_YAML.read_text())["groups"]
+        for rule in group["rules"]
+    }
+    shipped = [alert for alert in _VECTORS["alerts"] if alert["name"] in rules]
+    assert shipped
+    assert all(alert["summary"] == rules[alert["name"]] for alert in shipped)

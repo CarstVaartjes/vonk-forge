@@ -1,4 +1,5 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { FleetPage } from "./fleet-simplified";
@@ -8,9 +9,10 @@ import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
+let attentionUnavailable = false;
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
-    snapshot: { nodes, attention },
+    snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },
     now: new Date("2026-09-27T10:00:00Z"),
     loading: false,
     error: null,
@@ -153,25 +155,32 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
-test("firing alerts name the Spark and say how serious, in words, with no operator action", () => {
-  nodes = [spark("Alpha", 40, 250)];
-  attention = [
-    {
-      source: "prometheus",
-      name: "NodeHot",
-      summary: "GPU is hot",
-      severity: "critical",
-      labels: { node_id: `spk_${"Alpha".padEnd(32, "0")}` },
-      active_at: "2026-10-10T00:00:00Z",
-    },
-  ];
-  render(<FleetPage api={{} as ControlApi} />);
+test("firing alerts read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-attention.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    alerts: unknown[];
+    expected: string[];
+    unavailable: string;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  attention = vectors.alerts;
+  const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
   const region = screen.getByRole("region", { name: "Needs attention" });
-  expect(region).toHaveTextContent("Critical GPU is hot (Alpha)");
-  expect(region).not.toHaveTextContent("NodeHot");
-  expect(region).not.toHaveTextContent("spk_");
+  expect(
+    within(region)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(vectors.expected);
   expect(within(region).queryByRole("button")).toBeNull();
+  expect(container.textContent).not.toContain("NodeHot");
+  unmount();
   attention = [];
+  attentionUnavailable = true;
+  render(<FleetPage api={{} as ControlApi} />);
+  expect(screen.getByText(vectors.unavailable)).toBeVisible();
+  attentionUnavailable = false;
   nodes = [];
 });
 

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import {
-  ALERTS_UNAVAILABLE,
   formatBytes,
   nodeDiskFreeBytes,
   nodeDisplayName,
@@ -150,11 +149,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
           </>
         }
       />
-      {fleet.snapshot?.attention_unavailable && <p role="status">{ALERTS_UNAVAILABLE}</p>}
+      {fleet.snapshot?.attention_unavailable && (
+        <p role="status">Prometheus alerts unavailable. Retrying automatically.</p>
+      )}
       {!!fleet.snapshot?.attention?.length && (
         <section aria-label="Needs attention">
           <h2>Needs attention</h2>
-          <ul>
+          <ul className="attention-list">
             {fleet.snapshot.attention.map((alert) => (
               <AttentionItem
                 key={JSON.stringify(alert.labels)}

@@ -93,9 +93,6 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
-/** Said when the Controller cannot read Prometheus; `vonkctl fleet` says the same. */
-export const ALERTS_UNAVAILABLE = "Prometheus alerts unavailable. Retrying automatically.";
-
 /**
  * A firing alert in plain words: its severity as a word, and its summary with the Spark it
  * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.

@@ -3,7 +3,7 @@ import { ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { attentionText } from "../lib/fleet";
 import { StatusPill } from "./status-pill";
 
-/** One firing alert in plain words: a severity word, the summary, and the Spark by name. */
+/** One firing alert in plain words, `Severity: summary (Spark)`, as `vonkctl fleet` prints it. */
 export function AttentionItem({
   alert,
   nodes,
@@ -16,8 +16,8 @@ export function AttentionItem({
     <li>
       <StatusPill tone={alert.severity === "critical" ? "danger" : ProfileReasonSeverity.WARNING}>
         {severity}
-      </StatusPill>{" "}
-      {text}
+      </StatusPill>
+      : {text}
     </li>
   );
 }

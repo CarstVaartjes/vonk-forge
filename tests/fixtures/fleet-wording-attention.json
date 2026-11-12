@@ -1,5 +1,5 @@
 {
-  "comment": "Firing alerts in plain words, one set for the Controller web Fleet page and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_attention.py both render these alerts and must produce the expected `severity: text` lines.",
+  "comment": "Firing alerts in plain words, one set for the Controller web Fleet page and `vonkctl fleet`. The web test renders the Fleet page and compares each alert item's DOM text; the vonkctl test runs the fleet overview and compares the alert lines it prints (the Sparks' own notes follow them). Both must equal `expected` exactly. This file is also the one owner of the unavailable sentence. The alerts named in deploy/compose/prometheus/alerts.yaml carry that file's summaries verbatim.",
   "nodes": [
     {
       "id": "spk_11111111111111111111111111111111",
@@ -14,7 +14,7 @@
     {
       "source": "prometheus",
       "name": "NodeAgentStale",
-      "summary": "An active Vonk Forge node is offline under current connection rules",
+      "summary": "An active Vonk Forge node is offline; a running agent keeps retrying on its own",
       "severity": "warning",
       "labels": {
         "alertname": "NodeAgentStale",
@@ -45,7 +45,7 @@
     }
   ],
   "expected": [
-    "Warning: An active Vonk Forge node is offline under current connection rules (Spark Two)",
+    "Warning: An active Vonk Forge node is offline; a running agent keeps retrying on its own (Spark Two)",
     "Critical: The control API or its database dependency is unavailable",
     "Warning: A node left the fleet (spk_99999999999999999999999999999999)"
   ],

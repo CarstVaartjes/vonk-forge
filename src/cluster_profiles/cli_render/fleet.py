@@ -38,8 +38,6 @@ from .common import (
     _words,
 )
 
-ALERTS_UNAVAILABLE = "Prometheus alerts unavailable. Retrying automatically."
-
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
     name = node.get("display_name")
@@ -389,7 +387,7 @@ def _alert_notes(payload: object) -> list[str]:
             + (f" ({names.get(node_id, _text(node_id))})" if node_id else "")
         )
     if document.get("attention_unavailable"):
-        notes.append(ALERTS_UNAVAILABLE)
+        notes.append("Prometheus alerts unavailable. Retrying automatically.")
     return notes
 
 

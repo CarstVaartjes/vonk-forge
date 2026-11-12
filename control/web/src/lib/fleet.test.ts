@@ -1,10 +1,7 @@
-import { readFileSync } from "node:fs";
 import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
 import {
-  ALERTS_UNAVAILABLE,
-  attentionText,
   formatBytes,
   nodeDisplayName,
   nodeMemory,
@@ -220,24 +217,6 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
   expect(nodeMemory(observed)).toEqual({ usedPercent: 50, totalBytes: total });
   expect(formatBytes(total)).toBe("17179869184.0 GiB");
   expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
-});
-
-test("firing alerts read as plain words, as `vonkctl fleet` prints them", () => {
-  const vectors = JSON.parse(
-    readFileSync("../../tests/fixtures/fleet-wording-attention.json", "utf8"),
-  ) as {
-    nodes: Partial<VisualFleetNode>[];
-    alerts: Parameters<typeof attentionText>[0][];
-    expected: string[];
-    unavailable: string;
-  };
-  const fleet = vectors.nodes.map((input) => node(input));
-  const lines = vectors.alerts.map((alert) => {
-    const { severity, text } = attentionText(alert, fleet);
-    return `${severity}: ${text}`;
-  });
-  expect(lines).toEqual(vectors.expected);
-  expect(ALERTS_UNAVAILABLE).toBe(vectors.unavailable);
 });
 
 test("GPU reset warnings retain the operator fix while a Spark remains online", () => {
