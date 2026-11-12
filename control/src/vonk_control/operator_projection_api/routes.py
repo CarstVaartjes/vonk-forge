@@ -7,11 +7,13 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Path, Query, status
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 from vonk_agent_protocol import (
     ErrorCategory,
     ModelCacheOperatorStatus,
+    RunState,
     UnknownError,
     WaitReason,
 )
@@ -30,6 +32,7 @@ from ..fleet_projection import (
     FleetNodeIdentity,
     FleetSnapshot,
 )
+from ..models import RecipeRun, RunNode
 from ..observation_transfer import (
     ObservationTransferRecord,
     ObservationTransferResponse,
@@ -104,16 +107,24 @@ def install_operator_projection_routes(
             raise _operator_error(error) from None
 
     def served_aliases(node_id: str) -> list[str]:
-        """The aliases this Spark's loaded runs serve, for per-model metrics."""
-        return sorted(
-            {
-                run.alias
-                for value in snapshot().nodes
-                if value.id == node_id
-                for run in value.loaded
-                if run.alias is not None
-            }
-        )
+        """The aliases this Spark's live runs serve, for per-model metrics."""
+        if fleet_services is None or fleet_services.sessions is None:
+            raise HTTPException(status_code=503, detail="fleet unavailable")
+        try:
+            with fleet_services.sessions() as session:
+                return sorted(
+                    session.scalars(
+                        select(RecipeRun.alias)
+                        .join(RunNode, RunNode.run_id == RecipeRun.id)
+                        .where(
+                            RunNode.node_id == node_id,
+                            RecipeRun.state.not_in({RunState.STOPPED, RunState.FAILED}),
+                        )
+                        .distinct()
+                    )
+                )
+        except AVAILABILITY_ERRORS as error:
+            raise HTTPException(status_code=503, detail="fleet unavailable") from error
 
     install_metrics_routes(app, authenticated, prometheus, served_aliases)
 

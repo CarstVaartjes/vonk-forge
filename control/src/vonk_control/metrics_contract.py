@@ -53,7 +53,7 @@ SERIES_LABEL = {
 
 
 class MetricSpec(StrictJSONModel):
-    """What one metric is. The page and vonkctl render this and never hard-code it."""
+    """What one metric is. The page renders it and hard-codes none of it; vonkctl will in M7."""
 
     metric: Metric
     title: str

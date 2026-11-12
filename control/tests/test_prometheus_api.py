@@ -5,6 +5,7 @@ import base64
 import json
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import get_args
@@ -83,6 +84,8 @@ def test_every_query_window_covers_the_step_and_scrapes(metric, range):
     assert found
     window = int(found.group(1))
     assert window >= step and window >= 2 * query.scrape
+    if query.kind == "counter":
+        assert window >= step + query.scrape
 
 
 def test_every_metric_has_one_spec_and_one_query():
@@ -95,10 +98,14 @@ def test_every_metric_has_one_spec_and_one_query():
 
 def test_no_query_reads_a_gateway_family_the_gateway_does_not_export():
     """Catches a Trends query on a LiteLLM family dropped by PROMETHEUS_EXCLUDE_METRICS."""
-    families = {q.family.removesuffix("_total") for q in QUERIES.values()}
-    assert not {f for f in families if f.startswith("litellm_")} & set(
-        PROMETHEUS_EXCLUDE_METRICS
-    )
+    excluded = set(PROMETHEUS_EXCLUDE_METRICS)
+    hits = [
+        q.family
+        for q in QUERIES.values()
+        if q.family.startswith("litellm_")
+        and {q.family, q.family.removesuffix("_total")} & excluded
+    ]
+    assert not hits
 
 
 def test_catalogue_lists_every_metric(client):
@@ -113,13 +120,17 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
     """Catches averaged points standing in for the peak and the total, and NaN as 0."""
     label = "node_id" if metric == "gpu_utilization" else "alias"
     seen = []
+    now = time.time()
 
     def handle(request):
         params = request.url.params
         seen.append(request.url.path)
         if request.url.path == "/api/v1/query_range":
             rows = [
-                {"metric": {label: "a"}, "values": [[1, "2"], [2, "NaN"], [3, "6"]]},
+                {
+                    "metric": {label: "a"},
+                    "values": [[now - 30, "2"], [now - 15, "NaN"], [now, "6"]],
+                },
                 {"metric": {label: "empty"}, "values": [[1, "NaN"]]},
             ]
             return reply(resultType="matrix", result=rows)
@@ -412,3 +423,24 @@ def test_application_owns_configured_monitoring_and_preserves_service_lifespan(
         assert lifecycle == [app]
         assert observed.wait(timeout=30)
     assert lifecycle == [app, app]
+
+
+def test_latest_is_only_a_value_from_the_last_step(reader, monkeypatch):
+    """Catches a stale last sample shown as the current value."""
+    now = 1_000_000.0
+    monkeypatch.setattr("vonk_control.prometheus_api.time.time", lambda: now)
+
+    def handle(request):
+        if request.url.path.endswith("_range"):
+            rows = [
+                {"metric": {"node_id": "a"}, "values": [[now - 5, "1"]]},
+                {"metric": {"node_id": "b"}, "values": [[now - 600, "2"]]},
+            ]
+            return reply(resultType="matrix", result=rows)
+        return reply(resultType="vector", result=[])
+
+    mock_prometheus(monkeypatch, handle)
+    fresh, stale = asyncio.run(
+        reader.series("gpu_utilization", "1h", None, lambda node: [])
+    ).series
+    assert (fresh.summary.latest, stale.summary.latest) == (1, None)

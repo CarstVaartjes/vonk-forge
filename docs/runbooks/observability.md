@@ -23,13 +23,14 @@ model's tokens across Sparks.
 
 Trends read two Controller routes. `GET /api/metrics/catalogue` describes every
 metric once: title, unit, scope (`node` or `alias`), basis (`measured` or
-`estimated`), source and a hint; the page and vonkctl render that and hard-code
-none of it. `GET /api/metrics/series?metric&range[&node]` returns, per series,
+`estimated`), source and a hint; the page renders that and hard-codes none of
+it (vonkctl will in M7). `GET /api/metrics/series?metric&range[&node]` returns, per series,
 its points and a summary (`latest`, `average`, `peak`, `total`, `coverage`)
 computed by the Controller. Ranges are 1h, 6h, 24h, 7d and 30d (Prometheus keeps
 a year). Each point averages a window that is never smaller than the step and at
-least four scrapes (15 s for Controller series, 30 s for the LiteLLM job), so a
-rate never drops a burst between two points. `peak` is the highest raw value in
+least four scrapes (15 s for Controller series, 30 s for the LiteLLM job); a
+counter rate's window also spans the step plus one scrape, so consecutive points
+leave no gap. `latest` is only a value from the last step, else `None`. `peak` is the highest raw value in
 the range, not the highest averaged point. `total` (gateway counters only) is
 `increase()` over the range. `coverage` is the share of the range's steps that
 have a value. `None` means no data and is never drawn as zero. Every query is

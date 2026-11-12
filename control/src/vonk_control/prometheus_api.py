@@ -67,7 +67,13 @@ class MetricQuery:
         return 4 * self.scrape
 
     def window(self, step: int) -> int:
-        """Never smaller than the step, so no sample falls between two points."""
+        """Never smaller than the step, so no sample falls between two points.
+
+        A counter rate needs two samples inside its window, so (Grafana's rate
+        interval) it also spans the step plus one scrape.
+        """
+        if self.kind == "counter":
+            return max(step + self.scrape, self.floor)
         return max(step, self.floor)
 
     def _by_alias(self, expression: str) -> str:
@@ -90,7 +96,9 @@ class MetricQuery:
         """The highest raw value in the range; averaged points would understate it."""
         if self.kind != "counter":
             return f"max_over_time({self.family}{selector}[{duration}s])"
-        raw = self._by_alias(f"rate({self.family}{selector}[{self.floor}s])")
+        # Evaluated every floor seconds, each over floor + one scrape: no gap between windows.
+        window = self.floor + self.scrape
+        raw = self._by_alias(f"rate({self.family}{selector}[{window}s])")
         return f"max_over_time({raw}[{duration}s:{self.floor}s])"
 
     def total(self, selector: str, duration: int) -> str | None:
@@ -188,6 +196,7 @@ def _series(
     peaks: dict[str, float],
     totals: dict[str, float],
     label: SeriesLabel,
+    fresh_after: float,
 ) -> MetricSeries:
     """A series with its summary; a series without its label is the whole fleet."""
     key = name or ""
@@ -196,7 +205,12 @@ def _series(
         labels={label.value: name} if name else {},
         points=points,
         summary=SeriesSummary(
-            latest=found[-1] if found else None,
+            # Only a value from the last step is "now"; an older one is a gap.
+            latest=found[-1]
+            if found
+            and points[-1].value is not None
+            and points[-1].timestamp > fresh_after
+            else None,
             average=sum(found) / len(found) if found else None,
             peak=peaks.get(key),
             total=totals.get(key),
@@ -289,7 +303,7 @@ class PrometheusReader:
         metric: Metric,
         range: MetricRange,
         node: str | None,
-        aliases: Callable[[str], list[str]] | None = None,
+        aliases: Callable[[str], list[str]],
     ) -> MetricsSeriesResponse:
         """One range read plus an instant read each for the peak and the total.
 
@@ -304,7 +318,7 @@ class PrometheusReader:
         if node is not None:
             values = (
                 [node]
-                if label is SeriesLabel.NODE_ID or aliases is None
+                if label is SeriesLabel.NODE_ID
                 else await asyncio.to_thread(aliases, node)
             )
             if not values:
@@ -342,6 +356,7 @@ class PrometheusReader:
                     peaks,
                     totals,
                     label,
+                    end - step,
                 )
                 for row in matrix.result
             ]
@@ -393,7 +408,7 @@ def install_metrics_routes(
     app: FastAPI,
     authenticated: Any,
     reader: PrometheusReader,
-    served_aliases: Callable[[str], list[str]] | None = None,
+    served_aliases: Callable[[str], list[str]],
 ) -> None:
     """`served_aliases` maps a Spark id to the aliases its loaded runs serve."""
     _ADMIN_OPERATION_IDS[("get", "/api/metrics/series")] = "getMetricsSeries"
