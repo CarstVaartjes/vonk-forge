@@ -6,13 +6,14 @@ explicit list of commands. Every path and name here is taken from what the
 installers create (`deploy/compose/`, `nas_setup/`, `packaging/`,
 `rust/crates/vonk-spark-setup`). Run the Spark steps first, then the Controller.
 
-Large model files are kept unless you take the optional step that removes them.
-The parts are independent: you can remove one Spark and keep the rest.
+Unused data is removed. The Controller's model cache is the authoritative copy
+and is kept unless you take the optional step that removes it; a Spark's model
+cache is a copy of it and goes with the Spark. The parts are independent: you can remove one Spark and keep the rest.
 
 | Part | Removed by the default steps | Kept by default | Removed by the optional step |
 | --- | --- | --- | --- |
 | Controller (NAS) | containers, networks, images | named volumes (database, model cache, image registry, CA state) and the `vonk-forge/` project directory with `.env` and `secrets/` | volumes, then the directory |
-| Spark | package (agent, helper, monitor), units, configuration, identity, workloads, runtime images, swap file, firewall rules | the Spark model cache (`/var/lib/vonk-forge-agent/distribution`) | model cache, the `vonk-agent` account |
+| Spark | package (agent, helper, monitor), units, configuration, identity, workloads, runtime images, swap file, firewall rules | the `vonk-agent` account | the `vonk-agent` account |
 
 ## 1. Remove a Spark
 
@@ -63,7 +64,8 @@ Docker itself is not installed by Vonk Forge and stays.
 
 The firewall unit adds a `VONK-FORGE` chain (jumped to from `DOCKER-USER`) and a
 `VONK-FORGE-HOST` chain (jumped to from `INPUT`). Stopping the unit does not
-remove them; a reboot or a Docker restart does. To remove them now:
+remove them; a reboot does (the unit is `PartOf` Docker, and a Docker restart re-applies
+them). To remove them now:
 
 ```sh
 while sudo iptables -w -D DOCKER-USER -j VONK-FORGE 2>/dev/null; do :; done
@@ -89,9 +91,9 @@ holds until the next boot; to clear it now run `sudo nvidia-smi -rgc`.
 ### 1f. Remove configuration, state and the hosts entry (`sudo`)
 
 ```sh
-sudo rm -rf /etc/vonk-forge-agent /var/lib/vonk-forge /run/vonk-forge-agent /run/vonk-forge-package-candidates
+sudo rm -rf /etc/vonk-forge-agent /var/lib/vonk-forge 
 sudo sed -i '/^# BEGIN VONK FORGE MANAGED HOSTS$/,/^# END VONK FORGE MANAGED HOSTS$/d' /etc/hosts
-sudo find /var/lib/vonk-forge-agent -mindepth 1 -maxdepth 1 ! -name distribution -exec rm -rf {} +
+sudo rm -rf /var/lib/vonk-forge-agent
 ```
 
 - `/etc/vonk-forge-agent` holds `agent.toml`, `controller-ca.pem`,
@@ -100,24 +102,19 @@ sudo find /var/lib/vonk-forge-agent -mindepth 1 -maxdepth 1 ! -name distribution
 - `/var/lib/vonk-forge` holds helper state, rollback and upgrade records, the
   swap directory and the runtime-image receipts.
 - The `sed` removes the controller hostname block the Spark installer wrote.
-- The last command empties the agent's data directory
-  `/var/lib/vonk-forge-agent` except `distribution/`, the model cache. This
-  deletes the agent identity (`credentials/`), its journal (`state.sqlite`), the
-  installations, runs, build data and the rootless Podman storage (`containers/`).
-  Installations hard-link into the model cache, so the cache stays whole.
+- `/var/lib/vonk-forge-agent` is the agent's data directory: the agent
+  identity (`credentials/`), its journal (`state.sqlite`), the installations,
+  runs, build data, the rootless Podman storage (`containers/`) and the Spark
+  model cache (`distribution/`). The authoritative copy of every model is on the
+  Controller, so the Spark copy is removed with the rest.
 
-The Spark is now clean except for the model cache and the account.
+The Spark is now clean except for the account.
 
-### 1g. Optional: remove the model cache and the account (`sudo`)
-
-The model cache can be hundreds of GB. Keeping it means a later install on this
-Spark reuses the files. To remove it, and the service account:
+### 1g. Optional: remove the account (`sudo`)
 
 ```sh
-sudo rm -rf /var/lib/vonk-forge-agent
 sudo loginctl terminate-user vonk-agent 2>/dev/null
 sudo userdel vonk-agent
-sudo groupdel vonk-agent 2>/dev/null
 ```
 
 `userdel` also drops the account's subordinate ID ranges from `/etc/subuid` and
@@ -125,14 +122,48 @@ sudo groupdel vonk-agent 2>/dev/null
 agent depends on (podman, crun, and so on) are left installed; remove them with
 `apt-get autoremove` only if nothing else uses them.
 
-### 1h. Check
+### 1h. Check and revert the headless boot target
 
 ```sh
-systemctl list-unit-files 'vonk-forge*'
+find /etc/systemd/system /lib/systemd/system -name 'vonk-forge*'
 ```
 
-should list nothing. If a dangling `vonk-forge*` link remains in
-`/etc/systemd/system`, delete it and run `sudo systemctl daemon-reload`.
+should list nothing. The package has no `postrm`, so the enablement link
+`/etc/systemd/system/multi-user.target.wants/vonk-forge-package-rollback.service`
+is left dangling by the purge. Remove it and the package's enablement records,
+then reload:
+
+```sh
+sudo find /etc/systemd/system -name 'vonk-forge*' -exec rm -rf {} +
+sudo rm -f /var/lib/systemd/deb-systemd-helper-*/{,*/}vonk-forge*
+sudo systemctl daemon-reload
+```
+
+The helper sets the default boot target to `multi-user.target` and stops the
+display manager. On a desktop host, restore the graphical session with:
+
+```sh
+sudo systemctl set-default graphical.target
+```
+
+### If a purge ran during a package upgrade
+
+`prerm` can refuse with exit 1 ("cannot remove package during durable upgrade
+recovery"). Retry once the recovery has finished, or remove the files below by
+hand. The preinst recovery writes `/var/lib/vonk-forge/package-upgrade/`
+(`intent`, `lock`, `agent-blocked`, `recovery-capsule/`) and
+`/var/lib/vonk-forge/helper-upgrade.pending`, which 1f removes, and these
+systemd files, which it does not:
+
+```sh
+sudo rm -f /lib/systemd/system/vonk-forge-package-upgrade-recover-capsule.service \
+  /lib/systemd/system/multi-user.target.wants/vonk-forge-package-upgrade-recover-capsule.service \
+  /lib/systemd/system/vonk-forge-agent.service.d/10-package-upgrade-capsule.conf \
+  /lib/systemd/system/vonk-forge-agent.service.d/20-package-upgrade-recovery.conf \
+  /lib/systemd/system/vonk-forge-package-upgrade-recover.service.d/10-capsule-owner.conf \
+  /lib/systemd/system/vonk-forge-package-helper.socket.d/20-package-upgrade-recovery.conf
+sudo systemctl daemon-reload
+```
 
 ## 2. Remove the Controller
 
@@ -181,21 +212,22 @@ sudo docker volume ls -q --filter label=com.docker.compose.project=vonk-forge \
   | grep -v '_model-cache$' | xargs -r sudo docker volume rm
 ```
 
-### 2c. Remove the project directory
+### 2c. Optional, together with 2b: remove the project directory
 
-The installer created exactly `docker-compose.yaml`, `.env`, `secrets/`,
-`backups/` and `backups-offhost/`. `backups/` holds PostgreSQL dumps; copy it
-elsewhere first if you may restore later. `secrets/` holds the generated
-passwords and the local CA keys.
+The installer created `docker-compose.yaml`, `.env`, `secrets/`, `backups/`
+and `backups-offhost/`, plus the hidden `.vonk-verified-secrets/` and
+`.vonk-publication/` directories, and `../.vonk-setup.lock` next to the project
+directory. `backups/` holds PostgreSQL dumps; copy it elsewhere first if you may
+restore later. `secrets/` and `.env` are needed to reuse the volumes you kept
+in 2b (the database password and the CA keys live there): if you kept volumes,
+keep this directory too and skip this step.
 
 ```sh
-cd .. && sudo rm -rf vonk-forge
+cd .. && sudo rm -rf vonk-forge && sudo rm -f .vonk-setup.lock
 ```
 
 If you set `VONK_BACKUP_OFFHOST_PATH` in `.env`, that directory is outside the
-project and stays until you delete it. The installer leaves no resident service
-or other file on the preparation workstation (its `uv` environment is temporary).
-
+project and stays until you delete it. 
 ### 2d. Secure remote only: Tailscale
 
 Removing the project stops the gateway but does not remove it from your
@@ -216,5 +248,6 @@ Remove the DNS or hosts entries for `vonk-forge.local`, `enroll.vonk-forge.local
 uv tool uninstall vonk-cluster-profiles
 ```
 
-(`uv tool list` shows the exact name.) Delete the token file you created for
-`VONK_CONTROL_TOKEN_FILE`.
+(`uv tool list` shows the exact name.) Delete `~/.cache/vonkctl/` (or
+`$XDG_CACHE_HOME/vonkctl/`), the update-notice cache, and the token file you
+created for `VONK_CONTROL_TOKEN_FILE`.
