@@ -24,6 +24,7 @@ import { formatBytes } from "../lib/fleet";
 import { EmptyState } from "./empty-state";
 import { LibraryRecipeDownloadAction } from "./library-recipe-download-action";
 import { LibraryRecipeRemoveAction } from "./library-recipe-remove-action";
+import { NOT_REPORTED, useCapabilityWords } from "./library-vocabulary";
 import {
   RecipeQualificationBadge,
   RecipeQualificationEvidence,
@@ -459,6 +460,7 @@ export function LibraryWorkcell({
   snapshot: LibraryViewSnapshot;
   [key: string]: unknown;
 }) {
+  const words = useCapabilityWords();
   const records = buildLibraryRecipeRecords(snapshot);
   const matching = filterLibraryRecipeRecords(records, filters, query);
   const models = [...new Map(records.map((record) => [record.modelKey, record])).values()].filter(
@@ -544,7 +546,7 @@ export function LibraryWorkcell({
             <option value="">All usage</option>
             {[...new Set(records.flatMap((record) => record.capabilities))].sort().map((value) => (
               <option key={value} value={value}>
-                {value}
+                {words.label(value)}
               </option>
             ))}
           </select>
@@ -786,7 +788,7 @@ export function LibraryWorkcell({
                       <small>
                         {formatWire(model.modelFileCount)} files · {formatBytes(model.modelBytes)}
                       </small>
-                      <em>{model.capabilities.join(" · ") || "Capabilities not declared"}</em>
+                      <em>{model.capabilities.map(words.label).join(" · ") || NOT_REPORTED}</em>
                     </span>
                   </NavigateLink>
                 </li>
@@ -817,7 +819,7 @@ export function LibraryWorkcell({
                 <span>
                   {formatWire(selectedModel.modelFileCount)} files ·{" "}
                   {formatBytes(selectedModel.modelBytes)} ·{" "}
-                  {selectedModel.capabilities.join(" · ") || "Capabilities not declared"}
+                  {selectedModel.capabilities.map(words.label).join(" · ") || NOT_REPORTED}
                 </span>
                 {selectedModel.cacheUsage && (
                   <span>

@@ -25,6 +25,7 @@ export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
 export type CatalogSyncStatus = components["schemas"]["ManagedCatalogSyncResponse"];
+export type LibraryVocabulary = components["schemas"]["CatalogVocabulary"];
 export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionView"];
 export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
 export type ActivityFilters = { state?: string; target?: string; requestId?: string };
@@ -197,6 +198,7 @@ export type FleetChangeEvent = components["schemas"]["FleetChangeEvent"];
 export type FleetStreamEvent = components["schemas"]["FleetStreamEvent"];
 export interface LibraryApi {
   catalogSyncStatus(signal?: AbortSignal): Promise<CatalogSyncStatus | null>;
+  libraryVocabulary(signal?: AbortSignal): Promise<LibraryVocabulary | null>;
   modelLibrary(
     cursor?: string,
     sort?: LibrarySort,

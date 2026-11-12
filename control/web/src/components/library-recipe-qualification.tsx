@@ -2,6 +2,7 @@ import type { RecipeQualification } from "../api/types";
 import { compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
 import { QualificationOutcome, QualificationStatus } from "../api/vocabulary.generated";
 import { Time } from "./time";
+import { useStatusMeaning } from "./library-vocabulary";
 
 type PublishedStatus = RecipeQualification["status"];
 type QualificationRecord = NonNullable<RecipeQualification["last_pass"]>;
@@ -33,12 +34,13 @@ export function RecipeQualificationBadge({
   qualification: RecipeQualification | null | undefined;
 }) {
   const status = qualificationStatus(qualification);
+  const meaning = useStatusMeaning();
   return (
     <span
       className="library-badge"
       data-badge="qualification"
       data-qualification={QUALIFICATION_TONES[status]}
-      title="Hardware qualification published with the recipe library"
+      title={meaning(status)}
     >
       {status}
     </span>

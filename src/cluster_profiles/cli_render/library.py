@@ -34,6 +34,7 @@ from .common import (
     _words,
 )
 from .progress import progress_line
+from .vocabulary import NOT_REPORTED, capability_label, status_meaning
 
 
 class LibraryNoun(StrEnum):
@@ -83,6 +84,13 @@ def _qualification_evidence(value: object) -> tuple[str, str] | None:
     return ("Last failure", f"{record.cause_summary} ({tested})")
 
 
+def _capability_words(value: object) -> str:
+    """The capabilities by their published labels; none declared is not reported."""
+    if not isinstance(value, list):
+        return _words(value)
+    return ", ".join(capability_label(_text(name)) for name in value) or NOT_REPORTED
+
+
 def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> None:
     identity = _object(item.get("identity"), "identity")
     local = _object(item.get("local"), "local")
@@ -100,7 +108,7 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
     )
     selector = item.get("selector")
     print(f"USE {_text(selector)}")
-    _field("Usage", _words(item.get("usage")))
+    _field("Usage", _capability_words(item.get("usage")))
     _field("Disk", _bytes(resources.disk_bytes))
     if noun == LibraryNoun.MODEL:
         raw_usage = _optional(item.get("cache_usage"), "cache_usage")
@@ -141,7 +149,10 @@ def _library_item(item: Mapping[str, object], noun: str, *, detail: bool) -> Non
         else:
             _field("Readiness", "not assessed")
         # Informative only: the published hardware status never gates a step.
-        _field("Qualification", _qualification_status(item.get("qualification")))
+        status = _qualification_status(item.get("qualification"))
+        _field("Qualification", status)
+        if (meaning := status_meaning(status)) is not None:
+            _field("Meaning", meaning)
         if (evidence := _qualification_evidence(item.get("qualification"))) is not None:
             _field(*evidence)
     preparation = _optional(local.get("preparation"), "preparation")

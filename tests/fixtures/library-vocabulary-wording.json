@@ -1,0 +1,301 @@
+{
+  "comment": "Capability labels and status meanings for the Controller web Library and `vonkctl recipe detail`. `vocabulary` is what the contract publishes (`catalog_vocabulary()`; the vonkctl test fails when it drifts, regenerate it from that call). The web test renders each case under that vocabulary and compares the capability chips' text and titles and the status badge title; the vonkctl test renders the same input and compares the printed `Usage` and `Meaning` lines. Both must equal the literals here exactly. A capability the release does not list shows its name; none declared shows `Not reported`.",
+  "vocabulary": {
+    "categories": [
+      {
+        "id": "language",
+        "label": "Language"
+      },
+      {
+        "id": "code",
+        "label": "Code"
+      },
+      {
+        "id": "vision",
+        "label": "Vision"
+      },
+      {
+        "id": "image",
+        "label": "Image"
+      },
+      {
+        "id": "video",
+        "label": "Video"
+      },
+      {
+        "id": "audio",
+        "label": "Audio"
+      },
+      {
+        "id": "3d",
+        "label": "3D"
+      },
+      {
+        "id": "other",
+        "label": "Other"
+      }
+    ],
+    "capabilities": [
+      {
+        "name": "3d-generation",
+        "label": "3D generation",
+        "description": "Creates 3D assets such as meshes from text or images.",
+        "category": "3d"
+      },
+      {
+        "name": "audio-generation",
+        "label": "Audio generation",
+        "description": "Creates music or sound.",
+        "category": "audio"
+      },
+      {
+        "name": "audio-understanding",
+        "label": "Audio understanding",
+        "description": "Takes audio as input and answers about it.",
+        "category": "audio"
+      },
+      {
+        "name": "chat",
+        "label": "Chat",
+        "description": "Holds a conversation in turns.",
+        "category": "language"
+      },
+      {
+        "name": "code-generation",
+        "label": "Code generation",
+        "description": "Writes and edits program code.",
+        "category": "code"
+      },
+      {
+        "name": "decision",
+        "label": "Decision",
+        "description": "Chooses between options and returns the choice.",
+        "category": "other"
+      },
+      {
+        "name": "image-editing",
+        "label": "Image editing",
+        "description": "Changes an existing image from an instruction.",
+        "category": "image"
+      },
+      {
+        "name": "image-generation",
+        "label": "Image generation",
+        "description": "Creates images from text.",
+        "category": "image"
+      },
+      {
+        "name": "image-understanding",
+        "label": "Image understanding",
+        "description": "Takes images as input and answers about them.",
+        "category": "vision"
+      },
+      {
+        "name": "image-upscaling",
+        "label": "Image upscaling",
+        "description": "Raises the resolution of an image.",
+        "category": "image"
+      },
+      {
+        "name": "material-estimation",
+        "label": "Material estimation",
+        "description": "Estimates surface materials of a 3D asset or image.",
+        "category": "3d"
+      },
+      {
+        "name": "motion-capture",
+        "label": "Motion capture",
+        "description": "Recovers body motion from video.",
+        "category": "3d"
+      },
+      {
+        "name": "motion-generation",
+        "label": "Motion generation",
+        "description": "Creates character motion from text.",
+        "category": "3d"
+      },
+      {
+        "name": "ocr",
+        "label": "OCR",
+        "description": "Reads text from images and documents.",
+        "category": "vision"
+      },
+      {
+        "name": "parametric-body-model",
+        "label": "Parametric body model",
+        "description": "Represents a human body by shape and pose parameters.",
+        "category": "3d"
+      },
+      {
+        "name": "person-detection",
+        "label": "Person detection",
+        "description": "Finds people in images or video.",
+        "category": "vision"
+      },
+      {
+        "name": "reasoning",
+        "label": "Reasoning",
+        "description": "Works through a problem in steps before answering.",
+        "category": "language"
+      },
+      {
+        "name": "speculative-decoding",
+        "label": "Speculative decoding",
+        "description": "A draft model that speeds up another model's text generation.",
+        "category": "language"
+      },
+      {
+        "name": "speech-recognition",
+        "label": "Speech recognition",
+        "description": "Turns speech into text.",
+        "category": "audio"
+      },
+      {
+        "name": "text-generation",
+        "label": "Text generation",
+        "description": "Continues or writes text from a prompt.",
+        "category": "language"
+      },
+      {
+        "name": "text-to-speech",
+        "label": "Text to speech",
+        "description": "Speaks text aloud.",
+        "category": "audio"
+      },
+      {
+        "name": "tool-use",
+        "label": "Tool use",
+        "description": "Calls functions or tools you describe.",
+        "category": "language"
+      },
+      {
+        "name": "video-generation",
+        "label": "Video generation",
+        "description": "Creates video clips.",
+        "category": "video"
+      },
+      {
+        "name": "video-understanding",
+        "label": "Video understanding",
+        "description": "Takes video as input and answers about it.",
+        "category": "vision"
+      },
+      {
+        "name": "voice-cloning",
+        "label": "Voice cloning",
+        "description": "Speaks in the voice of a reference recording.",
+        "category": "audio"
+      },
+      {
+        "name": "voice-design",
+        "label": "Voice design",
+        "description": "Creates a new voice from a description.",
+        "category": "audio"
+      }
+    ],
+    "statuses": [
+      {
+        "status": "Working",
+        "meaning": "Passed on a real DGX Spark for this exact recipe, runtime image and model.",
+        "verified": true
+      },
+      {
+        "status": "Re-check: worked before",
+        "meaning": "Passed before, but the recipe, image or model has changed since.",
+        "verified": false
+      },
+      {
+        "status": "Fix to verify",
+        "meaning": "A recipe failure was followed by a change to the recipe, image or model.",
+        "verified": false
+      },
+      {
+        "status": "Failed: recipe",
+        "meaning": "Failed on a real DGX Spark with the current recipe, image and model.",
+        "verified": false
+      },
+      {
+        "status": "Blocked: platform",
+        "meaning": "Could not run because of a platform fault, not because of the recipe.",
+        "verified": false
+      },
+      {
+        "status": "Untested",
+        "meaning": "No hardware verdict yet.",
+        "verified": false
+      },
+      {
+        "status": "Can't test here",
+        "meaning": "Needs more Sparks than the test fleet has.",
+        "verified": false
+      },
+      {
+        "status": "Testing now",
+        "meaning": "Being tested on hardware now; the earlier result stays visible.",
+        "verified": false
+      },
+      {
+        "status": "Not yet verified",
+        "meaning": "No hardware verdict yet; the reason is shown under the badge.",
+        "verified": false
+      }
+    ]
+  },
+  "capabilities": [
+    {
+      "name": "published labels",
+      "usage": [
+        "chat",
+        "code-generation"
+      ],
+      "web": [
+        "Chat",
+        "Code generation"
+      ],
+      "web_titles": [
+        "Language: Holds a conversation in turns.",
+        "Code: Writes and edits program code."
+      ],
+      "vonkctl": "Usage: Chat, Code generation"
+    },
+    {
+      "name": "a capability the release does not list shows its name",
+      "usage": [
+        "chat",
+        "hologram"
+      ],
+      "web": [
+        "Chat",
+        "hologram"
+      ],
+      "web_titles": [
+        "Language: Holds a conversation in turns.",
+        null
+      ],
+      "vonkctl": "Usage: Chat, hologram"
+    },
+    {
+      "name": "none declared",
+      "usage": [],
+      "web": [
+        "Not reported"
+      ],
+      "web_titles": [
+        null
+      ],
+      "vonkctl": "Usage: Not reported"
+    }
+  ],
+  "statuses": [
+    {
+      "status": "Working",
+      "web_title": "Passed on a real DGX Spark for this exact recipe, runtime image and model.",
+      "vonkctl": "Meaning: Passed on a real DGX Spark for this exact recipe, runtime image and model."
+    },
+    {
+      "status": "Not yet verified",
+      "web_title": "No hardware verdict yet; the reason is shown under the badge.",
+      "vonkctl": "Meaning: No hardware verdict yet; the reason is shown under the badge."
+    }
+  ]
+}

@@ -9,11 +9,13 @@ from ..cli_artifact_jobs import (
     ArtifactJobClient,
     run_artifact_job,
 )
+from ..cli_render.vocabulary import use_vocabulary
 from ..control_client import (
     ControlClientError,
     ControlHTTPError,
     ControlNotFound,
 )
+from ..generated_control.models.catalog_vocabulary import CatalogVocabulary
 from .cache_removal import _remove_model, _remove_recipe
 from .cache_submission import (
     _submit_cache_request,
@@ -58,12 +60,30 @@ def _library_query(args: argparse.Namespace, *, recipe: bool) -> dict[str, objec
     return _query(**values)
 
 
+def _release_words(client: ControllerClient, args: argparse.Namespace) -> None:
+    """Fetch the release's words once, for the terminal view of this command.
+
+    They are informative: a Controller without them (none published, or older)
+    leaves the names as they are, and ``--json`` output never needs them.
+    """
+    use_vocabulary(None)
+    if getattr(args, "global_json", False) or getattr(args, "json", False):
+        return
+    try:
+        document = client.request("GET", "/api/library/vocabulary", retry=False)
+        use_vocabulary(CatalogVocabulary.from_dict(document))
+    except ControlClientError:
+        pass
+
+
 def _model(
     args: argparse.Namespace,
     client: ControllerClient,
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "model_action", None)
+    if action in {None, "library", "detail"}:
+        _release_words(client, args)
     if action == "progress":
         return _cache_progress(client, "model", args, factory)
     if action == "resume-access":
@@ -145,6 +165,8 @@ def _recipe(
     factory: Callable[[], str],
 ) -> dict[str, object]:
     action = getattr(args, "recipe_action", None)
+    if action in {None, "library", "detail"}:
+        _release_words(client, args)
     if action == "progress":
         try:
             return _cache_progress(client, "recipe", args, factory)
