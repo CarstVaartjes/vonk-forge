@@ -2,26 +2,60 @@ import { useEffect, useId, useState } from "react";
 import type { ControlApi, Metric, MetricRange, MetricsSeriesResponse } from "../api/types";
 import { safeErrorText } from "../lib/error-display";
 
-const METRICS: Array<[Metric, string, string]> = [
-  ["gpu_utilization", "GPU utilisation", "%"],
-  ["gpu_memory_used", "GPU memory used", "bytes"],
-  ["host_memory_used", "Host memory used", "bytes"],
-  ["gpu_temperature", "GPU temperature", "°C"],
-  ["request_rate", "Requests per model", "requests/s"],
-  ["certificate_expiry", "Certificate time to expiry", "seconds"],
+type Unit = "%" | "GiB" | "°C" | "requests/s";
+const GIB = 1024 ** 3;
+const TILES: Array<{ metric: Metric; title: string; unit: Unit; scale: number }> = [
+  { metric: "gpu_utilization", title: "GPU utilisation", unit: "%", scale: 1 },
+  { metric: "host_memory_used", title: "Unified memory used", unit: "GiB", scale: GIB },
+  { metric: "gpu_temperature", title: "GPU temperature", unit: "°C", scale: 1 },
+  { metric: "request_rate", title: "Requests per model", unit: "requests/s", scale: 1 },
 ];
-const COLORS = ["var(--mint)", "var(--text)", "var(--warning)"];
+const COLORS = ["var(--mint)", "var(--text)", "var(--warning)", "var(--info)", "var(--titanium)"];
 
-export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit: string }) {
+function formatValue(value: number, unit: Unit): string {
+  const text = Math.abs(value) >= 100 ? value.toFixed(0) : value.toPrecision(3);
+  return `${Number(text)} ${unit}`;
+}
+
+/** "12 days", "5 hours", "20 minutes": the time left, in the largest whole unit. */
+export function formatTimeLeft(seconds: number): string {
+  if (seconds <= 0) return "now";
+  const [size, name] =
+    seconds >= 86400 ? [86400, "day"] : seconds >= 3600 ? [3600, "hour"] : [60, "minute"];
+  const count = Math.max(1, Math.floor(seconds / size));
+  return `${count} ${name}${count === 1 ? "" : "s"}`;
+}
+
+function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
+  const node = labels.node_id;
+  if (node) return names[node] ?? node;
+  return labels.requested_model ?? "All Sparks";
+}
+
+export function SeriesChart({
+  data,
+  unit,
+  scale = 1,
+  names = {},
+}: {
+  data: MetricsSeriesResponse;
+  unit: Unit;
+  scale?: number;
+  names?: Record<string, string>;
+}) {
   const values = data.series.flatMap((series) =>
-    series.points.flatMap((point) => (point.value === null ? [] : [Number(point.value)])),
+    series.points.flatMap((point) => (point.value === null ? [] : [Number(point.value) / scale])),
   );
-  if (!values.length) return <p role="status">No samples reported in this range.</p>;
+  if (!values.length) return <p role="status">No samples in this range</p>;
   const low = values.reduce((min, value) => Math.min(min, value), 0),
     high = values.reduce((max, value) => Math.max(max, value), 1);
+  const clock: Intl.DateTimeFormatOptions =
+    Number(data.end) - Number(data.start) > 86400 * 2
+      ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+      : { hour: "2-digit", minute: "2-digit" };
   const x = (timestamp: number) =>
     50 + (530 * (timestamp - Number(data.start))) / (Number(data.end) - Number(data.start));
-  const y = (value: number) => 160 - (140 * (value - low)) / (high - low);
+  const y = (value: number) => 160 - (140 * (value / scale - low)) / (high - low);
   return (
     <>
       <svg
@@ -31,10 +65,10 @@ export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit:
         style={{ width: "100%", maxHeight: 240 }}
       >
         <text x="0" y="18" fill="currentColor" fontSize="11">
-          {high.toPrecision(3)}
+          {formatValue(high, unit)}
         </text>
         <text x="0" y="163" fill="currentColor" fontSize="11">
-          {low.toPrecision(3)}
+          {formatValue(low, unit)}
         </text>
         <path d="M50 20V160H580" fillOpacity={0} stroke="currentColor" opacity="0.3" />
         {data.series.map((series, index) => {
@@ -63,20 +97,16 @@ export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit:
           );
         })}
         <text x="50" y="185" fill="currentColor" fontSize="11">
-          {new Date(Number(data.start) * 1000).toLocaleString()}
+          {new Date(Number(data.start) * 1000).toLocaleString([], clock)}
         </text>
         <text x="580" y="185" textAnchor="end" fill="currentColor" fontSize="11">
-          {new Date(Number(data.end) * 1000).toLocaleString()}
+          {new Date(Number(data.end) * 1000).toLocaleString([], clock)}
         </text>
       </svg>
       <ul aria-label="Series legend">
         {data.series.map((series, index) => (
           <li key={JSON.stringify(series.labels)} style={{ color: COLORS[index % COLORS.length] }}>
-            {Object.entries(series.labels)
-              .filter(([key]) => !["__name__", "job", "instance"].includes(key))
-              .map(([key, value]) => `${key}: ${value}`)
-              .join(" · ") || "Fleet"}{" "}
-            · {unit}
+            {seriesName(series.labels, names)} · {unit}
           </li>
         ))}
       </ul>
@@ -84,45 +114,68 @@ export function SeriesChart({ data, unit }: { data: MetricsSeriesResponse; unit:
   );
 }
 
-export function MetricsChart({ api, node }: { api: ControlApi; node?: string }) {
+type Tile = { data: MetricsSeriesResponse | null; error: string | null };
+
+function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): string[] {
+  return data.series.flatMap((series) => {
+    const last = [...series.points].reverse().find((point) => point.value !== null);
+    return last
+      ? [
+          `${seriesName(series.labels, names)}: certificate expires in ${formatTimeLeft(Number(last.value))}`,
+        ]
+      : [];
+  });
+}
+
+export function MetricsChart({
+  api,
+  node,
+  names = {},
+}: {
+  api: ControlApi;
+  node?: string;
+  names?: Record<string, string>;
+}) {
   const id = useId();
-  const [metric, setMetric] = useState<Metric>("gpu_utilization");
   const [range, setRange] = useState<MetricRange>("6h");
-  const [data, setData] = useState<MetricsSeriesResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
+  const wanted = [
+    ...TILES.filter((tile) => !node || tile.metric !== "request_rate").map((tile) => tile.metric),
+    "certificate_expiry" as Metric,
+  ];
   useEffect(() => {
     const controller = new AbortController();
-    setData(null);
-    setError(null);
-    api.metricsSeries(metric, range, node, controller.signal).then(
-      (result) => {
-        if (!controller.signal.aborted) setData(result);
-      },
-      (cause) => {
-        if (!controller.signal.aborted)
-          setError(safeErrorText(cause instanceof Error ? cause.message : "Metrics unavailable"));
-      },
-    );
+    setTiles({});
+    // Each tile reads on its own, so one failed read leaves the others standing.
+    for (const metric of wanted) {
+      api.metricsSeries(metric, range, node, controller.signal).then(
+        (data) => {
+          if (!controller.signal.aborted)
+            setTiles((current) => ({ ...current, [metric]: { data, error: null } }));
+        },
+        (cause) => {
+          if (!controller.signal.aborted)
+            setTiles((current) => ({
+              ...current,
+              [metric]: {
+                data: null,
+                error: safeErrorText(
+                  cause instanceof Error ? cause.message : "Metrics unavailable",
+                ),
+              },
+            }));
+        },
+      );
+    }
     return () => controller.abort();
-  }, [api, metric, range, node, retry]);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `wanted` is derived from `node`
+  }, [api, range, node, retry]);
+  const expiry = tiles.certificate_expiry?.data;
   return (
     <section aria-labelledby={id} className="fleet-metrics">
-      <h2 id={id}>Metrics</h2>
+      <h2 id={id}>Trends</h2>
       <div className="button-row">
-        <label>
-          Metric{" "}
-          <select
-            value={metric}
-            onChange={(event) => setMetric(event.currentTarget.value as Metric)}
-          >
-            {METRICS.filter(([key]) => !node || key !== "request_rate").map(([key, label]) => (
-              <option key={key} value={key}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
         <label>
           Range{" "}
           <select
@@ -144,13 +197,24 @@ export function MetricsChart({ api, node }: { api: ControlApi; node?: string }) 
           Refresh metrics
         </button>
       </div>
-      {error ? (
-        <p role="status">Metrics unavailable: {error}</p>
-      ) : data ? (
-        <SeriesChart data={data} unit={METRICS.find(([key]) => key === metric)?.[2] ?? ""} />
-      ) : (
-        <p role="status">Reading metrics…</p>
-      )}
+      <div className="metric-tiles">
+        {TILES.filter((tile) => !node || tile.metric !== "request_rate").map((tile) => {
+          const state = tiles[tile.metric];
+          return (
+            <section key={tile.metric} className="metric-tile" aria-label={tile.title}>
+              <h3>{tile.title}</h3>
+              {state?.error ? (
+                <p role="status">Metrics unavailable: {state.error}</p>
+              ) : state?.data ? (
+                <SeriesChart data={state.data} unit={tile.unit} scale={tile.scale} names={names} />
+              ) : (
+                <p role="status">Reading metrics…</p>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      {expiry && timeLeft(expiry, names).map((line) => <p key={line}>{line}</p>)}
     </section>
   );
 }

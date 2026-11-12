@@ -409,7 +409,12 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
           </div>
         </section>
       )}
-      <MetricsChart api={api} />
+      <MetricsChart
+        api={api}
+        names={Object.fromEntries(
+          (fleet.snapshot?.nodes ?? []).map((node) => [node.id, nodeDisplayName(node)]),
+        )}
+      />
       {spark && <SparkDetail api={api} id={spark} onClose={() => selectSpark(null)} />}
     </div>
   );
