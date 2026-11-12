@@ -964,6 +964,7 @@ class ManagedRecipeCatalogSyncService:
             run.observed_commit = snapshot.commit
             run.library_version = snapshot.version
             run.library_updated_at = snapshot.updated_at
+            run.vocabulary = snapshot.vocabulary
             run.total_count = (
                 len(snapshot.items)
                 + len(snapshot.catalog_entities)

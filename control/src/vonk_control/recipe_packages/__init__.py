@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
+    CatalogVocabulary,
     ModelDefinition,
     ModelDisplay,
     RecipeApi,
@@ -876,11 +877,24 @@ class RecipePackageClient:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID, "recipe package index is not sorted"
             )
+        # The release's words: a vocabulary this contract cannot read costs only
+        # the words (a note), never the library; a release without one has none.
+        vocabulary: CatalogVocabulary | None = None
+        if "vocabulary" in index:
+            try:
+                vocabulary = CatalogVocabulary.model_validate(
+                    index["vocabulary"], extra="ignore"
+                )
+            except ValidationError as error:
+                display_notes.append(
+                    _index_problem(None, "catalog vocabulary is invalid", None, error)
+                )
         return RecipeLibrarySnapshot(
             commit=commit,
             items=tuple(items),
             repository=repository,
             version=version,
+            vocabulary=vocabulary,
             updated_at=updated_at,
             catalog_entities=tuple(catalog_entities),
             problems=tuple(problems),

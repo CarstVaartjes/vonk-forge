@@ -55,6 +55,13 @@ Sync status (`library_version`, `library_updated_at`), the Library page and
 changed. A release caught while its bundle is being replaced keeps the previous
 verified catalog active; the next sync picks up the new bundle.
 
+The release's index also publishes its **vocabulary**: the label, description and
+category of every capability and the meaning of every qualification status. A
+sync stores the newest release's vocabulary once (a JSON column of the sync run,
+read through `CatalogVocabulary`) and `GET /api/library/vocabulary` serves it (404
+when the synced release publishes none). The dashboard and `vonkctl` render these
+words from that endpoint; neither keeps a hand copy.
+
 Each sync verifies, before importing anything:
 
 1. the Sigstore bundle offline against the Sigstore public-good trust root

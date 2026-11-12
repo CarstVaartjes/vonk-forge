@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from vonk_forge_contracts import ModelDisplay, RecipeApi, RecipeDisplay
+from vonk_forge_contracts import (
+    CatalogVocabulary,
+    ModelDisplay,
+    RecipeApi,
+    RecipeDisplay,
+)
 from vonk_forge_contracts.model import ModelIdentity
 from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
 
@@ -127,6 +132,8 @@ class RecipeLibrarySnapshot:
     # recipes last changed.
     version: str | None = None
     updated_at: datetime | None = None
+    # The words the release publishes for capabilities and statuses.
+    vocabulary: CatalogVocabulary | None = None
 
 
 __all__ = [
