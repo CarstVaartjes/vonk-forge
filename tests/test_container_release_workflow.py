@@ -1163,13 +1163,13 @@ def test_supply_chain_evidence_gate_runs_on_every_pull_request() -> None:
 
     ``validate-release-images`` needs release metadata and image attestations,
     so it only runs once a tag is already being published.  The offline
-    supply-chain verifier also runs in the always-on ``supply-chain`` job, which
+    supply-chain verifier also runs in the ``supply-chain`` job (every full run), which
     is what makes an invalidated SBOM, protocol wheel or image pin fail before
     publication; that job must stay independent of the release metadata chain.
     """
 
     gate = job("supply-chain")
-    assert "needs:" not in gate
+    assert "release-metadata" not in gate
     assert "scripts/build-control-wheel" in gate
     assert (
         'scripts/verify-supply-chain --output-dir "$RUNNER_TEMP/supply-chain" --json'

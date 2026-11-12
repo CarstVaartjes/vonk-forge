@@ -30,9 +30,8 @@ AREA_JOBS = {
     # green lane run on that head.
     "lane": ("lane-proof",),
 }
-# Areas whose jobs also run on a member pull request; every other area job runs
-# only when the selector chose the full suites (`full`).
-MEMBER_AREAS = frozenset({"generated"})
+# Every job runs only when the selector chose the full suites (`full`): a member
+# pull request runs no jobs besides the selector and this gate.
 
 
 def _pairs(values: list[str], label: str) -> dict[str, str]:
@@ -52,16 +51,10 @@ def verify(
     if selector_result != "success":
         errors.append(f"selector result is {selector_result!r}, expected 'success'")
 
-    required_success = {"lint", "supply-chain", "repository-guards"}
-    for job in required_success:
-        if results.get(job) != "success":
-            errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")
-
-    for flag in ("full", "rust-sources"):
-        if selected.get(flag) not in {"true", "false"}:
-            errors.append(
-                f"{flag} selection is {selected.get(flag)!r}, expected 'true' or 'false'"
-            )
+    if selected.get("full") not in {"true", "false"}:
+        errors.append(
+            f"full selection is {selected.get('full')!r}, expected 'true' or 'false'"
+        )
     full = selected.get("full") == "true"
 
     def expect(job: str, run: bool) -> None:
@@ -71,8 +64,11 @@ def verify(
                 f"{job} result is {results.get(job)!r}, expected {expected!r}"
             )
 
+    for job in ("lint", "supply-chain", "repository-guards"):
+        expect(job, full)
+
     def chosen(area: str) -> bool:
-        return selected.get(area) == "true" and (full or area in MEMBER_AREAS)
+        return selected.get(area) == "true" and full
 
     for area in AREAS:
         selection = selected.get(area)
@@ -83,12 +79,8 @@ def verify(
         else:
             for job in AREA_JOBS[area]:
                 expect(job, chosen(area))
-    # A member pull request builds Rust only for Rust inputs, and runs the
-    # tests that exercise its changed paths instead of the complete suites.
-    rust_build = chosen("rust") or selected.get("rust-sources") == "true"
-    expect("rust-quality", rust_build)
-    expect("rust-tests", rust_build)
-    expect("targeted-tests", not full)
+    expect("rust-quality", chosen("rust"))
+    expect("rust-tests", chosen("rust"))
     expect("control-image-build", chosen("control") and chosen("nas-install"))
     expect("controller-spark-wire", chosen("rust") or chosen("control"))
     return errors

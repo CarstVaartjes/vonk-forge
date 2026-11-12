@@ -14,11 +14,7 @@ import yaml
 from tests.repository_guards import GUARDS, SCOPED
 
 ROOT = Path(__file__).resolve().parents[1]
-# ci.yml skips a labeled event for any label but release-acceptance.
-IGNORED_LABEL_IF = (
-    "${{ !(github.event.action == 'labeled' && "
-    "github.event.label.name != 'release-acceptance') }}"
-)
+FULL_ONLY = "needs.changes.outputs.full == 'true'"
 
 
 def unclassified(root: Path) -> set[str]:
@@ -74,8 +70,8 @@ def test_guard_runner_and_heavy_suite_use_complementary_selections() -> None:
 def test_ci_guards_are_unconditional_prepared_and_required() -> None:
     jobs = yaml.safe_load(ROOT.joinpath(".github/workflows/ci.yml").read_text())["jobs"]
     guards = jobs["repository-guards"]
-    assert guards.get("if", IGNORED_LABEL_IF) == IGNORED_LABEL_IF
-    assert "needs" not in guards
+    assert guards["if"] == FULL_ONLY
+    assert guards["needs"] == "changes"
     steps = guards["steps"]
     prepared = next(
         i

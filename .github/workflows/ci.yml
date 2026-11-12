@@ -66,10 +66,8 @@ jobs:
       # a member pull request runs the fast tier; every other run, including
       # an integration pull request, runs every suite and proof.
       full: ${{ steps.areas.outputs.full }}
-      rust_sources: ${{ steps.areas.outputs.rust_sources }}
       lane: ${{ steps.areas.outputs.lane }}
       upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
-      targeted_shards: ${{ steps.targeted.outputs.shards || '[1]' }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -105,20 +103,6 @@ jobs:
               --github-output </dev/null >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Size the targeted tests of a member pull request
-        id: targeted
-        # About a hundred test files per runner: a broad change spreads over
-        # as many shards as the complete control suite, a narrow one takes one.
-        if: steps.areas.outputs.full == 'false'
-        shell: bash
-        run: |
-          set -euo pipefail
-          files=$(scripts/select-changed-tests < "$RUNNER_TEMP/changed-paths.txt" | wc -l)
-          shards=$(((files + 99) / 100))
-          shards=$((shards < 1 ? 1 : shards > 6 ? 6 : shards))
-          echo "$files targeted test files over $shards shards"
-          echo "shards=[$(seq -s, 1 "$shards")]" >> "$GITHUB_OUTPUT"
-
       - name: Label integration pull requests
         # Visible marker only: acceptance is selected by the outputs above, not
         # by the label landing. Labels set with the workflow token start no run.
@@ -137,6 +121,8 @@ jobs:
 
       - name: Restore measured pytest durations
         id: timings
+        # Only the full suites read the durations.
+        if: steps.areas.outputs.full == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -160,7 +146,8 @@ jobs:
 
   lint:
     name: Ruff
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -196,7 +183,8 @@ jobs:
 
   supply-chain:
     name: Supply-chain evidence
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -231,7 +219,7 @@ jobs:
   rust-quality:
     name: Rust workspace lint
     needs: changes
-    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -264,7 +252,7 @@ jobs:
   rust-tests:
     name: Rust workspace tests
     needs: changes
-    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -511,6 +499,7 @@ jobs:
   generated-clients:
     name: Generated control clients
     needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -827,7 +816,8 @@ jobs:
 
   repository-guards:
     name: Repository guards
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -849,79 +839,6 @@ jobs:
           python3 scripts/repository-guards > "$guard_list"
           mapfile -t guards < "$guard_list"
           uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n 0 "${guards[@]}"
-
-  targeted-tests:
-    # A member pull request runs the test files that directly exercise its
-    # changed paths (scripts/select-changed-tests) instead of the complete
-    # suites; its integration pull request runs those once for the batch.
-    name: Targeted tests for changed paths (${{ matrix.shard }}-of-${{ strategy.job-total }})
-    needs: changes
-    if: needs.changes.outputs.full == 'false'
-    runs-on: ubuntu-24.04
-    # Hang bound, well above a complete shard's runtime.
-    timeout-minutes: 40
-    env:
-      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
-    strategy:
-      fail-fast: false
-      matrix:
-        # Sized by the selection; the job count is the only owner of the total.
-        shard: ${{ fromJSON(needs.changes.outputs.targeted_shards) }}
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Provide the canonical recipe library
-        uses: ./.github/actions/recipe-library
-      - name: Prepare the locked Python environment
-        uses: ./.github/actions/python-env
-      - name: Build recipe library index and packages
-        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
-      - name: Install completion shells and the Controller image ingress tool
-        uses: ./.github/actions/apt-install
-        with:
-          packages: skopeo zsh
-      - name: Authenticate CI image mirror reads
-        # The mirror is an optional fast path; pulls fall back to upstream.
-        continue-on-error: true
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-      - name: Pull the pinned test images once
-        run: scripts/pull-test-images postgres python
-      - name: Select the tests that exercise the changed paths
-        shell: bash
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" |
-            scripts/select-changed-tests > "$RUNNER_TEMP/targeted.txt"
-          cat "$RUNNER_TEMP/targeted.txt"
-      - name: Run this shard of the targeted repository and control tests
-        shell: bash
-        env:
-          SHARD: ${{ matrix.shard }}
-          SHARD_TOTAL: ${{ strategy.job-total }}
-          REPOSITORY_TIMINGS: ${{ needs.changes.outputs.repository_timings }}
-          CONTROL_TIMINGS: ${{ needs.changes.outputs.control_timings }}
-          VONK_CI_PREREQUISITES: needs_skopeo
-          VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
-        run: |
-          set -euo pipefail
-          status=0
-          for suite in repository control; do
-            timings="${suite^^}_TIMINGS"
-            printf '%s\n' "${!timings}" > "$RUNNER_TEMP/$suite-durations.json"
-            awk -v suite="$suite" '$1 == suite { print $2 }' "$RUNNER_TEMP/targeted.txt" \
-              > "$RUNNER_TEMP/targeted-$suite.txt"
-            scripts/test "$suite" --only "$RUNNER_TEMP/targeted-$suite.txt" \
-              --shard "$SHARD/$SHARD_TOTAL" --durations "$RUNNER_TEMP/$suite-durations.json" ||
-              status=1
-          done
-          exit "$status"
 
   repository-suite:
     name: Complete repository suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
@@ -1361,7 +1278,7 @@ jobs:
 
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, targeted-tests, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1396,7 +1313,6 @@ jobs:
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
           SELECTED_LANE: ${{ needs.changes.outputs.lane }}
           SELECTED_FULL: ${{ needs.changes.outputs.full }}
-          SELECTED_RUST_SOURCES: ${{ needs.changes.outputs.rust_sources }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
@@ -1404,7 +1320,6 @@ jobs:
           RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
           WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
           REPOSITORY_GUARDS_RESULT: ${{ needs.repository-guards.result }}
-          TARGETED_RESULT: ${{ needs.targeted-tests.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           CONTROL_IMAGE_BUILD_RESULT: ${{ needs.control-image-build.result }}
@@ -1428,7 +1343,6 @@ jobs:
             --selected "agent-package=$SELECTED_AGENT_PACKAGE" \
             --selected "lane=$SELECTED_LANE" \
             --selected "full=$SELECTED_FULL" \
-            --selected "rust-sources=$SELECTED_RUST_SOURCES" \
             --result "lint=$LINT_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
@@ -1436,7 +1350,6 @@ jobs:
             --result "rust-platform=$RUST_PLATFORM_RESULT" \
             --result "controller-spark-wire=$WIRE_RESULT" \
             --result "repository-guards=$REPOSITORY_GUARDS_RESULT" \
-            --result "targeted-tests=$TARGETED_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
