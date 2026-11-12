@@ -216,7 +216,11 @@ test("overview reports the agent version, or Not reported", async () => {
   const read = (agent_runtime: unknown) =>
     render(
       <SparkDetail
-        api={{ fleetNode: vi.fn().mockResolvedValue({ ...node, agent_runtime }) } as unknown as ControlApi}
+        api={
+          {
+            fleetNode: vi.fn().mockResolvedValue({ ...node, agent_runtime }),
+          } as unknown as ControlApi
+        }
         id="spk_1"
         onClose={vi.fn()}
       />,
@@ -225,5 +229,7 @@ test("overview reports the agent version, or Not reported", async () => {
   expect((await screen.findByText("Agent version")).nextElementSibling).toHaveTextContent("0.9.2");
   first.unmount();
   read(null);
-  expect((await screen.findByText("Agent version")).nextElementSibling).toHaveTextContent("Not reported");
+  expect((await screen.findByText("Agent version")).nextElementSibling).toHaveTextContent(
+    "Not reported",
+  );
 });

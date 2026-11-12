@@ -1,14 +1,14 @@
-import {useCallback, useEffect, useRef, useState} from "react";
-import {useOptionalAuth} from "./auth";
-import type {ControlApi} from "./api/types";
-import {AppShell} from "./components/app-shell";
-import {ToastProvider} from "./components/toast";
-import {VersionLine} from "./components/version-line";
-import type {AppRoute} from "./components/app-shell";
-import {ActivityPage} from "./pages/activity";
-import {FleetPage} from "./pages/fleet-simplified";
-import {KeysPage} from "./pages/keys";
-import {LibraryPage} from "./pages/library";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useOptionalAuth } from "./auth";
+import type { ControlApi } from "./api/types";
+import { AppShell } from "./components/app-shell";
+import { ToastProvider } from "./components/toast";
+import { VersionLine } from "./components/version-line";
+import type { AppRoute } from "./components/app-shell";
+import { ActivityPage } from "./pages/activity";
+import { FleetPage } from "./pages/fleet-simplified";
+import { KeysPage } from "./pages/keys";
+import { LibraryPage } from "./pages/library";
 
 const pages: AppRoute[] = ["fleet", "library", "keys", "activity"];
 function pageTitle(pathname: string): string {
@@ -24,10 +24,10 @@ function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
   if (value === "" || value === "fleet") return "fleet";
   if (/^library(?:\/|$)/.test(value)) return "library";
-  return pages.includes(value as AppRoute) ? value as AppRoute : undefined;
+  return pages.includes(value as AppRoute) ? (value as AppRoute) : undefined;
 }
 
-export function App({api}: {api: ControlApi}) {
+export function App({ api }: { api: ControlApi }) {
   const auth = useOptionalAuth();
   const [url, setUrl] = useState(`${location.pathname}${location.search}`);
   const activeUrl = useRef(url);
@@ -39,7 +39,9 @@ export function App({api}: {api: ControlApi}) {
   }, []);
   const pathname = new URL(url, location.origin).pathname;
   const page = currentPage(pathname);
-  useEffect(() => { document.title = pageTitle(pathname); }, [pathname]);
+  useEffect(() => {
+    document.title = pageTitle(pathname);
+  }, [pathname]);
   useEffect(() => {
     const listener = () => {
       if (navigationLockedRef.current) {
@@ -64,9 +66,12 @@ export function App({api}: {api: ControlApi}) {
     };
   }, []);
 
-  const setNavigationBusy = useCallback((busy: boolean) => {
-    setNavigationLocked(busy);
-  }, [setNavigationLocked]);
+  const setNavigationBusy = useCallback(
+    (busy: boolean) => {
+      setNavigationLocked(busy);
+    },
+    [setNavigationLocked],
+  );
 
   function requestNavigation(perform: () => void): boolean {
     if (navigationLockedRef.current) return false;
@@ -100,31 +105,75 @@ export function App({api}: {api: ControlApi}) {
       setUrl(nextUrl);
     });
   }
-  const content = page ? {
-    fleet: <FleetPage api={api} onBusyChange={setNavigationLocked}/>,
-    library: <LibraryPage api={api} path={url} onNavigate={navigatePath} onNavigatePath={navigateUrl} onBusyChange={setNavigationBusy}/>,
-    keys: <KeysPage api={api}/>,
-    activity: <ActivityPage api={api}/>,
-  }[page] : <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
-    <p className="fleet-kicker">Unknown workspace</p>
-    <h1 id="not-found-heading" ref={element => { if (element) queueMicrotask(() => element.focus()); }} tabIndex={-1}>Page not found</h1>
-    <p>This address does not match a Vonk Forge workspace. Choose a safe destination below.</p>
-    <div className="button-row"><a className="button" href="/fleet" onClick={event => navigate(event, "fleet")}>Go to Fleet</a><a className="button secondary" href="/library" onClick={event => navigate(event, "library")}>Go to Library</a></div>
-  </section>;
+  const content = page ? (
+    {
+      fleet: <FleetPage api={api} onBusyChange={setNavigationLocked} />,
+      library: (
+        <LibraryPage
+          api={api}
+          path={url}
+          onNavigate={navigatePath}
+          onNavigatePath={navigateUrl}
+          onBusyChange={setNavigationBusy}
+        />
+      ),
+      keys: <KeysPage api={api} />,
+      activity: <ActivityPage api={api} />,
+    }[page]
+  ) : (
+    <section className="fleet-empty route-not-found" aria-labelledby="not-found-heading">
+      <p className="fleet-kicker">Unknown workspace</p>
+      <h1
+        id="not-found-heading"
+        ref={(element) => {
+          if (element) queueMicrotask(() => element.focus());
+        }}
+        tabIndex={-1}
+      >
+        Page not found
+      </h1>
+      <p>This address does not match a Vonk Forge workspace. Choose a safe destination below.</p>
+      <div className="button-row">
+        <a className="button" href="/fleet" onClick={(event) => navigate(event, "fleet")}>
+          Go to Fleet
+        </a>
+        <a
+          className="button secondary"
+          href="/library"
+          onClick={(event) => navigate(event, "library")}
+        >
+          Go to Library
+        </a>
+      </div>
+    </section>
+  );
 
-  return <ToastProvider><AppShell
-    activeRoute={page}
-    navigationKey={pathname}
-    navigationLocked={navigationLocked}
-    onNavigate={navigate}
-    footer={auth ? <VersionLine api={api}/> : undefined}
-    operator={auth ? {
-      onDownloadCliToken: () => api.downloadCliToken(),
-      logoutError: auth.logoutError,
-      loggingOut: auth.loggingOut,
-      onLogout: () => requestNavigation(() => { void auth.logout(); }),
-      role: "Administrator",
-      subject: auth.session.subject,
-    } : undefined}
-  >{content}</AppShell></ToastProvider>;
+  return (
+    <ToastProvider>
+      <AppShell
+        activeRoute={page}
+        navigationKey={pathname}
+        navigationLocked={navigationLocked}
+        onNavigate={navigate}
+        footer={auth ? <VersionLine api={api} /> : undefined}
+        operator={
+          auth
+            ? {
+                onDownloadCliToken: () => api.downloadCliToken(),
+                logoutError: auth.logoutError,
+                loggingOut: auth.loggingOut,
+                onLogout: () =>
+                  requestNavigation(() => {
+                    void auth.logout();
+                  }),
+                role: "Administrator",
+                subject: auth.session.subject,
+              }
+            : undefined
+        }
+      >
+        {content}
+      </AppShell>
+    </ToastProvider>
+  );
 }
