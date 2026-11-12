@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import {
+  fleetStatusLine,
   nodeDiskFreeBytes,
   nodeDisplayName,
   nodeMemory,
@@ -237,64 +238,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
         />
       )}
       {fleet.snapshot && (
-        <section className="fleet-command-summary" aria-label="Fleet summary">
-          <div className="fleet-command-fact">
-            <strong>{fleet.snapshot.nodes.length}</strong>
-            <span>Sparks</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {
-                fleet.snapshot.nodes.filter((node) => node.connection.online_state === "online")
-                  .length
-              }
-            </strong>
-            <span>Online</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {
-                fleet.snapshot.nodes.filter(
-                  (node) => nodeStatus(node, fleet.now).status !== "online",
-                ).length
-              }
-            </strong>
-            <span>Need attention</span>
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {fleet.snapshot.nodes.reduce(
-                (count, node) => count + node.loaded.filter((item) => item.healthy === true).length,
-                0,
-              )}
-              {fleet.snapshot.nodes.some((node) => node.loaded.some((item) => item.healthy == null))
-                ? " confirmed"
-                : ""}
-            </strong>
-            <span>Running recipes</span>
-            {fleet.snapshot.nodes.some((node) =>
-              node.loaded.some((item) => item.healthy == null),
-            ) && <small>Some run health is unknown</small>}
-          </div>
-          <div className="fleet-command-fact">
-            <strong>
-              {fleet.snapshot.nodes.reduce(
-                (count, node) =>
-                  count + node.installed.filter((item) => item.complete === true).length,
-                0,
-              )}
-              {fleet.snapshot.nodes.some((node) =>
-                node.installed.some((item) => item.complete == null),
-              )
-                ? " confirmed"
-                : ""}
-            </strong>
-            <span>Installed recipes</span>
-            {fleet.snapshot.nodes.some((node) =>
-              node.installed.some((item) => item.complete == null),
-            ) && <small>Some installation completeness is unknown</small>}
-          </div>
-        </section>
+        <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && fleet.snapshot.nodes.length > 0 && (
         <section className="fleet-discovery" aria-label="Find a Spark">

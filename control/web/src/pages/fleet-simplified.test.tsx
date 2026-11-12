@@ -9,10 +9,12 @@ import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 
 let nodes: unknown[] = [];
 let attention: unknown[] = [];
+let attentionUnavailable = false;
+let fleetNow = new Date("2026-09-27T10:00:00Z");
 vi.mock("../hooks/use-fleet-stream", () => ({
   useFleetStream: () => ({
-    snapshot: { nodes, attention },
-    now: new Date("2026-09-27T10:00:00Z"),
+    snapshot: { nodes, attention, attention_unavailable: attentionUnavailable },
+    now: fleetNow,
     loading: false,
     error: null,
     retry: vi.fn(),
@@ -219,6 +221,34 @@ test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the share
     expect(lines).toEqual(vectors.expected[node.id]!.page);
   }
   nodes = [];
+});
+
+test("Fleet status line reads exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-status.json", "utf8"),
+  ) as {
+    now: string;
+    cases: {
+      nodes: Record<string, unknown>[];
+      attention?: unknown[];
+      attention_unavailable?: boolean;
+      expected: string;
+    }[];
+  };
+  fleetNow = new Date(vectors.now);
+  for (const vector of vectors.cases) {
+    nodes = vector.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+    attention = vector.attention ?? [];
+    attentionUnavailable = vector.attention_unavailable ?? false;
+    const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+    expect(container.querySelector(".fleet-status-line")?.textContent).toBe(vector.expected);
+    expect(container.querySelector(".fleet-status-line")?.getAttribute("role")).toBeNull();
+    unmount();
+  }
+  fleetNow = new Date("2026-09-27T10:00:00Z");
+  attentionUnavailable = false;
+  nodes = [];
+  attention = [];
 });
 
 test("firing Prometheus alerts are visible in Fleet attention", () => {

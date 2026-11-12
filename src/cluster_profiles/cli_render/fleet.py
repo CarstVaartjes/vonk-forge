@@ -43,6 +43,8 @@ from .common import (
     _words,
 )
 
+NO_SPARKS = "No Sparks are enrolled."
+
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
     name = node.get("display_name")
@@ -441,6 +443,91 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
+def _needs_attention(node: object) -> bool:
+    """A Spark needs attention when it is offline or warns, or its inventory is stale."""
+    return bool(_fleet_attention([_object(node, "Fleet node")]))
+
+
+def _is_serving(run: object) -> bool:
+    """A workload is serving while it is running and reported healthy."""
+    document = _object(run, "run")
+    return document.get("run_state") == RUN_RUNNING and document.get("healthy") is True
+
+
+def _free_memory_text(online: Sequence[object]) -> str:
+    """Free memory across the online Sparks, saying so when only some reported it."""
+    samples = [
+        _optional(
+            _optional(
+                _object(node, "Fleet node").get("telemetry"),
+                "fleet telemetry evidence",
+            ).get("sample"),
+            "fleet telemetry sample",
+        ).get("memory_available_bytes")
+        for node in online
+    ]
+    free = [value for value in samples if type(value) is int]
+    if not free:
+        return "unified memory not reported"
+    text = f"{_size(sum(free))} unified memory free"
+    return (
+        text
+        if len(free) == len(online)
+        else f"{text} on {len(free)} of {len(online)} online Sparks"
+    )
+
+
+def _fleet_status_line(payload: object) -> str:
+    """The Fleet in one line, in the words the Controller web Fleet page uses."""
+    document = _object(payload, "Fleet")
+    nodes = _records(document, "nodes")
+    if not nodes:
+        return NO_SPARKS
+    online = [
+        node
+        for node in nodes
+        if _object(node.get("connection"), "connection").get("online_state") == "online"
+    ]
+    serving = len(
+        {
+            run.get("run_id")
+            for node in nodes
+            for run in _records(node, "loaded")
+            if _is_serving(run)
+        }
+    )
+    sparks = sum(1 for node in nodes if _needs_attention(node))
+    firing = document.get("attention")
+    alerts = len(firing) if isinstance(firing, list) else 0
+    attention = [
+        *(
+            [f"{sparks} {'Spark needs' if sparks == 1 else 'Sparks need'} attention"]
+            if sparks
+            else []
+        ),
+        *(
+            [f"{alerts} {'alert' if alerts == 1 else 'alerts'} firing"]
+            if alerts
+            else []
+        ),
+        *(
+            ["alerts not reported"]
+            if not alerts and document.get("attention_unavailable")
+            else []
+        ),
+    ]
+    return " · ".join(
+        (
+            f"{len(online)} of {len(nodes)} {'Spark' if len(nodes) == 1 else 'Sparks'} online",
+            _free_memory_text(online),
+            f"{serving} {'workload' if serving == 1 else 'workloads'} serving"
+            if serving
+            else "no workloads serving",
+            *(attention or ["nothing needs attention"]),
+        )
+    )
+
+
 def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> list[str]:
     """Show each run once, its members by name, and return its problems."""
     names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
@@ -554,22 +641,10 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
 def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     nodes = _records(payload, "nodes")
     if not nodes:
-        print("No Sparks are enrolled.")
+        print(_fleet_status_line(payload))
         print("Next: vonkctl fleet enroll <name> --output <file>")
         return
-    online = sum(
-        1
-        for node in nodes
-        if _object(node.get("connection"), "connection").get("online_state") == "online"
-    )
-    run_ids = {
-        presence.get("run_id")
-        for node in nodes
-        for presence in _records(node, "loaded")
-    }
-    plural = "" if len(nodes) == 1 else "s"
-    workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
-    print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
+    print(_fleet_status_line(payload))
     print()
     labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "SERVING"]
     if wide:

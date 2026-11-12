@@ -1362,7 +1362,7 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
 
     render_payload(snapshot.model_dump(mode="json"), "fleet")
     rendered = capsys.readouterr()
-    assert "3 workloads running" in rendered.out
+    assert "1 workload serving" in rendered.out
     assert rendered.out.count("Recipe: Pair Recipe") == 3
     attention = rendered.out[rendered.out.index("Needs attention") :]
     assert "pair-healthy" not in attention
