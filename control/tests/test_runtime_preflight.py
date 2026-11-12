@@ -194,7 +194,9 @@ def test_failed_preflight_is_readable_and_repaired_evidence_admits(
     assert not blockers(req, result(req))
 
 
-def test_controller_receipt_clock_ignores_agent_clock(tmp_path):
+def test_receipts_are_retained_per_digest_for_the_current_host(tmp_path):
+    """Catches retention by age (a receipt for another digest pruned after
+    300 s) and retention without a bound (receipts from an old host kept)."""
     from vonk_control.inventory_items import record_preflight
     from vonk_control.models import AgentNode
     from vonk_control.runtime_preflight import latest_result
@@ -202,14 +204,28 @@ def test_controller_receipt_clock_ignores_agent_clock(tmp_path):
     from .test_lifecycle_preflight import _setup
 
     sessions, _, clock, node_id, _, _ = _setup(tmp_path)
-    req = request()
-    sample = result(req, observed_at=int(clock.now.timestamp()) + 600)
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        record_preflight(node, request_digest(req), sample, clock.now)
-    with sessions() as session:
-        receipt = latest_result(
-            session, node_id, requirements_sha256=request_digest(req)
-        )
-        assert not admission_blockers(req, receipt, current_fingerprint="a" * 64)
+    a = request()
+    b = a.model_copy(update={"source_build": False})
+    later = clock.now + timedelta(days=1)
+
+    def record(req, fingerprint, now):
+        with sessions.begin() as session:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            record_preflight(
+                node, request_digest(req), result(req, fingerprint=fingerprint), now
+            )
+
+    def kept(req):
+        with sessions() as session:
+            return latest_result(
+                session, node_id, requirements_sha256=request_digest(req)
+            )
+
+    record(a, "a" * 64, clock.now)
+    record(b, "a" * 64, later)
+    assert kept(a) is not None and kept(b) is not None
+    record(b, "c" * 64, later)
+    assert kept(a) is None
+    current = kept(b)
+    assert current is not None and current.result.fingerprint == "c" * 64

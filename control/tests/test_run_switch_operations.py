@@ -2770,10 +2770,11 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
     from vonk_agent_protocol import AgentOperation as OperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
-    stale_time = switch.clock.now - timedelta(seconds=301)
-    record_passing_preflight(switch.sessions, stale_time)
-    # The old receipts are from an earlier boot: the host identity, not their
-    # age, is what makes the Controller probe again.
+    # One second earlier only tells the old receipts from the fresh ones.
+    earlier_boot = switch.clock.now - timedelta(seconds=1)
+    record_passing_preflight(switch.sessions, earlier_boot)
+    # The old receipts are from an earlier boot: the host identity is what
+    # makes the Controller probe again.
     with switch.sessions.begin() as session:
         for node in session.scalars(select(AgentNode)):
             set_inventory_fingerprint(node, "b" * 64)
@@ -2783,7 +2784,7 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
             for operation in session.scalars(
                 select(AgentOperation).where(
                     AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
-                    AgentOperation.created_at == stale_time,
+                    AgentOperation.created_at == earlier_boot,
                 )
             )
         }
@@ -2826,7 +2827,7 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
         for node_id, digest in stale.values():
             selected = latest_result(session, node_id, requirements_sha256=digest)
             assert selected is not None
-            assert selected.result.observed_at > int(stale_time.timestamp())
+            assert selected.result.observed_at > int(earlier_boot.timestamp())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")

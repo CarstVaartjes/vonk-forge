@@ -141,13 +141,14 @@ class InstallAdmissionBusy(UnknownOutcomeError, InstallPlanConflict):
 
 
 class InstallPreflightExpired(InstallAdmissionBusy):
-    """The exact plan is admissible except that its runtime evidence expired."""
+    """The exact plan is admissible except that its runtime preflight receipt no
+    longer matches the host fingerprint or the requirements."""
 
-    code = RuntimePreflightCode.STALE
+    code = RuntimePreflightCode.HOST_CHANGED
 
     def __init__(
         self,
-        code: str = RuntimePreflightCode.STALE,
+        code: str,
         detail: str | None = None,
         *,
         reason: WaitReason | None = WaitReason.STALE_PLAN,
@@ -172,13 +173,11 @@ _RETRYABLE_INSTALL_BLOCKERS = {
     InstallAdmissionCode.IMAGE_DISTRIBUTION_PENDING,
     RuntimePreflightCode.HOST_CHANGED,
     RuntimePreflightCode.REQUIREMENTS_CHANGED,
-    RuntimePreflightCode.STALE,
 }
 
 _REFRESHABLE_PREFLIGHT_BLOCKERS = {
     RuntimePreflightCode.HOST_CHANGED,
     RuntimePreflightCode.REQUIREMENTS_CHANGED,
-    RuntimePreflightCode.STALE,
 }
 
 

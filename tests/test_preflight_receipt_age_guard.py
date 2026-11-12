@@ -67,7 +67,11 @@ def age_comparisons(tree: ast.AST) -> list[int]:
                 isinstance(op, ORDERING) for op in node.ops
             )
             age = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub)
-            if (ordering or age) and _names(node) & RECEIPT_TIMES:
+            if (
+                isinstance(node, ast.Compare | ast.BinOp)
+                and (ordering or age)
+                and _names(node) & RECEIPT_TIMES
+            ):
                 lines.append(node.lineno)
     for node in ast.walk(tree):
         name = (
@@ -77,7 +81,11 @@ def age_comparisons(tree: ast.AST) -> list[int]:
             if isinstance(node, ast.Attribute)
             else None
         )
-        if name is not None and AGE_CONSTANT.search(name):
+        if (
+            isinstance(node, ast.Name | ast.Attribute)
+            and name is not None
+            and AGE_CONSTANT.search(name)
+        ):
             lines.append(node.lineno)
     return sorted(set(lines))
 

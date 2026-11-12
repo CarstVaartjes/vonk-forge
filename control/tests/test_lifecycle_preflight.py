@@ -871,14 +871,14 @@ def _heartbeat(sessions, build_id, node_id, now):
         refresh_queue_waits(session, now, node_id=node_id)
 
 
-def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
+def test_pending_probe_beside_a_compiling_build_shows_its_own_wait(
     tmp_path,
 ):
     """Catches projecting the reason a probe round started as its current wait.
 
     Incident 2026-10-26: both receipts were invalidated, the round re-probed
     both Sparks, and node B's probe queued behind a long build for hours while
-    the load showed the round-start reason (then ``runtime_preflight.stale``). A build now runs beside the claim
+    the load showed the round-start reason. A build now runs beside the claim
     lane, so the probe waits only for node B's next poll, and says so.
     """
     from dataclasses import replace
@@ -905,7 +905,6 @@ def test_pending_probe_beside_a_compiling_build_shows_its_own_wait_never_stale(
     assert error is None and set(complete.receipts) == {node_a, node_b}
 
     # Both Sparks reboot: the new round starts because their hosts changed.
-    clock.now += timedelta(seconds=301)
     for node_id in (node_a, node_b):
         _claim_reports(sessions, node_id, "b" * 64)
     build_id = _heartbeating_build(sessions, node_b, clock.now)
