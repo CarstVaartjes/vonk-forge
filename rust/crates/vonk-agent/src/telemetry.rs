@@ -54,6 +54,8 @@ impl FileSystemProvider for SystemFileSystemProvider {
 #[derive(Debug, Clone)]
 pub struct TelemetryPaths {
     pub meminfo: PathBuf,
+    /// `/proc/uptime`: seconds since boot is its first field.
+    pub uptime: PathBuf,
     /// `/sys/devices/system/cpu`: per-CPU `cpufreq` clocks live below it.
     pub cpu_root: PathBuf,
     pub store: PathBuf,
@@ -104,7 +106,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .run(
                 Program::NvidiaSmi,
                 &[
-                    "--query-gpu=name,utilization.gpu,memory.total,memory.free,temperature.gpu"
+                    "--query-gpu=name,utilization.gpu,memory.total,memory.free,temperature.gpu,power.draw"
                         .to_owned(),
                     "--format=csv,noheader,nounits".to_owned(),
                 ],
@@ -130,6 +132,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             Ok(value)
                 if value.utilization.is_none()
                     && value.temperature_c.is_none()
+                    && value.power_watts.is_none()
                     && value.memory.is_none() =>
             {
                 Some(GpuUnavailableReason::GpuUnsupportedMetrics)
@@ -137,6 +140,13 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             Ok(_) => None,
         };
         let accelerator = accelerator_result.ok();
+        // Serial on purpose: there is one GPU driver, and the monitor keeps a slow sample.
+        // The driver's per-process memory is reported only where it is part of
+        // the unified pool; a dedicated accelerator has its own memory fields.
+        let gpu_process_memory_bytes = accelerator
+            .as_ref()
+            .filter(|value| shared_memory_pool(Some(value.name.as_str())))
+            .and_then(|_| self.gpu_process_memory());
         let cpu_frequency = read_cpu_frequency(&self.paths.cpu_root);
         // GB10 exposes one physical unified pool. Keep that capacity in the
         // memory fields so consumers cannot sum RAM and VRAM twice.
@@ -183,11 +193,50 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
             cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
             cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),
-            gpu_power_watts: None,
-            uptime_seconds: None,
-            gpu_process_memory_bytes: None,
+            gpu_power_watts: accelerator.as_ref().and_then(|value| value.power_watts),
+            uptime_seconds: read_uptime(&self.paths.uptime),
+            gpu_process_memory_bytes,
         }
     }
+
+    /// Sum of the memory GPU compute processes hold. No rows is 0 bytes; a
+    /// failed command or any row that is not a number is `None`.
+    fn gpu_process_memory(&self) -> Option<u64> {
+        let output = self
+            .runner
+            .run(
+                Program::NvidiaSmi,
+                &[
+                    "--query-compute-apps=used_memory".to_owned(),
+                    "--format=csv,noheader,nounits".to_owned(),
+                ],
+                Duration::from_secs(10),
+            )
+            .ok()?;
+        if !output.success || output.stdout.len() > SOURCE_TEXT_LIMIT as usize {
+            return None;
+        }
+        let mut total = 0_u64;
+        for row in std::str::from_utf8(&output.stdout).ok()?.lines() {
+            let row = row.trim();
+            if !row.is_empty() {
+                total = total.checked_add(row.parse::<u64>().ok()?.checked_mul(1024 * 1024)?)?;
+            }
+        }
+        (total <= MAX_CAPACITY_BYTES).then_some(total)
+    }
+}
+
+/// Whole seconds since boot: the first field of `/proc/uptime`, floored.
+fn read_uptime(path: &Path) -> Option<u32> {
+    let seconds = read_bounded_text(path)?
+        .split_ascii_whitespace()
+        .next()?
+        .parse::<f64>()
+        .ok()?;
+    (0.0..=f64::from(u32::MAX))
+        .contains(&seconds)
+        .then_some(seconds as u32)
 }
 
 fn collect_gpu_clock<R: ProcessRunner>(
@@ -467,6 +516,7 @@ fn read_khz_as_mhz(path: &Path) -> Option<u32> {
 struct AcceleratorReading {
     name: String,
     temperature_c: Option<u32>,
+    power_watts: Option<f64>,
     utilization: Option<f64>,
     /// (total, free) bytes, when the device reports dedicated memory.
     memory: Option<(u64, u64)>,
@@ -478,13 +528,25 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
         .lines()
         .find(|line| !line.trim().is_empty())?;
     let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-    let [name, utilization, memory_total, memory_free, temperature] = fields.as_slice() else {
+    let [
+        name,
+        utilization,
+        memory_total,
+        memory_free,
+        temperature,
+        power,
+    ] = fields.as_slice()
+    else {
         return None;
     };
     let temperature_c = temperature
         .parse::<u32>()
         .ok()
         .filter(|value| *value <= 150);
+    let power_watts = power
+        .parse::<f64>()
+        .ok()
+        .filter(|value| value.is_finite() && *value >= 0.0);
     if name.is_empty() || name.chars().count() > 256 {
         return None;
     }
@@ -505,6 +567,7 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
     Some(AcceleratorReading {
         name: (*name).to_owned(),
         temperature_c,
+        power_watts,
         utilization,
         memory,
     })

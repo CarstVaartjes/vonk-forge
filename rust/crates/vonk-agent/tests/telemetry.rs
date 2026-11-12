@@ -26,6 +26,8 @@ struct FakeRunner {
     output: Vec<u8>,
     clock_output: Option<Vec<u8>>,
     health_output: Option<Vec<u8>>,
+    /// The `--query-compute-apps` answer; `None` makes that command fail.
+    apps_output: Arc<Mutex<Option<Vec<u8>>>>,
 }
 
 impl ProcessRunner for FakeRunner {
@@ -39,6 +41,19 @@ impl ProcessRunner for FakeRunner {
             .lock()
             .unwrap()
             .push((program, arguments.to_vec(), timeout));
+        if arguments[0].starts_with("--query-compute-apps") {
+            return match self.apps_output.lock().unwrap().clone() {
+                Some(stdout) => Ok(ProcessOutput {
+                    exit_code: None,
+                    success: true,
+                    stdout,
+                    stderr: Vec::new(),
+                }),
+                None => Err(ProcessError::Io(std::io::Error::other(
+                    "compute-apps query failed",
+                ))),
+            };
+        }
         let output =
             if arguments[0].contains("clocks.") || arguments[0].contains("clocks_event_reasons") {
                 let fields = self.clock_output.as_ref().ok_or_else(|| {
@@ -94,6 +109,7 @@ fn runner(output: &[u8]) -> FakeRunner {
         output: output.to_vec(),
         clock_output: None,
         health_output: None,
+        apps_output: Arc::new(Mutex::new(None)),
     }
 }
 
@@ -109,6 +125,7 @@ fn collector(
         FakeFileSystem,
         TelemetryPaths {
             meminfo: path,
+            uptime: directory.join("uptime"),
             cpu_root: directory.join("cpu"),
             store: directory.to_path_buf(),
         },
@@ -146,7 +163,7 @@ fn dedicated_accelerator_reports_its_own_memory() {
     let collector = collector(
         directory.path(),
         MEMINFO,
-        runner(b"NVIDIA H100, 50, 100, 90, [N/A]\n"),
+        runner(b"NVIDIA H100, 50, 100, 90, [N/A], [N/A]\n"),
     );
 
     let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
@@ -334,6 +351,7 @@ fn failed_query_is_typed_and_same_collector_recovers_without_latching() {
             FakeFileSystem,
             TelemetryPaths {
                 meminfo,
+                uptime: directory.path().join("uptime"),
                 cpu_root: directory.path().join("cpu"),
                 store: directory.path().to_path_buf(),
             },
@@ -424,5 +442,117 @@ fn reset_signature_is_not_unsupported_metrics() {
             .iter()
             .all(|metric| metric.reason
                 == vonk_agent_protocol::generated::GpuClockUnavailableReason::NotSupported)
+    );
+}
+
+fn telemetry_vector() -> serde_json::Value {
+    serde_json::from_str(include_str!(
+        "../../../../agent_protocol/src/vonk_agent_protocol/vectors/telemetry-sample-v1.json"
+    ))
+    .unwrap()
+}
+
+fn reading(vector: &serde_json::Value, name: &str) -> Vec<u8> {
+    vector["driver_readings"][name]
+        .as_str()
+        .unwrap()
+        .as_bytes()
+        .to_vec()
+}
+
+#[test]
+fn gb10_driver_readings_report_power_uptime_and_gpu_process_memory() {
+    let vector = telemetry_vector();
+    let directory = tempdir().unwrap();
+    let runner = runner(&reading(&vector, "nvidia_smi_query_gpu"));
+    *runner.apps_output.lock().unwrap() = Some(reading(&vector, "nvidia_smi_query_compute_apps"));
+    let collector = collector(directory.path(), &reading(&vector, "proc_meminfo"), runner);
+    fs::write(
+        directory.path().join("uptime"),
+        reading(&vector, "proc_uptime"),
+    )
+    .unwrap();
+
+    let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
+
+    let expected = &vector["sample"];
+    assert_eq!(sample.gpu_power_watts, expected["gpu_power_watts"].as_f64());
+    assert_eq!(
+        sample.uptime_seconds,
+        expected["uptime_seconds"].as_u64().map(|v| v as u32)
+    );
+    assert_eq!(
+        sample.gpu_process_memory_bytes,
+        expected["gpu_process_memory_bytes"].as_u64()
+    );
+    assert_eq!(
+        sample.memory_total_bytes,
+        expected["memory_total_bytes"].as_u64()
+    );
+    assert_eq!(
+        sample.memory_available_bytes,
+        expected["memory_available_bytes"].as_u64()
+    );
+    assert_eq!(sample.gpu_temperature_c, Some(43));
+}
+
+#[test]
+fn each_new_reading_fails_alone_and_the_next_sample_recovers() {
+    let vector = telemetry_vector();
+    let directory = tempdir().unwrap();
+    // Power is [N/A], the uptime file is missing and the compute-apps query fails.
+    let runner = runner(b"NVIDIA GB10, 25, [N/A], [N/A], 61, [N/A]\n");
+    let apps = runner.apps_output.clone();
+    let collector = collector(directory.path(), MEMINFO, runner);
+    let at = Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap();
+
+    let failed = collector.sample_at(at);
+    assert_eq!(
+        (
+            failed.gpu_power_watts,
+            failed.uptime_seconds,
+            failed.gpu_process_memory_bytes
+        ),
+        (None, None, None)
+    );
+    assert_eq!(failed.gpu_utilization_percent, Some(25.0));
+    assert_eq!(failed.gpu_temperature_c, Some(61));
+    assert_eq!(failed.memory_total_bytes, Some(1_024_000));
+    assert_eq!(failed.gpu_unavailable_reason, None);
+
+    // A non-numeric row is a failure too, never a partial sum.
+    *apps.lock().unwrap() = Some(b"108403\n[N/A]\n".to_vec());
+    assert_eq!(collector.sample_at(at).gpu_process_memory_bytes, None);
+
+    // No rows means no process holds GPU memory.
+    *apps.lock().unwrap() = Some(Vec::new());
+    fs::write(
+        directory.path().join("uptime"),
+        reading(&vector, "proc_uptime"),
+    )
+    .unwrap();
+    let recovered = collector.sample_at(at);
+    assert_eq!(recovered.gpu_process_memory_bytes, Some(0));
+    assert_eq!(recovered.uptime_seconds, Some(1_804_535));
+}
+
+#[test]
+fn a_dedicated_accelerator_never_runs_the_compute_apps_query() {
+    let directory = tempdir().unwrap();
+    let runner = runner(b"NVIDIA H100, 50, 100, 90, 60, 300.5\n");
+    *runner.apps_output.lock().unwrap() = Some(b"1024\n".to_vec());
+    let collector = collector(directory.path(), MEMINFO, runner.clone());
+
+    let sample = collector.sample_at(Utc.with_ymd_and_hms(2026, 8, 15, 12, 0, 0).unwrap());
+
+    assert_eq!(sample.gpu_process_memory_bytes, None);
+    assert_eq!(sample.gpu_power_watts, Some(300.5));
+    assert!(
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|call| !call.1[0].starts_with("--query-compute-apps"))
     );
 }
