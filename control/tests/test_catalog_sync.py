@@ -719,6 +719,17 @@ def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
     assert reads == []
 
     now[0] = latest.wait.next_check + timedelta(seconds=61)
+    with sessions.begin() as session:
+        run = session.get(RecipeLibrarySyncRun, latest.id)
+        settled = (run.state, run.active_slot, run.completed_at)
+        run.state, run.active_slot = "running", "managed-recipes"
+        run.completed_at, run.heartbeat_at = None, now[0]
+    assert sync.redrive(latest.id, 60) is False  # a long API import holds the slot
+    assert reads == []
+
+    with sessions.begin() as session:
+        run = session.get(RecipeLibrarySyncRun, latest.id)
+        run.state, run.active_slot, run.completed_at = settled
     assert sync.redrive(latest.id, 60) is True
     assert len(reads) == 1
 

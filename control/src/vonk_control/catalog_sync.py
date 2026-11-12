@@ -432,7 +432,8 @@ class ManagedRecipeCatalogSyncService:
         ``run_automatic_sync`` wakes exactly at the due time it recorded, so a
         redrive at that instant would run the whole sync a second time on the
         worker's only thread. The worker takes over only when that cadence has
-        missed its turn by a full interval (for example, the API is down).
+        missed its turn by a full interval (for example, the API is down), and
+        never while a sync run's claim is live (a long import holds the slot).
         """
         with self._sessions() as session:
             current = session.scalar(
@@ -452,6 +453,13 @@ class ManagedRecipeCatalogSyncService:
             late = timedelta(seconds=interval_seconds)
             if wait is None or wait.next_check + late > self._clock():
                 return False
+            running = session.scalar(
+                select(RecipeLibrarySyncRun).where(
+                    RecipeLibrarySyncRun.state == LifecycleState.RUNNING
+                )
+            )
+            if running is not None and not self._expired(session, running):
+                return False  # a live sync holds the slot; its owner finishes it
         self.advance_automatic(interval_seconds)
         return True
 
