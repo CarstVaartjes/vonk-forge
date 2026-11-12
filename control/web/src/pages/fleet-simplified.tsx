@@ -16,6 +16,7 @@ import {
   type NodeStatus,
 } from "../lib/fleet";
 import { Meter } from "../components/meter";
+import { AttentionItem } from "../components/attention-item";
 import { SortHeader, useSort } from "../components/sort-header";
 import { StatusPill } from "../components/status-pill";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -153,17 +154,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
       {!!fleet.snapshot?.attention?.length && (
         <section aria-label="Needs attention">
           <h2>Needs attention</h2>
-          <ul>
+          <ul className="attention-list">
             {fleet.snapshot.attention.map((alert) => (
-              <li key={JSON.stringify(alert.labels)}>
-                <StatusPill
-                  tone={alert.severity === "critical" ? "danger" : ProfileReasonSeverity.WARNING}
-                >
-                  {alert.severity}
-                </StatusPill>{" "}
-                <strong>{alert.name}</strong> · {alert.summary}
-                {alert.labels.node_id && <> · {alert.labels.node_id}</>}
-              </li>
+              <AttentionItem
+                key={JSON.stringify(alert.labels)}
+                alert={alert}
+                nodes={fleet.snapshot?.nodes ?? []}
+              />
             ))}
           </ul>
         </section>

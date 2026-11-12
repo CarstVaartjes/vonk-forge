@@ -251,20 +251,33 @@ test("Fleet status line reads exactly what `vonkctl fleet` prints for the shared
   attention = [];
 });
 
-test("firing Prometheus alerts are visible in Fleet attention", () => {
-  attention = [
-    {
-      source: "prometheus",
-      name: "NodeHot",
-      summary: "GPU is hot",
-      severity: "critical",
-      labels: { node_id: "Spark A" },
-      active_at: "2026-10-10T00:00:00Z",
-    },
-  ];
-  render(<FleetPage api={{} as ControlApi} />);
-  expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("GPU is hot");
+test("firing alerts read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-attention.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    alerts: unknown[];
+    expected: string[];
+    unavailable: string;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  attention = vectors.alerts;
+  const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+  const region = screen.getByRole("region", { name: "Needs attention" });
+  expect(
+    within(region)
+      .getAllByRole("listitem")
+      .map((item) => item.textContent),
+  ).toEqual(vectors.expected);
+  expect(within(region).queryByRole("button")).toBeNull();
+  expect(container.textContent).not.toContain("NodeHot");
+  unmount();
   attention = [];
+  attentionUnavailable = true;
+  render(<FleetPage api={{} as ControlApi} />);
+  expect(screen.getByText(vectors.unavailable)).toBeVisible();
+  attentionUnavailable = false;
+  nodes = [];
 });
 
 test("Fleet shows the Controller headless memory recommendation without an apply action", () => {
