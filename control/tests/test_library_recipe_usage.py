@@ -28,7 +28,29 @@ def test_input_understanding_follows_the_api_modalities() -> None:
     ]
 
 
-def test_a_route_without_input_modalities_keeps_the_model_display() -> None:
-    model = ["text-to-speech", "video-understanding"]
-    assert _recipe_usage(model, _example("recipe-api-speech.json")) == model
+def test_a_speech_route_shows_no_understanding_tags() -> None:
+    model = ["text-to-speech", "video-understanding", "image-understanding"]
+    assert _recipe_usage(model, _example("recipe-api-speech.json")) == [
+        "text-to-speech"
+    ]
+
+
+def test_a_transcription_route_shows_audio_understanding() -> None:
+    model = ["speech-to-text", "video-understanding"]
+    assert _recipe_usage(model, _example("recipe-api-transcription.json")) == [
+        "audio-understanding",
+        "speech-to-text",
+    ]
+
+
+def test_any_option_choice_counts() -> None:
+    # The base block is text-only; the vision option accepts image.
+    assert _recipe_usage(["chat"], _example("recipe-api-options.json")) == [
+        "chat",
+        "image-understanding",
+    ]
+
+
+def test_without_an_api_document_the_model_display_stays() -> None:
+    model = ["chat", "video-understanding"]
     assert _recipe_usage(model, None) == model
