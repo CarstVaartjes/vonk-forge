@@ -41,6 +41,22 @@ Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is
 content-addressed and available only to operator/administrator API roles.
 
+## Spark and engine series
+
+control-api `/metrics` exports, per `node_id`: `vonk_node_cpu_busy_seconds_total`,
+`vonk_node_cpu_seconds_total`, `vonk_node_network_lan_{rx,tx}_bytes_total`,
+`vonk_node_fabric_{rx,tx}_bytes_total`, `vonk_node_fabric_ports_active`,
+`vonk_node_disk_{read,written}_bytes_total`, `vonk_node_oom_kills_total`,
+`vonk_node_load_average_1m`, `vonk_node_{board,nvme,nic}_temperature_c` and
+`vonk_node_fan_rpm`. Per `{node_id, alias}` (the run's published route name):
+`vonk_engine_{prompt,generation,cached_prompt}_tokens_total`,
+`vonk_engine_preemptions_total`, `vonk_engine_spec_decode_{draft,accepted}_total`,
+`vonk_engine_requests_{running,waiting}`, `vonk_engine_kv_cache_usage_ratio` and
+`vonk_engine_{ttft,tpot,prefill,decode,e2e}_seconds_{sum,count}`.
+Counters are exported as reported; take rates in Prometheus. A reading an agent
+or engine does not report has no series. See `control-plane-telemetry.md` for
+what each reading is.
+
 ## Worker memory
 
 The worker publishes no port. A sampler thread writes its own memory report
