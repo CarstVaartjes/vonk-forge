@@ -1,8 +1,8 @@
-import {useEffect, useRef} from "react";
-import type {MouseEvent, ReactNode} from "react";
-import {AdminMenu} from "./admin-menu";
-import type {CliTokenDownload} from "../api/types";
-import {ActivityIcon, BrandMark, FleetIcon, LibraryIcon} from "./icons";
+import { useEffect, useRef } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { AdminMenu } from "./admin-menu";
+import type { CliTokenDownload } from "../api/types";
+import { ActivityIcon, BrandMark, FleetIcon, LibraryIcon } from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
@@ -24,7 +24,14 @@ type AppShellProps = {
   operator?: Operator;
 };
 
-export function AppShell({activeRoute, children, navigationKey = activeRoute, navigationLocked = false, onNavigate, operator}: AppShellProps) {
+export function AppShell({
+  activeRoute,
+  children,
+  navigationKey = activeRoute,
+  navigationLocked = false,
+  onNavigate,
+  operator,
+}: AppShellProps) {
   const mainContent = useRef<HTMLElement>(null);
   const previousNavigationKey = useRef(navigationKey);
   useEffect(() => {
@@ -39,24 +46,64 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
     }
     onNavigate(event, route);
   }
-  const disabledLinkProps = navigationLocked ? {"aria-disabled": true as const, tabIndex: -1} : {};
-  return <div className="shell">
-    <a className="skip-link" href="#main-content">Skip to content</a>
-    <header className="app-header">
-      <div className="brand">
-        <BrandMark/>
-        <div><strong>Vonk Forge</strong><small>Controller</small></div>
-      </div>
-      <nav className="primary-navigation" aria-label="Primary">
-        <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>
-        <a href="/library" className="nav-link nav-link-primary" aria-current={activeRoute === "library" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "library")}><LibraryIcon/><span>Library</span></a>
-        <a href="/activity" className="nav-link nav-link-primary" aria-current={activeRoute === "activity" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "activity")}><ActivityIcon/><span>Activity</span></a>
-      </nav>
-      <div className="header-utility">
-        <span className="authority-note">Local Controller</span>
-        {operator && <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate}/>}
-      </div>
-    </header>
-    <main ref={mainContent} id="main-content" tabIndex={-1}><div className="content-frame">{children}</div></main>
-  </div>;
+  const disabledLinkProps = navigationLocked
+    ? { "aria-disabled": true as const, tabIndex: -1 }
+    : {};
+  return (
+    <div className="shell">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <header className="app-header">
+        <div className="brand">
+          <BrandMark />
+          <div>
+            <strong>Vonk Forge</strong>
+            <small>Controller</small>
+          </div>
+        </div>
+        <nav className="primary-navigation" aria-label="Primary">
+          <a
+            href="/fleet"
+            className="nav-link nav-link-primary"
+            aria-current={activeRoute === "fleet" ? "page" : undefined}
+            {...disabledLinkProps}
+            onClick={(event) => navigate(event, "fleet")}
+          >
+            <FleetIcon />
+            <span>Fleet</span>
+          </a>
+          <a
+            href="/library"
+            className="nav-link nav-link-primary"
+            aria-current={activeRoute === "library" ? "page" : undefined}
+            {...disabledLinkProps}
+            onClick={(event) => navigate(event, "library")}
+          >
+            <LibraryIcon />
+            <span>Library</span>
+          </a>
+          <a
+            href="/activity"
+            className="nav-link nav-link-primary"
+            aria-current={activeRoute === "activity" ? "page" : undefined}
+            {...disabledLinkProps}
+            onClick={(event) => navigate(event, "activity")}
+          >
+            <ActivityIcon />
+            <span>Activity</span>
+          </a>
+        </nav>
+        <div className="header-utility">
+          <span className="authority-note">Local Controller</span>
+          {operator && (
+            <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate} />
+          )}
+        </div>
+      </header>
+      <main ref={mainContent} id="main-content" tabIndex={-1}>
+        <div className="content-frame">{children}</div>
+      </main>
+    </div>
+  );
 }

@@ -9,7 +9,12 @@ import { FleetIcon } from "./icons";
 
 const apiFixture = {
   metricsSeries: async (metric: Metric, range: MetricRange) => ({
-    metric, range, start: 0, end: 1, step_seconds: 15, series: [],
+    metric,
+    range,
+    start: 0,
+    end: 1,
+    step_seconds: 15,
+    series: [],
   }),
   jobs: async () => ({ jobs: [], next_cursor: null, total: 0 }),
   operations: async () => ({ operations: [], next_cursor: null, total: 0 }),
