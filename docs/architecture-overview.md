@@ -100,7 +100,7 @@ Each fact has one authoritative owner. The following is the target contract:
 | Fact | Owner | Other representations |
 | --- | --- | --- |
 | Users, sessions, enrollment, certificates, revocations, and execution authorization | PostgreSQL | Files cannot grant or restore this authority. |
-| Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. |
+| Accepted catalog revisions, topology, saved profiles, desired placements, and exact plan references | PostgreSQL | Imported catalog files are source material; a digest reference does not assert local availability. A recipe revision's source bundle digest is the indexed column `catalog_document_revisions.source_bundle_sha256`, not part of its projection JSON. |
 | One current selected-profile record pointing to the immutable accepted application snapshot as standing desired state for the whole fleet | PostgreSQL | The selected record is an explicit authority fact; do not infer it from latest application or audit history. Unselected profiles are drafts. |
 | Operation intent, idempotency keys, queue/attempt ownership, cancellation, reservations, and route decisions | PostgreSQL | Local work records carry the owning request/attempt identity; they do not schedule or authorize work. |
 | Model bytes, image archives, complete artifact manifests, and verification receipts | Managed artifact storage | A disposable index may accelerate discovery; readiness resolves through the storage owner. |

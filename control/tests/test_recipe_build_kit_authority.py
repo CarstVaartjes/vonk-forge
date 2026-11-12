@@ -123,9 +123,7 @@ def test_accepted_source_is_not_readmitted_by_declarative_policy(tmp_path):
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == row.id)
-            .values(
-                projected=dict(row.projected) | {"source_bundle_sha256": bundle.sha256}
-            )
+            .values(source_bundle_sha256=bundle.sha256)
         )
     service = RecipeBuildService(sessions, bundles=bundles)
     # Diagnostic findings are visible, but do not become another authority.

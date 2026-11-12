@@ -848,6 +848,7 @@ def test_profile_load_of_an_editorial_successor_accepts_the_reused_build(
             content_digest=document_sha256(canonical.model_dump(mode="json")),
             artifact_key=original.artifact_key,
             execution_key=original.execution_key,
+            source_bundle_sha256=original.source_bundle_sha256,
             projected=copy.deepcopy(original.projected),
             created_by="test",
             created_at=now,

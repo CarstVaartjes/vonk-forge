@@ -223,6 +223,9 @@ class CatalogDocumentRevision(Base):
     document: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     content_digest: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     artifact_key: Mapped[str | None] = mapped_column(String(64), index=True)
+    # The digest of the recipe's source bundle, recorded by the import that
+    # stored the bundle. The one owner of this value: the projection carries none.
+    source_bundle_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     execution_key: Mapped[str | None] = mapped_column(String(64), index=True)
     download_bytes: Mapped[int | None] = mapped_column(ExactNonnegativeInteger())
     installed_bytes: Mapped[int | None] = mapped_column(ExactNonnegativeInteger())

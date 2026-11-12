@@ -108,6 +108,7 @@ class Catalog:
         head: str | None = None,
         document: object | None = None,
         projected: object | None = None,
+        source_bundle_sha256: str | None = None,
     ) -> str:
         """Add revision ``number`` of a document; ``head`` is "active" or "candidate"."""
 
@@ -181,6 +182,7 @@ class Catalog:
                     document=document,
                     content_digest=_digest(f"{slug}/{number}"),
                     projected=projected,
+                    source_bundle_sha256=source_bundle_sha256,
                     created_by="test",
                     created_at=created,
                 )
@@ -786,8 +788,9 @@ def test_source_bundles_nothing_names_are_removed_after_the_grace_period(
             .read_bytes()
         )
     )
-    projected["source_bundle_sha256"] = named
-    catalog.revision("glm", 1, head="active", projected=projected)
+    catalog.revision(
+        "glm", 1, head="active", projected=projected, source_bundle_sha256=named
+    )
     with catalog.sessions.begin() as session:
         for sha, verified in ((named, OLD), (orphan, OLD), (fresh, NOW)):
             session.add(

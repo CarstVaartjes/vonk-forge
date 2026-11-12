@@ -91,8 +91,7 @@ class _Lineage:
 def _lineage(session: Session, *, successor_source: str | None = "b" * 64):
     """A recipe whose head revision is an editorial successor with no build.
 
-    A ``None`` source is a projection that states no source bundle (one
-    re-derived from the document carries none).
+    A ``None`` source is a revision that states no source bundle.
     """
 
     recipe = _recipe("recipe-source-build.json")
@@ -102,12 +101,8 @@ def _lineage(session: Session, *, successor_source: str | None = "b" * 64):
     )
     second.document_id = first.document_id
     second.revision_number = 2
-    projected = _recipe_projection(
-        _successor(recipe, "Edited title"), successor_source or "b" * 64
-    )
-    if successor_source is None:
-        projected.pop("source_bundle_sha256")
-    second.projected = projected
+    second.projected = _recipe_projection(_successor(recipe, "Edited title"))
+    second.source_bundle_sha256 = successor_source
     _add_head(session, second)
     return _Lineage(
         first=first.id,

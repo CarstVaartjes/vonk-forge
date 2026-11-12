@@ -79,7 +79,6 @@ class _CatalogRevisionProjection(StrictJSONModel):
     publication_commit: str | None = None
     source_path: str | None = None
     package_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
-    source_bundle_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     package_handle: RecipePackageHandleProjection | None = None
     release_version: str | None = None
     release_released_at: str | None = None

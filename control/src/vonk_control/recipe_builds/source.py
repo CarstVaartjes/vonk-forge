@@ -132,9 +132,7 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
     if time.monotonic() < self._source_check_at:
         return False
     self._source_check_at = time.monotonic() + 30.0
-    digest_column = CatalogDocumentRevision.projected[
-        "source_bundle_sha256"
-    ].as_string()
+    digest_column = CatalogDocumentRevision.source_bundle_sha256
     package_column = CatalogDocumentRevision.projected[
         ("package_handle", "package_sha256")
     ].as_string()
@@ -152,6 +150,7 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
             .group_by(digest_column, package_column)
             .order_by(digest_column, func.min(CatalogDocumentRevision.id))
         ):
+            assert digest is not None  # the query names only revisions with one
             candidates.setdefault(digest, []).append(revision_id)
     wanted = {digest for digest in candidates if _SHA256.fullmatch(digest)}
     for digest in candidates.keys() - wanted:
@@ -236,7 +235,7 @@ def _check_source_once(
         projected = _read_recipe_projection(revision)
         document = _canonical_recipe_document(revision.document)
         build = _canonical_build(document, projected)
-        source_sha256 = _source_bundle_handle(projected)
+        source_sha256 = _source_bundle_handle(revision)
     bundle = self._verified_bundle(build, source_sha256)
     return inspect_build_source_policy(
         _source_policy_document(document, build, source_sha256), bundle
@@ -286,7 +285,7 @@ def _resolve_once(
         document = _canonical_recipe_document(revision.document)
         build = _canonical_build(document, projected)
         adapter = _resolved_adapter(projected)
-        source_sha256 = _source_bundle_handle(projected)
+        source_sha256 = _source_bundle_handle(revision)
 
     bundle = self._verified_bundle(build, source_sha256)
     dockerfile_path = build.get("dockerfile")

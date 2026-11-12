@@ -1292,16 +1292,16 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
     assert first.state == "current"
     assert item.package_handle is not None and item.source_bundle is not None
     with sessions() as session:
-        stored = read_catalog_projection(
-            session.scalar(
-                select(CatalogDocumentRevision).where(
-                    CatalogDocumentRevision.kind == "recipe",
-                    CatalogDocumentRevision.state == "active",
-                    active_head_revision(),
-                )
+        revision = session.scalar(
+            select(CatalogDocumentRevision).where(
+                CatalogDocumentRevision.kind == "recipe",
+                CatalogDocumentRevision.state == "active",
+                active_head_revision(),
             )
         )
-    assert stored.source_bundle_sha256 == item.source_bundle_sha256
+        assert revision is not None
+        stored = read_catalog_projection(revision)
+    assert revision.source_bundle_sha256 == item.source_bundle_sha256
     assert stored.package_sha256 == item.package_sha256
 
     files = dict(parse_source_bundle(item.source_bundle).files)
@@ -1343,8 +1343,9 @@ def test_sync_reimports_a_republished_package_with_an_unchanged_recipe_document(
                 active_head_revision(),
             )
         )
+        assert revision is not None
         projected = read_catalog_projection(revision)
-    assert projected.source_bundle_sha256 == repaired_bundle.sha256
+        assert revision.source_bundle_sha256 == repaired_bundle.sha256
     assert projected.package_sha256 == ("7" * 64 if package_present else None)
 
     third = _sync(sessions, service, republished_reader).sync(

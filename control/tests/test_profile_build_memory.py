@@ -17,10 +17,6 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.catalog_revision_contract import (
-    read_recipe_projection,
-    write_catalog_projection,
-)
 from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
@@ -90,13 +86,7 @@ def _accepted_build_profile(
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision.id)
-            .values(
-                projected=write_catalog_projection(
-                    read_recipe_projection(revision).model_copy(
-                        update={"source_bundle_sha256": bundle.sha256}
-                    )
-                )
-            )
+            .values(source_bundle_sha256=bundle.sha256)
         )
         set_inventory_identity(node, binary_digest="1" * 64)
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]

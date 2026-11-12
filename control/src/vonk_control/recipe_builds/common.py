@@ -312,13 +312,13 @@ def _bundle_dockerfile_path(build: Mapping[str, object]) -> object:
     return dockerfile
 
 
-def _source_bundle_handle(projected: RecipeRevisionProjection) -> str:
+def _source_bundle_handle(revision: CatalogDocumentRevision) -> str:
     """Return the catalog-owned source package digest for a build.
 
-    The package handle is a catalog projection.  A recipe document cannot
-    smuggle source bytes or an arbitrary URL into the builder.
+    The digest is a catalog-owned column of the revision.  A recipe document
+    cannot smuggle source bytes or an arbitrary URL into the builder.
     """
-    candidate = projected.source_bundle_sha256
+    candidate = revision.source_bundle_sha256
     if candidate is None or _SHA256.fullmatch(candidate) is None:
         raise RecipeBuildUnknown(
             RecipeBuildCode.SOURCE_UNAVAILABLE,

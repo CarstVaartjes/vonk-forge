@@ -57,11 +57,7 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision.id)
-            .values(
-                projected=projection.model_copy(
-                    update={"source_bundle_sha256": bundle.sha256}
-                ).model_dump(mode="json", exclude_none=True)
-            )
+            .values(source_bundle_sha256=bundle.sha256)
         )
     lifecycle = planner._lifecycle
     assert lifecycle is not None

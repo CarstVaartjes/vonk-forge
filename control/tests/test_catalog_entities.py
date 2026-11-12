@@ -391,6 +391,7 @@ def _pre_contract_projection(valid: dict[str, object]) -> dict[str, object]:
     topology["fabric"] = {"connectivity": "none", "minimum_bandwidth_mbps": 0}
     projected["test_report"] = {"result": "passed"}
     del projected["artifact_inputs"]  # derived again from the model bindings
+    # Retired from the projection (the revision column owns it): dropped.
     projected["source_bundle_sha256"] = _SOURCE_BUNDLE
     projected["publication_commit"] = "a" * 40
     # Itself invalid under the current contract: dropped, not carried over.
@@ -434,7 +435,6 @@ def test_refresh_rederives_a_projection_an_earlier_release_wrote(
     )
     assert healed == {
         **valid,
-        "source_bundle_sha256": _SOURCE_BUNDLE,
         "publication_commit": "a" * 40,
     }
     again = dict(revision.projected)
