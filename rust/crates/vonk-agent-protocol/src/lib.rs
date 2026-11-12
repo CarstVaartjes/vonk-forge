@@ -11,6 +11,8 @@ pub const GENERATED_SOURCE: &str = include_str!(concat!(env!("OUT_DIR"), "/gener
 #[doc(hidden)]
 pub const WIRE_SCHEMA: &str = include_str!(concat!(env!("OUT_DIR"), "/wire.json"));
 pub mod integer;
+// The telemetry byte-field bound, generated from the contract's `maximum`.
+include!(concat!(env!("OUT_DIR"), "/telemetry_capacity.rs"));
 pub mod runtime_identity;
 pub mod runtime_preflight;
 mod wire_datetime;

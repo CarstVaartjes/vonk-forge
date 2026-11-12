@@ -72,6 +72,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         )?;
     }
+    // One capacity bound for every telemetry byte field: the contract's own
+    // `maximum`, never a second hand-written number.
+    let sample = &graph["$defs"]["TelemetrySample"]["properties"];
+    let mut bound = None;
+    for name in [
+        "memory_total_bytes",
+        "memory_available_bytes",
+        "disk_total_bytes",
+        "disk_free_bytes",
+        "gpu_memory_total_bytes",
+        "gpu_memory_free_bytes",
+    ] {
+        let maximum = sample[name]["anyOf"][0]["maximum"]
+            .as_u64()
+            .ok_or("telemetry capacity needs a typed integer maximum")?;
+        if *bound.get_or_insert(maximum) != maximum {
+            return Err("telemetry capacity fields disagree on their maximum".into());
+        }
+    }
+    fs::write(
+        output.join("telemetry_capacity.rs"),
+        format!(
+            "pub const MAX_TELEMETRY_CAPACITY_BYTES: u64 = {};",
+            bound.ok_or("telemetry capacity fields are missing")?
+        ),
+    )?;
     fs::write(
         output.join("generated.rs"),
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,
