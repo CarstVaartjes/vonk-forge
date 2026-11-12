@@ -23,7 +23,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from sqlalchemy import event, inspect, select
-from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
+from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
 
 from .. import job_states, model_cache_states
 from ..lifecycle.evidence import Residue
@@ -66,17 +66,21 @@ class ChildEndWake:
         if installed is not None:
             return installed
         wake = cls(sessions, clock)
-        event.listen(sessions, "before_flush", wake._stage)
+        event.listen(sessions, "after_flush", wake._stage)
         event.listen(sessions, "after_commit", wake._committed)
         event.listen(sessions, "after_transaction_end", wake._dispatch)
         setattr(sessions, _INSTALLED, wake)
         return wake
 
     @staticmethod
-    def _stage(session: Session, _context: object, _instances: object) -> None:
+    def _stage(session: Session, _context: object) -> None:
+        # After the flush every inserted row has its id, while the session's
+        # new/dirty sets and attribute history still describe this flush.
         for row in (*session.new, *session.dirty):
             live = CHILD_ROWS.get(type(row))
             if live is None or row.state in live:  # type: ignore[attr-defined]
+                continue
+            if row.id is None:  # type: ignore[attr-defined]
                 continue
             if row in session.new or inspect(row).attrs.state.history.added:
                 session.info.setdefault(_STAGED, set()).add(row.id)  # type: ignore[attr-defined]
@@ -104,7 +108,9 @@ class ChildEndWake:
                 owners = frozenset(
                     job.id
                     for job in session.scalars(
-                        select(Job).where(
+                        select(Job)
+                        .options(load_only(Job.id, Job.kind, Job.result))
+                        .where(
                             Job.kind.in_(_OPERATION_KINDS),
                             Job.state.in_(job_states.LIVE),
                         )
@@ -127,7 +133,9 @@ def _waits_on(job: Job, child_ids: frozenset[str]) -> bool:
         # A damaged checkpoint names no child; its own advance repairs it.
         return False
     progress = _read_progress(stored)
-    if progress.child_operation_id in child_ids:
+    if progress.child_operation_id is not None and (
+        progress.child_operation_id in child_ids
+    ):
         return True
     probes = progress.preflight.pending_jobs if progress.preflight else {}
     return not child_ids.isdisjoint(probes.values())

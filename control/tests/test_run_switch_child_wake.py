@@ -182,6 +182,28 @@ def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
     engine.dispose()
 
 
+def test_a_row_inserted_already_ended_is_staged_by_its_own_id(tmp_path) -> None:
+    """Catches staging before the insert assigns the id: ``None`` matched every
+    run-switch with no child and cut its hold short."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'born.sqlite'}")
+    Job.__table__.create(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    woken: list[frozenset[str]] = []
+
+    class Probe(ChildEndWake):
+        def wake(self, child_ids: frozenset[str]) -> None:
+            woken.append(child_ids)
+
+    Probe.install(sessions, lambda: NOW)
+    born = _job_row(str(uuid.uuid4()), "succeeded")
+    born.id = None  # type: ignore[assignment]
+    with sessions.begin() as session:
+        session.add(born)
+    assert born.id is not None
+    assert woken == [frozenset({born.id})]
+    engine.dispose()
+
+
 def test_failed_wake_never_reaches_the_committed_end(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'lost.sqlite'}")
     Job.__table__.create(engine)
