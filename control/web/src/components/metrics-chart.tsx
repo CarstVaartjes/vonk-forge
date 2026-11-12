@@ -1,33 +1,37 @@
+import type { LosslessNumber } from "lossless-json";
 import { useEffect, useId, useState } from "react";
-import type { ControlApi, Metric, MetricRange, MetricsSeriesResponse } from "../api/types";
 import { safeErrorText } from "../lib/error-display";
 
-type Unit = "%" | "GiB" | "°C" | "requests/s" | "tok/s";
+import type {
+  ControlApi,
+  Metric,
+  MetricRange,
+  MetricSpec,
+  MetricsSeriesResponse,
+} from "../api/types";
+
 const GIB = 1024 ** 3;
-const TILES: Array<{
-  metric: Metric;
-  title: string;
-  unit: Unit;
-  scale: number;
-  perModel?: boolean;
-}> = [
-  { metric: "gpu_utilization", title: "GPU utilisation", unit: "%", scale: 1 },
-  { metric: "host_memory_used", title: "Unified memory used", unit: "GiB", scale: GIB },
-  { metric: "gpu_temperature", title: "GPU temperature", unit: "°C", scale: 1 },
-  {
-    metric: "request_rate",
-    title: "Requests per model",
-    unit: "requests/s",
-    scale: 1,
-    perModel: true,
-  },
-  {
-    metric: "output_token_rate",
-    title: "Generated tokens per model",
-    unit: "tok/s",
-    scale: 1,
-    perModel: true,
-  },
+// How the Controller's unit names read on the page; titles and basis come from the catalogue.
+const UNITS: Record<MetricSpec["unit"], { symbol: string; scale: number }> = {
+  percent: { symbol: "%", scale: 1 },
+  bytes: { symbol: "GiB", scale: GIB },
+  celsius: { symbol: "°C", scale: 1 },
+  watts: { symbol: "W", scale: 1 },
+  watt_hours: { symbol: "Wh", scale: 1 },
+  rpm: { symbol: "rpm", scale: 1 },
+  per_second: { symbol: "/s", scale: 1 },
+  tokens_per_second: { symbol: "tok/s", scale: 1 },
+  seconds: { symbol: "s", scale: 1 },
+  ratio: { symbol: "", scale: 1 },
+  count: { symbol: "", scale: 1 },
+};
+// The trend tiles, in order; the catalogue describes each.
+const TILES: Metric[] = [
+  "gpu_utilization",
+  "host_memory_used",
+  "gpu_temperature",
+  "request_rate",
+  "output_token_rate",
 ];
 const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
 
@@ -41,9 +45,9 @@ function seriesColor(labels: Record<string, string>, names: Record<string, strin
   return SERIES_COLORS[(position >= 0 ? position : index) % SERIES_COLORS.length];
 }
 
-function formatValue(value: number, unit: Unit): string {
+function formatValue(value: number, unit: string): string {
   const text = Math.abs(value) >= 100 ? value.toFixed(0) : value.toPrecision(3);
-  return `${Number(text)} ${unit}`;
+  return `${Number(text)} ${unit}`.trim();
 }
 
 /** "12 days", "5 hours", "20 minutes": the time left, in the largest whole unit. */
@@ -57,20 +61,37 @@ export function formatTimeLeft(seconds: number): string {
 function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
   const node = labels.node_id;
   if (node) return names[node] ?? node;
-  return labels.requested_model ?? "All Sparks";
+  return labels.alias ?? "All Sparks";
+}
+
+/** Latest, average, peak and total as the Controller computed them; an estimate says so. */
+function summaryText(
+  summary: MetricsSeriesResponse["series"][number]["summary"],
+  spec: MetricSpec,
+) {
+  const { symbol, scale } = UNITS[spec.unit];
+  const part = (label: string, value: number | LosslessNumber | null) =>
+    value === null ? [] : [`${label} ${formatValue(Number(value) / scale, symbol)}`];
+  const total =
+    summary.total === null ? [] : [`total ${Number(Number(summary.total).toPrecision(3))}`];
+  const parts = [
+    ...part("now", summary.latest),
+    ...part("average", summary.average),
+    ...part("peak", summary.peak),
+    ...total,
+  ];
+  const text = parts.length ? parts.join(" · ") : "No data in this range";
+  return spec.basis === "estimated" ? `${text} (estimate)` : text;
 }
 
 export function SeriesChart({
   data,
-  unit,
-  scale = 1,
   names = {},
 }: {
   data: MetricsSeriesResponse;
-  unit: Unit;
-  scale?: number;
   names?: Record<string, string>;
 }) {
+  const { symbol: unit, scale } = UNITS[data.spec.unit];
   const values = data.series.flatMap((series) =>
     series.points.flatMap((point) => (point.value === null ? [] : [Number(point.value) / scale])),
   );
@@ -141,6 +162,14 @@ export function SeriesChart({
           </li>
         ))}
       </ul>
+      <ul aria-label="Series summary">
+        {data.series.map((series) => (
+          <li key={JSON.stringify(series.labels)}>
+            {seriesName(series.labels, names)}: {summaryText(series.summary, data.spec)}
+          </li>
+        ))}
+      </ul>
+      {data.spec.basis === "estimated" && <p>{data.spec.hint}</p>}
     </>
   );
 }
@@ -174,11 +203,26 @@ export function MetricsChart({
   const id = useId();
   const [range, setRange] = useState<MetricRange>("6h");
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
+  // What each metric is, read once from the Controller: a list, or the message of the read that failed.
+  const [catalogue, setCatalogue] = useState<MetricSpec[] | string>();
   const [retry, setRetry] = useState(0);
-  const wanted = [
-    ...TILES.filter((tile) => !node || !tile.perModel).map((tile) => tile.metric),
-    "certificate_expiry" as Metric,
-  ];
+  const wanted: Metric[] = [...TILES, "certificate_expiry"];
+  useEffect(() => {
+    const controller = new AbortController();
+    setCatalogue(undefined);
+    api.metricsCatalogue(controller.signal).then(
+      (specs) => {
+        if (!controller.signal.aborted) setCatalogue(specs);
+      },
+      (cause) => {
+        if (!controller.signal.aborted)
+          setCatalogue(
+            safeErrorText(cause instanceof Error ? cause.message : "Metrics unavailable"),
+          );
+      },
+    );
+    return () => controller.abort();
+  }, [api, retry]);
   useEffect(() => {
     const controller = new AbortController();
     setTiles({});
@@ -213,7 +257,7 @@ export function MetricsChart({
             value={range}
             onChange={(event) => setRange(event.currentTarget.value as MetricRange)}
           >
-            {(["1h", "6h", "24h", "7d"] as const).map((value) => (
+            {(["1h", "6h", "24h", "7d", "30d"] as const).map((value) => (
               <option key={value} value={value}>
                 {value}
               </option>
@@ -228,16 +272,19 @@ export function MetricsChart({
           Refresh metrics
         </button>
       </div>
+      {typeof catalogue === "string" && <p role="status">Metrics unavailable: {catalogue}</p>}
       <div className="metric-tiles">
-        {TILES.filter((tile) => !node || !tile.perModel).map((tile) => {
-          const state = tiles[tile.metric];
+        {(Array.isArray(catalogue) ? TILES : []).map((metric) => {
+          const spec = (catalogue as MetricSpec[]).find((entry) => entry.metric === metric);
+          const state = tiles[metric];
+          if (!spec) return null;
           return (
-            <section key={tile.metric} className="metric-tile" aria-label={tile.title}>
-              <h3>{tile.title}</h3>
+            <section key={metric} className="metric-tile" aria-label={spec.title}>
+              <h3>{spec.title}</h3>
               {typeof state === "string" ? (
                 <p role="status">Metrics unavailable: {state}</p>
               ) : state ? (
-                <SeriesChart data={state} unit={tile.unit} scale={tile.scale} names={names} />
+                <SeriesChart data={state} names={names} />
               ) : (
                 <p role="status">Reading metrics…</p>
               )}

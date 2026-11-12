@@ -462,6 +462,16 @@ export class ApiClient implements ControlApi {
     );
   }
 
+  async metricsCatalogue(signal?: AbortSignal) {
+    return resultData(
+      await this.generated.GET("/api/metrics/catalogue", {
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+          : AbortSignal.timeout(10000),
+      }),
+    );
+  }
+
   async fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode> {
     return resultData(
       await this.generated.GET("/api/fleet/{selector}", { params: { path: { selector } }, signal }),
