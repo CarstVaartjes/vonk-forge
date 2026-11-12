@@ -150,7 +150,8 @@ def reconcile_source_bundles(self: RecipeBuildService) -> bool:
             .group_by(digest_column, package_column)
             .order_by(digest_column, func.min(CatalogDocumentRevision.id))
         ):
-            assert digest is not None  # the query names only revisions with one
+            if digest is None:  # the query names only revisions with one
+                continue
             candidates.setdefault(digest, []).append(revision_id)
     wanted = {digest for digest in candidates if _SHA256.fullmatch(digest)}
     for digest in candidates.keys() - wanted:

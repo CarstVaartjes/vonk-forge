@@ -71,7 +71,7 @@ def revision_images(
             )
         )
     }
-    # Each projection is read once: it states the source bundle and the pin.
+    # Each projection is read once: it states the pin (the source bundle is a column).
     projections = {
         revision_id: _read_projection(revision)
         for revision_id, revision in revisions.items()
