@@ -14,6 +14,7 @@ LOCK = "control/packaging/public-contracts.lock"
 FILES = (
     LOCK,
     "control/pyproject.toml",
+    "tests/acceptance/recipe-library-revision.txt",
     "control/Dockerfile",
     "scripts/resolve-publication-producer",
 )
@@ -50,6 +51,8 @@ def test_a_new_pin_replaces_the_wheel_and_every_spelling_of_it(tmp_path: Path) -
     assert lock["package"] == "vonk-forge-public-contracts==9.9.9"
     assert lock["wheel"] == "inventory/wheels/" + new.name
     assert [p.name for p in (repository / "inventory/wheels").iterdir()] == [new.name]
+    revision = repository / "tests/acceptance/recipe-library-revision.txt"
+    assert revision.read_text() == commit + "\n"
     assert f'rev = "{commit}"' in (repository / "control/pyproject.toml").read_text()
     for relative in ("control/Dockerfile", "scripts/resolve-publication-producer"):
         text = (repository / relative).read_text()

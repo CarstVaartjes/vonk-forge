@@ -6,8 +6,8 @@
 Builds the wheel from that commit (the build is byte-reproducible), then rewrites
 every place that names the pin: the control/pyproject.toml revision, control/uv.lock
 (``uv lock``, then ``scripts/refresh-protocol-wheel-lock`` restores the protocol
-wheel digest), control/packaging/public-contracts.lock, the wheel in
-inventory/wheels and the wheel name in the files that must spell it. The version
+wheel digest), control/packaging/public-contracts.lock, the acceptance
+library revision, the wheel in inventory/wheels and the wheel name in the files that must spell it. The version
 is read from the built wheel, never typed. ``scripts/verify-supply-chain`` checks
 the result.
 """
@@ -28,6 +28,8 @@ sys.dont_write_bytecode = True  # repository tools never leave __pycache__ behin
 
 ROOT = Path(__file__).resolve().parents[1]
 LOCK = "control/packaging/public-contracts.lock"
+# The acceptance suites read the library at the same commit as the contracts.
+LIBRARY_REVISION = "tests/acceptance/recipe-library-revision.txt"
 WHEELS = "inventory/wheels"
 COMMAND_TIMEOUT = 600
 WHEEL_PREFIX = "vonk_forge_public_contracts-"
@@ -111,6 +113,7 @@ def apply_pin(
         f"wheel = {_quote(f'{WHEELS}/{new_name}')}\n"
         f"sha256 = {_quote(hashlib.sha256(wheel.read_bytes()).hexdigest())}\n"
     )
+    (root / LIBRARY_REVISION).write_text(f"{commit}\n")
     for stale in (root / WHEELS).glob(f"{WHEEL_PREFIX}*.whl"):
         stale.unlink()
     shutil.copy2(wheel, root / WHEELS / new_name)
