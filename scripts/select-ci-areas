@@ -210,9 +210,10 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
 
 # Every change lands through an integration pull request (head branch
 # integration/*, labelled release-acceptance), which runs every suite and proof
-# once for its whole batch. A member pull request runs only the fast, decisive
-# checks. This is the one owner of that rule: ci.yml and the separate proof
-# workflows (through ci-scope.yml) read its `full` output. Anything that is not
+# once for its whole batch. A member pull request runs no CI jobs (only the
+# selector and a gate that cannot satisfy the required check). This is the one
+# owner of that rule: ci.yml and the separate proof workflows (through
+# ci-scope.yml) read its `full` output. Anything that is not
 # positively a member pull request (integration PR, merge queue, main's release,
 # a dispatch, an unknown payload) runs everything.
 INTEGRATION_HEAD = "integration/"
@@ -229,43 +230,6 @@ def full_suites(event: str, payload: dict | None) -> bool:
     same_repository = head_repository == pull["base"]["repo"]["full_name"]
     return ACCEPTANCE_LABEL in labels or (
         same_repository and pull["head"]["ref"].startswith(INTEGRATION_HEAD)
-    )
-
-
-# A member pull request builds and tests Rust only when it changes the Rust
-# workspace or a file the Rust build or tests read from outside it: the
-# build.rs rerun inputs and the include_str!/fixture paths. The one exception
-# is build.rs's whole `control/src` input, which almost every PR touches; its
-# Rust effect is proven by the integration pull request.
-RUST_INPUTS = (
-    "rust/",
-    ".cargo/",
-    "agent_protocol/",
-    "scripts/export-agent-wire-schema",
-    "scripts/generate-agent-wire",
-)
-RUST_FILES = (
-    "Cargo.toml",
-    "Cargo.lock",
-    "rust-toolchain.toml",
-    "control/uv.lock",
-    "scripts/check_environment.py",
-    "src/cluster_profiles/__init__.py",
-    "src/cluster_profiles/control_limits.py",
-    "src/cluster_profiles/runtime_identity.py",
-    "control/src/vonk_control/resources/site-ports.json",
-    "control/tests/fixtures/compiled_workload_v2.json",
-    "tests/acceptance/fixtures/nvidia-smi.sh",
-    "control/tests/fixtures/compiled_plan_751.json",
-    "control/tests/fixtures/stored_installation_33dc45f0.json",
-    "install/installer-release-public.pem",
-)
-
-
-def rust_sources_changed(paths: Iterable[str]) -> bool:
-    return any(
-        _matches(path.strip().removeprefix("./"), RUST_INPUTS, RUST_FILES)
-        for path in paths
     )
 
 
@@ -293,7 +257,6 @@ def main() -> int:
     upgrade_inputs = carry_selected(changed, arguments.event)
     lane = full and (full_pull_request or lane_selected(changed, arguments.event))
     carry = full_pull_request or upgrade_inputs
-    rust_sources = rust_sources_changed(changed)
     if arguments.github_output:
         for area in AREAS:
             print(f"{area}={str(selected[area]).lower()}")
@@ -302,7 +265,6 @@ def main() -> int:
         print(f"upgrade_carry={str(carry).lower()}")
         print(f"upgrade_inputs={str(upgrade_inputs).lower()}")
         print(f"full={str(full).lower()}")
-        print(f"rust_sources={str(rust_sources).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
         print(
@@ -314,7 +276,6 @@ def main() -> int:
                     "upgrade_carry": carry,
                     "upgrade_inputs": upgrade_inputs,
                     "full": full,
-                    "rust_sources": rust_sources,
                 },
                 sort_keys=True,
                 separators=(",", ":"),

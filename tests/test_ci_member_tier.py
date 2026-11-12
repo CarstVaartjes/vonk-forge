@@ -1,7 +1,8 @@
 """One selector output decides whether a run carries the full suites.
 
-A member pull request runs the fast tier; its integration pull request runs
-every suite and proof once. `full` from scripts/select-ci-areas owns that rule,
+A member pull request runs no CI jobs (the selector and a gate that cannot
+satisfy the required check); its integration pull request runs every suite and
+proof once. `full` from scripts/select-ci-areas owns that rule,
 so a new heavy job or proof workflow cannot run on every member again, and no
 workflow re-derives the rule from the branch name.
 """
@@ -13,17 +14,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
 FULL = "needs.changes.outputs.full == 'true'"
-# The reviewed jobs a member pull request runs. The lane proof reads `lane`,
+# The only jobs a member pull request runs. The lane proof reads `lane`,
 # which the selector already folds `full` into; the gate aggregates everything.
 MEMBER_JOBS = {
     "changes",
-    "lint",
-    "supply-chain",
-    "repository-guards",
-    "generated-clients",
-    "targeted-tests",
-    "rust-quality",
-    "rust-tests",
     "lane-proof",
     "ci-gate",
 }

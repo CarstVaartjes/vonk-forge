@@ -232,11 +232,10 @@ protocol wheel the `control` project installs is built locally, not kept in git.
 
 Every change lands through an integration PR (same-repository `integration/*`
 head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
-owns that rule. A member PR runs lean CI only: repository guards, Ruff and
-types, supply-chain evidence, generated clients, the tests that exercise its
-changed paths, and Rust lint/tests only for Rust inputs. Its gate reports
-`CI gate (member PR)`, never the required `CI gate`, so it cannot merge itself.
-A member PR is done when its lean CI is green and its review has passed.
+owns that rule. A member PR runs no CI jobs: only the selector and a gate that
+reports `CI gate (member PR)`, never the required `CI gate`, so it cannot merge
+itself. Check member work locally (targeted tests, fast guards); the integration
+PR proves it. A member PR is done when its review has passed.
 An integration PR runs the complete suites, every selected integration, its
 candidate acceptance with the upgrade carry, and the path-filtered proof
 workflows. Main's Release runs the complete CI unless it reuses the integration
