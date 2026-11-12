@@ -88,6 +88,16 @@ def _load_tools_plugin(name: str):
 
 
 @pytest.fixture
+def one_transition_per_redrive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin a redrive to one transition for a test that positions a run-switch
+    at an exact checkpoint between ticks; the chain itself is proven in
+    ``test_run_switch_redrive_chain``."""
+    from vonk_control.run_switch_operations import observation
+
+    monkeypatch.setattr(observation, "_CHAIN_LIMIT", 1)
+
+
+@pytest.fixture
 def damaged_json_rows() -> Iterator[None]:
     """Let a test write JSON documents its contract refuses (damaged or retired rows)."""
 

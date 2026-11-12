@@ -36,6 +36,7 @@ PASS_BUDGET_MODULES = (
     "vonk_control.library_assessment",
     "vonk_control.library_image_presence",
     "vonk_control.profile_read_observation",
+    "vonk_control.run_switch_operations.observation",
 )
 
 

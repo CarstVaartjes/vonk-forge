@@ -486,6 +486,7 @@ def test_background_image_after_a_replan_reaches_the_next_phase_on_postgres(
     _assert_replan_reaches_the_next_phase(tmp_path, caplog, postgres_engine)
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_background_image_failure_is_logged_and_shown_as_the_retry_reason(
     tmp_path: Path, caplog
 ) -> None:
@@ -526,6 +527,7 @@ def _drive_through_failures(switch, *, loops: int = 60) -> list[Any]:
     return waiting
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_a_lock_busy_preparation_backs_off_longer_and_completes_by_itself(
     tmp_path: Path,
 ) -> None:
@@ -589,6 +591,7 @@ def test_an_unexpected_preparation_error_is_a_visible_retry_that_heals(
     assert _past_image(final)
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 @pytest.mark.parametrize("old_receipt", ["retired-fields", "missing-adapter"])
 @pytest.mark.parametrize("node_count", [1, 2])
 @pytest.mark.parametrize("replanned", [False, True])
@@ -626,6 +629,7 @@ def test_preparation_longer_than_the_preflight_window_replaces_an_old_receipt(
     assert receipt.oci_archive_sha256 == switch.layout_digest
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 @pytest.mark.parametrize("node_count", [1, 2])
 @pytest.mark.parametrize("provenance", ["sibling", "other-adapter"])
 def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
@@ -658,6 +662,7 @@ def test_a_sibling_recipes_receipt_for_the_same_image_does_not_block_the_load(
     assert intent is not None and intent.build_id != "sibling-build"
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_a_replan_after_publication_republishes_the_image_reference(
     tmp_path: Path,
 ) -> None:
@@ -740,6 +745,7 @@ def test_unreadable_model_revision_ends_the_load_with_its_cause(
         switch.worker.composite.close()
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_waiting_load_resumes_after_a_worker_restart(tmp_path: Path) -> None:
     """A load parked by the old loop resumes on the new worker by itself."""
 

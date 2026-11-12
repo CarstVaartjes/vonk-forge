@@ -298,6 +298,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         assert admitted.node_ids == list(nodes)
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 @pytest.mark.parametrize("repair", [False, True])
 def test_accepted_readiness_observation_has_a_restart_safe_end(tmp_path, repair):
     """An unavailable executor cannot leave an accepted plan retrying forever."""

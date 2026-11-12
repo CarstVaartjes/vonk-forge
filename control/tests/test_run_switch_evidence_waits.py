@@ -133,6 +133,7 @@ def _held(tmp_path: Path, stopped_at: datetime) -> tuple[_Harness, _ScriptedExec
     return harness, executor
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_a_post_stop_wait_looks_again_only_when_newer_inventory_lands(
     tmp_path: Path,
 ) -> None:

@@ -1329,7 +1329,7 @@ def test_due_scheduler_reaches_work_past_a_full_parked_batch(
     ("damage", "expected_state"),
     [("plan", LifecycleState.FAILED), ("result", LifecycleState.RUNNING)],
 )
-@pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.usefixtures("damaged_json_rows", "one_transition_per_redrive")
 def test_malformed_operation_is_reconciled_without_aborting_the_batch(
     tmp_path: Path,
     damage: str,
@@ -1504,6 +1504,7 @@ def test_mapping_selection_rejects_malformed_persisted_parameters(
             )._mapping_selection(mapping, mapping_nodes)
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     tmp_path: Path,
 ) -> None:
@@ -1774,6 +1775,7 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
     assert ready.preparations[0].preparation.controller_ready is not missing
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     tmp_path: Path,
 ) -> None:
@@ -1837,6 +1839,7 @@ def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     assert service.get(operation.operation_id).current_phase == "verify"
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     tmp_path: Path,
 ) -> None:
@@ -2493,6 +2496,7 @@ def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
     assert prepared.install_plan_digest == installations[0].plan_digest
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
     tmp_path: Path,
 ) -> None:
@@ -2842,6 +2846,7 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
             assert selected.result.observed_at > int(stale_time.timestamp())
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_uncached_build_receipt_reaches_copy_after_restart_without_replay(
     tmp_path: Path,
@@ -4740,6 +4745,7 @@ def test_switch_replaces_a_running_model_with_an_estimate_above_the_idle_maximum
     assert plan.fit_current.nodes[0].memory_required_bytes == total - floor
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_artifact_child_checkpoint_advances_to_verify(
     tmp_path: Path,
 ) -> None:
@@ -5487,6 +5493,7 @@ def test_terminal_checkpoint_after_retry_clears_failure_and_rejects_missing_evid
         restarted.get(operation.operation_id)
 
 
+@pytest.mark.usefixtures("one_transition_per_redrive")
 def test_nas_transfer_checkpoint_does_not_complete_unstarted_spark_copy(tmp_path):
     sessions, lifecycle, _, _, _, nodes = setup_services(tmp_path)
 
@@ -5585,9 +5592,13 @@ def test_overlapping_ticks_cannot_apply_completion_to_the_next_checkpoint(
         )
         service.tick()
     current = service.get(operation.operation_id)
-    assert current.progress.phase_index == 1
-    assert current.current_phase == "verify"
-    assert current.completed_phases == ["transfer"]
+    # Chained or nested, each checkpoint is applied once. An issued child is
+    # issued once; an inline phase may run again in the nested tick, but only
+    # one result lands on its checkpoint.
+    if child_completion:
+        assert executor.calls.count("transfer") == 1
+    assert current.completed_phases[:2] == ["transfer", "verify"]
+    assert len(current.completed_phases) == len(set(current.completed_phases))
 
 
 def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tmp_path):

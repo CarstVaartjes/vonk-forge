@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import traceback
 from typing import (
     TYPE_CHECKING,
@@ -19,6 +20,7 @@ from ..bounded_json import require_integer
 from ..failure_classification import error_code, error_detail, is_definite
 from ..lifecycle.evidence import (
     BookkeepingReason,
+    Residue,
     retire_as_unknown,
 )
 from ..logging import log_event, redact_text
@@ -29,12 +31,12 @@ from ..models import (
 from ..operation_blockers import (
     bound_blockers,
 )
-from ..persisted_waits import schedule_wait
+from ..persisted_waits import schedule_wait, wait_due
 from ..stored_json import read_row_column
 from .constants import _LOGGER, _OPERATION_KINDS
 from .errors import RunSwitchOperationConflict
 from .evidence_waits import wake_evidence_waits
-from .planning_helpers import _now
+from .planning_helpers import _aware, _now
 from .provider import _ADAPTER
 from .result_helpers import (
     _persisted_result,
@@ -42,6 +44,13 @@ from .result_helpers import (
     _read_progress,
     _wait_blockers,
 )
+
+#: Transitions one redrive may chain, and the time after which it starts no
+#: further one. Each is its own fenced transaction, so the bounds only share
+#: the worker's turn (one step under its watchdog) with other operations and
+#: sources; the rest of the chain is the next turn's.
+_CHAIN_LIMIT = 8
+_CHAIN_BUDGET_SECONDS = 10.0
 
 if TYPE_CHECKING:
     from .provider import RunSwitchOperationProvider
@@ -212,7 +221,69 @@ class ObservationMixin:
                 schedule_wait(job, now)
 
     def redrive(self, job_id: str) -> bool:
-        """Advance one identity through the same fenced observation path."""
+        """Advance one identity, chaining transitions that need no outside wait.
+
+        Each ``_advance`` makes one fenced, idempotent transition and commits
+        it. The next one runs in the same turn only when that transition moved
+        the checkpoint and left the operation live, due and with no child
+        outstanding (``_chain_point``): a finished child is recorded, inline
+        phases complete, and the chain stops once the next child is issued.
+        Anything that needs an outside wait stops it: an outstanding child, a
+        hold with a future due time (a backoff, a preflight round, a background
+        preparation), an end or a failure. A crash between transitions leaves
+        the last committed checkpoint, which the next turn resumes.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        advanced = False
+        point = service._chain_point(str(job_id))
+        deadline = time.monotonic() + _CHAIN_BUDGET_SECONDS
+        for step in range(_CHAIN_LIMIT):
+            if step and time.monotonic() >= deadline:
+                break
+            if not service._redrive_once(str(job_id)):
+                break
+            advanced = True
+            following = service._chain_point(str(job_id))
+            if following is None or following == point:
+                break
+            point = following
+        return advanced
+
+    def _chain_point(self, job_id: str) -> tuple[object, ...] | None:
+        """The checkpoint of an operation whose next transition needs no
+        outside wait; ``None`` stops a chain.
+
+        That is a live operation that is due as ``tick`` selects it (no clock,
+        or a clock that has passed) and has no child outstanding.
+        """
+        service = typing_cast("RunSwitchOperationService", self)
+        with service._sessions() as session:
+            job = session.get(Job, job_id)
+            if (
+                job is None
+                or job.kind not in _OPERATION_KINDS
+                or job.state not in job_states.LIVE
+            ):
+                return None
+            due = wait_due(job)
+            if due is not None and _aware(due) > _now(service._clock):
+                return None
+            stored = read_row_column(job, "result")
+            if isinstance(stored, Residue):
+                return None  # its own advance repairs a damaged checkpoint
+            progress = _read_progress(stored)
+            if progress.child_operation_id is not None:
+                return None
+            return (
+                job.state,
+                progress.phase_index,
+                progress.item_index,
+                progress.phase,
+                progress.subphase,
+            )
+
+    def _redrive_once(self, job_id: str) -> bool:
+        """One fenced transition; a failure is contained and held for retry."""
         service = typing_cast("RunSwitchOperationService", self)
         advancing = True
         try:
