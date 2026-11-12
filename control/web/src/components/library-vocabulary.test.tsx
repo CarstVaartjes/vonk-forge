@@ -75,7 +75,8 @@ test("without a vocabulary the names show", () => {
 });
 
 test("the Library page fetches the served vocabulary once and shows its labels", async () => {
-  const name = modelLibrary.models.flatMap((model) => model.usage)[0]!;
+  // The default Recipes view labels each recipe's own capabilities.
+  const name = recipeLibrary.recipes.flatMap((recipe) => recipe.usage)[0]!;
   const libraryVocabulary = vi.fn(async () => ({
     ...wording.vocabulary,
     capabilities: [
