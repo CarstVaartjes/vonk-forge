@@ -91,7 +91,7 @@ holds until the next boot; to clear it now run `sudo nvidia-smi -rgc`.
 ### 1f. Remove configuration, state and the hosts entry (`sudo`)
 
 ```sh
-sudo rm -rf /etc/vonk-forge-agent /var/lib/vonk-forge 
+sudo rm -rf /etc/vonk-forge-agent /var/lib/vonk-forge
 sudo sed -i '/^# BEGIN VONK FORGE MANAGED HOSTS$/,/^# END VONK FORGE MANAGED HOSTS$/d' /etc/hosts
 sudo rm -rf /var/lib/vonk-forge-agent
 ```
@@ -134,7 +134,7 @@ is left dangling by the purge. Remove it and the package's enablement records,
 then reload:
 
 ```sh
-sudo find /etc/systemd/system -name 'vonk-forge*' -exec rm -rf {} +
+sudo find /etc/systemd/system -type l -name 'vonk-forge*' -delete
 sudo rm -f /var/lib/systemd/deb-systemd-helper-*/{,*/}vonk-forge*
 sudo systemctl daemon-reload
 ```
