@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
+    RunState,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -370,6 +371,25 @@ class StopMixin:
             canonical_message(read_row_column(job, "payload"))
         ).hexdigest()
         job.updated_at = now
+
+    @staticmethod
+    def _stop_of_stopped_run(session: Session, admitted: StopPlan) -> Job | None:
+        """The newest succeeded Stop of a run that is already stopped: a new
+        Stop of it is the same Stop, so it answers instead of being refused."""
+
+        if admitted.run_state != RunState.STOPPED:
+            return None
+        return session.scalar(
+            select(Job)
+            .where(
+                Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                Job.owner_kind == "run",
+                Job.owner_id == admitted.run_id,
+                Job.state == LifecycleState.SUCCEEDED.value,
+            )
+            .order_by(Job.created_at.desc(), Job.id.desc())
+            .limit(1)
+        )
 
     def _service_stop_pending(
         self,

@@ -129,16 +129,30 @@ def _failure_code_of(error: BaseException) -> str | None:
 
 
 def _same_intent(existing: Job, intent: RunSwitchIntent | None) -> bool:
-    """A reused request key names the same canonical accepted intent."""
+    """A reused request key names the same canonical accepted intent.
+
+    The previewed plan digest is not part of it: the same key for the same
+    intent is the same request, whatever plan the caller previewed.
+    """
     payload = _run_switch_payload(existing)
     if payload is None:
         return False
     stored = payload.intent
     if stored is None or intent is None:
         return True
-    return stored.model_dump(
-        mode="json", exclude_none=True, exclude={"request_key"}
-    ) == intent.model_dump(mode="json", exclude_none=True, exclude={"request_key"})
+    first, second = (
+        document.model_dump(
+            mode="json",
+            exclude_none=True,
+            exclude={
+                "request_key": True,
+                "plan_digest": True,
+                "request": {"plan_digest": True},
+            },
+        )
+        for document in (stored, intent)
+    )
+    return first == second
 
 
 def _require_reviewed_plan(reviewed_digest: str | None, plan: RunSwitchPlan) -> None:
