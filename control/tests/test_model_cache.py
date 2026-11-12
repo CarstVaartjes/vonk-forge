@@ -2959,13 +2959,15 @@ def test_repair_checkpoint_requires_exact_nested_contract():
             ModelCacheRepairCheckpoint.model_validate(invalid)
 
 
-def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
+def test_sampled_progress_writes_once_per_interval_and_rate_survives_restart(
     cache, tmp_path
 ):
+    from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
     from vonk_control.model_cache_progress import project_cache_progress
 
     service, sessions = cache
     clock = [datetime.now(UTC)]
+    half = timedelta(seconds=PROGRESS_CHECKPOINT_SECONDS / 2)
     service._clock = lambda: clock[0]
     raw = _artifact(tmp_path, b"x" * 100)
     preview = service.download_preview(artifacts=[raw])
@@ -2992,14 +2994,18 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
         )
 
     checkpoint(service, 10)
-    clock[0] += timedelta(seconds=0.1)
+    clock[0] += half
     checkpoint(service, 20)
     assert service.get_operation(operation.id).progress["downloaded_bytes"] == 10
-    clock[0] += timedelta(seconds=0.9)
+    clock[0] += half
     checkpoint(service, 30)
     measured = service.get_operation(operation.id).progress["measurement"]
-    assert measured["bytes_per_second"] == 20
-    assert measured["members"][0]["bytes_per_second"] == 20
+    assert measured["bytes_per_second"] == pytest.approx(
+        20 / PROGRESS_CHECKPOINT_SECONDS
+    )
+    assert measured["members"][0]["bytes_per_second"] == pytest.approx(
+        20 / PROGRESS_CHECKPOINT_SECONDS
+    )
     restarted = ModelCacheService(
         sessions,
         service.root,
@@ -3007,14 +3013,18 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
         fixture_sources=True,
         clock=lambda: clock[0],
     )
-    clock[0] += timedelta(seconds=1)
+    clock[0] += 2 * half
     checkpoint(restarted, 40)
     current = restarted.get_operation(operation.id).progress
     current_measurement = require_mapping(current["measurement"], "cache measurement")
-    assert current_measurement["bytes_per_second"] == 10
+    assert current_measurement["bytes_per_second"] == pytest.approx(
+        10 / PROGRESS_CHECKPOINT_SECONDS
+    )
     smoothed = current_measurement["smoothed_bytes_per_second"]
     assert isinstance(smoothed, (int, float))
-    assert 10 < smoothed < 20
+    assert (
+        10 / PROGRESS_CHECKPOINT_SECONDS < smoothed < 20 / PROGRESS_CHECKPOINT_SECONDS
+    )
     projected = project_cache_progress(current, clock[0])
     projected_members = require_sequence(
         projected["members"], "cache measurement members"
@@ -3032,6 +3042,77 @@ def test_cache_receipts_survive_restart_with_rolling_rate_and_bounded_writes(
     assert "eta_seconds" not in verifying
     assert "bytes_per_second" not in verifying
     restarted.close()
+
+
+@pytest.mark.parametrize("streams", [2, 10])
+def test_sampled_streams_share_one_progress_write_without_storage_reads(
+    cache, tmp_path, streams
+):
+    """Every stream samples once per second; the cost per window stays flat."""
+    from vonk_control.model_cache.checkpoints import PROGRESS_CHECKPOINT_SECONDS
+
+    service, sessions = cache
+    clock = [datetime.now(UTC)]
+    service._clock = lambda: clock[0]
+    raws = [
+        _artifact(
+            tmp_path,
+            bytes([index]) * 100,
+            artifact_id=f"shard-{index}",
+            path=f"shard-{index}.bin",
+        )
+        for index in range(streams)
+    ]
+    preview = service.download_preview(artifacts=raws)
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-000000000995",
+        plan_digest=preview["plan_digest"],
+        artifacts=raws,
+    )
+    with sessions() as session:
+        manifest = ArtifactSetManifest.from_document(
+            session.get(ModelCacheOperation, operation.id).payload["manifest"]
+        )
+    storage_reads = {"count": 0}
+    real_stored_object = service._stored_object
+
+    def counted_stored_object(digest, expected_bytes):
+        storage_reads["count"] += 1
+        return real_stored_object(digest, expected_bytes)
+
+    writes = {"count": 0}
+    real_session = service._session
+
+    @contextmanager
+    def counted_session(*, write: bool = False):
+        writes["count"] += int(write)
+        with real_session(write=write) as session:
+            yield session
+
+    service._stored_object = counted_stored_object
+    service._session = counted_session
+
+    def sample_every_stream(count: int) -> None:
+        for spec in manifest.artifacts:
+            service._checkpoint_artifact(
+                spec,
+                operation_id=operation.id,
+                set_digest=manifest.digest,
+                actual_bytes=count,
+                state="partial",
+                force_progress=False,
+            )
+
+    sample_every_stream(10)
+    clock[0] += timedelta(seconds=PROGRESS_CHECKPOINT_SECONDS)
+    sample_every_stream(20)
+    assert storage_reads["count"] == 0
+    assert writes["count"] == 2
+    # The due write carried every stream's sample, not only its own.
+    assert service.get_operation(operation.id).progress["downloaded_bytes"] == (
+        20 + 10 * (streams - 1)
+    )
 
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():

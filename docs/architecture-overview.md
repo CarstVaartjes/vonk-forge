@@ -409,6 +409,13 @@ permission to delete.
   an effect's deadline. At expiry, reconcile, retry safely, or report an
   actionable failure. A temporary failure never permanently bans a fresh
   authorized request for that artifact.
+- A long transfer writes durable progress on one fixed cadence per operation,
+  never per stream or per second: in-process samples are coalesced, and the
+  cadence is at most a third of the shortest window that reads the write
+  (progress staleness, stall flag, lease). A completion, failure or stop
+  writes at once. Resume reads the bytes retained on disk, not the progress
+  record, and whole-set projections such as verified bytes are recomputed at
+  finalization or when read, not in the heartbeat.
 - Leases and attempt fences protect every result and transition. Takeover
   checks exact process/runtime/storage effects; an expired heartbeat is not
   proof of death. Stale attempts cannot publish current references, renew

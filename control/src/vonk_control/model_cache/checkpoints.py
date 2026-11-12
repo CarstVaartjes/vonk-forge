@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, cast
 
@@ -11,8 +12,6 @@ from vonk_agent_protocol import (
     Disposition,
     ModelCacheCode,
     ModelFileState,
-    ProgressPhase,
-    adopt_progress_phase,
 )
 
 from ..agent_operation_facts import aware as _aware
@@ -20,6 +19,7 @@ from ..lifecycle import Outcome, Reported, State
 from ..model_cache_contract import ModelCacheTransferArtifact
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
+from ..operation_progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
 from ..profile_read_observation import observe_storage
 from .artifacts import ArtifactSetManifest, ArtifactSpec
 from .catalog_helpers import _iso, _iso_now
@@ -37,6 +37,34 @@ if TYPE_CHECKING:
     from .service import ModelCacheService
 
 
+#: How often a running download writes its durable progress. One write per
+#: operation carries every stream's latest bytes, so the cost does not grow with
+#: the stream count. The cadence is a third of the shortest window that reads
+#: that write: progress older than ``STALE_AFTER_SECONDS`` (45 s) is shown as
+#: waiting without a rate, ``STALL_AFTER_SECONDS`` flags a stopped transfer, and
+#: the write renews the ``_TRANSFER_CLAIM_SECONDS`` lease. Resume never reads it:
+#: a restarted transfer resumes from the bytes retained on disk.
+PROGRESS_CHECKPOINT_SECONDS = (
+    min(STALE_AFTER_SECONDS, STALL_AFTER_SECONDS, _TRANSFER_CLAIM_SECONDS) / 3
+)
+
+
+@dataclass(slots=True)
+class _ProgressWindow:
+    """One operation's progress between two durable writes, in process memory."""
+
+    noted_at: datetime
+    written_at: datetime | None = None
+    # Each stream's (or part's) object digest -> its latest sample.
+    samples: dict[str, tuple[ArtifactSpec, int, int]] = field(default_factory=dict)
+
+
+def _within(now: datetime, then: datetime | None) -> bool:
+    return then is not None and 0 <= (now - then).total_seconds() < (
+        PROGRESS_CHECKPOINT_SECONDS
+    )
+
+
 class CheckpointsMixin:
     """Checkpoints behavior of the cache service."""
 
@@ -51,23 +79,32 @@ class CheckpointsMixin:
         completed_artifacts: int = 0,
         force_progress: bool = True,
     ) -> None:
+        """Record a stream's bytes; write the operation's progress when due.
+
+        A sampled heartbeat (``force_progress=False``) is held in memory and
+        written with the operation's next write, at most once per
+        ``PROGRESS_CHECKPOINT_SECONDS``. A completion, failure or stop writes at
+        once. The set's ``verified_bytes`` is not recomputed here: the entry
+        read, reconcile and finalization own that whole-set projection.
+        """
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         with cache._lock:
-            if not force_progress:
-                last = cache._progress_checkpoint_at.get(operation_id)
-                if last is not None and 0 <= (now - last).total_seconds() < 1:
-                    return
-            # Bound this process-local fast path to the current sampling window.
-            cache._progress_checkpoint_at = {
+            # Bound this process-local state to operations still sampling.
+            windows = {
                 key: value
-                for key, value in cache._progress_checkpoint_at.items()
-                if 0 <= (now - value).total_seconds() < 1
+                for key, value in cache._progress_checkpoints.items()
+                if key == operation_id or _within(now, value.noted_at)
             }
-        # The receipts are read with neither the cache lock nor row locks held:
-        # every download thread checkpoints through that lock.
-        verified_bytes = cache._verified_bytes(set_digest)
-        with cache._lock:
+            cache._progress_checkpoints = windows
+            window = windows.setdefault(operation_id, _ProgressWindow(noted_at=now))
+            window.noted_at = now
+            window.samples[spec.sha256] = (spec, actual_bytes, completed_artifacts)
+            if not force_progress and _within(now, window.written_at):
+                return
+            samples = list(window.samples.values())
+            window.samples = {}
+            window.written_at = now
             with cache._session(write=True) as session:
                 operation = session.get(
                     ModelCacheOperation, operation_id, with_for_update=True
@@ -80,19 +117,6 @@ class CheckpointsMixin:
                     return
                 if operation is not None and operation.state in {"succeeded", "failed"}:
                     return
-                if operation is not None and not force_progress:
-                    prior = _operation_progress(operation).measurement
-                    if (
-                        adopt_progress_phase(prior.phase) is ProgressPhase.DOWNLOADING
-                        and prior.observed_at is not None
-                        and 0
-                        <= (
-                            now - datetime.fromisoformat(prior.observed_at)
-                        ).total_seconds()
-                        < 1
-                    ):
-                        cache._progress_checkpoint_at[operation_id] = now
-                        return
                 # Refresh bytes belong to the operation's transfer ledger. The
                 # last verified receipt and its object remain published until
                 # the replacement has been verified and atomically committed.
@@ -103,25 +127,24 @@ class CheckpointsMixin:
                     # (an unreadable document is not checkpointed: the bytes
                     # are content-addressed and the claim loop reconciles it)
                     manifest = _manifest_of(payload)
-                    # A part of a split file reports on the whole file's ledger
-                    # entry, offset by the parts already appended.
-                    ledger_digest = spec.ledger_sha256 or spec.sha256
-                    actual_bytes += spec.ledger_base
-                    entry = payload.transfer.artifacts.get(ledger_digest)
-                    baseline = 0 if entry is None else entry.baseline_bytes
-                    previous_received = 0 if entry is None else entry.received_bytes
-                    artifacts = {
-                        **payload.transfer.artifacts,
-                        ledger_digest: ModelCacheTransferArtifact(
+                    artifacts = dict(payload.transfer.artifacts)
+                    for sampled, sampled_bytes, _completed in samples:
+                        # A part of a split file reports on the whole file's
+                        # ledger entry, offset by the parts already appended.
+                        ledger_digest = sampled.ledger_sha256 or sampled.sha256
+                        landed = sampled_bytes + sampled.ledger_base
+                        entry = artifacts.get(ledger_digest)
+                        baseline = 0 if entry is None else entry.baseline_bytes
+                        previous_received = 0 if entry is None else entry.received_bytes
+                        artifacts[ledger_digest] = ModelCacheTransferArtifact(
                             baseline_bytes=baseline,
                             received_bytes=max(
-                                previous_received, max(0, actual_bytes - baseline)
+                                previous_received, max(0, landed - baseline)
                             ),
                             started_at=entry.started_at
                             if entry is not None
                             else _iso_now(cache._clock()),
-                        ),
-                    }
+                        )
                     transfer = payload.transfer.model_copy(
                         update={"artifacts": artifacts}
                     )
@@ -149,7 +172,10 @@ class CheckpointsMixin:
                             phase="downloading"
                             if state == ModelFileState.PARTIAL
                             else "verifying",
-                            completed_artifacts=max(old_completed, completed_artifacts),
+                            completed_artifacts=max(
+                                old_completed,
+                                *(completed for *_, completed in samples),
+                            ),
                             downloaded_bytes=max(old_downloaded, received),
                             expected_bytes=total,
                             current_artifact_key=spec.key,
@@ -167,9 +193,7 @@ class CheckpointsMixin:
                         if state == ModelFileState.PARTIAL
                         else "verifying"
                     )
-                    row.verified_bytes = verified_bytes
                     row.updated_at = now
-            cache._progress_checkpoint_at[operation_id] = now
 
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
         cache = cast("ModelCacheService", self)
