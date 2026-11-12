@@ -256,6 +256,9 @@ RUST_FILES = (
     "control/src/vonk_control/resources/site-ports.json",
     "control/tests/fixtures/compiled_workload_v2.json",
     "tests/acceptance/fixtures/nvidia-smi.sh",
+    "control/tests/fixtures/compiled_plan_751.json",
+    "control/tests/fixtures/stored_installation_33dc45f0.json",
+    "install/installer-release-public.pem",
 )
 
 
