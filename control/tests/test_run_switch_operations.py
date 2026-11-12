@@ -2284,7 +2284,7 @@ def _cold_compile_switch(
     slow_compiles: int = 1,
     runtime_install_busy_attempts: int = 0,
 ):
-    """Start a real Run/Switch whose cold compile outlives the preflight window.
+    """Start a real Run/Switch whose cold compile takes ``seconds`` of clock time.
 
     The phase gate, ``LifecyclePreflight``, install admission and compiled launch
     documents use production code; adjacent artifact phases use test adapters.
@@ -2411,6 +2411,24 @@ def _cold_compile_switch(
         hooks=hooks,
         drive=drive,
     )
+
+
+def _host_changes_during_compile(switch) -> None:
+    """Every slow compile sees the Spark host change, as a reboot or upgrade does.
+
+    The receipt the phase was admitted on then no longer matches the host, so
+    install admission refuses the identical plan until the ordinary probe runs.
+    """
+
+    changes = iter(range(1, 1_000))
+
+    def change() -> None:
+        fingerprint = f"{next(changes):064x}"
+        with switch.sessions.begin() as session:
+            for node_id in switch.nodes:
+                set_inventory_fingerprint(session.get(AgentNode, node_id), fingerprint)
+
+    switch.hooks.append(change)
 
 
 def _runtime_probes(sessions) -> int:
@@ -2668,12 +2686,13 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
 def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
-    """Persistent stale preflight ends its observer; repaired fresh intent runs."""
+    """A host that changes during every compile ends the refresh; fresh intent runs."""
     from vonk_control.run_switch_operations import _run_switch_payload
 
     from .non_blocking import assert_ended_without_blocking
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
+    _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
         from vonk_control.job_documents import RunSwitchRunIntent
@@ -2733,15 +2752,17 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
 ) -> None:
     """Cancellation on the expiry path prevents another compilation attempt.
 
-    The cancellation lands while the Controller is compiling, so the expired
-    preflight hold is the first code to see it.  It has to finish the
-    cancellation under the same checkpoint guard the executing path uses
-    instead of queueing another probe or accepting the identical plan later.
+    The cancellation lands while the Controller is compiling and the host
+    changes, so the expired preflight hold is the first code to see it.  It
+    has to finish the cancellation under the same checkpoint guard the
+    executing path uses instead of queueing another probe or accepting the
+    identical plan later.
     This does not exercise cancellation racing a successful acceptance.
     """
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
+    _host_changes_during_compile(switch)
     switch.hooks.append(
         lambda: service.cancel(
             operation.operation_id,
@@ -5347,6 +5368,7 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     from vonk_control.operation_api import operation_detail_response
 
     switch = _cold_compile_switch(tmp_path)
+    _host_changes_during_compile(switch)  # held for a refresh: totals unknown
     switch.drive()
     reason = (
         "install plan is blocked: " + "missing durable runtime image receipt; " * 10

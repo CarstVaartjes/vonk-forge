@@ -115,7 +115,6 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
             progress.stall is not None
             and progress.stall.repeats >= 2
             and progress.child_progress is not None
-            and progress.child_progress.operation is not None
         )
 
     for _ in range(20):
@@ -153,7 +152,7 @@ def test_a_repeated_wait_raises_the_alarm_and_progress_clears_it(
     assert listed.first_seen_at == application.progress.stall.first_seen_at
 
     _sparks_report(load, free)  # the disk is freed
-    # The next preflight sees the freed disk and the install goes ahead.
+    # The next install admission sees the freed disk and the install goes ahead.
     _loop(load, lambda: not _alarm(load), rounds=20)
     assert not _alarm(load) and not _platform_stalled(load)
     assert _settle(load), _application(load).status_reason
