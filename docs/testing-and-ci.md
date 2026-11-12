@@ -16,12 +16,25 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-Every PR runs complete sharded Controller and repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Every change lands through an integration PR: a same-repository
+`integration/*` head, or any PR with the `release-acceptance` label. `full` in
+`scripts/select-ci-areas` owns that rule; `ci.yml` and the proof workflows (via
+`ci-scope.yml`) read it.
+
+| Run | What runs |
+| --- | --- |
+| Member PR | `Repository guards`, `Ruff` (lint, format, types, added-line guards), supply-chain evidence, `Generated control clients`, the test files that directly exercise the changed paths (`scripts/select-changed-tests`, sharded about a hundred files per runner), and Rust lint/tests only for Rust inputs. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. |
+| Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and the path-filtered proof workflows. |
+| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. The proof workflows run on pull requests only. |
+
+A member PR is done when its lean CI is green and its review has passed.
+Adding the `release-acceptance` label re-runs `ci.yml` in full at once; the
+proof workflows do not trigger on labels, so they pick it up on the next push.
+
 Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
-wire and Rust platform checks run on every PR because their dependencies span
-these boundaries. Image/package builds may be selective.
+wire and Rust platform checks run on every full run because their dependencies
+span these boundaries. Image/package builds may be selective.
 
 Ordinary pytest files in the reviewed core test directories run the core suites
 without rebuilding unchanged images, packages or release candidates. Shared
@@ -33,12 +46,12 @@ the complete Controller suite, without a second standalone job.
 Integration PRs must accept their own candidate before merge. CI applies the
 `release-acceptance` label to same-repository `integration/*` PRs (the branch
 alone selects acceptance); `CI gate` requires their exact
-candidate's acceptance. A PR without the label runs that acceptance only when it
-changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance programs;
-Controller, web, tooling, test and documentation PRs fold into an integration
-PR or are accepted by main's Release, and their `CI gate` does not wait for it. A component PR merged straight to
-main leaves no candidate evidence, so Release runs the Spark acceptance (and the
-recipe refresh only if the change can alter the upgrade) itself.
+candidate's acceptance, with the upgrade carry. A member PR runs no acceptance:
+it folds into an integration PR. A merge-queue commit accepts its candidate
+when it changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance
+programs. A merge without candidate evidence makes Release run the Spark
+acceptance (and the recipe refresh only if the change can alter the upgrade)
+itself.
 See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
@@ -47,19 +60,18 @@ Only the `release-acceptance` label starts a new CI run. Any other label runs in
 its own concurrency group, so it never cancels the run in progress, and every job
 skips it. Only `CI gate` is renamed on that run (`CI gate (label ignored)`), so
 no such run reports a `CI gate` that could satisfy the requirement while the real
-run is pending. Other jobs keep their names: a job skipped by its own `if` shows
+run is pending; a member PR's gate is likewise `CI gate (member PR)`. Other jobs keep their names: a job skipped by its own `if` shows
 its name expression unevaluated, which would break a required check such as
 `Compose integration` on pull requests that skip it.
 
 The acceptance's upgrade carry (a workload keeps serving while the Controller
 is redeployed and the agent upgraded to the candidate) runs on main's release
-for every merge. A pull request carries its own candidate only when it changes
-what the upgrade is made of: the agent, its packaging and installers, the
-deployment, the Controller-to-agent protocol, and the scripts, actions and
-workflows that assemble and accept a candidate (`CARRY_INPUTS` in
-`scripts/select-ci-areas`). Other changes get no acceptance on the pull request
-and the carry on main; the `release-acceptance` label asks for both on any PR.
-The pull request's acceptance summary says when the carry was left to main.
+for every merge, and on every integration PR. Release refreshes recipes only
+for a change to what the upgrade is made of: the agent, its packaging and
+installers, the deployment, the Controller-to-agent protocol, and the scripts,
+actions and workflows that assemble and accept a candidate (`CARRY_INPUTS` in
+`scripts/select-ci-areas`). The `release-acceptance` label makes any PR a full
+run with both.
 
 The carry waits on behaviour, never on a fixed timer. After the baseline
 serves, after the Controller recreate and after the agent upgrade, each phase
@@ -235,9 +247,10 @@ first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
 The local `control` project refers to the ignored protocol wheel under
-`inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
-For direct `uv sync --project control` or `uv run --project control` commands,
-run `scripts/build-control-wheel` once first; it also checks the wheel against
+`inventory/wheels`; it is not in git, so a fresh clone has none.
+`scripts/test-local` builds and verifies it automatically. Before any other
+test or `uv sync --project control` / `uv run --project control` command in a
+fresh clone, run `scripts/build-control-wheel` once first; it also checks the wheel against
 the hash locked in `control/uv.lock`.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
@@ -610,7 +623,7 @@ upgrade baseline. PR acceptance cannot substitute for production acceptance.
 `Repository guards` runs the fast cross-area checks on every CI invocation,
 including documentation-only and control-only PRs, merge queues, and releases
 that need fresh CI. `CI gate` requires its success independently
-of `scripts/select-ci-areas`. The sharded repository suite also always runs and excludes the same files/nodes
+of `scripts/select-ci-areas`. The sharded repository suite runs on every full run and excludes the same files/nodes
 to avoid running guards twice.
 
 `tests/repository_guards.py` owns the guard selection and the reviewed scope of

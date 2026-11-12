@@ -16,7 +16,8 @@ Run `scripts/test-local` from your worktree for the repository and Controller
 pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
 VM when available; the script builds the local agent protocol wheel and checks
 it against `control/uv.lock` before running Controller commands. For direct
-Controller commands, run `scripts/build-control-wheel` once first. See
+Controller commands or tests in a fresh clone, run `scripts/build-control-wheel`
+once first: the protocol wheel is built locally, not kept in git. See
 [Testing and CI](docs/testing-and-ci.md) for focused commands and the other
 acceptance lanes.
 
@@ -29,12 +30,16 @@ contract checks. See [principle guards](docs/principle-guards.md).
 
 ## CI and pre-merge release acceptance
 
-Every PR runs the complete sharded Controller and repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Every change lands through an integration PR (`integration/*` or the
+`release-acceptance` label), which runs the complete suites, candidate
+acceptance and the path-filtered proof workflows. A member PR runs lean CI only
+and reports `CI gate (member PR)` instead of the required `CI gate`, so it
+cannot merge itself. [Testing and CI](docs/testing-and-ci.md) lists what runs
+where (`full` in `scripts/select-ci-areas`).
 Merge queues also accept their combined candidate before admission.
 Integration selection uses the conservative dependency closure documented in
 `scripts/select-ci-areas`; unfamiliar inputs select every integration. The
-Controller suites include their real PostgreSQL tests on every PR.
+Controller suites include their real PostgreSQL tests on every full run.
 
 Integration PRs carry the `release-acceptance` label. CI adds it to
 same-repository `integration/*` PRs (the branch alone selects acceptance) and requires acceptance of that exact PR merge

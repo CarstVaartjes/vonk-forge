@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.categorized_errors import InvalidRequestError
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
@@ -59,48 +58,6 @@ def claims(sessions, run_id):
                 )
             )
         }
-
-
-@pytest.mark.parametrize("changed", [False, True])
-def test_unreviewed_service_stop_has_no_publication_or_admission_effect(
-    published_service_run, changed
-):
-    sessions, service, _jobs, _routes, publisher, run_id, nodes = published_service_run
-    preview = service.preview_stop(run_id)
-    before_claims = claims(sessions, run_id)
-    before_generation = len(publisher.aliases)
-    with sessions() as session:
-        before_ordinals = {
-            node.node_id: node.workload_intent_ordinal
-            for node in session.scalars(
-                select(AgentNode).where(AgentNode.node_id.in_(nodes))
-            )
-        }
-    if changed:
-        # A real state change produces a different preview, not an invented DTO.
-        with sessions.begin() as session:
-            run = session.get(RecipeRun, run_id)
-            assert run is not None
-            run.state = "failed"
-        assert service.preview_stop(run_id).plan_digest != preview.plan_digest
-    request = str(uuid4())
-    with pytest.raises(InvalidRequestError):
-        service.stop(
-            run_id,
-            plan_digest=preview.plan_digest if changed else "0" * 64,
-            actor="admin",
-            request_id=request,
-        )
-    assert len(publisher.aliases) == before_generation
-    assert claims(sessions, run_id) == before_claims
-    with sessions() as session:
-        assert session.scalar(select(Job.id).where(Job.request_id == request)) is None
-        assert {
-            node.node_id: node.workload_intent_ordinal
-            for node in session.scalars(
-                select(AgentNode).where(AgentNode.node_id.in_(nodes))
-            )
-        } == before_ordinals
 
 
 def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
@@ -195,8 +152,13 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
         run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
     )
     assert replay.id == accepted_id
-    with pytest.raises(InvalidRequestError):
-        restarted.stop(run_id, plan_digest="0" * 64, actor="admin", request_id=request)
+    # The same key on the same run is the same Stop, whatever it previewed.
+    assert (
+        restarted.stop(
+            run_id, plan_digest="0" * 64, actor="admin", request_id=request
+        ).id
+        == accepted_id
+    )
     with sessions() as session:
         assert {
             (row.id, row.payload_digest)

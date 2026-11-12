@@ -88,7 +88,7 @@ jobs:
           # evidence: the upgrade carry still runs on every release; the
           # recipe refresh only runs for changes that can alter the upgrade.
           refresh_required=$(git diff --name-only --no-renames HEAD^ HEAD |
-            scripts/select-ci-areas --event pull_request | jq -er '.upgrade_carry | tostring')
+            scripts/select-ci-areas --event pull_request | jq -er '.upgrade_inputs | tostring')
           echo "refresh_required=$refresh_required" >> "$GITHUB_OUTPUT"
           names=$(gh api --paginate \
             "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts?per_page=100" \
