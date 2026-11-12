@@ -1343,7 +1343,13 @@ def _library_release(envelope: CatalogIndex) -> tuple[str, datetime]:
             RecipePackageCode.SCHEMA_INCOMPATIBLE,
             f"recipe library index is not a contract v{CONTRACT_MAJOR} release",
         )
-    return envelope.contract_version, datetime.fromisoformat(envelope.updated_at)
+    try:
+        return envelope.contract_version, datetime.fromisoformat(envelope.updated_at)
+    except ValueError as error:  # the contract's pattern admits month 13
+        raise RecipePackageError(
+            RecipePackageCode.RESPONSE_INVALID,
+            "recipe library index update time is invalid",
+        ) from error
 
 
 def _entry_uri(entry: Mapping[str, object]) -> str | None:

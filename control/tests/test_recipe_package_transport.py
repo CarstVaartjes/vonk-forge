@@ -566,6 +566,7 @@ def test_only_the_signed_envelope_rejects_the_whole_bundle(
         ("kind", "something-else", RecipePackageCode.SCHEMA_INCOMPATIBLE),
         ("schema_version", 3, RecipePackageCode.SCHEMA_INCOMPATIBLE),
         ("source_commit", "not-a-commit", RecipePackageCode.RESPONSE_INVALID),
+        ("updated_at", "2026-13-40T00:00:00Z", RecipePackageCode.RESPONSE_INVALID),
     ],
 )
 def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
