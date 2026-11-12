@@ -827,7 +827,7 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     progress.preflight = LifecyclePreflightCheckpoint(
         phase_index=0,
         next_check_at=NOW + timedelta(seconds=5),
-        last_failure_code=RuntimePreflightCode.STALE,
+        last_failure_code=RuntimePreflightCode.REQUIRED,
     )
     before = adapter.lifecycle(job, progress, NOW)
     after = replace(
