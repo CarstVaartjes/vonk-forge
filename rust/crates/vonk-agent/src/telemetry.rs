@@ -183,6 +183,9 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             cpu_frequency_avg_mhz: cpu_frequency.map(|value| value.avg_mhz),
             cpu_frequency_min_mhz: cpu_frequency.map(|value| value.min_mhz),
             cpu_frequency_max_mhz: cpu_frequency.and_then(|value| value.max_mhz),
+            gpu_power_watts: None,
+            uptime_seconds: None,
+            gpu_process_memory_bytes: None,
         }
     }
 }

@@ -22024,6 +22024,34 @@
           ],
           "title": "Gpu Memory Total Bytes"
         },
+        "gpu_power_watts": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Power Watts"
+        },
+        "gpu_process_memory_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gpu Process Memory Bytes"
+        },
         "gpu_temperature_c": {
           "anyOf": [
             {
@@ -22107,6 +22135,34 @@
           "format": "date-time",
           "title": "Received At",
           "type": "string"
+        },
+        "system_memory_bytes": {
+          "anyOf": [
+            {
+              "maximum": 17592186044416,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "System Memory Bytes"
+        },
+        "uptime_seconds": {
+          "anyOf": [
+            {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uptime Seconds"
         }
       },
       "required": [

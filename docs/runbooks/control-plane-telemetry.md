@@ -7,16 +7,23 @@ are nullable because a platform may not expose a value at a given sample:
 
 | Metric | Unit | Meaning |
 | --- | --- | --- |
-| CPU utilization | percent | Host CPU utilization. |
-| Load average | 1m | Unix load average over one minute. |
 | Memory total/available | bytes | Unified host memory capacity and currently available memory. |
 | Disk total/free | bytes | Filesystem capacity used for recipe/model admission. |
 | GPU utilization | percent | GPU utilization when exposed by the driver. |
-| GPU memory total/free | bytes | GPU memory evidence when exposed. |
-| Temperature | °C | Reported device/host temperature. |
-| Power | watts | Reported power draw. |
-| Network receive/transmit | bytes/s | Agent-observed network throughput. |
-| Gap samples | count | Missing sample evidence carried by the telemetry source. |
+| GPU memory total/free | bytes | Dedicated GPU memory; not reported on a shared-pool accelerator such as GB10. |
+| GPU unavailable reason | code | Why the GPU readings are missing, when they are. |
+| GPU temperature | °C | Reported GPU temperature. |
+| GPU clock | MHz and state | Current, maximum and locked GPU clock, with the helper's apply receipt. |
+| CPU clock avg/min/max | MHz | Current average and minimum core clock; hardware maximum. |
+| GPU power | watts | The GPU's power draw (`nvidia-smi power.draw`), not the whole host. |
+| Uptime | seconds | Whole seconds since boot (`/proc/uptime`). |
+| GPU process memory ("Models") | bytes | Memory the driver says GPU compute processes hold: weights, KV cache and CUDA workspace. Reported only on a shared-pool accelerator, where it is part of memory total minus available. |
+
+The Controller derives one more value for the fleet view, `system_memory_bytes`
+("System"): memory total minus available minus GPU process memory, never below
+zero, present only when all three are reported. It is everything in use outside
+GPU processes, including the model servers' own CPU-side memory and page cache.
+It is not stored.
 
 DGX Spark GB10 nodes use unified memory. GPU-memory fields and host-memory
 fields are not interchangeable: admission uses the resource evidence declared

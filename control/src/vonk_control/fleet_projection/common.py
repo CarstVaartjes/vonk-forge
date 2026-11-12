@@ -26,6 +26,7 @@ from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
 from vonk_agent_protocol.swap import SwapIntent, SwapPolicy
+from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_agent_protocol.wire_model import strict_json_datetime
 from vonk_forge_contracts import (
     EndpointAlias,
@@ -331,6 +332,14 @@ class InventoryState(InventoryRequest):
 class TelemetryPoint(TelemetrySampleView):
     id: UuidId
     node_id: NodeId
+    #: Everything in use outside GPU processes, derived once in
+    #: ``telemetry_point``; absent when any of its three inputs is.
+    system_memory_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_TELEMETRY_CAPACITY_BYTES,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class TelemetryState(StrictModel):
@@ -524,7 +533,15 @@ class FleetNodeIdentity(StrictModel):
 
 
 def telemetry_point(value: TelemetrySampleView) -> TelemetryPoint:
-    return TelemetryPoint.model_validate_json(canonical_message(value))
+    point = TelemetryPoint.model_validate_json(canonical_message(value))
+    total = value.memory_total_bytes
+    available = value.memory_available_bytes
+    gpu_processes = value.gpu_process_memory_bytes
+    if total is None or available is None or gpu_processes is None:
+        return point
+    return point.model_copy(
+        update={"system_memory_bytes": max(0, total - available - gpu_processes)}
+    )
 
 
 def _utc(value: datetime) -> datetime:
