@@ -9,13 +9,15 @@ from .generated_control.models.platform_observation import PlatformObservation
 
 def render_platform(observation: PlatformObservation) -> None:
     # Import lazily: the shared terminal helpers live with the task renderer.
-    from .cli_render import _field, _table, _time
+    from .cli_render import _field, _reported, _table, _time
 
     _field("Observed", _time(observation.observed_at.isoformat()))
-    _field("Controller build", observation.api.source_sha)
+    # Wording shared with the dashboard's version line (tests/fixtures/version-line.json).
+    build = observation.api.source_sha
+    _reported("Controller build", build[:12] if isinstance(build, str) else None)
     # A reused pull request build keeps its commit; the tree is the release's.
     tree = observation.api_source_tree
-    _field("Controller build tree", tree if isinstance(tree, str) else None)
+    _reported("Controller build tree", tree if isinstance(tree, str) else None)
     _field("API contract", observation.api.control_contract_sha256)
     if observation.workers is None:
         _field("Workers", None)

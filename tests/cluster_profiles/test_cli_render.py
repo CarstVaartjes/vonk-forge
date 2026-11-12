@@ -1,6 +1,8 @@
+import json
 import os
 from contextlib import redirect_stdout
 from io import BytesIO, TextIOWrapper
+from pathlib import Path
 
 import pytest
 
@@ -1095,7 +1097,7 @@ def test_platform_presents_current_response_contract(workers_available, capsys):
     contract = PlatformObservation.from_dict(payload)
     render_payload(contract.to_dict(), "platform")
     output = capsys.readouterr().out
-    assert contract.api.source_sha in output
+    assert contract.api.source_sha[:12] in output
     assert contract.api.control_contract_sha256 in output
     if workers_available:
         assert "d" * 40 in output and "e" * 64 in output
@@ -1310,31 +1312,31 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "2 B unique" in output
 
 
-def test_version_facts_use_the_dashboard_words(capsys):
-    """`vonkctl` and the dashboard's version line name the same facts the same way.
+_VERSION_LINE_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "version-line.json").read_text()
+)
 
-    Wrong implementation caught: the CLI keeps `API source` / `Last run` while the
-    Controller's version line says `Controller build` / `Last sync`, so one fact has
-    two names.
-    """
+
+@pytest.mark.parametrize(
+    "case", _VERSION_LINE_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_version_lines_print_the_text_the_dashboard_shows(case, capsys):
+    # The web test renders the same fixture, so the two clients cannot drift.
     render_payload(
         {
             "observed_at": "2026-11-12T08:00:00Z",
-            "api": {"source_sha": "a" * 40, "control_contract_sha256": "b" * 64},
+            "api": {
+                "source_sha": case["platform"]["source_sha"],
+                "control_contract_sha256": "b" * 64,
+            },
             "workers": None,
             "worker_issue": "worker-observation-unavailable",
         },
         "platform",
     )
-    assert f"Controller build: {'a' * 40}" in capsys.readouterr().out
     render_payload(
-        {
-            "state": "current",
-            "completed_at": "2026-11-12T08:00:00Z",
-            "library_version": "1.4.0",
-        },
-        "recipe",
-        action="sync-status",
+        case["sync"] or {"state": "never-run"}, "recipe", action="sync-status"
     )
-    output = capsys.readouterr().out
-    assert "Last sync:" in output and "Library version: 1.4.0" in output
+    printed = capsys.readouterr().out.splitlines()
+    for line in case["lines"]:
+        assert line in printed

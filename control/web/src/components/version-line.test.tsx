@@ -1,72 +1,79 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import type { CatalogSyncStatus, ControlApi, PlatformObservation } from "../api/types";
 import { VersionLine } from "./version-line";
 
-const platform = {
-  api: { source_sha: "0123456789abcdef0123456789abcdef01234567" },
-} as PlatformObservation;
-const sync = {
-  library_version: "1.4.0",
-  completed_at: "2026-11-12T08:00:00Z",
-  created_at: "2026-11-12T07:59:00Z",
-} as CatalogSyncStatus;
+// `vonkctl` renders the same fixture and prints the same lines, so the two clients cannot drift.
+const fixture: {
+  cases: {
+    name: string;
+    platform: { source_sha: string | null };
+    sync: Record<string, unknown> | null;
+    lines: string[];
+  }[];
+} = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../../tests/fixtures/version-line.json"), "utf8"),
+);
+
+type VersionApi = Pick<ControlApi, "platformObservation" | "catalogSyncStatus">;
 
 function api(
   platformObservation: () => Promise<PlatformObservation>,
   catalogSyncStatus: () => Promise<CatalogSyncStatus | null>,
 ) {
-  return { platformObservation, catalogSyncStatus } as unknown as Pick<
-    ControlApi,
-    "platformObservation" | "catalogSyncStatus"
-  >;
+  return { platformObservation, catalogSyncStatus } as unknown as VersionApi;
 }
 
-test("shows the build, library version and last sync from the API", async () => {
-  // Break caught: the line shows a constant or a guess instead of the API's own values.
+function facts(line: HTMLElement) {
+  return Array.from(line.children).map((child) => child.textContent);
+}
+
+test.each(fixture.cases)("shows the shared lines: $name", async (item) => {
   render(
     <VersionLine
       api={api(
-        async () => platform,
-        async () => sync,
+        async () => ({ api: item.platform }) as PlatformObservation,
+        async () => item.sync as CatalogSyncStatus | null,
       )}
     />,
   );
 
-  const line = await screen.findByLabelText("Versions");
-  expect(line).toHaveTextContent("Controller build 0123456789ab");
-  expect(line).toHaveTextContent("Library version 1.4.0");
-  expect(line.querySelector("time")).toHaveAttribute("datetime", "2026-11-12T08:00:00Z");
+  expect(facts(await screen.findByLabelText("Versions"))).toEqual(item.lines);
 });
 
-test("one failed fact reads Not reported while the others still show", async () => {
+test("a failed read says Not reported while the other facts still show", async () => {
   // Break caught: a failed platform read hides the library facts, or the footer renders blank values.
+  const synced = fixture.cases[0];
   render(
     <VersionLine
       api={api(
         async () => {
           throw new Error("platform unavailable");
         },
-        async () => sync,
+        async () => synced.sync as CatalogSyncStatus,
       )}
     />,
   );
 
-  const line = await screen.findByLabelText("Versions");
-  expect(line).toHaveTextContent("Controller build Not reported");
-  expect(line).toHaveTextContent("Library version 1.4.0");
+  expect(facts(await screen.findByLabelText("Versions"))).toEqual([
+    "Controller build: Not reported",
+    ...synced.lines.slice(1),
+  ]);
 });
 
-test("a library that never synced says so", async () => {
-  render(
-    <VersionLine
-      api={api(
-        async () => platform,
-        async () => null,
-      )}
-    />,
+test("reads again when the key changes, so the footer is not frozen at mount", async () => {
+  // Break caught: the footer keeps the values read at first mount after the operator navigates.
+  const synced = fixture.cases[0];
+  let build = "a".repeat(40);
+  const versions = api(
+    async () => ({ api: { source_sha: build } }) as PlatformObservation,
+    async () => synced.sync as CatalogSyncStatus,
   );
+  const { rerender } = render(<VersionLine api={versions} readKey="/fleet" />);
+  expect(await screen.findByText("aaaaaaaaaaaa")).toBeVisible();
 
-  const line = await screen.findByLabelText("Versions");
-  expect(line).toHaveTextContent("Library version Not reported");
-  expect(line).toHaveTextContent("Last sync none yet");
+  build = "b".repeat(40);
+  rerender(<VersionLine api={versions} readKey="/library" />);
+  expect(await screen.findByText("bbbbbbbbbbbb")).toBeVisible();
 });

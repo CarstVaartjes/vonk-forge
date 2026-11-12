@@ -155,7 +155,7 @@ export function App({ api }: { api: ControlApi }) {
         navigationKey={pathname}
         navigationLocked={navigationLocked}
         onNavigate={navigate}
-        footer={auth ? <VersionLine api={api} /> : undefined}
+        footer={auth ? <VersionLine api={api} readKey={pathname} /> : undefined}
         operator={
           auth
             ? {

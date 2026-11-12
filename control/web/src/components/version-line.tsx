@@ -1,18 +1,24 @@
 import { useEffect, useState } from "react";
 import type { CatalogSyncStatus, ControlApi, PlatformObservation } from "../api/types";
-import { Time } from "./time";
+import { lastSyncAt } from "../lib/catalog-sync";
+import { exactTime } from "../lib/time";
+import { utcTime } from "../lib/utc-time";
 
 const NOT_REPORTED = "Not reported";
 
 /**
  * A quiet line of what is running: the Controller build, the recipe library version and the last
- * sync. Each fact is read from the API on its own, so one that fails reads "Not reported" and the
- * others still show. The labels match `vonkctl platform` and `vonkctl recipe sync-status`.
+ * sync. Each fact is its own element and reads exactly as `vonkctl platform` and
+ * `vonkctl recipe sync-status` print it (tests/fixtures/version-line.json). Each fact is read from
+ * the API on its own, so one that fails reads "Not reported" and the others still show. It reads
+ * again whenever `readKey` changes (every navigation), so it is never older than the page.
  */
 export function VersionLine({
   api,
+  readKey,
 }: {
   api: Pick<ControlApi, "platformObservation" | "catalogSyncStatus">;
+  readKey?: string;
 }) {
   const [read, setRead] = useState(false);
   const [platform, setPlatform] = useState<PlatformObservation | null>(null);
@@ -29,16 +35,29 @@ export function VersionLine({
       },
     );
     return () => controller.abort();
-  }, [api]);
+  }, [api, readKey]);
   if (!read) return null;
   const build = platform?.api.source_sha;
-  const syncedAt = sync && (sync.completed_at ?? sync.created_at);
+  const syncedAt = sync && lastSyncAt(sync);
+  const stamp = syncedAt ? utcTime(syncedAt) : null;
   return (
     <footer className="version-line" aria-label="Versions">
-      <span>Controller build {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED}</span>
-      <span>Library version {sync?.library_version ?? NOT_REPORTED}</span>
+      <span>Controller build: {build ? <code>{build.slice(0, 12)}</code> : NOT_REPORTED}</span>
+      <span>Library version: {sync?.library_version ?? NOT_REPORTED}</span>
       <span>
-        Last sync {sync === null ? "none yet" : syncedAt ? <Time value={syncedAt} /> : NOT_REPORTED}
+        Last sync:{" "}
+        {sync === null ? (
+          "none yet"
+        ) : syncedAt && stamp ? (
+          <>
+            <time dateTime={syncedAt} title={exactTime(syncedAt) ?? undefined}>
+              {stamp}
+            </time>{" "}
+            ({sync?.state})
+          </>
+        ) : (
+          NOT_REPORTED
+        )}
       </span>
     </footer>
   );

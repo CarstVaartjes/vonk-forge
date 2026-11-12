@@ -24,6 +24,7 @@ from .common import _projection_issues as _projection_issues
 from .common import _reasons as _reasons
 from .common import _recommendation as _recommendation
 from .common import _records as _records
+from .common import _reported as _reported
 from .common import _table as _table
 from .common import _text as _text
 from .common import _time as _time
