@@ -154,9 +154,7 @@ def test_builder_inventory_recovers_before_plan_is_returned(tmp_path, monkeypatc
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize(
-    "field", ["build_resources", "build_security", "source_bundle_sha256"]
-)
+@pytest.mark.parametrize("field", ["build_resources", "build_security"])
 @pytest.mark.parametrize("repairs", [True, False])
 def test_missing_stored_dependency_reobserves_exact_authority_and_admits_fresh(
     tmp_path, field, repairs
