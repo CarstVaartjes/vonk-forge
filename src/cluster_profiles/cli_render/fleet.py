@@ -143,10 +143,8 @@ def _memory(node: Mapping[str, object]) -> str:
     return f"{_size(total - free)} of {_size(total)} ({round(100 * (total - free) / total)}%)"
 
 
-def _disk(node: Mapping[str, object]) -> str:
+def _disk(free: object, total: object) -> str:
     """Free disk beside the total, in the words the Controller web uses."""
-    inventory = _optional(node.get("inventory"), "inventory")
-    free, total = inventory.get("disk_free_bytes"), inventory.get("disk_total_bytes")
     if type(free) is not int or type(total) is not int or total <= 0:
         return _size(free)
     return f"{_size(free)} of {_size(total)}"
@@ -514,12 +512,13 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
         labels.append("ID")
     rows = []
     for node in nodes:
+        inventory = _optional(node.get("inventory"), "inventory")
         loaded = _records(node, "loaded")
         row: list[object] = [
             node.get("display_name"),
             _status(node),
             _memory(node),
-            _disk(node),
+            _disk(inventory.get("disk_free_bytes"), inventory.get("disk_total_bytes")),
             _gpu(node),
             "idle"
             if not loaded

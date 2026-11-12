@@ -15,5 +15,9 @@ _VITALS = json.loads(
 @pytest.mark.parametrize("case", _VITALS, ids=lambda case: case["name"])
 def test_fleet_vitals_use_the_words_the_web_shows(case):
     node, expected = case["node"], case["expected"]
-    for render, key in ((_memory, "memory"), (_disk, "disk"), (_gpu, "gpu")):
-        assert render(node) == (expected[key] or "unavailable")
+    inventory = node["inventory"] or {}
+    assert _memory(node) == (expected["memory"] or "unavailable")
+    assert _disk(
+        inventory.get("disk_free_bytes"), inventory.get("disk_total_bytes")
+    ) == (expected["disk"] or "unavailable")
+    assert _gpu(node) == (expected["gpu"] or "unavailable")
