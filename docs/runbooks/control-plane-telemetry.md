@@ -22,8 +22,9 @@ are nullable because a platform may not expose a value at a given sample:
 The Controller derives one more value for the fleet view, `system_memory_bytes`
 ("System"): memory total minus available minus GPU process memory, never below
 zero, present only when all three are reported. It is everything in use outside
-GPU processes, including the model servers' own CPU-side memory and page cache.
-It is not stored.
+GPU processes, including the model servers' own CPU-side memory, shared memory
+(/dev/shm) and other non-reclaimable cache; reclaimable page cache counts as
+free. It is not stored.
 
 DGX Spark GB10 nodes use unified memory. GPU-memory fields and host-memory
 fields are not interchangeable: admission uses the resource evidence declared

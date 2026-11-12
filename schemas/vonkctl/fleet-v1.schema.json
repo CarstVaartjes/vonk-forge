@@ -2664,7 +2664,6 @@
         "gpu_power_watts": {
           "anyOf": [
             {
-              "maximum": 10000,
               "minimum": 0,
               "type": "number"
             },
