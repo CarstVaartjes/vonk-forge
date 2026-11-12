@@ -146,3 +146,66 @@ def test_an_invalid_new_reading_is_dropped_alone(invalid: dict[str, int]) -> Non
         AgentEvidenceCode.TELEMETRY_READING_DROPPED
         in parsed.samples[0].evidence_warnings
     )
+
+
+VECTOR_V2 = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "src/vonk_agent_protocol/vectors/telemetry-sample-v2.json"
+    ).read_text()
+)
+HOST_READINGS_V2 = tuple(
+    name for name in VECTOR_V2["sample"] if name not in VECTOR["sample"]
+)
+
+
+def test_host_and_engine_readings_round_trip_and_older_agents_omit_them() -> None:
+    sample = VECTOR_V2["sample"]
+    parsed = TelemetryRequest.parse({"samples": [sample]})
+    document = parsed.document()["samples"][0]
+    assert {k: document[k] for k in sample} == sample
+    assert not parsed.samples[0].evidence_warnings
+
+    older = dict(VECTOR["sample"])
+    omitted = TelemetryRequest.parse({"samples": [older]}).document()["samples"][0]
+    assert not set(HOST_READINGS_V2) & set(omitted)
+
+
+@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_readings"])
+def test_an_invalid_host_reading_is_dropped_alone(invalid: dict[str, float]) -> None:
+    ((name, _),) = invalid.items()
+    parsed = TelemetryRequest.parse({"samples": [{**VECTOR_V2["sample"], **invalid}]})
+    kept = parsed.document()["samples"][0]
+    assert name not in kept
+    assert kept["memory_total_bytes"] == VECTOR_V2["sample"]["memory_total_bytes"]
+    assert kept["engines"] == VECTOR_V2["sample"]["engines"]
+    assert (
+        AgentEvidenceCode.TELEMETRY_READING_DROPPED
+        in parsed.samples[0].evidence_warnings
+    )
+
+
+@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_engine_entries"])
+def test_an_invalid_engine_entry_is_dropped_alone(invalid: dict[str, str]) -> None:
+    engines = [
+        invalid,
+        *VECTOR_V2["sample"]["engines"],
+        VECTOR_V2["sample"]["engines"][0],
+    ]
+    parsed = TelemetryRequest.parse(
+        {"samples": [{**VECTOR_V2["sample"], "engines": engines}]}
+    )
+    assert parsed.document()["samples"][0]["engines"] == VECTOR_V2["sample"]["engines"]
+
+
+def test_a_ninth_engine_is_kept_and_a_dropped_entry_is_counted() -> None:
+    first = VECTOR_V2["sample"]["engines"][0]
+    engines = [
+        {**first, "run_id": f"{n:08x}-1111-4111-8111-111111111111"} for n in range(9)
+    ]
+    bad = VECTOR_V2["invalid_engine_entries"][0]
+    sample = TelemetryRequest.parse(
+        {"samples": [{**VECTOR_V2["sample"], "engines": [bad, *engines, engines[0]]}]}
+    ).samples[0]
+    assert sample.engines is not None and len(sample.engines) == 9
+    assert sample.dropped_engine_entries == 2

@@ -241,6 +241,7 @@ _SAMPLE = {
     "gpu_memory_total_bytes": 10,
     "gpu_memory_free_bytes": 5,
 }
+_ENGINE = {"run_id": str(uuid.UUID(int=1, version=4)), "format": "vllm"}
 _FENCE = str(uuid.UUID(int=7))
 _CLAIM = {
     "protocol_version": 4,
@@ -303,6 +304,18 @@ CASES: list[
             "gpu_power_watts": _SAMPLE | {"gpu_power_watts": -1},
             "uptime_seconds": _SAMPLE | {"uptime_seconds": -5},
             "gpu_process_memory_bytes": _SAMPLE | {"gpu_process_memory_bytes": 2**50},
+            "cpu_busy_seconds": _SAMPLE | {"cpu_busy_seconds": -1.0},
+            "load_average_1m": _SAMPLE | {"load_average_1m": -1.0},
+            "network_lan_rx_bytes": _SAMPLE | {"network_lan_rx_bytes": -1},
+            "fabric_rx_bytes": _SAMPLE | {"fabric_rx_bytes": -1},
+            "fabric_ports_active": _SAMPLE | {"fabric_ports_active": 17},
+            "disk_read_bytes": _SAMPLE | {"disk_read_bytes": -1},
+            "oom_kills": _SAMPLE | {"oom_kills": -1},
+            "board_temperature_max_c": _SAMPLE | {"board_temperature_max_c": 900},
+            "nvme_temperature_c": _SAMPLE | {"nvme_temperature_c": 900},
+            "nic_temperature_c": _SAMPLE | {"nic_temperature_c": 900},
+            "fan_rpm_max": _SAMPLE | {"fan_rpm_max": 10**6},
+            "engines": _SAMPLE | {"engines": "not-a-list"},
         },
     ),
     (

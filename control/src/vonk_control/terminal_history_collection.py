@@ -255,6 +255,10 @@ RETAINED: dict[str, tuple[Retained, str]] = {
         Retained.OWNED_ELSEWHERE,
         "telemetry_maintenance, after 24 h",
     ),
+    "node_engine_samples": (
+        Retained.OWNED_ELSEWHERE,
+        "telemetry_maintenance, with its sample after 24 h",
+    ),
     "node_inventory_snapshots": (
         Retained.OWNED_ELSEWHERE,
         "telemetry_maintenance, after 24 h",

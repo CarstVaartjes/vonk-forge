@@ -1,0 +1,189 @@
+{
+  "captures": {
+    "spark": "spark-3542 (GB10), 2026-11-12, read-only as the login user",
+    "note": "Verbatim file contents; tensorfold_metrics is the allow-listed subset of GET 127.0.0.1:8888/metrics. Its kv_cache_usage_ratio lines are per pool; the expected sample carries the largest. The second engine entry is synthetic (no vLLM capture yet).",
+    "proc_stat_cpu_line": "cpu  43289912 1747719 38264669 3576438620 11820201 0 1902301 0 0 0\n",
+    "proc_loadavg": "2.35 2.47 2.34 3/702 3129124\n",
+    "proc_vmstat_oom_kill": "oom_kill 124\n",
+    "proc_net_route": "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT                                                       \nenP7s7\t00000000\t0101A8C0\t0003\t0\t0\t102\t00000000\t0\t0\t0                                                                           \ndocker0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0                                                                            \nenP7s7\t0001A8C0\t00000000\t0001\t0\t0\t102\t00FFFFFF\t0\t0\t0                                                                           \nenp1s0f1np1\t0064A8C0\t00000000\t0001\t0\t0\t101\t00FFFFFF\t0\t0\t0                                                                      \nenP2p1s0f1np1\t0065A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0                                                                    \n",
+    "proc_net_dev": "Inter-|   Receive                                                |  Transmit\n face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed\n    lo: 1422108669604 80979379    0    0    0     0          0         0 1422108669604 80979379    0    0    0     0       0          0\nenP7s7: 26705064976886 18738742555    0 33740    0     0          0  18329500 94381672251 1348483074    0    0    0     0       0          0\nenp1s0f0np0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0\nenp1s0f1np1: 3887307778 35551738    0    0    0     0          0    188392 4896486112 38857691    0    0    0     0       0          0\nenP2p1s0f0np0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0\nenP2p1s0f1np1: 45456865  188083    0    0    0     0          0    188082 15285988   63350    0    0    0     0       0          0\nwlP9s9:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0\ndocker0: 34369269  259270    0    0    0     0          0         0 25831156  330043    0    5    0     0       0          0\n",
+    "hwmon": {
+      "hwmon0": {
+        "name": "acpi_fan\n",
+        "fan1_input": "3213\n"
+      },
+      "hwmon1": {
+        "name": "acpi_fan\n",
+        "fan1_input": "3335\n"
+      },
+      "hwmon2": {
+        "name": "acpitz\n",
+        "temp1_input": "84800\n",
+        "temp2_input": "69900\n",
+        "temp3_input": "84800\n",
+        "temp4_input": "68300\n",
+        "temp5_input": "68800\n",
+        "temp6_input": "81300\n",
+        "temp7_input": "75700\n"
+      },
+      "hwmon3": {
+        "name": "nvme\n",
+        "temp1_input": "56850\n",
+        "temp1_label": "Composite\n",
+        "temp2_input": "59850\n",
+        "temp2_label": "Sensor 1\n",
+        "temp3_input": "56850\n",
+        "temp3_label": "Sensor 2\n"
+      },
+      "hwmon4": {
+        "name": "mlx5\n",
+        "temp1_input": "69000\n",
+        "temp1_label": "asic\n"
+      },
+      "hwmon5": {
+        "name": "mlx5\n",
+        "temp1_input": "69000\n",
+        "temp1_label": "asic\n"
+      },
+      "hwmon6": {
+        "name": "mlx5\n",
+        "temp1_input": "69000\n",
+        "temp1_label": "asic\n"
+      },
+      "hwmon7": {
+        "name": "mlx5\n",
+        "temp1_input": "69000\n",
+        "temp1_label": "asic\n"
+      },
+      "hwmon8": {
+        "name": "mt7925_phy0\n",
+        "temp1_input": "57000\n"
+      }
+    },
+    "infiniband": {
+      "roceP2p1s0f0": {
+        "state": "1: DOWN\n",
+        "rate": "40 Gb/sec (4X QDR)\n",
+        "port_rcv_data": "0\n",
+        "port_xmit_data": "0\n"
+      },
+      "roceP2p1s0f1": {
+        "state": "4: ACTIVE\n",
+        "rate": "200 Gb/sec (2X NDR)\n",
+        "port_rcv_data": "4855441966593\n",
+        "port_xmit_data": "4859505345423\n"
+      },
+      "rocep1s0f0": {
+        "state": "1: DOWN\n",
+        "rate": "40 Gb/sec (4X QDR)\n",
+        "port_rcv_data": "0\n",
+        "port_xmit_data": "0\n"
+      },
+      "rocep1s0f1": {
+        "state": "4: ACTIVE\n",
+        "rate": "200 Gb/sec (2X NDR)\n",
+        "port_rcv_data": "4862729441905\n",
+        "port_xmit_data": "4866861126283\n"
+      }
+    },
+    "block_stat_nvme0n1": "667087562 64678821 110107715524 598442396 328714660 293369692 65419076860 4157600541        0 78012850 463477645   200612        0 8364389864   184972  1922365  2217031\n",
+    "tensorfold_metrics": "tensorfold:requests_running 3\ntensorfold:requests_waiting 1\ntensorfold:prompt_tokens_total 8491903\ntensorfold:prompt_tokens_cached_total 5181440\ntensorfold:generation_tokens_total 58354\ntensorfold:kv_cache_usage_ratio{pool=\"0\"} 0.087269\ntensorfold:kv_cache_usage_ratio{pool=\"1\"} 0.071723\ntensorfold:kv_cache_usage_ratio{pool=\"2\"} 0.072404\ntensorfold:time_to_first_token_seconds_sum 3533.296118\ntensorfold:time_to_first_token_seconds_count 148\ntensorfold:request_decode_seconds_sum 3546.104619\ntensorfold:request_decode_seconds_count 148\ntensorfold:request_time_per_output_token_seconds_sum 8.842114\ntensorfold:request_time_per_output_token_seconds_count 148\ntensorfold:request_prefill_seconds_sum 3316.23\ntensorfold:request_prefill_seconds_count 148\ntensorfold:spec_decode_num_draft_tokens_total 53873\ntensorfold:spec_decode_num_accepted_tokens_total 33652\ntensorfold:e2e_request_latency_seconds_sum 7552.164158\ntensorfold:e2e_request_latency_seconds_count 151\ntensorfold:preemptions_total 0\n"
+  },
+  "sample": {
+    "boot_id": "00000000-0000-4000-8000-000000000001",
+    "observed_at": "2026-09-05T12:00:00Z",
+    "memory_total_bytes": 132270460928,
+    "memory_available_bytes": 11201568768,
+    "disk_total_bytes": 1000000000000,
+    "disk_free_bytes": 750000000000,
+    "gpu_utilization_percent": 0.0,
+    "gpu_memory_total_bytes": null,
+    "gpu_memory_free_bytes": null,
+    "gpu_temperature_c": 43,
+    "gpu_power_watts": 9.14,
+    "uptime_seconds": 1804535,
+    "gpu_process_memory_bytes": 113668784128,
+    "cpu_busy_seconds": 852046.01,
+    "cpu_total_seconds": 36734634.22,
+    "load_average_1m": 2.35,
+    "network_lan_rx_bytes": 26705064976886,
+    "network_lan_tx_bytes": 94381672251,
+    "fabric_rx_bytes": 38872685633992,
+    "fabric_tx_bytes": 38905465886824,
+    "fabric_ports_active": 2,
+    "disk_read_bytes": 56375150348288,
+    "disk_written_bytes": 33494567352320,
+    "oom_kills": 124,
+    "board_temperature_max_c": 84,
+    "nvme_temperature_c": 56,
+    "nic_temperature_c": 69,
+    "fan_rpm_max": 3335,
+    "engines": [
+      {
+        "run_id": "11111111-1111-4111-8111-111111111111",
+        "format": "tensorfold",
+        "prompt_tokens": 8491903,
+        "generation_tokens": 58354,
+        "cached_prompt_tokens": 5181440,
+        "preemptions": 0,
+        "spec_decode_draft_tokens": 53873,
+        "spec_decode_accepted_tokens": 33652,
+        "requests_running": 3,
+        "requests_waiting": 1,
+        "kv_cache_usage_ratio": 0.087269,
+        "ttft_seconds_sum": 3533.296118,
+        "ttft_seconds_count": 148,
+        "time_per_output_token_seconds_sum": 8.842114,
+        "time_per_output_token_seconds_count": 148,
+        "prefill_seconds_sum": 3316.23,
+        "prefill_seconds_count": 148,
+        "decode_seconds_sum": 3546.104619,
+        "decode_seconds_count": 148,
+        "e2e_seconds_sum": 7552.164158,
+        "e2e_seconds_count": 151
+      },
+      {
+        "run_id": "22222222-2222-4222-8222-222222222222",
+        "format": "vllm",
+        "requests_running": 1,
+        "requests_waiting": 0
+      }
+    ]
+  },
+  "invalid_readings": [
+    {
+      "cpu_busy_seconds": -1
+    },
+    {
+      "load_average_1m": -0.5
+    },
+    {
+      "network_lan_rx_bytes": -1
+    },
+    {
+      "fabric_ports_active": 17
+    },
+    {
+      "oom_kills": 1.5
+    },
+    {
+      "board_temperature_max_c": 151
+    },
+    {
+      "nic_temperature_c": -1
+    },
+    {
+      "fan_rpm_max": 100001
+    }
+  ],
+  "invalid_engine_entries": [
+    {
+      "run_id": "not-a-uuid",
+      "format": "vllm"
+    },
+    {
+      "run_id": "33333333-3333-4333-8333-333333333333",
+      "format": "unknown-engine"
+    }
+  ]
+}

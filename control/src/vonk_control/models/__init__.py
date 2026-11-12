@@ -73,6 +73,7 @@ from .routes import RoutePublication as RoutePublication
 from .routes import RoutePublicationOwner as RoutePublicationOwner
 from .telemetry import FleetEventCursor as FleetEventCursor
 from .telemetry import FleetStreamEvent as FleetStreamEvent
+from .telemetry import NodeEngineSample as NodeEngineSample
 from .telemetry import NodeInventoryItemsSnapshot as NodeInventoryItemsSnapshot
 from .telemetry import NodeInventoryResourceSnapshot as NodeInventoryResourceSnapshot
 from .telemetry import NodeInventorySnapshot as NodeInventorySnapshot
