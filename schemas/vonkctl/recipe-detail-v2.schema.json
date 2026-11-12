@@ -22,7 +22,7 @@
         "agent_evidence.inventory_host_settings_dropped",
         "agent_evidence.inventory_installations_dropped",
         "agent_evidence.inventory_runs_dropped",
-        "agent_evidence.inventory_stopped_runs_dropped",
+        "agent_evidence.inventory_stop_fences_dropped",
         "agent_evidence.inventory_installation_bytes_dropped",
         "agent_evidence.inventory_unused_model_bytes_dropped",
         "agent_evidence.inventory_model_objects_dropped",

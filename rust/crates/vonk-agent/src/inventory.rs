@@ -208,7 +208,7 @@ impl Inventory {
             model_objects: self.model_objects.clone(),
             runs: self.runs.clone(),
             // The inventory lane names the Stops completed before collection.
-            stopped_runs: None,
+            stop_fences: None,
             installation_bytes: self.installation_bytes.clone(),
         };
         // Optional model evidence must fit alongside the other observations,
@@ -882,7 +882,7 @@ mod process_tests {
             unused_model_bytes: None,
             model_objects: None,
             runs: None,
-            stopped_runs: None,
+            stop_fences: None,
             installation_bytes: None,
             nvidia_driver_version: "590".into(),
             container_runtime_version: "29".into(),

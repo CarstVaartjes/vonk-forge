@@ -791,7 +791,7 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
                     continue;
                 }
             };
-            inventory.stopped_runs = Some(completed_stops);
+            inventory.stop_fences = Some(completed_stops);
             if disk_reserve_degraded(inventory.disk_free_bytes) {
                 eprintln!(
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
@@ -1156,7 +1156,6 @@ mod tests {
     use vonk_agent::completed_stops::CompletedStops;
     use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
-    use vonk_agent_protocol::generated::StoppedRun;
 
     #[tokio::test(start_paused = true)]
     async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
@@ -1195,10 +1194,7 @@ mod tests {
         // Wrong implementations: a completed Stop waited for the two-minute
         // cadence, or a collection named a Stop that completed while it ran.
         let stops = CompletedStops::default();
-        let stopped = |run: u128| StoppedRun {
-            run_id: uuid::Uuid::from_u128(run),
-            run_generation: 1,
-        };
+        let stopped = uuid::Uuid::from_u128;
         let collections = Cell::new(0_u32);
         let reports = RefCell::new(Vec::new());
         let lane = super::inventory_lane(
@@ -1213,7 +1209,7 @@ mod tests {
                 ))
             },
             |inventory| {
-                reports.borrow_mut().push(inventory.stopped_runs);
+                reports.borrow_mut().push(inventory.stop_fences);
                 future::ready(Ok(()))
             },
         );

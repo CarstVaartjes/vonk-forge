@@ -20,7 +20,7 @@ from .optional_evidence import (
 from .reason_codes import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
-from .wire_model import MAX_RUN_GENERATION, WireEnum, WireModel, strict_json_datetime
+from .wire_model import WireEnum, WireModel, strict_json_datetime
 
 
 class GpuHealth(WireEnum):
@@ -58,8 +58,10 @@ MAX_REPORTED_INSTALLATIONS = 4096
 RunScopeId = InstallationId
 #: The most run scopes one inventory names, as for installations.
 MAX_REPORTED_RUNS = 4096
+#: A Stop order's claim fence: unique to that one attempt.
+StopFence = InstallationId
 #: The most recent completed Stops one inventory names.
-MAX_REPORTED_STOPPED_RUNS = 16
+MAX_REPORTED_STOP_FENCES = 16
 
 
 class InstallationBytes(WireModel):
@@ -72,18 +74,6 @@ class InstallationBytes(WireModel):
 
     installation_id: InstallationId
     bytes: int = Field(ge=0, le=16 * 1024**4)
-
-
-class StoppedRun(WireModel):
-    """One run rank whose Stop this agent completed: the run and generation
-    named by the Stop order it executed."""
-
-    model_config = ConfigDict(
-        extra="forbid", strict=True, frozen=True, allow_inf_nan=False
-    )
-
-    run_id: RunScopeId
-    run_generation: int = Field(ge=1, le=MAX_RUN_GENERATION, strict=True)
 
 
 class NetworkInterface(WireModel):
@@ -163,7 +153,7 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
         ),
         EvidenceGroup(AgentEvidenceCode.INVENTORY_RUNS_DROPPED, (("runs",),)),
         EvidenceGroup(
-            AgentEvidenceCode.INVENTORY_STOPPED_RUNS_DROPPED, (("stopped_runs",),)
+            AgentEvidenceCode.INVENTORY_STOP_FENCES_DROPPED, (("stop_fences",),)
         ),
         EvidenceGroup(
             AgentEvidenceCode.INVENTORY_INSTALLATION_BYTES_DROPPED,
@@ -220,12 +210,13 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     # name. None: the agent predates this evidence or could not list them; the
     # Controller then judges no run and nothing is removed.
     runs: list[RunScopeId] | None = Field(default=None, max_length=MAX_REPORTED_RUNS)
-    # The runs whose Stop this agent completed before it began this collection,
-    # newest last. Naming a Stop orders the collection after it causally, with
-    # no clock compared. None: the agent predates this evidence; the Controller
-    # then orders the collection by its clock.
-    stopped_runs: list[StoppedRun] | None = Field(
-        default=None, max_length=MAX_REPORTED_STOPPED_RUNS
+    # The claim fences of the Stop orders this agent completed before it began
+    # this collection, newest last. A fence names one Stop attempt and nothing
+    # else, so naming it orders the collection after that Stop with no clock
+    # compared. None: the agent predates this evidence; the Controller then
+    # orders the collection by its clock.
+    stop_fences: list[StopFence] | None = Field(
+        default=None, max_length=MAX_REPORTED_STOP_FENCES
     )
     # Each installation directory's size now, which grows after its install
     # (runtime caches). None: the agent predates this evidence or could not

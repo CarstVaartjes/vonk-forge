@@ -62,8 +62,8 @@ impl AgentClaim {
 pub const MAX_REPORTED_INSTALLATIONS: usize = 4096;
 /// The most run scopes one inventory names (the wire limit).
 pub const MAX_REPORTED_RUNS: usize = 4096;
-/// The most completed Stops one inventory names (the wire limit).
-pub const MAX_REPORTED_STOPPED_RUNS: usize = 16;
+// The wire limits the agent enforces itself, generated from the Pydantic contract.
+include!(concat!(env!("OUT_DIR"), "/wire_limits.rs"));
 
 /// Canonical schema-1 inventory evidence reported by a Spark agent.
 impl InventoryRequest {
@@ -109,9 +109,9 @@ impl InventoryRequest {
                 .as_ref()
                 .is_some_and(|names| names.len() > MAX_REPORTED_RUNS)
             || self
-                .stopped_runs
+                .stop_fences
                 .as_ref()
-                .is_some_and(|runs| runs.len() > MAX_REPORTED_STOPPED_RUNS)
+                .is_some_and(|fences| fences.len() > MAX_REPORTED_STOP_FENCES)
             || self
                 .unused_model_bytes
                 .is_some_and(|bytes| bytes > 16 * 1024_u64.pow(4))
@@ -325,7 +325,7 @@ mod inventory_tests {
             unused_model_bytes: None,
             model_objects: None,
             runs: None,
-            stopped_runs: None,
+            stop_fences: None,
             installation_bytes: None,
             nvidia_driver_version: "550.1".to_owned(),
             container_runtime_version: "podman-5".to_owned(),

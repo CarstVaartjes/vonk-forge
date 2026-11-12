@@ -23,7 +23,14 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import RecipeRun, RunNode
+from vonk_control.models import (
+    AgentCertificate,
+    AgentOperation,
+    AgentOperationAttempt,
+    Job,
+    RecipeRun,
+    RunNode,
+)
 from vonk_control.operation_blockers import STALL_RETRY_ATTEMPT, ProgressStall
 from vonk_control.progress_stall import is_stalled, next_stall
 from vonk_control.run_switch_contract import RunSwitchApplyRequest
@@ -35,6 +42,7 @@ from vonk_control.run_switch_operations.evidence_waits import (
     RunSwitchPostStopInventoryPending,
 )
 
+from .recipe_stop_fixtures import recipe_stop_payload
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_lifecycle import _Harness, _ScriptedExecutor
 from .test_run_switch_operations import (
@@ -57,7 +65,7 @@ def _report(
     node_id: str,
     observed_at: datetime,
     received_at: datetime,
-    stopped_runs: list[dict[str, object]] | None = None,
+    stop_fences: list[str] | None = None,
 ):
     """The Spark reports its unchanged inventory again, collected at ``observed_at``."""
 
@@ -86,11 +94,7 @@ def _report(
                     "network_interfaces": report.network_interfaces,
                     "nas_route_interface": report.nas_route_interface,
                     "schema_version": 1,
-                    **(
-                        {"stopped_runs": stopped_runs}
-                        if stopped_runs is not None
-                        else {}
-                    ),
+                    **({"stop_fences": stop_fences} if stop_fences is not None else {}),
                 }
             )
         )
@@ -293,6 +297,63 @@ def test_the_post_stop_gate_names_the_spark_and_the_collection_it_judged(
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
 
 
+def _stop_receipt(sessions, run_id: str, node_id: str, at: datetime) -> str:
+    """The Spark's succeeded Stop of the run's rank at ``at``; its claim fence."""
+
+    fence = str(uuid.uuid4())
+    parent = {
+        "schema_version": 1,
+        "owner_kind": "run",
+        "owner_id": run_id,
+        "plan_digest": "0" * 64,
+    }
+    with sessions.begin() as session:
+        job = Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind="recipe.stop",
+            state="succeeded",
+            actor="test",
+            authority_revision="test",
+            targets=[node_id],
+            payload_digest="0" * 64,
+            payload=parent,
+            created_at=at,
+            updated_at=at,
+        )
+        session.add(job)
+        session.flush()
+        operation = AgentOperation(
+            parent_job_id=job.id,
+            node_id=node_id,
+            kind="recipe.stop",
+            payload_digest="0" * 64,
+            payload=recipe_stop_payload(node_id, plan_digest="0" * 64),
+            authority_revision="test",
+            state="succeeded",
+            current_attempt=1,
+            created_at=at,
+            updated_at=at,
+        )
+        session.add(operation)
+        session.flush()
+        session.add(
+            AgentOperationAttempt(
+                operation_id=operation.id,
+                attempt=1,
+                fence=fence,
+                lease_deadline=at + timedelta(seconds=60),
+                agent_certificate_serial=session.scalar(
+                    select(AgentCertificate.serial).where(
+                        AgentCertificate.node_id == node_id
+                    )
+                ),
+                state="succeeded",
+            )
+        )
+    return fence
+
+
 def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
     tmp_path: Path,
 ) -> None:
@@ -305,10 +366,7 @@ def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
     sessions, service, node_id, run_id, plan, gate, now, stopped_at = _stopped_gate(
         tmp_path
     )
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None
-        generation = run.run_generation
+    fence = _stop_receipt(sessions, run_id, node_id, stopped_at)
     threshold = stopped_at + MAX_INVENTORY_FUTURE_SKEW
 
     # An agent that predates the evidence keeps today's clock rule.
@@ -317,16 +375,10 @@ def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
         gate._require_post_stop_inventory(plan)
     assert pending.value.observed_after == threshold
 
-    # Naming another generation's Stop proves nothing about this one, but the
-    # Spark's very next collection may settle the wait.
+    # A collection taken before the Stop completed does not name it, but the
+    # Spark's very next collection may.
     other = now[0] + timedelta(seconds=1)
-    _report(
-        sessions,
-        node_id,
-        other,
-        other,
-        stopped_runs=[{"run_id": run_id, "run_generation": generation + 1}],
-    )
+    _report(sessions, node_id, other, other, stop_fences=[])
     with pytest.raises(RunSwitchPostStopInventoryPending) as pending:
         gate._require_post_stop_inventory(plan)
     assert pending.value.observed_after == other
@@ -334,18 +386,49 @@ def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
     # The collection names this Stop: settled with no clock allowance.
     named = now[0] + timedelta(seconds=2)
     assert named < threshold
-    _report(
-        sessions,
-        node_id,
-        named,
-        named,
-        stopped_runs=[{"run_id": run_id, "run_generation": generation}],
-    )
+    _report(sessions, node_id, named, named, stop_fences=[fence])
     gate._require_post_stop_inventory(plan)
 
     # The settled wait leaves nothing behind: a fresh Switch for the Spark is
     # admitted.
     service._clock = lambda: now[0]
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **_request(sessions, node_id, action="switch").model_dump(),
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+def test_a_reopened_runs_second_stop_is_not_settled_by_the_first_stops_evidence(
+    tmp_path: Path,
+) -> None:
+    """Fault: a stopped run whose process the Spark still reports is reopened at
+    the same generation and stopped again. A collection that names only the
+    first Stop was taken before the second one ran, while the leftover process
+    still held memory; it must not admit the replacement."""
+
+    sessions, service, node_id, run_id, plan, gate, _now, stopped_at = _stopped_gate(
+        tmp_path
+    )
+    first = _stop_receipt(sessions, run_id, node_id, stopped_at)
+    restopped_at = stopped_at + timedelta(seconds=120)
+    second = _stop_receipt(sessions, run_id, node_id, restopped_at)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        run.stopped_at = restopped_at
+    collected = restopped_at + timedelta(seconds=2)
+    _report(sessions, node_id, collected, collected, stop_fences=[first])
+    with pytest.raises(RunSwitchPostStopInventoryPending):
+        gate._require_post_stop_inventory(plan)
+
+    named = collected + timedelta(seconds=1)
+    _report(sessions, node_id, named, named, stop_fences=[first, second])
+    gate._require_post_stop_inventory(plan)
+    service._clock = lambda: named
     fresh = service.apply(
         RunSwitchApplyRequest(
             **_request(sessions, node_id, action="switch").model_dump(),

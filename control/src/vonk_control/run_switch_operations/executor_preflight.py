@@ -11,6 +11,7 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     LifecycleState,
     RunState,
@@ -19,12 +20,14 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
-from vonk_agent_protocol.inventory import StoppedRun
 
 from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
 from ..models import (
+    AgentOperation,
+    AgentOperationAttempt,
     CatalogDocumentRevision,
+    Job,
     RecipeBuild,
     RecipeRun,
     RunNode,
@@ -64,6 +67,43 @@ from .result_helpers import _bound_workload_intent
 
 if TYPE_CHECKING:
     from .executor import RecipeLifecyclePhaseExecutor
+
+
+def _newest_stop_fence(session: Session, run_id: str, node_id: str) -> str | None:
+    """The claim fence of the run's newest Stop on ``node_id``, if it succeeded.
+
+    Only the newest counts: when a stopped run is reopened and stopped again,
+    the earlier Stop's fence proves nothing about the later one.
+    """
+
+    newest = session.execute(
+        select(
+            AgentOperation.state,
+            AgentOperationAttempt.state,
+            AgentOperationAttempt.fence,
+        )
+        .join(Job, Job.id == AgentOperation.parent_job_id)
+        .outerjoin(
+            AgentOperationAttempt,
+            (AgentOperationAttempt.operation_id == AgentOperation.id)
+            & (AgentOperationAttempt.attempt == AgentOperation.current_attempt),
+        )
+        .where(
+            Job.owner_kind == "run",
+            Job.owner_id == run_id,
+            AgentOperation.node_id == node_id,
+            AgentOperation.kind == WireAgentOperation.RECIPE_STOP.value,
+        )
+        .order_by(AgentOperation.created_at.desc(), AgentOperation.id.desc())
+        .limit(1)
+    ).first()
+    if (
+        newest is None
+        or newest[0] != LifecycleState.SUCCEEDED
+        or newest[1] != LifecycleState.SUCCEEDED
+    ):
+        return None
+    return newest[2]
 
 
 class ExecutorPreflightMixin:
@@ -186,9 +226,6 @@ class ExecutorPreflightMixin:
                     else _aware(run.stopped_at or now)
                 )
                 collected_after = stopped_at + MAX_INVENTORY_FUTURE_SKEW
-                stopped_here = StoppedRun(
-                    run_id=run.id, run_generation=run.run_generation
-                )
                 for node_id in sorted(members & expected_pools.keys()):
                     try:
                         snapshot = inventory.latest(
@@ -209,14 +246,19 @@ class ExecutorPreflightMixin:
                             RunSwitchCode.POST_STOP_MEMORY_POOL_CHANGED,
                             reason=WaitReason.SCOPE_CHANGED,
                         )
-                    # The Spark names this run's Stop in a collection it began
-                    # after completing that Stop: causal order, no clock read.
-                    if not snapshot.stale and stopped_here in (
-                        snapshot.stopped_runs or ()
+                    # The Spark names this rank's newest Stop, by its unique
+                    # claim fence, in a collection it began after completing
+                    # it: causal order, no clock read. An earlier Stop of the
+                    # same run (one reopened since) never matches.
+                    fence = _newest_stop_fence(session, run.id, node_id)
+                    if (
+                        not snapshot.stale
+                        and fence is not None
+                        and fence in (snapshot.stop_fences or ())
                     ):
                         continue
                     # Otherwise (an agent that predates the evidence, or a Stop
-                    # it did not execute) a sample received after the receipt
+                    # without an agent receipt) a sample received after the receipt
                     # can still have been collected before the stop. Preserve
                     # the producer clock's full admitted lead instead of
                     # treating receipt time as collection time or a released
@@ -231,10 +273,10 @@ class ExecutorPreflightMixin:
                             f"({collected_after.isoformat()}; "
                             f"latest {snapshot.observed_at.isoformat()})",
                             node_id=node_id,
-                            # A Spark that names its Stops may settle the wait
-                            # with its very next collection.
+                            # A Spark that names its Stops may settle a Stop
+                            # it completed with its very next collection.
                             collected_after=collected_after
-                            if snapshot.stopped_runs is None
+                            if fence is None or snapshot.stop_fences is None
                             else snapshot.observed_at,
                             observed_after=snapshot.observed_at,
                         )

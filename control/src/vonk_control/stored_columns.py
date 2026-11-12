@@ -30,7 +30,7 @@ from vonk_agent_protocol.inventory import (
     ModelStoreObject,
     NetworkInterface,
     RunScopeId,
-    StoppedRun,
+    StopFence,
 )
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
@@ -389,7 +389,7 @@ bind("node_inventory_snapshots", "agent_items", AgentInventoryItems, nullable=Tr
 
 bind("node_inventory_snapshots", "installations", list[InstallationId], nullable=True)
 bind("node_inventory_snapshots", "runs", list[RunScopeId], nullable=True)
-bind("node_inventory_snapshots", "stopped_runs", list[StoppedRun], nullable=True)
+bind("node_inventory_snapshots", "stop_fences", list[StopFence], nullable=True)
 bind(
     "node_inventory_snapshots",
     "installation_bytes",

@@ -932,6 +932,33 @@ rank planned and its installation partial, so normal preparation can reinstall
 it. Unknown, truncated and stale listings prove no absence. This cache repair
 never proves a running workload stopped or releases its resource claims.
 
+### Inventory after a Stop
+
+A run-switch starts the next run on a Spark only with memory evidence that
+Spark collected after the previous run's Stop
+(`run_switch_operations/executor_preflight.py`). The agent records the claim
+fence of each `recipe.stop` claim it completes (`completed_stops.rs`, at most
+`MAX_REPORTED_STOP_FENCES`, generated from the Pydantic `maxItems`), takes that
+list before it begins a collection and reports it as the optional inventory
+evidence `stop_fences`. A completed Stop also makes the next collection due at
+once instead of on the two-minute cadence.
+
+The Controller looks up the rank's newest `recipe.stop` operation for the run
+on that Spark. When it succeeded and a fresh inventory names its attempt fence,
+the collection is causally after that Stop and settles the wait with no clock
+compared. A fence names one attempt, so an earlier Stop of a run that was
+reopened and stopped again never settles the later one. Without that evidence
+(an agent that predates the field, a restarted agent, or a Stop with no agent
+receipt) the clock rule applies: received after the stop and observed more than
+`MAX_INVENTORY_FUTURE_SKEW` (30 s) after it. While a Spark that names its Stops
+owes the fence of a succeeded Stop, each of its newer collections wakes the
+wait; otherwise only a collection past the clock threshold does.
+
+Deploy the Controller before the agents. An older Controller refuses the
+unknown field; the agent then reports the inventory core only, which drops all
+optional evidence until the Controller is updated. A newer Controller with older
+agents keeps the clock rule. Running workloads are unaffected either way.
+
 
 ### Subprocess failure evidence
 

@@ -48,6 +48,7 @@ def inventory_request(inventory_wire_probe: Path) -> InventoryRequest:
     assert len(completed.stdout) > 64 * 1024
     request = InventoryRequest.model_validate_json(completed.stdout)
     assert request.model_objects is not None and len(request.model_objects) == 1024
+    assert request.stop_fences
     return request
 
 
@@ -86,6 +87,7 @@ def test_rust_inventory_json_crosses_controller_route_and_admission(
     assert stored.memory_pool == request.memory_pool
     assert not stored.stale
     assert stored.model_objects == request.model_objects
+    assert stored.stop_fences == request.stop_fences
     require_admissible(admission.plan_run(installation, alias="qwen", now=clock.now))
 
     malformed = request.model_dump(mode="json")

@@ -285,8 +285,7 @@ CASES: list[
             },
             "installations": _INVENTORY | {"installations": ["not-an-installation"]},
             "runs": _INVENTORY | {"runs": ["not-a-run"]},
-            "stopped_runs": _INVENTORY
-            | {"stopped_runs": [{"run_id": "not-a-run", "run_generation": 1}]},
+            "stop_fences": _INVENTORY | {"stop_fences": ["not-a-fence"]},
             "installation_bytes": _INVENTORY
             | {"installation_bytes": [{"installation_id": "x", "bytes": 1}]},
             "unused_model_bytes": _INVENTORY | {"unused_model_bytes": -1},

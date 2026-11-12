@@ -142,7 +142,7 @@ interface. Kernel observation I/O failures retain the helper I/O classification.
 
 An agent report is a mandatory core (identity, lease, capacity, the outcome of
 an operation) plus optional evidence (NICs, the NAS route, the fabric pair,
-sensor readings, progress, failure diagnostics). Invalid optional evidence is
+completed Stop fences, sensor readings, progress, failure diagnostics). Invalid optional evidence is
 dropped, not refused: the producer clamps it and logs a typed
 `AgentEvidenceCode`, and the Controller's `OptionalEvidenceModel` drops what
 still fails validation and logs the same code (`agent.evidence_dropped`). Only

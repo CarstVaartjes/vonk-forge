@@ -22,7 +22,7 @@
         "agent_evidence.inventory_host_settings_dropped",
         "agent_evidence.inventory_installations_dropped",
         "agent_evidence.inventory_runs_dropped",
-        "agent_evidence.inventory_stopped_runs_dropped",
+        "agent_evidence.inventory_stop_fences_dropped",
         "agent_evidence.inventory_installation_bytes_dropped",
         "agent_evidence.inventory_unused_model_bytes_dropped",
         "agent_evidence.inventory_model_objects_dropped",
@@ -8598,11 +8598,12 @@
           "title": "Schema Version",
           "type": "integer"
         },
-        "stopped_runs": {
+        "stop_fences": {
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/StoppedRun"
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
               },
               "maxItems": 16,
               "type": "array"
@@ -8612,7 +8613,7 @@
             }
           ],
           "default": null,
-          "title": "Stopped Runs"
+          "title": "Stop Fences"
         },
         "unused_model_bytes": {
           "anyOf": [
@@ -21181,28 +21182,6 @@
       ],
       "title": "StopPlanCode",
       "type": "string"
-    },
-    "StoppedRun": {
-      "description": "One run rank whose Stop this agent completed: the run and generation\nnamed by the Stop order it executed.",
-      "properties": {
-        "run_generation": {
-          "maximum": 9223372036854775807,
-          "minimum": 1,
-          "title": "Run Generation",
-          "type": "integer"
-        },
-        "run_id": {
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "title": "Run Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "run_id",
-        "run_generation"
-      ],
-      "title": "StoppedRun",
-      "type": "object"
     },
     "StorageDemandCode": {
       "description": "Storage demand outcomes of an admission.",
