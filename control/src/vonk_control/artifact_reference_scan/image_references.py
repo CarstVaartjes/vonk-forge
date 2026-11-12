@@ -18,9 +18,11 @@ from ..artifact_lifecycle import (
 from ..machine_states import DISTRIBUTION_HELD
 from ..models import (
     ArtifactDistributionAssignment,
+    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
     Job,
+    RecipeBuild,
     RecipeInstallation,
     RecipeRun,
 )
@@ -273,14 +275,23 @@ def runtime_image_reference_findings(
 
     from ..recipe_image_availability import OPERATION_KIND
 
-    revision_runs: dict[str, frozenset[str]] = {}
+    operations_active = (
+        Job.kind == OPERATION_KIND,
+        Job.state.in_(_ACTIVE_ARTIFACT_JOBS),
+    )
+    revision_runs = _operation_revision_archives(
+        session,
+        set(
+            session.scalars(
+                select(Job.authority_revision).where(*operations_active).distinct()
+            )
+        ),
+        selected,
+    )
 
     for operation in session.scalars(
         select(Job)
-        .where(
-            Job.kind == OPERATION_KIND,
-            Job.state.in_(_ACTIVE_ARTIFACT_JOBS),
-        )
+        .where(*operations_active)
         .order_by(Job.id)
         .execution_options(yield_per=64)
     ):
@@ -291,12 +302,8 @@ def runtime_image_reference_findings(
                 "active artifact operation payload is malformed; removal was deferred",
                 retryable=True,
             )
-        if operation.authority_revision not in revision_runs:
-            revision_runs[operation.authority_revision] = revision_archives(
-                session, [operation.authority_revision]
-            )
         associated_archives = sorted(
-            revision_runs[operation.authority_revision] & selected
+            revision_runs.get(operation.authority_revision, frozenset())
         )
         if associated_archives:
             account(payload)
@@ -394,3 +401,48 @@ def runtime_image_reference_reasons(
     return _reason_projection(
         runtime_image_reference_findings(session, archive_digests)
     )
+
+
+def _operation_revision_archives(
+    session: Session, revision_ids: set[str], selected: set[str]
+) -> dict[str, frozenset[str]]:
+    """The selected archives each revision may adopt: what it can run (its
+    succeeded builds) and every archive any build of its recipe holds, in any
+    state (a building or failed build keeps the verified archive an operation
+    adopts). Two batched queries, whatever the number of revisions."""
+
+    if not revision_ids or not selected:
+        return {}
+    runnable = revision_images(session, revision_ids)
+    documents = {
+        revision_id: document_id
+        for revision_id, document_id in session.execute(
+            select(
+                CatalogDocumentRevision.id, CatalogDocumentRevision.document_id
+            ).where(CatalogDocumentRevision.id.in_(sorted(revision_ids)))
+        )
+    }
+    held: dict[str, set[str]] = {}
+    for archive, document_id in session.execute(
+        select(RecipeBuild.oci_layout_sha256, CatalogDocumentRevision.document_id)
+        .join(
+            CatalogDocumentRevision,
+            CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id,
+        )
+        .where(
+            RecipeBuild.oci_layout_sha256.in_(sorted(selected)),
+            CatalogDocumentRevision.document_id.in_(sorted(set(documents.values()))),
+        )
+    ):
+        if archive is not None:
+            held.setdefault(document_id, set()).add(archive)
+    return {
+        revision_id: frozenset(
+            (
+                {image.archive_sha256 for image in runnable.get(revision_id, ())}
+                | held.get(documents.get(revision_id, ""), set())
+            )
+            & selected
+        )
+        for revision_id in revision_ids
+    }
