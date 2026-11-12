@@ -156,8 +156,8 @@ def lane_selected(paths: Iterable[str], event: str) -> bool:
     )
 
 
-# Always-on suites retain their output names for the aggregate gate and timing
-# cache. These are not ownership switches: no PR can deselect them.
+# Suites no path can deselect; they retain their output names for the
+# aggregate gate and timing cache. Whether they run at all is `full`'s choice.
 FAST_AREAS = ("rust", "repository", "control", "web", "generated")
 
 # Conservative transitive dependency closure, rather than directory ownership:
@@ -166,8 +166,9 @@ FAST_AREAS = ("rust", "repository", "control", "web", "generated")
 # - NAS installs that Compose graph plus install/, the Python helper and packaging.
 # - Agent lifecycle consumes Rust, packaging, protocol, Controller wire peers,
 #   shared Python fixtures, and build/materialization scripts.
-# Controller PostgreSQL and cross-language/Rust platform checks run every PR:
-# their fixture and generated-contract dependencies cross all these boundaries.
+# Controller PostgreSQL and cross-language/Rust platform checks run on every
+# full run: their fixture and generated-contract dependencies cross all these
+# boundaries.
 # Executable/build inputs remain conservative. Ordinary core test modules and
 # known prose are exempt; an unfamiliar path runs every integration.
 INTEGRATION_INPUTS = (
@@ -232,9 +233,10 @@ def full_suites(event: str, payload: dict | None) -> bool:
 
 
 # A member pull request builds and tests Rust only when it changes the Rust
-# workspace or the wire contract the Rust peers are generated from. Controller
-# contracts also feed the generated wire (build.rs); their Rust effect is
-# proven by the integration pull request, as is everything else.
+# workspace or a file the Rust build or tests read from outside it: the
+# build.rs rerun inputs and the include_str!/fixture paths. The one exception
+# is build.rs's whole `control/src` input, which almost every PR touches; its
+# Rust effect is proven by the integration pull request.
 RUST_INPUTS = (
     "rust/",
     ".cargo/",
@@ -242,7 +244,19 @@ RUST_INPUTS = (
     "scripts/export-agent-wire-schema",
     "scripts/generate-agent-wire",
 )
-RUST_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+RUST_FILES = (
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "control/uv.lock",
+    "scripts/check_environment.py",
+    "src/cluster_profiles/__init__.py",
+    "src/cluster_profiles/control_limits.py",
+    "src/cluster_profiles/runtime_identity.py",
+    "control/src/vonk_control/resources/site-ports.json",
+    "control/tests/fixtures/compiled_workload_v2.json",
+    "tests/acceptance/fixtures/nvidia-smi.sh",
+)
 
 
 def rust_sources_changed(paths: Iterable[str]) -> bool:
@@ -269,9 +283,13 @@ def main() -> int:
         else None
     )
     selected = select(changed, arguments.event)
-    lane = lane_selected(changed, arguments.event)
-    carry = carry_selected(changed, arguments.event)
     full = full_suites(arguments.event, payload)
+    # A full pull request (an integration PR) accepts its candidate with the
+    # carry regardless of paths; a member pull request accepts nothing.
+    full_pull_request = full and arguments.event == "pull_request"
+    upgrade_inputs = carry_selected(changed, arguments.event)
+    lane = full and (full_pull_request or lane_selected(changed, arguments.event))
+    carry = full_pull_request or upgrade_inputs
     rust_sources = rust_sources_changed(changed)
     if arguments.github_output:
         for area in AREAS:
@@ -279,6 +297,7 @@ def main() -> int:
         print("guards=true")
         print(f"lane={str(lane).lower()}")
         print(f"upgrade_carry={str(carry).lower()}")
+        print(f"upgrade_inputs={str(upgrade_inputs).lower()}")
         print(f"full={str(full).lower()}")
         print(f"rust_sources={str(rust_sources).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
@@ -290,6 +309,7 @@ def main() -> int:
                     "guards": True,
                     "lane": lane,
                     "upgrade_carry": carry,
+                    "upgrade_inputs": upgrade_inputs,
                     "full": full,
                     "rust_sources": rust_sources,
                 },

@@ -219,19 +219,20 @@ quality evidence still requires its designated lane.
 A fresh clone must run `scripts/build-control-wheel` before any tests: the agent
 protocol wheel the `control` project installs is built locally, not kept in git.
 
-Member PRs run lean CI only: repository guards, lint/types, generated clients,
-supply-chain evidence, the tests that exercise their changed paths, and Rust
-tests/lint only for Rust or wire changes. Integration batches (`integration/*`),
-main and releases run the complete suites and the proof workflows (`full` in
-`scripts/select-ci-areas` owns this rule). A member PR is done when its lean CI
-is green and its review has passed; its integration batch carries the full proof.
-Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
-unknown inputs run the integrations.
-Integration PRs require the `release-acceptance` label and exact-commit candidate
-acceptance before `CI gate` passes. CI labels same-repository `integration/*` PRs.
-Candidate acceptance runs on a PR only when it is a full run (integration branch
-or the `release-acceptance` label); member PRs fold into an integration PR, and
-main's Release runs the upgrade carry for every merge.
+Every change lands through an integration PR (same-repository `integration/*`
+head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
+owns that rule. A member PR runs lean CI only: repository guards, Ruff and
+types, supply-chain evidence, generated clients, the tests that exercise its
+changed paths, and Rust lint/tests only for Rust inputs. Its gate reports
+`CI gate (member PR)`, never the required `CI gate`, so it cannot merge itself.
+A member PR is done when its lean CI is green and its review has passed.
+An integration PR runs the complete suites, every selected integration, its
+candidate acceptance with the upgrade carry, and the path-filtered proof
+workflows. Main's Release runs the complete CI unless it reuses the integration
+PR's run for the identical tree, and its own release acceptance; the proof
+workflows run on pull requests only. Adding the label re-runs `ci.yml` in full
+at once; the proof workflows do not trigger on labels and pick it up on the next
+push.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.

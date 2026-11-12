@@ -28,8 +28,8 @@ SUITE is one of:
                   when given (unmeasured files get the measured average)
 --durations FILE  schema-1 per-file durations (scripts/collect-pytest-file-durations)
 --only FILE       run only the suite's test files listed in FILE (one repository
-                  path per line, e.g. from scripts/select-changed-tests); none
-                  listed runs nothing
+                  path per line, e.g. from scripts/select-changed-tests); with
+                  --shard, its share of them. Nothing listed runs nothing
 
 Arguments after -- go to pytest unchanged (for example -x or --junitxml=...).
 USAGE
@@ -151,8 +151,17 @@ if [[ -n "$shard$only" ]]; then
         if [[ -n "$durations" ]]; then
             selector+=(--durations "$durations" --max-duration-age-hours 720)
         fi
-        mapfile -t paths < <(printf '%s\n' "${candidates[@]}" | "${selector[@]}")
-        ((${#paths[@]} > 0)) || { echo "shard $shard selected no files" >&2; exit 1; }
+        if ((${#candidates[@]})); then
+            mapfile -t paths < <(printf '%s\n' "${candidates[@]}" | "${selector[@]}")
+        else
+            paths=()
+        fi
+        if ((${#paths[@]} == 0)); then
+            # A short --only list leaves some shards empty; a whole suite never.
+            [[ -n "$only" ]] || { echo "shard $shard selected no files" >&2; exit 1; }
+            echo "shard $shard of the listed $suite test files is empty"
+            exit 0
+        fi
     fi
 fi
 

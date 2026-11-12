@@ -453,13 +453,22 @@ def test_main_and_unknown_inputs_always_carry() -> None:
     assert module.carry_selected(["weird/new"], "pull_request") is True
 
 
-def test_selector_names_the_carry_for_the_lane_proof() -> None:
+@pytest.mark.parametrize(
+    ("head", "accepts"), [("member-branch", "false"), ("integration/batch", "true")]
+)
+def test_selector_folds_the_scope_into_lane_and_carry(tmp_path, head, accepts) -> None:
+    """Catches a member PR that starts candidate acceptance, or an integration
+    PR whose Controller-only change leaves its acceptance or carry out."""
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps(_pull(head)))
     result = subprocess.run(
         [
             sys.executable,
             str(ROOT / "scripts/select-ci-areas"),
             "--event",
             "pull_request",
+            "--event-payload",
+            str(payload),
             "--github-output",
         ],
         input="control/src/vonk_control/api.py\n",
@@ -471,8 +480,10 @@ def test_selector_names_the_carry_for_the_lane_proof() -> None:
     )
     assert result.returncode == 0, result.stderr
     lines = result.stdout.splitlines()
-    assert "lane=false" in lines
-    assert "upgrade_carry=false" in lines
+    assert f"lane={accepts}" in lines
+    assert f"upgrade_carry={accepts}" in lines
+    # Release decides the recipe refresh by paths alone.
+    assert "upgrade_inputs=false" in lines
 
 
 def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
@@ -491,7 +502,7 @@ def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
         ("pull_request", _pull("member", labels=["release-acceptance"]), True),
         ("pull_request", None, True),
         ("merge_group", None, True),
-        ("workflow_call", _pull("member"), True),
+        ("push", None, True),
     ],
 )
 def test_only_a_member_pull_request_skips_the_full_suites(event, payload, full) -> None:
@@ -505,32 +516,10 @@ def test_only_a_member_pull_request_skips_the_full_suites(event, payload, full) 
         ("Cargo.lock", True),
         ("agent_protocol/src/vonk_agent_protocol/x.py", True),
         ("control/src/vonk_control/api.py", False),
+        ("control/src/vonk_control/resources/site-ports.json", True),
+        ("control/uv.lock", True),
         ("docs/rust.md", False),
     ],
 )
 def test_member_rust_build_follows_rust_and_wire_inputs(path, selected) -> None:
     assert _module().rust_sources_changed([path]) is selected
-
-
-def test_selector_reads_the_scope_from_the_event_payload(tmp_path) -> None:
-    payload = tmp_path / "event.json"
-    payload.write_text(json.dumps(_pull("member-branch")))
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "scripts/select-ci-areas"),
-            "--event",
-            "pull_request",
-            "--event-payload",
-            str(payload),
-            "--github-output",
-        ],
-        input="rust/crates/vonk-agent/src/lib.rs\n",
-        text=True,
-        capture_output=True,
-        check=True,
-        timeout=10,
-    )
-    lines = result.stdout.splitlines()
-    assert "full=false" in lines
-    assert "rust_sources=true" in lines

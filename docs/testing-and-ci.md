@@ -16,18 +16,22 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-Every change lands through an integration PR (head branch `integration/*`).
-A member PR (any other pull request) runs only the fast tier: repository
-guards, Python lint/types, supply-chain evidence, generated clients, the test
-files that directly exercise its changed paths (`scripts/select-changed-tests`)
-and, when it changes the Rust workspace or the wire protocol, Rust tests/lint.
-Its integration PR, the merge queue and main's Release run the complete
-sharded Controller and repository suites, web tests, Rust tests/lint, every
-integration and the separate pull-request proof workflows. `full` from
-`scripts/select-ci-areas` is the one owner of that rule; the proof workflows
-read it through `ci-scope.yml`, and a member run leaves no source receipt for
-Release to reuse. A member PR is done when its lean CI is green and its
-review has passed. Integration jobs follow a conservative transitive dependency closure in
+Every change lands through an integration PR: a same-repository
+`integration/*` head, or any PR with the `release-acceptance` label. `full` in
+`scripts/select-ci-areas` owns that rule; `ci.yml` and the proof workflows (via
+`ci-scope.yml`) read it.
+
+| Run | What runs |
+| --- | --- |
+| Member PR | `Repository guards`, `Ruff` (lint, format, types, added-line guards), supply-chain evidence, `Generated control clients`, the test files that directly exercise the changed paths (`scripts/select-changed-tests`, sharded about a hundred files per runner), and Rust lint/tests only for Rust inputs. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. |
+| Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and the path-filtered proof workflows. |
+| Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. The proof workflows run on pull requests only. |
+
+A member PR is done when its lean CI is green and its review has passed.
+Adding the `release-acceptance` label re-runs `ci.yml` in full at once; the
+proof workflows do not trigger on labels, so they pick it up on the next push.
+
+Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
 wire and Rust platform checks run on every full run because their dependencies
 span these boundaries. Image/package builds may be selective.
@@ -45,9 +49,9 @@ alone selects acceptance); `CI gate` requires their exact
 candidate's acceptance, with the upgrade carry. A member PR runs no acceptance:
 it folds into an integration PR. A merge-queue commit accepts its candidate
 when it changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance
-programs. A component PR merged straight to
-main leaves no candidate evidence, so Release runs the Spark acceptance (and the
-recipe refresh only if the change can alter the upgrade) itself.
+programs. A merge without candidate evidence makes Release run the Spark
+acceptance (and the recipe refresh only if the change can alter the upgrade)
+itself.
 See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
 for dispatch by ref and protected-environment configuration. The PR and main
 publishers call the same candidate assembly and acceptance workflows.
@@ -56,7 +60,7 @@ Only the `release-acceptance` label starts a new CI run. Any other label runs in
 its own concurrency group, so it never cancels the run in progress, and every job
 skips it. Only `CI gate` is renamed on that run (`CI gate (label ignored)`), so
 no such run reports a `CI gate` that could satisfy the requirement while the real
-run is pending. Other jobs keep their names: a job skipped by its own `if` shows
+run is pending; a member PR's gate is likewise `CI gate (member PR)`. Other jobs keep their names: a job skipped by its own `if` shows
 its name expression unevaluated, which would break a required check such as
 `Compose integration` on pull requests that skip it.
 
