@@ -1,8 +1,12 @@
+import json
 import os
 from contextlib import redirect_stdout
 from io import BytesIO, TextIOWrapper
+from pathlib import Path
 
 import pytest
+from library_route_fixtures import _library_detail, _recipe_projection
+from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli_render import progress_line, render_payload
 
@@ -1308,3 +1312,49 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "12 B" in output and "3 B" in output and "9 B" in output
     assert "Previous revision retained because installation owner-1" in output
     assert "2 B unique" in output
+
+
+def test_recipe_detail_links_creator_licence_and_source_like_the_dashboard(capsys):
+    """`vonkctl recipe detail` names the creator page, source and licence as the dashboard does.
+
+    Wrong implementation caught: the CLI omits where a recipe comes from, or prints a
+    licence as something to confirm rather than information.
+    """
+    corpus = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "control/web/src/test-fixtures/library-corpus.json"
+        ).read_text()
+    )
+    display = next(iter(corpus["seedDisplays"]["models"].values()))
+    display["license"]["territorial_restrictions"] = {
+        "denied_jurisdictions": ["CN", "US"],
+        "notice": "Not for use in listed regions.",
+    }
+    document = _recipe_document("tiny")
+    source = "https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json"
+    document["provenance"]["source_reference"] = source
+    models = _library_detail(document)["detail"]["model_documents"]
+    for model in models:
+        model["model_display"] = display
+    render_payload(
+        {
+            **_recipe_projection("vonk/tiny", "Tiny"),
+            "document": document,
+            "model_documents": models,
+        },
+        "recipe",
+        action="detail",
+    )
+
+    output = capsys.readouterr().out
+    assert (
+        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny"
+        in output
+    )
+    assert f"Recipe source: {source}" in output
+    assert (
+        f"{display['model_title']} licence: {display['license']['spdx']} (terms: "
+        in output
+    )
+    assert "Regional limits (CN, US): Not for use in listed regions." in output

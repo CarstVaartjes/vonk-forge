@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 from collections.abc import Mapping
 from enum import StrEnum
+from urllib.parse import quote
 
 from ..cli_states_generated import QualificationOutcome, QualificationStatus
 from ..cli_telemetry_render import size as _size
@@ -18,6 +19,8 @@ from ..generated_control.models.published_qualification_status_view import (
 from ..generated_control.models.qualification_evidence_record import (
     QualificationEvidenceRecord,
 )
+from ..generated_control.models.recipe_detail_response import RecipeDetailResponse
+from ..generated_control.types import Unset
 from .common import (
     _bytes,
     _field,
@@ -230,6 +233,34 @@ def _alternative_line(alternative: Mapping[str, object]) -> str:
     )
 
 
+def _recipe_links(detail: RecipeDetailResponse) -> None:
+    """Where the recipe comes from, in the dashboard's words. Licences are information only."""
+    publisher = quote(detail.identity.publisher, safe="")
+    slug = quote(detail.identity.slug, safe="")
+    _field(
+        "Creator and details on vonkforge.ai",
+        f"https://vonkforge.ai/recipes/{publisher}/{slug}",
+    )
+    source = detail.document.provenance.source_reference
+    if isinstance(source, str) and source:
+        _field("Recipe source", source)
+    for model in detail.model_documents:
+        display = model.model_display
+        if display is None:
+            continue
+        license_ = display.license_
+        _field(
+            f"{display.model_title} licence",
+            f"{license_.spdx} (terms: {license_.url})",
+        )
+        limits = license_.territorial_restrictions
+        if limits is not None and not isinstance(limits, Unset):
+            _field(
+                f"Regional limits ({_words(limits.denied_jurisdictions)})",
+                limits.notice,
+            )
+
+
 def _recipe_alternatives(item: Mapping[str, object]) -> None:
     """Other recipes for the same model, with a command to open each."""
     alternatives = item.get("alternatives")
@@ -358,6 +389,8 @@ def _library(
             )
     if detail:
         _library_item(payload, noun, detail=True)
+        if noun == LibraryNoun.RECIPE:
+            _recipe_links(RecipeDetailResponse.from_dict(dict(payload)))
         return
     rows = _records(payload, "models" if noun == LibraryNoun.MODEL else "recipes")
     cursor = payload.get("next_cursor")

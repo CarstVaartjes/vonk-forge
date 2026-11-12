@@ -935,3 +935,11 @@
 .library-alternatives a { display: grid; gap: .15rem; padding: .5rem .2rem; color: inherit; text-decoration: none; }
 .library-alternatives a:hover strong { text-decoration: underline; }
 .library-alternatives small { color: var(--text-muted, #abb5a7); font-size: .72rem; }
+
+.library-recipe-links {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
