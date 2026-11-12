@@ -728,9 +728,11 @@ def test_withdrawals_wait_for_drained_and_publications_for_ready(tmp_path):
     )
     root = tmp_path / "live"
     required: list[str] = []
+    prepared: list[frozenset[str]] = []
     service = _service(
         base, root, lambda: NOW, lambda _marker, phase: required.append(phase)
     )
+    service._prepare_key_routes = prepared.append
     service.publish_run(first)
     service.publish_run(second)
     service.withdraw_run(second)
@@ -738,8 +740,10 @@ def test_withdrawals_wait_for_drained_and_publications_for_ready(tmp_path):
     service.withdraw_run(first)
     assert _live_aliases(root) == set()
     # A Stop of one run must not wait for the gateway restart that brings the
-    # remaining routes back, whether any remain or none do.
+    # remaining routes back, whether any remain or none do, nor call the
+    # gateway that restart takes down.
     assert required == ["ready", "ready", "drained", "drained"]
+    assert prepared == [frozenset({first}), frozenset({first, second})]
 
 
 def test_authenticated_observation_producer_repairs_between_passes(
