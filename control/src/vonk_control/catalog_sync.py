@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import RecipeDisplay, document_sha256
+from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay, document_sha256
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capabilities import CapabilityUnavailableError
@@ -558,6 +558,12 @@ class ManagedRecipeCatalogSyncService:
                     and not policy_problems
                     and _result(current.result).state == CatalogSyncState.CURRENT
                     and current.controller_marker == _controller_marker()
+                    # A Controller upgraded onto the same release has not stored
+                    # the vocabulary yet: a normal sync writes it.
+                    and (
+                        snapshot.vocabulary is None
+                        or isinstance(current.vocabulary, CatalogVocabulary)
+                    )
                 )
                 else None
             )
