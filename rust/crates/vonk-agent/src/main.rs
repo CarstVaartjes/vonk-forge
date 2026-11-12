@@ -1169,7 +1169,7 @@ mod tests {
     }
 
     use super::{
-        LaneExitWithRotation, claim_wait_seconds, collect_inventory_until_ready,
+        LaneExitWithRotation, PostStopInventory, claim_wait_seconds, collect_inventory_until_ready,
         inventory_refresh_due, inventory_retry_delay, loop_error_is_fatal,
         observation_snapshot_is_empty, report_ready_after_self_test, supervise_lanes_with_rotation,
     };
