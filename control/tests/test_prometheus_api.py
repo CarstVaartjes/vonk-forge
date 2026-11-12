@@ -121,6 +121,7 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
     label = "node_id" if metric == "gpu_utilization" else "alias"
     seen = []
     now = time.time()
+    monkeypatch.setattr("vonk_control.prometheus_api.time.time", lambda: now)
 
     def handle(request):
         params = request.url.params

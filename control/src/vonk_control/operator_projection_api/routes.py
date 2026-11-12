@@ -13,11 +13,11 @@ from starlette.responses import Response
 from vonk_agent_protocol import (
     ErrorCategory,
     ModelCacheOperatorStatus,
-    RunState,
     UnknownError,
     WaitReason,
 )
 
+from ..agent_api.ended_runs import ENDED_RUN_STATES
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
@@ -118,7 +118,7 @@ def install_operator_projection_routes(
                         .join(RunNode, RunNode.run_id == RecipeRun.id)
                         .where(
                             RunNode.node_id == node_id,
-                            RecipeRun.state.not_in({RunState.STOPPED, RunState.FAILED}),
+                            RecipeRun.state.not_in(ENDED_RUN_STATES),
                         )
                         .distinct()
                     )
