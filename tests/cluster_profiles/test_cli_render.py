@@ -1308,3 +1308,33 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "12 B" in output and "3 B" in output and "9 B" in output
     assert "Previous revision retained because installation owner-1" in output
     assert "2 B unique" in output
+
+
+def test_version_facts_use_the_dashboard_words(capsys):
+    """`vonkctl` and the dashboard's version line name the same facts the same way.
+
+    Wrong implementation caught: the CLI keeps `API source` / `Last run` while the
+    Controller's version line says `Controller build` / `Last sync`, so one fact has
+    two names.
+    """
+    render_payload(
+        {
+            "observed_at": "2026-11-12T08:00:00Z",
+            "api": {"source_sha": "a" * 40, "control_contract_sha256": "b" * 64},
+            "workers": None,
+            "worker_issue": "worker-observation-unavailable",
+        },
+        "platform",
+    )
+    assert f"Controller build: {'a' * 40}" in capsys.readouterr().out
+    render_payload(
+        {
+            "state": "current",
+            "completed_at": "2026-11-12T08:00:00Z",
+            "library_version": "1.4.0",
+        },
+        "recipe",
+        action="sync-status",
+    )
+    output = capsys.readouterr().out
+    assert "Last sync:" in output and "Library version: 1.4.0" in output

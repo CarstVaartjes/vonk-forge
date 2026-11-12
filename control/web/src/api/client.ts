@@ -25,6 +25,7 @@ import type {
   MetricRange,
   CliTokenDownload,
   ControlApi,
+  PlatformObservation,
   FleetProfileInput,
   FleetProfileList,
   FleetProfileEndpoints,
@@ -441,13 +442,8 @@ export class ApiClient implements ControlApi {
     return (await this.observation("/api/fleet", signal)) as VisualFleetSnapshot;
   }
 
-  async platformObservation(
-    signal?: AbortSignal,
-  ): Promise<components["schemas"]["PlatformObservation"]> {
-    return (await this.observation(
-      "/api/platform",
-      signal,
-    )) as components["schemas"]["PlatformObservation"];
+  async platformObservation(signal?: AbortSignal): Promise<PlatformObservation> {
+    return (await this.observation("/api/platform", signal)) as PlatformObservation;
   }
 
   async enrollFleetNode(input: FleetEnrollRequest, signal?: AbortSignal) {

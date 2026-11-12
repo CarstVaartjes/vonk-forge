@@ -38,7 +38,7 @@ def _catalog_sync(payload: Mapping[str, object]) -> None:
         print("Next: vonkctl recipe library")
         return
     _field("State", payload.get("state"))
-    _field("Last run", _time(payload.get("completed_at") or payload.get("created_at")))
+    _field("Last sync", _time(payload.get("completed_at") or payload.get("created_at")))
     _field("Trigger", payload.get("trigger"))
     _field("Repository", payload.get("repository"))
     _field("Library version", payload.get("library_version"))

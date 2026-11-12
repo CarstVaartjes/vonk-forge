@@ -3,6 +3,7 @@ import {useOptionalAuth} from "./auth";
 import type {ControlApi} from "./api/types";
 import {AppShell} from "./components/app-shell";
 import {ToastProvider} from "./components/toast";
+import {VersionLine} from "./components/version-line";
 import type {AppRoute} from "./components/app-shell";
 import {ActivityPage} from "./pages/activity";
 import {FleetPage} from "./pages/fleet-simplified";
@@ -116,6 +117,7 @@ export function App({api}: {api: ControlApi}) {
     navigationKey={pathname}
     navigationLocked={navigationLocked}
     onNavigate={navigate}
+    footer={auth ? <VersionLine api={api}/> : undefined}
     operator={auth ? {
       onDownloadCliToken: () => api.downloadCliToken(),
       logoutError: auth.logoutError,

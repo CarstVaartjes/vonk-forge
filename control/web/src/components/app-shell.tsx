@@ -18,13 +18,14 @@ type Operator = {
 type AppShellProps = {
   activeRoute?: AppRoute;
   children: ReactNode;
+  footer?: ReactNode;
   navigationKey?: string;
   navigationLocked?: boolean;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
   operator?: Operator;
 };
 
-export function AppShell({activeRoute, children, navigationKey = activeRoute, navigationLocked = false, onNavigate, operator}: AppShellProps) {
+export function AppShell({activeRoute, children, footer, navigationKey = activeRoute, navigationLocked = false, onNavigate, operator}: AppShellProps) {
   const mainContent = useRef<HTMLElement>(null);
   const previousNavigationKey = useRef(navigationKey);
   useEffect(() => {
@@ -57,6 +58,6 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
         {operator && <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate}/>}
       </div>
     </header>
-    <main ref={mainContent} id="main-content" tabIndex={-1}><div className="content-frame">{children}</div></main>
+    <main ref={mainContent} id="main-content" tabIndex={-1}><div className="content-frame">{children}{footer}</div></main>
   </div>;
 }
