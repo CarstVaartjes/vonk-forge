@@ -19,7 +19,7 @@ of the build input the catalog projection states without reading the bundle.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -201,43 +201,6 @@ def revision_archives(
         ).values()
         for image in images
     )
-
-
-def revisions_running_archives(
-    session: Session, archives: Collection[str]
-) -> Mapping[str, frozenset[str]]:
-    """For each archive, every revision of a recipe document that built it."""
-
-    if not archives:
-        return {}
-    documents: dict[str, set[str]] = {}
-    for archive, document_id in session.execute(
-        select(RecipeBuild.oci_layout_sha256, CatalogDocumentRevision.document_id)
-        .join(
-            CatalogDocumentRevision,
-            CatalogDocumentRevision.id == RecipeBuild.recipe_revision_id,
-        )
-        .where(RecipeBuild.oci_layout_sha256.in_(sorted(archives)))
-    ):
-        if archive is not None:
-            documents.setdefault(archive, set()).add(document_id)
-    wanted = {document for values in documents.values() for document in values}
-    revisions: dict[str, set[str]] = {}
-    if wanted:
-        for revision_id, document_id in session.execute(
-            select(
-                CatalogDocumentRevision.id, CatalogDocumentRevision.document_id
-            ).where(CatalogDocumentRevision.document_id.in_(sorted(wanted)))
-        ):
-            revisions.setdefault(document_id, set()).add(revision_id)
-    return {
-        archive: frozenset(
-            revision_id
-            for document_id in documents.get(archive, ())
-            for revision_id in revisions.get(document_id, ())
-        )
-        for archive in archives
-    }
 
 
 def _read_projection(revision: CatalogDocumentRevision) -> object | None:

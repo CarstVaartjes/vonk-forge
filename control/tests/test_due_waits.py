@@ -708,7 +708,9 @@ def test_catalog_retry_clock_survives_dependency_recovery_and_reconstruction(
     assert waiting is not None and waiting.wait is not None
     assert step.failures == 1 and len(jitter) == 1
     assert waiting.wait.next_check == NOW + timedelta(seconds=step.delay_seconds)
-    now[0], available[0] = waiting.wait.next_check, True
+    # The API cadence did not run: the backstop takes over one interval late.
+    now[0] = waiting.wait.next_check + timedelta(seconds=90)
+    available[0] = True
     reconstructed = construct()
     backstop = DueWaitBackstop(
         sessions,

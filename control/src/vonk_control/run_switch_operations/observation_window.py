@@ -29,9 +29,9 @@ from ..run_admission import (
 )
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
+from .awaited_children import awaited_jobs
 from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchPostStopEvidencePending
-from .observation_helpers import _start_child_request_key
 from .planning_helpers import _aware, _stored_job_plan
 
 #: Dependency recovery before verification: stayed unreadable.
@@ -62,23 +62,22 @@ def observation_owners(
     session = object_session(job)
     if session is None:
         return ()
-    refs = [
-        OwnerRef(OwnerKind.JOB, child)
-        for child in (progress.child_operation_id, progress.recovery_child_operation_id)
-        if child is not None
-    ]
     plan = _stored_job_plan(job)
     run_or_switch = plan is not None and plan.action in {"run", "switch"}
-    if run_or_switch:
+    awaited = awaited_jobs(job, progress, plan)
+    ids = list(awaited.job_ids)
+    if awaited.start_request_key is not None:
         start = session.scalar(
             select(Job.id).where(
                 Job.kind == WireAgentOperation.RECIPE_START.value,
-                Job.request_id == _start_child_request_key(job.request_id),
+                Job.request_id == awaited.start_request_key,
             )
         )
         if start is not None:
-            refs.append(OwnerRef(OwnerKind.JOB, start))
-    owners = [owner(session, ref) for ref in refs]
+            ids.append(start)
+    owners = [
+        owner(session, OwnerRef(OwnerKind.JOB, child)) for child in dict.fromkeys(ids)
+    ]
     if (
         run_or_switch
         and progress.final_verify_started_at is None
