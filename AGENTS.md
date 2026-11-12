@@ -216,12 +216,15 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
-Integration PRs (`integration/*`), the merge queue and main's Release run the
-complete sharded Controller/repository suites, repository guards, web tests,
-Rust tests/lint, generated clients, Python lint/types and the proof workflows.
-A member PR runs the fast tier only: guards, lint/types, generated clients,
-the tests for its changed paths, and Rust only for Rust or wire changes
-(`full` in `scripts/select-ci-areas`).
+A fresh clone must run `scripts/build-control-wheel` before any tests: the agent
+protocol wheel the `control` project installs is built locally, not kept in git.
+
+Member PRs run lean CI only: repository guards, lint/types, generated clients,
+supply-chain evidence, the tests that exercise their changed paths, and Rust
+tests/lint only for Rust or wire changes. Integration batches (`integration/*`),
+main and releases run the complete suites and the proof workflows (`full` in
+`scripts/select-ci-areas` owns this rule). A member PR is done when its lean CI
+is green and its review has passed; its integration batch carries the full proof.
 Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
 unknown inputs run the integrations.
 Integration PRs require the `release-acceptance` label and exact-commit candidate

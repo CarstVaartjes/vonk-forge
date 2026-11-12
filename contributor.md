@@ -16,7 +16,8 @@ Run `scripts/test-local` from your worktree for the repository and Controller
 pytest suites. On macOS it sends Linux-marked tests to the `vonk-ci` OrbStack
 VM when available; the script builds the local agent protocol wheel and checks
 it against `control/uv.lock` before running Controller commands. For direct
-Controller commands, run `scripts/build-control-wheel` once first. See
+Controller commands or tests in a fresh clone, run `scripts/build-control-wheel`
+once first: the protocol wheel is built locally, not kept in git. See
 [Testing and CI](docs/testing-and-ci.md) for focused commands and the other
 acceptance lanes.
 

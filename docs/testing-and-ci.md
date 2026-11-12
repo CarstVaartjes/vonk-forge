@@ -26,7 +26,8 @@ sharded Controller and repository suites, web tests, Rust tests/lint, every
 integration and the separate pull-request proof workflows. `full` from
 `scripts/select-ci-areas` is the one owner of that rule; the proof workflows
 read it through `ci-scope.yml`, and a member run leaves no source receipt for
-Release to reuse. Integration jobs follow a conservative transitive dependency closure in
+Release to reuse. A member PR is done when its lean CI is green and its
+review has passed. Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
 wire and Rust platform checks run on every full run because their dependencies
 span these boundaries. Image/package builds may be selective.
@@ -242,9 +243,10 @@ first and includes the checks; by default they are skipped. Prefer a static
 check of the Dockerfile or build inputs where that proves the property.
 
 The local `control` project refers to the ignored protocol wheel under
-`inventory/wheels`. `scripts/test-local` builds and verifies it automatically.
-For direct `uv sync --project control` or `uv run --project control` commands,
-run `scripts/build-control-wheel` once first; it also checks the wheel against
+`inventory/wheels`; it is not in git, so a fresh clone has none.
+`scripts/test-local` builds and verifies it automatically. Before any other
+test or `uv sync --project control` / `uv run --project control` command in a
+fresh clone, run `scripts/build-control-wheel` once first; it also checks the wheel against
 the hash locked in `control/uv.lock`.
 
 On Linux, this runs both suites in full. On macOS, it runs portable tests on
