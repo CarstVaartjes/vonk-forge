@@ -2385,6 +2385,11 @@ def check_source(
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
         )
+    if python and "contract-constants" in modes:
+        hits.extend(
+            (line, contract_constant_copies.LITERAL_KIND)
+            for line in contract_constant_copies.scan_literals(path, source)
+        )
     if python and not is_test and "contract-constants" in modes:
         hits.extend(
             (line, contract_constant_copies.KIND)

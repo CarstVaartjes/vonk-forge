@@ -40,8 +40,6 @@ from vonk_control.models import CatalogDocumentRevision, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    PACKAGE_REPOSITORY,
     RecipePackageClient,
     RecipePackageError,
 )
@@ -49,6 +47,7 @@ from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import generate_source_bundle
 from vonk_forge_contracts import (
+    PACKAGE_MEDIA_TYPE,
     ModelDefinition,
     RecipeDefinition,
     RecipeDisplay,
@@ -57,6 +56,7 @@ from vonk_forge_contracts import (
 )
 
 from .display_fixtures import display_of_model, display_of_recipe
+from .index_envelope import index_envelope
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_builds import setup
 
@@ -281,15 +281,8 @@ def _canonical_package_fixture(
             "minimum_consumer_schema": 2,
         },
     }
-    index = {
-        "schema_version": 2,
-        "kind": "recipe-library-index",
-        "contract_version": "4.0.0",
-        "updated_at": "2026-09-28T12:00:00Z",
-        "repository": PACKAGE_REPOSITORY,
-        "source_commit": "a" * 40,
-        "package_contract": {"schema_version": 2, "media_type": PACKAGE_MEDIA_TYPE},
-        "catalog_entities": [
+    index = index_envelope(
+        catalog_entities=[
             {
                 "source_path": "models/tiny-model.json",
                 "document": model_document,
@@ -305,8 +298,8 @@ def _canonical_package_fixture(
                 "content_sha256": model_digest,
             }
         ],
-        "recipes": [row],
-    }
+        recipes=[row],
+    )
     return _canonical(index) + b"\n", row, package
 
 
@@ -565,6 +558,61 @@ def test_only_the_signed_envelope_rejects_the_whole_bundle(
     client.prepare(repaired_snapshot)
     assert client.fetch(repaired_snapshot.items[0].uri).package_handle is not None
     client.close()
+
+
+_DROPPED = object()
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "code"),
+    [
+        ("kind", "something-else", RecipePackageCode.SCHEMA_INCOMPATIBLE),
+        ("schema_version", 3, RecipePackageCode.SCHEMA_INCOMPATIBLE),
+        ("source_commit", "not-a-commit", RecipePackageCode.RESPONSE_INVALID),
+        ("updated_at", "2026-13-40T00:00:00Z", RecipePackageCode.RESPONSE_INVALID),
+        ("vocabulary", _DROPPED, RecipePackageCode.RESPONSE_INVALID),
+    ],
+)
+def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
+    tmp_path: Path,
+    signed_releases: list[bytes],
+    field: str,
+    value: object,
+    code: RecipePackageCode,
+) -> None:
+    """The envelope is read through the contract; its refusal keeps its code."""
+    index, _, package = _canonical_package_fixture()
+    document = json.loads(index)
+    if value is _DROPPED:
+        del document[field]
+    else:
+        document[field] = value
+    release = _release_for(_canonical(document) + b"\n", package)
+    client = _client(release, tmp_path / "packages")
+    try:
+        with pytest.raises(RecipePackageError) as refused:
+            client.list()
+        assert refused.value.code == code
+    finally:
+        client.close()
+
+
+def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """Principle 1: the envelope is read through the contract, the entries one by one."""
+    index, _, package = _canonical_package_fixture()
+    document = json.loads(index)
+    document["catalog_entities"][0]["document"] = {"kind": "from-a-newer-contract"}
+    release = _release_for(_canonical(document) + b"\n", package)
+    client = _client(release, tmp_path / "packages")
+    try:
+        snapshot = client.list()
+        [problem] = snapshot.problems
+        assert problem.detail.startswith("catalog model document is invalid")
+        assert snapshot.items and not snapshot.catalog_entities
+    finally:
+        client.close()
 
 
 @pytest.mark.parametrize(
