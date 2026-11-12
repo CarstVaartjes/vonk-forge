@@ -8,7 +8,12 @@ import {
   type WireNumber,
 } from "../api/contract-numeric";
 import type { SwapShortfallEvidence, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
-import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
+import {
+  NodeOfflineReason,
+  OutcomeKind,
+  ProjectionCode,
+  RunState,
+} from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
@@ -151,14 +156,14 @@ export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSum
 }
 
 /**
- * The Fleet in one line: Sparks online, unified memory free, models serving, and how many
+ * The Fleet in one line: Sparks online, unified memory free, workloads serving, and how many
  * Sparks need attention. `vonkctl fleet` prints the same line.
  */
 export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   const summary = summarizeFleet(fleet) as FleetSummary;
   const serving = new Set(
     fleet.nodes.flatMap((node) =>
-      node.loaded.filter((run) => runStateWord(run) === "ready").map((run) => run.run_id),
+      node.loaded.filter((run) => runStateWord(run) === RunState.RUNNING).map((run) => run.run_id),
     ),
   ).size;
   const attention = fleet.nodes.filter((node) => nodeStatus(node, now).status !== "online").length;
@@ -168,8 +173,8 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
       ? "unified memory not reported"
       : `${formatBytes(summary.freeMemoryBytes)} unified memory free`,
     serving === 0
-      ? "no models serving"
-      : `${serving} ${serving === 1 ? "model" : "models"} serving`,
+      ? "no workloads serving"
+      : `${serving} ${serving === 1 ? "workload" : "workloads"} serving`,
     attention === 0
       ? "nothing needs attention"
       : `${attention} ${attention === 1 ? "needs" : "need"} attention`,

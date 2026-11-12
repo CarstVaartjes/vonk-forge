@@ -112,7 +112,7 @@ test("Fleet status line reads as one sentence at narrow and wide widths", async 
   await serveEmptyFleet(page);
   await page.goto("/fleet");
   await expect(page.getByRole("status").filter({ hasText: "Sparks online" })).toHaveText(
-    "0 of 0 Sparks online · unified memory not reported · no models serving · nothing needs attention",
+    "0 of 0 Sparks online · unified memory not reported · no workloads serving · nothing needs attention",
   );
   await expect(page.getByRole("heading", { name: "Fleet unavailable" })).toHaveCount(0);
 

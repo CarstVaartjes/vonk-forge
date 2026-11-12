@@ -363,84 +363,79 @@ def _fleet_updates(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
-def _node_attention(node: Mapping[str, object]) -> list[str]:
-    """What the owners report as not healthy on one Spark, in their own terms."""
+def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
+    """Collect what the owners report as not healthy, in their own terms."""
     notes: list[str] = []
-    name = _text(node.get("display_name"))
-    connection = _object(node.get("connection"), "connection")
-    if connection.get("online_state") != "online":
-        reason = connection.get("offline_reason")
-        notes.append(
-            f"{name} is {_text(connection.get('online_state'))}"
-            + (f" ({_text(reason)})" if reason is not None else "")
-            + f"; last seen {_time(connection.get('last_seen_at'))}"
-        )
-    else:
-        telemetry = _optional(node.get("telemetry"), "telemetry").get("freshness")
-        if telemetry not in {None, "live"}:
-            notes.append(f"{name} telemetry is {_text(telemetry)}")
-        inventory = _optional(node.get("inventory"), "inventory").get("freshness")
-        if inventory not in {None, "fresh"}:
-            notes.append(f"{name} inventory is {_text(inventory)}")
-    for issue in _projection_issues(node.get("projection_issues")):
-        notes.append(f"{name}: {_text(issue)}")
-    warnings = node.get("warnings")
-    if not isinstance(warnings, list):
-        warnings = []
-    for warning in warnings:
-        if _is_update_notice(warning):
-            continue
-        if isinstance(warning, Mapping):
+    for node in nodes:
+        name = _text(node.get("display_name"))
+        connection = _object(node.get("connection"), "connection")
+        if connection.get("online_state") != "online":
+            reason = connection.get("offline_reason")
             notes.append(
-                f"{name}: {_text(warning.get('detail') or warning.get('code'))}"
-                + _recommendation(warning)
+                f"{name} is {_text(connection.get('online_state'))}"
+                + (f" ({_text(reason)})" if reason is not None else "")
+                + f"; last seen {_time(connection.get('last_seen_at'))}"
             )
         else:
-            notes.append(f"{name}: {_text(warning)}")
+            telemetry = _optional(node.get("telemetry"), "telemetry").get("freshness")
+            if telemetry not in {None, "live"}:
+                notes.append(f"{name} telemetry is {_text(telemetry)}")
+            inventory = _optional(node.get("inventory"), "inventory").get("freshness")
+            if inventory not in {None, "fresh"}:
+                notes.append(f"{name} inventory is {_text(inventory)}")
+        for issue in _projection_issues(node.get("projection_issues")):
+            notes.append(f"{name}: {_text(issue)}")
+        warnings = node.get("warnings")
+        if not isinstance(warnings, list):
+            warnings = []
+        for warning in warnings:
+            if _is_update_notice(warning):
+                continue
+            if isinstance(warning, Mapping):
+                notes.append(
+                    f"{name}: {_text(warning.get('detail') or warning.get('code'))}"
+                    + _recommendation(warning)
+                )
+            else:
+                notes.append(f"{name}: {_text(warning)}")
     return notes
 
 
-def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
-    """Collect what the owners report as not healthy, in their own terms."""
-    return [note for node in nodes for note in _node_attention(node)]
-
-
-def _fleet_status_line(nodes: Sequence[Mapping[str, object]]) -> str:
+def _fleet_status_line(payload: object) -> str:
     """The Fleet in one line, in the words the Controller web Fleet page uses."""
+    nodes = _records(_object(payload, "Fleet"), "nodes")
     online = [
         node
         for node in nodes
         if _object(node.get("connection"), "connection").get("online_state") == "online"
     ]
-    free = [
-        value
+    sample = [
+        _optional(
+            _optional(node.get("telemetry"), "fleet telemetry evidence").get("sample"),
+            "fleet telemetry sample",
+        ).get("memory_available_bytes")
         for node in online
-        if type(
-            value := _optional(
-                _optional(node.get("telemetry"), "telemetry").get("sample"),
-                "telemetry sample",
-            ).get("memory_available_bytes")
-        )
-        is int
     ]
+    free = [value for value in sample if type(value) is int]
     serving = len(
         {
             run.get("run_id")
             for node in nodes
             for run in _records(node, "loaded")
-            if _run_state_word(run) == "ready"
+            if _run_state_word(run.get("healthy"), run.get("run_state"))
+            == cli_states.RUNNING
         }
     )
-    attention = sum(1 for node in nodes if _node_attention(node))
+    attention = sum(1 for node in nodes if _fleet_attention([node]))
     return " · ".join(
         (
             f"{len(online)} of {len(nodes)} {'Spark' if len(nodes) == 1 else 'Sparks'} online",
             f"{_size(sum(free))} unified memory free"
             if free
             else "unified memory not reported",
-            f"{serving} {'model' if serving == 1 else 'models'} serving"
+            f"{serving} {'workload' if serving == 1 else 'workloads'} serving"
             if serving
-            else "no models serving",
+            else "no workloads serving",
             f"{attention} {'needs' if attention == 1 else 'need'} attention"
             if attention
             else "nothing needs attention",
@@ -564,7 +559,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
         print("No Sparks are enrolled.")
         print("Next: vonkctl fleet enroll <name> --output <file>")
         return
-    print(_fleet_status_line(nodes))
+    print(_fleet_status_line(payload))
     print()
     labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "SERVING"]
     if wide:

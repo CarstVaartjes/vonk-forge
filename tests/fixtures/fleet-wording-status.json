@@ -69,7 +69,7 @@
           "loaded": []
         }
       ],
-      "expected": "2 of 3 Sparks online · 96.0 GiB unified memory free · 1 model serving · 1 needs attention"
+      "expected": "2 of 3 Sparks online · 96.0 GiB unified memory free · 1 workload serving · 1 needs attention"
     },
     {
       "name": "a single Spark that reports nothing",
@@ -88,7 +88,7 @@
           "telemetry": null
         }
       ],
-      "expected": "1 of 1 Spark online · unified memory not reported · no models serving · nothing needs attention"
+      "expected": "1 of 1 Spark online · unified memory not reported · no workloads serving · nothing needs attention"
     },
     {
       "name": "two models and two Sparks needing attention",
@@ -150,7 +150,7 @@
           "loaded": []
         }
       ],
-      "expected": "1 of 3 Sparks online · 8.0 GiB unified memory free · 2 models serving · 2 need attention"
+      "expected": "1 of 3 Sparks online · 8.0 GiB unified memory free · 2 workloads serving · 2 need attention"
     },
     {
       "name": "a run with unknown health is not counted as serving",
@@ -181,7 +181,7 @@
           }
         }
       ],
-      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no models serving · nothing needs attention"
+      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no workloads serving · nothing needs attention"
     }
   ]
 }
