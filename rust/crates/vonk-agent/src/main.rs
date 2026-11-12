@@ -432,6 +432,8 @@ async fn run_control_lane(
     beside.alongside(lane).await
 }
 
+// The lane's own handles, each shared with exactly one other lane.
+#[allow(clippy::too_many_arguments)]
 async fn claim_lane<'a>(
     config: &AgentConfig,
     mut runtime_identity: AgentRuntimeIdentity,
