@@ -73,6 +73,7 @@ flowchart LR
 - [PostgreSQL authority administration](runbooks/authority-administration.md)
 - [Node onboarding and health](runbooks/node-onboarding.md)
 - [Agent installation and enrollment](operations/install-vonk-agent.md)
+- [Remove Vonk Forge](operations/uninstall.md)
 - [Telemetry and troubleshooting](runbooks/control-plane-telemetry.md)
 - [Recipe and model switching](runbooks/model-switching.md)
 - [Model and recipe identities](operators/model-catalog.md)

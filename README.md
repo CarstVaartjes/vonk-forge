@@ -113,6 +113,8 @@ curl -fsSL https://install.vonkforge.ai/nas | sudo sh
 `.env` and secrets remain private to their owner. For a root-owned project, run
 `docker compose` with `sudo` on the host.
 
+To remove the Controller or a Spark, follow [Remove Vonk Forge](docs/operations/uninstall.md).
+
 The `/nas` path in the public installer URL is historical; the generated
 project is not NAS-specific. Keep it on this laptop for a lab, or move the
 complete directory to a NAS or local server for an always-on controller.

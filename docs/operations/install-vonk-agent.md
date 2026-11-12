@@ -101,3 +101,5 @@ URL is `/dev/spark` for a development NAS and `/spark` for a stable NAS.
 If the command fails, read its final error and retry after correcting that
 condition. A readiness failure preserves pairing; retry without `--enroll`.
 Release verification failures stop before privilege escalation.
+
+To remove the agent from a Spark, follow [Remove Vonk Forge](uninstall.md).

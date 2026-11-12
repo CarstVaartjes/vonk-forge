@@ -362,6 +362,11 @@ its host transport; do not request another approval merely for that transport
 when the operation is already authorized. This exception does not permit SSH
 Spark rollouts or bypass a Controller authorization decision.
 
+Removal is documented in [docs/operations/uninstall.md](docs/operations/uninstall.md),
+derived from what the installers create. A change that makes an installer, the
+Compose bundle or the agent package create a new file, volume, unit, host entry
+or account updates that page in the same PR.
+
 ## Profile cache contract
 
 The local NAS/Controller cache is the authoritative availability surface for
