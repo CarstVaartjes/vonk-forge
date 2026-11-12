@@ -569,7 +569,8 @@ async fn claim_lane<'a>(
         // Between lane claims only a build beside the lane can be live; its
         // stores stay protected by its units, base-image locks and age.
         if Instant::now() >= retention_due {
-            retention_due = collect_stores(config.data_dir.clone(), inventory.verdict.fresh()).await;
+            retention_due =
+                collect_stores(config.data_dir.clone(), inventory.verdict.fresh()).await;
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
