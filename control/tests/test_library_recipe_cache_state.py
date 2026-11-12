@@ -570,3 +570,54 @@ def test_a_sibling_recipe_follows_the_shared_set_while_it_downloads(
         )
         assert "model-not-cached" in resolution.blockers, slug
 
+
+def test_each_recipe_set_is_resolved_once_across_library_reads(
+    cache,  # noqa: F811
+    monkeypatch,
+):
+    from vonk_control.library_projection import local_state
+
+    _, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    monkeypatch.setattr(local_state, "_RESOLVED_RECIPE_SETS", {})
+    calls: list[str] = []
+    resolve = local_state.resolve_recipe_set
+    monkeypatch.setattr(
+        local_state,
+        "resolve_recipe_set",
+        lambda session, revision_id: (
+            calls.append(revision_id) or resolve(session, revision_id)
+        ),
+    )
+    projection = _projection(sessions)
+    _recipes(projection)
+    _recipes(projection)
+    assert sorted(calls) == sorted(
+        [world.recipe_revision_id, world.sibling_revision_id]
+    )
+
+
+def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
+    cache,  # noqa: F811
+    monkeypatch,
+):
+    from vonk_control.library_projection import local_state
+    from vonk_control.model_cache.errors import ModelCacheError
+
+    service, sessions = cache
+    world = _World(sessions, count=1)
+    world.add_sibling()
+    _put_image(service, True)
+    with sessions.begin() as session:
+        session.add(world.build(revision_id=world.sibling_revision_id))
+    monkeypatch.setattr(local_state, "_RESOLVED_RECIPE_SETS", {})
+
+    def refuse(session, revision_id):
+        raise ModelCacheError("set is not resolvable")
+
+    monkeypatch.setattr(local_state, "resolve_recipe_set", refuse)
+    recipes = _recipes(
+        _projection(sessions, archive=service._runtime_archive_available)
+    )
+    assert recipes["vonk-forge/resolver-dual"].local.controller == "unknown"

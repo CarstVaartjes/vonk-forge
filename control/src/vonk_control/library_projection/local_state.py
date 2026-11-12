@@ -101,6 +101,12 @@ def _assessed(
     ]
 
 
+# A recipe's artifact set digest is a pure function of its content, so a
+# resolved one is remembered for the process; a failure is never remembered.
+_RESOLVED_RECIPE_SETS: dict[str, str] = {}
+_RESOLVED_RECIPE_SETS_BOUND = 4096
+
+
 def _local_state_snapshot(
     self: LibraryProjection,
     digests: Sequence[str],
@@ -274,15 +280,27 @@ def _database_local_state(
         # admission resolves it; the recipe that cached the set first is
         # provenance on the row, never the key a reader joins on.
         recipe_sets: dict[str, str] = {}
+        unresolved: set[str] = set()
         for revision_id, recipe_digest, _ in revisions:
             if recipe_digest in recipe_sets:
                 continue
+            known = _RESOLVED_RECIPE_SETS.get(recipe_digest)
+            if known is not None:
+                recipe_sets[recipe_digest] = known
+                continue
             try:
-                recipe_sets[recipe_digest] = resolve_recipe_set(
-                    session, revision_id
-                ).digest
+                resolved = resolve_recipe_set(session, revision_id).digest
+            except SecurityRefusalError:
+                raise
             except (ModelCacheError, TypeError, ValueError):
-                continue  # no own set is resolvable: no cache fact is claimed
+                _note_unreadable(
+                    "recipe artifact set", recipe_digest, "set is not resolvable"
+                )
+                unresolved.add(recipe_digest)
+                continue
+            if len(_RESOLVED_RECIPE_SETS) >= _RESOLVED_RECIPE_SETS_BOUND:
+                _RESOLVED_RECIPE_SETS.pop(next(iter(_RESOLVED_RECIPE_SETS)))
+            _RESOLVED_RECIPE_SETS[recipe_digest] = recipe_sets[recipe_digest] = resolved
         # The shared manifest reader decides exact content membership, so damage
         # in one manifest cannot discard unrelated local state.
         cache_sets = [
@@ -452,14 +470,6 @@ def _database_local_state(
             self._merge_local(cache_facts, recipe_digest, controller=controller)
         for digest in reference_digests[set_id] & set(digests):
             self._merge_local(cache_facts, digest, controller=controller)
-    for recipe_digest in recipe_sets:
-        # The recipe's own set resolves, so an absent or unrequested row says
-        # it is not cached; only a recipe with no resolvable set has no cache
-        # fact, and then what was built or run is the whole evidence.
-        cache_facts.setdefault(
-            recipe_digest,
-            LibraryLocalState(controller=LibraryCacheState.NOT_CACHED.value),
-        )
     cache_sets_by_id = {row[0]: row for row in cache_sets}
     for cache_operation in cache_operations:
         operation_id = cache_operation.id
@@ -617,6 +627,17 @@ def _database_local_state(
                 self._merge_local(
                     asset_facts, digest, controller=LibraryCacheState.CACHED.value
                 )
+    for recipe_digest in asset_facts.keys() & (recipe_sets.keys() | unresolved):
+        # A recipe with built or running assets but no cache fact: its own set
+        # resolves and has no row (not cached), or does not resolve (unknown).
+        cache_facts.setdefault(
+            recipe_digest,
+            LibraryLocalState(
+                controller=AssetAvailability.UNKNOWN.value
+                if recipe_digest in unresolved
+                else LibraryCacheState.NOT_CACHED.value
+            ),
+        )
     result = _fold_local_facts(
         cache_facts, asset_facts, recipe_digests=set(revision_digests.values())
     )
