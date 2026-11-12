@@ -9,7 +9,7 @@ from typing import cast as _typing_cast
 
 from pydantic import ValidationError
 from sqlalchemy.orm import Session, object_session
-from vonk_agent_protocol import LifecycleState, ProfileReasonCode, SupersedeCode
+from vonk_agent_protocol import ProfileReasonCode, SupersedeCode
 from vonk_forge_contracts import RecipeDefinition
 
 from ..fleet_profile_contract import (
@@ -31,10 +31,7 @@ from .assessment_support import (
     _profile_preview_is_waitable,
     _progress_with_blockers,
 )
-from .contracts import (
-    FleetProfileConflict,
-    FleetProfileReviewStale,
-)
+from .contracts import FleetProfileConflict
 from .dependencies import _LOGGER
 from .persistence import (
     _owns_pending_admission,
@@ -47,7 +44,6 @@ from .projection_support import (
     _aware,
     _digest,
     _profile_document,
-    _validate_remaining_effects,
 )
 
 if TYPE_CHECKING:
@@ -199,6 +195,11 @@ class FleetProfileService:
         Returns the admissible plan, now bound to the accepted intent, or
         ``None`` while conditions still block it (the reasons are recorded and
         the preparation it needs is requested again).
+
+        The load has issued nothing, so it plans from the fleet as it is now:
+        a workload that appeared while it waited is stopped like any other the
+        profile replaces. Only a newer request ends it (its own supersession
+        and the admission fence), never a changed fleet.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
 
@@ -247,16 +248,6 @@ class FleetProfileService:
                 str(error) or "Profile admission evidence is unavailable",
                 blockers=_preview_blockers(blocked),
                 wait_for_space=True,
-            )
-            return None
-        try:
-            _validate_remaining_effects(blocked.effects, fresh.effects)
-        except FleetProfileReviewStale as error:
-            self._finish_pending_admission(
-                application_id,
-                state=LifecycleState.SUPERSEDED,
-                reason=str(error),
-                code=error.supersede_code,
             )
             return None
         if not fresh.allowed:
@@ -367,8 +358,6 @@ class FleetProfileService:
                     accepted_profile_definition=plan.profile_definition,
                     excluded_application_id=application_id,
                 )
-                # Recipe following cannot acquire unreviewed destructive targets.
-                _validate_remaining_effects(plan.effects, fresh.effects)
         except (FleetProfileConflict, ValidationError, KeyError):
             # The ordinary admission path reports whatever is unresumable.
             return False
