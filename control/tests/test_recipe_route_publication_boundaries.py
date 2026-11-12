@@ -47,6 +47,7 @@ def _service(
     root: Path,
     clock: Callable[[], datetime],
     acknowledge: Callable[[ActivationMarker, str], None] | None = None,
+    prepare_key_routes: Callable[[frozenset[str]], None] | None = None,
 ) -> RecipeRouteService:
     return RecipeRouteService(
         base.sessions,
@@ -56,6 +57,7 @@ def _service(
         management_policy=ManagementAddressPolicy.parse("10.0.0.0/24"),
         clock=clock,
         maximum_age_seconds=120,
+        prepare_key_routes=prepare_key_routes,
     )
 
 
@@ -730,9 +732,12 @@ def test_withdrawals_wait_for_drained_and_publications_for_ready(tmp_path):
     required: list[str] = []
     prepared: list[frozenset[str]] = []
     service = _service(
-        base, root, lambda: NOW, lambda _marker, phase: required.append(phase)
+        base,
+        root,
+        lambda: NOW,
+        lambda _marker, phase: required.append(phase),
+        prepared.append,
     )
-    service._prepare_key_routes = prepared.append
     service.publish_run(first)
     service.publish_run(second)
     service.withdraw_run(second)

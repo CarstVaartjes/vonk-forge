@@ -138,8 +138,10 @@ installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
 The LiteLLM supervisor script comes from the API image, but the route
 activation contract it imports is baked into the LiteLLM image. Each may run
-with the other's previous release, so a supervisor change must still work
-against the previous contract module.
+with the other's previous release. Transitions follow deploy order, with no
+compatibility code: a new supervisor script that meets an older contract module
+raises after the old child's exit is confirmed. The supervisor is PID 1, so the
+container restarts (`restart: unless-stopped`) and writes `ready`.
 On a route change the supervisor restarts LiteLLM. It writes a `drained`
 acknowledgement to the `litellm-supervisor-state` volume once the old child has
 exited, and a `ready` acknowledgement once the new child is healthy. A Controller

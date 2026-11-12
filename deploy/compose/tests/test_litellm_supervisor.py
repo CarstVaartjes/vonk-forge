@@ -856,19 +856,27 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
     config = tmp_path / "config.json"
     config.write_text('{"model_list":[]}\n')
     module.ACK = tmp_path / "ack.json"
+    marker = {"litellm_sha256": "d" * 64, "state": "published"}
     old = (
-        None if bootstrap else module.ActiveRequest(config, {"generation": 1}, "a" * 64)
+        None
+        if bootstrap
+        else module.ActiveRequest(config, {**marker, "generation": 1}, "a" * 64)
     )
     generation = 1 if bootstrap else 2
-    new = module.ActiveRequest(config, {"generation": generation}, "b" * 64)
+    new = module.ActiveRequest(config, {**marker, "generation": generation}, "b" * 64)
     current = [old]
     elapsed = [0.0]
     children = []
     spawns = []
     acknowledgements = []
+    drained = []
 
     def spawn(*_args, **_kwargs):
         assert not children or children[-1].returncode == 0
+        if children:
+            # The drained ack is on disk before the next child starts.
+            document = json.loads(module.ACK.read_bytes())
+            drained.append((document["generation"], document["phase"], len(children)))
         child = types.SimpleNamespace(pid=100 + len(children), returncode=None)
         child.poll = lambda: child.returncode
 
@@ -892,16 +900,10 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
         acknowledgements.append((request.marker["generation"], elapsed[0]))
         child.returncode = 23
 
-    def write_drained_ack(request, **_kwargs):
-        assert children[0].returncode == 0
-        drained.append((request.marker["generation"], len(children)))
-
-    drained = []
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: current[0])
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: config)
     monkeypatch.setattr(module, "_healthy", healthy)
     monkeypatch.setattr(module, "_write_ack", write_ack)
-    monkeypatch.setattr(module, "_write_drained_ack", write_drained_ack)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
@@ -914,5 +916,5 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
     assert spawns == [0, 94]
     # The superseded child's exit is confirmed before the new generation is
     # acknowledged drained, and that happens before its own child starts.
-    assert drained == [(generation, 1)]
+    assert drained == [(generation, "drained", 1)]
     assert acknowledgements == [(generation, 184)]
