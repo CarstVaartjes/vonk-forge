@@ -22,8 +22,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A member pull request leaves this proof to its integration pull request.
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   native-arm64-helper-process:
     name: Exercise signed helper pull and start on ARM64
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:

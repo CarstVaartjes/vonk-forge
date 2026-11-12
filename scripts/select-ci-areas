@@ -136,12 +136,12 @@ def carry_selected(paths: Iterable[str], event: str) -> bool:
     return False
 
 
-# Candidate acceptance on a pull request: the `release-acceptance` label (an
-# integration PR; ci.yml folds label and integration/* branches into `lane`) or a change to what the upgrade is made of
-# (CARRY_INPUTS) or to the acceptance programs themselves. Controller, web,
-# tooling, test and documentation PRs fold into an integration PR or merge to
-# main, where Release accepts the merge: its Spark and refresh steps run when
-# the tested PR holds no candidate evidence (release-acceptance-core.yml).
+# Candidate acceptance by paths: a change to what the upgrade is made of
+# (CARRY_INPUTS) or to the acceptance programs themselves. ci.yml accepts on a
+# full pull request (an integration PR, see `full_suites`) regardless of paths,
+# never on a member pull request, and by these paths on a merge-queue commit.
+# Release accepts every merge: its Spark and refresh steps run when the tested
+# PR holds no candidate evidence (release-acceptance-core.yml).
 # The canary fixture feeds the Spark lane and the carry, so it accepts too.
 LANE_INPUTS = ("tests/acceptance/", "tests/fixtures/canonical-synthetic-canary/")
 
@@ -207,26 +207,92 @@ def select(paths: Iterable[str], event: str) -> dict[str, bool]:
     return selected
 
 
+# Every change lands through an integration pull request (head branch
+# integration/*, labelled release-acceptance), which runs every suite and proof
+# once for its whole batch. A member pull request runs only the fast, decisive
+# checks. This is the one owner of that rule: ci.yml and the separate proof
+# workflows (through ci-scope.yml) read its `full` output. Anything that is not
+# positively a member pull request (integration PR, merge queue, main's release,
+# a dispatch, an unknown payload) runs everything.
+INTEGRATION_HEAD = "integration/"
+ACCEPTANCE_LABEL = "release-acceptance"
+
+
+def full_suites(event: str, payload: dict | None) -> bool:
+    """Whether this run carries every suite rather than the member tier."""
+    pull = (payload or {}).get("pull_request")
+    if event != "pull_request" or not isinstance(pull, dict):
+        return True
+    labels = {label.get("name") for label in pull.get("labels") or ()}
+    head_repository = (pull["head"].get("repo") or {}).get("full_name")
+    same_repository = head_repository == pull["base"]["repo"]["full_name"]
+    return ACCEPTANCE_LABEL in labels or (
+        same_repository and pull["head"]["ref"].startswith(INTEGRATION_HEAD)
+    )
+
+
+# A member pull request builds and tests Rust only when it changes the Rust
+# workspace or the wire contract the Rust peers are generated from. Controller
+# contracts also feed the generated wire (build.rs); their Rust effect is
+# proven by the integration pull request, as is everything else.
+RUST_INPUTS = (
+    "rust/",
+    ".cargo/",
+    "agent_protocol/",
+    "scripts/export-agent-wire-schema",
+    "scripts/generate-agent-wire",
+)
+RUST_FILES = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
+
+
+def rust_sources_changed(paths: Iterable[str]) -> bool:
+    return any(
+        _matches(path.strip().removeprefix("./"), RUST_INPUTS, RUST_FILES)
+        for path in paths
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--event", required=True)
+    parser.add_argument(
+        "--event-payload",
+        type=Path,
+        help="the GitHub event payload (GITHUB_EVENT_PATH); decides `full`",
+    )
     parser.add_argument("--github-output", action="store_true")
     arguments = parser.parse_args()
     changed = sys.stdin.read().splitlines()
+    payload = (
+        json.loads(arguments.event_payload.read_text())
+        if arguments.event_payload
+        else None
+    )
     selected = select(changed, arguments.event)
     lane = lane_selected(changed, arguments.event)
     carry = carry_selected(changed, arguments.event)
+    full = full_suites(arguments.event, payload)
+    rust_sources = rust_sources_changed(changed)
     if arguments.github_output:
         for area in AREAS:
             print(f"{area}={str(selected[area]).lower()}")
         print("guards=true")
         print(f"lane={str(lane).lower()}")
         print(f"upgrade_carry={str(carry).lower()}")
+        print(f"full={str(full).lower()}")
+        print(f"rust_sources={str(rust_sources).lower()}")
         print(f"any={str(any(selected.values())).lower()}")
     else:
         print(
             json.dumps(
-                {**selected, "guards": True, "lane": lane, "upgrade_carry": carry},
+                {
+                    **selected,
+                    "guards": True,
+                    "lane": lane,
+                    "upgrade_carry": carry,
+                    "full": full,
+                    "rust_sources": rust_sources,
+                },
                 sort_keys=True,
                 separators=(",", ":"),
             )

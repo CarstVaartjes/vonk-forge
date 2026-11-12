@@ -29,12 +29,16 @@ contract checks. See [principle guards](docs/principle-guards.md).
 
 ## CI and pre-merge release acceptance
 
-Every PR runs the complete sharded Controller and repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Integration PRs (`integration/*`) run the complete sharded Controller and
+repository suites, repository guards, web tests, Rust tests/lint, generated
+clients, Python lint/types and the proof workflows. A member PR runs the fast
+tier only: guards, lint/types, generated clients, the tests for its changed
+paths, and Rust only for Rust or wire changes (`full` in
+`scripts/select-ci-areas`).
 Merge queues also accept their combined candidate before admission.
 Integration selection uses the conservative dependency closure documented in
 `scripts/select-ci-areas`; unfamiliar inputs select every integration. The
-Controller suites include their real PostgreSQL tests on every PR.
+Controller suites include their real PostgreSQL tests on every full run.
 
 Integration PRs carry the `release-acceptance` label. CI adds it to
 same-repository `integration/*` PRs (the branch alone selects acceptance) and requires acceptance of that exact PR merge

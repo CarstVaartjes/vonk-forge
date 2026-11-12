@@ -16,12 +16,20 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-Every PR runs complete sharded Controller and repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
-Integration jobs follow a conservative transitive dependency closure in
+Every change lands through an integration PR (head branch `integration/*`).
+A member PR (any other pull request) runs only the fast tier: repository
+guards, Python lint/types, supply-chain evidence, generated clients, the test
+files that directly exercise its changed paths (`scripts/select-changed-tests`)
+and, when it changes the Rust workspace or the wire protocol, Rust tests/lint.
+Its integration PR, the merge queue and main's Release run the complete
+sharded Controller and repository suites, web tests, Rust tests/lint, every
+integration and the separate pull-request proof workflows. `full` from
+`scripts/select-ci-areas` is the one owner of that rule; the proof workflows
+read it through `ci-scope.yml`, and a member run leaves no source receipt for
+Release to reuse. Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,
-wire and Rust platform checks run on every PR because their dependencies span
-these boundaries. Image/package builds may be selective.
+wire and Rust platform checks run on every full run because their dependencies
+span these boundaries. Image/package builds may be selective.
 
 Ordinary pytest files in the reviewed core test directories run the core suites
 without rebuilding unchanged images, packages or release candidates. Shared
@@ -33,10 +41,10 @@ the complete Controller suite, without a second standalone job.
 Integration PRs must accept their own candidate before merge. CI applies the
 `release-acceptance` label to same-repository `integration/*` PRs (the branch
 alone selects acceptance); `CI gate` requires their exact
-candidate's acceptance. A PR without the label runs that acceptance only when it
-changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance programs;
-Controller, web, tooling, test and documentation PRs fold into an integration
-PR or are accepted by main's Release, and their `CI gate` does not wait for it. A component PR merged straight to
+candidate's acceptance, with the upgrade carry. A member PR runs no acceptance:
+it folds into an integration PR. A merge-queue commit accepts its candidate
+when it changes upgrade-sensitive paths (`CARRY_INPUTS`) or the acceptance
+programs. A component PR merged straight to
 main leaves no candidate evidence, so Release runs the Spark acceptance (and the
 recipe refresh only if the change can alter the upgrade) itself.
 See [the contributor guide](../contributor.md#ci-and-pre-merge-release-acceptance)
@@ -53,13 +61,12 @@ its name expression unevaluated, which would break a required check such as
 
 The acceptance's upgrade carry (a workload keeps serving while the Controller
 is redeployed and the agent upgraded to the candidate) runs on main's release
-for every merge. A pull request carries its own candidate only when it changes
-what the upgrade is made of: the agent, its packaging and installers, the
-deployment, the Controller-to-agent protocol, and the scripts, actions and
-workflows that assemble and accept a candidate (`CARRY_INPUTS` in
-`scripts/select-ci-areas`). Other changes get no acceptance on the pull request
-and the carry on main; the `release-acceptance` label asks for both on any PR.
-The pull request's acceptance summary says when the carry was left to main.
+for every merge, and on every integration PR. Release refreshes recipes only
+for a change to what the upgrade is made of: the agent, its packaging and
+installers, the deployment, the Controller-to-agent protocol, and the scripts,
+actions and workflows that assemble and accept a candidate (`CARRY_INPUTS` in
+`scripts/select-ci-areas`). The `release-acceptance` label makes any PR a full
+run with both.
 
 The carry waits on behaviour, never on a fixed timer. After the baseline
 serves, after the Controller recreate and after the agent upgrade, each phase
@@ -610,7 +617,7 @@ upgrade baseline. PR acceptance cannot substitute for production acceptance.
 `Repository guards` runs the fast cross-area checks on every CI invocation,
 including documentation-only and control-only PRs, merge queues, and releases
 that need fresh CI. `CI gate` requires its success independently
-of `scripts/select-ci-areas`. The sharded repository suite also always runs and excludes the same files/nodes
+of `scripts/select-ci-areas`. The sharded repository suite runs on every full run and excludes the same files/nodes
 to avoid running guards twice.
 
 `tests/repository_guards.py` owns the guard selection and the reviewed scope of

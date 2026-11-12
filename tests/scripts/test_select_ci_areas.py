@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import runpy
 import subprocess
 import sys
@@ -218,7 +219,8 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
     selected = {
         "rust": "true", "repository": "true", "control": "true", "web": "true",
         "generated": "true", "compose": "true", "nas-install": "true",
-        "agent-package": "true", "lane": "false",
+        "agent-package": "true", "lane": "false", "full": "true",
+        "rust-sources": "false",
     }  # fmt: skip
     results = {
         "lint": "success", "supply-chain": "success", "repository-guards": "success",
@@ -227,6 +229,7 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "generated": "success", "compose": "success", "nas-install": "success",
         "agent-package": "success", "control-image-build": "success",
         "controller-spark-wire": "success", "lane-proof": "skipped",
+        "targeted-tests": "skipped",
     }  # fmt: skip
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
@@ -470,3 +473,64 @@ def test_selector_names_the_carry_for_the_lane_proof() -> None:
     lines = result.stdout.splitlines()
     assert "lane=false" in lines
     assert "upgrade_carry=false" in lines
+
+
+def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
+    base = {"repo": {"full_name": "owner/repo"}}
+    head = {"ref": ref, "repo": {"full_name": "fork/repo" if fork else "owner/repo"}}
+    names = [{"name": name} for name in labels]
+    return {"pull_request": {"base": base, "head": head, "labels": names}}
+
+
+@pytest.mark.parametrize(
+    ("event", "payload", "full"),
+    [
+        ("pull_request", _pull("wl-awaited-children"), False),
+        ("pull_request", _pull("integration/2026-11-12"), True),
+        ("pull_request", _pull("integration/x", fork=True), False),
+        ("pull_request", _pull("member", labels=["release-acceptance"]), True),
+        ("pull_request", None, True),
+        ("merge_group", None, True),
+        ("workflow_call", _pull("member"), True),
+    ],
+)
+def test_only_a_member_pull_request_skips_the_full_suites(event, payload, full) -> None:
+    assert _module().full_suites(event, payload) is full
+
+
+@pytest.mark.parametrize(
+    ("path", "selected"),
+    [
+        ("rust/crates/vonk-agent/src/lib.rs", True),
+        ("Cargo.lock", True),
+        ("agent_protocol/src/vonk_agent_protocol/x.py", True),
+        ("control/src/vonk_control/api.py", False),
+        ("docs/rust.md", False),
+    ],
+)
+def test_member_rust_build_follows_rust_and_wire_inputs(path, selected) -> None:
+    assert _module().rust_sources_changed([path]) is selected
+
+
+def test_selector_reads_the_scope_from_the_event_payload(tmp_path) -> None:
+    payload = tmp_path / "event.json"
+    payload.write_text(json.dumps(_pull("member-branch")))
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/select-ci-areas"),
+            "--event",
+            "pull_request",
+            "--event-payload",
+            str(payload),
+            "--github-output",
+        ],
+        input="rust/crates/vonk-agent/src/lib.rs\n",
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    lines = result.stdout.splitlines()
+    assert "full=false" in lines
+    assert "rust_sources=true" in lines

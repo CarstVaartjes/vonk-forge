@@ -18,7 +18,7 @@ AREAS = (
     "lane",
 )
 AREA_JOBS = {
-    "rust": ("rust-quality", "rust-tests", "rust-platform"),
+    "rust": ("rust-platform",),
     "repository": ("repository",),
     "control": ("control",),
     "web": ("web",),
@@ -30,6 +30,9 @@ AREA_JOBS = {
     # green lane run on that head.
     "lane": ("lane-proof",),
 }
+# Areas whose jobs also run on a member pull request; every other area job runs
+# only when the selector chose the full suites (`full`).
+MEMBER_AREAS = frozenset({"generated"})
 
 
 def _pairs(values: list[str], label: str) -> dict[str, str]:
@@ -54,6 +57,23 @@ def verify(
         if results.get(job) != "success":
             errors.append(f"{job} result is {results.get(job)!r}, expected 'success'")
 
+    for flag in ("full", "rust-sources"):
+        if selected.get(flag) not in {"true", "false"}:
+            errors.append(
+                f"{flag} selection is {selected.get(flag)!r}, expected 'true' or 'false'"
+            )
+    full = selected.get("full") == "true"
+
+    def expect(job: str, run: bool) -> None:
+        expected = "success" if run else "skipped"
+        if results.get(job) != expected:
+            errors.append(
+                f"{job} result is {results.get(job)!r}, expected {expected!r}"
+            )
+
+    def chosen(area: str) -> bool:
+        return selected.get(area) == "true" and (full or area in MEMBER_AREAS)
+
     for area in AREAS:
         selection = selected.get(area)
         if selection not in {"true", "false"}:
@@ -61,31 +81,16 @@ def verify(
                 f"{area} selection is {selection!r}, expected 'true' or 'false'"
             )
         else:
-            expected = "success" if selection == "true" else "skipped"
             for job in AREA_JOBS[area]:
-                result = results.get(job)
-                if result != expected:
-                    errors.append(f"{job} result is {result!r}, expected {expected!r}")
-    image_expected = (
-        "success"
-        if selected.get("control") == "true" and selected.get("nas-install") == "true"
-        else "skipped"
-    )
-    if results.get("control-image-build") != image_expected:
-        errors.append(
-            f"control-image-build result is {results.get('control-image-build')!r}, "
-            f"expected {image_expected!r}"
-        )
-    wire_expected = (
-        "success"
-        if selected.get("rust") == "true" or selected.get("control") == "true"
-        else "skipped"
-    )
-    if results.get("controller-spark-wire") != wire_expected:
-        errors.append(
-            f"controller-spark-wire result is {results.get('controller-spark-wire')!r}, "
-            f"expected {wire_expected!r}"
-        )
+                expect(job, chosen(area))
+    # A member pull request builds Rust only for Rust inputs, and runs the
+    # tests that exercise its changed paths instead of the complete suites.
+    rust_build = chosen("rust") or selected.get("rust-sources") == "true"
+    expect("rust-quality", rust_build)
+    expect("rust-tests", rust_build)
+    expect("targeted-tests", not full)
+    expect("control-image-build", chosen("control") and chosen("nas-install"))
+    expect("controller-spark-wire", chosen("rust") or chosen("control"))
     return errors
 
 

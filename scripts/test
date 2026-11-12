@@ -8,7 +8,7 @@ cd "$root"
 
 usage() {
     cat <<'USAGE'
-Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [-- PYTEST_ARGS...]
+Usage: scripts/test SUITE [--markers EXPR] [--shard I/N] [--durations FILE] [--only FILE] [-- PYTEST_ARGS...]
 
 SUITE is one of:
   guards      fast cross-area checks in tests/repository_guards.py
@@ -27,6 +27,9 @@ SUITE is one of:
                   balanced by the measured per-file durations in --durations
                   when given (unmeasured files get the measured average)
 --durations FILE  schema-1 per-file durations (scripts/collect-pytest-file-durations)
+--only FILE       run only the suite's test files listed in FILE (one repository
+                  path per line, e.g. from scripts/select-changed-tests); none
+                  listed runs nothing
 
 Arguments after -- go to pytest unchanged (for example -x or --junitxml=...).
 USAGE
@@ -38,11 +41,13 @@ shift
 shard=
 durations=
 markers=
+only=
 while (($#)); do
     case "$1" in
         --markers) markers=${2:?--markers needs an expression}; shift 2 ;;
         --shard) shard=${2:?--shard needs I/N}; shift 2 ;;
         --durations) durations=${2:?--durations needs a file}; shift 2 ;;
+        --only) only=${2:?--only needs a file}; shift 2 ;;
         --) shift; break ;;
         -h|--help) usage; exit 0 ;;
         *) usage >&2; exit 2 ;;
@@ -109,10 +114,7 @@ if [[ "$suite" == repository || "$suite" == control || "$suite" == corpus ]]; th
     scripts/sync-cli-dependencies
 fi
 
-if [[ -n "$shard" ]]; then
-    [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
-    index=$((BASH_REMATCH[1] - 1))
-    total=${BASH_REMATCH[2]}
+if [[ -n "$shard$only" ]]; then
     # A shard is a set of whole test files, found the way pytest finds them
     # (test_*.py under the suite paths) minus the files the selection ignores.
     # Markers and --deselect apply when the shard runs, so no collection pass
@@ -130,14 +132,28 @@ if [[ -n "$shard" ]]; then
             # shellcheck disable=SC2053
             [[ "$file" == $pattern ]] && continue 2
         done
+        if [[ -n "$only" ]] && ! grep -qxF -- "$file" "$only"; then
+            continue
+        fi
         candidates+=("${file#"$prefix"}")
     done < <(find "${paths[@]}" -name 'test_*.py' -not -path '*/__pycache__/*' | LC_ALL=C sort)
-    selector=(scripts/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
-    if [[ -n "$durations" ]]; then
-        selector+=(--durations "$durations" --max-duration-age-hours 720)
+    if [[ -z "$shard" ]]; then
+        if ((${#candidates[@]} == 0)); then
+            echo "no $suite test files listed in $only"
+            exit 0
+        fi
+        paths=("${candidates[@]/#/$prefix}")
+    else
+        [[ "$shard" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "--shard must be I/N" >&2; exit 2; }
+        index=$((BASH_REMATCH[1] - 1))
+        total=${BASH_REMATCH[2]}
+        selector=(scripts/select-pytest-shard-files --index "$index" --total "$total" --prefix "$prefix")
+        if [[ -n "$durations" ]]; then
+            selector+=(--durations "$durations" --max-duration-age-hours 720)
+        fi
+        mapfile -t paths < <(printf '%s\n' "${candidates[@]}" | "${selector[@]}")
+        ((${#paths[@]} > 0)) || { echo "shard $shard selected no files" >&2; exit 1; }
     fi
-    mapfile -t paths < <(printf '%s\n' "${candidates[@]}" | "${selector[@]}")
-    ((${#paths[@]} > 0)) || { echo "shard $shard selected no files" >&2; exit 1; }
 fi
 
 run "${selection[@]}" "${parallel[@]}" "$@" "${paths[@]}"

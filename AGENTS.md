@@ -216,17 +216,19 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
-Every PR runs the complete sharded Controller/repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
+Integration PRs (`integration/*`), the merge queue and main's Release run the
+complete sharded Controller/repository suites, repository guards, web tests,
+Rust tests/lint, generated clients, Python lint/types and the proof workflows.
+A member PR runs the fast tier only: guards, lint/types, generated clients,
+the tests for its changed paths, and Rust only for Rust or wire changes
+(`full` in `scripts/select-ci-areas`).
 Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
-unknown inputs run the integrations. Controller PostgreSQL checks always run.
+unknown inputs run the integrations.
 Integration PRs require the `release-acceptance` label and exact-commit candidate
 acceptance before `CI gate` passes. CI labels same-repository `integration/*` PRs.
-Candidate acceptance runs on a PR only with the `release-acceptance` label or
-when the change can alter the upgrade (agent, packaging, installers, deployment,
-protocol, candidate scripts and workflows; the selector owns that boundary);
-other component PRs fold into an integration PR or are accepted by main's
-Release, which runs the upgrade carry for every merge.
+Candidate acceptance runs on a PR only when it is a full run (integration branch
+or the `release-acceptance` label); member PRs fold into an integration PR, and
+main's Release runs the upgrade carry for every merge.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
