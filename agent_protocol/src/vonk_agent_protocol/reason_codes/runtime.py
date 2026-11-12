@@ -61,7 +61,6 @@ class RuntimePreflightCode(WireEnum):
     REQUIRED = "runtime_preflight.required"
     REQUIREMENT_UNKNOWN = "runtime_preflight.requirement_unknown"
     REQUIREMENTS_CHANGED = "runtime_preflight.requirements_changed"
-    STALE = "runtime_preflight.stale"
     NODE_MISSING = "runtime_preflight.node_missing"
     CAPABILITY_FAILED = "runtime_preflight.capability_failed"
 

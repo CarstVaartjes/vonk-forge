@@ -15,18 +15,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, update
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import LifecycleState
 from vonk_control.artifact_reference_scan import runtime_image_reference_findings
 from vonk_control.models import (
     Base,
     FleetProfile,
+    Job,
     RecipeBuild,
 )
+from vonk_control.recipe_image_availability.contracts import OPERATION_KIND
 from vonk_control.revision_images import (
     revision_archives,
     revision_images,
-    revisions_running_archives,
 )
 
 from .test_recipe_image_availability import (
@@ -206,20 +208,105 @@ def test_another_recipes_builds_are_never_this_recipes_images(sessions) -> None:
         assert revision_archives(session, []) == frozenset()
 
 
-def test_the_revisions_that_run_an_archive_are_every_revision_of_its_recipes(
+def test_an_active_operation_retains_the_archive_a_pinned_sibling_built(
     sessions,
 ) -> None:
+    """The operation's revision pins the digest another recipe's build holds."""
+
+    with sessions.begin() as session:
+        built = _add_revision(session, "revision-built", _recipe("recipe-job.json"))
+        mine = _add_revision(
+            session, "revision-pinned", _recipe("recipe-source-build.json"), built=False
+        )
+        projected = dict(mine.projected)
+        projected["prebuilt_image"] = {
+            "reference": "ghcr.io/vonk/resolver@" + IMAGE_DIGEST,
+            "build_key": "9" * 64,
+        }
+        mine.projected = projected
+        assert built.document_id != mine.document_id
+        session.add(
+            Job(
+                id=str(uuid.uuid4()),
+                request_id=str(uuid.uuid4()),
+                kind=OPERATION_KIND,
+                state=LifecycleState.OBSERVING.value,
+                actor="operator",
+                authority_revision=mine.id,
+                targets=[],
+                payload_digest="0" * 64,
+                payload={},
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    with sessions() as session:
+        findings = runtime_image_reference_findings(session, [ARCHIVE_SHA, "9" * 64])
+    assert [item.owner_kind for item in findings[ARCHIVE_SHA]] == [
+        "recipe-image-availability-operation"
+    ]
+    assert findings["9" * 64] == ()
+
+
+def _operation(session: Session, revision_id: str) -> None:
+    session.add(
+        Job(
+            id=str(uuid.uuid4()),
+            request_id=str(uuid.uuid4()),
+            kind=OPERATION_KIND,
+            state=LifecycleState.OBSERVING.value,
+            actor="operator",
+            authority_revision=revision_id,
+            targets=[],
+            payload_digest="0" * 64,
+            payload={},
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+
+
+def test_an_active_operation_retains_a_failed_builds_stored_archive(sessions) -> None:
+    """A failed build keeps the verified archive the operation later adopts."""
+
     with sessions.begin() as session:
         lineage = _lineage(session)
-        mine = _add_revision(
-            session, "revision-other", _recipe("recipe-job.json"), built=False
-        ).id
-        _build(session, lineage.first, archive="1" * 64)
+        _build(session, lineage.first, archive=ARCHIVE_SHA, state="failed")
+        session.execute(update(RecipeBuild).values(oci_layout_sha256=ARCHIVE_SHA))
+        _operation(session, lineage.second)
     with sessions() as session:
-        running = revisions_running_archives(session, ["1" * 64, "2" * 64])
-        assert running["1" * 64] == {lineage.first, lineage.second}
-        assert mine not in running["1" * 64]
-        assert running["2" * 64] == frozenset()
+        findings = runtime_image_reference_findings(session, [ARCHIVE_SHA])
+    assert [item.owner_kind for item in findings[ARCHIVE_SHA]] == [
+        "recipe-image-availability-operation"
+    ]
+
+
+def test_the_scan_queries_once_however_many_operations_are_active(sessions) -> None:
+    def count(operations: int) -> int:
+        with sessions.begin() as session:
+            for index in range(operations):
+                revision = _add_revision(
+                    session,
+                    f"revision-count-{operations}-{index}",
+                    _successor(_recipe("recipe-job.json"), f"T{operations}-{index}"),
+                    built=False,
+                )
+                _operation(session, revision.id)
+        statements: list[str] = []
+        engine = sessions.kw["bind"]
+
+        def record(*args) -> None:
+            statements.append(args[2])
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            with sessions() as session:
+                runtime_image_reference_findings(session, [ARCHIVE_SHA])
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return len(statements)
+
+    assert count(1) == count(3)
 
 
 def test_a_saved_profile_keeps_the_image_its_recipes_successor_reuses(

@@ -2,7 +2,15 @@
 
 The Controller worker observes persisted waits independently of API requests,
 agent claims and heartbeats. `DueWaitBackstop` uses the existing owner tables;
-it stores no scheduler rows, leases or additional due timestamps.
+it stores no scheduler rows, leases or additional due timestamps. Two owners
+also have a live driver in the API process:
+
+- Catalog sync: the API's `run_automatic_sync` wakes at the same
+  `next_check`. The worker redrives it only at `next_check` plus one sync
+  interval, and not at all while a sync run's claim is live.
+- Route publication: the API's `_keep_recipe_routes` calls the same
+  `maintain` every 5 s. Its `next_action_at` is due only during failure
+  backoff, and the route publication owner serializes both drivers.
 
 The selection clock is each model's `next_action_at` attribute. Existing SQL
 aliases remain: RecipeRun uses `route_next_attempt_at`, RoutePublicationOwner
@@ -26,14 +34,15 @@ not exclude a row whose wait still owns unresolved cleanup.
 | RunSwitch | Shared per-row advancement, wait recording and ended-Start cancellation |
 | Route publication / recovery | Existing route maintenance and exact-run recovery/publication |
 | Storage relief / cleanup | Existing guarded removal and residue owners |
-| Catalog sync | Shared automatic observation and durable retry writer |
+| Catalog sync | Shared automatic observation and durable retry writer, at `next_check` + one interval and only while no sync run's claim is live |
 | Certificate / revocation | Existing remote revocation confirmation |
 
 A scan examines at most sixteen rows and yields between handlers when its
 one-second observation budget is spent. It rotates across logical owners and primary
 keys, including owners sharing the Job table, moving its cursor before invoking a handler. Busy or corrupt rows cannot
 hold the first batch indefinitely. Cursors and scan cadence are disposable;
-the owner's persisted clock remains the scheduling authority. The worker caps
+the owner's persisted clock remains the scheduling authority (catalog sync
+adds one interval of grace for its API driver, see above). The worker caps
 scan frequency at once per second, including under continuous ordinary work.
 
 Selection releases its SQL session before calling an owner. Owner advancement
