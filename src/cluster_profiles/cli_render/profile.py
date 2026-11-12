@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from .. import cli_states
 from .common import (
@@ -150,23 +150,20 @@ def _connection_examples(api_base: str, alias: str) -> None:
     print(CONNECTION_NOTE)
 
 
-def _serving_now(assignments: list[Mapping[str, object]]) -> None:
+def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
     """One line per published alias, exactly as the dashboard's "Serving now" block shows them.
 
-    The heading and lines are shared with the dashboard (tests/fixtures/serving-now.json).
+    Each row is (alias, recipe title, state). The heading and lines are shared with the
+    dashboard (tests/fixtures/serving-now.json).
     """
     published = [
-        item
-        for item in assignments
-        if item.get("state") == cli_states.PUBLISHED and item.get("alias")
+        row for row in assignments if row[2] == cli_states.PUBLISHED and row[0]
     ]
     if not published:
         return
     print("Serving now")
-    for item in published:
-        print(
-            f"{_text(item.get('alias'))} · {_text(item.get('recipe_title'))} · {_text(item.get('state'))}"
-        )
+    for alias, title, state in published:
+        print(f"{_text(alias)} · {_text(title)} · {_text(state)}")
 
 
 def _profile_endpoints(payload: Mapping[str, object]) -> None:
@@ -189,7 +186,12 @@ def _profile_endpoints(payload: Mapping[str, object]) -> None:
     if not assignments:
         print("The loaded application has no endpoint assignments.")
         return
-    _serving_now(assignments)
+    _serving_now(
+        [
+            (item.get("alias"), item.get("recipe_title"), item.get("state"))
+            for item in assignments
+        ]
+    )
     for assignment in assignments:
         print()
         _field("Assignment", assignment.get("recipe_title"))
