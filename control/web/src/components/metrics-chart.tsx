@@ -2,13 +2,32 @@ import { useEffect, useId, useState } from "react";
 import type { ControlApi, Metric, MetricRange, MetricsSeriesResponse } from "../api/types";
 import { safeErrorText } from "../lib/error-display";
 
-type Unit = "%" | "GiB" | "°C" | "requests/s";
+type Unit = "%" | "GiB" | "°C" | "requests/s" | "tok/s";
 const GIB = 1024 ** 3;
-const TILES: Array<{ metric: Metric; title: string; unit: Unit; scale: number }> = [
+const TILES: Array<{
+  metric: Metric;
+  title: string;
+  unit: Unit;
+  scale: number;
+  perModel?: boolean;
+}> = [
   { metric: "gpu_utilization", title: "GPU utilisation", unit: "%", scale: 1 },
   { metric: "host_memory_used", title: "Unified memory used", unit: "GiB", scale: GIB },
   { metric: "gpu_temperature", title: "GPU temperature", unit: "°C", scale: 1 },
-  { metric: "request_rate", title: "Requests per model", unit: "requests/s", scale: 1 },
+  {
+    metric: "request_rate",
+    title: "Requests per model",
+    unit: "requests/s",
+    scale: 1,
+    perModel: true,
+  },
+  {
+    metric: "output_token_rate",
+    title: "Generated tokens per model",
+    unit: "tok/s",
+    scale: 1,
+    perModel: true,
+  },
 ];
 const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
 
@@ -157,7 +176,7 @@ export function MetricsChart({
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
   const wanted = [
-    ...TILES.filter((tile) => !node || tile.metric !== "request_rate").map((tile) => tile.metric),
+    ...TILES.filter((tile) => !node || !tile.perModel).map((tile) => tile.metric),
     "certificate_expiry" as Metric,
   ];
   useEffect(() => {
@@ -210,7 +229,7 @@ export function MetricsChart({
         </button>
       </div>
       <div className="metric-tiles">
-        {TILES.filter((tile) => !node || tile.metric !== "request_rate").map((tile) => {
+        {TILES.filter((tile) => !node || !tile.perModel).map((tile) => {
           const state = tiles[tile.metric];
           return (
             <section key={tile.metric} className="metric-tile" aria-label={tile.title}>

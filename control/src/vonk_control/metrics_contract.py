@@ -12,8 +12,11 @@ Metric = Literal[
     "host_memory_used",
     "gpu_temperature",
     "request_rate",
+    "output_token_rate",
     "certificate_expiry",
 ]
+# Gateway metrics are per model, never per Spark.
+PER_MODEL_METRICS: frozenset[Metric] = frozenset({"request_rate", "output_token_rate"})
 MetricRange = Literal["1h", "6h", "24h", "7d"]
 
 
@@ -24,8 +27,8 @@ class MetricsSeriesRequest(StrictJSONModel):
 
     @model_validator(mode="after")
     def _scope(self) -> Self:
-        if self.node is not None and self.metric == "request_rate":
-            raise ValueError("Request rates are per model, not per Spark")
+        if self.node is not None and self.metric in PER_MODEL_METRICS:
+            raise ValueError("Gateway metrics are per model, not per Spark")
         return self
 
 

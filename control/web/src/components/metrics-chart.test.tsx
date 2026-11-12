@@ -61,6 +61,27 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
 
+test("shows generated tokens per model in tok/s and not per Spark", async () => {
+  // Break caught: the token tile is missing, in raw units, or asked for one Spark.
+  const metricsSeries = vi.fn(async (metric: string) =>
+    metric === "output_token_rate"
+      ? {
+          ...stable(42.5),
+          series: [{ ...stable(42.5).series[0], labels: { requested_model: "glm" } }],
+        }
+      : stable(10),
+  );
+  const { rerender } = render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} />);
+
+  const tile = await screen.findByRole("region", { name: "Generated tokens per model" });
+  await within(tile).findByText("glm · tok/s");
+  expect(tile).toHaveTextContent("42.5 tok/s");
+  rerender(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} node="spk_abc" />);
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "Generated tokens per model" })).toBeNull(),
+  );
+});
+
 test("an empty series says so and one failed tile leaves the others", async () => {
   // Break caught: a failed or empty read blanks every tile.
   const metricsSeries = vi.fn(async (metric: string) => {
