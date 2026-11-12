@@ -92,7 +92,10 @@ def test_kept_proof_workflows_supply_behavioral_inputs_only() -> None:
         scopes = [workflow]
         for job in workflow["jobs"].values():
             scopes.append(job)
-            scopes.extend(job["steps"])
+            # A job that calls a reusable workflow (`uses:`) has no steps; its
+            # `with` inputs are checked like env keys.
+            scopes.extend(job.get("steps", []))
+            scopes.append({"env": job.get("with", {})})
         for scope in scopes:
             assert not any(
                 _PROOF_ENVIRONMENT.fullmatch(name) for name in scope.get("env", {})
