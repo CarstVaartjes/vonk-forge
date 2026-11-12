@@ -598,6 +598,11 @@
       "module": "control/src/vonk_control/inventory_repository.py",
       "kind": "controller-contract",
       "reason": "Metadata-only node binding and read views of the canonical agent contract."
+    },
+    {
+      "module": "control/src/vonk_control/telemetry.py",
+      "kind": "controller-contract",
+      "reason": "Metadata-only node binding and read views of the canonical agent contract."
     }
   ],
   "allowed_duplicates": []

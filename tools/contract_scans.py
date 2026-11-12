@@ -151,6 +151,7 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
     """``(file, class) -> field signature`` for every Pydantic model class."""
 
     classes: dict[tuple[str, str], tuple[ast.ClassDef, set[str]]] = {}
+    aliases: dict[str, str] = {}
     for path in python_sources(root):
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -161,10 +162,23 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
             if isinstance(node, ast.ClassDef):
                 bases = {name for b in node.bases if (name := _base_name(b))}
                 classes[(relative, node.name)] = (node, bases)
+        # A module-level alias (``Name = _Name``) is another name for a model.
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name)
+            ):
+                aliases[node.targets[0].id] = node.value.id
     model_names = set(_MODEL_ROOTS)
     changed = True
     while changed:
         changed = False
+        for alias, target in aliases.items():
+            if alias not in model_names and target in model_names:
+                model_names.add(alias)
+                changed = True
         for (_file, name), (_node, bases) in classes.items():
             if name not in model_names and bases & model_names:
                 model_names.add(name)
@@ -192,9 +206,12 @@ def python_models(root: Path = ROOT) -> dict[tuple[str, str], tuple[str, ...]]:
 def python_registry_problems(
     root: Path = ROOT, registry: dict | None = None
 ) -> list[str]:
-    if registry is None:
-        registry = json.loads((root / "tools/python-model-registry.json").read_text())
-    modules = {entry["module"] for entry in registry["modules"]}
+    document: dict = (
+        json.loads((root / "tools/python-model-registry.json").read_text())
+        if registry is None
+        else registry
+    )
+    modules = {entry["module"] for entry in document["modules"]}
     problems: list[str] = []
     models = python_models(root)
     for file, name in models:
@@ -207,7 +224,7 @@ def python_registry_problems(
     for module in sorted(modules - present):
         problems.append(f"registry module {module} defines no model (stale entry)")
     allowed = {
-        tuple(sorted(item["models"])) for item in registry.get("allowed_duplicates", [])
+        tuple(sorted(item["models"])) for item in document.get("allowed_duplicates", [])
     }
     by_name: dict[str, list[str]] = defaultdict(list)
     by_fields: dict[tuple[str, ...], list[str]] = defaultdict(list)
