@@ -233,12 +233,13 @@ def _alternative_line(alternative: Mapping[str, object]) -> str:
     )
 
 
-def _recipe_links(payload: Mapping[str, object]) -> None:
+def _recipe_links(detail: object) -> None:
     """Where the recipe comes from, in the dashboard's words. Licences are information only.
 
     Only the model displays are parsed into the generated model; the rest is read as plain
     fields. The lines are shared with the dashboard (tests/fixtures/recipe-links.json).
     """
+    payload = _object(detail, "recipe detail")
     identity = _object(payload.get("identity"), "identity")
     publisher = quote(_text(identity.get("publisher")), safe="")
     slug = quote(_text(identity.get("slug")), safe="")
