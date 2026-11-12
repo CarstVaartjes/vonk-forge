@@ -35,6 +35,7 @@ from .models import (
     InstallationNode,
     RecipeInstallation,
 )
+from .operator_receipt_contract import ReceiptOwner
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -144,7 +145,7 @@ def fill_revision_source_bundles(connection: Connection) -> int:
     moved = 0
     for revision_id, projected in connection.execute(
         select(CatalogDocumentRevision.id, CatalogDocumentRevision.projected).where(
-            CatalogDocumentRevision.kind == "recipe",
+            CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
             CatalogDocumentRevision.source_bundle_sha256.is_(None),
         )
     ).all():
