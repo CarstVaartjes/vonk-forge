@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_control.categorized_errors import InvalidRequestError
 from vonk_control.job_documents import RecipeStopParent
 from vonk_control.lifecycle.evidence import Residue
 from vonk_control.models import (
@@ -153,8 +152,13 @@ def test_accepted_service_stop_resumes_same_review_after_withdrawal_restart(
         run_id, plan_digest=preview.plan_digest, actor="admin", request_id=request
     )
     assert replay.id == accepted_id
-    with pytest.raises(InvalidRequestError):
-        restarted.stop(run_id, plan_digest="0" * 64, actor="admin", request_id=request)
+    # The same key on the same run is the same Stop, whatever it previewed.
+    assert (
+        restarted.stop(
+            run_id, plan_digest="0" * 64, actor="admin", request_id=request
+        ).id
+        == accepted_id
+    )
     with sessions() as session:
         assert {
             (row.id, row.payload_digest)

@@ -3359,6 +3359,48 @@ def test_stop_preview_is_stable_exact_and_defers_capacity_release(
     assert len(first.plan_digest) == 64
 
 
+def test_stop_refuses_changed_review_before_withdrawal_or_admission(
+    tmp_path: Path,
+) -> None:
+    withdrawn: list[str] = []
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, route_withdrawer=withdrawn.append
+    )
+    installation = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id="3" * 35 + "a"
+    )
+    run = started_recipe(
+        sessions,
+        service,
+        installation.owner_id,
+        nodes,
+        request_id="3" * 35 + "b",
+    )
+    with sessions() as session:
+        ordinals = {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        }
+    # A run that can no longer be stopped is the one refusal a Stop has.
+    with sessions.begin() as session:
+        stopped = session.get(RecipeRun, run.owner_id)
+        assert stopped is not None
+        stopped.state = "stopped"
+    with pytest.raises(RecipeRequestInvalid):
+        service.stop(
+            run.owner_id, plan_digest="0" * 64, actor="admin", request_id="3" * 35 + "c"
+        )
+    assert withdrawn == []
+    with sessions() as session:
+        assert (
+            session.scalar(select(Job).where(Job.request_id == "3" * 35 + "c")) is None
+        )
+        assert {
+            node.node_id: node.workload_intent_ordinal
+            for node in session.scalars(select(AgentNode))
+        } == ordinals
+
+
 def test_stop_replay_is_bound_to_selected_run_kind_and_action_digest(
     tmp_path: Path,
 ) -> None:

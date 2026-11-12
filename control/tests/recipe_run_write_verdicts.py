@@ -132,7 +132,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "6d3618fc710e5617d8d26f132da9bdaeeafbc9dd98ce24245c60b53ab7c4aaff",
+            "7009cf49e277b6b0b9cb55fdf8350f4fdfff595cd1ae2df5ab0d06aa647114ea",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
