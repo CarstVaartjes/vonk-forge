@@ -186,6 +186,17 @@ def _drop(group: EvidenceGroup, data: Any, refusal: ValidationError) -> Evidence
     )
 
 
+def _validated(
+    handler: ValidatorFunctionWrapHandler, data: Any, dropped: tuple[EvidenceGroup, ...]
+) -> tuple[Any, ValidationError | None]:
+    """The model for ``data`` without the ``dropped`` groups, or why it was refused."""
+
+    try:
+        return handler(_without(data, dropped)), None
+    except ValidationError as refusal:
+        return None, refusal
+
+
 def _smallest_valid(
     handler: ValidatorFunctionWrapHandler,
     data: Any,
@@ -194,18 +205,15 @@ def _smallest_valid(
     """``named`` less every group the report is valid without dropping, with the
     model that validated; ``None`` when dropping all of them is not enough."""
 
-    try:
-        model = handler(_without(data, named))
-    except ValidationError:
+    model, refusal = _validated(handler, data, named)
+    if refusal is not None:
         return None
     kept = list(named)
     for group in reversed(named):
         trial = tuple(item for item in kept if item is not group)
-        try:
-            model = handler(_without(data, trial))
-        except ValidationError:
-            continue
-        kept = list(trial)
+        trial_model, refusal = _validated(handler, data, trial)
+        if refusal is None:
+            model, kept = trial_model, list(trial)
     return tuple(kept), model
 
 

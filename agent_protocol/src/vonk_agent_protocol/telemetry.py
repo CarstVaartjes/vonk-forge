@@ -390,6 +390,17 @@ class _TelemetryReadings(OptionalEvidenceModel, HostResourceSample):
 TelemetryReadings = _TelemetryReadings
 
 
+def _engine_reading(
+    entry: object,
+) -> tuple[EngineReading | None, Exception | None]:
+    """One engine entry, or why it was refused (the sample counts the drop)."""
+
+    try:
+        return EngineReading.model_validate_json(canonical_message(entry)), None
+    except (ValidationError, TypeError, ValueError) as refusal:
+        return None, refusal
+
+
 class _EngineEntries(TelemetryWireModel):
     """The ``engines`` list of a sample. An entry that is invalid is dropped
     alone (counted), and a repeated ``run_id`` keeps its first entry. It is a
@@ -415,11 +426,8 @@ class _EngineEntries(TelemetryWireModel):
         if isinstance(entries, list):
             kept: list[EngineReading] = []
             for entry in entries:
-                try:
-                    reading = EngineReading.model_validate_json(
-                        canonical_message(entry)
-                    )
-                except (ValidationError, TypeError, ValueError):
+                reading, refusal = _engine_reading(entry)
+                if refusal is not None:
                     dropped += 1
                     continue
                 if any(reading.run_id == earlier.run_id for earlier in kept):

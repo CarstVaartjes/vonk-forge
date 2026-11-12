@@ -105,20 +105,15 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     )
 
 
-def _readings(value: dict[str, object]) -> TelemetryReadings:
-    return TelemetryReadings.model_validate_json(
-        canonical_message({k: v for k, v in value.items() if k in _READING_FIELDS})
-    )
-
-
-_READING_FIELDS = frozenset(TelemetryReadings.model_fields)
+_READING_FIELDS = tuple(TelemetryReadings.model_fields)
 
 
 def _same_sample(row: NodeTelemetrySample, value: TelemetrySample) -> bool:
     """Whether a stored sample is this one. A replay is compared on the host
     readings: its engine rows were written with it, in the same transaction."""
-    return _readings(_view(row).model_dump(mode="json")) == _readings(
-        value.model_dump(mode="json")
+    stored = _view(row)
+    return all(
+        getattr(stored, name) == getattr(value, name) for name in _READING_FIELDS
     )
 
 
