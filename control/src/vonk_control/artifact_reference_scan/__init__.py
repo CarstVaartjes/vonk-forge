@@ -143,9 +143,6 @@ from ..models import (
 from ..revision_images import (
     revision_archives as revision_archives,
 )
-from ..revision_images import (
-    revisions_running_archives as revisions_running_archives,
-)
 from ..run_switch_contract import (
     RunSwitchOperationResult as RunSwitchOperationResult,
 )

@@ -19832,7 +19832,6 @@
         "runtime_preflight.required",
         "runtime_preflight.requirement_unknown",
         "runtime_preflight.requirements_changed",
-        "runtime_preflight.stale",
         "runtime_preflight.node_missing",
         "runtime_preflight.capability_failed"
       ],
