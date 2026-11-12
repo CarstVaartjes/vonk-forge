@@ -203,13 +203,16 @@ def test_the_start_a_run_switch_issued_ending_wakes_its_parent(tmp_path) -> None
         start = _job_row(start_id, "running")
         start.kind = WireAgentOperation.RECIPE_START.value
         start.request_id = start_request_key(_get(session, Job, operation_id))
-        start.payload = controller_recipe_document(
-            RecipeStartParent(
-                schema_version=1,
-                owner_kind="run",
-                owner_id=str(uuid.uuid4()),
-                plan_digest="a" * 64,
-            )
+        start.payload = cast(
+            dict[str, object],
+            controller_recipe_document(
+                RecipeStartParent(
+                    schema_version=1,
+                    owner_kind="run",
+                    owner_id=str(uuid.uuid4()),
+                    plan_digest="a" * 64,
+                )
+            ),
         )
         start.payload_digest = hashlib.sha256(
             canonical_message(start.payload)
