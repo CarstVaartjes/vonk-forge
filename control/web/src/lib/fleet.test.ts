@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
 import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
-import type { VisualFleetNode } from "../api/types";
+import type { VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import {
+  fleetStatusLine,
   formatBytes,
   nodeDisplayName,
   nodeMemory,
@@ -228,6 +229,16 @@ test("a Spark serves in the words `vonkctl fleet` prints", () => {
   const fleet = vectors.nodes.map((input) => node(input));
   for (const member of fleet) {
     expect(nodeWorkloadLines(member, fleet)).toEqual(vectors.expected[member.id]);
+  }
+});
+
+test("the Fleet status line uses the words `vonkctl fleet` prints", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-status.json", "utf8"),
+  ) as { now: string; cases: { nodes: Partial<VisualFleetNode>[]; expected: string }[] };
+  for (const { nodes, expected } of vectors.cases) {
+    const snapshot = { nodes: nodes.map((input) => node(input)) } as VisualFleetSnapshot;
+    expect(fleetStatusLine(snapshot, new Date(vectors.now))).toBe(expected);
   }
 });
 

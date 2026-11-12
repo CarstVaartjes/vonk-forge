@@ -1,0 +1,187 @@
+{
+  "comment": "The Fleet status line, in one set of words for the Controller web Fleet page and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_status.py both render these fleets and must produce the expected line. `now` is the web's clock; the telemetry samples are observed at that instant.",
+  "now": "2026-08-15T12:00:00Z",
+  "cases": [
+    {
+      "name": "two Sparks serve one model, one Spark is offline",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": true
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 68719476736
+            }
+          }
+        },
+        {
+          "id": "spk_00000000000000000000000000000002",
+          "display_name": "Spark 2",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": true
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 34359738368
+            }
+          }
+        },
+        {
+          "id": "spk_00000000000000000000000000000003",
+          "display_name": "Spark 3",
+          "connection": {
+            "online_state": "offline",
+            "offline_reason": "stale",
+            "last_seen_at": "2026-08-15T11:00:00Z"
+          },
+          "inventory": null,
+          "telemetry": null,
+          "warnings": [],
+          "loaded": []
+        }
+      ],
+      "expected": "2 of 3 Sparks online · 96.0 GiB unified memory free · 1 model serving · 1 needs attention"
+    },
+    {
+      "name": "a single Spark that reports nothing",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [],
+          "telemetry": null
+        }
+      ],
+      "expected": "1 of 1 Spark online · unified memory not reported · no models serving · nothing needs attention"
+    },
+    {
+      "name": "two models and two Sparks needing attention",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": true
+            },
+            {
+              "run_id": "run-b",
+              "run_state": "running",
+              "healthy": true
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 8589934592
+            }
+          }
+        },
+        {
+          "id": "spk_00000000000000000000000000000002",
+          "display_name": "Spark 2",
+          "connection": {
+            "online_state": "offline",
+            "offline_reason": "stale",
+            "last_seen_at": "2026-08-15T11:00:00Z"
+          },
+          "inventory": null,
+          "telemetry": null,
+          "warnings": [],
+          "loaded": []
+        },
+        {
+          "id": "spk_00000000000000000000000000000003",
+          "display_name": "Spark 3",
+          "connection": {
+            "online_state": "offline",
+            "offline_reason": "stale",
+            "last_seen_at": "2026-08-15T11:00:00Z"
+          },
+          "inventory": null,
+          "telemetry": null,
+          "warnings": [],
+          "loaded": []
+        }
+      ],
+      "expected": "1 of 3 Sparks online · 8.0 GiB unified memory free · 2 models serving · 2 need attention"
+    },
+    {
+      "name": "a run with unknown health is not counted as serving",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": null
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 8589934592
+            }
+          }
+        }
+      ],
+      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no models serving · nothing needs attention"
+    }
+  ]
+}

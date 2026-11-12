@@ -178,7 +178,7 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/components/library-setup.tsx",
+      "file": "control/web/src/lib/fleet.ts",
       "type": "FleetSummary",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },

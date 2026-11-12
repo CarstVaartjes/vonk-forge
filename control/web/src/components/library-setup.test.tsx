@@ -2,7 +2,8 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { vi } from "vitest";
 import type { VisualFleetSnapshot } from "../api/types";
 import { libraryViewSnapshot } from "../test-fixtures/library";
-import { countFleetFit, isYourFleet, LibrarySetupStrip, summarizeFleet } from "./library-setup";
+import { summarizeFleet } from "../lib/fleet";
+import { countFleetFit, isYourFleet, LibrarySetupStrip } from "./library-setup";
 import {
   buildLibraryRecipeRecords,
   EMPTY_LIBRARY_WORKCELL_FILTERS,

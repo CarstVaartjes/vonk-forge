@@ -1,6 +1,6 @@
-import { addWire, compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
+import { compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetSnapshot } from "../api/types";
-import { formatBytes } from "../lib/fleet";
+import { formatBytes, summarizeFleet, type FleetSummary } from "../lib/fleet";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   filterLibraryRecipeRecords,
@@ -19,28 +19,6 @@ import {
 // other filters leave. "Fits my fleet now" is the Controller's own placement
 // verdict against fresh capacity, carried on each recipe of the loaded page;
 // unknown evidence is counted apart and never presented as a non-fit.
-
-export type FleetSummary = {
-  enrolled: number;
-  online: number;
-  freeMemoryBytes: WireNumber | null;
-};
-
-export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSummary | undefined {
-  if (!fleet) return undefined;
-  const online = fleet.nodes.filter((node) => node.connection.online_state === "online");
-  const samples = online.flatMap((node) => {
-    const value = node.telemetry?.sample.memory_available_bytes;
-    return value === null || value === undefined ? [] : [value as WireNumber];
-  });
-  return {
-    enrolled: fleet.nodes.length,
-    online: online.length,
-    freeMemoryBytes: samples.length
-      ? samples.reduce<WireNumber>((total, value) => addWire(total, value), 0)
-      : null,
-  };
-}
 
 type Facet = "family" | "engine" | "creator";
 // Proven fits, proven non-fits, and verdicts the Controller could not give.

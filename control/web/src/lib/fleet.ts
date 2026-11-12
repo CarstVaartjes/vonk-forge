@@ -1,4 +1,5 @@
 import {
+  addWire,
   compareWire,
   displayRatio,
   formatWire,
@@ -6,7 +7,7 @@ import {
   subtractWire,
   type WireNumber,
 } from "../api/contract-numeric";
-import type { SwapShortfallEvidence, VisualFleetNode } from "../api/types";
+import type { SwapShortfallEvidence, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
@@ -125,6 +126,54 @@ export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[
     );
   }
   return lines;
+}
+
+export type FleetSummary = {
+  enrolled: number;
+  online: number;
+  freeMemoryBytes: WireNumber | null;
+};
+
+export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSummary | undefined {
+  if (!fleet) return undefined;
+  const online = fleet.nodes.filter((node) => node.connection.online_state === "online");
+  const samples = online.flatMap((node) => {
+    const value = node.telemetry?.sample.memory_available_bytes;
+    return value === null || value === undefined ? [] : [value as WireNumber];
+  });
+  return {
+    enrolled: fleet.nodes.length,
+    online: online.length,
+    freeMemoryBytes: samples.length
+      ? samples.reduce<WireNumber>((total, value) => addWire(total, value), 0)
+      : null,
+  };
+}
+
+/**
+ * The Fleet in one line: Sparks online, unified memory free, models serving, and how many
+ * Sparks need attention. `vonkctl fleet` prints the same line.
+ */
+export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
+  const summary = summarizeFleet(fleet) as FleetSummary;
+  const serving = new Set(
+    fleet.nodes.flatMap((node) =>
+      node.loaded.filter((run) => runStateWord(run) === "ready").map((run) => run.run_id),
+    ),
+  ).size;
+  const attention = fleet.nodes.filter((node) => nodeStatus(node, now).status !== "online").length;
+  return [
+    `${summary.online} of ${summary.enrolled} ${summary.enrolled === 1 ? "Spark" : "Sparks"} online`,
+    summary.freeMemoryBytes === null
+      ? "unified memory not reported"
+      : `${formatBytes(summary.freeMemoryBytes)} unified memory free`,
+    serving === 0
+      ? "no models serving"
+      : `${serving} ${serving === 1 ? "model" : "models"} serving`,
+    attention === 0
+      ? "nothing needs attention"
+      : `${attention} ${attention === 1 ? "needs" : "need"} attention`,
+  ].join(" · ");
 }
 
 /** Running workloads on an older recipe revision, once per run; informational and never an error. */
