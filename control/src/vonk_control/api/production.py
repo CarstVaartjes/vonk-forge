@@ -431,9 +431,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         agent_upgrades.consume_agent_result(session, operation, attempt, message)
 
     agent_services.operations.set_result_consumer(consume_agent_result)
-    agent_services.operations.set_preflight_completed(
-        run_switch_operations.preflight_completed
-    )
+    run_switch_operations.wake_on_child_end()
 
     def refresh_metrics() -> None:
         operational_metrics.refresh()

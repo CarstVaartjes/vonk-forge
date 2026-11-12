@@ -827,6 +827,8 @@ def assemble_production_worker(
         build_archive_available=runtime_archive_available,
         artifact_phase_executor=artifact_phase_executor,
     )
+    # Builds, model downloads and sweeps end children here, not only reports.
+    run_switch_operations.wake_on_child_end()
     fleet_profiles = build_production_fleet_profile_service(
         sessions,
         clock=clock,
