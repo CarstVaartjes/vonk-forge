@@ -14,10 +14,13 @@ import yaml
 from tests.repository_guards import GUARDS, SCOPED
 
 ROOT = Path(__file__).resolve().parents[1]
-# ci.yml skips a labeled event for any label but release-acceptance.
+# ci.yml skips a labeled event for any label but release-acceptance, and a
+# pull request that is not an integration/* batch.
 IGNORED_LABEL_IF = (
     "${{ !(github.event.action == 'labeled' && "
-    "github.event.label.name != 'release-acceptance') }}"
+    "github.event.label.name != 'release-acceptance') && "
+    "(github.event_name != 'pull_request' || "
+    "startsWith(github.head_ref, 'integration/')) }}"
 )
 
 

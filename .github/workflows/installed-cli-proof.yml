@@ -39,6 +39,7 @@ concurrency:
 jobs:
   signed-update:
     name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:

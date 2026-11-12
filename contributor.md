@@ -29,7 +29,9 @@ contract checks. See [principle guards](docs/principle-guards.md).
 
 ## CI and pre-merge release acceptance
 
-Every PR runs the complete sharded Controller and repository suites, repository
+CI runs only on same-repository `integration/*` batch PRs and main; every job
+is skipped on a member PR, which folds into a batch. Every batch PR runs the
+complete sharded Controller and repository suites, repository
 guards, web tests, Rust tests/lint, generated clients and Python lint/types.
 Merge queues also accept their combined candidate before admission.
 Integration selection uses the conservative dependency closure documented in

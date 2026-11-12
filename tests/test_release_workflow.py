@@ -18,10 +18,13 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
-# ci.yml skips a labeled event for any label but release-acceptance.
+# ci.yml skips a labeled event for any label but release-acceptance, and a
+# pull request that is not an integration/* batch.
 IGNORED_LABEL_IF = (
     "${{ !(github.event.action == 'labeled' && "
-    "github.event.label.name != 'release-acceptance') }}"
+    "github.event.label.name != 'release-acceptance') && "
+    "(github.event_name != 'pull_request' || "
+    "startsWith(github.head_ref, 'integration/')) }}"
 )
 RELEASE = WORKFLOWS / "installer-publication.yml"
 ACCEPTANCE = WORKFLOWS / "release-acceptance-core.yml"

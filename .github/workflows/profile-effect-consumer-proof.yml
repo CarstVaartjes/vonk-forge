@@ -24,6 +24,7 @@ concurrency:
 jobs:
   connected-consumer:
     name: Real SQL Stop through installed CLI and recipes cleanup
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

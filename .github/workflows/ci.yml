@@ -43,7 +43,7 @@ concurrency:
 jobs:
   changes:
     name: Select CI integration dependencies
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/')) }}
     permissions:
       contents: read
       actions: read
@@ -137,7 +137,7 @@ jobs:
 
   lint:
     name: Ruff
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -173,7 +173,7 @@ jobs:
 
   supply-chain:
     name: Supply-chain evidence
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -787,7 +787,7 @@ jobs:
 
   repository-guards:
     name: Repository guards
-    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -1243,7 +1243,7 @@ jobs:
   ci-gate:
     name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || 'CI gate' }}
     needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
-    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
+    if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && (github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

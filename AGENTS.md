@@ -213,7 +213,9 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
-Every PR runs the complete sharded Controller/repository suites, repository
+CI runs only on same-repository `integration/*` batch PRs and main; every job is
+skipped on a member PR, which folds into a batch.
+Every batch PR runs the complete sharded Controller/repository suites, repository
 guards, web tests, Rust tests/lint, generated clients and Python lint/types.
 Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
 unknown inputs run the integrations. Controller PostgreSQL checks always run.

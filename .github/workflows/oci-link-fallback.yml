@@ -23,6 +23,7 @@ concurrency:
 jobs:
   cross-device:
     name: Actual EXDEV, visible layout fault and no private copies
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:

@@ -16,7 +16,11 @@ live repository ruleset, not the dated protection report under `inventory/`):
 | `Compose integration` | Exercise the Compose and ingress boundaries. |
 | `CI gate` | Aggregate the suites selected for the change. |
 
-Every PR runs complete sharded Controller and repository suites, repository
+CI runs only on `integration/*` batch PRs and on main: every job of `ci.yml` and
+of each path-triggered pull-request workflow is skipped (by its own `if` on
+`github.head_ref`) on any other PR, so a member PR shows skipped checks and is
+never merged directly; it folds into a batch PR, whose run is the proof.
+Every batch PR runs complete sharded Controller and repository suites, repository
 guards, web tests, Rust tests/lint, generated clients and Python lint/types.
 Integration jobs follow a conservative transitive dependency closure in
 `scripts/select-ci-areas`; unknown inputs run every integration. PostgreSQL,

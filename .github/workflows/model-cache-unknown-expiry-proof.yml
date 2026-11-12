@@ -25,6 +25,7 @@ concurrency:
 jobs:
   cancellation:
     name: Unknown cancellation expiry through fresh exact artifact claim
+    if: ${{ github.event_name != 'pull_request' || startsWith(github.head_ref, 'integration/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
