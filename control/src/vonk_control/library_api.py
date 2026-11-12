@@ -106,10 +106,7 @@ def install_library_routes(
     )
     def library_vocabulary(_actor: Any = authenticated) -> CatalogVocabulary:
         """The capability, category and status words of the synced release."""
-        try:
-            vocabulary = library().library_vocabulary()
-        except AVAILABILITY_ERRORS as error:
-            raise _error(error) from None
+        vocabulary = projection.library_vocabulary() if projection else None
         if vocabulary is None:
             raise HTTPException(status_code=404, detail="no vocabulary synced yet")
         return vocabulary
