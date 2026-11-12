@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/profile-effect-consumer-proof.yml
+      - .github/actions/recipe-library/**
+      - tests/acceptance/recipe-library-revision.txt
       - control/tests/test_profile_effect_consumer_contract_postgres.py
       - control/tests/test_profile_stop_effect_adoption_postgres.py
       - control/src/vonk_control/fleet_profiles.py
@@ -32,15 +34,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Check out immutable recipes consumer
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: CarstVaartjes/vonk-forge-recipes
-          ref: 556e4fdd5e6764fdc79692d0e0465624f436520e
-          path: .proof-recipes
-          persist-credentials: false
-      - name: Verify immutable consumer source
-        run: test "$(git -C .proof-recipes rev-parse HEAD)" = 556e4fdd5e6764fdc79692d0e0465624f436520e
+      - name: Check out the reviewed recipe library
+        uses: ./.github/actions/recipe-library
       - name: Prepare locked Python and CLI dependencies
         uses: ./.github/actions/python-env
       - name: Authenticate CI image mirror reads
@@ -55,7 +50,7 @@ jobs:
         run: scripts/pull-test-images postgres
       - name: Exercise connected producer and consumer
         env:
-          VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.proof-recipes
+          VONK_RECIPE_EFFECT_CONSUMER_SOURCE: ${{ github.workspace }}/.recipe-library
           VONK_EFFECT_PLATFORM_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: >-
           uv run --project control --frozen pytest -q -n 0

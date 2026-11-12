@@ -7,8 +7,8 @@ Builds the wheel from that commit (the build is byte-reproducible), then rewrite
 every place that names the pin: the control/pyproject.toml revision, control/uv.lock
 (``uv lock``, then ``scripts/refresh-protocol-wheel-lock`` restores the protocol
 wheel digest), control/packaging/public-contracts.lock, the acceptance
-library revision and the proof files that name the commit, the wheel in inventory/wheels and the wheel name in the files that must spell it. The version
-is read from the built wheel, never typed. ``scripts/verify-supply-chain`` checks
+library revision, the wheel in inventory/wheels and the wheel name in the files
+that must spell it. The version is read from the built wheel, never typed. ``scripts/verify-supply-chain`` checks
 the result.
 """
 
@@ -33,11 +33,6 @@ LIBRARY_REVISION = "tests/acceptance/recipe-library-revision.txt"
 WHEELS = "inventory/wheels"
 COMMAND_TIMEOUT = 600
 WHEEL_PREFIX = "vonk_forge_public_contracts-"
-# Files that name the recipes commit the Controller's proofs run against.
-REVISION_FILES = (
-    ".github/workflows/profile-effect-consumer-proof.yml",
-    "control/tests/test_profile_effect_consumer_contract_postgres.py",
-)
 # The files that spell the wheel name; verify-supply-chain checks the Dockerfile
 # and tests/scripts/test_resolve_publication_producer.py checks the producer list.
 SPELLING_FILES = ("control/Dockerfile", "scripts/resolve-publication-producer")
@@ -119,15 +114,15 @@ def apply_pin(
         f"sha256 = {_quote(hashlib.sha256(wheel.read_bytes()).hexdigest())}\n"
     )
     (root / LIBRARY_REVISION).write_text(f"{commit}\n")
-    for relative in REVISION_FILES:
-        path = root / relative
-        path.write_text(path.read_text().replace(old["revision"], commit))
     for stale in (root / WHEELS).glob(f"{WHEEL_PREFIX}*.whl"):
         stale.unlink()
     shutil.copy2(wheel, root / WHEELS / new_name)
     for relative in SPELLING_FILES:
         path = root / relative
-        path.write_text(path.read_text().replace(old_name, new_name))
+        text = path.read_text()
+        if old_name not in text:
+            raise SystemExit(f"{relative} does not name {old_name}")
+        path.write_text(text.replace(old_name, new_name))
 
 
 def _quote(value: str) -> str:

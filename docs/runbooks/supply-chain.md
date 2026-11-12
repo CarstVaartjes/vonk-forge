@@ -62,9 +62,13 @@ base through `scripts/retry-dependency-fetch`, failing closed. A workflow test
 requires that step, installed cosign and ordering before every LiteLLM build.
 To move the public-contracts pin, run
 `scripts/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
-commit, rewrites `control/pyproject.toml`, `control/uv.lock` (through `uv lock`),
-`control/packaging/public-contracts.lock`, the wheel in `inventory/wheels` and
-the wheel name in `control/Dockerfile` and `scripts/resolve-publication-producer`.
+commit and writes exactly: the revision in `control/pyproject.toml`;
+`control/uv.lock` (`uv lock`, then `scripts/refresh-protocol-wheel-lock` restores
+the protocol wheel digest); `control/packaging/public-contracts.lock`;
+`tests/acceptance/recipe-library-revision.txt` (the library the suites and the
+profile-effect proof check out, which must equal the lock revision); the wheel in
+`inventory/wheels`; and the wheel name in `control/Dockerfile` and
+`scripts/resolve-publication-producer`, failing if either does not name the old wheel.
 The wheels directory is git-ignored: stage the new wheel with `git add -f`.
 The lock owns the version; the verifier derives the wheel path and checks the
 Dockerfile names it, so no script or test carries a version literal. A recipes
