@@ -41,9 +41,9 @@ def _enrollment(payload: Mapping[str, object]) -> None:
     _actions(payload.get("recovery"))
 
 
-def last_sync_at(payload: Mapping[str, object]) -> object:
+def last_sync_at(completed_at: object, created_at: object) -> object:
     """The one rule for when a sync run happened: when it finished, else when it started."""
-    return payload.get("completed_at") or payload.get("created_at")
+    return completed_at or created_at
 
 
 def _catalog_sync(payload: Mapping[str, object]) -> None:
@@ -54,7 +54,8 @@ def _catalog_sync(payload: Mapping[str, object]) -> None:
         print("Next: vonkctl recipe library")
         return
     _field(
-        "Last sync", f"{_time(last_sync_at(payload))} ({_text(payload.get('state'))})"
+        "Last sync",
+        f"{_time(last_sync_at(payload.get('completed_at'), payload.get('created_at')))} ({_text(payload.get('state'))})",
     )
     _field("Trigger", payload.get("trigger"))
     _field("Repository", payload.get("repository"))

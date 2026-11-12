@@ -45,6 +45,8 @@ function controlApi(overrides: Partial<TestApi> = {}): TestApi {
       authority_revision: "a".repeat(64),
       nodes: [],
     }),
+    platformObservation: async () => ({ api: { source_sha: "a".repeat(40) } }) as never,
+    catalogSyncStatus: async () => null,
     session: async () => {
       throw new AuthenticationRequired();
     },
