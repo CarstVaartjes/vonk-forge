@@ -22,8 +22,19 @@ type TestApi = ControlApi & BrowserAuthApi;
 
 function controlApi(overrides: Partial<TestApi> = {}): TestApi {
   return {
+    metricsCatalogue: async () => [],
     metricsSeries: async (metric, range) => ({
       metric,
+      spec: {
+        metric,
+        title: "",
+        unit: "count",
+        scope: "node",
+        basis: "measured",
+        source: "spark",
+        summary_total: false,
+        hint: "",
+      },
       range,
       start: 0,
       end: 1,

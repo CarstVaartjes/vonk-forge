@@ -87,7 +87,6 @@ def install_operator_projection_routes(
     )
     authenticated = actor_dependency
     prometheus = prometheus or PrometheusReader()
-    install_metrics_routes(app, authenticated, prometheus)
 
     def fleet() -> Any:
         if fleet_projection is None:
@@ -103,6 +102,20 @@ def install_operator_projection_routes(
             raise ObservationCaptureUnavailable(phase="database-capture") from error
         except (KeyError, OSError, RuntimeError, TypeError, ValueError) as error:
             raise _operator_error(error) from None
+
+    def served_aliases(node_id: str) -> list[str]:
+        """The aliases this Spark's loaded runs serve, for per-model metrics."""
+        return sorted(
+            {
+                run.alias
+                for value in snapshot().nodes
+                if value.id == node_id
+                for run in value.loaded
+                if run.alias is not None
+            }
+        )
+
+    install_metrics_routes(app, authenticated, prometheus, served_aliases)
 
     def selected(selector: str) -> FleetNode:
         try:

@@ -16,10 +16,25 @@ first if the cap is reached). Changing the retention flags keeps the existing
 TSDB. Time to first token covers streaming requests only; the error rate is
 failed over total deployment attempts, so it can include retried attempts.
 The Controller Trends page shows requests and generated (output) tokens per
-model as `request_rate` and `output_token_rate` (tokens per second, 5-minute
-rate of `litellm_output_tokens_metric_total` summed by `requested_model`). They
-are per model: a Spark serves the models loaded on it, and the Controller does
-not split a model's tokens across Sparks.
+model as `request_rate` and `output_token_rate`. They are estimates: the gateway
+counts what it forwarded, and the catalogue labels them so. A Spark view shows
+the models that Spark's loaded runs serve; the Controller does not split a
+model's tokens across Sparks.
+
+Trends read two Controller routes. `GET /api/metrics/catalogue` describes every
+metric once: title, unit, scope (`node` or `alias`), basis (`measured` or
+`estimated`), source and a hint; the page and vonkctl render that and hard-code
+none of it. `GET /api/metrics/series?metric&range[&node]` returns, per series,
+its points and a summary (`latest`, `average`, `peak`, `total`, `coverage`)
+computed by the Controller. Ranges are 1h, 6h, 24h, 7d and 30d (Prometheus keeps
+a year). Each point averages a window that is never smaller than the step and at
+least four scrapes (15 s for Controller series, 30 s for the LiteLLM job), so a
+rate never drops a burst between two points. `peak` is the highest raw value in
+the range, not the highest averaged point. `total` (gateway counters only) is
+`increase()` over the range. `coverage` is the share of the range's steps that
+have a value. `None` means no data and is never drawn as zero. Every query is
+fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM family listed
+in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
 
 Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is

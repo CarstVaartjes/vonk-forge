@@ -3,9 +3,11 @@
 import asyncio
 import base64
 import json
+import re
 import threading
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from typing import get_args
 
 import httpx2 as httpx
 import pytest
@@ -13,9 +15,15 @@ from fastapi.testclient import TestClient
 from starlette import status
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
+from vonk_control.litellm import PROMETHEUS_EXCLUDE_METRICS
 from vonk_control.metrics import MetricsRegistry
-from vonk_control.metrics_contract import PER_MODEL_METRICS, MetricsSeriesResponse
-from vonk_control.prometheus_api import PrometheusReader
+from vonk_control.metrics_contract import (
+    METRIC_SPECS,
+    Metric,
+    MetricRange,
+    MetricsSeriesResponse,
+)
+from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader
 
 from .test_api import Jobs
 from .test_metrics import NODE, _fleet_snapshot
@@ -58,48 +66,104 @@ def reply(**data):
     return httpx.Response(200, json={"status": "success", "data": data})
 
 
-@pytest.mark.parametrize(
-    "metric,query",
-    [
-        ("gpu_utilization", "vonk_node_telemetry_gpu_utilization_percent"),
-        ("gpu_memory_used", "vonk_node_telemetry_gpu_memory_used_bytes"),
-        ("host_memory_used", "vonk_node_telemetry_host_memory_used_bytes"),
-        ("gpu_temperature", "vonk_node_telemetry_gpu_temperature_c"),
-        (
-            "request_rate",
-            "sum by (requested_model) (rate(litellm_requests_metric_total[5m]))",
-        ),
-        (
-            "output_token_rate",
-            "sum by (requested_model) (rate(litellm_output_tokens_metric_total[5m]))",
-        ),
-        ("certificate_expiry", "vonk_agent_certificate_expiry_seconds"),
-    ],
-)
-@pytest.mark.parametrize(
-    "range,duration", [("1h", 3600), ("6h", 21600), ("24h", 86400), ("7d", 604800)]
-)
-def test_fixed_queries_and_ranges(client, monkeypatch, metric, query, range, duration):
-    """Catches arbitrary query forwarding, wrong mappings and unbounded resolution."""
-    node = None if metric in PER_MODEL_METRICS else NODE
+@pytest.mark.parametrize("metric", get_args(Metric))
+@pytest.mark.parametrize("range", get_args(MetricRange))
+def test_every_query_window_covers_the_step_and_scrapes(metric, range):
+    """Catches a rate window shorter than its step, which drops bursts between points."""
+    query, step = QUERIES[metric], max(15, RANGES[range] // 480)
+    for selector in ("", '{node_id="x"}'):
+        expressions = [
+            query.series(selector, step),
+            query.peak(selector, RANGES[range]),
+            query.total(selector, RANGES[range]),
+        ]
+        for expression in filter(None, expressions):
+            assert expression.count("{") == selector.count("{")
+    found = re.search(r"\[(\d+)s\]", query.series("", step))
+    assert found
+    window = int(found.group(1))
+    assert window >= step and window >= 2 * query.scrape
+
+
+def test_every_metric_has_one_spec_and_one_query():
+    """Catches a metric added to the contract without its description or query."""
+    assert set(METRIC_SPECS) == set(QUERIES) == set(get_args(Metric))
+    assert {s.metric for s in METRIC_SPECS.values() if s.summary_total} == {
+        m for m, q in QUERIES.items() if q.total("", 1)
+    }
+
+
+def test_no_query_reads_a_gateway_family_the_gateway_does_not_export():
+    """Catches a Trends query on a LiteLLM family dropped by PROMETHEUS_EXCLUDE_METRICS."""
+    families = {q.family.removesuffix("_total") for q in QUERIES.values()}
+    assert not {f for f in families if f.startswith("litellm_")} & set(
+        PROMETHEUS_EXCLUDE_METRICS
+    )
+
+
+def test_catalogue_lists_every_metric(client):
+    """Catches a page or vonkctl having to hard-code what a metric is."""
+    response = client.get("/api/metrics/catalogue")
+    assert response.status_code == 200
+    assert {item["metric"] for item in response.json()} == set(get_args(Metric))
+
+
+@pytest.mark.parametrize("metric", ["gpu_utilization", "output_token_rate"])
+def test_series_carry_their_summary(client, monkeypatch, metric):
+    """Catches averaged points standing in for the peak and the total, and NaN as 0."""
+    label = "node_id" if metric == "gpu_utilization" else "alias"
+    seen = []
 
     def handle(request):
         params = request.url.params
-        assert request.url.path == "/api/v1/query_range"
-        assert params["query"] == query + (f'{{node_id="{NODE}"}}' if node else "")
-        assert float(params["end"]) - float(params["start"]) == duration
-        assert int(params["step"]) == max(15, duration // 480)
-        row = {"metric": {"node_id": NODE}, "values": [[1, "2.5"], [2, "NaN"]]}
-        return reply(resultType="matrix", result=[row])
+        seen.append(request.url.path)
+        if request.url.path == "/api/v1/query_range":
+            rows = [
+                {"metric": {label: "a"}, "values": [[1, "2"], [2, "NaN"], [3, "6"]]},
+                {"metric": {label: "empty"}, "values": [[1, "NaN"]]},
+            ]
+            return reply(resultType="matrix", result=rows)
+        value = "9" if "max_over_time" in params["query"] else "100"
+        row = {"metric": {label: "a"}, "value": [3, value]}
+        return reply(resultType="vector", result=[row])
 
     mock_prometheus(monkeypatch, handle)
-    params = dict(metric=metric, range=range, **({"node": node} if node else {}))
-    response = client.get("/api/metrics/series", params=params)
-    assert response.status_code == 200, response.text
-    points = (
-        MetricsSeriesResponse.model_validate_json(response.content).series[0].points
+    body = client.get(
+        "/api/metrics/series", params={"metric": metric, "range": "1h"}
+    ).json()
+    full, empty = MetricsSeriesResponse.model_validate(body).series
+    assert full.labels == {label: "a"}
+    assert (full.summary.latest, full.summary.average, full.summary.peak) == (6, 4, 9)
+    assert full.summary.total == (100 if metric == "output_token_rate" else None)
+    assert full.summary.coverage == 2 / (3600 // 15 + 1)
+    assert (empty.summary.latest, empty.summary.average, empty.summary.peak) == (
+        None,
+        None,
+        None,
     )
-    assert [point.value for point in points] == [2.5, None]
+    assert empty.summary.coverage == 0
+    assert seen.count("/api/v1/query") == (2 if metric == "output_token_rate" else 1)
+
+
+def test_node_filter_on_a_model_metric_is_the_aliases_it_serves(reader, monkeypatch):
+    """Catches a Spark view of per-model metrics that is refused, unfiltered or injectable."""
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.params["query"])
+        return reply(
+            resultType="matrix" if "range" in request.url.path else "vector", result=[]
+        )
+
+    mock_prometheus(monkeypatch, handle)
+    asyncio.run(
+        reader.series("request_rate", "1h", NODE, lambda node: ["glm-5.1", 'a"b'])
+    )
+    expected = r'{requested_model=~"^(glm\\-5\\.1|a\"b)$"}'
+    assert seen and all(expected in query for query in seen)
+    seen.clear()
+    response = asyncio.run(reader.series("request_rate", "1h", NODE, lambda node: []))
+    assert response.series == [] and not seen
 
 
 @pytest.mark.parametrize(
@@ -108,8 +172,6 @@ def test_fixed_queries_and_ranges(client, monkeypatch, metric, query, range, dur
         {"metric": "up", "range": "1h"},
         {"metric": "gpu_utilization", "range": "2h"},
         {"metric": "gpu_utilization", "range": "1h", "node": 'spk_"'},
-        {"metric": "request_rate", "range": "1h", "node": NODE},
-        {"metric": "output_token_rate", "range": "1h", "node": NODE},
     ],
 )
 def test_closed_input(client, monkeypatch, params):
@@ -147,7 +209,13 @@ def test_prometheus_failure_is_retryable_and_recovers(client, monkeypatch, failu
     response = client.get("/api/metrics/series?metric=gpu_utilization&range=1h")
     assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
     assert response.headers["Retry-After"] == "5"
-    mock_prometheus(monkeypatch, lambda request: reply(resultType="matrix", result=[]))
+    mock_prometheus(
+        monkeypatch,
+        lambda request: reply(
+            resultType="matrix" if request.url.path.endswith("_range") else "vector",
+            result=[],
+        ),
+    )
     assert (
         client.get("/api/metrics/series?metric=gpu_utilization&range=1h").status_code
         == 200
