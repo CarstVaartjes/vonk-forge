@@ -174,7 +174,7 @@ The palette is one graphite operating shell with a small state vocabulary that t
 
 The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Fleet is table-first: a fleet summary line, a Spark search, and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), then a detail view for the selected Spark. Needs-attention items sit above the summary.
 
-At 54rem the shell becomes a compact top bar and action groups stack. On narrow screens a table of Sparks scrolls only inside its own region rather than shrinking labels past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
+At 54rem the shell becomes a compact top bar and action groups stack. Below 54rem each Spark row of the fleet table becomes a stacked block (label beside value) instead of a table row, so labels are never shrunk past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
 
 Spacing follows a compact operating rhythm: small control gaps, roughly three-quarter-rem fixture padding, one-rem section separation, and 1.25rem shell spacing. Touch targets remain at least 2.75rem (44px) where interaction is primary.
 
