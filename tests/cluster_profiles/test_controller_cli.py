@@ -86,6 +86,10 @@ class FakeClient:
         retry=True,
     ):
         self._validate_request(method, path, payload, query)
+        if path == "/api/library/vocabulary" and (method, path) not in self.responses:
+            # The release words are informative and fetched aside by the
+            # library commands; a release without them answers 404.
+            raise ControlNotFound(404, "the synced release publishes no vocabulary")
         self.calls.append((method, path, payload, query))
         response = self.responses.get((method, path), {})
         if method == "POST" and path.endswith("/preview") and not response:
