@@ -60,6 +60,15 @@ Dockerfile `FROM` lines equal the lock, then runs
 `cosign verify --key deploy/compose/trust/litellm-cosign.pub` on the locked
 base through `scripts/retry-dependency-fetch`, failing closed. A workflow test
 requires that step, installed cosign and ordering before every LiteLLM build.
+To move the public-contracts pin, run
+`scripts/refresh-public-contracts <recipes-commit>`. It builds the wheel from that
+commit, rewrites `control/pyproject.toml`, `control/uv.lock` (through `uv lock`),
+`control/packaging/public-contracts.lock`, the wheel in `inventory/wheels` and
+the wheel name in `control/Dockerfile` and `scripts/resolve-publication-producer`.
+The lock owns the version; the verifier derives the wheel path and checks the
+Dockerfile names it, so no script or test carries a version literal. A recipes
+contract major is deployed consumer-first: pin the recipes commit here, deploy,
+then move the recipes `platform_ref`.
 The verifier does not require
 generated inventory in the checkout. The
 protocol wheel and SPDX 2.3 files are build outputs. Generate release evidence

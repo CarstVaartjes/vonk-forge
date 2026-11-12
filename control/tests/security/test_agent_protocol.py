@@ -52,7 +52,10 @@ PROTOCOL_WHEEL = (
 )
 PROTOCOL_WHEEL_HASH = hashlib.sha256(PROTOCOL_WHEEL.read_bytes()).hexdigest()
 PUBLIC_CONTRACTS_WHEEL = (
-    ROOT / "inventory/wheels/vonk_forge_public_contracts-4.7.0-py3-none-any.whl"
+    ROOT
+    / tomllib.loads((ROOT / "control/packaging/public-contracts.lock").read_text())[
+        "wheel"
+    ]
 )
 PUBLIC_CONTRACTS_WHEEL_HASH = hashlib.sha256(
     PUBLIC_CONTRACTS_WHEEL.read_bytes()
