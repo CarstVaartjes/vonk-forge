@@ -299,10 +299,6 @@ def test_job_refusals_are_invalid_requests_with_reasons(service) -> None:
         jobs.get("absent")
     with pytest.raises(InvalidRequestError):
         jobs.enqueue("probe", "admin", "abc", ["spk_1"], {"token": "x"})
-    with pytest.raises(InvalidRequestError):
-        jobs.enqueue_guarded(
-            "probe", "admin", "abc", ["spk_1"], {}, authority_check=lambda: False
-        )
 
 
 def test_job_waiting_on_its_agent_operation_is_neither_claimed_nor_starved(

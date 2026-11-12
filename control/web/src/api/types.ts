@@ -5,6 +5,7 @@ import type { components, paths } from "./generated";
 export type MetricsSeriesResponse = components["schemas"]["MetricsSeriesResponse"];
 export type Metric = MetricsSeriesResponse["metric"];
 export type MetricRange = MetricsSeriesResponse["range"];
+export type MetricSpec = MetricsSeriesResponse["spec"];
 export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
 export type CliTokenDownload = components["schemas"]["CliTokenDownload"];
@@ -354,6 +355,7 @@ export interface ControlApi extends LibraryApi {
     node?: string,
     signal?: AbortSignal,
   ): Promise<MetricsSeriesResponse>;
+  metricsCatalogue(signal?: AbortSignal): Promise<MetricSpec[]>;
   fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
   renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity>;
   removeFleetNode(selector: string): Promise<FleetActionResponse>;

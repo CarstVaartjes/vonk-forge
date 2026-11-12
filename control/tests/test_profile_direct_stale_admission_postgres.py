@@ -7,16 +7,19 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
-from vonk_control.fleet_profile_contract import FleetProfileApplicationView
+from vonk_control.fleet_profile_contract import (
+    FleetProfileApplicationView,
+    FleetProfilePreview,
+)
 from vonk_control.fleet_profiles import (
     FleetProfileService,
     FleetProfileStalePlanConflict,
+    _persisted_profile_plan,
 )
 from vonk_control.models import (
     ClusterMapping,
     FleetProfileApplication,
     RecipeBuild,
-    RecipeRun,
 )
 
 from .test_fleet_profile_review import _replace_run
@@ -126,10 +129,12 @@ def test_direct_stale_refusal_that_replanning_cannot_change_ends_with_evidence(
     assert "injected unchanged admission assumption" in refusal.detail
 
 
-def test_pending_replan_cannot_acquire_an_unreviewed_stop_target(
+def test_a_waiting_load_replans_to_stop_a_workload_that_appeared_meanwhile(
     tmp_path, postgres_engine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Catches replacing the stored review with new destructive effects on retry."""
+    """#2128: a waiting load that issued nothing plans from the fleet as it is
+    now. A run that appeared while it waited is stopped like any other the
+    profile replaces; no newer request exists, so the load is not superseded."""
     sessions, lifecycle, _, profiles, profile, installed, nodes = (
         _exact_cleanup_profile(tmp_path, engine=postgres_engine)
     )
@@ -157,9 +162,15 @@ def test_pending_replan_cannot_acquire_an_unreviewed_stop_target(
         assert due is not None
         profiles._clock = lambda due=due: due
         assert profiles.tick()
-    ended = profiles.application(accepted.id)
-    assert ended.state == LifecycleState.SUPERSEDED
-    assert "unreviewed workload" in (ended.status_reason or "")
+    admitted = profiles.application(accepted.id)
+    assert admitted.state == LifecycleState.RUNNING, admitted
+    assert not admitted.progress.admission_pending
     with sessions() as session:
-        replacement = session.get(RecipeRun, replacement_id)
-        assert replacement is not None and replacement.state == LifecycleState.RUNNING
+        row = session.get(FleetProfileApplication, accepted.id)
+        assert row is not None
+        plan = _persisted_profile_plan(row)
+    assert isinstance(plan, FleetProfilePreview)
+    assert any(
+        effect.run_id == replacement_id and effect.action == "stop"
+        for effect in plan.effects.runs
+    )

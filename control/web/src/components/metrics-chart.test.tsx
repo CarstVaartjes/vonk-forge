@@ -1,9 +1,56 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ControlApi, MetricsSeriesResponse } from "../api/types";
+import type { ControlApi, MetricSpec, MetricsSeriesResponse } from "../api/types";
 import { MetricsChart, SeriesChart } from "./metrics-chart";
+
+const spec = (
+  metric: MetricSpec["metric"],
+  title: string,
+  unit: MetricSpec["unit"],
+  extra: Partial<MetricSpec> = {},
+): MetricSpec => ({
+  metric,
+  title,
+  unit,
+  scope: "node",
+  basis: "measured",
+  source: "spark",
+  summary_total: false,
+  hint: "",
+  ...extra,
+});
+const model = {
+  scope: "alias",
+  basis: "estimated",
+  source: "gateway",
+  summary_total: true,
+} as const;
+const SPECS: Record<string, MetricSpec> = {
+  gpu_utilization: spec("gpu_utilization", "GPU utilisation", "percent"),
+  host_memory_used: spec("host_memory_used", "Unified memory used", "bytes"),
+  gpu_temperature: spec("gpu_temperature", "GPU temperature", "celsius"),
+  request_rate: spec("request_rate", "Requests per model", "per_second", model),
+  output_token_rate: spec("output_token_rate", "Generated tokens per model", "tokens_per_second", {
+    ...model,
+    hint: "Counted by the gateway.",
+  }),
+  certificate_expiry: spec("certificate_expiry", "Certificate expiry", "seconds"),
+};
+const summary = { latest: 80, average: 50, peak: 90, total: null, coverage: 1 };
+
+/** The Controller answers with each metric's own spec; the fake does the same. */
+const fakeApi = (metricsSeries: (metric: string, ...rest: never[]) => unknown) =>
+  ({
+    metricsCatalogue: async () => Object.values(SPECS),
+    metricsSeries: (metric: string, ...rest: never[]) =>
+      Promise.resolve(metricsSeries(metric, ...rest)).then((data) => ({
+        ...(data as MetricsSeriesResponse),
+        spec: SPECS[metric],
+      })),
+  }) as unknown as ControlApi;
 
 const data: MetricsSeriesResponse = {
   metric: "gpu_utilization",
+  spec: SPECS.gpu_utilization,
   range: "6h",
   start: 100,
   end: 200,
@@ -15,14 +62,13 @@ const data: MetricsSeriesResponse = {
         { timestamp: 100, value: 20 },
         { timestamp: 200, value: 80 },
       ],
+      summary,
     },
   ],
 };
 
 test("renders the measured series, axes and identity instead of an empty chart", () => {
-  const { container } = render(
-    <SeriesChart data={data} unit="%" names={{ "Spark A": "Kitchen" }} />,
-  );
+  const { container } = render(<SeriesChart data={data} names={{ "Spark A": "Kitchen" }} />);
   expect(screen.getByRole("img", { name: "Time series in %" })).toBeVisible();
   expect(container.querySelector('path[stroke-width="2"]')).toHaveAttribute("d", "M50,125 L580,20");
   expect(screen.getByText("Kitchen · %")).toBeVisible();
@@ -37,6 +83,7 @@ const stable = (value: number): MetricsSeriesResponse => ({
         { timestamp: 100, value },
         { timestamp: 200, value },
       ],
+      summary,
     },
   ],
 });
@@ -50,9 +97,7 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
         ? stable(12 * 86400 + 600)
         : stable(10),
   );
-  render(
-    <MetricsChart api={{ metricsSeries } as unknown as ControlApi} names={{ spk_a: "Kitchen" }} />,
-  );
+  render(<MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
 
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
@@ -61,24 +106,32 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
 
-test("shows generated tokens per model in tok/s and not per Spark", async () => {
-  // Break caught: the token tile is missing, in raw units, or asked for one Spark.
+test("shows generated tokens per model as an estimate with the Controller's summary", async () => {
+  // Break caught: the gateway's tokens look measured, or the page recomputes what the Controller owns.
+  const tokens = { latest: 42.5, average: 40, peak: 61.2, total: 12400, coverage: 1 };
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "output_token_rate"
       ? {
           ...stable(42.5),
-          series: [{ ...stable(42.5).series[0], labels: { requested_model: "glm" } }],
+          series: [{ ...stable(42.5).series[0], labels: { alias: "glm" }, summary: tokens }],
         }
       : stable(10),
   );
-  const { rerender } = render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} />);
+  const { rerender } = render(<MetricsChart api={fakeApi(metricsSeries)} />);
 
   const tile = await screen.findByRole("region", { name: "Generated tokens per model" });
   await within(tile).findByText("glm · tok/s");
-  expect(tile).toHaveTextContent("42.5 tok/s");
-  rerender(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} node="spk_abc" />);
+  expect(tile).toHaveTextContent(
+    "glm: now 42.5 tok/s · average 40 tok/s · peak 61.2 tok/s · total 12400 (estimate)",
+  );
+  rerender(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
   await waitFor(() =>
-    expect(screen.queryByRole("region", { name: "Generated tokens per model" })).toBeNull(),
+    expect(metricsSeries).toHaveBeenCalledWith(
+      "output_token_rate",
+      "6h",
+      "spk_abc",
+      expect.any(AbortSignal),
+    ),
   );
 });
 
@@ -88,7 +141,7 @@ test("an empty series says so and one failed tile leaves the others", async () =
     if (metric === "gpu_temperature") throw new Error("Temporarily unavailable");
     return metric === "gpu_utilization" ? { ...data, series: [] } : stable(40);
   });
-  render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} />);
+  render(<MetricsChart api={fakeApi(metricsSeries)} />);
 
   const gpu = await screen.findByRole("region", { name: "GPU utilisation" });
   await within(gpu).findByText("No samples in this range");
@@ -97,9 +150,9 @@ test("an empty series says so and one failed tile leaves the others", async () =
   await within(screen.getByRole("region", { name: "Unified memory used" })).findByRole("img");
 });
 
-test("one range switch re-reads every tile for the Spark", async () => {
+test("one range switch re-reads every tile for the Spark, models included", async () => {
   const metricsSeries = vi.fn(async () => data);
-  render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} node="spk_abc" />);
+  render(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
   await screen.findAllByRole("img");
   fireEvent.change(screen.getByRole("combobox", { name: "Range" }), { target: { value: "24h" } });
   await waitFor(() =>
@@ -110,11 +163,11 @@ test("one range switch re-reads every tile for the Spark", async () => {
       expect.any(AbortSignal),
     ),
   );
-  expect(metricsSeries).not.toHaveBeenCalledWith(
+  expect(metricsSeries).toHaveBeenCalledWith(
     "request_rate",
-    expect.anything(),
+    "24h",
     "spk_abc",
-    expect.anything(),
+    expect.any(AbortSignal),
   );
 });
 
@@ -123,9 +176,7 @@ test("an expired certificate says expired, never 'expires in now'", async () => 
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "certificate_expiry" ? stable(0) : stable(10),
   );
-  render(
-    <MetricsChart api={{ metricsSeries } as unknown as ControlApi} names={{ spk_a: "Kitchen" }} />,
-  );
+  render(<MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
 
   expect(await screen.findByText("Kitchen: certificate expired")).toBeVisible();
   expect(screen.queryByText(/expires in/)).toBeNull();
@@ -141,16 +192,14 @@ test("a Spark has the same colour in every tile, by its place in the snapshot or
         { timestamp: 100, value: 1 },
         { timestamp: 200, value: 2 },
       ],
+      summary,
     })),
   });
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "gpu_temperature" ? both("spk_b", "spk_a") : both("spk_a", "spk_b"),
   );
   render(
-    <MetricsChart
-      api={{ metricsSeries } as unknown as ControlApi}
-      names={{ spk_a: "Kitchen", spk_b: "Garage" }}
-    />,
+    <MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen", spk_b: "Garage" }} />,
   );
 
   const color = async (tile: string, name: string) => {
@@ -170,7 +219,7 @@ test("range changes request Spark samples and a fresh read recovers from failure
     if (failing && range === "24h") throw new Error("Temporarily unavailable, retry");
     return data;
   });
-  render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} node="spk_abc" />);
+  render(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
   await screen.findAllByRole("img");
   expect(metricsSeries).toHaveBeenCalledWith(
     "gpu_utilization",
@@ -199,7 +248,7 @@ test("range change aborts the old read and a late response cannot replace curren
           })
         : Promise.resolve(data),
   );
-  render(<MetricsChart api={{ metricsSeries } as unknown as ControlApi} />);
+  render(<MetricsChart api={fakeApi(metricsSeries)} />);
   fireEvent.change(screen.getByRole("combobox", { name: "Range" }), { target: { value: "1h" } });
   await screen.findAllByRole("img");
   const stale = metricsSeries.mock.calls.filter((call) => call[1] === "6h");
