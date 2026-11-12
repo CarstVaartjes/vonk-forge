@@ -37,6 +37,7 @@ from vonk_agent_protocol.inventory import (
     ModelStoreObject,
     NetworkInterface,
     RunScopeId,
+    StoppedRun,
 )
 from vonk_agent_protocol.telemetry import HostResourceSample
 
@@ -169,6 +170,12 @@ class NodeInventorySnapshot(NodeSnapshot):
             ),
             nullable=True,
         )
+    )
+    stopped_runs: Mapped[list[StoppedRun] | Residue | None] = mapped_column(
+        ContractJSON[list[StoppedRun]](
+            "node_inventory_snapshots", "stopped_runs", none_as_null=True
+        ),
+        nullable=True,
     )
 
     nvidia_driver_version: Mapped[str] = mapped_column(

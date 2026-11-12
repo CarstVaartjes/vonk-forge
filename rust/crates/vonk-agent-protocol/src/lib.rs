@@ -100,7 +100,8 @@ use recipe_validation::{
 };
 
 pub use validation::{
-    MAX_REPORTED_INSTALLATIONS, MAX_REPORTED_RUNS, ProtocolError, valid_interface_name,
+    MAX_REPORTED_INSTALLATIONS, MAX_REPORTED_RUNS, MAX_REPORTED_STOPPED_RUNS, ProtocolError,
+    valid_interface_name,
 };
 
 #[cfg(test)]

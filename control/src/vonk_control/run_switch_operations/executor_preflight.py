@@ -19,6 +19,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase, ProfileReportedPhase
+from vonk_agent_protocol.inventory import StoppedRun
 
 from ..inventory_repository import MAX_INVENTORY_FUTURE_SKEW, InventoryRepository
 from ..lifecycle_preflight import LifecyclePreflight, LifecyclePreflightCheckpoint
@@ -185,6 +186,9 @@ class ExecutorPreflightMixin:
                     else _aware(run.stopped_at or now)
                 )
                 collected_after = stopped_at + MAX_INVENTORY_FUTURE_SKEW
+                stopped_here = StoppedRun(
+                    run_id=run.id, run_generation=run.run_generation
+                )
                 for node_id in sorted(members & expected_pools.keys()):
                     try:
                         snapshot = inventory.latest(
@@ -205,10 +209,18 @@ class ExecutorPreflightMixin:
                             RunSwitchCode.POST_STOP_MEMORY_POOL_CHANGED,
                             reason=WaitReason.SCOPE_CHANGED,
                         )
-                    # A sample received after the receipt can still have been
-                    # collected before the stop. Preserve the producer clock's
-                    # full admitted lead instead of treating receipt time as
-                    # collection time or a released promise as physical memory.
+                    # The Spark names this run's Stop in a collection it began
+                    # after completing that Stop: causal order, no clock read.
+                    if not snapshot.stale and stopped_here in (
+                        snapshot.stopped_runs or ()
+                    ):
+                        continue
+                    # Otherwise (an agent that predates the evidence, or a Stop
+                    # it did not execute) a sample received after the receipt
+                    # can still have been collected before the stop. Preserve
+                    # the producer clock's full admitted lead instead of
+                    # treating receipt time as collection time or a released
+                    # promise as physical memory.
                     if (
                         snapshot.stale
                         or _aware(snapshot.received_at) < stopped_at
@@ -219,7 +231,11 @@ class ExecutorPreflightMixin:
                             f"({collected_after.isoformat()}; "
                             f"latest {snapshot.observed_at.isoformat()})",
                             node_id=node_id,
-                            collected_after=collected_after,
+                            # A Spark that names its Stops may settle the wait
+                            # with its very next collection.
+                            collected_after=collected_after
+                            if snapshot.stopped_runs is None
+                            else snapshot.observed_at,
                             observed_after=snapshot.observed_at,
                         )
 

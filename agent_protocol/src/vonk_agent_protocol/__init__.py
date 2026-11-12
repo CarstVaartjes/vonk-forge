@@ -237,6 +237,7 @@ from .inventory import (
     InventoryRequest,
     InventoryVerdict,
     NetworkInterface,
+    StoppedRun,
 )
 from .recipe_jobs import (
     RecipeJobEnding,
@@ -526,6 +527,7 @@ __all__ = [
     "StopIdentityTarget",
     "StopOutcome",
     "StopPlanCode",
+    "StoppedRun",
     "StorageDemandCode",
     "StrictJSONModel",
     "SupersedeCode",

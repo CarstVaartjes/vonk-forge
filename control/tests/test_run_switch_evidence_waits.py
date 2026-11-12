@@ -52,7 +52,13 @@ _PHASES = (
 )
 
 
-def _report(sessions, node_id: str, observed_at: datetime, received_at: datetime):
+def _report(
+    sessions,
+    node_id: str,
+    observed_at: datetime,
+    received_at: datetime,
+    stopped_runs: list[dict[str, object]] | None = None,
+):
     """The Spark reports its unchanged inventory again, collected at ``observed_at``."""
 
     inventory = InventoryRepository(sessions, clock=lambda: received_at)
@@ -80,6 +86,11 @@ def _report(sessions, node_id: str, observed_at: datetime, received_at: datetime
                     "network_interfaces": report.network_interfaces,
                     "nas_route_interface": report.nas_route_interface,
                     "schema_version": 1,
+                    **(
+                        {"stopped_runs": stopped_runs}
+                        if stopped_runs is not None
+                        else {}
+                    ),
                 }
             )
         )
@@ -200,9 +211,9 @@ def test_a_silent_spark_is_looked_at_again_once_its_inventory_is_too_old(
     assert _result(view).awaited_inventory is not None
 
 
-def test_the_post_stop_gate_names_the_spark_and_the_collection_it_judged(
-    tmp_path: Path,
-) -> None:
+def _stopped_gate(tmp_path: Path):
+    """A Switch whose stop of the Spark's previous run is complete."""
+
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
     node_id = nodes[0]
     installation_id = installed_recipe(
@@ -234,6 +245,15 @@ def test_the_post_stop_gate_names_the_spark_and_the_collection_it_judged(
     now = [stopped_at + timedelta(seconds=10)]
     gate = RecipeLifecyclePhaseExecutor(
         lifecycle, sessions, ClusterMappingService(sessions), lambda: now[0]
+    )
+    return sessions, service, node_id, run_id, plan, gate, now, stopped_at
+
+
+def test_the_post_stop_gate_names_the_spark_and_the_collection_it_judged(
+    tmp_path: Path,
+) -> None:
+    sessions, service, node_id, _run_id, plan, gate, now, stopped_at = _stopped_gate(
+        tmp_path
     )
     threshold = stopped_at + MAX_INVENTORY_FUTURE_SKEW
 
@@ -271,6 +291,57 @@ def test_the_post_stop_gate_names_the_spark_and_the_collection_it_judged(
         actor="admin",
     )
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+def test_a_spark_naming_the_stop_settles_the_gate_inside_the_clock_allowance(
+    tmp_path: Path,
+) -> None:
+    """Wrong implementation this catches: the gate ordered a collection after
+    the stop only by clocks (the stop plus the 30 s skew allowance), so a Spark
+    that reported right after completing the stop still left the load waiting
+    for its next two-minute report. A Spark that names the Stop it completed
+    before collecting proves the order; one that does not keeps the clock rule."""
+
+    sessions, _service, node_id, run_id, plan, gate, now, stopped_at = _stopped_gate(
+        tmp_path
+    )
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        generation = run.run_generation
+    threshold = stopped_at + MAX_INVENTORY_FUTURE_SKEW
+
+    # An agent that predates the evidence keeps today's clock rule.
+    _report(sessions, node_id, now[0], now[0])
+    with pytest.raises(RunSwitchPostStopInventoryPending) as pending:
+        gate._require_post_stop_inventory(plan)
+    assert pending.value.observed_after == threshold
+
+    # Naming another generation's Stop proves nothing about this one, but the
+    # Spark's very next collection may settle the wait.
+    other = now[0] + timedelta(seconds=1)
+    _report(
+        sessions,
+        node_id,
+        other,
+        other,
+        stopped_runs=[{"run_id": run_id, "run_generation": generation + 1}],
+    )
+    with pytest.raises(RunSwitchPostStopInventoryPending) as pending:
+        gate._require_post_stop_inventory(plan)
+    assert pending.value.observed_after == other
+
+    # The collection names this Stop: settled with no clock allowance.
+    named = now[0] + timedelta(seconds=2)
+    assert named < threshold
+    _report(
+        sessions,
+        node_id,
+        named,
+        named,
+        stopped_runs=[{"run_id": run_id, "run_generation": generation}],
+    )
+    gate._require_post_stop_inventory(plan)
 
 
 def test_a_repeated_preflight_refresh_keeps_one_progress_signature(

@@ -12,6 +12,7 @@ use url::Url;
 use vonk_agent::{
     agent_upgrade::AgentUpgradeExecutor,
     client::{AgentHttpClient, ClientError, Disposition},
+    completed_stops::CompletedStops,
     config::{AgentConfig, DEFAULT_CONFIG_PATH, POLL_MAX_SECONDS, POLL_MIN_SECONDS},
     executor::{
         Beside, ControlExecutor, LaneStep, LoopError, RecipeExecutor, RecipeObservationError,
@@ -265,14 +266,22 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
+    // The claim lane records each Stop it completes; the next inventory names it.
+    let stops = CompletedStops::default();
     let control = run_control_lane(
         config,
         runtime_identity,
         client.clone(),
         state,
         verdict.clone(),
+        stops.clone(),
     );
-    let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone(), verdict));
+    let mut inventory = tokio::spawn(run_inventory_lane(
+        config.clone(),
+        client.clone(),
+        verdict,
+        stops,
+    ));
     let outcome = supervise_lanes_with_rotation(
         control,
         async {
@@ -301,6 +310,7 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 struct CustodyExecutor<'a, E> {
     executor: &'a E,
     available: bool,
+    stops: CompletedStops,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -327,9 +337,12 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
                 ),
             );
         }
-        self.executor
+        let result = self
+            .executor
             .execute(claim, lease_deadline, cancellation)
-            .await
+            .await;
+        self.stops.observe(claim, &result);
+        result
     }
 }
 
@@ -392,6 +405,7 @@ async fn run_control_lane(
     client: AgentHttpClient,
     state: StateStore,
     verdict: LatestVerdict,
+    stops: CompletedStops,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // A build compiles beside the lane: the Spark keeps claiming other work.
     let runner = SystemProcessRunner;
@@ -411,6 +425,7 @@ async fn run_control_lane(
         client.clone(),
         state,
         verdict,
+        stops,
         &builds,
         &beside,
     );
@@ -423,6 +438,7 @@ async fn claim_lane<'a>(
     client: AgentHttpClient,
     mut state: StateStore,
     verdict: LatestVerdict,
+    stops: CompletedStops,
     builds: &'a RecipeExecutor<'a, SystemProcessRunner>,
     beside: &Beside<'a>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -535,6 +551,7 @@ async fn claim_lane<'a>(
         };
         let guarded = CustodyExecutor {
             executor: &executor,
+            stops: stops.clone(),
             available: self_test::verify_runtime_directories(
                 &config.data_dir,
                 Path::new("/run/vonk-forge-agent"),
@@ -578,10 +595,12 @@ async fn claim_lane<'a>(
                         Ok(store) => {
                             let client = client.clone();
                             let available = guarded.available;
+                            let stops = stops.clone();
                             beside.start(fence, async move {
                                 let executor = CustodyExecutor {
                                     executor: builds,
                                     available,
+                                    stops,
                                 };
                                 claim.execute(client, store, &executor).await
                             });
@@ -671,8 +690,14 @@ async fn collect_stores(
     Instant::now() + INTERVAL
 }
 
-async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdict: LatestVerdict) {
+async fn run_inventory_lane(
+    config: AgentConfig,
+    client: AgentHttpClient,
+    verdict: LatestVerdict,
+    stops: CompletedStops,
+) {
     inventory_lane(
+        &stops,
         || {
             let config = config.clone();
             async move {
@@ -723,6 +748,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
 }
 
 async fn inventory_lane<Collect, Collected, Report, Reported>(
+    stops: &CompletedStops,
     mut collect: Collect,
     mut report: Report,
 ) where
@@ -734,8 +760,15 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
 {
     let mut failures = 0_u32;
     let mut inventory_reported_at = None;
+    let mut reported_stops = 0_u64;
     loop {
-        if inventory_refresh_due(inventory_reported_at, Instant::now()) {
+        // Taken before the collection begins, so every Stop it names precedes
+        // it. A Stop completed since the last report makes a collection due:
+        // the Controller's next load on this Spark waits for that evidence.
+        let (recorded_stops, completed_stops) = stops.snapshot();
+        if inventory_refresh_due(inventory_reported_at, Instant::now())
+            || recorded_stops != reported_stops
+        {
             let collected = collect_inventory_until_ready(
                 &mut collect,
                 &mut failures,
@@ -743,7 +776,7 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
                 POLL_MAX_SECONDS,
             )
             .await;
-            let inventory = match collected {
+            let mut inventory = match collected {
                 Ok(inventory) => inventory,
                 Err(error) => {
                     eprintln!("vonk-agent: inventory observation unavailable: {error}");
@@ -756,6 +789,7 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
                     continue;
                 }
             };
+            inventory.stopped_runs = Some(completed_stops);
             if disk_reserve_degraded(inventory.disk_free_bytes) {
                 eprintln!(
                     "vonk-agent: degraded: {} bytes remain on the state database filesystem; the {} byte reserve is not held",
@@ -770,6 +804,7 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
                 Ok(()) => {
                     failures = 0;
                     inventory_reported_at = Some(Instant::now());
+                    reported_stops = recorded_stops;
                     systemd_notify::watchdog();
                 }
                 Err(error) => {
@@ -1116,8 +1151,10 @@ mod tests {
         time::{Duration, Instant},
     };
     use vonk_agent::client::{ClientError, ControllerError};
+    use vonk_agent::completed_stops::CompletedStops;
     use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
     use vonk_agent::{inventory::Inventory, inventory::InventoryError};
+    use vonk_agent_protocol::generated::StoppedRun;
 
     #[tokio::test(start_paused = true)]
     async fn inventory_lane_survives_refusal_and_reports_after_recovery() {
@@ -1125,6 +1162,7 @@ mod tests {
         let started = tokio::time::Instant::now();
         let recovered = Cell::new(false);
         let lane = super::inventory_lane(
+            &Default::default(),
             || {
                 future::ready(Ok(
                     test_inventory().to_request(chrono::Utc::now().fixed_offset())
@@ -1147,6 +1185,53 @@ mod tests {
             _ = tokio::time::sleep(Duration::from_secs(180)) => {}
         }
         assert!(recovered.get());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn inventory_names_the_stops_completed_before_its_collection_began() {
+        // Wrong implementations: a completed Stop waited for the two-minute
+        // cadence, or a collection named a Stop that completed while it ran.
+        let stops = CompletedStops::default();
+        let stopped = |run: u128| StoppedRun {
+            run_id: uuid::Uuid::from_u128(run),
+            run_generation: 1,
+        };
+        let collections = Cell::new(0_u32);
+        let reports = RefCell::new(Vec::new());
+        let lane = super::inventory_lane(
+            &stops,
+            || {
+                collections.set(collections.get() + 1);
+                if collections.get() == 2 {
+                    stops.record(stopped(2));
+                }
+                future::ready(Ok(
+                    test_inventory().to_request(chrono::Utc::now().fixed_offset())
+                ))
+            },
+            |inventory| {
+                reports.borrow_mut().push(inventory.stopped_runs);
+                future::ready(Ok(()))
+            },
+        );
+        tokio::pin!(lane);
+        tokio::select! {
+            _ = &mut lane => panic!("inventory lane exited"),
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+        }
+        stops.record(stopped(1));
+        tokio::select! {
+            _ = &mut lane => panic!("inventory lane exited"),
+            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+        }
+        assert_eq!(
+            *reports.borrow(),
+            [
+                Some(vec![]),
+                Some(vec![stopped(1)]),
+                Some(vec![stopped(1), stopped(2)]),
+            ]
+        );
     }
 
     #[test]

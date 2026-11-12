@@ -1243,6 +1243,22 @@
           "title": "Schema Version",
           "type": "integer"
         },
+        "stopped_runs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StoppedRun"
+              },
+              "maxItems": 16,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stopped Runs"
+        },
         "unused_model_bytes": {
           "anyOf": [
             {
@@ -2296,6 +2312,28 @@
       ],
       "title": "RunState",
       "type": "string"
+    },
+    "StoppedRun": {
+      "description": "One run rank whose Stop this agent completed: the run and generation\nnamed by the Stop order it executed.",
+      "properties": {
+        "run_generation": {
+          "maximum": 9223372036854775807,
+          "minimum": 1,
+          "title": "Run Generation",
+          "type": "integer"
+        },
+        "run_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "run_generation"
+      ],
+      "title": "StoppedRun",
+      "type": "object"
     },
     "StoreRetentionFailure": {
       "description": "The first unresolved removal in a pass; other stores keep progressing.",

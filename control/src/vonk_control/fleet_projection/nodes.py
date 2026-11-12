@@ -421,6 +421,7 @@ def _inventory(
                 "installations",
                 "runs",
                 "installation_bytes",
+                "stopped_runs",
             },
         ),
         observed_at=observed,
