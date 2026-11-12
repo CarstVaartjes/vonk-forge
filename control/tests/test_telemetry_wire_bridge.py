@@ -27,8 +27,9 @@ def telemetry_wire_probe() -> Path:
 
 def _sample(observed_at: str) -> dict[str, object]:
     vector = json.loads(
-        (files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json")
-        .read_text()
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
+        ).read_text()
     )
     return {**vector["sample"], "observed_at": observed_at}
 
