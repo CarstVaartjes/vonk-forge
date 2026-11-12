@@ -10,6 +10,7 @@ from library_route_fixtures import _library_detail, _recipe_projection
 from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli_render import progress_line, render_payload
+from cluster_profiles.cli_render.profile import _profile_endpoints
 
 
 @pytest.mark.parametrize("width", [60, 80, 120])
@@ -1385,3 +1386,49 @@ def test_version_lines_print_the_text_the_dashboard_shows(case, capsys):
     printed = capsys.readouterr().out.splitlines()
     for line in case["lines"]:
         assert line in printed
+
+
+_SERVING_NOW_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "serving-now.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "case", _SERVING_NOW_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_profile_endpoint_prints_the_serving_lines_the_dashboard_shows(case, capsys):
+    # The web test renders the same fixture, so the two clients cannot drift.
+    assignments = [
+        {
+            "assignment_id": f"33333333-3333-4333-8333-{index:012d}",
+            "desired_state": "running",
+            **item,
+            "endpoint": {
+                "alias": item["alias"],
+                "api_base": "https://vonk-forge.example.ts.net/v1",
+                "backend_api_base": "http://10.0.0.10:8000/v1",
+                "generation": 8,
+                "node_id": "spk_" + "a" * 32,
+                "observed_at": "2026-09-23T12:59:30Z",
+                "plan_digest": "a" * 64,
+            }
+            if item["state"] == "published"
+            else None,
+        }
+        for index, item in enumerate(case["assignments"])
+    ]
+    _profile_endpoints(
+        {
+            "number": 3,
+            "profile_id": "11111111-1111-4111-8111-111111111111",
+            "application_id": "22222222-2222-4222-8222-222222222222",
+            "application_state": "succeeded",
+            "observed_at": "2026-09-23T12:59:31Z",
+            "assignments": assignments,
+        }
+    )
+
+    printed = capsys.readouterr().out.splitlines()
+    start = printed.index(_SERVING_NOW_FIXTURE["heading"])
+    assert printed[start + 1 : start + 1 + len(case["lines"])] == case["lines"]
+    assert printed[start + 1 + len(case["lines"])] == ""

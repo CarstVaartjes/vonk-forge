@@ -22,6 +22,7 @@ import { PageHeader } from "../components/page-header";
 import { SkeletonRows } from "../components/skeleton";
 import { useToast } from "../components/toast";
 import { EnrollmentGrant } from "../components/enrollment-grant";
+import { ServingNow, servingKey } from "../components/serving-now";
 import { SparkDetail } from "../components/spark-detail";
 import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
@@ -226,6 +227,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
             subject="the Fleet"
           />
         </div>
+      )}
+      {fleet.snapshot && (
+        <ServingNow
+          api={api}
+          refreshKey={servingKey(fleet.snapshot.nodes)}
+          pollKey={fleet.snapshot.generated_at}
+        />
       )}
       {fleet.snapshot && (
         <section className="fleet-command-summary" aria-label="Fleet summary">
