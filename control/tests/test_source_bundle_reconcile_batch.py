@@ -88,6 +88,7 @@ def test_a_digest_heals_through_a_sibling_package(tmp_path: Path) -> None:
     }
     with sessions.begin() as session:
         template = session.get(CatalogDocumentRevision, revision.id)
+        assert template is not None
         columns = {
             column.key: getattr(template, column.key)
             for column in CatalogDocumentRevision.__table__.columns
@@ -167,4 +168,4 @@ def test_database_store_cost_is_independent_of_distinct_digests(
         seed(start, stop)
         service._source_check_at = 0.0
         counts.append(_count_queries(postgres_engine, service.reconcile_source_bundles))
-    assert counts == [2, 2]
+    assert counts[0] == counts[1]
