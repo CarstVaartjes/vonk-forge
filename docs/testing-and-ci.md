@@ -433,6 +433,9 @@ npm test --prefix control/web -- --run
 npm run build --prefix control/web
 ```
 
+The web tests include `styles-live.test.ts`: every class a stylesheet selects must be
+named by production source, so deleting a component also deletes its CSS.
+
 Generated clients and wire outputs are ignored build inputs. Test setup prepares
 them, and `tests/test_generated_contracts.py` compares them with their Pydantic
 producers alongside the remaining checked-in installer and qualification
