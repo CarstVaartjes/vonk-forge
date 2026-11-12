@@ -58,6 +58,11 @@ from .test_run_switch_operations import (
     RecordingArtifactExecutor,
 )
 
+# These scenarios stop an attempt at an exact phase and fail it there; one
+# transition per redrive keeps each phase observable between ticks. The chain
+# is proven in test_run_switch_redrive_chain.
+pytestmark = pytest.mark.usefixtures("one_transition_per_redrive")
+
 
 def _load(tmp_path: Path, *, executor=None, artifacts=None):
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
