@@ -32,7 +32,6 @@ def _valid(**overrides: str):
         "agent-package": "true",
         "lane": "false",
         "full": "true",
-        "rust-sources": "false",
     }
     results = {
         "lint": "success",
@@ -51,7 +50,6 @@ def _valid(**overrides: str):
         "agent-package": "success",
         "lane-proof": "skipped",
         "supply-chain": "success",
-        "targeted-tests": "skipped",
     }
     selected.update({key: value for key, value in overrides.items() if key in selected})
     results.update({key: value for key, value in overrides.items() if key in results})
@@ -189,26 +187,16 @@ def test_repository_guards_are_required_when_heavy_repository_is_skipped(
     )
 
 
-def test_member_pull_request_runs_only_the_fast_tier() -> None:
-    selected, results = _valid(full="false", **{"rust-sources": "true"})
-    for job in ("rust-platform", "controller-spark-wire", "control",
-                "control-image-build", "web", "compose", "nas-install",
-                "agent-package"):  # fmt: skip
+def test_member_pull_request_runs_no_jobs() -> None:
+    selected, results = _valid(full="false")
+    for job in results:
         results[job] = "skipped"
-    results["targeted-tests"] = "success"
     assert _module().verify("success", selected, results) == []
-    # A full suite that ran anyway, or skipped targeted tests, is refused.
-    refused = dict(results, control="success", **{"targeted-tests": "skipped"})
-    assert set(_module().verify("success", selected, refused)) == {
-        "targeted-tests result is 'skipped', expected 'success'",
-        "control result is 'success', expected 'skipped'",
-    }
-    # Without Rust inputs a member builds no Rust.
-    selected["rust-sources"] = "false"
-    assert set(_module().verify("success", selected, results)) == {
-        "rust-quality result is 'success', expected 'skipped'",
-        "rust-tests result is 'success', expected 'skipped'",
-    }
+    # Any job that ran anyway is refused.
+    refused = dict(results, lint="success")
+    assert _module().verify("success", selected, refused) == [
+        "lint result is 'success', expected 'skipped'"
+    ]
 
 
 def test_missing_scope_selection_is_refused() -> None:

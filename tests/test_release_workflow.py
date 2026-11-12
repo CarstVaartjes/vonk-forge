@@ -18,11 +18,8 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github/workflows"
-# ci.yml skips a labeled event for any label but release-acceptance.
-IGNORED_LABEL_IF = (
-    "${{ !(github.event.action == 'labeled' && "
-    "github.event.label.name != 'release-acceptance') }}"
-)
+# Every fast job runs on the full suites only; a member pull request runs none.
+FULL_ONLY = "needs.changes.outputs.full == 'true'"
 RELEASE = WORKFLOWS / "installer-publication.yml"
 ACCEPTANCE = WORKFLOWS / "release-acceptance-core.yml"
 CANDIDATE = WORKFLOWS / "installer-candidate.yml"
@@ -274,8 +271,9 @@ def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
 def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
     for name in ("generated-clients", "repository-guards", "lint"):
-        # The only predicate is the one that skips a label other than release-acceptance.
-        assert jobs[name].get("if", IGNORED_LABEL_IF) == IGNORED_LABEL_IF, name
+        # No path predicate: the only one is the selector's full-suites choice.
+        assert jobs[name]["if"] == FULL_ONLY, name
+        assert jobs[name]["needs"] == "changes", name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
     # Integration PRs prove their own complete candidate with no release secrets.
     assert jobs["lane-proof"]["uses"] == "./.github/workflows/release-acceptance.yml"

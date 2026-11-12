@@ -220,7 +220,6 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "rust": "true", "repository": "true", "control": "true", "web": "true",
         "generated": "true", "compose": "true", "nas-install": "true",
         "agent-package": "true", "lane": "false", "full": "true",
-        "rust-sources": "false",
     }  # fmt: skip
     results = {
         "lint": "success", "supply-chain": "success", "repository-guards": "success",
@@ -229,7 +228,6 @@ def test_a_control_only_pr_without_acceptance_still_passes_the_gate() -> None:
         "generated": "success", "compose": "success", "nas-install": "success",
         "agent-package": "success", "control-image-build": "success",
         "controller-spark-wire": "success", "lane-proof": "skipped",
-        "targeted-tests": "skipped",
     }  # fmt: skip
     assert gate["verify"]("success", selected, results) == []
     results["lane-proof"] = "success"
@@ -507,19 +505,3 @@ def _pull(ref: str, *, labels=(), fork: bool = False) -> dict:
 )
 def test_only_a_member_pull_request_skips_the_full_suites(event, payload, full) -> None:
     assert _module().full_suites(event, payload) is full
-
-
-@pytest.mark.parametrize(
-    ("path", "selected"),
-    [
-        ("rust/crates/vonk-agent/src/lib.rs", True),
-        ("Cargo.lock", True),
-        ("agent_protocol/src/vonk_agent_protocol/x.py", True),
-        ("control/src/vonk_control/api.py", False),
-        ("control/src/vonk_control/resources/site-ports.json", True),
-        ("control/uv.lock", True),
-        ("docs/rust.md", False),
-    ],
-)
-def test_member_rust_build_follows_rust_and_wire_inputs(path, selected) -> None:
-    assert _module().rust_sources_changed([path]) is selected
