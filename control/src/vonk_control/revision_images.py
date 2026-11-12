@@ -7,6 +7,10 @@ a row of its own (``RecipeBuildService.resolve`` finds it by content). The
 images a revision can run are therefore the succeeded builds of its recipe
 document, newest first, not the builds that happen to name its revision id.
 
+A recipe of another document that pins the same image digest (a dual sharing its
+single's prebuilt image) runs the same image: a succeeded build whose image
+digest is the digest the revision's projection pins is returned too.
+
 Readers use this for retention, presence and removal scope. Retention must keep
 too much rather than too little, so it takes every build of the document;
 presence readers ask only for builds of the same source bundle, which is the part
@@ -20,6 +24,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import LifecycleState
 
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
@@ -66,6 +71,11 @@ def revision_images(
             )
         )
     }
+    # Each projection is read once: it states the source bundle and the pin.
+    projections = {
+        revision_id: _read_projection(revision)
+        for revision_id, revision in revisions.items()
+    }
     documents = {row.document_id for row in revisions.values()}
     if not documents:
         return {}
@@ -110,7 +120,8 @@ def revision_images(
     for revision_id, revision in revisions.items():
         sources = (
             build_source_bundles(
-                revision_source_bundle(revision), recorded.get(revision_id, ())
+                _stated(projections[revision_id], "source_bundle_sha256"),
+                recorded.get(revision_id, ()),
             )
             if same_source
             else None
@@ -136,6 +147,45 @@ def revision_images(
             seen.add(image.archive_sha256)
             images.append(image)
         result[revision_id] = tuple(images)
+    pinned = {
+        revision_id: digest
+        for revision_id in revisions
+        if (digest := _pinned_digest(projections[revision_id])) is not None
+    }
+    if pinned:
+        # An image is its content: a succeeded build of any recipe whose image
+        # is the digest this revision pins is an image this revision runs.
+        # Both sides state that digest; the recipe that asked first is not it.
+        shared: dict[str, list[RevisionImage]] = {}
+        for build in session.scalars(
+            select(RecipeBuild)
+            .where(
+                RecipeBuild.image_digest.in_(sorted(set(pinned.values()))),
+                RecipeBuild.state == LifecycleState.SUCCEEDED.value,
+                RecipeBuild.oci_layout_sha256.is_not(None),
+                RecipeBuild.image_bytes.is_not(None),
+            )
+            .order_by(RecipeBuild.updated_at.desc(), RecipeBuild.id.desc())
+        ):
+            assert build.image_digest is not None
+            assert build.oci_layout_sha256 is not None
+            assert build.image_bytes is not None
+            shared.setdefault(build.image_digest, []).append(
+                RevisionImage(
+                    archive_sha256=build.oci_layout_sha256,
+                    image_digest=build.image_digest,
+                    image_bytes=build.image_bytes,
+                    build_id=build.id,
+                )
+            )
+        for revision_id, digest in pinned.items():
+            known = {image.archive_sha256 for image in result[revision_id]}
+            extra: list[RevisionImage] = []
+            for image in shared.get(digest, ()):
+                if image.archive_sha256 not in known:
+                    known.add(image.archive_sha256)
+                    extra.append(image)
+            result[revision_id] += tuple(extra)
     return result
 
 
@@ -190,12 +240,24 @@ def revisions_running_archives(
     }
 
 
+def _read_projection(revision: CatalogDocumentRevision) -> object | None:
+    try:
+        return read_catalog_projection(revision)
+    except CatalogRevisionContractError:
+        return None
+
+
+def _stated(projected: object | None, name: str) -> str | None:
+    candidate = getattr(projected, name, None)
+    return candidate if isinstance(candidate, str) else None
+
+
+def _pinned_digest(projected: object | None) -> str | None:
+    image = getattr(projected, "prebuilt_image", None)
+    return image.digest if image is not None else None
+
+
 def revision_source_bundle(revision: CatalogDocumentRevision) -> str | None:
     """The source bundle digest the revision was imported with; None if unknown."""
 
-    try:
-        projected = read_catalog_projection(revision)
-    except CatalogRevisionContractError:
-        return None
-    candidate = getattr(projected, "source_bundle_sha256", None)
-    return candidate if isinstance(candidate, str) else None
+    return _stated(_read_projection(revision), "source_bundle_sha256")

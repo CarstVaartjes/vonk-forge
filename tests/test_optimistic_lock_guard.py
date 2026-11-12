@@ -146,9 +146,6 @@ FOLLOW_UP_JOB_LOCKS: dict[str, tuple[str, ...]] = {
         "_expire_distribution_observation",
         "_fail",
     ),
-    "control/src/vonk_control/run_switch_operations/evidence_waits.py": (
-        "wake_evidence_waits",
-    ),
     "control/src/vonk_control/run_switch_operations/observation.py": (
         "_record_wait",
         "_hold_after_advance_failure",

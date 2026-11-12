@@ -4921,24 +4921,8 @@ def test_reusable_preflight_survives_operation_history_collection(service) -> No
     with sessions() as session:
         retained = latest_result(session, NODE_A, requirements_sha256=digest)
         assert retained is not None and retained.result == result
-        assert not admission_blockers(
-            request,
-            retained,
-            current_fingerprint="a" * 64,
-            now=int(clock.now.timestamp()),
-        )
-        assert admission_blockers(
-            request,
-            retained,
-            current_fingerprint="b" * 64,
-            now=int(clock.now.timestamp()),
-        )
-        assert admission_blockers(
-            request,
-            retained,
-            current_fingerprint="a" * 64,
-            now=int(clock.now.timestamp()) + 301,
-        )
+        assert not admission_blockers(request, retained, current_fingerprint="a" * 64)
+        assert admission_blockers(request, retained, current_fingerprint="b" * 64)
 
 
 def test_failed_preflight_wake_preserves_committed_receipt(service, caplog):

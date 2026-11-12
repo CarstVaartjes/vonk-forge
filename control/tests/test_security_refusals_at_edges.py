@@ -45,8 +45,9 @@ from .test_recipe_operation_bookkeeping import _running_recipe
 
 _ROOT = "recipe.run-switch.v2"
 _STOP = "recipe.stop"
-# The load continues toward its replacement Start with a fresh preflight.
-_NEXT = "runtime.preflight.v1"
+# The load continues to its replacement Start (the preflight receipt still
+# matches the unchanged host, so no new probe runs).
+_NEXT = "recipe.start"
 
 
 def _advance(monkeypatch, seconds: int) -> None:
@@ -88,12 +89,16 @@ def _drive(profiles, planner, sessions, monkeypatch, kind: str) -> str:
 
 
 def _inventory_reported_again(sessions, monkeypatch) -> None:
-    """The Sparks report inventory again once the old run has stopped."""
+    """The Sparks report inventory again once the old run has stopped.
+
+    A report is collected (``observed_at``) and received (``received_at``)
+    after the stop, which is what the post-stop gate admits on.
+    """
 
     _advance(monkeypatch, 60)
     with sessions.begin() as session:
         for snapshot in session.scalars(select(NodeInventorySnapshot)):
-            snapshot.observed_at = recipe_fixtures.NOW
+            snapshot.observed_at = snapshot.received_at = recipe_fixtures.NOW
     _advance(monkeypatch, 1)
 
 

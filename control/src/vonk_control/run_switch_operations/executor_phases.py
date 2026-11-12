@@ -371,10 +371,10 @@ class ExecutorPhasesMixin:
                         workload_intent_ordinal=_bound_workload_intent(progress),
                     )
             except (RecipeInstallPreflightExpired, InstallPreflightExpired) as error:
-                # Compiling the launch document above can outlast the runtime
-                # preflight window this phase was admitted on.  Nothing else
-                # about the install changed, so ask the caller to rerun the
-                # ordinary probe rather than failing an identical plan.
+                # The host fingerprint can move (reboot, agent upgrade) while
+                # the launch document above compiles.  Nothing else about the
+                # install changed, so ask the caller to rerun the ordinary
+                # probe rather than failing an identical plan.
                 raise RunSwitchInstallPreflightExpired(
                     f"{RunSwitchCode.INSTALL_PREFLIGHT_EXPIRED}: {error}"
                 ) from error

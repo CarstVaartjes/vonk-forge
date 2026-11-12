@@ -1094,6 +1094,8 @@ def assemble_production_worker(
     }
     backstop = DueWaitBackstop(sessions, wait_sources(advancers), clock=clock)
     worker._due_waits = backstop.tick
+    backstop.timed = worker._timed
+    recipe_operations.timed = worker._timed
     return worker
 
 
