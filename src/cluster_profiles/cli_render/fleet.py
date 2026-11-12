@@ -125,56 +125,59 @@ def _display_memory(observation: DisplayMemoryObservation | None) -> str:
     return f"reserved {amount} · SoC {version} · UEFI {_text(observation.bios_version) if isinstance(observation.bios_version, str) else UNKNOWN} · display connected {display}"
 
 
-def _live(node: Mapping[str, object]) -> bool:
-    return _optional(node.get("telemetry"), "telemetry").get("freshness") == "live"
+def _live(node: object) -> bool:
+    telemetry = _optional(
+        _object(node, "Fleet node").get("telemetry"), "telemetry state"
+    )
+    return telemetry.get("freshness") == "live"
 
 
-def _vitals_source(node: Mapping[str, object]) -> Mapping[str, object]:
-    """The live telemetry sample while it is live, otherwise the inventory."""
-    if _live(node):
-        return _optional(
-            _optional(node.get("telemetry"), "telemetry").get("sample"),
-            "telemetry sample",
-        )
-    return _optional(node.get("inventory"), "inventory")
+def _live_sample(node: object):
+    """The telemetry sample while telemetry is live, otherwise nothing."""
+    telemetry = _optional(
+        _object(node, "Fleet node").get("telemetry"), "telemetry state"
+    )
+    if telemetry.get("freshness") != "live":
+        return {}
+    return _optional(telemetry.get("sample"), "telemetry sample")
 
 
-def _memory(node: Mapping[str, object]) -> str:
+def _memory(node: object) -> str:
     """Used memory beside the total, in the words the Controller web uses."""
-    source = _vitals_source(node)
-    live = _live(node)
-    total = source.get("memory_total_bytes" if live else "host_memory_total_bytes")
-    free = source.get("memory_available_bytes" if live else "host_memory_free_bytes")
+    sample = _live_sample(node)
+    inventory = _optional(
+        _object(node, "Fleet node").get("inventory"), "node inventory"
+    )
+    total, free = (
+        (sample.get("memory_total_bytes"), sample.get("memory_available_bytes"))
+        if _live(node)
+        else (
+            inventory.get("host_memory_total_bytes"),
+            inventory.get("host_memory_free_bytes"),
+        )
+    )
     if type(total) is not int or type(free) is not int or total <= 0:
         return NOT_REPORTED
     percent = round_half_up(100 * ((total - free) / total))
     return f"{_size(total - free)} of {_size(total)} ({percent}%)"
 
 
-def _disk(node: Mapping[str, object]) -> str:
+def _disk(node: object) -> str:
     """Free disk beside the total: the inventory's pair, else the live sample's."""
-    sources = [_optional(node.get("inventory"), "inventory")]
-    if _live(node):
-        sources.append(
-            _optional(
-                _optional(node.get("telemetry"), "telemetry").get("sample"),
-                "telemetry sample",
-            )
-        )
-    for source in sources:
+    inventory = _optional(
+        _object(node, "Fleet node").get("inventory"), "node inventory"
+    )
+    for source in (inventory, _live_sample(node)):
         free, total = source.get("disk_free_bytes"), source.get("disk_total_bytes")
         if type(free) is int and type(total) is int and total > 0:
             return f"{_size(free)} free of {_size(total)}"
     return NOT_REPORTED
 
 
-def _gpu(node: Mapping[str, object]) -> str:
+def _gpu(node: object) -> str:
+    sample = _live_sample(node)
     if not _live(node):
         return NOT_REPORTED
-    sample = _optional(
-        _optional(node.get("telemetry"), "telemetry").get("sample"),
-        "telemetry sample",
-    )
     return gpu_readings(
         sample.get("gpu_utilization_percent"),
         sample.get("gpu_temperature_c"),
