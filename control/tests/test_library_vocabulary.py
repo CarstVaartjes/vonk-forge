@@ -42,8 +42,7 @@ def test_sync_stores_the_release_vocabulary_and_a_newer_release_replaces_it(
     world = World(postgres_engine, tmp_path)
     client = _client(world.projection)
 
-    # A release that publishes no vocabulary: there is nothing to serve.
-    world.sync()
+    # Before the first sync there is nothing to serve (every release carries one).
     assert client.get(_URL).status_code == 404
 
     published = catalog_vocabulary().model_dump(mode="json")
