@@ -245,3 +245,7 @@ copies registry bytes with skopeo into the Controller's `image-cache/oci` layout
 and the existing unused-storage and image-store collectors expire receipts and
 unreferenced OCI blobs there. They do not operate the NAS Docker daemon. The
 registry container's `registry-data` volume is another separate store.
+
+## Remove it
+
+See [Remove Vonk Forge](../../docs/operations/uninstall.md) for the Controller and Spark removal steps.
