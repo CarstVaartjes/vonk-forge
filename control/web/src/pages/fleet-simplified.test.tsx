@@ -153,20 +153,26 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
-test("firing Prometheus alerts are visible in Fleet attention", () => {
+test("firing alerts name the Spark and say how serious, in words, with no operator action", () => {
+  nodes = [spark("Alpha", 40, 250)];
   attention = [
     {
       source: "prometheus",
       name: "NodeHot",
       summary: "GPU is hot",
       severity: "critical",
-      labels: { node_id: "Spark A" },
+      labels: { node_id: `spk_${"Alpha".padEnd(32, "0")}` },
       active_at: "2026-10-10T00:00:00Z",
     },
   ];
   render(<FleetPage api={{} as ControlApi} />);
-  expect(screen.getByRole("region", { name: "Needs attention" })).toHaveTextContent("GPU is hot");
+  const region = screen.getByRole("region", { name: "Needs attention" });
+  expect(region).toHaveTextContent("Critical GPU is hot (Alpha)");
+  expect(region).not.toHaveTextContent("NodeHot");
+  expect(region).not.toHaveTextContent("spk_");
+  expect(within(region).queryByRole("button")).toBeNull();
   attention = [];
+  nodes = [];
 });
 
 test("Fleet shows the Controller headless memory recommendation without an apply action", () => {

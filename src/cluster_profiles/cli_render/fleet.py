@@ -38,6 +38,8 @@ from .common import (
     _words,
 )
 
+ALERTS_UNAVAILABLE = "Prometheus alerts unavailable. Retrying automatically."
+
 
 def _node(node: Mapping[str, object], *, detail: bool) -> None:
     name = node.get("display_name")
@@ -369,6 +371,26 @@ def _fleet_attention(nodes: Sequence[Mapping[str, object]]) -> list[str]:
     return notes
 
 
+def _alert_notes(
+    payload: Mapping[str, object], nodes: Sequence[Mapping[str, object]]
+) -> list[str]:
+    """Firing Prometheus alerts as `Severity: summary (Spark)`, as the Controller web says them."""
+    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
+    notes: list[str] = []
+    alerts = payload.get("attention")
+    for alert in alerts if isinstance(alerts, list) else []:
+        labels = _optional(alert.get("labels"), "alert labels")
+        node_id = labels.get("node_id")
+        severity = _text(alert.get("severity"))
+        notes.append(
+            f"{severity[:1].upper()}{severity[1:]}: {_text(alert.get('summary'))}"
+            + (f" ({names.get(node_id, _text(node_id))})" if node_id else "")
+        )
+    if payload.get("attention_unavailable"):
+        notes.append(ALERTS_UNAVAILABLE)
+    return notes
+
+
 def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> list[str]:
     """Show each run once, its members by name, and return its problems."""
     names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
@@ -523,7 +545,11 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
         rows.append(row)
     _table(labels, rows)
     print()
-    notes = _fleet_attention(nodes) + _fleet_workloads(nodes, wide=wide)
+    notes = (
+        _alert_notes(payload, nodes)
+        + _fleet_attention(nodes)
+        + _fleet_workloads(nodes, wide=wide)
+    )
     if notes:
         print("Needs attention")
         for note in notes:

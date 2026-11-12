@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import {
+  ALERTS_UNAVAILABLE,
   formatBytes,
   nodeDiskFreeBytes,
   nodeDisplayName,
@@ -13,6 +14,7 @@ import {
   nodeStatus,
   type NodeStatus,
 } from "../lib/fleet";
+import { AttentionItem } from "../components/attention-item";
 import { SortHeader, useSort } from "../components/sort-header";
 import { StatusPill } from "../components/status-pill";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -148,23 +150,17 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
           </>
         }
       />
-      {fleet.snapshot?.attention_unavailable && (
-        <p role="status">Prometheus alerts unavailable. Retrying automatically.</p>
-      )}
+      {fleet.snapshot?.attention_unavailable && <p role="status">{ALERTS_UNAVAILABLE}</p>}
       {!!fleet.snapshot?.attention?.length && (
         <section aria-label="Needs attention">
           <h2>Needs attention</h2>
           <ul>
             {fleet.snapshot.attention.map((alert) => (
-              <li key={JSON.stringify(alert.labels)}>
-                <StatusPill
-                  tone={alert.severity === "critical" ? "danger" : ProfileReasonSeverity.WARNING}
-                >
-                  {alert.severity}
-                </StatusPill>{" "}
-                <strong>{alert.name}</strong> · {alert.summary}
-                {alert.labels.node_id && <> · {alert.labels.node_id}</>}
-              </li>
+              <AttentionItem
+                key={JSON.stringify(alert.labels)}
+                alert={alert}
+                nodes={fleet.snapshot?.nodes ?? []}
+              />
             ))}
           </ul>
         </section>

@@ -6,7 +6,7 @@ import {
   subtractWire,
   type WireNumber,
 } from "../api/contract-numeric";
-import type { SwapShortfallEvidence, VisualFleetNode } from "../api/types";
+import type { SwapShortfallEvidence, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
@@ -91,6 +91,27 @@ export function nodeStatus(
     ...warnings.filter((warning) => warning.severity !== "info").map(warningText),
   ];
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
+}
+
+/** Said when the Controller cannot read Prometheus; `vonkctl fleet` says the same. */
+export const ALERTS_UNAVAILABLE = "Prometheus alerts unavailable. Retrying automatically.";
+
+/**
+ * A firing alert in plain words: its severity as a word, and its summary with the Spark it
+ * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.
+ */
+export function attentionText(
+  alert: NonNullable<VisualFleetSnapshot["attention"]>[number],
+  fleet: VisualFleetNode[],
+): { severity: string; text: string } {
+  const spark = fleet.find((node) => node.id === alert.labels.node_id);
+  const named = alert.labels.node_id
+    ? ` (${spark ? nodeDisplayName(spark) : alert.labels.node_id})`
+    : "";
+  return {
+    severity: alert.severity.charAt(0).toLocaleUpperCase() + alert.severity.slice(1),
+    text: `${alert.summary}${named}`,
+  };
 }
 
 /** Running workloads on an older recipe revision, once per run; informational and never an error. */

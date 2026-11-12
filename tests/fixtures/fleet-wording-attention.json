@@ -1,0 +1,53 @@
+{
+  "comment": "Firing alerts in plain words, one set for the Controller web Fleet page and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_attention.py both render these alerts and must produce the expected `severity: text` lines.",
+  "nodes": [
+    {
+      "id": "spk_11111111111111111111111111111111",
+      "display_name": "Spark One"
+    },
+    {
+      "id": "spk_22222222222222222222222222222222",
+      "display_name": "Spark Two"
+    }
+  ],
+  "alerts": [
+    {
+      "source": "prometheus",
+      "name": "NodeAgentStale",
+      "summary": "An active Vonk Forge node is offline under current connection rules",
+      "severity": "warning",
+      "labels": {
+        "alertname": "NodeAgentStale",
+        "node_id": "spk_22222222222222222222222222222222"
+      },
+      "active_at": "2026-11-12T10:00:00Z"
+    },
+    {
+      "source": "prometheus",
+      "name": "ControlDatabaseUnavailable",
+      "summary": "The control API or its database dependency is unavailable",
+      "severity": "critical",
+      "labels": {
+        "alertname": "ControlDatabaseUnavailable"
+      },
+      "active_at": "2026-11-12T10:00:00Z"
+    },
+    {
+      "source": "prometheus",
+      "name": "NodeHot",
+      "summary": "A node left the fleet",
+      "severity": "warning",
+      "labels": {
+        "alertname": "NodeHot",
+        "node_id": "spk_99999999999999999999999999999999"
+      },
+      "active_at": "2026-11-12T10:00:00Z"
+    }
+  ],
+  "expected": [
+    "Warning: An active Vonk Forge node is offline under current connection rules (Spark Two)",
+    "Critical: The control API or its database dependency is unavailable",
+    "Warning: A node left the fleet (spk_99999999999999999999999999999999)"
+  ],
+  "unavailable": "Prometheus alerts unavailable. Retrying automatically."
+}
