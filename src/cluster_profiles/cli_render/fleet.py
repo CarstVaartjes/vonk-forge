@@ -143,6 +143,41 @@ def _memory(node: Mapping[str, object]) -> str:
     return f"{round(100 * (total - free) / total)}% of {_size(total)}"
 
 
+def _run_state_word(run: Mapping[str, object]) -> str:
+    """One workload's state in a word, as the Controller web Fleet page says it."""
+    if run.get("healthy") is None:
+        return "state unknown"
+    if run["healthy"] is False:
+        return "degraded"
+    return "ready" if run.get("run_state") == "running" else _text(run.get("run_state"))
+
+
+def _node_workloads(
+    node: Mapping[str, object], names: Mapping[object, str]
+) -> list[str]:
+    """What a Spark serves, one line per run: title, alias, state, and its partners."""
+    seen: set[object] = set()
+    lines: list[str] = []
+    for run in _records(node, "loaded"):
+        if run.get("run_id") in seen:
+            continue
+        seen.add(run.get("run_id"))
+        members = run.get("member_node_ids")
+        partners = [
+            names.get(member, _text(member))
+            for member in (members if isinstance(members, list) else [])
+            if member != node.get("id")
+        ]
+        parts = [
+            _text(run.get("title") or run.get("run_id")),
+            _text(run.get("alias")) if run.get("alias") else "",
+            _run_state_word(run),
+            f"with {', '.join(partners)}" if partners else "",
+        ]
+        lines.append(" · ".join(part for part in parts if part))
+    return lines
+
+
 def _gpu(node: Mapping[str, object]) -> str:
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
@@ -499,23 +534,21 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
     print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
     print()
-    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "RUNNING"]
+    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "SERVING"]
     if wide:
         labels[5:5] = ["CPU"]
         labels.append("ID")
+    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
     rows = []
     for node in nodes:
         inventory = _optional(node.get("inventory"), "inventory")
-        loaded = _records(node, "loaded")
         row: list[object] = [
             node.get("display_name"),
             _status(node),
             _memory(node),
             _size(inventory.get("disk_free_bytes")),
             _gpu(node),
-            "idle"
-            if not loaded
-            else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
+            "; ".join(_node_workloads(node, names)) or "idle",
         ]
         if wide:
             row.insert(5, _cpu_clock(node))

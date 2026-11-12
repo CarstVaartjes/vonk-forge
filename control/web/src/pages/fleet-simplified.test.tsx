@@ -153,6 +153,28 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
+test("Fleet rows name what each Spark serves, and say idle when nothing runs", () => {
+  const run = (healthy: boolean | null) => ({
+    run_id: "run-1",
+    title: "Qwen Code",
+    alias: "code",
+    run_state: "running",
+    healthy,
+    member_node_ids: [`spk_${"Alpha".padEnd(32, "0")}`, `spk_${"Bravo".padEnd(32, "0")}`],
+  });
+  nodes = [
+    { ...spark("Alpha", 40, 250), loaded: [run(true)] },
+    { ...spark("Bravo", 40, 250), loaded: [run(null)] },
+    spark("Charlie", 40, 250),
+  ];
+  render(<FleetPage api={{} as ControlApi} />);
+  const rows = screen.getAllByRole("row").slice(1);
+  expect(within(rows[0]!).getByText("Qwen Code · code · ready · with Bravo")).toBeVisible();
+  expect(within(rows[1]!).getByText("Qwen Code · code · state unknown · with Alpha")).toBeVisible();
+  expect(within(rows[2]!).getByText("Idle")).toBeVisible();
+  nodes = [];
+});
+
 test("firing Prometheus alerts are visible in Fleet attention", () => {
   attention = [
     {

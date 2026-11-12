@@ -93,6 +93,41 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
+/** One workload's state in a word: ready, degraded, its run state, or unknown health. */
+function runStateWord(run: VisualFleetNode["loaded"][number]): string {
+  if (run.healthy == null) return "state unknown";
+  if (run.healthy === false) return "degraded";
+  return run.run_state === "running" ? "ready" : run.run_state;
+}
+
+/**
+ * What a Spark serves, one line per run: title, alias, state, and the other Sparks of a
+ * multi-Spark run. `vonkctl fleet` prints the same lines.
+ */
+export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+  const names = new Map(fleet.map((member) => [member.id, nodeDisplayName(member)]));
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  for (const run of node.loaded) {
+    if (seen.has(run.run_id)) continue;
+    seen.add(run.run_id);
+    const partners = (run.member_node_ids ?? [])
+      .filter((id) => id !== node.id)
+      .map((id) => names.get(id) ?? id);
+    lines.push(
+      [
+        run.title ?? run.run_id,
+        run.alias,
+        runStateWord(run),
+        partners.length ? `with ${partners.join(", ")}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+    );
+  }
+  return lines;
+}
+
 /** Running workloads on an older recipe revision, once per run; informational and never an error. */
 export function nodeRecipeUpdates(
   node: VisualFleetNode,

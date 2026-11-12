@@ -1,0 +1,67 @@
+{
+  "comment": "What each Spark serves, in one set of words for the Controller web Fleet row and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_workloads.py both render these nodes and must produce the expected lines per Spark.",
+  "nodes": [
+    {
+      "id": "spk_11111111111111111111111111111111",
+      "display_name": "Spark One",
+      "loaded": [
+        {
+          "run_id": "run-a",
+          "title": "GLM 5.3 Flash",
+          "alias": "code",
+          "run_state": "running",
+          "healthy": true,
+          "member_node_ids": ["spk_11111111111111111111111111111111", "spk_22222222222222222222222222222222"]
+        },
+        {
+          "run_id": "run-b",
+          "title": "Qwen3 Embedding",
+          "alias": "embed",
+          "run_state": "running",
+          "healthy": null,
+          "member_node_ids": ["spk_11111111111111111111111111111111"]
+        }
+      ]
+    },
+    {
+      "id": "spk_22222222222222222222222222222222",
+      "display_name": "Spark Two",
+      "loaded": [
+        {
+          "run_id": "run-a",
+          "title": "GLM 5.3 Flash",
+          "alias": "code",
+          "run_state": "running",
+          "healthy": false,
+          "member_node_ids": ["spk_11111111111111111111111111111111", "spk_22222222222222222222222222222222", "spk_33333333333333333333333333333333"]
+        }
+      ]
+    },
+    {
+      "id": "spk_44444444444444444444444444444444",
+      "display_name": "Spark Four",
+      "loaded": [
+        {
+          "run_id": "run-c",
+          "title": "Mistral Small",
+          "alias": "chat",
+          "run_state": "starting",
+          "healthy": true,
+          "member_node_ids": ["spk_44444444444444444444444444444444"]
+        }
+      ]
+    },
+    { "id": "spk_55555555555555555555555555555555", "display_name": "Spark Five", "loaded": [] }
+  ],
+  "expected": {
+    "spk_11111111111111111111111111111111": [
+      "GLM 5.3 Flash · code · ready · with Spark Two",
+      "Qwen3 Embedding · embed · state unknown"
+    ],
+    "spk_22222222222222222222222222222222": [
+      "GLM 5.3 Flash · code · degraded · with Spark One, spk_33333333333333333333333333333333"
+    ],
+    "spk_44444444444444444444444444444444": ["Mistral Small · chat · starting"],
+    "spk_55555555555555555555555555555555": []
+  }
+}

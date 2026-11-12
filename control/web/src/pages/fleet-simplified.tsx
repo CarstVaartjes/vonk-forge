@@ -11,6 +11,7 @@ import {
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
+  nodeWorkloadLines,
   type NodeStatus,
 } from "../lib/fleet";
 import { SortHeader, useSort } from "../components/sort-header";
@@ -341,13 +342,14 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                   <SortHeader column="memory" label="Memory used" sort={sort} onSort={toggle} />
                   <SortHeader column="disk" label="Disk free" sort={sort} onSort={toggle} />
                   <th scope="col">GPU</th>
-                  <th scope="col">Recipes</th>
+                  <th scope="col">Serving</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((node) => {
                   const { status, reasons } = nodeStatus(node, fleet.now);
                   const name = nodeDisplayName(node);
+                  const workloads = nodeWorkloadLines(node, fleet.snapshot?.nodes ?? []);
                   const disk = nodeDiskFreeBytes(node);
                   return (
                     <tr key={node.id}>
@@ -380,20 +382,19 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                           ? `${node.telemetry.sample.gpu_utilization_percent.toFixed(1)}%`
                           : "Not reported"}
                       </td>
-                      <td>
-                        <strong>
-                          {node.loaded.filter((item) => item.healthy === true).length}
-                          {node.loaded.some((item) => item.healthy == null) ? " confirmed" : ""}{" "}
-                          running
-                        </strong>
+                      <td data-label="Serving">
+                        {workloads.length === 0 ? (
+                          <strong>Idle</strong>
+                        ) : (
+                          workloads.map((line) => <strong key={line}>{line}</strong>)
+                        )}
                         <small>
                           {node.installed.filter((item) => item.complete === true).length}
                           {node.installed.some((item) => item.complete == null) ? " confirmed" : ""}{" "}
                           installed
                         </small>
-                        {(node.loaded.some((item) => item.healthy == null) ||
-                          node.installed.some((item) => item.complete == null)) && (
-                          <small>Some workload state is unknown</small>
+                        {node.installed.some((item) => item.complete == null) && (
+                          <small>Some installation state is unknown</small>
                         )}
                         {nodeRecipeUpdates(node).length > 0 && (
                           <small>
