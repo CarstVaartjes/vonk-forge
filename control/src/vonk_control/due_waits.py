@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from hashlib import sha256
 from typing import cast
 
@@ -81,6 +82,10 @@ class DueWaitBackstop:
             self._table_kinds[source.table.name] = known | source.kinds
             self._first_source.setdefault(source.table.name, index)
         self._clock = clock
+        # The worker times each handler under its own name (observation only).
+        self.timed: Callable[[str, Callable[[], object]], object] = lambda _name, call: (
+            call()
+        )
         if pass_budget_seconds <= 0:
             raise ValueError("due wait observation budget must be positive")
         self._limit = batch_limit
@@ -198,7 +203,7 @@ class DueWaitBackstop:
                     for binding in self._sources
                     if binding.table.name == table.name and kind in binding.kinds
                 )
-                advance(key, kind)
+                self.timed(f"due-waits:{kind}", partial(advance, key, kind))
                 self._failures.pop((table.name, key), None)
             except Exception as error:  # noqa: BLE001 - isolate one row/owner observation
                 if disposition(error) in {Disposition.WAIT, Disposition.OBSERVE}:

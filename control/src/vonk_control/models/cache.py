@@ -426,7 +426,7 @@ class RecipeBuild(Base):
     state: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     policy_report: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
     plan: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False)
-    image_digest: Mapped[str | None] = mapped_column(String(71))
+    image_digest: Mapped[str | None] = mapped_column(String(71), index=True)
     oci_layout_sha256: Mapped[str | None] = mapped_column(String(64))
     image_bytes: Mapped[int | None] = mapped_column(BigInteger)
     error: Mapped[str | None] = mapped_column(String(512))

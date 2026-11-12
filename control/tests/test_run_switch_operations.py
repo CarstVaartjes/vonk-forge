@@ -117,7 +117,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchReason,
     RunSwitchRetention,
     RunSwitchRuntimeInstallResult,
-    RunSwitchRuntimePlanResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
     RunSwitchUninstallResult,
@@ -2285,7 +2284,7 @@ def _cold_compile_switch(
     slow_compiles: int = 1,
     runtime_install_busy_attempts: int = 0,
 ):
-    """Start a real Run/Switch whose cold compile outlives the preflight window.
+    """Start a real Run/Switch whose cold compile takes ``seconds`` of clock time.
 
     The phase gate, ``LifecyclePreflight``, install admission and compiled launch
     documents use production code; adjacent artifact phases use test adapters.
@@ -2414,83 +2413,84 @@ def _cold_compile_switch(
     )
 
 
-def test_slow_cold_compile_refreshes_preflight_instead_of_failing_the_switch(
+def _host_changes_during_compile(switch) -> None:
+    """Every slow compile sees the Spark host change, as a reboot or upgrade does.
+
+    The receipt the phase was admitted on then no longer matches the host, so
+    install admission refuses the identical plan until the ordinary probe runs.
+    """
+
+    changes = iter(range(1, 1_000))
+
+    def change() -> None:
+        fingerprint = f"{next(changes):064x}"
+        with switch.sessions.begin() as session:
+            for node_id in switch.nodes:
+                set_inventory_fingerprint(session.get(AgentNode, node_id), fingerprint)
+
+    switch.hooks.append(change)
+
+
+def _runtime_probes(sessions) -> int:
+    from vonk_agent_protocol import AgentOperation as AgentOperationKind
+
+    with sessions() as session:
+        return len(
+            list(
+                session.scalars(
+                    select(AgentOperation.id).where(
+                        AgentOperation.kind
+                        == AgentOperationKind.RUNTIME_PREFLIGHT.value
+                    )
+                )
+            )
+        )
+
+
+def test_a_switch_longer_than_five_minutes_runs_one_preflight_round(
     tmp_path: Path,
 ) -> None:
-    """A cold compile longer than the preflight window must not fail the run.
+    """A receipt is valid by identity, never by age.
 
-    A cold ``prepare/runtime-plan`` phase measured 716s: the phase gate admits
-    the node against fresh preflight receipts, ``preview_install`` reads the
-    same fresh receipts, and only then does the Controller compile the exact
-    launch document.  ``prepare_installation`` re-plans with a fresh clock, by
-    which time the 300s runtime preflight window has closed, so admission
-    refuses the identical plan with ``install.plan_stale_or_blocked``.  Nothing
-    about the installation changed: inventory stays fresh, and the plan digest,
-    mapping generation and recipe/build authority are identical.  The switch
-    must refresh the ordinary preflight probe and still create exactly one
-    installation.
+    Catches the wall-clock window: a cold ``prepare/runtime-plan`` compile
+    measured 716 s, after which install admission re-aged the receipt past
+    300 s, held the switch for ``install-preflight-refresh`` and ran a second
+    probe round on an unchanged host.  Every switch whose phases outlast five
+    minutes paid that round (15-130 s per load).  Same requirements digest and
+    same host fingerprint: the receipt from the one round still admits.
     """
 
     switch = _cold_compile_switch(tmp_path)
-    sessions, clock, admission = switch.sessions, switch.clock, switch.admission
-    service, executor, compiler = switch.service, switch.executor, switch.compiler
-    admitted, drive = switch.admitted, switch.drive
+    clock, admission = switch.clock, switch.admission
+    probes = _runtime_probes(switch.sessions)
 
     for _ in range(8):
-        if "runtime-plan" in executor.events:
+        if "runtime-plan" in switch.executor.events:
             break
-        drive()
-    assert "runtime-plan" in executor.events, executor.events
-    assert compiler.compiles >= 1
+        switch.drive()
+    assert "runtime-plan" in switch.executor.events, switch.executor.events
     assert (clock.now - NOW).total_seconds() == 716
 
-    # Isolate the blocker: only the runtime preflight receipt expired.  The
-    # compiled plan identity, mapping generation, recipe/build authority and
-    # inventory freshness are all unchanged across the compile.
     replanned = admission.plan_install(
         switch.mapping_id, switch.build_id, now=clock.now
     )
-    assert replanned.plan_digest == admitted.plan_digest
-    assert replanned.mapping_generation == admitted.mapping_generation
-    assert replanned.recipe_build_id == admitted.recipe_build_id
-    assert replanned.recipe_content_sha256 == admitted.recipe_content_sha256
-    assert replanned.image_digest == admitted.image_digest
-    assert not replanned.allowed
-    assert not replanned.allowed
+    assert replanned.allowed, [
+        reason.code for node in replanned.nodes for reason in node.blockers
+    ]
+    assert replanned.plan_digest == switch.admitted.plan_digest
 
-    # Desired behaviour: the expired ordinary preflight is refreshed and the
-    # switch still reaches exactly one installation of the identical plan.
-    failure = service.get(switch.operation.operation_id)
-    assert failure.state != "failed", failure.status_reason
-    assert failure.result.retry_attempt == 2
-    assert failure.progress.operation.phase == "install-preflight-refresh"
-    # The attempt is in ``retry_attempt``; the progress meter moves only with work.
-    assert failure.progress.operation.completed_items == 0
-    assert failure.progress.operation.observed_at == clock.now.isoformat()
-    with switch.sessions() as session:
-        held = session.get(Job, switch.operation.operation_id)
-        assert held.updated_at.replace(tzinfo=UTC) == switch.clock.now
-
-    for _ in range(8):
-        view = service.get(switch.operation.operation_id)
-        if view.state != "running" or view.progress.subphase == "runtime-install":
+    for _ in range(40):
+        if switch.service.get(switch.operation.operation_id).state != "running":
             break
-        drive()
-
-    with sessions() as session:
+        switch.drive()
+    with switch.sessions() as session:
         installations = list(session.scalars(select(RecipeInstallation)))
     assert len(installations) == 1
-    assert installations[0].plan_digest == admitted.plan_digest
-    assert installations[0].mapping_generation == admitted.mapping_generation
-    assert installations[0].plan["compiled_execution_plans"]
-    completed = service.get(switch.operation.operation_id)
-    assert completed.result is not None
-    prepared = next(
-        result
-        for result in completed.result.phase_results
-        if isinstance(result, RunSwitchRuntimePlanResult)
-    )
-    assert prepared.install_plan_digest == installations[0].plan_digest
+    assert installations[0].plan_digest == switch.admitted.plan_digest
+    completed = switch.service.get(switch.operation.operation_id)
+    assert completed.result is not None and completed.result.retry_attempt is None
+    assert completed.progress.operation.phase != "install-preflight-refresh"
+    assert _runtime_probes(switch.sessions) == probes
 
 
 def test_agent_upgrade_during_runtime_install_preflight_completes_the_switch(
@@ -2686,12 +2686,13 @@ def test_runtime_install_capacity_wait_backs_off_and_resets_after_progress(
 def test_preflight_refresh_after_repeated_cold_compiles_ends_and_admits_fresh(
     tmp_path: Path,
 ) -> None:
-    """Persistent stale preflight ends its observer; repaired fresh intent runs."""
+    """A host that changes during every compile ends the refresh; fresh intent runs."""
     from vonk_control.run_switch_operations import _run_switch_payload
 
     from .non_blocking import assert_ended_without_blocking
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
+    _host_changes_during_compile(switch)
     service, operation = switch.service, switch.operation
     with switch.sessions() as session:
         from vonk_control.job_documents import RunSwitchRunIntent
@@ -2751,15 +2752,17 @@ def test_cancellation_during_expiring_compile_prevents_a_subsequent_attempt(
 ) -> None:
     """Cancellation on the expiry path prevents another compilation attempt.
 
-    The cancellation lands while the Controller is compiling, so the expired
-    preflight hold is the first code to see it.  It has to finish the
-    cancellation under the same checkpoint guard the executing path uses
-    instead of queueing another probe or accepting the identical plan later.
+    The cancellation lands while the Controller is compiling and the host
+    changes, so the expired preflight hold is the first code to see it.  It
+    has to finish the cancellation under the same checkpoint guard the
+    executing path uses instead of queueing another probe or accepting the
+    identical plan later.
     This does not exercise cancellation racing a successful acceptance.
     """
 
     switch = _cold_compile_switch(tmp_path, slow_compiles=99)
     service, operation = switch.service, switch.operation
+    _host_changes_during_compile(switch)
     switch.hooks.append(
         lambda: service.cancel(
             operation.operation_id,
@@ -2788,15 +2791,21 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
     from vonk_agent_protocol import AgentOperation as OperationKind
 
     switch = _cold_compile_switch(tmp_path, seconds=1, slow_compiles=0)
-    stale_time = switch.clock.now - timedelta(seconds=301)
-    record_passing_preflight(switch.sessions, stale_time)
+    # One second earlier only tells the old receipts from the fresh ones.
+    earlier_boot = switch.clock.now - timedelta(seconds=1)
+    record_passing_preflight(switch.sessions, earlier_boot)
+    # The old receipts are from an earlier boot: the host identity is what
+    # makes the Controller probe again.
+    with switch.sessions.begin() as session:
+        for node in session.scalars(select(AgentNode)):
+            set_inventory_fingerprint(node, "b" * 64)
     with switch.sessions() as session:
         stale = {
             operation.id: (operation.node_id, operation.payload_digest)
             for operation in session.scalars(
                 select(AgentOperation).where(
                     AgentOperation.kind == OperationKind.RUNTIME_PREFLIGHT.value,
-                    AgentOperation.created_at == stale_time,
+                    AgentOperation.created_at == earlier_boot,
                 )
             )
         }
@@ -2839,7 +2848,7 @@ def test_preflight_reuse_ignores_operation_history_ordering(tmp_path: Path) -> N
         for node_id, digest in stale.values():
             selected = latest_result(session, node_id, requirements_sha256=digest)
             assert selected is not None
-            assert selected.result.observed_at > int(stale_time.timestamp())
+            assert selected.result.observed_at > int(earlier_boot.timestamp())
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
@@ -5359,6 +5368,7 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
     from vonk_control.operation_api import operation_detail_response
 
     switch = _cold_compile_switch(tmp_path)
+    _host_changes_during_compile(switch)  # held for a refresh: totals unknown
     switch.drive()
     reason = (
         "install plan is blocked: " + "missing durable runtime image receipt; " * 10

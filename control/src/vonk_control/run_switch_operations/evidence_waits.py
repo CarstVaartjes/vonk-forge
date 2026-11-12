@@ -5,9 +5,10 @@ After a Stop, admission needs inventory a Spark collected after that stop
 on its own cadence, so a retry clock can only guess: a guess that is early
 looks again before the evidence can exist, one that is late leaves the load
 waiting after it arrived.  Instead the hold records which Spark it waits on and
-the newest collection it already judged (``awaited_inventory``), and every
-tick makes such a wait due at once when that Spark has reported a newer
-collection.  Its own retry time is only the resync for a Spark that stays
+the newest collection it already judged (``awaited_inventory``).  The
+inventory ingest makes such a wait due as soon as that Spark's newer
+collection commits, and every tick repeats the check as the backstop for a
+lost wake.  Its own retry time is only the resync for a Spark that stays
 silent.
 """
 
@@ -49,9 +50,18 @@ class RunSwitchPostStopInventoryPending(RunSwitchPostStopEvidencePending):
         self.observed_after = max(collected_after, observed_after)
 
 
-def wake_evidence_waits(sessions: sessionmaker[Session], now: datetime) -> bool:
-    """Make every post-stop wait whose awaited inventory landed due now."""
+def wake_evidence_waits(
+    sessions: sessionmaker[Session], now: datetime, *, node_id: str | None = None
+) -> bool:
+    """Make every post-stop wait whose awaited inventory landed due now.
 
+    ``node_id`` limits the check to waits on that Spark (the inventory ingest
+    passes the reporting Spark).  A wait whose row another writer holds is
+    skipped, never waited for: its owner, the next ingest or the next tick
+    sees it again.
+    """
+
+    awaited_node = Job.result["awaited_inventory"]["node_id"].as_string()
     woke = False
     with sessions.begin() as session:
         waiting = session.scalars(
@@ -65,10 +75,12 @@ def wake_evidence_waits(sessions: sessionmaker[Session], now: datetime) -> bool:
                         LifecycleState.OBSERVING,
                     )
                 ),
-                Job.result["awaited_inventory"].as_string().is_not(None),
+                awaited_node.is_not(None)
+                if node_id is None
+                else awaited_node == node_id,
             )
             .order_by(Job.id)
-            .with_for_update()
+            .with_for_update(skip_locked=True)
         )
         for job in waiting:
             stored = read_row_column(job, "result")

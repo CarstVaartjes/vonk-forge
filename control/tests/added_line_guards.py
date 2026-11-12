@@ -197,6 +197,9 @@ SECURITY_EDGES = frozenset(
 
 
 # The files that allocate the next revision_number; no other source names it.
+READINESS_READERS = frozenset(
+    {"control/src/vonk_control/library_projection/local_state.py"}
+)
 REVISION_NUMBER_ALLOCATORS = frozenset(
     {
         "control/src/vonk_control/catalog_entities.py",
@@ -1793,6 +1796,26 @@ def check_source(
                 (site.line, "provenance comparison")
                 for site in identity.scan_source(source, path=path)
             )
+            # A readiness reader finds a recipe's cache and image facts by the
+            # recipe's own artifact set and by the image digest. The recipe that
+            # asked first (the set's recorded provenance, the revision or
+            # document a build row names) does not own the shared bytes.
+            if path.startswith("control/src/vonk_control/"):
+                hits.extend(
+                    (line, "cache set provenance: key by the recipe's own set")
+                    for line, text in enumerate(source.splitlines(), 1)
+                    if line in added
+                    and re.search(r"\bModelCacheSet\.recipe_revision_sha256\b", text)
+                )
+            if path in READINESS_READERS:
+                hits.extend(
+                    (line, "readiness reader keyed by the asking recipe")
+                    for line, text in enumerate(source.splitlines(), 1)
+                    if line in added
+                    and re.search(
+                        r"\bRecipeBuild\.recipe_revision_id\b|\bdocument_id\b", text
+                    )
+                )
             # No internal hashing: a row's digest is recorded once, when it is
             # written. Re-hashing the Controller's own row to decide what it is
             # refuses it whenever a newer Controller reads it back differently.

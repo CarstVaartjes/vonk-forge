@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from importlib.resources import files
 
 import pytest
-from sqlalchemy import create_engine, delete, select, update
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState, canonical_message
@@ -1044,35 +1044,30 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
     )
 
 
-def test_expired_preflight_waits_then_accepts_the_same_request(
-    tmp_path,
-) -> None:
-    """An identical plan whose only fault is an aged receipt stays separable.
+def test_a_host_change_waits_then_accepts_the_same_request(tmp_path) -> None:
+    """An identical plan whose only fault is a receipt from an earlier host
+    (reboot, agent upgrade) stays separable, however long the plan took.
 
-    Acceptance still refuses and persists nothing, but it says which refusal
-    this is so a caller with its own bounded probe can rerun preflight and
-    re-present the same plan.
+    Acceptance refuses with the refreshable preflight refusal and persists
+    nothing, so a caller with its own bounded probe can rerun preflight and
+    re-present the same plan.  Catches both an age window (716 s alone must
+    not refuse) and a host change that admits on the old receipt.
     """
+    from vonk_control.install_admission import InstallPreflightExpired
 
     sessions, now, node, mapping, build = setup(tmp_path, free=200)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     assert plan.allowed
 
-    # Inside the window nothing changes: the identical plan is still accepted.
-    warm = _service(
-        sessions, preflight=False, inventory_max_age=300, disk_floor_bytes=10
-    )
-    warm_id = warm.accept_install(plan, actor="admin", now=now + timedelta(seconds=299))
-    with sessions.begin() as session:
-        session.delete(session.get(RecipeInstallation, warm_id))
-        session.execute(
-            delete(ResourceReservation).where(ResourceReservation.owner_id == warm_id)
-        )
-
     later = now + timedelta(seconds=716)
     _record_inventory(sessions, node, later)
-    with pytest.raises(Exception) as _ending:
+    assert service.plan_install(mapping, build, now=later).allowed
+    with sessions.begin() as session:
+        host = session.get(AgentNode, node)
+        assert host is not None
+        set_inventory_fingerprint(host, "b" * 64)
+    with pytest.raises(InstallPreflightExpired):
         service.accept_install(plan, actor="admin", now=later)
     with sessions() as session:
         assert list(session.scalars(select(RecipeInstallation))) == []

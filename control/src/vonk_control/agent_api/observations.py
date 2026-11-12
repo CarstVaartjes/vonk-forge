@@ -56,6 +56,7 @@ from ..owner_liveness import builds_in_flight, run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..presence import PresenceError
 from ..recipe_operations import prepare_exact_recipe_run_observation_nodes
+from ..run_switch_operations.evidence_waits import wake_evidence_waits
 from ..source_bundles import SourceBundleError
 from ..spark_store_retention import store_retention_request
 from ..telemetry import TelemetryRepository
@@ -84,6 +85,23 @@ from .common import (
     contract_verdict_or_wait,
 )
 from .ended_runs import reopen_ended_runs_still_running
+
+
+def _wake_post_stop_waits(
+    services: AgentApiServices, node_id: str, now: datetime
+) -> None:
+    """A Run/Switch waiting for this Spark's post-stop inventory is due now.
+
+    Runs after the inventory committed, so the worker's due-wait backstop
+    (drained after every worker step) advances the switch, instead of the
+    run-switch tick's next turn in the worker rotation finding it.  A failure
+    only leaves the wake to that tick; the inventory is already accepted.
+    """
+
+    try:
+        wake_evidence_waits(services.sessions, now, node_id=node_id)
+    except Exception:  # noqa: BLE001 - ingest never fails for a deferred wake
+        _LOGGER.exception("Post-stop inventory wake deferred for %s", node_id)
 
 
 def _wait_out_clock_skew(observed_at: datetime, now: datetime) -> None:
@@ -217,6 +235,7 @@ def install_observations_routes(
         request.state.inventory_acceptance = InventoryAcceptance(
             snapshot.id, snapshot.evidence_digest
         )
+        _wake_post_stop_waits(required, identity.node_id, now)
         clock_authority = (
             required.host_runtime_authority if body.host_settings is not None else None
         )

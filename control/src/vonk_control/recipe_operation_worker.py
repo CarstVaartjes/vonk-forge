@@ -99,6 +99,10 @@ class RecipeOperationWorker:
         self._stop_admission_cleanup = stop_admission_cleanup
         self._residue_cleanup = residue_cleanup
         self._order_reconcile = order_reconcile
+        # The worker times each sub-task under its own name (observation only).
+        self.timed: Callable[[str, Callable[[], bool]], bool] = lambda _name, call: (
+            call()
+        )
         self._retry_at: dict[Callable[[], bool], datetime] = {}
         self._publication_retry_at: dict[str, datetime] = {}
         # Consecutive passes that found the shared route owner held elsewhere.
@@ -110,21 +114,32 @@ class RecipeOperationWorker:
         # Preserve observation-before-admission ordering, but a damaged owner
         # cannot suppress a turn for another owner. Each call ends this turn;
         # the worker cadence re-observes it after its dependencies recover.
-        for task in (
-            self._order_reconcile,
-            self._stop_admission_cleanup,
-            self._build_cleanup,
-            self._retirement_cleanup,
-            self._residue_cleanup,
-            self._fleet_profiles.tick if self._fleet_profiles is not None else None,
-            self._run_switches.tick if self._run_switches is not None else None,
-            self._recoveries.tick if self._recoveries is not None else None,
+        for name, task in (
+            ("order-reconcile", self._order_reconcile),
+            ("stop-admission-cleanup", self._stop_admission_cleanup),
+            ("build-cleanup", self._build_cleanup),
+            ("retirement-cleanup", self._retirement_cleanup),
+            ("residue-cleanup", self._residue_cleanup),
+            (
+                "fleet-profile-tick",
+                self._fleet_profiles.tick if self._fleet_profiles is not None else None,
+            ),
+            (
+                "run-switch-tick",
+                self._run_switches.tick if self._run_switches is not None else None,
+            ),
+            (
+                "recoveries",
+                self._recoveries.tick if self._recoveries is not None else None,
+            ),
         ):
-            progressed = self._advance(task) or progressed
-        if self._advance(self._expire_initial_observation_deadline):
+            progressed = self._advance(task, name) or progressed
+        if self._advance(
+            self._expire_initial_observation_deadline, "expire-initial-observation"
+        ):
             progressed = True
             if self._recoveries is not None:
-                self._advance(self._recoveries.tick)
+                self._advance(self._recoveries.tick, "recoveries-after-expiry")
         if self._reconcile_routes:
             progressed = self.reconcile_routes() or progressed
         return progressed
@@ -152,7 +167,9 @@ class RecipeOperationWorker:
             else False
         ) or progressed
 
-    def _advance(self, task: Callable[[], bool] | None) -> bool:
+    def _advance(
+        self, task: Callable[[], bool] | None, name: str | None = None
+    ) -> bool:
         if task is None:
             return False
         now = self._clock()
@@ -160,7 +177,7 @@ class RecipeOperationWorker:
         if due is not None and now < due:
             return False
         try:
-            result = task()
+            result = task() if name is None else self.timed(f"recipes:{name}", task)
             self._retry_at.pop(task, None)
             return result
         except Exception as error:

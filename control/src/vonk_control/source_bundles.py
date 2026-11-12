@@ -6,7 +6,7 @@ import json
 import os
 import tarfile
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -281,6 +281,15 @@ class SourceBundleStore:
                 pass
         raise _verification_pending()
 
+    def missing(self, digests: Collection[str]) -> set[str]:
+        absent: set[str] = set()
+        for digest in digests:
+            try:
+                self.verified_manifest(digest)
+            except SourceBundleUnknown:
+                absent.add(digest)
+        return absent
+
     def get(self, sha256: str) -> GeneratedSourceBundle:
         manifest = self.verified_manifest(sha256)
         path = self._root / sha256[:2] / f"{sha256}.tar"
@@ -314,6 +323,10 @@ class SourceBundleStoreProtocol(Protocol):
     def get(self, sha256: str) -> GeneratedSourceBundle: ...
 
     def verified_manifest(self, sha256: str) -> SourceBundleManifest: ...
+
+    def missing(self, digests: Collection[str]) -> set[str]:
+        """The digests without a verified ingress receipt, in one observation."""
+        ...
 
 
 class DatabaseSourceBundleStore:
@@ -400,13 +413,10 @@ class DatabaseSourceBundleStore:
                 .join(SourceBundleArchive)
                 .where(RecipeSourceBundle.sha256 == sha256)
             ).one_or_none()
-        if row is None or row[1] != f"postgres:{sha256}:{row[2]}":
-            raise _verification_pending()
-        try:
-            manifest = parse_source_bundle_manifest(row[0])
-        except SourceBundleError as error:
-            raise _verification_pending() from error
-        if manifest.sha256 != sha256:
+        manifest = (
+            None if row is None else _stored_manifest(sha256, row[1], row[2], row[0])
+        )
+        if row is None or manifest is None:
             raise _verification_pending()
         return manifest, row[3] if include_archive else b""
 
@@ -414,9 +424,48 @@ class DatabaseSourceBundleStore:
         manifest, _ = self._read(sha256, include_archive=False)
         return manifest
 
+    def missing(self, digests: Collection[str]) -> set[str]:
+        """One ``sha256 IN (...)`` query: a digest is present when its receipt
+        names the stored archive version and its manifest still reads."""
+        wanted = set(digests)
+        if not wanted:
+            return set()
+        from .models import RecipeSourceBundle, SourceBundleArchive
+
+        with self._sessions() as session:
+            rows = session.execute(
+                select(
+                    RecipeSourceBundle.sha256,
+                    RecipeSourceBundle.storage_key,
+                    literal_column("source_bundle_archives.xmin::text"),
+                    RecipeSourceBundle.manifest,
+                )
+                .join(SourceBundleArchive)
+                .where(RecipeSourceBundle.sha256.in_(wanted))
+            ).all()
+        present = {
+            sha256
+            for sha256, storage_key, version, manifest in rows
+            if _stored_manifest(sha256, storage_key, version, manifest) is not None
+        }
+        return wanted - present
+
     def get(self, sha256: str) -> GeneratedSourceBundle:
         manifest, archive = self._read(sha256, include_archive=True)
         return _generated_bundle(archive, manifest, self._limits)
+
+
+def _stored_manifest(
+    sha256: str, storage_key: str, version: str, manifest: object
+) -> SourceBundleManifest | None:
+    """The manifest when the receipt names this archive version and reads, else None."""
+    if storage_key != f"postgres:{sha256}:{version}":
+        return None
+    try:
+        parsed = parse_source_bundle_manifest(manifest)
+    except SourceBundleError:
+        return None
+    return parsed if parsed.sha256 == sha256 else None
 
 
 def _verification_pending() -> SourceBundleUnknown:
