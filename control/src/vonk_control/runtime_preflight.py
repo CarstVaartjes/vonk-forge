@@ -1,4 +1,14 @@
-"""Recipe-aware runtime admission, with explicit unknown and stale evidence."""
+"""Recipe-aware runtime admission, with explicit unknown evidence.
+
+A receipt is valid by identity, never by age: it answers the exact
+requirements it was probed for (``requirements_sha256``) on the exact host it
+was probed on (the agent's host fingerprint: boot id, agent build, runtime and
+storage policy). The Controller refreshes the current fingerprint on every
+claim and inventory report, so a reboot, upgrade or policy change invalidates
+the receipt at once; while neither moves, re-probing would only repeat the
+same answer. Disk is admitted separately on fresh inventory (install
+admission's floor), and fabric or reachability faults surface at start.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +24,6 @@ from vonk_agent_protocol.runtime_preflight import (
 )
 
 from .inventory_items_contract import PreflightInventoryItem
-
-PREFLIGHT_MAX_AGE_SECONDS = 300
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +96,6 @@ def admission_blockers(
     receipt: PreflightInventoryItem | None,
     *,
     current_fingerprint: str | None,
-    now: float,
-    maximum_age: int = PREFLIGHT_MAX_AGE_SECONDS,
 ) -> tuple[RuntimePreflightBlocker, ...]:
     if receipt is None:
         return (
@@ -111,14 +117,6 @@ def admission_blockers(
             RuntimePreflightBlocker(
                 RuntimePreflightCode.HOST_CHANGED,
                 "Spark host policy changed or its current fingerprint is unavailable; rerun preflight.",
-            ),
-        )
-    received_at = receipt.received_at
-    if received_at is None or now - received_at.timestamp() > maximum_age:
-        return (
-            RuntimePreflightBlocker(
-                RuntimePreflightCode.STALE,
-                "Spark runtime preflight evidence has expired; rerun preflight.",
             ),
         )
     findings = {item.capability: item for item in result.findings}

@@ -16,7 +16,6 @@ from .inventory_items_contract import (
     PreflightInventoryItem,
 )
 from .models import AgentNode, NodeInventoryItemsSnapshot
-from .runtime_preflight import PREFLIGHT_MAX_AGE_SECONDS
 
 
 def inventory_items(node: AgentNode | None) -> AgentInventoryItems:
@@ -109,12 +108,13 @@ def record_preflight(
     now: datetime,
 ) -> None:
     items = _reported_items(node)
+    # One receipt per requirements digest, for this host only: a receipt from
+    # another host fingerprint can never admit anything again.
     entries = [
         item
         for item in items.preflights
         if item.requirements_sha256 != requirements_sha256
-        and item.received_at is not None
-        and item.received_at.timestamp() >= now.timestamp() - PREFLIGHT_MAX_AGE_SECONDS
+        and item.result.fingerprint == result.fingerprint
     ]
     entries.append(
         PreflightInventoryItem(
