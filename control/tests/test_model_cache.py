@@ -3093,16 +3093,19 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
     service._stored_object = counted_stored_object
     service._session = counted_session
 
+    def sample(spec, count: int, state: str = "partial") -> None:
+        service._checkpoint_artifact(
+            spec,
+            operation_id=operation.id,
+            set_digest=manifest.digest,
+            actual_bytes=count,
+            state=state,
+            force_progress=state != "partial",
+        )
+
     def sample_every_stream(count: int) -> None:
         for spec in manifest.artifacts:
-            service._checkpoint_artifact(
-                spec,
-                operation_id=operation.id,
-                set_digest=manifest.digest,
-                actual_bytes=count,
-                state="partial",
-                force_progress=False,
-            )
+            sample(spec, count)
 
     sample_every_stream(10)
     clock[0] += timedelta(seconds=PROGRESS_CHECKPOINT_SECONDS)
@@ -3113,6 +3116,16 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
     assert service.get_operation(operation.id).progress["downloaded_bytes"] == (
         20 + 10 * (streams - 1)
     )
+    # One file's verification does not hide the other streams' transfer.
+    first, *others = manifest.artifacts
+    sample(first, 100, state="verifying")
+    assert service.get_operation(operation.id).progress["phase"] == "downloading"
+    clock[0] += timedelta(seconds=PROGRESS_CHECKPOINT_SECONDS)
+    for spec in others:
+        sample(spec, 30)
+    progress = service.get_operation(operation.id).progress
+    assert progress["phase"] == "downloading"
+    assert progress["measurement"]["bytes_per_second"] > 0
 
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():

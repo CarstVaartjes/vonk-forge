@@ -49,14 +49,25 @@ PROGRESS_CHECKPOINT_SECONDS = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _StreamSample:
+    """One stream's (or part's) latest progress, as its sampler last saw it."""
+
+    spec: ArtifactSpec
+    actual_bytes: int
+    completed_artifacts: int
+    state: str
+    noted_at: datetime
+
+
 @dataclass(slots=True)
 class _ProgressWindow:
-    """One operation's progress between two durable writes, in process memory."""
+    """One operation's live streams between durable writes, in process memory."""
 
     noted_at: datetime
     written_at: datetime | None = None
-    # Each stream's (or part's) object digest -> its latest sample.
-    samples: dict[str, tuple[ArtifactSpec, int, int]] = field(default_factory=dict)
+    # Object digest -> the latest sample of a stream still transferring.
+    samples: dict[str, _StreamSample] = field(default_factory=dict)
 
 
 def _within(now: datetime, then: datetime | None) -> bool:
@@ -99,11 +110,36 @@ class CheckpointsMixin:
             cache._progress_checkpoints = windows
             window = windows.setdefault(operation_id, _ProgressWindow(noted_at=now))
             window.noted_at = now
-            window.samples[spec.sha256] = (spec, actual_bytes, completed_artifacts)
+            sample = _StreamSample(spec, actual_bytes, completed_artifacts, state, now)
+            window.samples[spec.sha256] = sample
             if not force_progress and _within(now, window.written_at):
                 return
             samples = list(window.samples.values())
-            window.samples = {}
+            # The operation is downloading while any of its streams still is:
+            # one file's verification does not hide the others' transfer.
+            transferring = [
+                value for value in samples if value.state == ModelFileState.PARTIAL
+            ]
+            current = (
+                sample
+                if sample.state == ModelFileState.PARTIAL or not transferring
+                else transferring[-1]
+            )
+            phase = "downloading" if transferring else "verifying"
+            # Kept for the next write: streams still transferring. A stream that
+            # ended (verified or corrupt), or that wrote and then stayed silent
+            # for a whole window, has nothing left to report.
+            previous = window.written_at
+            window.samples = {
+                key: value
+                for key, value in window.samples.items()
+                if value.state == ModelFileState.PARTIAL
+                and (
+                    previous is None
+                    or value.noted_at >= previous
+                    or _within(now, value.noted_at)
+                )
+            }
             window.written_at = now
             with cache._session(write=True) as session:
                 operation = session.get(
@@ -128,11 +164,12 @@ class CheckpointsMixin:
                     # are content-addressed and the claim loop reconciles it)
                     manifest = _manifest_of(payload)
                     artifacts = dict(payload.transfer.artifacts)
-                    for sampled, sampled_bytes, _completed in samples:
+                    for value in samples:
                         # A part of a split file reports on the whole file's
                         # ledger entry, offset by the parts already appended.
+                        sampled = value.spec
                         ledger_digest = sampled.ledger_sha256 or sampled.sha256
-                        landed = sampled_bytes + sampled.ledger_base
+                        landed = value.actual_bytes + sampled.ledger_base
                         entry = artifacts.get(ledger_digest)
                         baseline = 0 if entry is None else entry.baseline_bytes
                         previous_received = 0 if entry is None else entry.received_bytes
@@ -169,30 +206,24 @@ class CheckpointsMixin:
                         cache._progress(
                             manifest,
                             previous=old_progress,
-                            phase="downloading"
-                            if state == ModelFileState.PARTIAL
-                            else "verifying",
+                            phase=phase,
                             completed_artifacts=max(
                                 old_completed,
-                                *(completed for *_, completed in samples),
+                                *(value.completed_artifacts for value in samples),
                             ),
                             downloaded_bytes=max(old_downloaded, received),
                             expected_bytes=total,
-                            current_artifact_key=spec.key,
+                            current_artifact_key=current.spec.key,
                             transfer=transfer,
                         )
                     )
-                    operation.current_artifact_key = spec.key
+                    operation.current_artifact_key = current.spec.key
                     operation.updated_at = now
                     if received > old_downloaded:
                         operation.progress_advanced_at = now
                 row = session.get(ModelCacheSet, set_digest)
                 if row is not None:
-                    row.state = (
-                        "downloading"
-                        if state == ModelFileState.PARTIAL
-                        else "verifying"
-                    )
+                    row.state = phase
                     row.updated_at = now
 
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
