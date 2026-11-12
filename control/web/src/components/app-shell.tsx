@@ -2,7 +2,7 @@ import {useEffect, useRef} from "react";
 import type {MouseEvent, ReactNode} from "react";
 import {AdminMenu} from "./admin-menu";
 import type {CliTokenDownload} from "../api/types";
-import {ActivityIcon, FleetIcon, LibraryIcon} from "./icons";
+import {ActivityIcon, BrandMark, FleetIcon, LibraryIcon} from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
@@ -44,8 +44,8 @@ export function AppShell({activeRoute, children, navigationKey = activeRoute, na
     <a className="skip-link" href="#main-content">Skip to content</a>
     <header className="app-header">
       <div className="brand">
-        <span className="mark" aria-hidden="true">VF</span>
-        <div><strong>Vonk Forge</strong><small>Cluster control</small></div>
+        <BrandMark/>
+        <div><strong>Vonk Forge</strong><small>Controller</small></div>
       </div>
       <nav className="primary-navigation" aria-label="Primary">
         <a href="/fleet" className="nav-link nav-link-primary" aria-current={activeRoute === "fleet" ? "page" : undefined} {...disabledLinkProps} onClick={event => navigate(event, "fleet")}><FleetIcon/><span>Fleet</span></a>

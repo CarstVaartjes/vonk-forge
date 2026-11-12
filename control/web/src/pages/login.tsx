@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from "react";
+import {BrandMark} from "../components/icons";
 
 type LoginFailure = {status?: unknown};
 
@@ -36,7 +37,8 @@ export function LoginPage({onLogin}: {onLogin(subject: "admin", password: string
 
   return <main className="login-shell">
     <section className="login-card" aria-labelledby="login-heading">
-      <span className="mark" aria-hidden="true">VF</span>
+      <BrandMark/>
+      <p className="controller-name">Vonk Forge · Controller at {window.location.host}</p>
       <h1 id="login-heading">Sign in</h1>
       <p>Use the local administrator account to manage this Vonk Forge cluster.</p>
       <form onSubmit={event => void submit(event)}>

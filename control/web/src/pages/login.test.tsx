@@ -24,3 +24,10 @@ it.each([
   expect(login).toHaveBeenCalledWith("admin", "synthetic-test-password");
   expect(screen.queryByText("synthetic credential detail")).not.toBeInTheDocument();
 });
+
+it("says which Controller it signs in to", () => {
+  // Break caught: the login card is anonymous, so an owner with several Controllers cannot tell which one asks.
+  render(<LoginPage onLogin={async () => undefined}/>);
+
+  expect(screen.getByText(`Vonk Forge · Controller at ${window.location.host}`)).toBeInTheDocument();
+});

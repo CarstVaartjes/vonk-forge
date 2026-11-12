@@ -70,6 +70,7 @@ test("shows Fleet, Library and Activity as the primary views", () => {
   expect(screen.getByRole("link", { name: "Fleet" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Library" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Activity" })).toBeVisible();
+  expect(screen.getByText("Controller")).toBeVisible();
   expect(screen.queryByText("Agents")).not.toBeInTheDocument();
   expect(screen.queryByText("Catalog")).not.toBeInTheDocument();
   expect(screen.queryByText("Packages")).not.toBeInTheDocument();

@@ -33,3 +33,7 @@ export function CloseIcon(props: IconProps) {
 export function ChevronIcon(props: IconProps) {
   return <Icon {...props}><path d="m9 6 6 6-6 6"/></Icon>;
 }
+
+export function BrandMark() {
+  return <span className="mark" aria-hidden="true"><i/><i/><i/></span>;
+}
