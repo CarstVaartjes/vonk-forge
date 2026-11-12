@@ -15,6 +15,11 @@ it. Prometheus keeps one year (`365d`, capped at 40GB; the oldest blocks go
 first if the cap is reached). Changing the retention flags keeps the existing
 TSDB. Time to first token covers streaming requests only; the error rate is
 failed over total deployment attempts, so it can include retried attempts.
+The Controller Trends page shows requests and generated (output) tokens per
+model as `request_rate` and `output_token_rate` (tokens per second, 5-minute
+rate of `litellm_output_tokens_metric_total` summed by `requested_model`). They
+are per model: a Spark serves the models loaded on it, and the Controller does
+not split a model's tokens across Sparks.
 
 Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is

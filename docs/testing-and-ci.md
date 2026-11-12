@@ -23,11 +23,11 @@ Every change lands through an integration PR: a same-repository
 
 | Run | What runs |
 | --- | --- |
-| Member PR | `Repository guards`, `Ruff` (lint, format, types, added-line guards), supply-chain evidence, `Generated control clients`, the test files that directly exercise the changed paths (`scripts/select-changed-tests`, sharded about a hundred files per runner), and Rust lint/tests only for Rust inputs. The gate reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. |
+| Member PR | No jobs: only the selector and the gate, which reports `CI gate (member PR)`, never the required `CI gate`, so a member PR cannot merge; it leaves no receipt for Release. Check member work locally (targeted tests, `scripts/test-local --changed`, the fast guards); its integration PR proves it. |
 | Integration PR | The complete sharded Controller and repository suites, web tests, Rust tests/lint/platform, wire contracts, every selected integration, candidate acceptance with the upgrade carry, and the path-filtered proof workflows. |
 | Main / Release | `ci.yml` in full, unless Release reuses the integration PR's run for the identical tree, then release acceptance. The proof workflows run on pull requests only. |
 
-A member PR is done when its lean CI is green and its review has passed.
+A member PR is done when its review has passed.
 Adding the `release-acceptance` label re-runs `ci.yml` in full at once; the
 proof workflows do not trigger on labels, so they pick it up on the next push.
 

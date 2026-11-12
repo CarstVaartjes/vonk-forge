@@ -31,6 +31,7 @@ QUERIES: dict[Metric, str] = {
     "host_memory_used": "vonk_node_telemetry_host_memory_used_bytes{filter}",
     "gpu_temperature": "vonk_node_telemetry_gpu_temperature_c{filter}",
     "request_rate": "sum by (requested_model) (rate(litellm_requests_metric_total[5m]))",
+    "output_token_rate": "sum by (requested_model) (rate(litellm_output_tokens_metric_total[5m]))",
     "certificate_expiry": "vonk_agent_certificate_expiry_seconds{filter}",
 }
 RANGES: dict[MetricRange, int] = {"1h": 3600, "6h": 21600, "24h": 86400, "7d": 604800}

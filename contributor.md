@@ -32,7 +32,7 @@ contract checks. See [principle guards](docs/principle-guards.md).
 
 Every change lands through an integration PR (`integration/*` or the
 `release-acceptance` label), which runs the complete suites, candidate
-acceptance and the path-filtered proof workflows. A member PR runs lean CI only
+acceptance and the path-filtered proof workflows. A member PR runs no CI jobs
 and reports `CI gate (member PR)` instead of the required `CI gate`, so it
 cannot merge itself. [Testing and CI](docs/testing-and-ci.md) lists what runs
 where (`full` in `scripts/select-ci-areas`).
