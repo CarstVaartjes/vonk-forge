@@ -21,12 +21,15 @@ test("links the creator's page on the public site and shows each licence as info
 test("a licence address that is not a web address is not a link", () => {
   // Break caught: published text such as a javascript: address becomes a clickable href.
   const detail = structuredClone(fullLibraryDetail);
-  for (const item of detail.model_documents) item.model_display!.license.url = "javascript:alert(1)";
+  for (const item of detail.model_documents)
+    item.model_display!.license.url = "javascript:alert(1)";
   render(<LibraryRecipeLinks detail={detail} />);
 
   const hrefs = screen.getAllByRole("link").map((link) => link.getAttribute("href"));
   expect(hrefs.some((href) => href?.startsWith("javascript:"))).toBe(false);
-  expect(hrefs).toContain(`https://vonkforge.ai/recipes/${detail.recipe.publisher}/${detail.recipe.slug}`);
+  expect(hrefs).toContain(
+    `https://vonkforge.ai/recipes/${detail.recipe.publisher}/${detail.recipe.slug}`,
+  );
 });
 
 test("the recipe detail lists no per-file bytes", () => {

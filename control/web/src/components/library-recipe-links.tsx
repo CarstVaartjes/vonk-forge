@@ -51,7 +51,8 @@ export function LibraryRecipeLinks({ detail }: { detail: RecipeDetail }) {
             {title} licence: {license.spdx} (<Address value={license.url}>terms</Address>)
             {license.territorial_restrictions && (
               <>
-                . Regional limits ({license.territorial_restrictions.denied_jurisdictions.join(", ")}):{" "}
+                . Regional limits (
+                {license.territorial_restrictions.denied_jurisdictions.join(", ")}):{" "}
                 {license.territorial_restrictions.notice}
               </>
             )}

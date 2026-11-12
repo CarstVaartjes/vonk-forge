@@ -3,6 +3,7 @@ import os
 from contextlib import redirect_stdout
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from library_route_fixtures import _library_detail, _recipe_projection
@@ -1331,10 +1332,12 @@ def test_recipe_detail_links_creator_licence_and_source_like_the_dashboard(capsy
         "denied_jurisdictions": ["CN", "US"],
         "notice": "Not for use in listed regions.",
     }
-    document = _recipe_document("tiny")
+    document = cast(dict[str, Any], _recipe_document("tiny"))
     source = "https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json"
     document["provenance"]["source_reference"] = source
-    models = _library_detail(document)["detail"]["model_documents"]
+    models = cast(dict[str, Any], _library_detail(document)["detail"])[
+        "model_documents"
+    ]
     for model in models:
         model["model_display"] = display
     render_payload(
