@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import select
 from sqlalchemy.orm import object_session
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import RunSwitchCode
 
 from ..admission_locking import AdmissionLockBusy
@@ -27,7 +29,7 @@ from ..run_admission import (
 )
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
-from .awaited_children import awaited_job_ids
+from .awaited_children import awaited_jobs
 from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchPostStopEvidencePending
 from .planning_helpers import _aware, _stored_job_plan
@@ -60,13 +62,22 @@ def observation_owners(
     session = object_session(job)
     if session is None:
         return ()
-    refs = [
-        OwnerRef(OwnerKind.JOB, child)
-        for child in awaited_job_ids(session, job, progress)
-    ]
     plan = _stored_job_plan(job)
     run_or_switch = plan is not None and plan.action in {"run", "switch"}
-    owners = [owner(session, ref) for ref in refs]
+    awaited = awaited_jobs(job, progress, plan)
+    ids = list(awaited.job_ids)
+    if awaited.start_request_key is not None:
+        start = session.scalar(
+            select(Job.id).where(
+                Job.kind == WireAgentOperation.RECIPE_START.value,
+                Job.request_id == awaited.start_request_key,
+            )
+        )
+        if start is not None:
+            ids.append(start)
+    owners = [
+        owner(session, OwnerRef(OwnerKind.JOB, child)) for child in dict.fromkeys(ids)
+    ]
     if (
         run_or_switch
         and progress.final_verify_started_at is None

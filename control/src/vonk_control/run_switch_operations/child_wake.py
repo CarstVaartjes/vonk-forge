@@ -26,16 +26,18 @@ from datetime import datetime
 
 from sqlalchemy import event, inspect, select
 from sqlalchemy.orm import Session, SessionTransaction, load_only, sessionmaker
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import WaitReason
 
 from .. import job_states, model_cache_states
 from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import read_wait, schedule_wait
+from ..run_switch_contract import RunSwitchOperationResult
 from ..stored_json import read_row_column
-from .awaited_children import awaited_job_ids
+from .awaited_children import awaited_jobs, child_job_ids, start_request_key
 from .constants import _OPERATION_KINDS
-from .planning_helpers import _aware
+from .planning_helpers import _aware, _stored_job_plan
 from .result_helpers import _read_progress
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,26 +111,7 @@ class ChildEndWake:
         """Make each live run-switch waiting on one of ``child_ids`` due now."""
         try:
             with self._sessions() as session:
-                owners = frozenset(
-                    job.id
-                    for job in session.scalars(
-                        select(Job)
-                        .options(
-                            load_only(
-                                Job.id,
-                                Job.kind,
-                                Job.result,
-                                Job.request_id,
-                                Job.payload,
-                            )
-                        )
-                        .where(
-                            Job.kind.in_(_OPERATION_KINDS),
-                            Job.state.in_(job_states.LIVE),
-                        )
-                    )
-                    if _waits_on(session, job, child_ids)
-                )
+                owners = _owners_awaiting(session, child_ids)
             now = self._clock()
         except Exception:
             _LOGGER.warning(
@@ -139,14 +122,46 @@ class ChildEndWake:
             _wake_owners(self._sessions, owners, now)
 
 
-def _waits_on(session: Session, job: Job, child_ids: frozenset[str]) -> bool:
-    stored = read_row_column(job, "result")
-    if isinstance(stored, Residue):
-        # A damaged checkpoint names no child; its own advance repairs it.
-        return False
-    return not child_ids.isdisjoint(
-        awaited_job_ids(session, job, _read_progress(stored))
+def _owners_awaiting(session: Session, child_ids: frozenset[str]) -> frozenset[str]:
+    """Live operations awaiting an ended id: one scan, at most one more query.
+
+    A job's own children are read from its checkpoint. The start it issued is
+    named only by its request key, so the ended ids that are starts are read
+    once and matched in memory; the payload is read only for a job whose key
+    matched.
+    """
+    owners: set[str] = set()
+    undecided: list[tuple[Job, RunSwitchOperationResult]] = []
+    for job in session.scalars(
+        select(Job)
+        .options(load_only(Job.id, Job.kind, Job.result, Job.request_id))
+        .where(Job.kind.in_(_OPERATION_KINDS), Job.state.in_(job_states.LIVE))
+    ):
+        stored = read_row_column(job, "result")
+        if isinstance(stored, Residue):
+            # A damaged checkpoint names no child; its own advance repairs it.
+            continue
+        progress = _read_progress(stored)
+        if not child_ids.isdisjoint(child_job_ids(progress)):
+            owners.add(job.id)
+        else:
+            undecided.append((job, progress))
+    if not undecided:
+        return frozenset(owners)
+    ended_starts = frozenset(
+        session.scalars(
+            select(Job.request_id).where(
+                Job.id.in_(child_ids),
+                Job.kind == WireAgentOperation.RECIPE_START.value,
+            )
+        )
     )
+    for job, progress in undecided:
+        if start_request_key(job) in ended_starts:
+            key = awaited_jobs(job, progress, _stored_job_plan(job)).start_request_key
+            if key in ended_starts:
+                owners.add(job.id)
+    return frozenset(owners)
 
 
 def _wake_owners(

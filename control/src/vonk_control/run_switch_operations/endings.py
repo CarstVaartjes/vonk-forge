@@ -42,8 +42,8 @@ from ..run_switch_progress import (
 )
 from ..stall_window import Verdict, stall_deadline
 from ..stored_json import read_row_column
+from .awaited_children import start_request_key
 from .errors import RunSwitchOperationConflict
-from .observation_helpers import _start_child_request_key
 from .observation_window import checkpoint_deadline, checkpoint_verdict
 from .ownership import _checkpoint_matches, _complete_cancellation
 from .planning_helpers import _aware, _now, _stored_job_plan
@@ -226,7 +226,7 @@ class EndingsMixin:
             ):
                 return
             state = job.state
-            start_request_id = _start_child_request_key(job.request_id)
+            start_request_id = start_request_key(job)
             start_id = session.scalar(
                 select(Job.id).where(
                     Job.kind == WireAgentOperation.RECIPE_START.value,
