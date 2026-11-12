@@ -1,0 +1,82 @@
+{
+  "note": "Input -> the exact lines the recipe detail shows (dashboard) and `vonkctl recipe detail` prints. The licence terms address is part of the line; the dashboard makes web addresses clickable but shows the same text.",
+  "cases": [
+    {
+      "name": "licence and source",
+      "publisher": "vonk",
+      "slug": "tiny",
+      "source_reference": "https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json",
+      "models": [
+        {
+          "model_title": "Tiny Model",
+          "license": {
+            "attribution": [
+              "Tiny Authors"
+            ],
+            "spdx": "Apache-2.0",
+            "url": "https://www.apache.org/licenses/LICENSE-2.0",
+            "territorial_restrictions": null
+          }
+        }
+      ],
+      "lines": [
+        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
+        "Recipe source: https://github.com/CarstVaartjes/vonk-forge-recipes/blob/main/recipes/vonk/tiny.json",
+        "Tiny Model licence: Apache-2.0 (terms: https://www.apache.org/licenses/LICENSE-2.0)"
+      ]
+    },
+    {
+      "name": "regional limits and no source",
+      "publisher": "vonk",
+      "slug": "tiny",
+      "source_reference": null,
+      "models": [
+        {
+          "model_title": "Tiny Model",
+          "license": {
+            "attribution": [
+              "Tiny Authors"
+            ],
+            "spdx": "LicenseRef-Custom",
+            "url": "https://example.org/terms",
+            "territorial_restrictions": {
+              "denied_jurisdictions": [
+                "CN",
+                "US"
+              ],
+              "notice": "Not for use in listed regions."
+            }
+          }
+        }
+      ],
+      "lines": [
+        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
+        "Tiny Model licence: LicenseRef-Custom (terms: https://example.org/terms)",
+        "Regional limits (CN, US): Not for use in listed regions."
+      ]
+    },
+    {
+      "name": "address that is not a web address stays text",
+      "publisher": "vonk",
+      "slug": "tiny",
+      "source_reference": null,
+      "models": [
+        {
+          "model_title": "Tiny Model",
+          "license": {
+            "attribution": [
+              "Tiny Authors"
+            ],
+            "spdx": "MIT",
+            "url": "javascript:alert(1)",
+            "territorial_restrictions": null
+          }
+        }
+      ],
+      "lines": [
+        "Creator and details on vonkforge.ai: https://vonkforge.ai/recipes/vonk/tiny",
+        "Tiny Model licence: MIT (terms: javascript:alert(1))"
+      ]
+    }
+  ]
+}

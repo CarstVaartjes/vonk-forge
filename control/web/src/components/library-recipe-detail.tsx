@@ -1,10 +1,10 @@
 import type { MouseEvent } from "react";
 import type { ControlApi, LibraryViewRecipeDetail as RecipeDetail } from "../api/types";
 import { recipeLibraryPath } from "../lib/library-route";
-import { formatBytes } from "../lib/fleet";
 import { ArtifactJobWorkspace } from "./artifact-job-workspace";
 import { LibraryProfileComposer } from "./library-profile-composer";
 import { LibraryRecipeFit } from "./library-recipe-fit";
+import { LibraryRecipeLinks } from "./library-recipe-links";
 import { LibraryRecipeVisual } from "./library-recipe-visual";
 import { RecipeQualificationEvidence } from "./library-recipe-qualification";
 import { RecipeBadges, recipeAttribution, sparkLabel } from "./library-workcell";
@@ -108,19 +108,12 @@ export function LibraryRecipeAuthority({
                   {item.selection.files.length} Recipe mount
                   {item.selection.files.length === 1 ? "" : "s"}
                 </small>
-                <ul>
-                  {item.model_document.files.map((file) => (
-                    <li key={file.id}>
-                      {file.path} · {formatBytes(file.size_bytes)} · sha256:
-                      {file.sha256.slice(0, 12)}…
-                    </li>
-                  ))}
-                </ul>
               </div>
             </li>
           ))}
         </ol>
       </section>
+      <LibraryRecipeLinks detail={detail} />
       <ArtifactJobWorkspace api={api} detail={detail} onBusyChange={onBusyChange} />
       <LibraryProfileComposer api={api} detail={detail} />
       <LibraryRecipeVisual document={detail.definition} modelDocuments={documents} />

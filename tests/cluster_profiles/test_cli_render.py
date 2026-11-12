@@ -1,8 +1,13 @@
+import json
 import os
 from contextlib import redirect_stdout
 from io import BytesIO, TextIOWrapper
+from pathlib import Path
+from typing import Any, cast
 
 import pytest
+from library_route_fixtures import _library_detail, _recipe_projection
+from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli_render import progress_line, render_payload
 
@@ -1308,3 +1313,43 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "12 B" in output and "3 B" in output and "9 B" in output
     assert "Previous revision retained because installation owner-1" in output
     assert "2 B unique" in output
+
+
+_RECIPE_LINKS_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "recipe-links.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "case", _RECIPE_LINKS_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_recipe_detail_prints_the_links_the_dashboard_shows(case, capsys):
+    # The web test renders the same fixture, so the two clients cannot drift.
+    corpus = json.loads(
+        (
+            Path(__file__).parents[2]
+            / "control/web/src/test-fixtures/library-corpus.json"
+        ).read_text()
+    )
+    display = next(iter(corpus["seedDisplays"]["models"].values()))
+    document = cast(dict[str, Any], _recipe_document(case["slug"]))
+    document["identity"]["publisher"] = case["publisher"]
+    document["provenance"]["source_reference"] = case["source_reference"]
+    models = cast(dict[str, Any], _library_detail(document)["detail"])[
+        "model_documents"
+    ][:1]
+    models = [
+        {**models[0], "model_display": {**display, **item}} for item in case["models"]
+    ]
+    render_payload(
+        {
+            **_recipe_projection(f"{case['publisher']}/{case['slug']}", "Tiny"),
+            "document": document,
+            "model_documents": models,
+        },
+        "recipe",
+        action="detail",
+    )
+
+    printed = capsys.readouterr().out.splitlines()
+    assert [line for line in printed if line in case["lines"]] == case["lines"]
