@@ -72,6 +72,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
         )?;
     }
+    // Every TelemetrySample byte field shares one Pydantic bound; read it from
+    // one field so the agent's plausibility check cannot drift from the contract.
+    let capacity = &graph["$defs"]["TelemetrySample"]["properties"]["memory_total_bytes"]["anyOf"]
+        [0]["maximum"];
+    let capacity = capacity
+        .as_u64()
+        .ok_or("TelemetrySample.memory_total_bytes needs an integer maximum in the wire schema")?;
+    fs::write(
+        output.join("telemetry_capacity.rs"),
+        format!("pub const MAX_TELEMETRY_CAPACITY_BYTES: u64 = {capacity};"),
+    )?;
     fs::write(
         output.join("generated.rs"),
         vonk_wire_codegen::render(schema.to_str().ok_or("non-UTF8 schema path")?)?,
