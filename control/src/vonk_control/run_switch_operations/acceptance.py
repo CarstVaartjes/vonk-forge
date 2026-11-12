@@ -161,8 +161,9 @@ class AcceptanceMixin:
             )
             if existing is not None:
                 return existing
+        # Stop is declarative: a preview that moved on is re-planned, never
+        # refused as stale.
         preview = service.preview_stop(request, actor=actor)
-        _require_reviewed_plan(request.plan_digest, preview)
         if not preview.allowed and not _plan_blockers_are_waitable(preview):
             raise RunSwitchRequestInvalid(
                 f"{RunSwitchCode.PLAN_BLOCKED}: "

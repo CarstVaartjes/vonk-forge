@@ -66,7 +66,7 @@ class UninstallMixin:
         existing = service._idempotent(
             request_id,
             WireAgentOperation.RECIPE_RECONCILE.value,
-            run_switch_plan_digest,
+            None,
             owner_kind="installation",
             owner_id=installation_id,
         )
@@ -107,7 +107,7 @@ class UninstallMixin:
                     session,
                     request_id,
                     WireAgentOperation.RECIPE_RECONCILE.value,
-                    run_switch_plan_digest,
+                    None,
                     owner_kind="installation",
                     owner_id=installation_id,
                 )
@@ -159,7 +159,7 @@ class UninstallMixin:
                 lambda: service._idempotent(
                     request_id,
                     WireAgentOperation.RECIPE_RECONCILE.value,
-                    run_switch_plan_digest,
+                    None,
                     owner_kind="installation",
                     owner_id=installation_id,
                 )
@@ -258,14 +258,12 @@ class UninstallMixin:
                     also_removing=also_removing,
                     preserve_model_files=preserve_model_files,
                 )
-                if plan.plan_digest != plan_digest:
-                    raise RecipeRequestInvalid(
-                        "uninstall effects changed since review; request a fresh preview",
-                        reason=InvalidRequestReason.SUPERSEDED,
-                    )
+                # Uninstall is declarative: it removes the installation as it
+                # is now. A plan that moved on since the caller's preview is
+                # re-planned, never refused; only a blocked one is.
                 if not plan.allowed:
                     raise RecipeRequestInvalid(
-                        "uninstall plan is stale or blocked: "
+                        "uninstall plan is blocked: "
                         + "; ".join(reason.code for reason in plan.blockers),
                         reason=InvalidRequestReason.SUPERSEDED,
                     )
@@ -326,7 +324,7 @@ class UninstallMixin:
                 lambda: service._idempotent(
                     request_id,
                     WireAgentOperation.RECIPE_UNINSTALL.value,
-                    plan_digest,
+                    None,
                     owner_kind="installation",
                     owner_id=installation_id,
                 )

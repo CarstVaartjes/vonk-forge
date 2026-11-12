@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     OperatorActionName,
+    RunState,
     UnknownOutcomeError,
     WaitReason,
     canonical_message,
@@ -124,6 +125,12 @@ class StopMixin:
             )
         ):
             return existing
+        if existing is None:
+            # Stop is declarative: a run already stopped answers with the Stop
+            # that stopped it, under any key, instead of being refused.
+            stopped_by = service._stop_of_stopped_run(run_id)
+            if stopped_by is not None:
+                return stopped_by
         refused: UnknownOutcomeError | None = None
         logical: RecipeOperationView | RecipeArtifactJobCancellationPending | None = (
             None
@@ -370,6 +377,27 @@ class StopMixin:
             canonical_message(read_row_column(job, "payload"))
         ).hexdigest()
         job.updated_at = now
+
+    def _stop_of_stopped_run(self, run_id: str) -> RecipeOperationView | None:
+        """The newest succeeded Stop of a run that is already stopped."""
+
+        service = typing_cast("RecipeOperationService", self)
+        with service._sessions() as session:
+            run = session.get(RecipeRun, run_id)
+            if run is None or run.state != RunState.STOPPED:
+                return None
+            job = session.scalar(
+                select(Job)
+                .where(
+                    Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                    Job.owner_kind == "run",
+                    Job.owner_id == run_id,
+                    Job.state == LifecycleState.SUCCEEDED.value,
+                )
+                .order_by(Job.created_at.desc(), Job.id.desc())
+                .limit(1)
+            )
+            return service._view(job, session=session) if job is not None else None
 
     def _service_stop_pending(
         self,

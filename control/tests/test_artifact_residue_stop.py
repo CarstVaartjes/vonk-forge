@@ -251,6 +251,14 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         request_id=stop_key,
     )
     assert stopped.id == stopping.id and stopped.state == "succeeded"
+    # A new key on the stopped run is that Stop too, never a refusal.
+    again = operations.stop(
+        run_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="operator",
+        request_id="a" * 36,
+    )
+    assert again.id == stopping.id
     resolved = artifacts.get(job.id)
     assert resolved.result_evidence is not None
     assert resolved.result_evidence.active_scope_may_remain is False

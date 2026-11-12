@@ -290,12 +290,12 @@ def test_request_lookup_api_uses_real_run_switch_provider_and_lifecycle_child(
     assert replay.status_code == 202, replay.text
     assert replay.json()["operation_id"] == accepted["operation_id"]
     assert replay.json()["request_key"] == request_key
+    # The same key is the same request, whatever plan digest it previewed.
     changed = client.post(
         apply_path, json={**apply_body, "plan_digest": "0" * 64}, headers=headers
     )
-    assert (
-        changed.status_code == 409 and "request_key_reused_differently" in changed.text
-    )
+    assert changed.status_code == 202, changed.text
+    assert changed.json()["operation_id"] == accepted["operation_id"]
 
     operation_id = accepted["operation_id"]
     assert service.tick() is True
