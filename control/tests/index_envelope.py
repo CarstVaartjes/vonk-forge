@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from vonk_control.recipe_packages import PACKAGE_REPOSITORY
 from vonk_forge_contracts import (
     INDEX_KIND,
     INDEX_SCHEMA_VERSION,
@@ -12,8 +13,6 @@ from vonk_forge_contracts import (
     PackageContract,
     catalog_vocabulary,
 )
-
-REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 
 
 def index_envelope(
@@ -31,7 +30,7 @@ def index_envelope(
         "kind": INDEX_KIND,
         "contract_version": contract_version,
         "updated_at": updated_at,
-        "repository": REPOSITORY,
+        "repository": PACKAGE_REPOSITORY,
         "source_commit": source_commit,
         "package_contract": PackageContract(
             schema_version=PACKAGE_SCHEMA_VERSION,

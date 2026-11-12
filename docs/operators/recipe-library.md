@@ -42,7 +42,7 @@ The index envelope (`kind`, `schema_version`, `contract_version`, `updated_at`,
 through the contract's `read_catalog_index`, with the entries emptied: the
 envelope is all or nothing, while each Model and recipe entry is still read on
 its own, so one entry this Controller cannot parse never rejects the library.
-A wrong `kind` or `schema_version` is `recipe_package.schema_incompatible`;
+A wrong `kind`, `schema_version` or `contract_version` is `recipe_package.schema_incompatible`;
 any other envelope fault is `recipe_package.response_invalid`.
 
 ## Development versus production

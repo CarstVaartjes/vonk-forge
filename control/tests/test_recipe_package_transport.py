@@ -560,6 +560,9 @@ def test_only_the_signed_envelope_rejects_the_whole_bundle(
     client.close()
 
 
+_DROPPED = object()
+
+
 @pytest.mark.parametrize(
     ("field", "value", "code"),
     [
@@ -567,6 +570,7 @@ def test_only_the_signed_envelope_rejects_the_whole_bundle(
         ("schema_version", 3, RecipePackageCode.SCHEMA_INCOMPATIBLE),
         ("source_commit", "not-a-commit", RecipePackageCode.RESPONSE_INVALID),
         ("updated_at", "2026-13-40T00:00:00Z", RecipePackageCode.RESPONSE_INVALID),
+        ("vocabulary", _DROPPED, RecipePackageCode.RESPONSE_INVALID),
     ],
 )
 def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
@@ -579,7 +583,10 @@ def test_an_envelope_the_contract_refuses_rejects_the_signed_index(
     """The envelope is read through the contract; its refusal keeps its code."""
     index, _, package = _canonical_package_fixture()
     document = json.loads(index)
-    document[field] = value
+    if value is _DROPPED:
+        del document[field]
+    else:
+        document[field] = value
     release = _release_for(_canonical(document) + b"\n", package)
     client = _client(release, tmp_path / "packages")
     try:
