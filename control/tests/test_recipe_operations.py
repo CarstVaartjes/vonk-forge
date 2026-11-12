@@ -6252,6 +6252,10 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
 def test_postgres_duplicate_stop_request_returns_same_operation(
     tmp_path: Path, postgres_engine
 ) -> None:
+    # The duplicate's acceptance pauses at its run fence while the first Stop
+    # is accepted, withdrawn and dispatched. Past the fence it must read that
+    # committed Stop and replay it, never re-plan against the withdrawn route
+    # and be refused as stale.
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -6271,10 +6275,22 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
     routes.publish_run(run.owner_id)
     plan = service.preview_stop(run.owner_id)
     request_key = "e" * 35 + "7"
-    start = threading.Barrier(2)
+    role = threading.local()
+    second_at_fence = threading.Event()
+    release_second = threading.Event()
 
-    def stop() -> str:
-        start.wait()
+    def at_fence(_connection, _cursor, statement, _parameters, _context, _many):
+        if (
+            getattr(role, "value", None) == "second"
+            and "FROM recipe_runs" in statement
+            and "FOR UPDATE" in statement
+            and not second_at_fence.is_set()
+        ):
+            second_at_fence.set()
+            assert release_second.wait(timeout=10)
+
+    def stop(label: str) -> str:
+        role.value = label
         return service.stop(
             run.owner_id,
             plan_digest=plan.plan_digest,
@@ -6282,10 +6298,20 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
             request_id=request_key,
         ).id
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        operation_ids = list(pool.map(lambda _index: stop(), range(2)))
+    event.listen(postgres_engine, "before_cursor_execute", at_fence)
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        second = pool.submit(stop, "second")
+        assert second_at_fence.wait(timeout=10)
+        first_id = pool.submit(stop, "first").result(timeout=10)
+        release_second.set()
+        second_id = second.result(timeout=10)
+    finally:
+        release_second.set()
+        pool.shutdown(wait=True)
+        event.remove(postgres_engine, "before_cursor_execute", at_fence)
 
-    assert len(set(operation_ids)) == 1
+    assert second_id == first_id
     with sessions() as session:
         assert (
             len(
