@@ -140,6 +140,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             Ok(_) => None,
         };
         let accelerator = accelerator_result.ok();
+        // Serial on purpose: there is one GPU driver, and the monitor keeps a slow sample.
         // The driver's per-process memory is reported only where it is part of
         // the unified pool; a dedicated accelerator has its own memory fields.
         let gpu_process_memory_bytes = accelerator
@@ -545,7 +546,7 @@ fn parse_first_accelerator(value: &[u8]) -> Option<AcceleratorReading> {
     let power_watts = power
         .parse::<f64>()
         .ok()
-        .filter(|value| (0.0..=10_000.0).contains(value));
+        .filter(|value| value.is_finite() && *value >= 0.0);
     if name.is_empty() || name.chars().count() > 256 {
         return None;
     }
