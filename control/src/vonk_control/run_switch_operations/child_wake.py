@@ -33,6 +33,7 @@ from ..lifecycle.evidence import Residue
 from ..models import Job, ModelCacheOperation
 from ..persisted_waits import read_wait, schedule_wait
 from ..stored_json import read_row_column
+from .awaited_children import awaited_job_ids
 from .constants import _OPERATION_KINDS
 from .planning_helpers import _aware
 from .result_helpers import _read_progress
@@ -112,13 +113,21 @@ class ChildEndWake:
                     job.id
                     for job in session.scalars(
                         select(Job)
-                        .options(load_only(Job.id, Job.kind, Job.result))
+                        .options(
+                            load_only(
+                                Job.id,
+                                Job.kind,
+                                Job.result,
+                                Job.request_id,
+                                Job.payload,
+                            )
+                        )
                         .where(
                             Job.kind.in_(_OPERATION_KINDS),
                             Job.state.in_(job_states.LIVE),
                         )
                     )
-                    if _waits_on(job, child_ids)
+                    if _waits_on(session, job, child_ids)
                 )
             now = self._clock()
         except Exception:
@@ -130,18 +139,14 @@ class ChildEndWake:
             _wake_owners(self._sessions, owners, now)
 
 
-def _waits_on(job: Job, child_ids: frozenset[str]) -> bool:
+def _waits_on(session: Session, job: Job, child_ids: frozenset[str]) -> bool:
     stored = read_row_column(job, "result")
     if isinstance(stored, Residue):
         # A damaged checkpoint names no child; its own advance repairs it.
         return False
-    progress = _read_progress(stored)
-    if progress.child_operation_id is not None and (
-        progress.child_operation_id in child_ids
-    ):
-        return True
-    probes = progress.preflight.pending_jobs if progress.preflight else {}
-    return not child_ids.isdisjoint(probes.values())
+    return not child_ids.isdisjoint(
+        awaited_job_ids(session, job, _read_progress(stored))
+    )
 
 
 def _wake_owners(

@@ -12,9 +12,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.orm import object_session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import RunSwitchCode
 
 from ..admission_locking import AdmissionLockBusy
@@ -29,9 +27,9 @@ from ..run_admission import (
 )
 from ..run_switch_contract import RunSwitchOperationResult
 from ..stall_window import Verdict, progress_deadline
+from .awaited_children import awaited_job_ids
 from .constants import _FINAL_VERIFICATION_MAX_SECONDS
 from .errors import RunSwitchPostStopEvidencePending
-from .observation_helpers import _start_child_request_key
 from .planning_helpers import _aware, _stored_job_plan
 
 #: Dependency recovery before verification: stayed unreadable.
@@ -64,20 +62,10 @@ def observation_owners(
         return ()
     refs = [
         OwnerRef(OwnerKind.JOB, child)
-        for child in (progress.child_operation_id, progress.recovery_child_operation_id)
-        if child is not None
+        for child in awaited_job_ids(session, job, progress)
     ]
     plan = _stored_job_plan(job)
     run_or_switch = plan is not None and plan.action in {"run", "switch"}
-    if run_or_switch:
-        start = session.scalar(
-            select(Job.id).where(
-                Job.kind == WireAgentOperation.RECIPE_START.value,
-                Job.request_id == _start_child_request_key(job.request_id),
-            )
-        )
-        if start is not None:
-            refs.append(OwnerRef(OwnerKind.JOB, start))
     owners = [owner(session, ref) for ref in refs]
     if (
         run_or_switch
