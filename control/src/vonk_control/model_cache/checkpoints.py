@@ -66,6 +66,7 @@ class _ProgressWindow:
 
     noted_at: datetime
     written_at: datetime | None = None
+    written_phase: str | None = None
     # Object digest -> the latest sample of a stream still transferring.
     samples: dict[str, _StreamSample] = field(default_factory=dict)
 
@@ -112,7 +113,13 @@ class CheckpointsMixin:
             window.noted_at = now
             sample = _StreamSample(spec, actual_bytes, completed_artifacts, state, now)
             window.samples[spec.sha256] = sample
-            if not force_progress and _within(now, window.written_at):
+            # A phase change is due at once, like any progress phase change: a
+            # stream starting after a verifying write is not shown as verifying.
+            if (
+                not force_progress
+                and _within(now, window.written_at)
+                and window.written_phase == "downloading"
+            ):
                 return
             samples = list(window.samples.values())
             # The operation is downloading while any of its streams still is:
@@ -141,6 +148,7 @@ class CheckpointsMixin:
                 )
             }
             window.written_at = now
+            window.written_phase = phase
             with cache._session(write=True) as session:
                 operation = session.get(
                     ModelCacheOperation, operation_id, with_for_update=True

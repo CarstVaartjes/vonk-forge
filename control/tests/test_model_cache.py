@@ -3126,6 +3126,13 @@ def test_sampled_streams_share_one_progress_write_without_storage_reads(
     progress = service.get_operation(operation.id).progress
     assert progress["phase"] == "downloading"
     assert progress["measurement"]["bytes_per_second"] > 0
+    # With no stream left transferring, the next stream's start is due at once.
+    for spec in others:
+        sample(spec, 100, state="verifying")
+    assert service.get_operation(operation.id).progress["phase"] == "verifying"
+    clock[0] += timedelta(seconds=1)
+    sample(first, 0)
+    assert service.get_operation(operation.id).progress["phase"] == "downloading"
 
 
 def test_cache_measurements_handle_unknown_total_and_observation_gap():
