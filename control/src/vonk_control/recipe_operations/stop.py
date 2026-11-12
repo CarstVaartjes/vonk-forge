@@ -374,8 +374,8 @@ class StopMixin:
 
     @staticmethod
     def _stop_of_stopped_run(session: Session, admitted: StopPlan) -> Job | None:
-        """The newest Stop of a run that is already stopped: a new Stop of it
-        is the same Stop, so it answers instead of being refused."""
+        """The newest succeeded Stop of a run that is already stopped: a new
+        Stop of it is the same Stop, so it answers instead of being refused."""
 
         if admitted.run_state != RunState.STOPPED:
             return None
@@ -385,6 +385,7 @@ class StopMixin:
                 Job.kind == WireAgentOperation.RECIPE_STOP.value,
                 Job.owner_kind == "run",
                 Job.owner_id == admitted.run_id,
+                Job.state == LifecycleState.SUCCEEDED.value,
             )
             .order_by(Job.created_at.desc(), Job.id.desc())
             .limit(1)
