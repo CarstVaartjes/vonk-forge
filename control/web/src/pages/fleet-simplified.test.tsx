@@ -1,4 +1,5 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { FleetPage } from "./fleet-simplified";
@@ -153,25 +154,24 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
-test("Fleet rows name what each Spark serves, and say idle when nothing runs", () => {
-  const run = (healthy: boolean | null) => ({
-    run_id: "run-1",
-    title: "Qwen Code",
-    alias: "code",
-    run_state: "running",
-    healthy,
-    member_node_ids: [`spk_${"Alpha".padEnd(32, "0")}`, `spk_${"Bravo".padEnd(32, "0")}`],
-  });
-  nodes = [
-    { ...spark("Alpha", 40, 250), loaded: [run(true)] },
-    { ...spark("Bravo", 40, 250), loaded: [run(null)] },
-    spark("Charlie", 40, 250),
-  ];
-  render(<FleetPage api={{} as ControlApi} />);
-  const rows = screen.getAllByRole("row").slice(1);
-  expect(within(rows[0]!).getByText("Qwen Code · code · running · with Bravo")).toBeVisible();
-  expect(within(rows[1]!).getByText("Qwen Code · code · state unknown · with Alpha")).toBeVisible();
-  expect(within(rows[2]!).getByText("Idle")).toBeVisible();
+test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-workloads.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    expected: Record<string, { page: string[] }>;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  const { container } = render(<FleetPage api={{} as ControlApi} />);
+  for (const node of vectors.nodes) {
+    const row = [...container.querySelectorAll("tbody tr")].find((candidate) =>
+      candidate.querySelector("th")?.textContent?.includes(node.display_name),
+    );
+    const lines = [...(row?.querySelectorAll('td[data-label="Serving"] > strong') ?? [])].map(
+      (line) => line.textContent,
+    );
+    expect(lines).toEqual(vectors.expected[node.id]!.page);
+  }
   nodes = [];
 });
 

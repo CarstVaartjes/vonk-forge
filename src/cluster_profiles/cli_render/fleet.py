@@ -6,7 +6,12 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
+from ..cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    RUN_RUNNING,
+    UNKNOWN,
+    GpuClockMetric,
+)
 from ..cli_telemetry_render import gpu_readings
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.display_memory_observation import (
@@ -144,7 +149,12 @@ def _memory(node: Mapping[str, object]) -> str:
 
 
 def _run_state_word(healthy: object, run_state: object) -> str:
-    """One workload's state in a word, as the Controller web Fleet page says it."""
+    """One workload's state in a word, as the Controller web Fleet page says it.
+
+    Health only qualifies a run that is running; any other run state is shown as is.
+    """
+    if run_state != RUN_RUNNING:
+        return _text(run_state)
     if healthy is None:
         return "state unknown"
     return "degraded" if healthy is False else _text(run_state)
@@ -545,7 +555,7 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
             _memory(node),
             _size(inventory.get("disk_free_bytes")),
             _gpu(node),
-            "; ".join(_node_workloads(node, names)) or "idle",
+            "; ".join(_node_workloads(node, names)) or "Idle",
         ]
         if wide:
             row.insert(5, _cpu_clock(node))

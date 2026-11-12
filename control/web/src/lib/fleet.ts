@@ -7,7 +7,12 @@ import {
   type WireNumber,
 } from "../api/contract-numeric";
 import type { SwapShortfallEvidence, VisualFleetNode } from "../api/types";
-import { NodeOfflineReason, OutcomeKind, ProjectionCode } from "../api/vocabulary.generated";
+import {
+  NodeOfflineReason,
+  OutcomeKind,
+  ProjectionCode,
+  RunState,
+} from "../api/vocabulary.generated";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
@@ -93,8 +98,10 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
-/** One workload's state in a word: degraded, unknown health, or its run state. */
+/** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */
 function runStateWord(run: VisualFleetNode["loaded"][number]): string {
+  if (run.run_state == null) return "state unknown";
+  if (run.run_state !== RunState.RUNNING) return run.run_state;
   if (run.healthy == null) return "state unknown";
   return run.healthy === false ? "degraded" : run.run_state;
 }

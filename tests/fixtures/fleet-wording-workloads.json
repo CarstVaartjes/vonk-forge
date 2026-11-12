@@ -1,5 +1,5 @@
 {
-  "comment": "What each Spark serves, in one set of words for the Controller web Fleet row and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording_workloads.py both render these nodes and must produce the expected lines per Spark.",
+  "comment": "What each Spark serves, in one set of words for the Controller web Fleet row and `vonkctl fleet`. The web test renders the Fleet page and compares the DOM text of each Serving line; the vonkctl test runs the fleet overview and compares the printed SERVING cell. Both must equal `expected` exactly. A run says degraded only while it is running and unhealthy; running with unknown health says state unknown; any other run state is shown as the run state itself. A Spark with nothing running says Idle.",
   "nodes": [
     {
       "id": "spk_11111111111111111111111111111111",
@@ -11,7 +11,10 @@
           "alias": "code",
           "run_state": "running",
           "healthy": true,
-          "member_node_ids": ["spk_11111111111111111111111111111111", "spk_22222222222222222222222222222222"]
+          "member_node_ids": [
+            "spk_11111111111111111111111111111111",
+            "spk_22222222222222222222222222222222"
+          ]
         },
         {
           "run_id": "run-b",
@@ -19,7 +22,9 @@
           "alias": "embed",
           "run_state": "running",
           "healthy": null,
-          "member_node_ids": ["spk_11111111111111111111111111111111"]
+          "member_node_ids": [
+            "spk_11111111111111111111111111111111"
+          ]
         }
       ]
     },
@@ -33,7 +38,11 @@
           "alias": "code",
           "run_state": "running",
           "healthy": false,
-          "member_node_ids": ["spk_11111111111111111111111111111111", "spk_22222222222222222222222222222222", "spk_33333333333333333333333333333333"]
+          "member_node_ids": [
+            "spk_11111111111111111111111111111111",
+            "spk_22222222222222222222222222222222",
+            "spk_33333333333333333333333333333333"
+          ]
         }
       ]
     },
@@ -46,22 +55,44 @@
           "title": "Mistral Small",
           "alias": "chat",
           "run_state": "starting",
-          "healthy": true,
-          "member_node_ids": ["spk_44444444444444444444444444444444"]
+          "healthy": false,
+          "member_node_ids": [
+            "spk_44444444444444444444444444444444"
+          ]
         }
       ]
     },
-    { "id": "spk_55555555555555555555555555555555", "display_name": "Spark Five", "loaded": [] }
+    {
+      "id": "spk_55555555555555555555555555555555",
+      "display_name": "Spark Five",
+      "loaded": []
+    }
   ],
   "expected": {
-    "spk_11111111111111111111111111111111": [
-      "GLM 5.3 Flash · code · running · with Spark Two",
-      "Qwen3 Embedding · embed · state unknown"
-    ],
-    "spk_22222222222222222222222222222222": [
-      "GLM 5.3 Flash · code · degraded · with Spark One, spk_33333333333333333333333333333333"
-    ],
-    "spk_44444444444444444444444444444444": ["Mistral Small · chat · starting"],
-    "spk_55555555555555555555555555555555": []
+    "spk_11111111111111111111111111111111": {
+      "page": [
+        "GLM 5.3 Flash · code · running · with Spark Two",
+        "Qwen3 Embedding · embed · state unknown"
+      ],
+      "vonkctl": "GLM 5.3 Flash · code · running · with Spark Two; Qwen3 Embedding · embed · state unknown"
+    },
+    "spk_22222222222222222222222222222222": {
+      "page": [
+        "GLM 5.3 Flash · code · degraded · with Spark One, spk_33333333333333333333333333333333"
+      ],
+      "vonkctl": "GLM 5.3 Flash · code · degraded · with Spark One, spk_33333333333333333333333333333333"
+    },
+    "spk_44444444444444444444444444444444": {
+      "page": [
+        "Mistral Small · chat · starting"
+      ],
+      "vonkctl": "Mistral Small · chat · starting"
+    },
+    "spk_55555555555555555555555555555555": {
+      "page": [
+        "Idle"
+      ],
+      "vonkctl": "Idle"
+    }
   }
 }
