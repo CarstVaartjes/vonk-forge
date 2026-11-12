@@ -143,22 +143,19 @@ def _memory(node: Mapping[str, object]) -> str:
     return f"{round(100 * (total - free) / total)}% of {_size(total)}"
 
 
-def _run_state_word(run: Mapping[str, object]) -> str:
+def _run_state_word(healthy: object, run_state: object) -> str:
     """One workload's state in a word, as the Controller web Fleet page says it."""
-    if run.get("healthy") is None:
+    if healthy is None:
         return "state unknown"
-    if run["healthy"] is False:
-        return "degraded"
-    return "ready" if run.get("run_state") == "running" else _text(run.get("run_state"))
+    return "degraded" if healthy is False else _text(run_state)
 
 
-def _node_workloads(
-    node: Mapping[str, object], names: Mapping[object, str]
-) -> list[str]:
+def _node_workloads(node: object, names: dict[object, str]) -> list[str]:
     """What a Spark serves, one line per run: title, alias, state, and its partners."""
+    document = _object(node, "Fleet node")
     seen: set[object] = set()
     lines: list[str] = []
-    for run in _records(node, "loaded"):
+    for run in _records(document, "loaded"):
         if run.get("run_id") in seen:
             continue
         seen.add(run.get("run_id"))
@@ -166,12 +163,12 @@ def _node_workloads(
         partners = [
             names.get(member, _text(member))
             for member in (members if isinstance(members, list) else [])
-            if member != node.get("id")
+            if member != document.get("id")
         ]
         parts = [
             _text(run.get("title") or run.get("run_id")),
             _text(run.get("alias")) if run.get("alias") else "",
-            _run_state_word(run),
+            _run_state_word(run.get("healthy"), run.get("run_state")),
             f"with {', '.join(partners)}" if partners else "",
         ]
         lines.append(" · ".join(part for part in parts if part))

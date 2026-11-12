@@ -169,7 +169,7 @@ test("Fleet rows name what each Spark serves, and say idle when nothing runs", (
   ];
   render(<FleetPage api={{} as ControlApi} />);
   const rows = screen.getAllByRole("row").slice(1);
-  expect(within(rows[0]!).getByText("Qwen Code · code · ready · with Bravo")).toBeVisible();
+  expect(within(rows[0]!).getByText("Qwen Code · code · running · with Bravo")).toBeVisible();
   expect(within(rows[1]!).getByText("Qwen Code · code · state unknown · with Alpha")).toBeVisible();
   expect(within(rows[2]!).getByText("Idle")).toBeVisible();
   nodes = [];

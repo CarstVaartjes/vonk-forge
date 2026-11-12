@@ -55,7 +55,7 @@
   ],
   "expected": {
     "spk_11111111111111111111111111111111": [
-      "GLM 5.3 Flash · code · ready · with Spark Two",
+      "GLM 5.3 Flash · code · running · with Spark Two",
       "Qwen3 Embedding · embed · state unknown"
     ],
     "spk_22222222222222222222222222222222": [

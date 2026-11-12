@@ -93,11 +93,10 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
-/** One workload's state in a word: ready, degraded, its run state, or unknown health. */
+/** One workload's state in a word: degraded, unknown health, or its run state. */
 function runStateWord(run: VisualFleetNode["loaded"][number]): string {
   if (run.healthy == null) return "state unknown";
-  if (run.healthy === false) return "degraded";
-  return run.run_state === "running" ? "ready" : run.run_state;
+  return run.healthy === false ? "degraded" : run.run_state;
 }
 
 /**
