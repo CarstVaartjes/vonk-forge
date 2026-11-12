@@ -217,7 +217,7 @@ jobs:
   rust-quality:
     name: Rust workspace lint
     needs: changes
-    if: (needs.changes.outputs.full == 'true' && needs.changes.outputs.rust == 'true') || needs.changes.outputs.rust_sources == 'true'
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -250,7 +250,7 @@ jobs:
   rust-tests:
     name: Rust workspace tests
     needs: changes
-    if: (needs.changes.outputs.full == 'true' && needs.changes.outputs.rust == 'true') || needs.changes.outputs.rust_sources == 'true'
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -899,7 +899,7 @@ jobs:
   repository-suite:
     name: Complete repository suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
     needs: changes
-    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.repository == 'true'
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # Hang bound, well above a shard's runtime.
     timeout-minutes: 40
@@ -1016,7 +1016,7 @@ jobs:
   control-suite:
     name: Complete control suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
     needs: changes
-    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true'
+    if: needs.changes.outputs.full == 'true'
     permissions:
       contents: read
       actions: read
@@ -1198,7 +1198,7 @@ jobs:
   web-suite:
     name: Admin web behavior
     needs: changes
-    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.web == 'true'
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Match control/web/package-lock.json; browsers and system libraries are baked in.
