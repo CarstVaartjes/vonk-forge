@@ -37,6 +37,14 @@ minor release added, and identifies each document by the `document_sha256` of
 its published JSON as recorded in the signed index. A document it still cannot
 read is skipped, listed under the sync-status `problems`, and the rest applies.
 
+The index envelope (`kind`, `schema_version`, `contract_version`, `updated_at`,
+`repository`, `source_commit`, `package_contract` and `vocabulary`) is read
+through the contract's `read_catalog_index`, with the entries emptied: the
+envelope is all or nothing, while each Model and recipe entry is still read on
+its own, so one entry this Controller cannot parse never rejects the library.
+A wrong `kind` or `schema_version` is `recipe_package.schema_incompatible`;
+any other envelope fault is `recipe_package.response_invalid`.
+
 ## Development versus production
 
 The catalog index and recipe packages are not committed to the recipe

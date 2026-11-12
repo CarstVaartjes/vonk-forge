@@ -563,27 +563,16 @@ def test_canary_catalog_import_applies_the_producer_fixture(tmp_path: Path) -> N
 
 def _release_index(recipes: list[object]) -> dict[str, object]:
     """A release-shaped library index this Controller's parser accepts."""
-    from vonk_control.recipe_packages import (
-        PACKAGE_MEDIA_TYPE,
-        PACKAGE_REPOSITORY,
-        PACKAGE_SCHEMA_VERSION,
-    )
     from vonk_forge_contracts import CONTRACT_MAJOR
 
-    return {
-        "schema_version": PACKAGE_SCHEMA_VERSION,
-        "kind": "recipe-library-index",
-        "repository": PACKAGE_REPOSITORY,
-        "source_commit": "c" * 40,
-        "contract_version": f"{CONTRACT_MAJOR}.0.0",
-        "updated_at": "1970-01-01T00:00:00Z",
-        "package_contract": {
-            "schema_version": PACKAGE_SCHEMA_VERSION,
-            "media_type": PACKAGE_MEDIA_TYPE,
-        },
-        "recipes": recipes,
-        "catalog_entities": [],
-    }
+    from control.tests.index_envelope import index_envelope
+
+    return index_envelope(
+        contract_version=f"{CONTRACT_MAJOR}.0.0",
+        updated_at="1970-01-01T00:00:00Z",
+        source_commit="c" * 40,
+        recipes=recipes,
+    )
 
 
 def test_canary_import_refuses_an_index_the_installed_controller_skips() -> None:

@@ -37,8 +37,6 @@ from vonk_control.models import (
     CatalogDocumentRevision,
 )
 from vonk_control.recipe_packages import (
-    PACKAGE_MEDIA_TYPE,
-    PACKAGE_REPOSITORY,
     RecipePackageClient,
     _entry_display,
 )
@@ -52,6 +50,7 @@ from vonk_forge_contracts import (
     read_recipe_display,
 )
 
+from .index_envelope import index_envelope
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_package_transport import _canonical_package_fixture
 
@@ -439,20 +438,10 @@ def _document_for(vector_name: str) -> dict:
 
 def _index(kind: str, document: dict, display: object) -> bytes:
     entry = {"document": document, "display": display, "content_sha256": "0" * 64}
-    envelope = {
-        "schema_version": 2,
-        "kind": "recipe-library-index",
-        "contract_version": "4.0.0",
-        "updated_at": "2026-09-28T12:00:00Z",
-        "repository": PACKAGE_REPOSITORY,
-        "source_commit": "a" * 40,
-        "package_contract": {
-            "schema_version": 2,
-            "media_type": PACKAGE_MEDIA_TYPE,
-        },
-        "catalog_entities": [entry] if kind == "model" else [],
-        "recipes": [entry | {"package": {}}] if kind == "recipe" else [],
-    }
+    envelope = index_envelope(
+        catalog_entities=[entry] if kind == "model" else [],
+        recipes=[entry | {"package": {}}] if kind == "recipe" else [],
+    )
     return json.dumps(envelope).encode()
 
 
