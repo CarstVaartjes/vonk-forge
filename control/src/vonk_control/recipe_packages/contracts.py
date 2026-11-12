@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 from vonk_agent_protocol import (
+    CatalogSyncCode,
     InvalidRequestError,
     InvalidRequestReason,
     RecipePackageCode,
@@ -76,18 +77,19 @@ def _newest_major(releases: list[_ReleaseResponse]) -> int | None:
 def _newer_major_note(published: int) -> ManagedCatalogSyncProblem:
     """The visible note while this Controller reads an older major than published.
 
-    Only an index-envelope refusal carries this code otherwise, and that one
-    raises instead of being a problem entry, so ``has_newer_major_note`` is exact.
+    A sync-owned code: the catalog was applied, a newer major merely exists.
     """
 
     return ManagedCatalogSyncProblem(
-        code=RecipePackageCode.SCHEMA_INCOMPATIBLE,
+        code=CatalogSyncCode.NEWER_CONTRACT_PUBLISHED,
         detail=f"contract v{published} is published; this Controller reads v{CONTRACT_MAJOR}",
     )
 
 
 def has_newer_major_note(problems: Iterable[ManagedCatalogSyncProblem]) -> bool:
-    return any(item.code == RecipePackageCode.SCHEMA_INCOMPATIBLE for item in problems)
+    return any(
+        item.code == CatalogSyncCode.NEWER_CONTRACT_PUBLISHED for item in problems
+    )
 
 
 @dataclass(frozen=True, slots=True)

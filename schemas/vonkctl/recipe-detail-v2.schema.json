@@ -890,6 +890,7 @@
         "catalog.sync_item_failed",
         "catalog.sync_lease_expired",
         "catalog.sync_model_failed",
+        "catalog.sync_newer_contract_published",
         "catalog.sync_not_found",
         "catalog.sync_prebuilt_images_failed",
         "catalog.sync_preview_changed",
