@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { ProfileReasonSeverity, ProjectionCode } from "../api/vocabulary.generated";
 import { parseContractJson, materialize, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetNode } from "../api/types";
@@ -9,6 +10,7 @@ import {
   nodeSecondaryName,
   nodeStatus,
   nodeSwap,
+  nodeVitals,
   offlineReasonLabel,
   telemetryFreshnessAt,
 } from "./fleet";
@@ -214,8 +216,8 @@ test("retains wide memory counters while deriving only a presentation ratio", ()
       host_memory_free_bytes: free,
     } as VisualFleetNode["inventory"],
   });
-  expect(nodeMemory(observed)).toEqual({ usedPercent: 50, totalBytes: total });
-  expect(formatBytes(total)).toBe("17179869184.0 GiB");
+  expect(nodeMemory(observed)).toMatchObject({ usedPercent: 50, totalBytes: total });
+  expect(formatBytes(total)).toBe("16777216.0 TiB");
   expect(formatBytes(wireInteger("1" + "0".repeat(400)))).toBe("1" + "0".repeat(400) + " B");
 });
 
@@ -276,4 +278,22 @@ test("swap shows the active size beside the desired size and the helper's wait r
   expect(text).toContain("desired 64 GiB (policy 16–128 GiB)");
   expect(text).toContain("waiting (insufficient-disk)");
   expect(nodeSwap(node())).toContain("desired unknown");
+});
+
+test("Fleet vitals use the words `vonkctl fleet` prints", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-vitals.json", "utf8"),
+  ) as {
+    cases: {
+      node: Partial<VisualFleetNode>;
+      expected: { memory: string | null; disk: string | null; gpu: string | null };
+    }[];
+  };
+  for (const { node: input, expected } of vectors.cases) {
+    const vitals = nodeVitals(node(input));
+    expect(vitals.memory?.text ?? null).toBe(expected.memory);
+    expect(vitals.disk?.text ?? null).toBe(expected.disk);
+    const gpu = [vitals.gpu?.text, vitals.gpuTemperature].filter(Boolean).join(", ");
+    expect(gpu || null).toBe(expected.gpu);
+  }
 });

@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import {
-  formatBytes,
   nodeDiskFreeBytes,
   nodeDisplayName,
   nodeMemory,
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
+  nodeVitals,
   type NodeStatus,
 } from "../lib/fleet";
+import { Meter } from "../components/meter";
 import { SortHeader, useSort } from "../components/sort-header";
 import { StatusPill } from "../components/status-pill";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -31,11 +32,6 @@ function statusTone(status: NodeStatus): "healthy" | "warning" | "danger" {
 
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
-
-function memoryLabel(node: VisualFleetNode): string {
-  const memory = nodeMemory(node);
-  return memory ? `${memory.usedPercent}% of ${formatBytes(memory.totalBytes)}` : "Not reported";
-}
 
 function selectedSpark(): string | null {
   return new URLSearchParams(location.search).get("spark");
@@ -348,7 +344,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                 {sorted.map((node) => {
                   const { status, reasons } = nodeStatus(node, fleet.now);
                   const name = nodeDisplayName(node);
-                  const disk = nodeDiskFreeBytes(node);
+                  const vitals = nodeVitals(node);
                   return (
                     <tr key={node.id}>
                       <th scope="row">
@@ -364,7 +360,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                         </a>
                         {nodeSecondaryName(node) && <small>{nodeSecondaryName(node)}</small>}
                       </th>
-                      <td>
+                      <td data-label="Status">
                         <StatusPill tone={statusTone(status)}>{status}</StatusPill>
                         {reasons.length > 0 && (
                           <small title={reasons.join("\n")}>
@@ -373,14 +369,32 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                           </small>
                         )}
                       </td>
-                      <td>{memoryLabel(node)}</td>
-                      <td>{disk === null ? "Not reported" : formatBytes(disk)}</td>
-                      <td>
-                        {typeof node.telemetry?.sample.gpu_utilization_percent === "number"
-                          ? `${node.telemetry.sample.gpu_utilization_percent.toFixed(1)}%`
-                          : "Not reported"}
+                      <td data-label="Memory used">
+                        {vitals.memory ? (
+                          <Meter label={`${name} memory used`} vital={vitals.memory} />
+                        ) : (
+                          "Not reported"
+                        )}
                       </td>
-                      <td>
+                      <td data-label="Disk free">
+                        {vitals.disk ? (
+                          <Meter label={`${name} disk used`} vital={vitals.disk} />
+                        ) : (
+                          "Not reported"
+                        )}
+                      </td>
+                      <td data-label="GPU">
+                        {vitals.gpu ? (
+                          <Meter
+                            label={`${name} GPU utilisation`}
+                            vital={vitals.gpu}
+                            note={vitals.gpuTemperature}
+                          />
+                        ) : (
+                          (vitals.gpuTemperature ?? "Not reported")
+                        )}
+                      </td>
+                      <td data-label="Recipes">
                         <strong>
                           {node.loaded.filter((item) => item.healthy === true).length}
                           {node.loaded.some((item) => item.healthy == null) ? " confirmed" : ""}{" "}

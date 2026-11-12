@@ -148,7 +148,9 @@ export function formatBytes(value: WireNumber | null | undefined): string {
       ? ([1024, "KiB"] as const)
       : compareWire(value, 1024 ** 3) < 0
         ? ([1024 ** 2, "MiB"] as const)
-        : ([1024 ** 3, "GiB"] as const);
+        : compareWire(value, 1024 ** 4) < 0
+          ? ([1024 ** 3, "GiB"] as const)
+          : ([1024 ** 4, "TiB"] as const);
   const displayed = displayRatio(value, unit[0]);
   return Number.isFinite(displayed)
     ? `${displayed.toFixed(1)} ${unit[1]}`
@@ -215,22 +217,60 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
     : hostname;
 }
 
-/** Used share and total of the Spark's memory, from the live sample when there is one. */
+/** Used and total memory of the Spark, from the live sample when there is one. */
 export function nodeMemory(
   node: VisualFleetNode,
-): { usedPercent: number; totalBytes: WireNumber } | null {
+): { usedPercent: number; usedBytes: WireNumber; totalBytes: WireNumber } | null {
   const sample = node.telemetry?.sample;
   const total = sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
   const free = sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes;
   if (!isWireNumber(total) || !isWireNumber(free) || compareWire(total, 0) <= 0) return null;
+  const used = subtractWire(total, free);
   return {
-    usedPercent: Math.round(100 * displayRatio(subtractWire(total, free), total)),
+    usedPercent: Math.round(100 * displayRatio(used, total)),
+    usedBytes: used,
     totalBytes: total,
   };
 }
 
 export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
+}
+
+/** A gauge: its fill, and the words that sit beside it (`vonkctl fleet` prints the same words). */
+export type Vital = { percent: number; text: string };
+
+/** The three gauges of a Fleet row; a vital the Spark does not report is null. */
+export function nodeVitals(node: VisualFleetNode): {
+  memory: Vital | null;
+  gpu: Vital | null;
+  gpuTemperature: string | null;
+  disk: Vital | null;
+} {
+  const memory = nodeMemory(node);
+  const sample = node.telemetry?.sample;
+  const gpu = sample?.gpu_utilization_percent;
+  const temperature = sample?.gpu_temperature_c;
+  const diskFree = nodeDiskFreeBytes(node);
+  const diskTotal = node.inventory?.disk_total_bytes ?? sample?.disk_total_bytes;
+  return {
+    memory: memory && {
+      percent: memory.usedPercent,
+      text: `${formatBytes(memory.usedBytes)} of ${formatBytes(memory.totalBytes)} (${memory.usedPercent}%)`,
+    },
+    gpu:
+      typeof gpu === "number" && Number.isFinite(gpu)
+        ? { percent: Math.min(100, Math.max(0, gpu)), text: `${Math.round(gpu)}%` }
+        : null,
+    gpuTemperature: typeof temperature === "number" ? `${temperature} °C` : null,
+    disk:
+      isWireNumber(diskFree) && isWireNumber(diskTotal) && compareWire(diskTotal, 0) > 0
+        ? {
+            percent: Math.round(100 * displayRatio(subtractWire(diskTotal, diskFree), diskTotal)),
+            text: `${formatBytes(diskFree)} of ${formatBytes(diskTotal)}`,
+          }
+        : null,
+  };
 }
 
 /** Average current CPU clock against the hardware maximum, with the temperature it runs at. */

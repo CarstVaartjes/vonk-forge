@@ -1,0 +1,42 @@
+{
+  "comment": "One set of vitals wording for the Controller web Fleet row and `vonkctl fleet`. control/web/src/lib/fleet.test.ts and tests/cluster_profiles/test_fleet_wording.py both render these nodes and must produce the expected strings.",
+  "cases": [
+    {
+      "name": "live sample",
+      "node": {
+        "inventory": {
+          "freshness": "fresh",
+          "host_memory_total_bytes": 137438953472,
+          "host_memory_free_bytes": 71940702208,
+          "disk_free_bytes": 442721857536,
+          "disk_total_bytes": 1999844147200
+        },
+        "telemetry": {
+          "freshness": "live",
+          "sample": {
+            "memory_total_bytes": 137438953472,
+            "memory_available_bytes": 71940702208,
+            "gpu_utilization_percent": 41.6,
+            "gpu_temperature_c": 55
+          }
+        }
+      },
+      "expected": {
+        "memory": "61.0 GiB of 128.0 GiB (48%)",
+        "disk": "412.3 GiB of 1.8 TiB",
+        "gpu": "42%, 55 °C"
+      }
+    },
+    {
+      "name": "temperature only",
+      "node": {
+        "inventory": null,
+        "telemetry": {
+          "freshness": "live",
+          "sample": { "gpu_temperature_c": 61 }
+        }
+      },
+      "expected": { "memory": null, "disk": null, "gpu": "61 °C" }
+    }
+  ]
+}

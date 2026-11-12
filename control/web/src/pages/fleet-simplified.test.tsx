@@ -153,6 +153,33 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   nodes = [];
 });
 
+test("Fleet rows show vitals as meters with their words, and no empty meter without a sample", () => {
+  const reporting = {
+    ...spark("Alpha", 40, 250),
+    telemetry: {
+      freshness: "live",
+      sample: {
+        observed_at: "2026-09-27T10:00:00Z",
+        gpu_utilization_percent: 42,
+        gpu_temperature_c: 55,
+      },
+    },
+  };
+  nodes = [reporting, { ...spark("Bravo", 40, 250), inventory: null }];
+  render(<FleetPage api={{} as ControlApi} />);
+  const rows = screen.getAllByRole("row").slice(1);
+  const meters = within(rows[0]!).getAllByRole("meter");
+  expect(meters.map((meter) => meter.getAttribute("aria-valuetext"))).toEqual([
+    "60 B of 100 B (60%)",
+    "250 B of 1000 B",
+    "42%",
+  ]);
+  expect(within(rows[0]!).getByText("42% · 55 °C")).toBeVisible();
+  expect(within(rows[1]!).queryAllByRole("meter")).toHaveLength(0);
+  expect(within(rows[1]!).getAllByText("Not reported")).toHaveLength(3);
+  nodes = [];
+});
+
 test("firing Prometheus alerts are visible in Fleet attention", () => {
   attention = [
     {
