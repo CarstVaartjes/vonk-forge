@@ -50,6 +50,7 @@ class CatalogSyncCode(WireEnum):
     ITEM_FAILED = "catalog.sync_item_failed"
     LEASE_EXPIRED = "catalog.sync_lease_expired"
     MODEL_FAILED = "catalog.sync_model_failed"
+    NEWER_CONTRACT_PUBLISHED = "catalog.sync_newer_contract_published"
     NOT_FOUND = "catalog.sync_not_found"
     PREBUILT_IMAGES_FAILED = "catalog.sync_prebuilt_images_failed"
     PREVIEW_CHANGED = "catalog.sync_preview_changed"

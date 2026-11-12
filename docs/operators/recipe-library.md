@@ -63,6 +63,13 @@ Sync status (`library_version`, `library_updated_at`), the Library page and
 changed. A release caught while its bundle is being replaced keeps the previous
 verified catalog active; the next sync picks up the new bundle.
 
+When a release of a newer contract major is published than this Controller
+reads, the Controller keeps applying its own major's catalog and the sync result
+carries one note in its `problems`, `contract vN is published; this Controller reads vM`. It follows the release
+listing, so it clears once a Controller of the new major is deployed. A major is
+deployed consumer-first: the Controller waits visibly for its major to be
+published and adopts it within a minute.
+
 Each sync verifies, before importing anything:
 
 1. the Sigstore bundle offline against the Sigstore public-good trust root
