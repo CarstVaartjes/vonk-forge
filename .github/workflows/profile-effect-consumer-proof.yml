@@ -24,8 +24,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A member pull request leaves this proof to its integration pull request.
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   connected-consumer:
     name: Real SQL Stop through installed CLI and recipes cleanup
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

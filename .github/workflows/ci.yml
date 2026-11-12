@@ -36,6 +36,9 @@ env:
 # 40906603157, job 123574403196), so every other job keeps its literal name: a
 # renamed job that is skipped would report a raw expression and never satisfy
 # its required check on pull requests that legitimately skip it.
+# A member pull request's gate is renamed too ("CI gate (member PR)"): only a
+# full run reports the required "CI gate", so every change lands through an
+# integration pull request (scripts/select-ci-areas, `full`).
 concurrency:
   group: vonk-forge-ci-${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && format('ignored-label-{0}', github.run_id) || github.event.pull_request.number || github.event.merge_group.head_sha || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
@@ -59,11 +62,14 @@ jobs:
       generated: ${{ steps.areas.outputs.generated }}
       nas_install: ${{ steps.areas.outputs.nas_install }}
       agent_package: ${{ steps.areas.outputs.agent_package }}
-      # One owner of the label rule: the selector decides by paths; an
-      # integration PR (labelled, or same-repository from integration/*) asks
-      # for complete acceptance and the carry on top of that.
-      lane: ${{ steps.areas.outputs.lane == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integration/')) }}
-      upgrade_carry: ${{ steps.areas.outputs.upgrade_carry == 'true' || contains(github.event.pull_request.labels.*.name, 'release-acceptance') || (github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'integration/')) }}
+      # The one owner of the member/integration rule (scripts/select-ci-areas):
+      # a member pull request runs the fast tier; every other run, including
+      # an integration pull request, runs every suite and proof.
+      full: ${{ steps.areas.outputs.full }}
+      rust_sources: ${{ steps.areas.outputs.rust_sources }}
+      lane: ${{ steps.areas.outputs.lane }}
+      upgrade_carry: ${{ steps.areas.outputs.upgrade_carry }}
+      targeted_shards: ${{ steps.targeted.outputs.shards || '[1]' }}
       repository_timings: ${{ steps.timings.outputs.repository }}
       control_timings: ${{ steps.timings.outputs.control }}
     steps:
@@ -88,21 +94,38 @@ jobs:
             # The tested commit is a merge onto the base: comparing the two
             # trees needs those two commits, not the repository history.
             git fetch --no-tags --depth=1 origin "$BASE_SHA"
-            git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" |
-              scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" --github-output \
-                >> "$GITHUB_OUTPUT"
+            git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" \
+              > "$RUNNER_TEMP/changed-paths.txt"
+            scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+              --event-payload "$GITHUB_EVENT_PATH" --github-output \
+              < "$RUNNER_TEMP/changed-paths.txt" >> "$GITHUB_OUTPUT"
           else
             scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+              --event-payload "$GITHUB_EVENT_PATH" \
               --github-output </dev/null >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Size the targeted tests of a member pull request
+        id: targeted
+        # About a hundred test files per runner: a broad change spreads over
+        # as many shards as the complete control suite, a narrow one takes one.
+        if: steps.areas.outputs.full == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=$(scripts/select-changed-tests < "$RUNNER_TEMP/changed-paths.txt" | wc -l)
+          shards=$(((files + 99) / 100))
+          shards=$((shards < 1 ? 1 : shards > 6 ? 6 : shards))
+          echo "$files targeted test files over $shards shards"
+          echo "shards=[$(seq -s, 1 "$shards")]" >> "$GITHUB_OUTPUT"
 
       - name: Label integration pull requests
         # Visible marker only: acceptance is selected by the outputs above, not
         # by the label landing. Labels set with the workflow token start no run.
+        # A full pull request without the label is an integration PR.
         if: >-
           github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          startsWith(github.head_ref, 'integration/') &&
+          steps.areas.outputs.full == 'true' &&
           !contains(github.event.pull_request.labels.*.name, 'release-acceptance')
         shell: bash
         env:
@@ -208,6 +231,7 @@ jobs:
   rust-quality:
     name: Rust workspace lint
     needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -240,6 +264,7 @@ jobs:
   rust-tests:
     name: Rust workspace tests
     needs: changes
+    if: needs.changes.outputs.full == 'true' || needs.changes.outputs.rust_sources == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -306,7 +331,7 @@ jobs:
   controller-spark-wire:
     name: Controller and Spark wire contract
     needs: changes
-    if: needs.changes.outputs.control == 'true' || needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.full == 'true' && (needs.changes.outputs.control == 'true' || needs.changes.outputs.rust == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -382,7 +407,7 @@ jobs:
   rust-platform:
     name: Rust platform integration
     needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -508,7 +533,7 @@ jobs:
   compose-integration:
     name: Compose integration
     needs: changes
-    if: needs.changes.outputs.compose == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.compose == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -540,7 +565,7 @@ jobs:
     # with no GHCR, R2, signatures or tailnet.
     name: Clean NAS install from source
     needs: changes
-    if: needs.changes.outputs.nas_install == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.nas_install == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -692,7 +717,7 @@ jobs:
     # with a throwaway key, and runs the same script on a native ARM64 runner.
     name: Native ARM64 agent package lifecycle
     needs: changes
-    if: needs.changes.outputs.agent_package == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.agent_package == 'true'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
@@ -825,9 +850,83 @@ jobs:
           mapfile -t guards < "$guard_list"
           uv run --project control --frozen python -m pytest -q -p no:cacheprovider -n 0 "${guards[@]}"
 
+  targeted-tests:
+    # A member pull request runs the test files that directly exercise its
+    # changed paths (scripts/select-changed-tests) instead of the complete
+    # suites; its integration pull request runs those once for the batch.
+    name: Targeted tests for changed paths (${{ matrix.shard }}-of-${{ strategy.job-total }})
+    needs: changes
+    if: needs.changes.outputs.full == 'false'
+    runs-on: ubuntu-24.04
+    # Hang bound, well above a complete shard's runtime.
+    timeout-minutes: 40
+    env:
+      VONK_RECIPE_LIBRARY_ROOT: ${{ github.workspace }}/.recipe-library
+    strategy:
+      fail-fast: false
+      matrix:
+        # Sized by the selection; the job count is the only owner of the total.
+        shard: ${{ fromJSON(needs.changes.outputs.targeted_shards) }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Provide the canonical recipe library
+        uses: ./.github/actions/recipe-library
+      - name: Prepare the locked Python environment
+        uses: ./.github/actions/python-env
+      - name: Build recipe library index and packages
+        run: scripts/build-recipe-library "$VONK_RECIPE_LIBRARY_ROOT"
+      - name: Install completion shells and the Controller image ingress tool
+        uses: ./.github/actions/apt-install
+        with:
+          packages: skopeo zsh
+      - name: Authenticate CI image mirror reads
+        # The mirror is an optional fast path; pulls fall back to upstream.
+        continue-on-error: true
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Pull the pinned test images once
+        run: scripts/pull-test-images postgres python
+      - name: Select the tests that exercise the changed paths
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          git diff --name-only --no-renames "$BASE_SHA" "$GITHUB_SHA" |
+            scripts/select-changed-tests > "$RUNNER_TEMP/targeted.txt"
+          cat "$RUNNER_TEMP/targeted.txt"
+      - name: Run this shard of the targeted repository and control tests
+        shell: bash
+        env:
+          SHARD: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ strategy.job-total }}
+          REPOSITORY_TIMINGS: ${{ needs.changes.outputs.repository_timings }}
+          CONTROL_TIMINGS: ${{ needs.changes.outputs.control_timings }}
+          VONK_CI_PREREQUISITES: needs_skopeo
+          VONK_SYNTHETIC_CANARY_INDEX: tests/fixtures/canonical-synthetic-canary/index.json
+        run: |
+          set -euo pipefail
+          status=0
+          for suite in repository control; do
+            timings="${suite^^}_TIMINGS"
+            printf '%s\n' "${!timings}" > "$RUNNER_TEMP/$suite-durations.json"
+            awk -v suite="$suite" '$1 == suite { print $2 }' "$RUNNER_TEMP/targeted.txt" \
+              > "$RUNNER_TEMP/targeted-$suite.txt"
+            scripts/test "$suite" --only "$RUNNER_TEMP/targeted-$suite.txt" \
+              --shard "$SHARD/$SHARD_TOTAL" --durations "$RUNNER_TEMP/$suite-durations.json" ||
+              status=1
+          done
+          exit "$status"
+
   repository-suite:
     name: Complete repository suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
     needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     # Hang bound, well above a shard's runtime.
     timeout-minutes: 40
@@ -904,6 +1003,7 @@ jobs:
     # control shards start without waiting for a Cargo build.
     name: Build actual native consumer probe
     needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -943,6 +1043,7 @@ jobs:
   control-suite:
     name: Complete control suite (${{ matrix.shard }}-of-${{ strategy.job-total }})
     needs: changes
+    if: needs.changes.outputs.full == 'true'
     permissions:
       contents: read
       actions: read
@@ -1033,7 +1134,7 @@ jobs:
     # are deselected from the control shards and never build an image.
     name: Controller image build tests
     needs: changes
-    if: needs.changes.outputs.control == 'true' && needs.changes.outputs.nas_install == 'true'
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.control == 'true' && needs.changes.outputs.nas_install == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -1124,6 +1225,7 @@ jobs:
   web-suite:
     name: Admin web behavior
     needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     # Match control/web/package-lock.json; browsers and system libraries are baked in.
@@ -1252,14 +1354,14 @@ jobs:
     uses: ./.github/workflows/release-acceptance.yml
     with:
       ref: ${{ github.sha }}
-      # The upgrade carry runs on a pull request when it changes what the
-      # upgrade is made of, or when an integration PR asks for complete
-      # acceptance; main's release carries every merge regardless.
+      # Every full pull request (an integration PR) carries; a merge-queue
+      # commit carries when it changes what the upgrade is made of; main's
+      # release carries every merge regardless.
       upgrade_carry: ${{ needs.changes.outputs.upgrade_carry == 'true' }}
 
   ci-gate:
-    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || 'CI gate' }}
-    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
+    name: ${{ (github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') && 'CI gate (label ignored)' || needs.changes.outputs.full == 'false' && 'CI gate (member PR)' || 'CI gate' }}
+    needs: [changes, lint, supply-chain, rust-quality, rust-tests, rust-platform, controller-spark-wire, generated-clients, compose-integration, repository-guards, targeted-tests, repository-suite, control-suite, control-image-build, web-suite, nas-install, agent-package, lane-proof]
     if: ${{ always() && !(github.event.action == 'labeled' && github.event.label.name != 'release-acceptance') }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -1293,6 +1395,8 @@ jobs:
           SELECTED_NAS_INSTALL: ${{ needs.changes.outputs.nas_install }}
           SELECTED_AGENT_PACKAGE: ${{ needs.changes.outputs.agent_package }}
           SELECTED_LANE: ${{ needs.changes.outputs.lane }}
+          SELECTED_FULL: ${{ needs.changes.outputs.full }}
+          SELECTED_RUST_SOURCES: ${{ needs.changes.outputs.rust_sources }}
           LINT_RESULT: ${{ needs.lint.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           RUST_QUALITY_RESULT: ${{ needs.rust-quality.result }}
@@ -1300,6 +1404,7 @@ jobs:
           RUST_PLATFORM_RESULT: ${{ needs.rust-platform.result }}
           WIRE_RESULT: ${{ needs.controller-spark-wire.result }}
           REPOSITORY_GUARDS_RESULT: ${{ needs.repository-guards.result }}
+          TARGETED_RESULT: ${{ needs.targeted-tests.result }}
           REPOSITORY_RESULT: ${{ needs.repository-suite.result }}
           CONTROL_RESULT: ${{ needs.control-suite.result }}
           CONTROL_IMAGE_BUILD_RESULT: ${{ needs.control-image-build.result }}
@@ -1322,6 +1427,8 @@ jobs:
             --selected "nas-install=$SELECTED_NAS_INSTALL" \
             --selected "agent-package=$SELECTED_AGENT_PACKAGE" \
             --selected "lane=$SELECTED_LANE" \
+            --selected "full=$SELECTED_FULL" \
+            --selected "rust-sources=$SELECTED_RUST_SOURCES" \
             --result "lint=$LINT_RESULT" \
             --result "supply-chain=$SUPPLY_CHAIN_RESULT" \
             --result "rust-quality=$RUST_QUALITY_RESULT" \
@@ -1329,6 +1436,7 @@ jobs:
             --result "rust-platform=$RUST_PLATFORM_RESULT" \
             --result "controller-spark-wire=$WIRE_RESULT" \
             --result "repository-guards=$REPOSITORY_GUARDS_RESULT" \
+            --result "targeted-tests=$TARGETED_RESULT" \
             --result "repository=$REPOSITORY_RESULT" \
             --result "control=$CONTROL_RESULT" \
             --result "control-image-build=$CONTROL_IMAGE_BUILD_RESULT" \
@@ -1341,17 +1449,18 @@ jobs:
 
       - name: Record the exact source and successful check selection
         # A merge-queue run tests the commit main will carry; its receipt lets
-        # the release reuse these checks without running them again.
+        # the release reuse these checks without running them again. A member
+        # run proves only its fast tier, so it leaves no receipt to reuse.
         if: >-
-          github.event_name == 'merge_group' ||
-          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+          needs.changes.outputs.full == 'true' && (github.event_name == 'merge_group' ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         env:
           SELECTED_AREAS: ${{ toJSON(needs.changes.outputs) }}
         run: scripts/resolve-tested-ci write-receipt --output "$RUNNER_TEMP/ci-tested-source/receipt.json"
       - name: Upload successful source check evidence
         if: >-
-          github.event_name == 'merge_group' ||
-          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)
+          needs.changes.outputs.full == 'true' && (github.event_name == 'merge_group' ||
+          (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-tested-source-v3

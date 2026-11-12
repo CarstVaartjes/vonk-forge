@@ -273,17 +273,7 @@ def test_pr_and_release_share_the_candidate_and_acceptance_jobs() -> None:
 
 def test_fast_jobs_have_no_path_predicate_and_gate_observes_acceptance() -> None:
     jobs = load(WORKFLOWS / "ci.yml")["jobs"]
-    for name in (
-        "rust-quality",
-        "rust-tests",
-        "generated-clients",
-        "repository-suite",
-        "consumer-probe",
-        "control-suite",
-        "web-suite",
-        "repository-guards",
-        "lint",
-    ):
+    for name in ("generated-clients", "repository-guards", "lint"):
         # The only predicate is the one that skips a label other than release-acceptance.
         assert jobs[name].get("if", IGNORED_LABEL_IF) == IGNORED_LABEL_IF, name
     assert "lane-proof" in jobs["ci-gate"]["needs"]
@@ -477,12 +467,11 @@ def test_pull_request_carry_follows_the_selector_and_the_release_always_carries(
     ci = load(WORKFLOWS / "ci.yml")["jobs"]
     carry = ci["lane-proof"]["with"]["upgrade_carry"]
     assert carry == "${{ needs.changes.outputs.upgrade_carry == 'true' }}"
-    # The label (or an integration/* head) is folded once, in the job outputs.
+    # The selector folds a full pull request (an integration PR) into both;
+    # the workflow passes them through without composing the rule again.
     for name in ("lane", "upgrade_carry"):
         output = ci["changes"]["outputs"][name]
-        assert f"steps.areas.outputs.{name} == 'true'" in output
-        assert "'release-acceptance'" in output
-        assert "startsWith(github.head_ref, 'integration/')" in output
+        assert output == f"${{{{ steps.areas.outputs.{name} }}}}"
     assert ci["lane-proof"]["if"].count("release-acceptance") == 0
     pr = load(WORKFLOWS / "release-acceptance.yml")
     assert pr["on"]["workflow_call"]["inputs"]["upgrade_carry"]["default"] is True

@@ -107,7 +107,7 @@ class StopMixin:
         )
         pending_service = (
             service._service_stop_pending(
-                request_id, plan_digest, profile_target_node_ids, profile_application_id
+                request_id, profile_target_node_ids, profile_application_id
             )
             if existing is not None
             else False
@@ -146,7 +146,7 @@ class StopMixin:
                     lambda: service._idempotent(
                         request_id,
                         WireAgentOperation.RECIPE_STOP.value,
-                        plan_digest,
+                        None,
                         owner_kind="run",
                         owner_id=run_id,
                     )
@@ -195,7 +195,7 @@ class StopMixin:
         profile_application_id: str | None,
     ) -> RecipeOperationView:
         # Claim, effect, conditional completion. The accepted Stop is checked
-        # durably first so a stale or blocked request withdraws nothing; the
+        # durably first so a blocked request withdraws nothing; the
         # route is then withdrawn with no transaction open (the withdrawal
         # intent is durable with its claim, and a crash resumes from it); only
         # then is the Stop dispatched, in its own short transaction, and only
@@ -228,14 +228,14 @@ class StopMixin:
             replay = service._idempotent(
                 request_id,
                 WireAgentOperation.RECIPE_STOP.value,
-                plan_digest,
+                None,
                 owner_kind="run",
                 owner_id=run_id,
             )
             if replay is None:
                 raise
             service._service_stop_pending(
-                request_id, plan_digest, profile_target_node_ids, profile_application_id
+                request_id, profile_target_node_ids, profile_application_id
             )
             return UndispatchedStopView.of(replay)
         workload_intent_ordinal = _bound_workload_intent(accepted)
@@ -374,7 +374,6 @@ class StopMixin:
     def _service_stop_pending(
         self,
         request_id: str,
-        plan_digest: str,
         profile_target_node_ids: Sequence[str] | None,
         profile_application_id: str | None,
     ) -> bool:
@@ -393,9 +392,10 @@ class StopMixin:
                 # Already-issued and other canonical Stop kinds remain observers;
                 # an absent historical review never authorizes new dispatch.
                 return False
+            # The same key on the same run is the same Stop, whatever plan
+            # digest the caller previewed.
             if (
-                document.plan_digest != plan_digest
-                or review.profile_target_node_ids
+                review.profile_target_node_ids
                 != (
                     sorted(profile_target_node_ids)
                     if profile_target_node_ids is not None

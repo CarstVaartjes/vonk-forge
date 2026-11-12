@@ -21,8 +21,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A member pull request leaves this proof to its integration pull request.
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   cross-device:
     name: Actual EXDEV, visible layout fault and no private copies
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:

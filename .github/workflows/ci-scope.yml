@@ -1,0 +1,37 @@
+name: CI scope
+
+# The separate pull-request proof workflows call this to read the same `full`
+# decision ci.yml's selector makes (scripts/select-ci-areas): a member pull
+# request skips them, and its integration pull request runs them for the batch.
+on:
+  workflow_call:
+    outputs:
+      full:
+        description: Whether this run carries every suite and proof
+        value: ${{ jobs.scope.outputs.full }}
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: Select member or full CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.select.outputs.full }}
+    steps:
+      - name: Check out the selector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/select-ci-areas
+          sparse-checkout-cone-mode: false
+      - name: Select the CI scope
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/select-ci-areas --event "$GITHUB_EVENT_NAME" \
+            --event-payload "$GITHUB_EVENT_PATH" --github-output </dev/null |
+            grep '^full=' >> "$GITHUB_OUTPUT"

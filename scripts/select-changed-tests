@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Select the pytest files that exercise a set of changed repository paths.
 
-This is the fast inner loop for ``scripts/test-local --changed``: a changed
-test file selects itself, a changed module selects the test files that import
-it directly, and any other changed file selects the test files that name its
-path. It deliberately ignores transitive imports, so it is a pre-check, not a
-substitute for the full suites before review.
+It drives ``scripts/test-local --changed`` and a member pull request's
+targeted CI tests: a changed test file selects itself, a changed module selects
+the test files that import it directly, and any other changed file selects the
+test files that name its path. It deliberately ignores transitive imports, so
+it is a pre-check; the integration pull request runs the full suites.
 
 Reads changed paths (one per line) on stdin and prints ``<suite> <test file>``
 lines, where suite is ``repository``, ``control`` or ``compose``.

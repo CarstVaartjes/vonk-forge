@@ -194,9 +194,6 @@ RECIPE_RUN_LOCK_VERDICTS: dict[str, dict[str, str]] = {
     "recipe_operations/stop.py": {
         "_check_service_stop": "retain: Stop acceptance revalidates the reviewed run",
     },
-    "recipe_operations/stop_acceptance.py": {
-        "_accept_service_stop": "retain: duplicate Stop replay under the run fence",
-    },
 }
 
 

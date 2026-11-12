@@ -79,11 +79,13 @@ class _Service(StopMixin):
         self._sessions = _Sessions()
         self._clock = lambda: NOW
         self._agent_jobs = SimpleNamespace(notify_available=lambda: None)
+        self._lookups = 0
 
-    def _idempotent(self, _request_id, _operation, plan_digest, **_kwargs):
-        # The entry check (digest None) sees nothing; the busy replay finds the
-        # committed receipt.
-        return self._replay if plan_digest is not None else None
+    def _idempotent(self, *_args, **_kwargs):
+        # The entry check sees nothing; the busy replay finds the committed
+        # receipt.
+        self._lookups += 1
+        return self._replay if self._lookups > 1 else None
 
     def _service_stop_pending(self, *_args):
         return False

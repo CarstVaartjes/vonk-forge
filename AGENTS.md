@@ -227,17 +227,23 @@ active task worktree. On macOS, check the intended OrbStack engine before
 calling a container/Linux lane unavailable. Physical NVIDIA, fabric, and model
 quality evidence still requires its designated lane.
 
-Every PR runs the complete sharded Controller/repository suites, repository
-guards, web tests, Rust tests/lint, generated clients and Python lint/types.
-Integration selection follows transitive dependencies in `scripts/select-ci-areas`;
-unknown inputs run the integrations. Controller PostgreSQL checks always run.
-Integration PRs require the `release-acceptance` label and exact-commit candidate
-acceptance before `CI gate` passes. CI labels same-repository `integration/*` PRs.
-Candidate acceptance runs on a PR only with the `release-acceptance` label or
-when the change can alter the upgrade (agent, packaging, installers, deployment,
-protocol, candidate scripts and workflows; the selector owns that boundary);
-other component PRs fold into an integration PR or are accepted by main's
-Release, which runs the upgrade carry for every merge.
+A fresh clone must run `scripts/build-control-wheel` before any tests: the agent
+protocol wheel the `control` project installs is built locally, not kept in git.
+
+Every change lands through an integration PR (same-repository `integration/*`
+head, or the `release-acceptance` label); `full` in `scripts/select-ci-areas`
+owns that rule. A member PR runs lean CI only: repository guards, Ruff and
+types, supply-chain evidence, generated clients, the tests that exercise its
+changed paths, and Rust lint/tests only for Rust inputs. Its gate reports
+`CI gate (member PR)`, never the required `CI gate`, so it cannot merge itself.
+A member PR is done when its lean CI is green and its review has passed.
+An integration PR runs the complete suites, every selected integration, its
+candidate acceptance with the upgrade carry, and the path-filtered proof
+workflows. Main's Release runs the complete CI unless it reuses the integration
+PR's run for the identical tree, and its own release acceptance; the proof
+workflows run on pull requests only. Adding the label re-runs `ci.yml` in full
+at once; the proof workflows do not trigger on labels and pick it up on the next
+push.
 See [the contributor CI guide](contributor.md#ci-and-pre-merge-release-acceptance)
 for protected environment setup and dispatch by ref. PR acceptance and main's
 Release reuse the same candidate/acceptance jobs; only main promotes channels.
