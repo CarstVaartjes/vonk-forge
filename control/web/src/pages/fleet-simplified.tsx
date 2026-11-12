@@ -232,7 +232,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
           />
         </div>
       )}
-      {fleet.snapshot && <ServingNow api={api} refreshKey={servingKey(fleet.snapshot.nodes)} />}
+      {fleet.snapshot && (
+        <ServingNow
+          api={api}
+          refreshKey={servingKey(fleet.snapshot.nodes)}
+          pollKey={fleet.snapshot.generated_at}
+        />
+      )}
       {fleet.snapshot && (
         <section className="fleet-command-summary" aria-label="Fleet summary">
           <div className="fleet-command-fact">

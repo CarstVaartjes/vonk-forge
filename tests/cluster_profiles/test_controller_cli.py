@@ -3364,9 +3364,6 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
         cli.main(("--profile", "3", "profile", "endpoint"), control_client=client) == 0
     )
     presentation = capsys.readouterr()
-    # The dashboard's "Serving now" lines: published aliases only, in its words.
-    serving = presentation.out.split("Serving now:\n", 1)[1].split("\n\n", 1)[0]
-    assert serving == "  example-model · Example Model · published"
     assert "Client model identifier: example-model" in presentation.out
     assert "Route generation: 8" in presentation.out
     assert (

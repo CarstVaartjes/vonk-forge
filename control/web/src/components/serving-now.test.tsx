@@ -1,8 +1,22 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ControlApi, FleetProfile } from "../api/types";
 import { connectionSnippets } from "./connection-examples";
 import { ServingNow } from "./serving-now";
+
+// `vonkctl profile endpoint` prints the same fixture's heading and lines.
+const fixture: {
+  heading: string;
+  cases: {
+    name: string;
+    assignments: { alias: string | null; recipe_title: string; state: string }[];
+    lines: string[];
+  }[];
+} = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../../tests/fixtures/serving-now.json"), "utf8"),
+);
 
 const endpoint = {
   alias: "qwen-code",
@@ -34,22 +48,28 @@ function apiWith(profiles: unknown[], assignments: unknown[]) {
   } as unknown as Pick<ControlApi, "profiles" | "profileEndpoints">;
 }
 
-test("lists each published alias of the loaded profile with the profile page's connection example", async () => {
-  // Break caught: the example is rebuilt differently from the Library's, an unpublished alias is
-  // offered, or the browser calls the inference gateway itself.
-  const fetched = vi.spyOn(globalThis, "fetch");
-  const notPublished = {
+test.each(fixture.cases)("shows the shared lines: $name", async (item) => {
+  const assignments = item.assignments.map((entry, index) => ({
     ...published,
-    assignment_id: "44444444-4444-4444-8444-444444444444",
-    alias: "draft",
-    state: "not-published-yet",
-    endpoint: null,
-  };
-  render(<ServingNow api={apiWith([loaded], [published, notPublished])} refreshKey="a" />);
+    assignment_id: `33333333-3333-4333-8333-${String(index).padStart(12, "0")}`,
+    ...entry,
+    endpoint: entry.state === "published" ? { ...endpoint, alias: entry.alias } : null,
+  }));
+  render(<ServingNow api={apiWith([loaded], assignments)} refreshKey="a" pollKey="1" />);
+
+  const heading = await screen.findByRole("heading", { name: fixture.heading });
+  expect(heading.textContent).toBe(fixture.heading);
+  const lines = screen.getAllByRole("listitem").map((line) => line.querySelector("p")?.textContent);
+  expect(lines).toEqual(item.lines);
+});
+
+test("offers the profile page's connection example and never calls the gateway", async () => {
+  // Break caught: the example is rebuilt differently from the Library's, or the browser calls the
+  // inference gateway itself.
+  const fetched = vi.spyOn(globalThis, "fetch");
+  render(<ServingNow api={apiWith([loaded], [published])} refreshKey="a" pollKey="1" />);
 
   const line = await screen.findByRole("listitem");
-  expect(line).toHaveTextContent("qwen-code · Qwen Code · published");
-  expect(screen.queryByText("draft")).not.toBeInTheDocument();
   await userEvent.click(within(line).getByText("Show connection example"));
   expect(within(line).getByLabelText("curl example").textContent).toBe(
     connectionSnippets(endpoint.api_base, "qwen-code").curl,
@@ -60,7 +80,7 @@ test("lists each published alias of the loaded profile with the profile page's c
 test("shows nothing when no profile is loaded", async () => {
   // Break caught: an empty "Serving now" heading appears on a fleet that serves nothing.
   const api = apiWith([{ number: 1, status: "draft" }], []);
-  render(<ServingNow api={api} refreshKey="a" />);
+  render(<ServingNow api={api} refreshKey="a" pollKey="1" />);
 
   await vi.waitFor(() => expect(api.profiles).toHaveBeenCalled());
   expect(screen.queryByRole("heading", { name: "Serving now" })).not.toBeInTheDocument();
@@ -71,7 +91,30 @@ test("a failed read says so instead of pretending nothing is served", async () =
   // Break caught: an unreachable endpoint view reads as "nothing is serving".
   const api = apiWith([loaded], []);
   vi.mocked(api.profileEndpoints).mockRejectedValue(new Error("down"));
-  render(<ServingNow api={api} refreshKey="a" />);
+  render(<ServingNow api={api} refreshKey="a" pollKey="1" />);
 
   expect(await screen.findByRole("status")).toHaveTextContent("not available");
+});
+
+test("reads again on the next poll while nothing is shown, but not once something is", async () => {
+  // Break caught: a profile that finishes loading never appears until a workload changes, or every
+  // poll re-reads the profile and endpoint views.
+  const api = apiWith([loaded], []);
+  const { rerender } = render(<ServingNow api={api} refreshKey="a" pollKey="1" />);
+  await vi.waitFor(() => expect(api.profileEndpoints).toHaveBeenCalledTimes(1));
+
+  vi.mocked(api.profileEndpoints).mockResolvedValue({
+    number: 2,
+    observed_at: "2026-09-10T00:00:00Z",
+    assignments: [published],
+  } as never);
+  rerender(<ServingNow api={api} refreshKey="a" pollKey="2" />);
+  expect(await screen.findByRole("listitem")).toBeVisible();
+  expect(api.profileEndpoints).toHaveBeenCalledTimes(2);
+
+  rerender(<ServingNow api={api} refreshKey="a" pollKey="3" />);
+  rerender(<ServingNow api={api} refreshKey="a" pollKey="4" />);
+  expect(api.profileEndpoints).toHaveBeenCalledTimes(2);
+  rerender(<ServingNow api={api} refreshKey="b" pollKey="5" />);
+  await vi.waitFor(() => expect(api.profileEndpoints).toHaveBeenCalledTimes(3));
 });

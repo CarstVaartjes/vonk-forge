@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { EndpointState, ProfileDocumentState } from "../api/vocabulary.generated";
 import {
   readableProfile,
@@ -21,19 +21,32 @@ export function servingKey(nodes: readonly VisualFleetNode[]): string {
 /**
  * What the loaded profile serves right now, one line per published alias, with the connection
  * example for each. Everything comes from the Controller's profile and endpoint views; the browser
- * never calls the inference gateway. `refreshKey` changes when the fleet's workloads change.
+ * never calls the inference gateway. The lines read exactly as `vonkctl profile endpoint` prints
+ * them (tests/fixtures/serving-now.json).
+ *
+ * It reads again when `refreshKey` changes (the fleet's workloads changed). While the last read
+ * failed or found nothing published, it also reads again on the next fleet poll (`pollKey`), so a
+ * profile that finishes loading appears without a workload change; once something is shown, polls
+ * alone do not re-read.
  */
 export function ServingNow({
   api,
   refreshKey,
+  pollKey,
 }: {
   api: Pick<ControlApi, "profiles" | "profileEndpoints">;
   refreshKey: string;
+  pollKey: string;
 }) {
   // null: the read failed, which is not the same as nothing being served
   const [serving, setServing] = useState<ServedAssignment[] | null>([]);
+  const read = useRef<{ api: unknown; refreshKey: string; shown: boolean } | null>(null);
   useEffect(() => {
-    void refreshKey;
+    void pollKey;
+    if (read.current?.api === api && read.current.refreshKey === refreshKey && read.current.shown)
+      return;
+    const attempt = { api, refreshKey, shown: false };
+    read.current = attempt;
     const controller = new AbortController();
     const { signal } = controller;
     void (async () => {
@@ -48,14 +61,16 @@ export function ServingNow({
       );
     })().then(
       (value) => {
-        if (!signal.aborted) setServing(value);
+        if (signal.aborted) return;
+        attempt.shown = value.length > 0;
+        setServing(value);
       },
       () => {
         if (!signal.aborted) setServing(null);
       },
     );
     return () => controller.abort();
-  }, [api, refreshKey]);
+  }, [api, refreshKey, pollKey]);
   if (serving === null)
     return (
       <p className="serving-now" role="status">

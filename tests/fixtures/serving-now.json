@@ -1,0 +1,48 @@
+{
+  "note": "Input assignments -> the heading and exact lines the Fleet page's 'Serving now' block shows and `vonkctl profile endpoint` prints. Only published aliases are listed.",
+  "heading": "Serving now",
+  "cases": [
+    {
+      "name": "one published alias",
+      "assignments": [
+        {
+          "alias": "qwen-code",
+          "recipe_title": "Qwen Code",
+          "state": "published"
+        }
+      ],
+      "lines": [
+        "qwen-code \u00b7 Qwen Code \u00b7 published"
+      ]
+    },
+    {
+      "name": "only published aliases, in order",
+      "assignments": [
+        {
+          "alias": "draft",
+          "recipe_title": "Draft Model",
+          "state": "not-published-yet"
+        },
+        {
+          "alias": "example-model",
+          "recipe_title": "Example Model",
+          "state": "published"
+        },
+        {
+          "alias": null,
+          "recipe_title": "Installed Tool",
+          "state": "installed-only"
+        },
+        {
+          "alias": "embedder",
+          "recipe_title": "Embedder",
+          "state": "published"
+        }
+      ],
+      "lines": [
+        "example-model \u00b7 Example Model \u00b7 published",
+        "embedder \u00b7 Embedder \u00b7 published"
+      ]
+    }
+  ]
+}
