@@ -6,7 +6,12 @@ from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from .. import cli_states
-from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
+from ..cli_states_generated import (
+    ENDPOINT_UNAVAILABLE,
+    RUN_RUNNING,
+    UNKNOWN,
+    GpuClockMetric,
+)
 from ..cli_telemetry_render import NOT_REPORTED, gpu_readings, round_half_up
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.display_memory_observation import (
@@ -160,6 +165,43 @@ def _memory(node: object) -> str:
         return NOT_REPORTED
     percent = round_half_up(100 * ((total - free) / total))
     return f"{_size(total - free)} of {_size(total)} ({percent}%)"
+
+
+def _run_state_word(healthy: object, run_state: object) -> str:
+    """One workload's state in a word, as the Controller web Fleet page says it.
+
+    Health only qualifies a run that is running; any other run state is shown as is.
+    """
+    if run_state != RUN_RUNNING:
+        return _text(run_state)
+    if healthy is None:
+        return "state unknown"
+    return "degraded" if healthy is False else _text(run_state)
+
+
+def _node_workloads(node: object, names: dict[object, str]) -> list[str]:
+    """What a Spark serves, one line per run: title, alias, state, and its partners."""
+    document = _object(node, "Fleet node")
+    seen: set[object] = set()
+    lines: list[str] = []
+    for run in _records(document, "loaded"):
+        if run.get("run_id") in seen:
+            continue
+        seen.add(run.get("run_id"))
+        members = run.get("member_node_ids")
+        partners = [
+            names.get(member, _text(member))
+            for member in (members if isinstance(members, list) else [])
+            if member != document.get("id")
+        ]
+        parts = [
+            _text(run.get("title") or run.get("run_id")),
+            _text(run.get("alias")) if run.get("alias") else "",
+            _run_state_word(run.get("healthy"), run.get("run_state")),
+            f"with {', '.join(partners)}" if partners else "",
+        ]
+        lines.append(" · ".join(part for part in parts if part))
+    return lines
 
 
 def _disk(node: object) -> str:
@@ -529,22 +571,20 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
     workloads = "1 workload" if len(run_ids) == 1 else f"{len(run_ids)} workloads"
     print(f"Fleet: {len(nodes)} Spark{plural}, {online} online, {workloads} running")
     print()
-    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "RUNNING"]
+    labels = ["SPARK", "STATUS", "MEMORY USED", "DISK FREE", "GPU", "SERVING"]
     if wide:
         labels[5:5] = ["CPU"]
         labels.append("ID")
+    names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
     rows = []
     for node in nodes:
-        loaded = _records(node, "loaded")
         row: list[object] = [
             node.get("display_name"),
             _status(node),
             _memory(node),
             _disk(node),
             _gpu(node),
-            "idle"
-            if not loaded
-            else f"{len(loaded)} workload" + ("s" if len(loaded) > 1 else ""),
+            "; ".join(_node_workloads(node, names)) or "Idle",
         ]
         if wide:
             row.insert(5, _cpu_clock(node))

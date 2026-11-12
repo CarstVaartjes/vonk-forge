@@ -200,6 +200,27 @@ test("Fleet meters turn amber for full memory and disk, never for GPU utilisatio
   nodes = [];
 });
 
+test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-workloads.json", "utf8"),
+  ) as {
+    nodes: { id: string; display_name: string }[];
+    expected: Record<string, { page: string[] }>;
+  };
+  nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
+  const { container } = render(<FleetPage api={{} as ControlApi} />);
+  for (const node of vectors.nodes) {
+    const row = [...container.querySelectorAll("tbody tr")].find((candidate) =>
+      candidate.querySelector("th")?.textContent?.includes(node.display_name),
+    );
+    const lines = [...(row?.querySelectorAll('td[data-label="Serving"] > strong') ?? [])].map(
+      (line) => line.textContent,
+    );
+    expect(lines).toEqual(vectors.expected[node.id]!.page);
+  }
+  nodes = [];
+});
+
 test("firing Prometheus alerts are visible in Fleet attention", () => {
   attention = [
     {
