@@ -1100,7 +1100,9 @@ def test_platform_presents_current_response_contract(workers_available, capsys):
     contract = PlatformObservation.from_dict(payload)
     render_payload(contract.to_dict(), "platform")
     output = capsys.readouterr().out
-    assert contract.api.source_sha in output
+    source_sha = contract.api.source_sha
+    assert source_sha is not None
+    assert source_sha[:12] in output
     assert contract.api.control_contract_sha256 in output
     if workers_available:
         assert "d" * 40 in output and "e" * 64 in output
@@ -1353,3 +1355,33 @@ def test_recipe_detail_prints_the_links_the_dashboard_shows(case, capsys):
 
     printed = capsys.readouterr().out.splitlines()
     assert [line for line in printed if line in case["lines"]] == case["lines"]
+
+
+_VERSION_LINE_FIXTURE = json.loads(
+    (Path(__file__).parents[1] / "fixtures" / "version-line.json").read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "case", _VERSION_LINE_FIXTURE["cases"], ids=lambda case: case["name"]
+)
+def test_version_lines_print_the_text_the_dashboard_shows(case, capsys):
+    # The web test renders the same fixture, so the two clients cannot drift.
+    render_payload(
+        {
+            "observed_at": "2026-11-12T08:00:00Z",
+            "api": {
+                "source_sha": case["platform"]["source_sha"],
+                "control_contract_sha256": "b" * 64,
+            },
+            "workers": None,
+            "worker_issue": "worker-observation-unavailable",
+        },
+        "platform",
+    )
+    render_payload(
+        case["sync"] or {"state": "never-run"}, "recipe", action="sync-status"
+    )
+    printed = capsys.readouterr().out.splitlines()
+    for line in case["lines"]:
+        assert line in printed

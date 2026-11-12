@@ -56,6 +56,14 @@ def _text(value: object) -> str:
     )
 
 
+# The one word both clients (this CLI and the dashboard) print for a fact the Controller did not report.
+NOT_REPORTED = "Not reported"
+
+
+def _reported(label: str, value: object) -> None:
+    _field(label, NOT_REPORTED if value is None else value)
+
+
 def _warn(message: str) -> None:
     encoding = sys.stderr.encoding or "utf-8"
     print(

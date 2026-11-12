@@ -643,8 +643,8 @@ they were built from. Acceptance and reuse bind an image to the tree of the
 commit they verify, while `org.opencontainers.image.revision` and the embedded
 `VONK_BUILD_SOURCE_SHA` keep naming the commit that built it, for operators.
 Identical content built for a pull request and for main is therefore one image.
-`vonkctl platform` shows both: `API source` is the commit that built the
-Controller (for a reused image, the pull request's test merge) and `API source
+`vonkctl platform` shows both: `Controller build` is the commit that built the
+Controller (first 12 characters; `--json` has all of it; for a reused image, the pull request's test merge) and `Controller build
 tree` is its tree, which equals the release commit's
 (`git rev-parse <release commit>^{tree}`).
 An image without the tree label is refused.

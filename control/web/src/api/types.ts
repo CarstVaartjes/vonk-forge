@@ -24,6 +24,7 @@ export type GatewayKeyRevoked = components["schemas"]["GatewayKeyRevoked"];
 export type JobDetail = components["schemas"]["JobDetailResponse"];
 export type JobResumeResponse = components["schemas"]["JobResumeResponse"];
 export type OperationDetail = components["schemas"]["OperationDetailResponse"];
+export type PlatformObservation = components["schemas"]["PlatformObservation"];
 export type CatalogSyncStatus = components["schemas"]["ManagedCatalogSyncResponse"];
 export type ProfileDefinition = components["schemas"]["FleetProfileDefinitionView"];
 export type ReconcilePlan = components["schemas"]["RunSwitchPlan"];
@@ -304,6 +305,7 @@ export interface LibraryApi {
   ): Promise<unknown>;
 }
 export interface ControlApi extends LibraryApi {
+  platformObservation(signal?: AbortSignal): Promise<PlatformObservation>;
   downloadCliToken(): Promise<CliTokenDownload>;
   profiles(signal?: AbortSignal): Promise<FleetProfileList>;
   profile(number: FleetProfileNumber, signal?: AbortSignal): Promise<FleetProfileRead>;

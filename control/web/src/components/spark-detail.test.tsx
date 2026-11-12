@@ -210,3 +210,26 @@ test("display reservation stays unknown and renders Controller advice", async ()
   expect(screen.getByText(/Reserved unknown · SoC unknown/)).toBeVisible();
   expect(api.fleetNode).toHaveBeenCalledTimes(1);
 });
+
+test("overview reports the agent version, or Not reported", async () => {
+  // Break caught: the agent version is guessed or shown blank when the agent has not reported it.
+  const read = (agent_runtime: unknown) =>
+    render(
+      <SparkDetail
+        api={
+          {
+            fleetNode: vi.fn().mockResolvedValue({ ...node, agent_runtime }),
+          } as unknown as ControlApi
+        }
+        id="spk_1"
+        onClose={vi.fn()}
+      />,
+    );
+  const first = read({ semantic_version: "0.9.2" });
+  expect((await screen.findByText("Agent version")).nextElementSibling).toHaveTextContent("0.9.2");
+  first.unmount();
+  read(null);
+  expect((await screen.findByText("Agent version")).nextElementSibling).toHaveTextContent(
+    "Not reported",
+  );
+});

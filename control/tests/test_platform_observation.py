@@ -104,7 +104,7 @@ def test_platform_worker_fault_repair_through_authenticated_native_cli(
     text = io.StringIO()
     with redirect_stdout(text):
         assert cli.main(("platform",)) == 0
-    assert f"API source tree: {'1' * 40}" in text.getvalue()
+    assert f"Controller build tree: {'1' * 40}" in text.getvalue()
     assert healthy["workers"][0]["source_sha"] == "b" * 40
     assert healthy["workers"][0]["worker_contract_sha256"] == "e" * 64
     assert healthy["worker_issue"] is None

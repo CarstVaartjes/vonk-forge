@@ -19,6 +19,7 @@ type Operator = {
 type AppShellProps = {
   activeRoute?: AppRoute;
   children: ReactNode;
+  footer?: ReactNode;
   navigationKey?: string;
   navigationLocked?: boolean;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
@@ -28,6 +29,7 @@ type AppShellProps = {
 export function AppShell({
   activeRoute,
   children,
+  footer,
   navigationKey = activeRoute,
   navigationLocked = false,
   onNavigate,
@@ -103,7 +105,10 @@ export function AppShell({
         </div>
       </header>
       <main ref={mainContent} id="main-content" tabIndex={-1}>
-        <div className="content-frame">{children}</div>
+        <div className="content-frame">
+          {children}
+          {footer}
+        </div>
       </main>
     </div>
   );

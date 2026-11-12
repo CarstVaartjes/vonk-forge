@@ -1,6 +1,7 @@
 import { formatWire } from "../api/contract-numeric";
 import { useEffect, useState } from "react";
 import type { CatalogSyncStatus, LibraryApi } from "../api/types";
+import { lastSyncAt } from "../lib/catalog-sync";
 import { Time } from "./time";
 import { StatusPill } from "./status-pill";
 import type { StatusTone } from "./status-pill";
@@ -12,7 +13,7 @@ const TONE: Record<CatalogSyncStatus["state"], StatusTone> = {
   failed: "danger",
 };
 
-/** Read-only: the Controller syncs the recipe library itself; this only reports the last run. */
+/** Read-only: the Controller syncs the recipe library itself; this only reports the last sync. */
 export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogSyncStatus"> }) {
   const [status, setStatus] = useState<CatalogSyncStatus | null | undefined>();
   const [error, setError] = useState("");
@@ -45,7 +46,7 @@ export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogS
         Recipe library sync has not run yet. The Controller syncs automatically.
       </p>
     );
-  const at = status.completed_at ?? status.created_at;
+  const at = lastSyncAt(status);
   const problems = [
     ...status.problems.map((item) => `${item.code}: ${item.detail}`),
     ...(status.last_error ? [`${status.last_error.code}: ${status.last_error.detail}`] : []),
@@ -57,7 +58,7 @@ export function CatalogSyncStatusLine({ api }: { api: Pick<LibraryApi, "catalogS
         <StatusPill tone={TONE[status.state]}>{status.state}</StatusPill>
         <>
           {" "}
-          · last run <Time value={at} />
+          · Last sync <Time value={at} />
         </>
         {status.commit && (
           <>
