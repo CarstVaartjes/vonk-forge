@@ -38,6 +38,9 @@ from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
 from .warn_once import warn_once
 
+#: A sample is accepted only within this long of its observation time.
+TELEMETRY_ACCEPTANCE_WINDOW = timedelta(minutes=5)
+
 
 def _aware_utc(value: datetime, *, label: str) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -66,9 +69,10 @@ class TelemetrySampleView(TelemetryReadings):
 
 def _canonical_sample(value: TelemetrySample, now: datetime) -> TelemetrySample:
     validated = TelemetrySample.model_validate_json(canonical_message(value))
-    if validated.observed_at > now + timedelta(
-        seconds=30
-    ) or now - validated.observed_at > timedelta(minutes=5):
+    if (
+        validated.observed_at > now + timedelta(seconds=30)
+        or now - validated.observed_at > TELEMETRY_ACCEPTANCE_WINDOW
+    ):
         raise InvalidValue(
             "telemetry observation time is outside the accepted window",
             reason=InvalidRequestReason.OUT_OF_RANGE,
@@ -161,10 +165,6 @@ def _advance_latest(
 #: How far back an engine reading still stands for its run. Several samples fit
 #: in it, so one slow scrape does not gap the exported series.
 ENGINE_LIVE_WINDOW = timedelta(seconds=30)
-
-
-#: A sample is accepted only within this long of its observation time.
-ENGINE_SCAN_BOUND = timedelta(minutes=5)
 
 
 @dataclass(frozen=True)
@@ -445,7 +445,8 @@ class TelemetryRepository:
                 .join(RecipeRun, RecipeRun.id == NodeEngineSample.run_id)
                 .where(
                     NodeTelemetrySample.received_at >= since,
-                    NodeTelemetrySample.observed_at >= since - ENGINE_SCAN_BOUND,
+                    NodeTelemetrySample.observed_at
+                    >= since - TELEMETRY_ACCEPTANCE_WINDOW,
                     RecipeRun.route_state == RouteState.PUBLISHED.value,
                 )
                 .order_by(NodeTelemetrySample.observed_at)

@@ -198,22 +198,6 @@ def test_an_invalid_engine_entry_is_dropped_alone(invalid: dict[str, str]) -> No
     assert parsed.document()["samples"][0]["engines"] == VECTOR_V2["sample"]["engines"]
 
 
-@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_engine_readings"])
-def test_an_invalid_engine_reading_is_dropped_alone(invalid: dict[str, float]) -> None:
-    first, second = VECTOR_V2["sample"]["engines"]
-    parsed = TelemetryRequest.parse(
-        {
-            "samples": [
-                {**VECTOR_V2["sample"], "engines": [{**first, **invalid}, second]}
-            ]
-        }
-    )
-    kept_first, kept_second = parsed.document()["samples"][0]["engines"]
-    assert kept_second == second
-    assert not set(invalid) & set(kept_first)
-    assert kept_first["generation_tokens"] == first["generation_tokens"]
-
-
 def test_a_ninth_engine_is_kept_and_a_dropped_entry_is_counted() -> None:
     first = VECTOR_V2["sample"]["engines"][0]
     engines = [

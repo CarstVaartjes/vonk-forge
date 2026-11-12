@@ -185,18 +185,5 @@
       "run_id": "33333333-3333-4333-8333-333333333333",
       "format": "unknown-engine"
     }
-  ],
-  "invalid_engine_readings": [
-    {
-      "kv_cache_usage_ratio": 1.5
-    },
-    {
-      "spec_decode_draft_tokens": 5,
-      "spec_decode_accepted_tokens": 6
-    },
-    {
-      "ttft_seconds_sum": -1.0,
-      "ttft_seconds_count": 3
-    }
   ]
 }

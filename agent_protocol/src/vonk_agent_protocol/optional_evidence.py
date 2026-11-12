@@ -209,25 +209,6 @@ def _smallest_valid(
     return tuple(kept), model
 
 
-def _refused_groups(
-    groups: tuple[EvidenceGroup, ...], data: Any, refusal: ValidationError
-) -> tuple[EvidenceGroup, ...]:
-    """The groups with a field that ``refusal`` names, in declaration order."""
-
-    locations = [
-        _data_location(data, tuple(error["loc"])) for error in refusal.errors()
-    ]
-    return tuple(
-        group
-        for group in groups
-        if any(
-            location[: len(path)] == path
-            for location in locations
-            for path in group.paths
-        )
-    )
-
-
 class OptionalEvidenceModel(BaseModel):
     """Mixin: drop invalid optional evidence instead of refusing the report."""
 
@@ -293,15 +274,11 @@ def _drop_invalid_optional_evidence(
             for group in cls.EVIDENCE_GROUPS
             if any(_present(data, path) for path in group.paths)
         )
-        # Drop what the refusal names, keeping each group only if the report is
-        # valid without dropping it. A refusal that names no group (a check
-        # across fields) starts from every present group. Either way the cost
-        # is at most one validation per group plus one: a report whose core is
-        # invalid fails the first trial and is refused unchanged.
-        named = _refused_groups(present, data, refusal)
-        found = _smallest_valid(handler, data, named) if named else None
-        if found is None and set(named) != set(present):
-            found = _smallest_valid(handler, data, present)
+        # Drop every present group, then keep each one only if the report is
+        # valid without dropping it, so the cost is at most one validation per
+        # group. A report whose core is invalid fails the first trial and is
+        # refused unchanged.
+        found = _smallest_valid(handler, data, present)
         if found is None:
             raise
         dropped, model = found

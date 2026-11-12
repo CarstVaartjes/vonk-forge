@@ -22,6 +22,7 @@ import pytest
 import vonk_agent_protocol
 from pydantic import BaseModel
 from vonk_agent_protocol import AgentFailureResult, AgentResult
+from vonk_agent_protocol.failure_evidence import FailureDiagnostics
 from vonk_agent_protocol.optional_evidence import EvidenceDrop
 from vonk_agent_protocol.page_cache import PageCacheDropProblem, PageCacheDropReport
 from vonk_agent_protocol.reason_codes import AgentEvidenceCode
@@ -200,3 +201,41 @@ def test_every_strict_protocol_model_reads_uuids_and_timestamps_from_json() -> N
     }
 
     assert unbound == {}
+
+
+def test_diagnostics_over_their_size_bound_lose_only_the_page_cache() -> None:
+    """The size check refuses the diagnostics as a whole, yet recovery keeps them
+    and drops only the page-cache group that makes them too big to keep whole."""
+
+    document = copy.deepcopy(_vector())
+    diagnostics = document["result"]["evidence"]["diagnostics"]
+    for name, count in (
+        ("preflight", 8),
+        ("sandbox", 12),
+        ("storage", 8),
+        ("versions", 8),
+    ):
+        diagnostics[name] = [
+            {"name": f"{n:02}" + "n" * 62, "value": "x" * 256} for n in range(count)
+        ]
+    for stream in ("stdout", "stderr"):
+        diagnostics[stream]["text"] = "y" * 2048
+
+    def size_without_page_cache() -> int:
+        kept = {k: v for k, v in diagnostics.items() if k != "page_cache"}
+        return len(FailureDiagnostics.model_validate(kept).model_dump_json().encode())
+
+    # The diagnostics fit their 16 KiB bound exactly without the page cache, so
+    # the page cache alone pushes them over: trim stdout to the exact size.
+    diagnostics["stdout"]["text"] = ""
+    room = 16 * 1024 - size_without_page_cache()
+    diagnostics["stdout"]["text"] = "y" * room
+    assert size_without_page_cache() == 16 * 1024
+
+    accepted = AgentResult.model_validate(document)
+
+    assert accepted.evidence_warnings == (AgentEvidenceCode.FAILURE_PAGE_CACHE_DROPPED,)
+    stored = accepted.stored_result()
+    assert isinstance(stored, AgentFailureResult)
+    assert stored.diagnostics is not None
+    assert stored.diagnostics.page_cache is None
