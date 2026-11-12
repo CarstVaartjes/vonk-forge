@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { AdminMenu } from "./admin-menu";
 import type { CliTokenDownload } from "../api/types";
+import { BrandMark } from "./brand-mark";
 import { ActivityIcon, FleetIcon, LibraryIcon } from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
@@ -58,12 +59,10 @@ export function AppShell({
       </a>
       <header className="app-header">
         <div className="brand">
-          <span className="mark" aria-hidden="true">
-            VF
-          </span>
+          <BrandMark />
           <div>
             <strong>Vonk Forge</strong>
-            <small>Cluster control</small>
+            <small>Controller</small>
           </div>
         </div>
         <nav className="primary-navigation" aria-label="Primary">
