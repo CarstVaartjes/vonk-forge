@@ -14,8 +14,8 @@ fn only_a_stop_that_established_its_effect_is_named() {
     stops.observe(&claim, &done);
     claim.operation = AgentOperation::RecipeStop;
     for ended in [
-        ExecutionResult::cancelled("cancelled"),
-        ExecutionResult::failed("failed"),
+        ExecutionResult::cancelled("the order was withdrawn"),
+        ExecutionResult::failed("the helper refused the stop"),
     ] {
         stops.observe(&claim, &ended);
     }
