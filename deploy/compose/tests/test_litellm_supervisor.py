@@ -569,6 +569,73 @@ def test_live_supervisor_reloads_only_when_a_new_generation_changes_routes(
     assert children[0].terminated is True
 
 
+def test_withdrawal_is_acknowledged_drained_before_the_new_child_is_healthy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _module()
+    _bundle(module, tmp_path)
+    first = module._active_request()
+    withdrawn_config = tmp_path / "withdrawn.json"
+    withdrawn_config.write_text('{"model_list":[]}\n')
+    withdrawn = module.ActiveRequest(
+        withdrawn_config, {**first.marker, "generation": 2}, "c" * 64
+    )
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+    requests = iter((first, withdrawn))
+    children = [_live_child(456), _live_child(457)]
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    def ack() -> dict[str, object]:
+        document = json.loads(module.ACK.read_bytes())
+        document.pop("acknowledged_at")
+        return document
+
+    def spawn(*_args, **_kwargs):
+        spawned = sum(1 for event, _ in observed if event == "spawn")
+        # The replacement starts only after the old child's exit is confirmed.
+        assert spawned == 0 or children[0].terminated is True
+        observed.append(("spawn", ack() if spawned else {}))
+        return children[spawned]
+
+    def await_healthy(child, **_kwargs):
+        if child is children[1]:
+            observed.append(("health", ack()))
+        return True
+
+    def poll_sleep(_seconds: float) -> None:
+        if len(observed) == 3:
+            observed.append(("ready", ack()))
+            children[1].returncode = 31
+
+    monkeypatch.setattr(module, "_active_request", lambda: next(requests))
+    monkeypatch.setattr(module, "_await_healthy", await_healthy)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "sleep", poll_sleep)
+
+    assert module._supervise() == 31
+    drained = {
+        "activation_sha256": "c" * 64,
+        "generation": 2,
+        "litellm_sha256": first.marker["litellm_sha256"],
+        "phase": "drained",
+        "schema_version": 1,
+        "state": "published",
+    }
+    ready = {key: value for key, value in drained.items() if key != "phase"} | {
+        "child_pid": 457
+    }
+    # The old child has exited before the drained ack, which a withdrawal
+    # accepts while the new child is still starting; only then is it ready.
+    assert observed[1:] == [
+        ("spawn", drained),
+        ("health", drained),
+        ("ready", ready),
+    ]
+
+
 def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor() -> (
     None
 ):
@@ -789,19 +856,27 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
     config = tmp_path / "config.json"
     config.write_text('{"model_list":[]}\n')
     module.ACK = tmp_path / "ack.json"
+    marker = {"litellm_sha256": "d" * 64, "state": "published"}
     old = (
-        None if bootstrap else module.ActiveRequest(config, {"generation": 1}, "a" * 64)
+        None
+        if bootstrap
+        else module.ActiveRequest(config, {**marker, "generation": 1}, "a" * 64)
     )
     generation = 1 if bootstrap else 2
-    new = module.ActiveRequest(config, {"generation": generation}, "b" * 64)
+    new = module.ActiveRequest(config, {**marker, "generation": generation}, "b" * 64)
     current = [old]
     elapsed = [0.0]
     children = []
     spawns = []
     acknowledgements = []
+    drained = []
 
     def spawn(*_args, **_kwargs):
         assert not children or children[-1].returncode == 0
+        if children:
+            # The drained ack is on disk before the next child starts.
+            document = json.loads(module.ACK.read_bytes())
+            drained.append((document["generation"], document["phase"], len(children)))
         child = types.SimpleNamespace(pid=100 + len(children), returncode=None)
         child.poll = lambda: child.returncode
 
@@ -839,4 +914,7 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
     )
     assert module._supervise() == 23
     assert spawns == [0, 94]
+    # The superseded child's exit is confirmed before the new generation is
+    # acknowledged drained, and that happens before its own child starts.
+    assert drained == [(generation, "drained", 1)]
     assert acknowledgements == [(generation, 184)]

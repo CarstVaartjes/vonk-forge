@@ -59,6 +59,7 @@ artifacts is [data-contracts.md](data-contracts.md).
 | Fleet and Run/Switch progress/results | `fleet_profile_contract/` and `run_switch_contract/` | Orchestration, restart/replay reads, Library projections and APIs |
 | Run artifact verification | `ArtifactVerificationResult` in `run_switch_contract/phase_results.py` | Cached/distributed artifact verification producers and Run/Switch consumer |
 | Route activation marker | `vonk_agent_protocol.route_activation.ActivationMarker` | Controller publisher and the exact shared model packaged in LiteLLM |
+| Route activation acknowledgement (`drained` or `ready`) | `vonk_agent_protocol.route_activation.SupervisorAcknowledgement` | LiteLLM supervisor writer; Controller `FileSupervisorAcknowledger` (a withdrawal accepts `drained`, a publication only `ready`) |
 | Controller image-cache receipt | `RuntimeImageReceipt` in `runtime_image_preparation.py` | Image preparation, persisted receipt reader, availability worker and execution-plan compiler |
 | Database rows | SQLAlchemy models in `control/src/vonk_control/models.py` | Controller API and worker processes |
 | Documents stored in JSON columns | The contract bound to each `JSON` column in `control/src/vonk_control/stored_columns.py` (read and written through `stored_json`) | Every Controller reader and writer of that column, the published OpenAPI (`x-vonk-json-columns`) and the generated clients |

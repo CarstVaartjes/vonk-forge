@@ -810,7 +810,18 @@ expired, or withdrawn state.
 The shared route activation contract allows 30 seconds to stop and reap the old
 LiteLLM child, then 120 seconds for all replacement preparation, startup retries,
 and readiness checks. The Controller waits up to 165 seconds for the exact
-generation acknowledgement. Each publication has a finite 180-second lease,
+generation acknowledgement. Any new generation restarts LiteLLM, so every route
+is unavailable while the replacement child starts. The supervisor acknowledges
+twice. A `drained` acknowledgement is written once the old child's exit is
+confirmed, before the new child starts. A `ready` acknowledgement follows when
+the new child answers health. A withdrawal (a Stop, a recovery or a maintenance
+withdrawal) needs only `drained`: nothing serves the removed route any more, and
+the remaining routes come back with the new child. A publication waits for
+`ready`. The ready acknowledgement keeps the bytes it always had. An older
+Controller rejects the `phase` key and waits for `ready`, and an older LiteLLM
+image, whose baked contract has no drained phase, makes the new supervisor fail
+at import before any child starts; the container restarts until the matching
+LiteLLM image runs (crash-only, deploy-ordered, no compatibility code). Each publication has a finite 180-second lease,
 capped at 300 seconds after its oldest admitted observation; observations must
 be at most 120 seconds old when admitted. This covers the permitted transition
 without requiring renewal during the acknowledgement wait. Expiry still denies

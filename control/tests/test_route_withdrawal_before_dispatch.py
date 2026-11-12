@@ -61,7 +61,7 @@ class _Gate:
         self.release.clear()
         self._armed = True
 
-    def __call__(self, _marker: ActivationMarker) -> None:
+    def __call__(self, _marker: ActivationMarker, _required: str) -> None:
         if not self._armed:
             return
         self._armed = False

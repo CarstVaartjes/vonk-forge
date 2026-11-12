@@ -136,6 +136,18 @@ Controller API image. On every start the API stages it into the
 restart with it. A pull and redeploy therefore rolls out configuration too; the
 installer only needs to run again when `.env`, secrets or the Compose graph
 itself change.
+The LiteLLM supervisor script comes from the API image, but the route
+activation contract it imports is baked into the LiteLLM image. Each may run
+with the other's previous release. Transitions follow deploy order, with no
+compatibility code: a new supervisor script that meets an older contract module
+fails at import, before any LiteLLM child starts, so the container restarts
+(`restart: unless-stopped`) until the matching LiteLLM image runs (one redeploy;
+the release ships both images together).
+On a route change the supervisor restarts LiteLLM. It writes a `drained`
+acknowledgement to the `litellm-supervisor-state` volume once the old child has
+exited, and a `ready` acknowledgement once the new child is healthy. A Controller
+withdrawal (for example a Stop) waits only for `drained`; a publication waits for
+`ready`. All routes stay unavailable until the new child is ready.
 The Caddy startup wrapper forwards an explicit Compose `command` after the
 runtime-asset wait and native secret checks. With no command, its native
 entrypoint selects `/run/vonk-runtime-assets/caddy/Caddyfile` and watches it,

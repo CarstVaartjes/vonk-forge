@@ -205,7 +205,7 @@ def test_owner_contention_after_activation_keeps_completion_and_generation(
     completions = []
     original_completion = routes._record_completion
 
-    def acknowledge(_marker) -> None:
+    def acknowledge(_marker, _required) -> None:
         activated.set()
         assert held.wait(timeout=10)
 
