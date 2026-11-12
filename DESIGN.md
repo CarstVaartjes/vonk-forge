@@ -21,10 +21,6 @@ colors:
   warning: "#f4c66b"
   danger: "#ff919d"
   info: "#94cfff"
-  workcell-canvas: "#f4f1e8"
-  workcell-ink: "#181a16"
-  workcell-muted: "#5d6258"
-  workcell-line: "#c9c4b6"
 typography:
   display:
     fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
@@ -99,16 +95,6 @@ components:
     textColor: "{colors.text}"
     rounded: "{rounded.panel}"
     padding: "1rem"
-  profile-rail-item:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.text}"
-    rounded: "0.35rem"
-    padding: "0.7rem 0.65rem"
-  workload-map-row:
-    backgroundColor: "{colors.workcell-canvas}"
-    textColor: "{colors.workcell-ink}"
-    rounded: "0"
-    padding: "0.68rem 0.75rem"
 ---
 
 # Design System: Vonk Forge Control
@@ -117,21 +103,21 @@ components:
 
 **Creative North Star: "The Spark Workcell"**
 
-Vonk Forge feels like a local AI CNC-machine inspection board: a powder-coated graphite control shell with restrained champagne hardware cues surrounding a warm, light inspection canvas. The shell is calm and compact; the canvas makes live workload placement, desired profile state, and discrepancies read like a physical job sheet under task lighting.
+Vonk Forge feels like a local AI CNC-machine inspection board: a powder-coated graphite control shell with restrained champagne hardware cues. The shell is calm and compact; live fleet state, installed and running models, and discrepancies read like a job sheet of aligned rows.
 
 Precision comes from rows, rails, thin dividers, tabular measurements, and exact state language rather than ornamental dashboard chrome. NVIDIA green is deliberately scarce and belongs to positive health, readiness, and safe primary action. Amber requests attention, red proves failure, and blue identifies installed or informational state; text and structure always repeat the meaning.
 
 **Key Characteristics:**
 
 - Graphite hardware shell with champagne separators and labels.
-- Warm inspection canvas for live-versus-desired workload truth.
+- One graphite surface family; state is carried by words, dots, and edges.
 - Dense, aligned operating rows with generous local whitespace.
 - Green reserved for positive health, readiness, and safe action.
 - Flat fixtures first; ambient depth only where hierarchy requires it.
 
 ## Colors
 
-The palette separates the graphite operating shell from the warm inspection sheet, then uses a small state vocabulary with text and shape reinforcement.
+The palette is one graphite operating shell with a small state vocabulary that text and shape reinforce.
 
 ### Primary
 
@@ -153,20 +139,16 @@ The palette separates the graphite operating shell from the warm inspection shee
 ### Neutral
 
 - **Graphite Base:** The page ground behind the controller.
-- **Sidebar Graphite:** The distinct navigation rail.
+- **Sidebar Graphite:** The distinct header bar behind the navigation.
 - **Panel Graphite:** The default dark fixture and form surface.
 - **Raised Graphite:** Selected or hovered structural layers that remain subordinate to state color.
 - **Recessed Graphite:** Search wells, metric cells, and inset evidence areas.
 - **Structural Line / Strong Structural Line:** Thin separators and control outlines that carry most grouping.
 - **Primary Text / Muted Text / Subtle Text:** The three-level graphite-surface text hierarchy.
-- **Inspection Canvas:** The warm paper-like field for desired and live workload comparison.
-- **Inspection Ink / Inspection Muted / Inspection Line:** The corresponding dark text and divider system for the light field.
 
 ### Named Rules
 
 **The Green Means Go Rule.** Reserve green for positive health, readiness, and safe primary action; never use it as general decoration or as the only state signal.
-
-**The Two Material Zones Rule.** Dense control chrome stays graphite; desired-versus-live workload truth moves onto the warm inspection canvas.
 
 ## Typography
 
@@ -180,7 +162,7 @@ The palette separates the graphite operating shell from the warm inspection shee
 
 - **Display** (700, fluid compact display, tight line-height): Library-level titles and the rare page title that must orient a whole workspace.
 - **Headline** (760, compact, tight tracking): Command titles, workcell headings, and primary section names.
-- **Title** (800, compact): Spark names, workload names, and decisive fixture labels.
+- **Title** (800, compact): Spark names, recipe names, and decisive fixture labels.
 - **Body** (400, compact, 1.45 line-height): Operational explanations, helper text, and result context; keep paragraphs narrow enough to scan inside their fixture.
 - **Label** (800, widely tracked, uppercase): Measurement headings, field labels, table axes, and small control categories.
 
@@ -190,9 +172,9 @@ The palette separates the graphite operating shell from the warm inspection shee
 
 ## Layout
 
-The desktop shell is a fixed graphite rail beside a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Fleet's signature board is a three-part fixture: profile rail, workload map, and plan/exception rail, with the selected profile and fleet facts spanning its top edge.
+The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Fleet is table-first: a fleet summary line, a Spark search, and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), then a detail view for the selected Spark. Needs-attention items sit above the summary.
 
-At 54rem the shell becomes a top bar, the board becomes one column, the profile rail scrolls horizontally, and action groups stack. At 42rem the workload matrix is replaced by workload-first stacked rows rather than shrinking labels past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
+At 54rem the shell becomes a compact top bar and action groups stack. Below 54rem each Spark row of the fleet table becomes a stacked block (label beside value) instead of a table row, so labels are never shrunk past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
 
 Spacing follows a compact operating rhythm: small control gaps, roughly three-quarter-rem fixture padding, one-rem section separation, and 1.25rem shell spacing. Touch targets remain at least 2.75rem (44px) where interaction is primary.
 
@@ -200,7 +182,6 @@ Spacing follows a compact operating rhythm: small control gaps, roughly three-qu
 
 **The Rows Before Cards Rule.** Use rows, rails, and dividers for repeated operational facts; introduce a card only when it represents a complete inspectable fixture.
 
-**The Workload-First Mobile Rule.** On phones, preserve each workload and reveal its Spark states beneath it; do not miniaturize the desktop matrix.
 
 ## Elevation & Depth
 
@@ -209,7 +190,6 @@ The system is flat by default. Tonal layering, a one-pixel structural line, and 
 ### Shadow Vocabulary
 
 - **Fixture Ambient** (`0 1.4rem 4rem #0002, inset 0 1px #ffffff0b`): Dark Spark and recipe fixtures that need quiet separation from the shell.
-- **Inspection Board Ambient** (`0 1.3rem 3.4rem #0005`): The complete warm operating board as one lifted instrument.
 - **Overlay Ambient** (`0 2rem 6rem #000b`): Dialogs and consequential control overlays only.
 
 ### Named Rules
@@ -218,11 +198,11 @@ The system is flat by default. Tonal layering, a one-pixel structural line, and 
 
 ## Shapes
 
-Controls use gently machined corners, repeated fixtures use medium curves, and complete boards use the broadest corners. Pills are reserved for compact status, counts, and state filters. Tables and workload cells stay square inside their enclosing fixture so the grid reads as one instrument rather than a pile of cards.
+Controls use gently machined corners, repeated fixtures use medium curves, and complete boards use the broadest corners. Pills are reserved for compact status, counts, and state filters. Tables and their cells stay square inside their enclosing fixture so the grid reads as one instrument rather than a pile of cards.
 
 ### Named Rules
 
-**The Fixture Corners Rule.** Apply curvature to the outside silhouette; keep internal rows and matrix cells square and separated by lines.
+**The Fixture Corners Rule.** Apply curvature to the outside silhouette; keep internal rows and table cells square and separated by lines.
 
 ## Components
 
@@ -241,7 +221,7 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 ### Cards / Containers
 
 - **Corner Style:** Medium fixture corners for inspectable Spark and recipe units; broad panel corners for complete workspaces.
-- **Background:** Graphite panels in the shell; warm canvas only for workload/profile inspection.
+- **Background:** Graphite panels in the shell.
 - **Shadow Strategy:** Flat at rest unless the component is a complete fixture or overlay.
 - **Border:** One-pixel structural lines, with a state-colored strong edge when the whole fixture carries health.
 - **Internal Padding:** Three-quarter-rem to one-rem density, increasing only for complete workcells.
@@ -254,11 +234,7 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 ### Navigation
 
-The desktop rail contains only Fleet and Library as primary destinations. Links are compact rows; the active location uses a tonal field and a strong inset rail, while hover changes the graphite plane. On narrow screens navigation becomes a top-bar disclosure with focus containment and a scrim.
-
-### Workload Map
-
-The signature component is a warm inspection fixture that aligns model/recipe rows against Spark columns and a profile rail. Every cell states Running, Installed, Profile change, Attention, or empty in words, reinforces that state with color and a dot, and exposes horizontal scrolling only within the matrix. Below 42rem the same truth becomes workload-first stacked rows.
+The header holds the brand mark, Fleet, Library, and Activity as primary destinations, and the administrator menu. Links are compact; the active location uses a tonal field, while hover changes the graphite plane. On narrow screens the header stays one compact row with the icons hidden.
 
 ### Named Rules
 
@@ -268,11 +244,10 @@ The signature component is a warm inspection fixture that aligns model/recipe ro
 
 ### Do:
 
-- **Do** keep operational text on solid graphite or warm inspection surfaces with WCAG 2.2 AA contrast.
+- **Do** keep operational text on solid graphite surfaces with WCAG 2.2 AA contrast.
 - **Do** pair every color-coded state with explicit words and, where useful, a dot, border, or edge.
-- **Do** use warm inspection surfaces for desired-versus-live comparisons and graphite for control chrome.
-- **Do** preserve exact alignment and tabular numerals across counts, measurements, and workload cells.
-- **Do** confine horizontal scrolling to an explicit data region and provide a stacked mobile representation.
+- **Do** preserve exact alignment and tabular numerals across counts, measurements, and table cells.
+- **Do** confine horizontal scrolling to an explicit data region and provide a stacked mobile representation where a table would not fit.
 - **Do** honor reduced motion and keep visible focus unobscured.
 
 ### Don't:
@@ -280,6 +255,6 @@ The signature component is a warm inspection fixture that aligns model/recipe ro
 - **Don't** use green as ambient decoration, a generic brand wash, or an unsupported success claim.
 - **Don't** put texture, metallic noise, or champagne fields behind operational text.
 - **Don't** use shadow as the primary grouping device or scatter floating rounded cards across dense data.
-- **Don't** compress a desktop matrix until labels or touch targets become illegible.
+- **Don't** compress a desktop table until labels or touch targets become illegible.
 - **Don't** encode healthy, warning, blocked, installed, or running state through color alone.
 - **Don't** introduce eyebrow or kicker labels above headings, or glyph-style icons in place of the established icon system; use direct headings and recognizable visual controls.
