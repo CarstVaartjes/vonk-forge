@@ -388,13 +388,6 @@ def _model_identity(
     )
 
 
-_UNDERSTANDING_BY_MODALITY = (
-    ("image", str(CapabilityName.IMAGE_UNDERSTANDING.value)),
-    ("audio", str(CapabilityName.AUDIO_UNDERSTANDING.value)),
-    ("video", str(CapabilityName.VIDEO_UNDERSTANDING.value)),
-)
-
-
 def _recipe_usage(model_usage: Sequence[str], api: RecipeApi | None) -> list[str]:
     """The recipe's capabilities: its Models' display, with the input
     understanding tags taken from what its API accepts.
@@ -407,16 +400,18 @@ def _recipe_usage(model_usage: Sequence[str], api: RecipeApi | None) -> list[str
     """
 
     blocks = [] if api is None else [api.api, *(c.api for c in api.option_choices)]
-    served = [b for b in blocks if isinstance(b, ChatApi | DecisionApi)]
+    served = [
+        b.input_modalities for b in blocks if isinstance(b, ChatApi | DecisionApi)
+    ]
     if not served:
         return sorted(set(model_usage))
-    derived = {name for _, name in _UNDERSTANDING_BY_MODALITY}
-    accepted = {
-        name
-        for modality, name in _UNDERSTANDING_BY_MODALITY
-        if any(getattr(b.input_modalities, modality) for b in served)
+    understanding = {
+        CapabilityName.IMAGE_UNDERSTANDING.value: any(m.image for m in served),
+        CapabilityName.AUDIO_UNDERSTANDING.value: any(m.audio for m in served),
+        CapabilityName.VIDEO_UNDERSTANDING.value: any(m.video for m in served),
     }
-    return sorted((set(model_usage) - derived) | accepted)
+    kept = set(model_usage) - understanding.keys()
+    return sorted(kept | {name for name, accepted in understanding.items() if accepted})
 
 
 def _recipe_creator(
