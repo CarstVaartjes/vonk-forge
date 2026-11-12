@@ -65,6 +65,7 @@ To move the public-contracts pin, run
 commit, rewrites `control/pyproject.toml`, `control/uv.lock` (through `uv lock`),
 `control/packaging/public-contracts.lock`, the wheel in `inventory/wheels` and
 the wheel name in `control/Dockerfile` and `scripts/resolve-publication-producer`.
+The wheels directory is git-ignored: stage the new wheel with `git add -f`.
 The lock owns the version; the verifier derives the wheel path and checks the
 Dockerfile names it, so no script or test carries a version literal. A recipes
 contract major is deployed consumer-first: pin the recipes commit here, deploy,
