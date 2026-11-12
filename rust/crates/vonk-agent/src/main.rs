@@ -265,14 +265,21 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
     let rotation = tokio::spawn(run_rotation_lane(config.clone(), client.clone()));
     // The inventory lane receives the Controller's verdict; retention acts on it.
     let verdict = LatestVerdict::default();
+    let stops = PostStopInventory::default();
     let control = run_control_lane(
         config,
         runtime_identity,
         client.clone(),
         state,
         verdict.clone(),
+        stops.clone(),
     );
-    let mut inventory = tokio::spawn(run_inventory_lane(config.clone(), client.clone(), verdict));
+    let mut inventory = tokio::spawn(run_inventory_lane(
+        config.clone(),
+        client.clone(),
+        verdict,
+        stops,
+    ));
     let outcome = supervise_lanes_with_rotation(
         control,
         async {
@@ -301,6 +308,41 @@ async fn run_agent(config: &AgentConfig) -> Result<(), Box<dyn std::error::Error
 struct CustodyExecutor<'a, E> {
     executor: &'a E,
     available: bool,
+    stops: PostStopInventory,
+}
+
+/// Seconds after a completed `recipe.stop` at which the next inventory is
+/// collected. The Controller accepts an inventory as proof the stop is
+/// reflected only when observed_at > stopped_at + MAX_INVENTORY_FUTURE_SKEW
+/// (30 s, control/src/vonk_control/inventory_repository.py:32), so 31 s is the
+/// first instant an observation can count.
+const POST_STOP_INVENTORY_SECONDS: u64 = 31;
+
+/// The claim lane tells the inventory lane when a stop completed; the inventory
+/// lane then collects once just past the Controller's freshness bound instead
+/// of waiting for the regular cadence. Cleared only by a successful report.
+#[derive(Clone, Default)]
+struct PostStopInventory(std::sync::Arc<std::sync::Mutex<Option<tokio::time::Instant>>>);
+
+impl PostStopInventory {
+    fn stopped(&self) {
+        let at = tokio::time::Instant::now() + Duration::from_secs(POST_STOP_INVENTORY_SECONDS);
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(at);
+    }
+
+    fn due(&self, now: tokio::time::Instant) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some_and(|at| now >= at)
+    }
+
+    fn reported(&self, now: tokio::time::Instant) {
+        let mut at = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if at.is_some_and(|at| now >= at) {
+            *at = None;
+        }
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -327,9 +369,16 @@ impl<E: vonk_agent::executor::Executor> vonk_agent::executor::Executor for Custo
                 ),
             );
         }
-        self.executor
+        let result = self
+            .executor
             .execute(claim, lease_deadline, cancellation)
-            .await
+            .await;
+        if claim.operation == vonk_agent_protocol::generated::AgentOperation::RecipeStop
+            && matches!(result, vonk_agent::outcome::ExecutionResult::Done(_))
+        {
+            self.stops.stopped();
+        }
+        result
     }
 }
 
@@ -392,6 +441,7 @@ async fn run_control_lane(
     client: AgentHttpClient,
     state: StateStore,
     verdict: LatestVerdict,
+    stops: PostStopInventory,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // A build compiles beside the lane: the Spark keeps claiming other work.
     let runner = SystemProcessRunner;
@@ -411,6 +461,7 @@ async fn run_control_lane(
         client.clone(),
         state,
         verdict,
+        stops,
         &builds,
         &beside,
     );
@@ -423,6 +474,7 @@ async fn claim_lane<'a>(
     client: AgentHttpClient,
     mut state: StateStore,
     verdict: LatestVerdict,
+    stops: PostStopInventory,
     builds: &'a RecipeExecutor<'a, SystemProcessRunner>,
     beside: &Beside<'a>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -540,6 +592,7 @@ async fn claim_lane<'a>(
                 Path::new("/run/vonk-forge-agent"),
             )
             .is_ok(),
+            stops: stops.clone(),
         };
         let operation = async {
             run_once_with_claim_hook(
@@ -578,10 +631,12 @@ async fn claim_lane<'a>(
                         Ok(store) => {
                             let client = client.clone();
                             let available = guarded.available;
+                            let stops = stops.clone();
                             beside.start(fence, async move {
                                 let executor = CustodyExecutor {
                                     executor: builds,
                                     available,
+                                    stops,
                                 };
                                 claim.execute(client, store, &executor).await
                             });
@@ -671,7 +726,12 @@ async fn collect_stores(
     Instant::now() + INTERVAL
 }
 
-async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdict: LatestVerdict) {
+async fn run_inventory_lane(
+    config: AgentConfig,
+    client: AgentHttpClient,
+    verdict: LatestVerdict,
+    stops: PostStopInventory,
+) {
     inventory_lane(
         || {
             let config = config.clone();
@@ -718,6 +778,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
                 Ok(())
             }
         },
+        stops,
     )
     .await;
 }
@@ -725,6 +786,7 @@ async fn run_inventory_lane(config: AgentConfig, client: AgentHttpClient, verdic
 async fn inventory_lane<Collect, Collected, Report, Reported>(
     mut collect: Collect,
     mut report: Report,
+    stops: PostStopInventory,
 ) where
     Collect: FnMut() -> Collected,
     Collected:
@@ -735,7 +797,8 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
     let mut failures = 0_u32;
     let mut inventory_reported_at = None;
     loop {
-        if inventory_refresh_due(inventory_reported_at, Instant::now()) {
+        let now = tokio::time::Instant::now();
+        if inventory_refresh_due(inventory_reported_at, now) || stops.due(now) {
             let collected = collect_inventory_until_ready(
                 &mut collect,
                 &mut failures,
@@ -769,7 +832,8 @@ async fn inventory_lane<Collect, Collected, Report, Reported>(
             match report(inventory).await {
                 Ok(()) => {
                     failures = 0;
-                    inventory_reported_at = Some(Instant::now());
+                    inventory_reported_at = Some(tokio::time::Instant::now());
+                    stops.reported(now);
                     systemd_notify::watchdog();
                 }
                 Err(error) => {
@@ -878,7 +942,10 @@ fn jittered_backoff(failures: u32, minimum: u64, maximum: u64) -> Duration {
     backoff_delay(failures, entropy, minimum, maximum.max(minimum))
 }
 
-fn inventory_refresh_due(reported_at: Option<Instant>, now: Instant) -> bool {
+fn inventory_refresh_due(
+    reported_at: Option<tokio::time::Instant>,
+    now: tokio::time::Instant,
+) -> bool {
     // Idle claims wait at most 60 seconds. Refresh after two minutes so the
     // next loop still reports comfortably inside the Controller's five-minute
     // admission window. Only a successful report advances this deadline.
@@ -1113,7 +1180,7 @@ mod tests {
             Arc, Barrier,
             atomic::{AtomicBool, Ordering},
         },
-        time::{Duration, Instant},
+        time::Duration,
     };
     use vonk_agent::client::{ClientError, ControllerError};
     use vonk_agent::{executor::RecipeObservationError, rotation::RotationError};
@@ -1140,6 +1207,7 @@ mod tests {
                     Ok(())
                 })
             },
+            PostStopInventory::default(),
         );
         tokio::pin!(lane);
         tokio::select! {
@@ -1147,6 +1215,55 @@ mod tests {
             _ = tokio::time::sleep(Duration::from_secs(180)) => {}
         }
         assert!(recovered.get());
+    }
+
+    /// Seconds (after start) at which the lane collected, over 130 s, when a
+    /// stop completes at `stop_at` seconds (never, if `None`).
+    async fn inventory_collections(stop_at: Option<u64>) -> Vec<u64> {
+        let started = tokio::time::Instant::now();
+        let collected = RefCell::new(Vec::new());
+        let stops = PostStopInventory::default();
+        {
+            let lane = super::inventory_lane(
+                || {
+                    collected.borrow_mut().push(started.elapsed().as_secs());
+                    future::ready(Ok(
+                        test_inventory().to_request(chrono::Utc::now().fixed_offset())
+                    ))
+                },
+                |_| future::ready(Ok(())),
+                stops.clone(),
+            );
+            tokio::pin!(lane);
+            let stop = async {
+                if let Some(at) = stop_at {
+                    tokio::time::sleep(Duration::from_secs(at)).await;
+                    stops.stopped();
+                }
+                future::pending::<()>().await
+            };
+            tokio::select! {
+                _ = &mut lane => panic!("inventory lane exited"),
+                _ = stop => {}
+                _ = tokio::time::sleep(Duration::from_secs(130)) => {}
+            }
+        }
+        collected.into_inner()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn completed_stop_brings_next_inventory_just_past_the_freshness_bound() {
+        // Wrong implementation: the next inventory waits for the 120 s cadence.
+        let times = inventory_collections(Some(10)).await;
+        assert_eq!(times.len(), 2, "{times:?}");
+        assert!((41..=43).contains(&times[1]), "{times:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn without_a_stop_inventory_keeps_the_regular_cadence() {
+        let times = inventory_collections(None).await;
+        assert_eq!(times.len(), 2, "{times:?}");
+        assert!((120..=122).contains(&times[1]), "{times:?}");
     }
 
     #[test]
@@ -1173,7 +1290,7 @@ mod tests {
 
     #[test]
     fn idle_agent_refreshes_inventory_before_controller_admission_expires() {
-        let reported_at = Instant::now();
+        let reported_at = tokio::time::Instant::now();
         assert!(!inventory_refresh_due(
             Some(reported_at),
             reported_at + Duration::from_secs(119),
