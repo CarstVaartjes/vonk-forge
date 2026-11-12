@@ -370,29 +370,13 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
                         )}
                       </td>
                       <td data-label="Memory used">
-                        {vitals.memory ? (
-                          <Meter label={`${name} memory used`} vital={vitals.memory} />
-                        ) : (
-                          "Not reported"
-                        )}
+                        <Meter label={`${name} memory used`} vital={vitals.memory} />
                       </td>
                       <td data-label="Disk free">
-                        {vitals.disk ? (
-                          <Meter label={`${name} disk used`} vital={vitals.disk} />
-                        ) : (
-                          "Not reported"
-                        )}
+                        <Meter label={`${name} disk free`} vital={vitals.disk} />
                       </td>
                       <td data-label="GPU">
-                        {vitals.gpu ? (
-                          <Meter
-                            label={`${name} GPU utilisation`}
-                            vital={vitals.gpu}
-                            note={vitals.gpuTemperature}
-                          />
-                        ) : (
-                          (vitals.gpuTemperature ?? "Not reported")
-                        )}
+                        <Meter label={`${name} GPU utilisation`} vital={vitals.gpu} />
                       </td>
                       <td data-label="Recipes">
                         <strong>

@@ -2,16 +2,15 @@
 export function Meter({
   label,
   vital,
-  note,
 }: {
   label: string;
-  vital: { percent: number; text: string };
-  note?: string | null;
+  vital: { percent: number | null; text: string; amber: boolean };
 }) {
+  if (vital.percent === null) return <>{vital.text}</>;
   return (
     <span className="meter-cell">
       <span
-        className={vital.percent >= 90 ? "meter meter-high" : "meter"}
+        className={vital.amber ? "meter meter-high" : "meter"}
         role="meter"
         aria-label={label}
         aria-valuemin={0}
@@ -21,10 +20,7 @@ export function Meter({
       >
         <span style={{ width: `${vital.percent}%` }} />
       </span>
-      <span>
-        {vital.text}
-        {note ? ` · ${note}` : ""}
-      </span>
+      <span>{vital.text}</span>
     </span>
   );
 }

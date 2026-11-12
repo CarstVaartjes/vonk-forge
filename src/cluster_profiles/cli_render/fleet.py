@@ -7,7 +7,7 @@ from enum import Enum
 
 from .. import cli_states
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, UNKNOWN, GpuClockMetric
-from ..cli_telemetry_render import gpu_readings
+from ..cli_telemetry_render import NOT_REPORTED, gpu_readings, round_half_up
 from ..cli_telemetry_render import size as _size
 from ..generated_control.models.display_memory_observation import (
     DisplayMemoryObservation,
@@ -125,36 +125,56 @@ def _display_memory(observation: DisplayMemoryObservation | None) -> str:
     return f"reserved {amount} · SoC {version} · UEFI {_text(observation.bios_version) if isinstance(observation.bios_version, str) else UNKNOWN} · display connected {display}"
 
 
-def _memory(node: Mapping[str, object]) -> str:
-    """Used share of the Spark's memory, preferring the live telemetry sample."""
-    telemetry = _optional(node.get("telemetry"), "telemetry")
-    sample = _optional(telemetry.get("sample"), "telemetry sample")
-    inventory = _optional(node.get("inventory"), "inventory")
-    total, free = (
-        (sample.get("memory_total_bytes"), sample.get("memory_available_bytes"))
-        if telemetry.get("freshness") == "live"
-        else (
-            inventory.get("host_memory_total_bytes"),
-            inventory.get("host_memory_free_bytes"),
+def _live(node: Mapping[str, object]) -> bool:
+    return _optional(node.get("telemetry"), "telemetry").get("freshness") == "live"
+
+
+def _vitals_source(node: Mapping[str, object]) -> Mapping[str, object]:
+    """The live telemetry sample while it is live, otherwise the inventory."""
+    if _live(node):
+        return _optional(
+            _optional(node.get("telemetry"), "telemetry").get("sample"),
+            "telemetry sample",
         )
-    )
+    return _optional(node.get("inventory"), "inventory")
+
+
+def _memory(node: Mapping[str, object]) -> str:
+    """Used memory beside the total, in the words the Controller web uses."""
+    source = _vitals_source(node)
+    live = _live(node)
+    total = source.get("memory_total_bytes" if live else "host_memory_total_bytes")
+    free = source.get("memory_available_bytes" if live else "host_memory_free_bytes")
     if type(total) is not int or type(free) is not int or total <= 0:
-        return ENDPOINT_UNAVAILABLE
-    return f"{_size(total - free)} of {_size(total)} ({round(100 * (total - free) / total)}%)"
+        return NOT_REPORTED
+    percent = round_half_up(100 * ((total - free) / total))
+    return f"{_size(total - free)} of {_size(total)} ({percent}%)"
 
 
-def _disk(free: object, total: object) -> str:
-    """Free disk beside the total, in the words the Controller web uses."""
-    if type(free) is not int or type(total) is not int or total <= 0:
-        return _size(free)
-    return f"{_size(free)} of {_size(total)}"
+def _disk(node: Mapping[str, object]) -> str:
+    """Free disk beside the total: the inventory's pair, else the live sample's."""
+    sources = [_optional(node.get("inventory"), "inventory")]
+    if _live(node):
+        sources.append(
+            _optional(
+                _optional(node.get("telemetry"), "telemetry").get("sample"),
+                "telemetry sample",
+            )
+        )
+    for source in sources:
+        free, total = source.get("disk_free_bytes"), source.get("disk_total_bytes")
+        if type(free) is int and type(total) is int and total > 0:
+            return f"{_size(free)} free of {_size(total)}"
+    return NOT_REPORTED
 
 
 def _gpu(node: Mapping[str, object]) -> str:
-    telemetry = _optional(node.get("telemetry"), "telemetry")
-    sample = _optional(telemetry.get("sample"), "telemetry sample")
-    if telemetry.get("freshness") != "live":
-        return ENDPOINT_UNAVAILABLE
+    if not _live(node):
+        return NOT_REPORTED
+    sample = _optional(
+        _optional(node.get("telemetry"), "telemetry").get("sample"),
+        "telemetry sample",
+    )
     return gpu_readings(
         sample.get("gpu_utilization_percent"),
         sample.get("gpu_temperature_c"),
@@ -512,13 +532,12 @@ def _fleet_overview(payload: Mapping[str, object], *, wide: bool) -> None:
         labels.append("ID")
     rows = []
     for node in nodes:
-        inventory = _optional(node.get("inventory"), "inventory")
         loaded = _records(node, "loaded")
         row: list[object] = [
             node.get("display_name"),
             _status(node),
             _memory(node),
-            _disk(inventory.get("disk_free_bytes"), inventory.get("disk_total_bytes")),
+            _disk(node),
             _gpu(node),
             "idle"
             if not loaded

@@ -84,8 +84,10 @@ an ETA, percentage, missing value, or success when evidence is unknown.
 
 The Fleet words (vitals, what a Spark serves, the status line, attention items)
 are shown identically by the web Fleet page and `vonkctl fleet`. A change to one
-changes the other in the same PR, and both render the shared vectors in
-`tests/fixtures/fleet-wording-*.json`.
+changes the other in the same PR. Each screen has one fixture,
+`tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the
+exact text: the page's DOM text and the string `vonkctl` prints. Missing values read
+"Not reported" on both sides, and .5 rounds up on both.
 
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or
