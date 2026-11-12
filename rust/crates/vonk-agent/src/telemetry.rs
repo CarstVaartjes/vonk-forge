@@ -15,9 +15,9 @@ use crate::{
 };
 
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
-const MAX_CAPACITY_BYTES: u64 = 16 * 1024_u64.pow(4);
 pub const MAX_REPORT_SAMPLES: usize = 16;
 
+use vonk_agent_protocol::MAX_TELEMETRY_CAPACITY_BYTES;
 pub use vonk_agent_protocol::generated::{GpuUnavailableReason, TelemetryRequest, TelemetrySample};
 
 #[derive(Debug, Error)]
@@ -99,7 +99,8 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             .capacity(&self.paths.store)
             .ok()
             .filter(|value| {
-                value.free_bytes <= value.total_bytes && value.total_bytes <= MAX_CAPACITY_BYTES
+                value.free_bytes <= value.total_bytes
+                    && value.total_bytes <= MAX_TELEMETRY_CAPACITY_BYTES
             });
         let accelerator_result = self
             .runner
@@ -223,7 +224,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                 total = total.checked_add(row.parse::<u64>().ok()?.checked_mul(1024 * 1024)?)?;
             }
         }
-        (total <= MAX_CAPACITY_BYTES).then_some(total)
+        (total <= MAX_TELEMETRY_CAPACITY_BYTES).then_some(total)
     }
 }
 
@@ -420,7 +421,7 @@ pub fn valid_report_batch(samples: &[TelemetrySample]) -> bool {
 fn valid_capacity_pair(total: Option<u64>, free: Option<u64>) -> bool {
     match (total, free) {
         (None, None) => true,
-        (Some(total), Some(free)) => free <= total && total <= MAX_CAPACITY_BYTES,
+        (Some(total), Some(free)) => free <= total && total <= MAX_TELEMETRY_CAPACITY_BYTES,
         _ => false,
     }
 }
@@ -453,7 +454,9 @@ fn parse_memory(value: &str) -> Option<(u64, u64)> {
         }
     }
     match (total, available) {
-        (Some(total), Some(available)) if available <= total && total <= MAX_CAPACITY_BYTES => {
+        (Some(total), Some(available))
+            if available <= total && total <= MAX_TELEMETRY_CAPACITY_BYTES =>
+        {
             Some((total, available))
         }
         _ => None,
@@ -582,7 +585,7 @@ fn optional_mib(value: &str) -> Option<Option<u64>> {
         return Some(None);
     }
     let value = value.parse::<u64>().ok()?.checked_mul(1024 * 1024)?;
-    (value <= MAX_CAPACITY_BYTES).then_some(Some(value))
+    (value <= MAX_TELEMETRY_CAPACITY_BYTES).then_some(Some(value))
 }
 
 #[cfg(test)]
