@@ -26,8 +26,14 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # A member pull request leaves this proof to its integration pull request.
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   native-arm64-repair-matrix:
     name: Exercise full repair matrix on disposable ARM64 systemd
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-24.04-arm
     # Passing runs take about 10 minutes; a hung matrix must fail fast.
     timeout-minutes: 30

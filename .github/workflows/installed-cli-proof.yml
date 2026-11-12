@@ -37,8 +37,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A member pull request leaves this proof to its integration pull request.
+  scope:
+    uses: ./.github/workflows/ci-scope.yml
+
   signed-update:
     name: Actual signed wheel update and old CLI to NDJSON Controller bootstrap
+    needs: scope
+    if: needs.scope.outputs.full == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
