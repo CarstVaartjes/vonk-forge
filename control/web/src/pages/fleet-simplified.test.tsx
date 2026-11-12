@@ -1,4 +1,5 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach } from "vitest";
 import { FleetPage } from "./fleet-simplified";
@@ -150,6 +151,52 @@ test("Fleet sorts by name, status, memory and disk, and uses the CLI's status wo
   expect(order()).toEqual(["Alpha", "Bravo", "Charlie"]);
   expect(screen.getAllByText("offline")).toHaveLength(1);
   expect(screen.getAllByText("online")).toHaveLength(2);
+  nodes = [];
+});
+
+test("Fleet vitals cells read exactly what `vonkctl fleet` prints for the shared vectors", () => {
+  const vectors = JSON.parse(
+    readFileSync("../../tests/fixtures/fleet-wording-vitals.json", "utf8"),
+  ) as {
+    cases: {
+      node: Record<string, unknown>;
+      expected: { memory: string; disk: string; gpu: string };
+    }[];
+  };
+  for (const { node, expected } of vectors.cases) {
+    nodes = [{ ...spark("Alpha", 40, 250), ...node }];
+    const { container, unmount } = render(<FleetPage api={{} as ControlApi} />);
+    const cell = (label: string) =>
+      container.querySelector(`td[data-label="${label}"]`)?.textContent;
+    expect(cell("Memory used")).toBe(expected.memory);
+    expect(cell("Disk free")).toBe(expected.disk);
+    expect(cell("GPU")).toBe(expected.gpu);
+    unmount();
+  }
+  nodes = [];
+});
+
+test("Fleet meters turn amber for full memory and disk, never for GPU utilisation", () => {
+  nodes = [
+    {
+      ...spark("Alpha", 5, 50),
+      telemetry: {
+        freshness: "live",
+        sample: {
+          observed_at: "2026-09-27T10:00:00Z",
+          memory_total_bytes: 100,
+          memory_available_bytes: 5,
+          gpu_utilization_percent: 99,
+        },
+      },
+    },
+  ];
+  render(<FleetPage api={{} as ControlApi} />);
+  const [memory, disk, gpu] = within(screen.getAllByRole("row")[1]!).getAllByRole("meter");
+  expect(memory!.className).toContain("meter-high");
+  expect(disk!.className).toContain("meter-high");
+  expect(gpu!.className).not.toContain("meter-high");
+  expect(disk!.getAttribute("aria-label")).toBe("Alpha disk free");
   nodes = [];
 });
 

@@ -133,6 +133,11 @@ export function offlineReasonLabel(
   return reason ? OFFLINE_REASON_LABELS[reason] : "Offline reason unavailable";
 }
 
+/** .5 rounds up on every Fleet number; `vonkctl` does the same (Python's round() goes to even). */
+export function halfUp(value: number): number {
+  return Math.floor(value + 0.5);
+}
+
 export function formatMetric(
   value: number | null | undefined,
   format: (value: number) => string,
@@ -148,10 +153,12 @@ export function formatBytes(value: WireNumber | null | undefined): string {
       ? ([1024, "KiB"] as const)
       : compareWire(value, 1024 ** 3) < 0
         ? ([1024 ** 2, "MiB"] as const)
-        : ([1024 ** 3, "GiB"] as const);
+        : compareWire(value, 1024 ** 4) < 0
+          ? ([1024 ** 3, "GiB"] as const)
+          : ([1024 ** 4, "TiB"] as const);
   const displayed = displayRatio(value, unit[0]);
   return Number.isFinite(displayed)
-    ? `${displayed.toFixed(1)} ${unit[1]}`
+    ? `${(halfUp(displayed * 10) / 10).toFixed(1)} ${unit[1]}`
     : `${formatWire(value)} B`;
 }
 
@@ -215,22 +222,92 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
     : hostname;
 }
 
-/** Used share and total of the Spark's memory, from the live sample when there is one. */
+/** The live telemetry sample while its freshness is live; otherwise the Spark shows its inventory. */
+function liveSample(node: VisualFleetNode) {
+  return node.telemetry?.freshness === "live" ? node.telemetry.sample : null;
+}
+
+/** Used and total memory of the Spark, from the live sample when there is one. */
 export function nodeMemory(
   node: VisualFleetNode,
-): { usedPercent: number; totalBytes: WireNumber } | null {
-  const sample = node.telemetry?.sample;
-  const total = sample?.memory_total_bytes ?? node.inventory?.host_memory_total_bytes;
-  const free = sample?.memory_available_bytes ?? node.inventory?.host_memory_free_bytes;
+): { usedPercent: number; usedBytes: WireNumber; totalBytes: WireNumber } | null {
+  const sample = liveSample(node);
+  const total = sample ? sample.memory_total_bytes : node.inventory?.host_memory_total_bytes;
+  const free = sample ? sample.memory_available_bytes : node.inventory?.host_memory_free_bytes;
   if (!isWireNumber(total) || !isWireNumber(free) || compareWire(total, 0) <= 0) return null;
+  const used = subtractWire(total, free);
   return {
-    usedPercent: Math.round(100 * displayRatio(subtractWire(total, free), total)),
+    usedPercent: halfUp(100 * displayRatio(used, total)),
+    usedBytes: used,
     totalBytes: total,
   };
 }
 
 export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
+}
+
+/** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
+type Vital = { percent: number | null; text: string; amber: boolean };
+
+const NOT_REPORTED: Vital = { percent: null, text: "Not reported", amber: false };
+
+/** Free disk and its total: the inventory's pair, else the live sample's. */
+function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber } | null {
+  for (const source of [node.inventory, liveSample(node)]) {
+    const free = source?.disk_free_bytes;
+    const total = source?.disk_total_bytes;
+    if (isWireNumber(free) && isWireNumber(total) && compareWire(total, 0) > 0) {
+      return { free, total };
+    }
+  }
+  return null;
+}
+
+/** The three vitals of a Fleet row; `vonkctl fleet` prints the same words (shared vectors). */
+export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital; gpu: Vital } {
+  const memory = nodeMemory(node);
+  const disk = diskPair(node);
+  const sample = liveSample(node);
+  const utilisation = sample?.gpu_utilization_percent;
+  const temperature = sample?.gpu_temperature_c;
+  const readings = [
+    typeof utilisation === "number" && Number.isFinite(utilisation)
+      ? `${halfUp(utilisation)}%`
+      : null,
+    typeof temperature === "number" ? `${temperature} °C` : null,
+  ].filter((reading): reading is string => reading !== null);
+  const reason = sample?.gpu_unavailable_reason;
+  const usedDisk =
+    disk && halfUp(100 * displayRatio(subtractWire(disk.total, disk.free), disk.total));
+  return {
+    memory: memory
+      ? {
+          percent: memory.usedPercent,
+          text: `${formatBytes(memory.usedBytes)} of ${formatBytes(memory.totalBytes)} (${memory.usedPercent}%)`,
+          amber: memory.usedPercent >= 90,
+        }
+      : NOT_REPORTED,
+    disk:
+      disk && usedDisk !== null
+        ? {
+            percent: Math.min(100, Math.max(0, 100 - usedDisk)),
+            text: `${formatBytes(disk.free)} free of ${formatBytes(disk.total)}`,
+            amber: usedDisk >= 90,
+          }
+        : NOT_REPORTED,
+    // GPU utilisation is never amber: a busy GPU is the point of the machine.
+    gpu: readings.length
+      ? {
+          percent:
+            typeof utilisation === "number" && Number.isFinite(utilisation)
+              ? Math.min(100, Math.max(0, utilisation))
+              : null,
+          text: readings.join(", "),
+          amber: false,
+        }
+      : { ...NOT_REPORTED, text: reason ? `Not reported (${reason})` : "Not reported" },
+  };
 }
 
 /** Average current CPU clock against the hardware maximum, with the temperature it runs at. */
