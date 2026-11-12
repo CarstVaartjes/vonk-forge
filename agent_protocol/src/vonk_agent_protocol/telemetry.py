@@ -82,8 +82,15 @@ class HostResourceSample(TelemetryWireModel):
 
 
 class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
-    """One host sample. The capacity scalars are the core; the 4.1 readings
-    (temperature, CPU clocks) are optional evidence dropped when invalid."""
+    """One host sample. The capacity scalars are the core; the optional readings
+    (4.1: temperature, CPU clocks; 4.3: GPU power, uptime, GPU process memory)
+    are evidence dropped when invalid.
+
+    ``gpu_power_watts`` is the GPU's draw, not the host's. ``uptime_seconds`` is
+    whole seconds since boot. ``gpu_process_memory_bytes`` is the memory the
+    driver says GPU compute processes hold; it is reported only for a
+    shared-pool accelerator, where it is part of ``memory_total - memory_available``.
+    """
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
         EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("gpu_clock",),)),
@@ -98,6 +105,16 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
                 ("cpu_frequency_min_mhz",),
                 ("cpu_frequency_max_mhz",),
             ),
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("gpu_power_watts",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("uptime_seconds",),)
+        ),
+        EvidenceGroup(
+            AgentEvidenceCode.TELEMETRY_READING_DROPPED,
+            (("gpu_process_memory_bytes",),),
         ),
     )
 
@@ -126,6 +143,21 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
     )
     cpu_frequency_max_mhz: int | None = Field(
         default=None, ge=1, le=20_000, exclude_if=lambda value: value is None
+    )
+    gpu_power_watts: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+    )
+    uptime_seconds: int | None = Field(
+        default=None, ge=0, le=2**32 - 1, exclude_if=lambda value: value is None
+    )
+    gpu_process_memory_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_TELEMETRY_CAPACITY_BYTES,
+        exclude_if=lambda value: value is None,
     )
     _parse_observed_at = field_validator("observed_at", mode="before")(
         _rfc3339_datetime

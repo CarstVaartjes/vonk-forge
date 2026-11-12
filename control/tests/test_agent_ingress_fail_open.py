@@ -300,6 +300,9 @@ CASES: list[
             "gpu_clock": _SAMPLE | {"gpu_clock": {"graphics_mhz": -1}},
             "cpu_frequency_avg_mhz": _SAMPLE
             | {"cpu_frequency_avg_mhz": 1000, "cpu_frequency_min_mhz": 2000},
+            "gpu_power_watts": _SAMPLE | {"gpu_power_watts": -1},
+            "uptime_seconds": _SAMPLE | {"uptime_seconds": -5},
+            "gpu_process_memory_bytes": _SAMPLE | {"gpu_process_memory_bytes": 2**50},
         },
     ),
     (

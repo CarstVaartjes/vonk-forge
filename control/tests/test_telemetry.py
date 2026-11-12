@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
@@ -458,3 +460,44 @@ def test_gpu_failure_round_trips_and_next_sample_recovers(telemetry):
     assert point.gpu_temperature_c == 61
     assert point.gpu_memory_total_bytes is None
     assert point.memory_total_bytes == recovered.memory_total_bytes
+
+
+def _vector() -> dict:
+    return json.loads(
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
+        ).read_text()
+    )
+
+
+def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) -> None:
+    from vonk_control.fleet_projection import telemetry_point
+
+    repository, _sessions, _engine, _clock = telemetry
+    vector = _vector()
+    reported = TelemetrySample.model_validate_json(
+        canonical_message(
+            {**vector["sample"], "observed_at": START + timedelta(seconds=1)}
+        )
+    )
+    repository.record_batch(NODE_A, (reported,))
+    point = telemetry_point(repository.latest((NODE_A,))[NODE_A])
+    assert (
+        point.gpu_power_watts,
+        point.uptime_seconds,
+        point.gpu_process_memory_bytes,
+        point.system_memory_bytes,
+    ) == (9.14, 1804535, 113668784128, vector["system_memory_bytes"])
+
+    # An older agent omits the readings: stored NULL, absent from the wire.
+    older = sample(sequence=2)
+    repository.record_batch(NODE_A, (older,))
+    served = json.loads(
+        canonical_message(telemetry_point(repository.latest((NODE_A,))[NODE_A]))
+    )
+    assert not {
+        "gpu_power_watts",
+        "uptime_seconds",
+        "gpu_process_memory_bytes",
+        "system_memory_bytes",
+    } & set(served)

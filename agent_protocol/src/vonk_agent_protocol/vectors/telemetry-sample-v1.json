@@ -1,0 +1,35 @@
+{
+  "driver_readings": {
+    "nvidia_smi_query_gpu": "NVIDIA GB10, 0, [N/A], [N/A], 43, 9.14\n",
+    "nvidia_smi_query_compute_apps": "108403\n",
+    "proc_uptime": "1804535.81 35033914.25\n",
+    "proc_meminfo": "MemTotal:       129170372 kB\nMemAvailable:   10939032 kB\n"
+  },
+  "sample": {
+    "boot_id": "00000000-0000-4000-8000-000000000001",
+    "observed_at": "2026-09-05T12:00:00Z",
+    "memory_total_bytes": 132270460928,
+    "memory_available_bytes": 11201568768,
+    "disk_total_bytes": 1000000000000,
+    "disk_free_bytes": 750000000000,
+    "gpu_utilization_percent": 0.0,
+    "gpu_memory_total_bytes": null,
+    "gpu_memory_free_bytes": null,
+    "gpu_temperature_c": 43,
+    "gpu_power_watts": 9.14,
+    "uptime_seconds": 1804535,
+    "gpu_process_memory_bytes": 113668784128
+  },
+  "system_memory_bytes": 7400108032,
+  "invalid_readings": [
+    {
+      "gpu_power_watts": -1
+    },
+    {
+      "uptime_seconds": -5
+    },
+    {
+      "gpu_process_memory_bytes": 17592186044417
+    }
+  ]
+}

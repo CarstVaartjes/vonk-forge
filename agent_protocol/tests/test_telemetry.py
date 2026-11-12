@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from vonk_agent_protocol import (
@@ -101,6 +103,45 @@ def test_cpu_frequency_and_temperature_are_optional_and_bounded() -> None:
     # An inconsistent optional reading is dropped and named, not refused.
     parsed = TelemetryRequest.parse(inverted)
     assert parsed.samples[0].cpu_frequency_avg_mhz is None
+    assert (
+        AgentEvidenceCode.TELEMETRY_READING_DROPPED
+        in parsed.samples[0].evidence_warnings
+    )
+
+
+VECTOR = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "src/vonk_agent_protocol/vectors/telemetry-sample-v1.json"
+    ).read_text()
+)
+NEW_READINGS = ("gpu_power_watts", "uptime_seconds", "gpu_process_memory_bytes")
+
+
+def test_power_uptime_and_process_memory_round_trip_and_older_agents_omit_them() -> (
+    None
+):
+    parsed = TelemetryRequest.parse({"samples": [VECTOR["sample"]]})
+    document = parsed.document()["samples"][0]
+    assert {k: document[k] for k in NEW_READINGS} == {
+        k: VECTOR["sample"][k] for k in NEW_READINGS
+    }
+
+    older = {k: v for k, v in VECTOR["sample"].items() if k not in NEW_READINGS}
+    omitted = TelemetryRequest.parse({"samples": [older]}).document()["samples"][0]
+    assert not set(NEW_READINGS) & set(omitted)
+
+
+@pytest.mark.parametrize("invalid", VECTOR["invalid_readings"])
+def test_an_invalid_new_reading_is_dropped_alone(invalid: dict[str, int]) -> None:
+    ((name, _),) = invalid.items()
+    parsed = TelemetryRequest.parse({"samples": [{**VECTOR["sample"], **invalid}]})
+    kept = parsed.document()["samples"][0]
+    assert name not in kept
+    assert {k: kept[k] for k in NEW_READINGS if k != name} == {
+        k: VECTOR["sample"][k] for k in NEW_READINGS if k != name
+    }
+    assert kept["memory_total_bytes"] == VECTOR["sample"]["memory_total_bytes"]
     assert (
         AgentEvidenceCode.TELEMETRY_READING_DROPPED
         in parsed.samples[0].evidence_warnings

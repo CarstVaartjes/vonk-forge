@@ -289,6 +289,9 @@ class NodeTelemetrySample(Base):
     cpu_frequency_avg_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_min_mhz: Mapped[int | None] = mapped_column(Integer)
     cpu_frequency_max_mhz: Mapped[int | None] = mapped_column(Integer)
+    gpu_power_watts: Mapped[float | None] = mapped_column(Float)
+    uptime_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    gpu_process_memory_bytes: Mapped[int | None] = mapped_column(BigInteger)
 
     resource_snapshot: Mapped[NodeInventoryResourceSnapshot] = relationship(
         foreign_keys=[
