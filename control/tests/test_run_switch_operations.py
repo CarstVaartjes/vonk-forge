@@ -8525,8 +8525,8 @@ def test_cancel_leaves_a_claimed_probe_to_report_its_own_end(tmp_path):
 def test_a_queued_probe_names_its_spark_holder_as_the_load_reason(tmp_path):
     """Catches the load reason staying at the reason its probe round started.
 
-    Incident 2026-10-26: the load said ``runtime_preflight.stale`` for hours
-    while its probe sat queued behind another order holding the Spark.
+    Incident 2026-10-26: the load kept the reason its probe round started with
+    for hours while its probe sat queued behind another order holding the Spark.
     """
     from vonk_agent_protocol import AgentOperation as OperationKind
     from vonk_agent_protocol import WaitReason
