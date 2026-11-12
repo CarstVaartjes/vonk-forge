@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
 
 from ..agent_operation_facts import aware as _aware
 from ..lifecycle import Outcome, Reported, State
-from ..model_cache_contract import ModelCacheTransferArtifact
+from ..model_cache_contract import ModelCacheSetState, ModelCacheTransferArtifact
 from ..model_cache_progress import cache_phase, progress_document
 from ..models import ModelCacheOperation, ModelCacheSet
 from ..operation_progress import STALE_AFTER_SECONDS, STALL_AFTER_SECONDS
@@ -66,7 +66,7 @@ class _ProgressWindow:
 
     noted_at: datetime
     written_at: datetime | None = None
-    written_phase: str | None = None
+    written_phase: ModelCacheSetState | None = None
     # Object digest -> the latest sample of a stream still transferring.
     samples: dict[str, _StreamSample] = field(default_factory=dict)
 
@@ -118,7 +118,7 @@ class CheckpointsMixin:
             if (
                 not force_progress
                 and _within(now, window.written_at)
-                and window.written_phase == "downloading"
+                and window.written_phase is ModelCacheSetState.DOWNLOADING
             ):
                 return
             samples = list(window.samples.values())
@@ -132,7 +132,11 @@ class CheckpointsMixin:
                 if sample.state == ModelFileState.PARTIAL or not transferring
                 else transferring[-1]
             )
-            phase = "downloading" if transferring else "verifying"
+            phase = (
+                ModelCacheSetState.DOWNLOADING
+                if transferring
+                else ModelCacheSetState.VERIFYING
+            )
             # Kept for the next write: streams still transferring. A stream that
             # ended (verified or corrupt), or that wrote and then stayed silent
             # for a whole window, has nothing left to report.
@@ -214,7 +218,7 @@ class CheckpointsMixin:
                         cache._progress(
                             manifest,
                             previous=old_progress,
-                            phase=phase,
+                            phase=phase.value,
                             completed_artifacts=max(
                                 old_completed,
                                 *(value.completed_artifacts for value in samples),
