@@ -6215,8 +6215,9 @@ def test_postgres_disjoint_stops_serialize_one_route_candidate(
 def test_postgres_duplicate_stop_request_returns_same_operation(
     tmp_path: Path, postgres_engine
 ) -> None:
-    # The duplicate pauses at its run fence while the first Stop is accepted,
-    # withdrawn and dispatched. Past the fence it returns that Stop.
+    # Both Stops carry a preview the run has moved on from: the first is
+    # re-planned, never refused. The duplicate pauses at its run fence while
+    # the first is accepted, withdrawn and dispatched, then returns that Stop.
     Base.metadata.drop_all(postgres_engine)
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
         tmp_path, engine=postgres_engine
@@ -6235,6 +6236,11 @@ def test_postgres_duplicate_stop_request_returns_same_operation(
     service, routes = bind_route_publications(sessions, service, publisher)
     routes.publish_run(run.owner_id)
     plan = service.preview_stop(run.owner_id)
+    with sessions.begin() as session:
+        moved = session.get(RecipeRun, run.owner_id)
+        assert moved is not None
+        moved.state = "failed"
+    assert service.preview_stop(run.owner_id).plan_digest != plan.plan_digest
     request_key = "e" * 35 + "7"
     role = threading.local()
     second_at_fence = threading.Event()
