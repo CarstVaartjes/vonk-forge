@@ -30,7 +30,6 @@ from vonk_agent_protocol import (
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
     InstallAdmissionCode,
-    InvalidRequestReason,
     LifecycleState,
     RecipeInstallPayload,
     RecipeStartPayload,
@@ -4618,7 +4617,7 @@ def test_profile_cleanup_new_load_reuses_completed_nodes_after_failed_uninstall(
         ) == {"uninstalled"}
 
 
-def test_uninstall_requires_fresh_review_after_installation_observation_changes(
+def test_uninstall_replans_a_stale_review_from_the_installation_as_it_is_now(
     tmp_path: Path,
 ) -> None:
     sessions, service, _queue, mapping_id, build_id, nodes = setup_services(
@@ -4637,31 +4636,13 @@ def test_uninstall_requires_fresh_review_after_installation_observation_changes(
         )
         assert node is not None
         node.installed_bytes += 1
-    assert (
-        service.preview_uninstall(installation.owner_id).plan_digest
-        != stale.plan_digest
-    )
+    current = service.preview_uninstall(installation.owner_id).plan_digest
+    assert current != stale.plan_digest
 
-    with pytest.raises(RecipeRequestInvalid) as changed:
-        service.uninstall(
-            installation.owner_id,
-            plan_digest=stale.plan_digest,
-            actor="admin",
-            request_id="8" * 35 + "f",
-        )
-    assert changed.value.typed_reason == InvalidRequestReason.SUPERSEDED
-    with sessions() as session:
-        assert (
-            session.scalar(
-                select(AgentOperation.id).where(
-                    AgentOperation.kind == WireAgentOperation.RECIPE_UNINSTALL
-                )
-            )
-            is None
-        )
+    # Uninstall is declarative: the stale review is re-planned, never refused.
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=service.preview_uninstall(installation.owner_id).plan_digest,
+        plan_digest=stale.plan_digest,
         actor="admin",
         request_id="8" * 35 + "f",
     )
@@ -4673,6 +4654,9 @@ def test_uninstall_requires_fresh_review_after_installation_observation_changes(
     )
     assert replay == operation
     with sessions() as session:
+        assert _required(session.get(Job, operation.id)).payload["plan_digest"] == (
+            current
+        )
         children = tuple(
             session.scalars(
                 select(AgentOperation)

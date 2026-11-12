@@ -103,22 +103,11 @@ def test_age_uninstall_binds_model_retention_in_real_queue(
     sessions, service, installation_id, _nodes = _real_lifecycle(
         tmp_path, engine=postgres_engine
     )
-    from vonk_control.recipe_operations.errors import RecipeRequestInvalid
-
     with sessions() as session:
         stored = session.get(RecipeInstallation, installation_id)
         assert stored is not None and stored.recipe_build_id is not None
         mapping_id, build_id = stored.mapping_id, stored.recipe_build_id
 
-    reviewed = service.preview_uninstall(installation_id, preserve_model_files=True)
-    with pytest.raises(RecipeRequestInvalid):
-        service.uninstall(
-            installation_id,
-            plan_digest=reviewed.plan_digest,
-            actor="test",
-            request_id=str(uuid.uuid4()),
-            preserve_model_files=False,
-        )
     # Keep the real admission fixture's memory/capability observations when
     # advancing the disk observation; a disk-only synthetic report cannot admit.
     with sessions.begin() as session:

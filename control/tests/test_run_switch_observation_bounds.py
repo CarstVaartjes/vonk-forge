@@ -124,6 +124,41 @@ def _pending_stop(tmp_path):
     return service, operation, run_id
 
 
+def test_a_stale_stop_preview_is_replanned_and_its_key_replays(tmp_path):
+    """Catches a Stop refused as stale, or its retry refused for another digest."""
+    from vonk_control.run_switch_contract import RunSwitchStopApplyRequest
+
+    service, parent, _index = _parked_start_switch(tmp_path, healthy=True)
+    with service._sessions() as session:
+        run = session.scalar(select(RecipeRun))
+        assert run is not None
+        run_id = run.id
+        job = session.get(Job, parent.operation_id)
+        assert job is not None
+        node_id = job.targets[0]
+    key = str(uuid.uuid4())
+
+    def stop(previewed: str):
+        return service.apply_stop(
+            RunSwitchStopApplyRequest(
+                run_id=run_id, plan_digest=previewed, request_key=key
+            ),
+            actor="admin",
+        )
+
+    first = stop("a" * 64)
+    assert stop("b" * 64).operation_id == first.operation_id
+    # The newest request still wins after the Stop.
+    fresh = service.apply(
+        RunSwitchApplyRequest(
+            **_request(service._sessions, node_id).model_dump(),
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    assert fresh.operation_id != first.operation_id
+
+
 def test_unknown_stop_expires_across_restart_without_blocking_fresh_request(tmp_path):
     """Catches retryable observation exceptions escaping the stop's time bound."""
     from vonk_agent_protocol import LifecycleState

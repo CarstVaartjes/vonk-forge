@@ -89,7 +89,7 @@ def test_stop_of_a_run_the_spark_reports_gone_succeeds_and_releases(tmp_path):
         )
 
 
-def test_a_stale_stop_of_a_gone_run_replays_under_its_key(tmp_path):
+def test_a_stale_or_repeated_stop_of_a_gone_run_answers_with_its_stop(tmp_path):
     sessions, service, _queue, mapping, build, nodes = setup_services(tmp_path)
     installed = installed_recipe(service, mapping, build, nodes, request_id="i" * 36)
     started = started_recipe(
@@ -99,18 +99,20 @@ def test_a_stale_stop_of_a_gone_run_replays_under_its_key(tmp_path):
     _report_absent(sessions, started.owner_id)
     assert service.preview_stop(started.owner_id).plan_digest != stale.plan_digest
 
-    def stop():
+    def stop(key: str = "s" * 36):
         return service.stop(
             started.owner_id,
             plan_digest=stale.plan_digest,
             actor="admin",
-            request_id="s" * 36,
+            request_id=key,
         )
 
     first = stop()
     assert first.state == "succeeded"
     # The same key on the same run is the same Stop.
     assert stop().id == first.id
+    # A new key on the stopped run is that Stop too, never a refusal.
+    assert stop("t" * 36).id == first.id
     plan = service.preview_run(installed.owner_id, "after-the-stop")
     fresh = service.start(
         plan, plan_digest=plan.plan_digest, actor="admin", request_id="f" * 36
