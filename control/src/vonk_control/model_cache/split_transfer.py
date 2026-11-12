@@ -254,7 +254,7 @@ class SplitTransferMixin:
             ),
             WorkerMemoryComponent.MODEL_CACHE_CANCEL_EVENTS: len(cache._cancel_events),
             WorkerMemoryComponent.MODEL_CACHE_PROGRESS_CHECKPOINTS: len(
-                cache._progress_checkpoint_at
+                cache._progress_checkpoints
             ),
             WorkerMemoryComponent.MODEL_CACHE_REVERIFIED: len(cache._reverified_at),
         }
@@ -322,6 +322,7 @@ class SplitTransferMixin:
                         actual_bytes=latest[0],
                         state=ModelFileState.PARTIAL,
                         completed_artifacts=completed_artifacts,
+                        force_progress=False,
                     )
                 except Exception as error:  # noqa: BLE001 - propagate sampler failures to owner
                     errors.append(error)

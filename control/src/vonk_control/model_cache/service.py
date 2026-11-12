@@ -22,7 +22,7 @@ from ..storage_demands import StorageDemands
 from .availability import AvailabilityMixin
 from .cancellation import CancellationMixin
 from .catalog import CatalogMixin
-from .checkpoints import CheckpointsMixin
+from .checkpoints import CheckpointsMixin, _ProgressWindow
 from .constants import (
     _DEFAULT_MAX_DOWNLOAD_STREAMS,
     _DEFAULT_MAX_PARALLEL_DOWNLOADS,
@@ -195,7 +195,7 @@ class ModelCacheService(
         self._cooldown_lock = threading.Lock()
         # Signed GitHub LFS links, in process memory only.
         self._lfs_links = _LfsLinks()
-        self._progress_checkpoint_at: dict[str, datetime] = {}
+        self._progress_checkpoints: dict[str, _ProgressWindow] = {}
         self._cancel_events: dict[str, threading.Event] = {}
         self._range_reserved_bytes = 0
         self._reverified_at: dict[str, datetime] = {}

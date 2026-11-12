@@ -63,7 +63,7 @@ class CoreMixin:
         cache._executor.shutdown(wait=True, cancel_futures=True)
         with cache._lock:
             cache._advance_background_operations()
-            cache._progress_checkpoint_at.clear()
+            cache._progress_checkpoints.clear()
 
     @property
     def root(self) -> Path:

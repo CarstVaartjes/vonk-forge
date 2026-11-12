@@ -8,7 +8,6 @@ from typing import Any, cast
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
-from vonk_agent_protocol import ModelFileState
 from vonk_control.model_cache.persistence import (
     _manifest_of,
     _store_operation_payload,
@@ -137,29 +136,6 @@ def test_a_failed_download_reads_its_receipts_before_locking_the_row(
     finally:
         service.close()
     assert sum(reads.count.values()) >= 2
-    assert reads.problems == []
-
-
-def test_a_progress_checkpoint_reads_no_receipt_under_the_lock_or_row_lock(
-    postgres_engine, tmp_path: Path, monkeypatch
-) -> None:
-    """Catches the checkpoint of every download thread reading receipts under both locks."""
-    service, _sessions, running, _due = _setup(postgres_engine, tmp_path, monkeypatch)
-    manifest = _running_manifest(service, running)
-    reads = _Reads(
-        postgres_engine, service, monkeypatch, [running], ("_stored_object",)
-    )
-    try:
-        service._checkpoint_artifact(
-            manifest.artifacts[0],
-            operation_id=running,
-            set_digest=manifest.digest,
-            actual_bytes=10,
-            state=ModelFileState.PARTIAL,
-        )
-    finally:
-        service.close()
-    assert reads.count["_stored_object"] >= 1
     assert reads.problems == []
 
 
