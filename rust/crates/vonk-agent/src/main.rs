@@ -318,6 +318,12 @@ struct CustodyExecutor<'a, E> {
 /// first instant an observation can count.
 const POST_STOP_INVENTORY_SECONDS: u64 = 31;
 
+/// What the claim lane shares with the inventory lane.
+struct InventoryLink {
+    verdict: LatestVerdict,
+    stops: PostStopInventory,
+}
+
 /// The claim lane tells the inventory lane when a stop completed; the inventory
 /// lane then collects once just past the Controller's freshness bound instead
 /// of waiting for the regular cadence. Cleared only by a successful report.
@@ -460,8 +466,7 @@ async fn run_control_lane(
         runtime_identity,
         client.clone(),
         state,
-        verdict,
-        stops,
+        InventoryLink { verdict, stops },
         &builds,
         &beside,
     );
@@ -473,8 +478,7 @@ async fn claim_lane<'a>(
     mut runtime_identity: AgentRuntimeIdentity,
     client: AgentHttpClient,
     mut state: StateStore,
-    verdict: LatestVerdict,
-    stops: PostStopInventory,
+    inventory: InventoryLink,
     builds: &'a RecipeExecutor<'a, SystemProcessRunner>,
     beside: &Beside<'a>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -565,7 +569,7 @@ async fn claim_lane<'a>(
         // Between lane claims only a build beside the lane can be live; its
         // stores stay protected by its units, base-image locks and age.
         if Instant::now() >= retention_due {
-            retention_due = collect_stores(config.data_dir.clone(), verdict.fresh()).await;
+            retention_due = collect_stores(config.data_dir.clone(), inventory.verdict.fresh()).await;
         }
         let wait_seconds = claim_wait_seconds(
             POLL_MAX_SECONDS,
@@ -592,7 +596,7 @@ async fn claim_lane<'a>(
                 Path::new("/run/vonk-forge-agent"),
             )
             .is_ok(),
-            stops: stops.clone(),
+            stops: inventory.stops.clone(),
         };
         let operation = async {
             run_once_with_claim_hook(
@@ -631,7 +635,7 @@ async fn claim_lane<'a>(
                         Ok(store) => {
                             let client = client.clone();
                             let available = guarded.available;
-                            let stops = stops.clone();
+                            let stops = inventory.stops.clone();
                             beside.start(fence, async move {
                                 let executor = CustodyExecutor {
                                     executor: builds,
