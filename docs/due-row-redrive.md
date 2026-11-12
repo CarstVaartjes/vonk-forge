@@ -26,7 +26,7 @@ not exclude a row whose wait still owns unresolved cleanup.
 | RunSwitch | Shared per-row advancement, wait recording and ended-Start cancellation |
 | Route publication / recovery | Existing route maintenance and exact-run recovery/publication |
 | Storage relief / cleanup | Existing guarded removal and residue owners |
-| Catalog sync | Shared automatic observation and durable retry writer |
+| Catalog sync | Shared automatic observation and durable retry writer, once the API's own cadence is a full sync interval late (it wakes at the same due time) |
 | Certificate / revocation | Existing remote revocation confirmation |
 
 A scan examines at most sixteen rows and yields between handlers when its
