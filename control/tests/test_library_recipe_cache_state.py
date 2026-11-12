@@ -598,12 +598,17 @@ def test_each_recipe_set_is_resolved_once_across_library_reads(
     )
 
 
+@pytest.mark.parametrize("refused", [False, True])
 def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
     cache,  # noqa: F811
     monkeypatch,
+    refused: bool,
 ):
     from vonk_control.library_projection import local_state
-    from vonk_control.model_cache.errors import ModelCacheError
+    from vonk_control.model_cache.errors import (
+        ModelCacheError,
+        ModelCacheResolutionRefused,
+    )
 
     service, sessions = cache
     world = _World(sessions, count=1)
@@ -614,6 +619,8 @@ def test_an_unresolvable_set_reads_unknown_not_cached_from_its_build(
     monkeypatch.setattr(local_state, "_RESOLVED_RECIPE_SETS", {})
 
     def refuse(session, revision_id):
+        if refused:
+            raise ModelCacheResolutionRefused("source-refused", "source policy refused")
         raise ModelCacheError("set is not resolvable")
 
     monkeypatch.setattr(local_state, "resolve_recipe_set", refuse)

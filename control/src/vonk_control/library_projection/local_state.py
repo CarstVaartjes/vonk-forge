@@ -290,17 +290,18 @@ def _database_local_state(
                 continue
             try:
                 resolved = resolve_recipe_set(session, revision_id).digest
-            except SecurityRefusalError:
-                raise
             except (ModelCacheError, TypeError, ValueError):
+                # A refusal for one recipe leaves that recipe unknown; it does
+                # not fail the page.
                 _note_unreadable(
                     "recipe artifact set", recipe_digest, "set is not resolvable"
                 )
                 unresolved.add(recipe_digest)
-                continue
-            if len(_RESOLVED_RECIPE_SETS) >= _RESOLVED_RECIPE_SETS_BOUND:
-                _RESOLVED_RECIPE_SETS.pop(next(iter(_RESOLVED_RECIPE_SETS)))
-            _RESOLVED_RECIPE_SETS[recipe_digest] = recipe_sets[recipe_digest] = resolved
+            else:
+                if len(_RESOLVED_RECIPE_SETS) >= _RESOLVED_RECIPE_SETS_BOUND:
+                    _RESOLVED_RECIPE_SETS.pop(next(iter(_RESOLVED_RECIPE_SETS)), None)
+                _RESOLVED_RECIPE_SETS[recipe_digest] = resolved
+                recipe_sets[recipe_digest] = resolved
         # The shared manifest reader decides exact content membership, so damage
         # in one manifest cannot discard unrelated local state.
         cache_sets = [
