@@ -187,6 +187,48 @@ def _drop(group: EvidenceGroup, data: Any, refusal: ValidationError) -> Evidence
     )
 
 
+def _smallest_valid(
+    handler: ValidatorFunctionWrapHandler,
+    data: Any,
+    named: tuple[EvidenceGroup, ...],
+) -> tuple[EvidenceGroup, ...] | None:
+    """``named`` less every group the report is valid without dropping, or ``None``
+    when dropping all of them is not enough."""
+
+    try:
+        handler(_without(data, named))
+    except ValidationError:
+        return None
+    kept = list(named)
+    for group in reversed(named):
+        trial = tuple(item for item in kept if item is not group)
+        try:
+            handler(_without(data, trial))
+        except ValidationError:
+            continue
+        kept = list(trial)
+    return tuple(kept)
+
+
+def _refused_groups(
+    groups: tuple[EvidenceGroup, ...], data: Any, refusal: ValidationError
+) -> tuple[EvidenceGroup, ...]:
+    """The groups with a field that ``refusal`` names, in declaration order."""
+
+    locations = [
+        _data_location(data, tuple(error["loc"])) for error in refusal.errors()
+    ]
+    return tuple(
+        group
+        for group in groups
+        if any(
+            location[: len(path)] == path
+            for location in locations
+            for path in group.paths
+        )
+    )
+
+
 class OptionalEvidenceModel(BaseModel):
     """Mixin: drop invalid optional evidence instead of refusing the report."""
 
@@ -252,20 +294,31 @@ def _drop_invalid_optional_evidence(
             for group in cls.EVIDENCE_GROUPS
             if any(_present(data, path) for path in group.paths)
         )
-        # Fewest groups first: lose as little as the core allows.
-        for size in range(1, len(present) + 1):
-            for dropped in itertools.combinations(present, size):
-                try:
-                    model = handler(_without(data, dropped))
-                except ValidationError:
-                    continue
-                model._evidence_warnings = redacted + tuple(
-                    group.code for group in dropped
-                )
-                model._evidence_drops = tuple(
-                    _drop(group, data, refusal) for group in dropped
-                )
-                return model
+        # The groups the refusal names are the first candidate, then each is
+        # kept if the report is valid without dropping it: one attempt per
+        # group, so a sensor-reading agent that sends many invalid readings at
+        # once costs a few validations, not a search over every subset. A
+        # refusal that names no group (a check across fields) falls back to
+        # the search: fewest groups first, to lose as little as the core allows.
+        named = _refused_groups(present, data, refusal)
+        first = _smallest_valid(handler, data, named) if named else None
+        for dropped in itertools.chain(
+            () if first is None else (first,),
+            (
+                dropped
+                for size in range(1, len(present) + 1)
+                for dropped in itertools.combinations(present, size)
+            ),
+        ):
+            try:
+                model = handler(_without(data, dropped))
+            except ValidationError:
+                continue
+            model._evidence_warnings = redacted + tuple(group.code for group in dropped)
+            model._evidence_drops = tuple(
+                _drop(group, data, refusal) for group in dropped
+            )
+            return model
         raise
 
 

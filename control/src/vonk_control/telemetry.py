@@ -5,14 +5,18 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
 from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
+from vonk_agent_protocol.state_machines import RouteState
 from vonk_agent_protocol.telemetry import (
+    EngineReading,
     HostResourceSample,
+    TelemetryReadings,
     TelemetryRequest,
     TelemetrySample,
 )
@@ -25,9 +29,11 @@ from .fleet_events import FleetEventDraft, FleetEventRepository
 from .lifecycle.evidence import Residue
 from .models import (
     AgentNode,
+    NodeEngineSample,
     NodeInventoryResourceSnapshot,
     NodeTelemetryLatest,
     NodeTelemetrySample,
+    RecipeRun,
 )
 from .observed_run_memory import record_observed_run_memory
 from .strict_json import warn_unreadable_once
@@ -45,8 +51,10 @@ def _stored_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-class TelemetrySampleView(TelemetrySample):
-    """Controller identity and receive time around the single sample contract."""
+class TelemetrySampleView(TelemetryReadings):
+    """Controller identity and receive time around the host readings of the
+    sample contract. Engine readings are not part of it: they have their own
+    table and their own reader (``TelemetryRepository.live_engine_readings``)."""
 
     id: str
     node_id: str
@@ -71,7 +79,7 @@ def _canonical_sample(value: TelemetrySample, now: datetime) -> TelemetrySample:
 
 _SAMPLE_FIELDS = tuple(
     name
-    for name in TelemetrySample.model_fields
+    for name in TelemetryReadings.model_fields
     if name not in HostResourceSample.model_fields
 )
 
@@ -94,16 +102,20 @@ def _view(row: NodeTelemetrySample) -> TelemetrySampleView:
     )
 
 
+def _readings(value: dict[str, object]) -> TelemetryReadings:
+    return TelemetryReadings.model_validate_json(
+        canonical_message({k: v for k, v in value.items() if k in _READING_FIELDS})
+    )
+
+
+_READING_FIELDS = frozenset(TelemetryReadings.model_fields)
+
+
 def _same_sample(row: NodeTelemetrySample, value: TelemetrySample) -> bool:
-    return (
-        TelemetrySample.model_validate_json(
-            canonical_message(
-                _view(row).model_dump(
-                    mode="json", include=set(TelemetrySample.model_fields)
-                )
-            )
-        )
-        == value
+    """Whether a stored sample is this one. A replay is compared on the host
+    readings: its engine rows were written with it, in the same transaction."""
+    return _readings(_view(row).model_dump(mode="json")) == _readings(
+        value.model_dump(mode="json")
     )
 
 
@@ -145,6 +157,19 @@ def _advance_latest(
         ).scalar()
         is not None
     )
+
+
+#: How far back an engine reading still stands for its run. Several samples fit
+#: in it, so one slow scrape does not gap the exported series.
+ENGINE_LIVE_WINDOW = timedelta(seconds=30)
+
+
+@dataclass(frozen=True)
+class LiveEngineReading:
+    node_id: str
+    #: The run's published route name.
+    alias: str
+    reading: EngineReading
 
 
 class TelemetryRepository:
@@ -272,6 +297,12 @@ class TelemetryRepository:
                     )
                 )
                 session.flush()
+                session.add_all(
+                    NodeEngineSample(
+                        sample_id=sample_id, **reading.model_dump(mode="json")
+                    )
+                    for reading in value.engines or ()
+                )
                 if _advance_latest(session, node_id, sample_id, value.observed_at):
                     self._events.append_in_session(
                         session,
@@ -290,7 +321,7 @@ class TelemetryRepository:
                     TelemetrySampleView.model_validate_json(
                         canonical_message(
                             {
-                                **value.model_dump(mode="json"),
+                                **value.model_dump(mode="json", exclude={"engines"}),
                                 "id": sample_id,
                                 "node_id": node_id,
                                 "received_at": now,
@@ -385,6 +416,46 @@ class TelemetryRepository:
             if view is not None:
                 recent.setdefault(row.node_id, []).append(view)
         return recent
+
+    def live_engine_readings(self, now: datetime) -> list[LiveEngineReading]:
+        """The newest reading of each (node, run) seen within ``ENGINE_LIVE_WINDOW``.
+
+        Not only the latest sample: an engine that answered slowly is missing
+        from it, and its series would gap exactly when it is busy. A run whose
+        route is not published has no alias, so it has no reading here.
+        """
+
+        since = _aware_utc(now, label="engine reading clock") - ENGINE_LIVE_WINDOW
+        with self._sessions() as session:
+            rows = session.execute(
+                select(NodeTelemetrySample.node_id, RecipeRun.alias, NodeEngineSample)
+                .join(
+                    NodeEngineSample,
+                    NodeEngineSample.sample_id == NodeTelemetrySample.id,
+                )
+                .join(RecipeRun, RecipeRun.id == NodeEngineSample.run_id)
+                .where(
+                    NodeTelemetrySample.observed_at >= since,
+                    RecipeRun.route_state == RouteState.PUBLISHED.value,
+                )
+                .order_by(NodeTelemetrySample.observed_at)
+            ).all()
+        newest: dict[tuple[str, str], LiveEngineReading] = {}
+        for node_id, alias, row in rows:
+            try:
+                reading = EngineReading.model_validate_json(
+                    canonical_message(
+                        {
+                            name: getattr(row, name)
+                            for name in EngineReading.model_fields
+                        }
+                    )
+                )
+            except ValueError:
+                warn_unreadable_once("engine reading", f"{row.sample_id}:{row.run_id}")
+                continue
+            newest[(node_id, row.run_id)] = LiveEngineReading(node_id, alias, reading)
+        return list(newest.values())
 
     def by_ids(self, sample_ids: Sequence[str]) -> dict[str, TelemetrySampleView]:
         """Hydrate one bounded stream batch without per-event reads."""

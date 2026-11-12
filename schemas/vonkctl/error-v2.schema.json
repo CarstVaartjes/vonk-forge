@@ -21390,10 +21390,38 @@
     },
     "TelemetryPoint": {
       "properties": {
+        "board_temperature_max_c": {
+          "anyOf": [
+            {
+              "maximum": 150,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Board Temperature Max C"
+        },
         "boot_id": {
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "title": "Boot Id",
           "type": "string"
+        },
+        "cpu_busy_seconds": {
+          "anyOf": [
+            {
+              "maximum": 1000000000000.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Busy Seconds"
         },
         "cpu_frequency_avg_mhz": {
           "anyOf": [
@@ -21437,6 +21465,20 @@
           "default": null,
           "title": "Cpu Frequency Min Mhz"
         },
+        "cpu_total_seconds": {
+          "anyOf": [
+            {
+              "maximum": 1000000000000.0,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Total Seconds"
+        },
         "disk_free_bytes": {
           "anyOf": [
             {
@@ -21450,6 +21492,20 @@
           ],
           "title": "Disk Free Bytes"
         },
+        "disk_read_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Read Bytes"
+        },
         "disk_total_bytes": {
           "anyOf": [
             {
@@ -21462,6 +21518,76 @@
             }
           ],
           "title": "Disk Total Bytes"
+        },
+        "disk_written_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disk Written Bytes"
+        },
+        "fabric_ports_active": {
+          "anyOf": [
+            {
+              "maximum": 16,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric Ports Active"
+        },
+        "fabric_rx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric Rx Bytes"
+        },
+        "fabric_tx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric Tx Bytes"
+        },
+        "fan_rpm_max": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fan Rpm Max"
         },
         "gpu_clock": {
           "anyOf": [
@@ -21570,6 +21696,20 @@
           "title": "Id",
           "type": "string"
         },
+        "load_average_1m": {
+          "anyOf": [
+            {
+              "maximum": 10000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load Average 1M"
+        },
         "memory_available_bytes": {
           "anyOf": [
             {
@@ -21596,15 +21736,85 @@
           ],
           "title": "Memory Total Bytes"
         },
+        "network_lan_rx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Lan Rx Bytes"
+        },
+        "network_lan_tx_bytes": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Network Lan Tx Bytes"
+        },
+        "nic_temperature_c": {
+          "anyOf": [
+            {
+              "maximum": 150,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nic Temperature C"
+        },
         "node_id": {
           "pattern": "^spk_[0-9a-f]{32}$",
           "title": "Node Id",
           "type": "string"
         },
+        "nvme_temperature_c": {
+          "anyOf": [
+            {
+              "maximum": 150,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Nvme Temperature C"
+        },
         "observed_at": {
           "format": "date-time",
           "title": "Observed At",
           "type": "string"
+        },
+        "oom_kills": {
+          "anyOf": [
+            {
+              "maximum": 9223372036854775807,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Oom Kills"
         },
         "received_at": {
           "format": "date-time",

@@ -1,8 +1,11 @@
+import json
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from importlib.resources import files
+from typing import Any, Literal
 
 from fastapi.testclient import TestClient
-from vonk_agent_protocol import NodeOfflineReason
+from vonk_agent_protocol import NodeOfflineReason, canonical_message
+from vonk_agent_protocol.telemetry import EngineReading
 from vonk_control.api import create_app
 from vonk_control.auth import TokenCodec
 from vonk_control.fleet_projection import (
@@ -16,6 +19,7 @@ from vonk_control.fleet_projection import (
     TelemetryState,
 )
 from vonk_control.metrics import MetricsRegistry, runnable_job_ages
+from vonk_control.telemetry import LiveEngineReading
 
 NODE = "spk_00000000000000000000000000000001"
 NOW = datetime(2026, 8, 5, 12, tzinfo=UTC)
@@ -28,6 +32,7 @@ def _fleet_snapshot(
     online_state: Literal["online", "offline", "unregistered"] = "online",
     certificate_state: CertificateState = CertificateState.VALID,
     gpu_utilization: float | None = None,
+    readings: dict[str, Any] | None = None,
 ) -> FleetSnapshot:
     point = TelemetryPoint(
         memory_total_bytes=None,
@@ -42,6 +47,7 @@ def _fleet_snapshot(
         observed_at=NOW,
         received_at=NOW,
         gpu_utilization_percent=gpu_utilization,
+        **(readings or {}),
     )
     return FleetSnapshot(
         event_cursor=1,
@@ -368,3 +374,58 @@ def test_metrics_endpoint_projects_typed_fleet_snapshot() -> None:
         f'vonk_node_telemetry_freshness{{node_id="{NODE}",state="live"}} 1'
         in response.text
     )
+
+
+def test_metrics_export_host_and_engine_readings_and_omit_what_is_not_reported() -> (
+    None
+):
+    vector = json.loads(
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"
+        ).read_text()
+    )["sample"]
+    v1 = json.loads(
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
+        ).read_text()
+    )["sample"]
+    host = {k: v for k, v in vector.items() if k not in v1 and k != "engines"}
+    tensorfold, partial = (
+        EngineReading.model_validate_json(canonical_message(e))
+        for e in vector["engines"]
+    )
+    metrics = MetricsRegistry()
+    metrics.set_fleet_source(lambda: _fleet_snapshot(readings=host))
+    metrics.set_engine_source(
+        lambda: [
+            LiveEngineReading(NODE, "glm-5-flash", tensorfold),
+            LiveEngineReading(NODE, "other-model", partial),
+        ]
+    )
+    text = metrics.render()
+    node = f'node_id="{NODE}"'
+    assert (
+        f"vonk_node_cpu_busy_seconds_total{{{node}}} {host['cpu_busy_seconds']!r}"
+        in text
+    )
+    assert "# TYPE vonk_node_cpu_busy_seconds_total counter" in text
+    assert f"vonk_node_fan_rpm{{{node}}} {host['fan_rpm_max']}" in text
+    glm = f'{node},alias="glm-5-flash"'
+    assert (
+        f"vonk_engine_generation_tokens_total{{{glm}}} {tensorfold.generation_tokens}"
+        in text
+    )
+    assert (
+        f"vonk_engine_tpot_seconds_sum{{{glm}}} {tensorfold.time_per_output_token_seconds_sum!r}"
+        in text
+    )
+    # A reading the engine did not report is a gap, never a zero.
+    assert "vonk_engine_requests_running{" + f'{node},alias="other-model"}} 1' in text
+    assert f'vonk_engine_prompt_tokens_total{{{node},alias="other-model"}}' not in text
+
+    # An older agent reports none of them; no engine source reports no engines.
+    older = MetricsRegistry()
+    older.set_fleet_source(lambda: _fleet_snapshot())
+    older_text = older.render()
+    assert "vonk_node_fan_rpm" not in older_text
+    assert "vonk_engine_" not in older_text

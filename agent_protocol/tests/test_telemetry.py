@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -146,3 +147,79 @@ def test_an_invalid_new_reading_is_dropped_alone(invalid: dict[str, int]) -> Non
         AgentEvidenceCode.TELEMETRY_READING_DROPPED
         in parsed.samples[0].evidence_warnings
     )
+
+
+VECTOR_V2 = json.loads(
+    (
+        Path(__file__).parents[1]
+        / "src/vonk_agent_protocol/vectors/telemetry-sample-v2.json"
+    ).read_text()
+)
+HOST_READINGS_V2 = tuple(
+    name for name in VECTOR_V2["sample"] if name not in VECTOR["sample"]
+)
+
+
+def test_host_and_engine_readings_round_trip_and_older_agents_omit_them() -> None:
+    sample = VECTOR_V2["sample"]
+    parsed = TelemetryRequest.parse({"samples": [sample]})
+    document = parsed.document()["samples"][0]
+    assert {k: document[k] for k in sample} == sample
+    assert not parsed.samples[0].evidence_warnings
+
+    older = dict(VECTOR["sample"])
+    omitted = TelemetryRequest.parse({"samples": [older]}).document()["samples"][0]
+    assert not set(HOST_READINGS_V2) & set(omitted)
+
+
+@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_readings"])
+def test_an_invalid_host_reading_is_dropped_alone(invalid: dict[str, float]) -> None:
+    ((name, _),) = invalid.items()
+    parsed = TelemetryRequest.parse({"samples": [{**VECTOR_V2["sample"], **invalid}]})
+    kept = parsed.document()["samples"][0]
+    assert name not in kept
+    assert kept["memory_total_bytes"] == VECTOR_V2["sample"]["memory_total_bytes"]
+    assert kept["engines"] == VECTOR_V2["sample"]["engines"]
+    assert (
+        AgentEvidenceCode.TELEMETRY_READING_DROPPED
+        in parsed.samples[0].evidence_warnings
+    )
+
+
+@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_engine_entries"])
+def test_an_invalid_engine_entry_is_dropped_alone(invalid: dict[str, str]) -> None:
+    engines = [
+        invalid,
+        *VECTOR_V2["sample"]["engines"],
+        VECTOR_V2["sample"]["engines"][0],
+    ]
+    parsed = TelemetryRequest.parse(
+        {"samples": [{**VECTOR_V2["sample"], "engines": engines}]}
+    )
+    assert parsed.document()["samples"][0]["engines"] == VECTOR_V2["sample"]["engines"]
+
+
+@pytest.mark.parametrize("invalid", VECTOR_V2["invalid_engine_readings"])
+def test_an_invalid_engine_reading_is_dropped_alone(invalid: dict[str, float]) -> None:
+    first, second = VECTOR_V2["sample"]["engines"]
+    parsed = TelemetryRequest.parse(
+        {
+            "samples": [
+                {**VECTOR_V2["sample"], "engines": [{**first, **invalid}, second]}
+            ]
+        }
+    )
+    kept_first, kept_second = parsed.document()["samples"][0]["engines"]
+    assert kept_second == second
+    assert not set(invalid) & set(kept_first)
+    assert kept_first["generation_tokens"] == first["generation_tokens"]
+
+
+def test_many_invalid_readings_at_once_are_dropped_without_a_search() -> None:
+    """A subset search over the groups takes seconds for eight bad readings."""
+
+    invalid = {k: v for item in VECTOR_V2["invalid_readings"] for k, v in item.items()}
+    started = time.monotonic()
+    parsed = TelemetryRequest.parse({"samples": [{**VECTOR_V2["sample"], **invalid}]})
+    assert time.monotonic() - started < 1
+    assert not set(invalid) & set(parsed.document()["samples"][0])

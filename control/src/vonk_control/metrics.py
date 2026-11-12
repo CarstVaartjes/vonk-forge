@@ -6,7 +6,7 @@ import math
 import re
 import threading
 from collections import defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -24,6 +24,7 @@ from vonk_agent_protocol.state_machines import CertificateRecordState
 from . import agent_operation_states, job_states
 from .compose_bundle import ComposeBundle
 from .jobs import without_agent_operation
+from .metrics_readings import engine_reading_lines, host_reading_lines
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -39,6 +40,7 @@ from .worker_memory_contract import WorkerMemoryReport, WorkerTraceState
 
 if TYPE_CHECKING:
     from .fleet_projection import FleetSnapshot
+    from .telemetry import LiveEngineReading
 
 _NODE = re.compile(r"spk_[0-9a-f]{32}")
 _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"})
@@ -245,6 +247,7 @@ class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._fleet_source: Callable[[], FleetSnapshot] | None = None
+        self._engine_source: Callable[[], Sequence[LiveEngineReading]] | None = None
         self._contact_source: Callable[[], list[str]] | None = None
         self._jobs: dict[tuple[str, str], int] = {}
         self._runnable_job_ages: dict[str, float] = {}
@@ -300,6 +303,12 @@ class MetricsRegistry:
     def set_fleet_source(self, source: Callable[[], FleetSnapshot]) -> None:
         """Bind the owner, never retain the facts returned by a scrape."""
         self._fleet_source = source
+
+    def set_engine_source(
+        self, source: Callable[[], Sequence[LiveEngineReading]]
+    ) -> None:
+        """Bind the owner of live engine readings; a scrape reads it fresh."""
+        self._engine_source = source
 
     @staticmethod
     def _fleet_values(snapshot: FleetSnapshot):
@@ -610,6 +619,9 @@ class MetricsRegistry:
                     value = None if total is None or free is None else total - free
                 if value is not None:
                     lines.append(f'{metric}{{node_id="{node_id}"}} {value}')
+        lines.extend(host_reading_lines(telemetry_samples))
+        if self._engine_source is not None:
+            lines.extend(engine_reading_lines(self._engine_source()))
         lines.extend(
             (
                 "# HELP vonk_jobs Number of control jobs by bounded kind and state.",

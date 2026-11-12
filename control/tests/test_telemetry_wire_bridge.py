@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import TelemetryRequest
-from vonk_control.models import NodeTelemetrySample
+from vonk_control.models import NodeEngineSample, NodeTelemetrySample
 
 from tests.wire_probes import prebuilt_probe
 
@@ -28,7 +28,7 @@ def telemetry_wire_probe() -> Path:
 def _sample(observed_at: str) -> dict[str, object]:
     vector = json.loads(
         (
-            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v1.json"
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"
         ).read_text()
     )
     return {**vector["sample"], "observed_at": observed_at}
@@ -49,6 +49,7 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
     report = TelemetryRequest.parse(json.loads(produced.stdout))
     assert report.samples[0].gpu_power_watts == 9.14
     assert report.samples[0].gpu_process_memory_bytes == 113_668_784_128
+    assert report.document()["samples"][0]["engines"] == sample["engines"]
 
     response = client.post(
         "/agent/telemetry",
@@ -61,3 +62,5 @@ def test_rust_telemetry_json_crosses_shared_python_and_controller_ack(
         assert row is not None
         assert (row.gpu_power_watts, row.uptime_seconds) == (9.14, 1_804_535)
         assert row.gpu_process_memory_bytes == 113_668_784_128
+        assert row.fan_rpm_max == sample["fan_rpm_max"]
+        assert len(session.scalars(select(NodeEngineSample)).all()) == 2

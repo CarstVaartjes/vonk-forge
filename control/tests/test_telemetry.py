@@ -14,10 +14,16 @@ from vonk_agent_protocol import canonical_message
 from vonk_control.models import (
     AgentNode,
     Base,
+    NodeEngineSample,
     NodeTelemetryLatest,
     NodeTelemetrySample,
+    RecipeRun,
 )
-from vonk_control.telemetry import TelemetryRepository, TelemetrySample
+from vonk_control.telemetry import (
+    ENGINE_LIVE_WINDOW,
+    TelemetryRepository,
+    TelemetrySample,
+)
 
 NODE_A = "spk_" + "a" * 32
 NODE_B = "spk_" + "b" * 32
@@ -501,3 +507,115 @@ def test_gpu_power_uptime_and_process_memory_are_stored_and_served(telemetry) ->
         "gpu_process_memory_bytes",
         "system_memory_bytes",
     } & set(served)
+
+
+def _vector_v2() -> dict:
+    return json.loads(
+        (
+            files("vonk_agent_protocol") / "vectors" / "telemetry-sample-v2.json"
+        ).read_text()
+    )
+
+
+def test_host_readings_are_stored_and_served_and_engines_are_not_on_the_point(
+    telemetry,
+) -> None:
+    from vonk_control.fleet_projection import telemetry_point
+
+    repository, sessions, _engine, _clock = telemetry
+    vector = _vector_v2()["sample"]
+    reported = TelemetrySample.model_validate_json(
+        canonical_message({**vector, "observed_at": START + timedelta(seconds=1)})
+    )
+    repository.record_batch(NODE_A, (reported,))
+    served = json.loads(
+        canonical_message(telemetry_point(repository.latest((NODE_A,))[NODE_A]))
+    )
+    new_readings = {
+        k: v
+        for k, v in vector.items()
+        if k not in _vector()["sample"] and k != "engines"
+    }
+    assert new_readings
+    assert {k: served[k] for k in new_readings} == new_readings
+    assert "engines" not in served
+    with sessions() as session:
+        stored = session.scalars(select(NodeEngineSample)).all()
+    assert {row.run_id: row.generation_tokens for row in stored} == {
+        engine["run_id"]: engine.get("generation_tokens")
+        for engine in vector["engines"]
+    }
+
+    # An older agent omits every 4.4 reading: NULL columns, absent on the wire.
+    repository.record_batch(NODE_A, (sample(sequence=2),))
+    older = json.loads(
+        canonical_message(telemetry_point(repository.latest((NODE_A,))[NODE_A]))
+    )
+    assert not {"fan_rpm_max", "oom_kills", "cpu_busy_seconds"} & set(older)
+
+    # A replay of the first sample stays idempotent and adds no engine rows.
+    repository.record_batch(NODE_A, (reported,))
+    with sessions() as session:
+        assert session.scalar(select(func.count()).select_from(NodeEngineSample)) == 2
+
+
+def _run(session, run_id: str, alias: str, route_state: str) -> None:
+    session.add(
+        RecipeRun(
+            id=run_id,
+            installation_id=str(uuid.uuid4()),
+            mapping_id=str(uuid.uuid4()),
+            mapping_generation=1,
+            run_generation=1,
+            alias=alias,
+            plan_digest="a" * 64,
+            plan={},
+            state="running",
+            route_state=route_state,
+            actor="admin",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+
+
+def test_live_engine_readings_are_the_newest_per_run_with_a_published_alias(
+    telemetry,
+) -> None:
+    repository, sessions, _engine, _clock = telemetry
+    first, second = (e["run_id"] for e in _vector_v2()["sample"]["engines"])
+    unpublished = "44444444-4444-4444-8444-444444444444"
+    with sessions.begin() as session:
+        _run(session, first, "glm-5-flash", "published")
+        _run(session, second, "other-model", "published")
+        _run(session, unpublished, "withdrawn-model", "withdrawn")
+
+    def reported(second_offset: int, tokens: int, *runs: str) -> TelemetrySample:
+        return TelemetrySample.model_validate_json(
+            canonical_message(
+                {
+                    **sample(sequence=second_offset).model_dump(mode="json"),
+                    "engines": [
+                        {"run_id": run, "format": "vllm", "generation_tokens": tokens}
+                        for run in runs
+                    ],
+                }
+            )
+        )
+
+    repository.record_batch(NODE_A, (reported(1, 10, first, second, unpublished),))
+    repository.record_batch(NODE_A, (reported(10, 20, first, unpublished),))
+
+    # `second` answered slowly: it is missing from the newest sample but its
+    # earlier reading still stands inside the live window.
+    live = repository.live_engine_readings(START + timedelta(seconds=11))
+    assert {(item.alias, item.reading.generation_tokens) for item in live} == {
+        ("glm-5-flash", 20),
+        ("other-model", 10),
+    }
+
+    # Past the window nothing stands for it.
+    past = repository.live_engine_readings(
+        START + timedelta(seconds=10) + ENGINE_LIVE_WINDOW + timedelta(seconds=1)
+    )
+    assert past == []

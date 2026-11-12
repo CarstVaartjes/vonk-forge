@@ -13,6 +13,7 @@ from pydantic_core import ValidationError
 
 from .contracts import (
     AgentProtocolError,
+    CanonicalUUID,
     canonical_message,
 )
 from .gpu_clock import GpuClockObservation
@@ -60,6 +61,137 @@ class TelemetryWireModel(WireModel):
     pass
 
 
+MAX_ENGINE_READINGS = 8
+_COUNTER_MAX = 2**63 - 1
+
+
+def _counter() -> Any:
+    """A monotonic whole-number reading (per boot, or per engine process)."""
+
+    return Field(
+        default=None, ge=0, le=_COUNTER_MAX, exclude_if=lambda value: value is None
+    )
+
+
+def _seconds() -> Any:
+    """A non-negative duration or sum of durations, in seconds."""
+
+    return Field(
+        default=None,
+        ge=0,
+        le=1e12,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+    )
+
+
+class EngineFormat(StrEnum):
+    """Which engine's metric names the reading was taken from."""
+
+    VLLM = "vllm"
+    SGLANG = "sglang"
+    TENSORFOLD = "tensorfold"
+    LLAMA_CPP = "llama-cpp"
+
+
+class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
+    """One run's engine metrics, read by the monitor from the engine's own
+    ``/metrics`` on loopback (protocol 4.4).
+
+    The counters are cumulative since the engine process started (the
+    Controller's Prometheus computes rates from them; a reset is a restart).
+    The ``*_seconds_sum`` / ``*_seconds_count`` pairs are a histogram's sum and
+    count, so a mean over any window is the difference of the sums over the
+    difference of the counts. There are no percentiles: the gateway carries
+    those. ``kv_pool_bytes`` is reported only by an engine whose capture proves
+    the source name. An invalid reading is dropped alone.
+    """
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = tuple(
+        EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, paths)
+        for paths in (
+            (("prompt_tokens",),),
+            (("generation_tokens",),),
+            (("cached_prompt_tokens",),),
+            (("preemptions",),),
+            (
+                ("spec_decode_draft_tokens",),
+                ("spec_decode_accepted_tokens",),
+            ),
+            (("requests_running",),),
+            (("requests_waiting",),),
+            (("kv_cache_usage_ratio",),),
+            (("kv_pool_bytes",),),
+            (
+                ("ttft_seconds_sum",),
+                ("ttft_seconds_count",),
+            ),
+            (
+                ("time_per_output_token_seconds_sum",),
+                ("time_per_output_token_seconds_count",),
+            ),
+            (
+                ("prefill_seconds_sum",),
+                ("prefill_seconds_count",),
+            ),
+            (
+                ("decode_seconds_sum",),
+                ("decode_seconds_count",),
+            ),
+            (
+                ("e2e_seconds_sum",),
+                ("e2e_seconds_count",),
+            ),
+        )
+    )
+
+    run_id: CanonicalUUID
+    format: EngineFormat
+    prompt_tokens: int | None = _counter()
+    generation_tokens: int | None = _counter()
+    cached_prompt_tokens: int | None = _counter()
+    preemptions: int | None = _counter()
+    spec_decode_draft_tokens: int | None = _counter()
+    spec_decode_accepted_tokens: int | None = _counter()
+    requests_running: int | None = _counter()
+    requests_waiting: int | None = _counter()
+    kv_cache_usage_ratio: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+    )
+    kv_pool_bytes: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_TELEMETRY_CAPACITY_BYTES,
+        exclude_if=lambda value: value is None,
+    )
+    ttft_seconds_sum: float | None = _seconds()
+    ttft_seconds_count: int | None = _counter()
+    time_per_output_token_seconds_sum: float | None = _seconds()
+    time_per_output_token_seconds_count: int | None = _counter()
+    prefill_seconds_sum: float | None = _seconds()
+    prefill_seconds_count: int | None = _counter()
+    decode_seconds_sum: float | None = _seconds()
+    decode_seconds_count: int | None = _counter()
+    e2e_seconds_sum: float | None = _seconds()
+    e2e_seconds_count: int | None = _counter()
+
+    @model_validator(mode="after")
+    def spec_decode_accepts_no_more_than_it_drafted(self) -> EngineReading:
+        drafted = self.spec_decode_draft_tokens
+        accepted = self.spec_decode_accepted_tokens
+        if (drafted is None) is not (accepted is None) or (
+            drafted is not None and accepted is not None and accepted > drafted
+        ):
+            raise ValueError("speculative decoding counters are inconsistent")
+        return self
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()
+
+
 class HostResourceSample(TelemetryWireModel):
     """RAM and filesystem readings, owned by the inventory store."""
 
@@ -81,15 +213,26 @@ class HostResourceSample(TelemetryWireModel):
         return self
 
 
-class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
-    """One host sample. The capacity scalars are the core; the optional readings
-    (4.1: temperature, CPU clocks; 4.3: GPU power, uptime, GPU process memory)
-    are evidence dropped when invalid.
+class _TelemetryReadings(OptionalEvidenceModel, HostResourceSample):
+    """The host readings of one sample, which the Controller stores per node. The
+    capacity scalars are the core; the optional readings (4.1: temperature, CPU
+    clocks; 4.3: GPU power, uptime, GPU process memory; 4.4: CPU time, load,
+    network, fabric, disk, OOM kills, board, NVMe and NIC temperatures, fan) are
+    evidence dropped when invalid.
 
     ``gpu_power_watts`` is the GPU's draw, not the host's. ``uptime_seconds`` is
     whole seconds since boot. ``gpu_process_memory_bytes`` is the memory the
     driver says GPU compute processes hold; it is reported only for a
     shared-pool accelerator, where it is part of ``memory_total - memory_available``.
+
+    4.4 counters are cumulative since boot (a lower value than before is a
+    reboot). ``cpu_busy_seconds`` and ``cpu_total_seconds`` are the ``/proc/stat``
+    jiffies over USER_HZ. The LAN counters are the default-route interface's.
+    The fabric counters are the RDMA port counters of ACTIVE ports (RoCE traffic
+    bypasses the netdev counters). The disk counters are for the disk that holds
+    the model store. ``board_temperature_max_c`` is the hottest unlabelled
+    ``acpitz`` zone, never "CPU". ``nic_temperature_c`` is the hottest ConnectX
+    ASIC and ``fan_rpm_max`` the fastest board fan.
     """
 
     EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
@@ -115,6 +258,34 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
         EvidenceGroup(
             AgentEvidenceCode.TELEMETRY_READING_DROPPED,
             (("gpu_process_memory_bytes",),),
+        ),
+        *(
+            EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, paths)
+            for paths in (
+                (
+                    ("cpu_busy_seconds",),
+                    ("cpu_total_seconds",),
+                ),
+                (("load_average_1m",),),
+                (
+                    ("network_lan_rx_bytes",),
+                    ("network_lan_tx_bytes",),
+                ),
+                (
+                    ("fabric_rx_bytes",),
+                    ("fabric_tx_bytes",),
+                ),
+                (("fabric_ports_active",),),
+                (
+                    ("disk_read_bytes",),
+                    ("disk_written_bytes",),
+                ),
+                (("oom_kills",),),
+                (("board_temperature_max_c",),),
+                (("nvme_temperature_c",),),
+                (("nic_temperature_c",),),
+                (("fan_rpm_max",),),
+            )
         ),
     )
 
@@ -159,6 +330,37 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
         le=MAX_TELEMETRY_CAPACITY_BYTES,
         exclude_if=lambda value: value is None,
     )
+    cpu_busy_seconds: float | None = _seconds()
+    cpu_total_seconds: float | None = _seconds()
+    load_average_1m: float | None = Field(
+        default=None,
+        ge=0,
+        le=10_000,
+        allow_inf_nan=False,
+        exclude_if=lambda value: value is None,
+    )
+    network_lan_rx_bytes: int | None = _counter()
+    network_lan_tx_bytes: int | None = _counter()
+    fabric_rx_bytes: int | None = _counter()
+    fabric_tx_bytes: int | None = _counter()
+    fabric_ports_active: int | None = Field(
+        default=None, ge=0, le=16, exclude_if=lambda value: value is None
+    )
+    disk_read_bytes: int | None = _counter()
+    disk_written_bytes: int | None = _counter()
+    oom_kills: int | None = _counter()
+    board_temperature_max_c: int | None = Field(
+        default=None, ge=0, le=150, exclude_if=lambda value: value is None
+    )
+    nvme_temperature_c: int | None = Field(
+        default=None, ge=0, le=150, exclude_if=lambda value: value is None
+    )
+    nic_temperature_c: int | None = Field(
+        default=None, ge=0, le=150, exclude_if=lambda value: value is None
+    )
+    fan_rpm_max: int | None = Field(
+        default=None, ge=0, le=100_000, exclude_if=lambda value: value is None
+    )
     _parse_observed_at = field_validator("observed_at", mode="before")(
         _rfc3339_datetime
     )
@@ -171,7 +373,7 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
         return value
 
     @model_validator(mode="after")
-    def internally_consistent(self) -> TelemetrySample:
+    def internally_consistent(self) -> _TelemetryReadings:
         for total, available in (
             (self.gpu_memory_total_bytes, self.gpu_memory_free_bytes),
         ):
@@ -186,6 +388,50 @@ class TelemetrySample(OptionalEvidenceModel, HostResourceSample):
         ):
             raise ValueError("telemetry CPU frequencies are inconsistent")
         return self
+
+    drop_invalid_optional_evidence = fail_open_on_optional_evidence()
+
+
+#: The base is private so the wire export (public classes only) does not make
+#: Rust generate a structural conversion for it; ``TelemetrySample`` carries
+#: the same fields. The Controller derives its views from this name.
+TelemetryReadings = _TelemetryReadings
+
+
+class TelemetrySample(TelemetryReadings):
+    """One sample: the host readings plus the engine readings (4.4).
+
+    ``engines`` carries at most one reading per running endpoint. An entry that
+    is invalid is dropped alone, and a repeated ``run_id`` keeps its first entry.
+    The Controller stores engine readings in their own table and never puts them
+    on the fleet point.
+    """
+
+    EVIDENCE_GROUPS: ClassVar[tuple[EvidenceGroup, ...]] = (
+        *TelemetryReadings.EVIDENCE_GROUPS,
+        EvidenceGroup(AgentEvidenceCode.TELEMETRY_READING_DROPPED, (("engines",),)),
+    )
+
+    engines: list[EngineReading] | None = Field(
+        default=None,
+        max_length=MAX_ENGINE_READINGS,
+        exclude_if=lambda value: value is None,
+    )
+
+    @field_validator("engines", mode="before")
+    @classmethod
+    def keep_valid_engines(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        kept: list[EngineReading] = []
+        for entry in value:
+            try:
+                reading = EngineReading.model_validate_json(canonical_message(entry))
+            except (ValidationError, TypeError, ValueError):
+                continue
+            if all(reading.run_id != earlier.run_id for earlier in kept):
+                kept.append(reading)
+        return kept
 
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
@@ -227,8 +473,12 @@ class TelemetryRequest(TelemetryWireModel):
 
 
 __all__ = [
+    "MAX_ENGINE_READINGS",
     "MAX_TELEMETRY_CAPACITY_BYTES",
     "MAX_TELEMETRY_REPORT_BYTES",
+    "EngineFormat",
+    "EngineReading",
+    "TelemetryReadings",
     "TelemetryRequest",
     "TelemetrySample",
 ]
