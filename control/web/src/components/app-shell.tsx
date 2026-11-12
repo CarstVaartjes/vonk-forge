@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { AdminMenu } from "./admin-menu";
 import type { CliTokenDownload } from "../api/types";
-import { ActivityIcon, BrandMark, FleetIcon, LibraryIcon } from "./icons";
+import { BrandMark } from "./brand-mark";
+import { ActivityIcon, FleetIcon, LibraryIcon } from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
