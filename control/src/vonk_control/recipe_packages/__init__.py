@@ -14,7 +14,7 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -23,12 +23,16 @@ from pydantic import ValidationError
 from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
+    PACKAGE_MEDIA_TYPE,
+    PACKAGE_SCHEMA_VERSION,
+    CatalogIndex,
     ModelDefinition,
     ModelDisplay,
     RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     document_sha256,
+    read_catalog_index,
     read_model,
     read_model_display,
     read_recipe,
@@ -68,6 +72,8 @@ from .contracts import (
     _RELEASE_TAG,
     RecipePackageRequestInvalid,
     RecipePackageUnsettled,
+    _newer_major_note,
+    _newest_major,
     _ReleaseResponse,
     _select_release,
     _snapshot_content,
@@ -75,8 +81,6 @@ from .contracts import (
 )
 from .contracts import RecipePackageError as RecipePackageError
 
-PACKAGE_SCHEMA_VERSION = 2
-PACKAGE_MEDIA_TYPE = "application/vnd.vonk-forge.recipe-package.v2+tar+gzip"
 PACKAGE_REPOSITORY = "CarstVaartjes/vonk-forge-recipes"
 PACKAGE_API_ORIGIN = "https://api.github.com"
 # Release assets download from github.com (not the rate-limited REST API),
@@ -101,9 +105,7 @@ _COPY_CHUNK = 1024 * 1024
 _ORPHAN_AGE_SECONDS = 24 * 60 * 60
 _LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
-_CONTRACT_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
@@ -263,6 +265,8 @@ class RecipePackageClient:
         # The GitHub digest of the library bundle last ingested.
         self._library_digest: str | None = None
         self._listing_unchanged = False
+        # The highest contract major the last release listing showed.
+        self._newest_major: int | None = None
         self._cache_root = cache_root.resolve()
         self._cache_root.mkdir(parents=True, exist_ok=True)
         self._remove_orphans()
@@ -305,6 +309,21 @@ class RecipePackageClient:
                     )
 
     def list(self) -> RecipeLibrarySnapshot:
+        """The snapshot, with a visible note while a newer contract major exists.
+
+        The note follows the listing on every tick, so it is never stored in the
+        cached snapshot (an unchanged release returns that snapshot as is).
+        """
+        snapshot = self._list_snapshot()
+        published = self._newest_major
+        if published is None or published <= CONTRACT_MAJOR:
+            return snapshot
+        return replace(
+            snapshot,
+            display_notes=(_newer_major_note(published), *snapshot.display_notes),
+        )
+
+    def _list_snapshot(self) -> RecipeLibrarySnapshot:
         try:
             resolved = self._resolve_release()
             if (
@@ -583,6 +602,7 @@ class RecipePackageClient:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID, "recipe release response is invalid"
             ) from error
+        self._newest_major = _newest_major(releases)
         release = _select_release(releases, self._release_selector)
         if release is None:
             raise RecipePackageUnsettled(
@@ -617,30 +637,40 @@ class RecipePackageClient:
                 RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index is invalid JSON",
             ) from error
-        if (
-            not isinstance(index, Mapping)
-            or index.get("schema_version") != PACKAGE_SCHEMA_VERSION
-            or index.get("kind") != "recipe-library-index"
-        ):
+        if not isinstance(index, Mapping):
             raise RecipePackageError(
                 RecipePackageCode.SCHEMA_INCOMPATIBLE,
                 "recipe package index schema is unsupported",
             )
-        repository, commit, raw_recipes = (
-            index.get("repository"),
-            index.get("source_commit"),
-            index.get("recipes"),
-        )
-        raw_entities = index.get("catalog_entities")
-        contract = index.get("package_contract")
-        version, updated_at = _library_release(index)
+        # The envelope is read through the contract with its entries emptied:
+        # ``read_catalog_index`` validates the whole index, so one entry an
+        # older reader cannot parse would reject the signed library. The entries
+        # are read one by one below, where an unreadable one is skipped and
+        # reported. A wrong ``kind``, ``schema_version`` or ``contract_version``
+        # is an incompatible schema; any other envelope fault is invalid.
+        try:
+            envelope = read_catalog_index(
+                {**index, "catalog_entities": [], "recipes": []}
+            )
+        except ValidationError as error:
+            locations = {item["loc"] for item in error.errors()}
+            incompatible = locations & {
+                ("schema_version",),
+                ("kind",),
+                ("contract_version",),
+            }
+            raise RecipePackageError(
+                RecipePackageCode.SCHEMA_INCOMPATIBLE
+                if incompatible
+                else RecipePackageCode.RESPONSE_INVALID,
+                "recipe package index schema is unsupported"
+                if incompatible
+                else "recipe package index identity is invalid",
+            ) from error
+        version, updated_at = _library_release(envelope)
+        raw_recipes, raw_entities = index.get("recipes"), index.get("catalog_entities")
         if (
-            repository != PACKAGE_REPOSITORY
-            or not isinstance(commit, str)
-            or not _SHA1.fullmatch(commit)
-            or not isinstance(contract, Mapping)
-            or contract.get("schema_version") != PACKAGE_SCHEMA_VERSION
-            or contract.get("media_type") != PACKAGE_MEDIA_TYPE
+            envelope.repository != PACKAGE_REPOSITORY
             or not isinstance(raw_recipes, list)
             or not isinstance(raw_entities, list)
         ):
@@ -648,6 +678,7 @@ class RecipePackageClient:
                 RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index identity is invalid",
             )
+        repository, commit = envelope.repository, envelope.source_commit
         catalog_entities: list[CatalogModelEntry] = []
         identities: set[tuple[str, str]] = set()
         # Each model and recipe document is validated on its own: one document
@@ -1323,29 +1354,22 @@ class RecipePackageClient:
         return target
 
 
-def _library_release(index: Mapping[str, object]) -> tuple[str, datetime]:
-    """Read the library version and last recipe update from the index."""
+def _library_release(envelope: CatalogIndex) -> tuple[str, datetime]:
+    """The library version and last recipe update, if this Controller reads them."""
 
-    version, updated = index.get("contract_version"), index.get("updated_at")
-    match = _CONTRACT_VERSION.fullmatch(version) if isinstance(version, str) else None
-    if match is None or int(match[1]) != CONTRACT_MAJOR:
+    major = int(envelope.contract_version.split(".")[0])
+    if major != CONTRACT_MAJOR:
         raise RecipePackageError(
             RecipePackageCode.SCHEMA_INCOMPATIBLE,
             f"recipe library index is not a contract v{CONTRACT_MAJOR} release",
         )
     try:
-        parsed = datetime.fromisoformat(str(updated))
-    except ValueError as error:
+        return envelope.contract_version, datetime.fromisoformat(envelope.updated_at)
+    except ValueError as error:  # the contract's pattern admits month 13
         raise RecipePackageError(
             RecipePackageCode.RESPONSE_INVALID,
             "recipe library index update time is invalid",
         ) from error
-    if parsed.tzinfo is None:
-        raise RecipePackageError(
-            RecipePackageCode.RESPONSE_INVALID,
-            "recipe library index update time is invalid",
-        )
-    return str(version), parsed.astimezone(UTC)
 
 
 def _entry_uri(entry: Mapping[str, object]) -> str | None:
@@ -1637,7 +1661,6 @@ def load_recipe_package(
 
 
 __all__ = [
-    "PACKAGE_MEDIA_TYPE",
     "PACKAGE_REPOSITORY",
     "RecipePackageClient",
     "RecipePackageError",

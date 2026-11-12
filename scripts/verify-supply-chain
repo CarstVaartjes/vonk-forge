@@ -26,8 +26,8 @@ from protocol_wheel import protocol_wheel_name
 # digest reference fails this check.
 VERSIONED_IMAGE = re.compile(r"^[^\s@]+:[^\s@]+$")
 PUBLIC_CONTRACT_LOCK = "control/packaging/public-contracts.lock"
-PUBLIC_CONTRACT_WHEEL = (
-    "inventory/wheels/vonk_forge_public_contracts-4.7.0-py3-none-any.whl"
+PUBLIC_CONTRACT_PACKAGE = re.compile(
+    r"vonk-forge-public-contracts==([0-9]+\.[0-9]+\.[0-9]+)"
 )
 UV_LOCK_PACKAGE = re.compile(r"(?m)^\[\[package\]\]\n")
 UV_LOCK_SCALAR = re.compile(r'(?m)^(name|version) = "([^"\\\r\n]+)"$')
@@ -104,14 +104,22 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
     """Verify the pinned third-party contract wheel and its source revision."""
 
     lock = tomllib.loads((root / PUBLIC_CONTRACT_LOCK).read_text())
+    # The lock owns the version; the wheel path and the Dockerfile follow it.
+    named = PUBLIC_CONTRACT_PACKAGE.fullmatch(str(lock.get("package")))
+    if named is None:
+        raise ValueError("public contract lock does not select the canonical package")
+    wheel_path = (
+        f"inventory/wheels/vonk_forge_public_contracts-{named[1]}-py3-none-any.whl"
+    )
     expected = {
         "source": "https://github.com/CarstVaartjes/vonk-forge-recipes.git",
         "subdirectory": "contracts",
-        "package": "vonk-forge-public-contracts==4.7.0",
-        "wheel": PUBLIC_CONTRACT_WHEEL,
+        "wheel": wheel_path,
     }
     if any(lock.get(key) != value for key, value in expected.items()):
         raise ValueError("public contract lock does not select the canonical package")
+    if Path(wheel_path).name not in (root / "control/Dockerfile").read_text():
+        raise ValueError("control image does not install the locked public contract")
     revision = lock.get("revision")
     wheel_sha256 = lock.get("sha256")
     if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
@@ -121,7 +129,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
         or re.fullmatch(r"[0-9a-f]{64}", wheel_sha256) is None
     ):
         raise ValueError("public contract wheel digest is invalid")
-    if digest((root / PUBLIC_CONTRACT_WHEEL).read_bytes()) != wheel_sha256:
+    if digest((root / wheel_path).read_bytes()) != wheel_sha256:
         raise ValueError("public contract wheel does not match its reviewed lock")
     packages = [
         package
@@ -134,7 +142,7 @@ def verify_public_contract_lock(root: Path, control_lock: bytes) -> None:
     )
     if (
         len(packages) != 1
-        or packages[0]["version"] != "4.7.0"
+        or packages[0]["version"] != named[1]
         or source not in packages[0]["record"].splitlines()
     ):
         raise ValueError("control lock does not resolve the reviewed public contract")

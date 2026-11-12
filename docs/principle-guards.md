@@ -12,6 +12,12 @@ coordination detectors also inspect added lines. Bounded waits remain valid.
 No count ledger, baseline regeneration, category assignment or before/after
 report is required. Untouched old findings cannot block a change.
 
+The published index's kind (`recipe-library-index`) and package media type
+(`application/vnd.vonk-forge.recipe-package.*`) are owned by `vonk_forge_contracts`:
+spelling either as a literal on an added Python line fails
+(`control/tests/contract_constant_copies.py`); read the index with
+`read_catalog_index` and import the constants.
+
 The contact-clock detector rejects new negative-age liveness refusals for
 Controller-stamped contacts and worker heartbeats, including local aliases and
 SQL freshness filters. Clock rollback and capture latency imply age zero;
