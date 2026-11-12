@@ -245,34 +245,47 @@ class StopAcceptanceMixin:
         # and waits for a busy owner there instead of refusing this request.
         with service._sessions.begin() as session:
             set_admission_timeout(session)
-            # The locked plan read takes the run row lock that fences every
-            # acceptance and stage change of this run's Stop. The request is
-            # looked up only behind it, so a concurrent duplicate reads the
-            # committed Stop and replays it instead of being refused as stale
-            # against that Stop's own withdrawal.
+
+            def accepted_stop() -> Job | None:
+                return service._idempotent_job_in_session(
+                    session,
+                    request_id,
+                    WireAgentOperation.RECIPE_STOP.value,
+                    plan_digest,
+                    owner_kind="run",
+                    owner_id=run_id,
+                )
+
+            existing = accepted_stop()
+            if existing is not None:
+                # The run fence binds route state to its Stop stage; it does
+                # not arbitrate request creation. Re-read after that fence.
+                session.get(RecipeRun, run_id, with_for_update=True)
+                replayed = session.get(Job, existing.id, populate_existing=True)
+                if replayed is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
+                service._check_service_stop(session, replayed)
+                return replayed
             admitted = service._stop_plan_in_session(
                 session,
                 run_id,
                 lock=True,
                 profile_target_node_ids=profile_target_node_ids,
             )
-            existing = service._idempotent_job_in_session(
-                session,
-                request_id,
-                WireAgentOperation.RECIPE_STOP.value,
-                plan_digest,
-                owner_kind="run",
-                owner_id=run_id,
-            )
-            if existing is not None:
-                service._check_service_stop(session, existing)
-                return existing
             # This check precedes any ordinal, accepted Job or route effect.
             if not admitted.allowed or admitted.plan_digest != plan_digest:
-                raise RecipeRequestInvalid(
-                    "stop plan is stale or blocked",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
+                # A concurrent caller with this request key may have committed
+                # its Stop after the lookup above and moved the plan on. The
+                # locked plan read now holds the run fence, so a re-read sees
+                # that Stop and this duplicate replays it instead of failing.
+                existing = accepted_stop()
+                if existing is None:
+                    raise RecipeRequestInvalid(
+                        "stop plan is stale or blocked",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
+                service._check_service_stop(session, existing)
+                return existing
             run = session.get(RecipeRun, run_id)
             assert run is not None
             if (
