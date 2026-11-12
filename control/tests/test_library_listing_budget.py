@@ -514,7 +514,7 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == built.id)
-            .values(projected=projection)
+            .values(projected=projection, source_bundle_sha256="b" * 64)
         )
         for build in session.scalars(
             select(RecipeBuild).where(RecipeBuild.recipe_revision_id == built.id)
@@ -534,6 +534,7 @@ def test_a_head_reusing_its_predecessors_image_is_cached_while_it_is_stored(
             document=document,
             content_digest=document_sha256(document),
             projected=projection,
+            source_bundle_sha256="b" * 64,
             created_by="test",
             created_at=NOW,
         )

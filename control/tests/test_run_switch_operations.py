@@ -7651,6 +7651,7 @@ def test_dual_profile_disk_review_does_not_decode_unrelated_catalog_documents(
                         document=document,
                         content_digest=document_sha256(document),
                         projected=template.projected,
+                        source_bundle_sha256=template.source_bundle_sha256,
                         created_by="admin",
                         created_at=NOW,
                     )

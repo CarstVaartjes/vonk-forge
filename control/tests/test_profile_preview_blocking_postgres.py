@@ -12,6 +12,7 @@ from vonk_control import source_bundles
 from vonk_control.catalog_revision_contract import (
     RecipeRevisionProjection,
     read_catalog_projection,
+    write_catalog_projection,
 )
 from vonk_control.fleet_profile_contract import FleetProfilePreview
 from vonk_control.models import (
@@ -57,7 +58,10 @@ def test_slow_ingress_finishes_once_and_dual_previews_become_loadable(
         session.execute(
             update(CatalogDocumentRevision)
             .where(CatalogDocumentRevision.id == revision.id)
-            .values(source_bundle_sha256=bundle.sha256)
+            .values(
+                projected=write_catalog_projection(projection),
+                source_bundle_sha256=bundle.sha256,
+            )
         )
     lifecycle = planner._lifecycle
     assert lifecycle is not None

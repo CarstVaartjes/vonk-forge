@@ -1193,6 +1193,7 @@ def test_waiting_load_follows_a_newer_recipe_revision_instead_of_failing(
             document=document,
             content_digest=document_sha256(document),
             projected=old.projected,
+            source_bundle_sha256=old.source_bundle_sha256,
             execution_key=old.execution_key,
             artifact_key=old.artifact_key,
             created_by="admin",
