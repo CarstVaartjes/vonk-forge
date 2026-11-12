@@ -120,7 +120,7 @@ class Actor:
             raise AuthError("invalid authenticated actor")
 
 
-_CAPABILITY_ROLES: dict[str, frozenset[str]] = {
+_ROLES_BY_CAPABILITY: dict[str, frozenset[str]] = {
     "fleet:enroll": frozenset({"administrator"}),
     "fleet:review": frozenset({"administrator"}),
     "fleet:revoke": frozenset({"administrator"}),
@@ -130,7 +130,7 @@ _CAPABILITY_ROLES: dict[str, frozenset[str]] = {
 def has_capability(actor: Actor | str, capability: str) -> bool:
     """Return whether an authenticated actor may perform a capability."""
     role = actor.role if isinstance(actor, Actor) else actor
-    return role in _CAPABILITY_ROLES.get(capability, frozenset())
+    return role in _ROLES_BY_CAPABILITY.get(capability, frozenset())
 
 
 def require_capability(actor: Actor | str, capability: str) -> None:

@@ -103,7 +103,7 @@ _LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SHA1 = re.compile(r"^[0-9a-f]{40}$")
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
-_CONTRACT_VERSION = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+_SEMVER_TRIPLE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
@@ -1327,7 +1327,7 @@ def _library_release(index: Mapping[str, object]) -> tuple[str, datetime]:
     """Read the library version and last recipe update from the index."""
 
     version, updated = index.get("contract_version"), index.get("updated_at")
-    match = _CONTRACT_VERSION.fullmatch(version) if isinstance(version, str) else None
+    match = _SEMVER_TRIPLE.fullmatch(version) if isinstance(version, str) else None
     if match is None or int(match[1]) != CONTRACT_MAJOR:
         raise RecipePackageError(
             RecipePackageCode.SCHEMA_INCOMPATIBLE,
