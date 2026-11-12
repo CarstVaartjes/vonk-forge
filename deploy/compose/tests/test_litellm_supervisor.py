@@ -569,6 +569,73 @@ def test_live_supervisor_reloads_only_when_a_new_generation_changes_routes(
     assert children[0].terminated is True
 
 
+def test_withdrawal_is_acknowledged_drained_before_the_new_child_is_healthy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    module = _module()
+    _bundle(module, tmp_path)
+    first = module._active_request()
+    withdrawn_config = tmp_path / "withdrawn.json"
+    withdrawn_config.write_text('{"model_list":[]}\n')
+    withdrawn = module.ActiveRequest(
+        withdrawn_config, {**first.marker, "generation": 2}, "c" * 64
+    )
+    module.ACK_ROOT = tmp_path / "supervisor"
+    module.ACK = module.ACK_ROOT / "ack.json"
+    requests = iter((first, withdrawn))
+    children = [_live_child(456), _live_child(457)]
+    observed: list[tuple[str, dict[str, object]]] = []
+
+    def ack() -> dict[str, object]:
+        document = json.loads(module.ACK.read_bytes())
+        document.pop("acknowledged_at")
+        return document
+
+    def spawn(*_args, **_kwargs):
+        spawned = sum(1 for event, _ in observed if event == "spawn")
+        # The replacement starts only after the old child's exit is confirmed.
+        assert spawned == 0 or children[0].terminated is True
+        observed.append(("spawn", ack() if spawned else {}))
+        return children[spawned]
+
+    def await_healthy(child, **_kwargs):
+        if child is children[1]:
+            observed.append(("health", ack()))
+        return True
+
+    def poll_sleep(_seconds: float) -> None:
+        if len(observed) == 3:
+            observed.append(("ready", ack()))
+            children[1].returncode = 31
+
+    monkeypatch.setattr(module, "_active_request", lambda: next(requests))
+    monkeypatch.setattr(module, "_await_healthy", await_healthy)
+    monkeypatch.setattr(module.subprocess, "Popen", spawn)
+    monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(module.time, "sleep", poll_sleep)
+
+    assert module._supervise() == 31
+    drained = {
+        "activation_sha256": "c" * 64,
+        "generation": 2,
+        "litellm_sha256": first.marker["litellm_sha256"],
+        "phase": "drained",
+        "schema_version": 1,
+        "state": "published",
+    }
+    ready = {key: value for key, value in drained.items() if key != "phase"} | {
+        "child_pid": 457
+    }
+    # The old child has exited before the drained ack, which a withdrawal
+    # accepts while the new child is still starting; only then is it ready.
+    assert observed[1:] == [
+        ("spawn", drained),
+        ("health", drained),
+        ("ready", ready),
+    ]
+
+
 def test_compose_mounts_one_read_only_route_volume_and_starts_bounded_supervisor() -> (
     None
 ):
@@ -825,10 +892,16 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
         acknowledgements.append((request.marker["generation"], elapsed[0]))
         child.returncode = 23
 
+    def write_drained_ack(request, **_kwargs):
+        assert children[0].returncode == 0
+        drained.append((request.marker["generation"], len(children)))
+
+    drained = []
     monkeypatch.setattr(module, "_active_request", lambda **_kwargs: current[0])
     monkeypatch.setattr(module, "_selected", lambda **_kwargs: config)
     monkeypatch.setattr(module, "_healthy", healthy)
     monkeypatch.setattr(module, "_write_ack", write_ack)
+    monkeypatch.setattr(module, "_write_drained_ack", write_drained_ack)
     monkeypatch.setattr(module.subprocess, "Popen", spawn)
     monkeypatch.setattr(module.signal, "signal", lambda *_args: None)
     monkeypatch.setattr(module.time, "monotonic", lambda: elapsed[0])
@@ -839,4 +912,7 @@ def test_new_generation_interrupts_old_startup_and_owns_a_full_budget(
     )
     assert module._supervise() == 23
     assert spawns == [0, 94]
+    # The superseded child's exit is confirmed before the new generation is
+    # acknowledged drained, and that happens before its own child starts.
+    assert drained == [(generation, 1)]
     assert acknowledgements == [(generation, 184)]

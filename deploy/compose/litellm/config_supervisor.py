@@ -253,6 +253,34 @@ def _write_ack(
     _atomic_write(ACK, acknowledgement.canonical_bytes())
 
 
+def _write_drained_ack(request: ActiveRequest, *, now: datetime) -> None:
+    """Acknowledge that no child serves anything older than ``request``.
+
+    Called only after the previous child's exit is confirmed and before the
+    next child, which loads exactly this request, starts. That is all a
+    withdrawal needs: nothing serves the routes it removed. A publication
+    still waits for the ready acknowledgement of a healthy child.
+    """
+    marker = request.marker
+    try:
+        acknowledgement = SupervisorAcknowledgement(
+            acknowledged_at=now.astimezone(UTC).isoformat(),
+            activation_sha256=request.activation_sha256,
+            generation=marker["generation"],
+            litellm_sha256=marker["litellm_sha256"],
+            phase="drained",
+            schema_version=1,
+            state=marker["state"],
+        )
+    except ValidationError:
+        # This script ships in the Controller API image; the contract module is
+        # baked into the LiteLLM image. An older LiteLLM image has no drained
+        # phase: acknowledge nothing early, and the ready acknowledgement
+        # still follows.
+        return
+    _atomic_write(ACK, acknowledgement.canonical_bytes())
+
+
 def _clear_ack() -> None:
     if ACK.is_symlink():
         raise RuntimeError("LiteLLM acknowledgement path is unsafe")
@@ -377,6 +405,7 @@ def _supervise(*, startup_deadline: float | None = None) -> int:
             newer_activation = _newer_activation(request, next_request)
             _stop(child, deadline=None if newer_activation else startup_deadline)
             if newer_activation:
+                _write_drained_ack(next_request, now=datetime.now(UTC))
                 # This generation owns a new transition budget, after confirmed
                 # shutdown of the superseded child. Ordinary retries do not.
                 startup_attempts = 0
@@ -411,6 +440,8 @@ def _supervise(*, startup_deadline: float | None = None) -> int:
                 reload_requested = True
                 _clear_ack()
                 _stop(child)
+                if candidate_request is not None:
+                    _write_drained_ack(candidate_request, now=datetime.now(UTC))
                 selected = candidate
                 request = candidate_request
                 startup_deadline = time.monotonic() + STARTUP_SECONDS

@@ -80,7 +80,7 @@ def _publish(
             litellm=render_empty_config(),
         )
         marker = ActivationMarker.model_validate_json(marker.model_dump_json())
-        uncertainty = publisher._require_supervisor_ack(marker)
+        uncertainty = publisher._require_supervisor_ack(marker, "ready")
         assert uncertainty is None
         return marker
 
@@ -175,7 +175,10 @@ def test_republication_and_empty_publication_keep_monotonic_generations_and_ack(
     tmp_path,
 ):
     acknowledged = []
-    publisher = _publisher(tmp_path, await_supervisor_ack=acknowledged.append)
+    publisher = _publisher(
+        tmp_path,
+        await_supervisor_ack=lambda marker, _required: acknowledged.append(marker),
+    )
     first = _publish(publisher)
     second = _publish(publisher, plan_digest="c" * 64, evidence_set_digest="c" * 64)
     empty = _publish(publisher, state="maintenance")
@@ -193,12 +196,12 @@ def test_validation_failure_preserves_previous_activation(tmp_path):
 
 
 def test_ack_failure_is_reported_and_exact_persisted_marker_can_be_inspected(tmp_path):
-    def unavailable(marker):
+    def unavailable(marker, _required):
         raise RuntimeError("supervisor unavailable")
 
     publisher = _publisher(tmp_path, await_supervisor_ack=unavailable)
     marker = _publish(_publisher(tmp_path))
-    publisher._require_supervisor_ack(marker)
+    publisher._require_supervisor_ack(marker, "ready")
     assert _inspected(_publisher(tmp_path)).generation == 1
     fresh = _publish(_publisher(tmp_path))
     assert fresh.generation == 2
@@ -264,7 +267,7 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
             json.dumps(acknowledgement, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()
     )
-    FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker)
+    FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, "ready")
 
     acknowledgement["activation_sha256"] = "f" * 64
     ack_path.write_bytes(
@@ -281,7 +284,7 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         monotonic=lambda: next(moments),
         sleep=lambda _seconds: None,
     )
-    mismatched(marker)
+    mismatched(marker, "ready")
     fresh = _publish(_publisher(tmp_path))
     acknowledgement.update(
         activation_sha256=fresh.digest,
@@ -289,8 +292,50 @@ def test_control_accepts_only_a_recent_ack_for_the_exact_marker(tmp_path: Path) 
         litellm_sha256=fresh.litellm_sha256,
     )
     ack_path.write_bytes(_encoded(acknowledgement))
-    assert FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(fresh) is None
+    assert (
+        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(fresh, "ready") is None
+    )
     assert fresh.generation > marker.generation
+
+
+def test_a_drained_ack_completes_a_withdrawal_but_never_a_publication(
+    tmp_path: Path,
+) -> None:
+    marker = _publish(_publisher(tmp_path))
+    ack_path = tmp_path / "supervisor/ack.json"
+    ack_path.parent.mkdir()
+    exact = {
+        "acknowledged_at": NOW.isoformat(),
+        "activation_sha256": marker.digest,
+        "generation": marker.generation,
+        "litellm_sha256": marker.litellm_sha256,
+        "schema_version": 1,
+        "state": marker.state,
+    }
+    ack_path.write_bytes(_encoded({**exact, "phase": "drained"}))
+    assert (
+        FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, "drained")
+        is None
+    )
+    moments = iter((0.0, 1.0))
+    publication = FileSupervisorAcknowledger(
+        ack_path,
+        clock=lambda: NOW,
+        timeout_seconds=0.5,
+        poll_seconds=0.1,
+        monotonic=lambda: next(moments),
+        sleep=lambda _seconds: None,
+    )
+    assert publication(marker, "ready") is not None
+
+    # A ready ack, in the bytes every supervisor has always written, still
+    # completes both.
+    ack_path.write_bytes(_encoded({**exact, "child_pid": 123}))
+    for required in ("drained", "ready"):
+        assert (
+            FileSupervisorAcknowledger(ack_path, clock=lambda: NOW)(marker, required)
+            is None
+        )
 
 
 @pytest.mark.parametrize("ack_after", [90, 150])
@@ -320,7 +365,7 @@ def test_delayed_supervisor_ack_uses_the_shared_activation_budget(
         monotonic=lambda: elapsed[0],
         sleep=sleep,
         poll_seconds=1,
-    )(marker)
+    )(marker, "ready")
     assert elapsed[0] == ack_after
 
 
@@ -337,15 +382,17 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
         elapsed[0] += seconds
         if elapsed[0] < 90:
             return
-        ack = SupervisorAcknowledgement(
-            schema_version=1,
-            acknowledged_at=NOW.isoformat(),
-            activation_sha256=marker.digest,
-            child_pid=123,
-            generation=marker.generation,
-            litellm_sha256=marker.litellm_sha256,
-            state=marker.state,
-        ).model_dump()
+        ack = json.loads(
+            SupervisorAcknowledgement(
+                schema_version=1,
+                acknowledged_at=NOW.isoformat(),
+                activation_sha256=marker.digest,
+                child_pid=123,
+                generation=marker.generation,
+                litellm_sha256=marker.litellm_sha256,
+                state=marker.state,
+            ).canonical_bytes()
+        )
         if repaired[0] or failure != "stale":
             ack["acknowledged_at"] = (NOW + timedelta(seconds=elapsed[0])).isoformat()
         if not repaired[0] and failure == "generation":
@@ -360,7 +407,7 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
         monotonic=lambda: elapsed[0],
         sleep=sleep,
         poll_seconds=1,
-    )(marker)
+    )(marker, "ready")
     assert ROUTE_ACK_TIMEOUT_SECONDS <= elapsed[0] <= ROUTE_ACK_TIMEOUT_SECONDS + 1
     marker = _publish(_publisher(tmp_path))
     repaired[0] = True
@@ -371,7 +418,7 @@ def test_longer_ack_budget_still_rejects_invalid_authority(tmp_path, failure):
             monotonic=lambda: elapsed[0],
             sleep=sleep,
             poll_seconds=1,
-        )(marker)
+        )(marker, "ready")
         is None
     )
 

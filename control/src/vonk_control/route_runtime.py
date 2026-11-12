@@ -30,6 +30,7 @@ from vonk_agent_protocol.route_activation import (
     ActivationManifest,
     ActivationMarker,
     SupervisorAcknowledgement,
+    SupervisorPhase,
 )
 
 from .litellm import LiteLlmConfig
@@ -102,7 +103,11 @@ def recipe_route_run_id(operation_id: object) -> str | None:
 
 
 class FileSupervisorAcknowledger:
-    """Wait for a recent live-process ack bound to one exact marker request."""
+    """Wait for a recent ack, at least as far as ``required``, of one exact marker.
+
+    A withdrawal requires ``drained`` (no child serves the removed routes); a
+    publication requires ``ready`` (a healthy child serves the new ones).
+    """
 
     def __init__(
         self,
@@ -130,17 +135,21 @@ class FileSupervisorAcknowledger:
         self._monotonic = monotonic
         self._sleep = sleep
 
-    def __call__(self, marker: ActivationMarker) -> UnknownError | None:
+    def __call__(
+        self, marker: ActivationMarker, required: SupervisorPhase
+    ) -> UnknownError | None:
         deadline = self._monotonic() + self._timeout_seconds
         while True:
             now = _aware(self._clock(), "supervisor acknowledgement clock")
-            if self._matches(marker, now=now):
+            if self._matches(marker, required, now=now):
                 return
             if self._monotonic() >= deadline:
                 return _unknown(WaitReason.RUNTIME_EFFECT_UNCONFIRMED)
             self._sleep(self._poll_seconds)
 
-    def _matches(self, marker: ActivationMarker, *, now: datetime) -> bool:
+    def _matches(
+        self, marker: ActivationMarker, required: SupervisorPhase, *, now: datetime
+    ) -> bool:
         path = self._path
         if path.is_symlink() or not path.is_file() or path.parent.is_symlink():
             return False
@@ -157,6 +166,7 @@ class FileSupervisorAcknowledger:
             return False
         if (
             content != acknowledgement.canonical_bytes()
+            or not acknowledgement.satisfies(required)
             or acknowledgement.state != marker.state
             or acknowledgement.generation != marker.generation
             or acknowledgement.activation_sha256 != marker.digest
@@ -185,7 +195,9 @@ class AtomicRouteBundlePublisher:
         *,
         validate_routes: Callable[[bytes], bool] | None = None,
         validate_litellm: Callable[[bytes], bool] | None = None,
-        await_supervisor_ack: Callable[[ActivationMarker], UnknownError | None]
+        await_supervisor_ack: Callable[
+            [ActivationMarker, SupervisorPhase], UnknownError | None
+        ]
         | None = None,
     ) -> None:
         if root.is_symlink():
@@ -203,11 +215,13 @@ class AtomicRouteBundlePublisher:
         self._validate_litellm = validate_litellm or self._valid_litellm
         self._await_supervisor_ack = await_supervisor_ack
 
-    def _require_supervisor_ack(self, marker: ActivationMarker) -> UnknownError | None:
+    def _require_supervisor_ack(
+        self, marker: ActivationMarker, required: SupervisorPhase
+    ) -> UnknownError | None:
         if self._await_supervisor_ack is None:
             return
         try:
-            return self._await_supervisor_ack(marker)
+            return self._await_supervisor_ack(marker, required)
         except (RouteRuntimeError, SecurityRefusalError):
             raise
         except Exception:  # noqa: BLE001 - unavailable acknowledgement has no authority

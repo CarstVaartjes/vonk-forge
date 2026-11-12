@@ -19,7 +19,10 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol import RouteState as RunRouteState
-from vonk_agent_protocol.route_activation import ROUTE_EVIDENCE_MAX_AGE_SECONDS
+from vonk_agent_protocol.route_activation import (
+    ROUTE_EVIDENCE_MAX_AGE_SECONDS,
+    SupervisorPhase,
+)
 
 from .. import bounded_retry
 from ..agent_operation_facts import job_start_deadline
@@ -775,10 +778,12 @@ class RecipeRouteService:
     ) -> bool | _Publication:
         return withdrawal_steps._maintain_empty_routes(self, session, served)
 
-    def _publish(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
+    def _publish(
+        self, candidate: _RecipeCandidate, *, required: SupervisorPhase = "ready"
+    ) -> LiteLlmGeneration:
         if self._prepare_key_routes is not None:
             self._prepare_key_routes(candidate.included)
-        return self._publisher.publish_recipe(candidate)
+        return self._publisher.publish_recipe(candidate, required=required)
 
     def _publish_empty(self, route_digest: str) -> LiteLlmGeneration:
         return self._publisher.publish_empty(route_digest)

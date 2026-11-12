@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 import pytest
 from sqlalchemy import func, select
+from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_control.litellm import ServedModelInfo
 from vonk_control.models import AgentOperation, Job, RecipeRun, ResourceReservation
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
@@ -54,11 +55,11 @@ class _FlakyPublisher(ConcurrentPublisher):
         super().__init__()
         self.down = False
 
-    def publish_recipe(self, candidate):
+    def publish_recipe(self, candidate, *, required: SupervisorPhase = "ready"):
         if self.down:
             # As the real activation reports an unreachable gateway.
             raise RecipeRouteNotReady("the route publisher is unreachable")
-        return super().publish_recipe(candidate)
+        return super().publish_recipe(candidate, required=required)
 
 
 def _load(world: World, profile_id: str) -> str:

@@ -136,7 +136,7 @@ def test_absent_ack_ends_at_deadline_without_changing_working_activation(tmp_pat
         monotonic=lambda: elapsed[0],
         sleep=advance,
     )
-    observed = acknowledge(marker)
+    observed = acknowledge(marker, "ready")
     assert isinstance(observed, UnknownError)
     assert elapsed[0] == 1
     assert publisher.inspect(expected=marker) == marker

@@ -13,6 +13,7 @@ from datetime import datetime
 
 from vonk_agent_protocol import GatewayRouteState, SecurityRefusalError
 from vonk_agent_protocol.outcome import UnknownError
+from vonk_agent_protocol.route_activation import SupervisorPhase
 from vonk_forge_contracts import ENDPOINT_ALIAS_PATTERN
 
 from ..bounded_retry import REQUEST_PAUSES, bounded_attempts
@@ -72,20 +73,27 @@ class AtomicRecipeRoutePublisher:
     def __init__(self, publisher: AtomicRouteBundlePublisher) -> None:
         self._publisher = publisher
 
-    def publish_recipe(self, candidate: _RecipeCandidate) -> LiteLlmGeneration:
+    def publish_recipe(
+        self, candidate: _RecipeCandidate, *, required: SupervisorPhase = "ready"
+    ) -> LiteLlmGeneration:
+        """Activate the candidate's routes; a withdrawal requires only ``drained``."""
         return self._activate(
             candidate.state.digest,
             render_config(candidate.state, candidate.policy),
             endpoints=candidate.endpoints,
             state=GatewayRouteState.PUBLISHED,
+            required=required,
         )
 
     def publish_empty(self, route_digest: str) -> LiteLlmGeneration:
+        # An empty bundle only withdraws: once the old child is gone nothing
+        # serves, and no healthy child is owed to anyone.
         return self._activate(
             route_digest,
             render_empty_config(),
             endpoints={},
             state=GatewayRouteState.MAINTENANCE,
+            required="drained",
         )
 
     def active_marker_digest(self) -> str | None:
@@ -242,6 +250,7 @@ class AtomicRecipeRoutePublisher:
         *,
         endpoints: dict[str, _RecipeEndpoint],
         state: GatewayRouteState,
+        required: SupervisorPhase,
     ) -> LiteLlmGeneration:
         """Reconcile the same exact activated bytes after a lost acknowledgement."""
         last: _ActivatedRecipeRouteError | None = None
@@ -256,6 +265,7 @@ class AtomicRecipeRoutePublisher:
                     litellm,
                     endpoints=endpoints,
                     state=state,
+                    required=required,
                     expected_marker_digest=(
                         last.generation.activation_marker.digest
                         if last is not None
@@ -290,6 +300,7 @@ class AtomicRecipeRoutePublisher:
         *,
         endpoints: dict[str, _RecipeEndpoint],
         state: GatewayRouteState,
+        required: SupervisorPhase,
         expected_marker_digest: str | None = None,
     ) -> LiteLlmGeneration | None:
         self._publisher._identity(self._AUTHORITY_ID, route_digest, route_digest)
@@ -365,7 +376,7 @@ class AtomicRecipeRoutePublisher:
             raise RecipeRouteNotReady(marker.reason)
         # Release the file lock before waiting for a live acknowledgement.
         try:
-            uncertainty = self._publisher._require_supervisor_ack(marker)
+            uncertainty = self._publisher._require_supervisor_ack(marker, required)
             if uncertainty is not None:
                 acknowledgement_error = RecipeRouteNotReady(uncertainty.reason)
         except SecurityRefusalError:
