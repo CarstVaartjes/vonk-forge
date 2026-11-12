@@ -124,9 +124,10 @@ def _waiting_on_transfer(tmp_path):
     return service, executor, operation.operation_id, child_id
 
 
+@pytest.mark.parametrize("ended", ["succeeded", "failed", "cancelled"])
 @pytest.mark.parametrize("model", list(CHILD_ROWS), ids=lambda model: model.__name__)
 def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
-    tmp_path, model
+    tmp_path, model, ended
 ) -> None:
     """Catches a parent left for the ``recipes`` rotation after its child ended."""
     service, executor, operation_id, child_id = _waiting_on_transfer(tmp_path)
@@ -139,16 +140,17 @@ def test_ending_child_makes_its_run_switch_due_and_one_redrive_consumes_it(
         assert job is not None and job.next_action_at is None  # nothing ended yet
 
     with sessions.begin() as session:
-        session.get(model, child_id).state = "succeeded"
+        session.get(model, child_id).state = ended
 
     assert _due(sessions, operation_id) == NOW
     # The worker's next look consumes the wake: no due clock is left behind
     # for the due-waits backstop to spin on.
-    _replace_child(executor, child_id, state="succeeded")
+    _replace_child(executor, child_id, state=ended)
     assert service.redrive(operation_id) is True
     due = _due(sessions, operation_id)
     assert due is None or due > NOW
-    assert "transfer" in _result(service.get(operation_id)).completed_phases
+    if ended == "succeeded":
+        assert "transfer" in _result(service.get(operation_id)).completed_phases
 
 
 def test_wake_runs_after_the_ending_connection_is_returned(tmp_path) -> None:
