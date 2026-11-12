@@ -64,6 +64,13 @@ def build_wheel(source: str, commit: str, work: Path) -> Path:
 
 
 def relock(root: Path) -> None:
+    # uv resolves vonk-agent-protocol from the local wheel directory.
+    subprocess.run(
+        [str(root / "scripts/build-control-wheel")],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        timeout=COMMAND_TIMEOUT,
+    )
     subprocess.run(
         ["uv", "lock", "--project", str(root / "control")],
         check=True,
