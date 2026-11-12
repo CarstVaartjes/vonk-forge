@@ -39,7 +39,7 @@ from ..library_contract import (
     LibraryLocalState,
     LibraryRecipeProjection,
 )
-from ..library_image_presence import ImageKey
+from ..library_image_presence import ImageKey, ImagePresence
 from ..machine_states import INSTALLATION_ACTIVE
 from ..model_cache.lineage import verifies_model
 from ..model_cache_contract import (
@@ -559,21 +559,56 @@ def _database_local_state(
             controller="cached",
             running_on=nodes,
         )
+    claims = _image_claims(
+        head_digests,
+        builds=[
+            (revision_digests.get(revision_id), layout, size)
+            for revision_id, state, layout, size in builds
+            if state == "succeeded"
+        ],
+        inherited=inherited_claims,
+    )
+    presence = (
+        self._image_presence.lookup(
+            {key for _, key in claims}, budget_seconds=self._image_budget
+        )
+        if self._image_presence is not None
+        else None
+    )
+    if presence is not None:
+        # A head that runs an image by its content (its own build, or one a
+        # sibling recipe built from the same pinned image) is as built as that
+        # image is present: the image is the asset fact.
+        for digest, key in _image_claims(
+            head_digests, builds=(), inherited=inherited_claims
+        ):
+            if presence[key].state == "present":
+                self._merge_local(
+                    asset_facts, digest, controller=LibraryCacheState.CACHED.value
+                )
     result = _fold_local_facts(
         cache_facts, asset_facts, recipe_digests=set(revision_digests.values())
     )
-    if self._image_presence is not None:
+    if presence is not None:
         self._apply_image_presence(
-            result,
-            head_digests=head_digests,
-            builds=[
-                (revision_digests.get(revision_id), layout, size)
-                for revision_id, state, layout, size in builds
-                if state == "succeeded"
-            ],
-            inherited=inherited_claims,
+            result, head_digests=head_digests, claims=claims, presence=presence
         )
     return result
+
+
+def _image_claims(
+    head_digests: set[str],
+    *,
+    builds: Sequence[tuple[str | None, object, object]],
+    inherited: Sequence[tuple[str, object, object]],
+) -> list[tuple[str, ImageKey]]:
+    """The (recipe digest, stored image) pairs the Library asks presence about."""
+
+    claims: list[tuple[str, ImageKey]] = []
+    for digest, layout, size in (*builds, *inherited):
+        if digest in head_digests and isinstance(layout, str) and type(size) is int:
+            claims.append((digest, (layout, size)))
+    return claims
 
 
 def _apply_image_presence(
@@ -581,8 +616,8 @@ def _apply_image_presence(
     result: dict[str, LibraryLocalState],
     *,
     head_digests: set[str],
-    builds: Sequence[tuple[str | None, object, object]],
-    inherited: Sequence[tuple[str, object, object]],
+    claims: Sequence[tuple[str, ImageKey]],
+    presence: Mapping[ImageKey, ImagePresence],
 ) -> None:
     """Demote a cached recipe whose stored image is gone; name what is not known.
 
@@ -593,17 +628,6 @@ def _apply_image_presence(
     An image whose answer is not yet in is reported as ``unknown`` rather
     than as stored or absent.
     """
-    assert self._image_presence is not None
-    claims: list[tuple[str, ImageKey]] = []
-    for digest, layout, size in builds:
-        if digest in head_digests and isinstance(layout, str) and type(size) is int:
-            claims.append((digest, (layout, size)))
-    for digest, layout, size in inherited:
-        if digest in head_digests and isinstance(layout, str) and type(size) is int:
-            claims.append((digest, (layout, size)))
-    presence = self._image_presence.lookup(
-        {key for _, key in claims}, budget_seconds=self._image_budget
-    )
     available: set[str] = set()
     unreadable: dict[str, str] = {}
     unknown: set[str] = set()
