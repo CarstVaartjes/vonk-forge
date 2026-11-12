@@ -17,6 +17,8 @@ FILES = (
     "tests/acceptance/recipe-library-revision.txt",
     "control/Dockerfile",
     "scripts/resolve-publication-producer",
+    ".github/workflows/profile-effect-consumer-proof.yml",
+    "control/tests/test_profile_effect_consumer_contract_postgres.py",
 )
 
 
@@ -54,6 +56,13 @@ def test_a_new_pin_replaces_the_wheel_and_every_spelling_of_it(tmp_path: Path) -
     revision = repository / "tests/acceptance/recipe-library-revision.txt"
     assert revision.read_text() == commit + "\n"
     assert f'rev = "{commit}"' in (repository / "control/pyproject.toml").read_text()
+    old_revision = tomllib.loads((ROOT / LOCK).read_text())["revision"]
+    for relative in (
+        ".github/workflows/profile-effect-consumer-proof.yml",
+        "control/tests/test_profile_effect_consumer_contract_postgres.py",
+    ):
+        text = (repository / relative).read_text()
+        assert commit in text and old_revision not in text
     for relative in ("control/Dockerfile", "scripts/resolve-publication-producer"):
         text = (repository / relative).read_text()
         assert new.name in text and Path(old).name not in text
