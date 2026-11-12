@@ -1097,7 +1097,9 @@ def test_platform_presents_current_response_contract(workers_available, capsys):
     contract = PlatformObservation.from_dict(payload)
     render_payload(contract.to_dict(), "platform")
     output = capsys.readouterr().out
-    assert contract.api.source_sha[:12] in output
+    source_sha = contract.api.source_sha
+    assert source_sha is not None
+    assert source_sha[:12] in output
     assert contract.api.control_contract_sha256 in output
     if workers_available:
         assert "d" * 40 in output and "e" * 64 in output
@@ -1208,10 +1210,11 @@ def test_library_shared_vector_shows_why_a_preparation_waits(capsys):
     import json
     from pathlib import Path
 
-    from cluster_profiles.cli_render import _library_item
     from cluster_profiles.generated_control.models.recipe_library_response import (
         RecipeLibraryResponse,
     )
+
+    from cluster_profiles.cli_render import _library_item
 
     raw = json.loads(
         (Path(__file__).resolve().parents[1] / "fixtures/library-list.json").read_text()
