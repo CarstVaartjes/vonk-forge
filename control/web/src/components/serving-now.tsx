@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
 import { EndpointState, ProfileDocumentState } from "../api/vocabulary.generated";
-import { readableProfile, type ControlApi, type VisualFleetNode } from "../api/types";
+import {
+  readableProfile,
+  type ControlApi,
+  type FleetProfileEndpoints,
+  type VisualFleetNode,
+} from "../api/types";
 import { ConnectionExamples } from "./connection-examples";
 
-type ServedAlias = { id: string; alias: string; title: string; state: string; apiBase: string };
+type ServedAssignment = NonNullable<FleetProfileEndpoints["assignments"]>[number];
 
 /** Changes when a workload starts, stops or changes health, so the list follows the fleet. */
 export function servingKey(nodes: readonly VisualFleetNode[]): string {
@@ -26,7 +31,7 @@ export function ServingNow({
   refreshKey: string;
 }) {
   // null: the read failed, which is not the same as nothing being served
-  const [serving, setServing] = useState<ServedAlias[] | null>([]);
+  const [serving, setServing] = useState<ServedAssignment[] | null>([]);
   useEffect(() => {
     void refreshKey;
     const controller = new AbortController();
@@ -38,18 +43,8 @@ export function ServingNow({
         .find((profile) => profile.status === ProfileDocumentState.LOADED);
       if (!loaded) return [];
       const endpoints = await api.profileEndpoints(loaded.number, signal);
-      return (endpoints.assignments ?? []).flatMap((item) =>
-        item.state === EndpointState.PUBLISHED && item.alias && item.endpoint
-          ? [
-              {
-                id: item.assignment_id,
-                alias: item.alias,
-                title: item.recipe_title,
-                state: item.state,
-                apiBase: item.endpoint.api_base,
-              },
-            ]
-          : [],
+      return (endpoints.assignments ?? []).filter(
+        (item) => item.state === EndpointState.PUBLISHED && item.alias && item.endpoint,
       );
     })().then(
       (value) => {
@@ -73,16 +68,18 @@ export function ServingNow({
       <h2 id="serving-now-heading">Serving now</h2>
       <ul>
         {serving.map((item) => (
-          <li key={item.id}>
+          <li key={item.assignment_id}>
             <p>
               <strong>
                 <code>{item.alias}</code>
               </strong>{" "}
-              · {item.title} · {item.state}
+              · {item.recipe_title} · {item.state}
             </p>
             <details>
               <summary>Show connection example</summary>
-              <ConnectionExamples apiBase={item.apiBase} alias={item.alias} />
+              {item.endpoint && item.alias && (
+                <ConnectionExamples apiBase={item.endpoint.api_base} alias={item.alias} />
+              )}
             </details>
           </li>
         ))}
