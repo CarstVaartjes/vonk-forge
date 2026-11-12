@@ -14,7 +14,7 @@ from starlette import status
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.metrics import MetricsRegistry
-from vonk_control.metrics_contract import MetricsSeriesResponse
+from vonk_control.metrics_contract import PER_MODEL_METRICS, MetricsSeriesResponse
 from vonk_control.prometheus_api import PrometheusReader
 
 from .test_api import Jobs
@@ -69,6 +69,10 @@ def reply(**data):
             "request_rate",
             "sum by (requested_model) (rate(litellm_requests_metric_total[5m]))",
         ),
+        (
+            "output_token_rate",
+            "sum by (requested_model) (rate(litellm_output_tokens_metric_total[5m]))",
+        ),
         ("certificate_expiry", "vonk_agent_certificate_expiry_seconds"),
     ],
 )
@@ -77,7 +81,7 @@ def reply(**data):
 )
 def test_fixed_queries_and_ranges(client, monkeypatch, metric, query, range, duration):
     """Catches arbitrary query forwarding, wrong mappings and unbounded resolution."""
-    node = None if metric == "request_rate" else NODE
+    node = None if metric in PER_MODEL_METRICS else NODE
 
     def handle(request):
         params = request.url.params
@@ -105,6 +109,7 @@ def test_fixed_queries_and_ranges(client, monkeypatch, metric, query, range, dur
         {"metric": "gpu_utilization", "range": "2h"},
         {"metric": "gpu_utilization", "range": "1h", "node": 'spk_"'},
         {"metric": "request_rate", "range": "1h", "node": NODE},
+        {"metric": "output_token_rate", "range": "1h", "node": NODE},
     ],
 )
 def test_closed_input(client, monkeypatch, params):
