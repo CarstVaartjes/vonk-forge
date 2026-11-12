@@ -39,6 +39,7 @@ from vonk_control.models import (
     CatalogDocumentRevision,
     RecipeLibrarySyncRun,
 )
+from vonk_control.owner_liveness import SYNC_HEARTBEAT_WINDOW
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import (
     CatalogModelEntry,
@@ -721,7 +722,6 @@ def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
     now[0] = latest.wait.next_check + timedelta(seconds=61)
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
-        settled = (run.state, run.active_slot, run.completed_at)
         run.state, run.active_slot = "running", "managed-recipes"
         run.completed_at, run.heartbeat_at = None, now[0]
     assert sync.redrive(latest.id, 60) is False  # a long API import holds the slot
@@ -729,9 +729,13 @@ def test_worker_redrive_leaves_an_on_time_sync_to_the_api_cadence(
 
     with sessions.begin() as session:
         run = session.get(RecipeLibrarySyncRun, latest.id)
-        run.state, run.active_slot, run.completed_at = settled
+        run.heartbeat_at = now[0] - SYNC_HEARTBEAT_WINDOW - timedelta(seconds=1)
+    # A dead claim no longer holds the slot: the worker observes the library
+    # and the stale run is replaced.
     assert sync.redrive(latest.id, 60) is True
-    assert len(reads) == 1
+    assert reads
+    with sessions() as session:
+        assert session.get(RecipeLibrarySyncRun, latest.id).state != "running"
 
 
 def test_a_display_note_leaves_the_sync_current_and_the_next_tick_reuses_it(

@@ -2,11 +2,15 @@
 
 The Controller worker observes persisted waits independently of API requests,
 agent claims and heartbeats. `DueWaitBackstop` uses the existing owner tables;
-it stores no scheduler rows, leases or additional due timestamps. Catalog sync
-is the one owner with a second live driver (the API's `run_automatic_sync`,
-which wakes at the same `next_check`): the worker redrives it only at
-`next_check` plus one sync interval, and not at all while a sync run's claim
-is live.
+it stores no scheduler rows, leases or additional due timestamps. Two owners
+also have a live driver in the API process:
+
+- Catalog sync: the API's `run_automatic_sync` wakes at the same
+  `next_check`. The worker redrives it only at `next_check` plus one sync
+  interval, and not at all while a sync run's claim is live.
+- Route publication: the API's `_keep_recipe_routes` calls the same
+  `maintain` every 5 s. Its `next_action_at` is due only during failure
+  backoff, and the route publication owner serializes both drivers.
 
 The selection clock is each model's `next_action_at` attribute. Existing SQL
 aliases remain: RecipeRun uses `route_next_attempt_at`, RoutePublicationOwner
