@@ -583,7 +583,9 @@ def _database_local_state(
             head_digests, builds=(), inherited=inherited_claims
         ):
             if presence[key].state == "present":
-                self._merge_local(asset_facts, digest, controller="cached")
+                self._merge_local(
+                    asset_facts, digest, controller=LibraryCacheState.CACHED.value
+                )
     result = _fold_local_facts(
         cache_facts, asset_facts, recipe_digests=set(revision_digests.values())
     )
