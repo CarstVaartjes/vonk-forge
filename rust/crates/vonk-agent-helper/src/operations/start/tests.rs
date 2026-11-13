@@ -886,11 +886,12 @@ fn corrupt_persistent_cache_still_reaches_docker_with_fresh_run_backing() {
     assert!(mount.contains("/compile-cache-fallback/"), "{mount}");
 }
 
-/// A job whose end cannot take the installation lock (a stop or inspection
-/// holds it) is not refused as busy: the Start already ran, so the answer is
-/// the job's own failure and the container is reported as remaining.
+/// A job that runs out its deadline while a stop or inspection holds the
+/// installation lock is not refused as busy: the Start already ran, so the end
+/// reports the container as remaining (`stop_uncertain`), and the agent keeps
+/// reading the job instead of treating it as a pre-launch refusal.
 #[test]
-fn a_job_end_that_finds_the_installation_lock_held_is_not_busy() {
+fn a_job_deadline_that_finds_the_installation_lock_held_is_stop_uncertain() {
     let mut plan = job_plan(recipe_start_plan_for_authority(1));
     let (_temp, roots) = start_fixture(&mut plan);
     let runner = LaunchRunner {
@@ -898,8 +899,16 @@ fn a_job_end_that_finds_the_installation_lock_held_is_not_busy() {
         config: String::new(),
         earlier_job: String::new(),
         run: RunAnswer::NoId,
-        launched: None,
-        created: Arc::default(),
+        launched: Some(format!(
+            "true\tfalse\t{}\ttrue\t{}\t{}\t{}\t{}\t{}\n",
+            "f".repeat(64),
+            plan.run_id,
+            plan.run_id,
+            plan.installation_id,
+            plan.run_generation,
+            plan.plan_digest
+        )),
+        created: Arc::new(Mutex::new(true)),
     };
     let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
     let identity = RuntimeEffectIdentity {
@@ -914,6 +923,9 @@ fn a_job_end_that_finds_the_installation_lock_held_is_not_busy() {
         executor.runtime_wait_for_job(identity, plan.run_id, &plan.plan_digest, 0, Instant::now());
     assert!(matches!(
         ended,
-        Err(OperationError::RuntimeJobWaitFailed { .. })
+        Ok(RuntimeRequestOutcome {
+            stop_uncertain: true,
+            ..
+        })
     ));
 }
