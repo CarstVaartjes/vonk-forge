@@ -33,7 +33,13 @@ const reply = (metric: string, alias: string) => ({
         { timestamp: 0, value: 40 },
         { timestamp: 50, value: 42 },
       ],
-      summary: { latest: 42, average: 41, peak: 42, total: null, coverage: 1 },
+      summary: {
+        latest: 42,
+        average: 41,
+        peak: 42,
+        total: null,
+        coverage: metric === "decode_throughput" ? 0.97 : 1,
+      },
     },
   ],
 });
@@ -48,6 +54,7 @@ test("draws the engine metrics this alias has samples for; others are not drawn"
   render(<EnginePanel api={api} alias="coder" title="GLM 5.3 Flash" />);
   const decode = await screen.findByRole("region", { name: "Decode throughput" });
   expect(decode).toHaveTextContent("42.0 tok/s");
+  expect(decode).toHaveTextContent("covers 97 % of this range");
   await waitFor(() =>
     expect(
       screen.getByRole("region", { name: "Time to first token, 95th percentile" }),

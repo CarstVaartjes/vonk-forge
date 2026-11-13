@@ -134,14 +134,7 @@ export function App({ api }: { api: ControlApi }) {
           onOpenSpark={openSpark}
         />
       ),
-      workloads: (
-        <WorkloadsPage
-          api={api}
-          onLive={setLive}
-          onNavigate={navigatePath}
-          onOpenSpark={openSpark}
-        />
-      ),
+      workloads: <WorkloadsPage api={api} onLive={setLive} onOpenSpark={openSpark} />,
       library: (
         <LibraryPage
           api={api}

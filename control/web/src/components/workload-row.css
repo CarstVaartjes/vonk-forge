@@ -1,8 +1,8 @@
 .workloads-section>h2{margin:1.5rem 0 .5rem;font-size:1.0625rem}
 .workload-rows{display:grid;gap:.75rem;margin:1rem 0;padding:0;list-style:none}
-.workload-row{position:relative;padding:0}
+.workload-row{padding:0}
 .workload-row:has(button[aria-expanded="true"]){border-color:var(--line-strong)}
-.row-grid{display:grid;grid-template-columns:minmax(12rem,1.6fr) minmax(9rem,1.2fr) repeat(3,minmax(5rem,.7fr));gap:.75rem 1.5rem;align-items:start;padding:1rem 1.25rem}
+.row-grid{position:relative;display:grid;grid-template-columns:minmax(12rem,1.6fr) minmax(9rem,1.2fr) repeat(3,minmax(5rem,.7fr));gap:.75rem 1.5rem;align-items:start;padding:1rem 1.25rem}
 .row-grid>div{min-width:0}
 .row-name{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem}
 .row-name h3{margin:0;font-size:1.0625rem;letter-spacing:-.02em}
@@ -18,10 +18,9 @@
 .row-grid strong small,.row-memory small{color:var(--muted);font-size:.72em;font-weight:500}
 .row-speed .sparkline{height:1.75rem;margin-top:.25rem}
 .row-memory{margin:0;padding:0;list-style:none}
-.row-loading{grid-column:2/-1;margin:0;color:var(--muted)}
-.row-loading a{position:relative;z-index:1}
+.row-memory li{display:flex;flex-wrap:wrap;gap:0 .5rem;align-items:baseline}
 .workload-row>.workload-unit{border:0;border-top:1px solid var(--line);border-radius:0 0 var(--r-card) var(--r-card);box-shadow:none}
 @media(max-width:42rem){
   .row-grid{grid-template-columns:repeat(2,minmax(0,1fr));padding:1rem}
-  .row-name,.row-speed,.row-loading{grid-column:1/-1}
+  .row-name,.row-speed{grid-column:1/-1}
 }

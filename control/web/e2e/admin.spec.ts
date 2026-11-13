@@ -144,6 +144,29 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
   }
 });
 
+test("Workloads fits a phone and a desktop, opened or not, and passes the accessibility checks", async ({
+  page,
+}) => {
+  await serveOverviewFleet(page);
+  await page.goto("/workloads");
+  const toggle = page.getByRole("button", { name: "GLM 5.3 Flash" });
+  await expect(toggle).toBeVisible();
+  for (const open of [false, true]) {
+    if (open) await toggle.click();
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      for (const [width, height] of [
+        [400, 800],
+        [1440, 900],
+      ]) {
+        await page.setViewportSize({ width, height });
+        await expectNoDocumentOverflow(page);
+        await expectNoSeriousAccessibilityViolations(page);
+      }
+    }
+  }
+});
+
 test("a Spark page fits a phone and a desktop and passes the accessibility checks", async ({
   page,
 }) => {
