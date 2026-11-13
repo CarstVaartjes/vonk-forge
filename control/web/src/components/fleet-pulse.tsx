@@ -43,7 +43,7 @@ function coverage(reporting: number, online: number): string {
 
 /**
  * Five fleet figures in one band. Each is a Controller reading or a plain sum of Spark readings (GPU
- * power now, unified memory) or of the gateway's per-model totals (tokens); a figure with no reading says
+ * power now, unified memory) or the Controller's fleet total (tokens); a figure with no reading says
  * Not reported. The engine's output speed and GPU energy wait for their metrics.
  */
 export function FleetPulse({

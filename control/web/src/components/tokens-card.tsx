@@ -24,7 +24,7 @@ function titles(nodes: VisualFleetNode[]): Map<string, string> {
 
 /**
  * Generated tokens over 24 hours: the total and one row per model with its share. The numbers are the
- * Controller's per-model totals; a share is a model's total over their sum (display arithmetic). Prompt tokens and cache share
+ * Controller's per-model totals, fleet total and shares. Prompt tokens and cache share
  * wait for their metric and say Not reported. The hint under the figure is the Controller's.
  */
 export function TokensCard({
@@ -66,9 +66,7 @@ export function TokensCard({
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  // A share is the model's total over the models' sum (meter arithmetic until the
-                  // Controller serves a share).
-                  const share = sum > 0 ? Math.round((100 * row.total) / sum) : 0;
+                  const share = Math.round(100 * (row.share ?? 0));
                   return (
                     <tr key={row.alias}>
                       <th scope="row">

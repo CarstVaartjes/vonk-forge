@@ -8,8 +8,10 @@ export const UNITS: Record<MetricSpec["unit"], { symbol: string; scale: number }
   celsius: { symbol: "°C", scale: 1 },
   watts: { symbol: "W", scale: 1 },
   watt_hours: { symbol: "Wh", scale: 1 },
+  megahertz: { symbol: "MHz", scale: 1 },
   rpm: { symbol: "rpm", scale: 1 },
   per_second: { symbol: "/s", scale: 1 },
+  bytes_per_second: { symbol: "GiB/s", scale: GIB },
   tokens_per_second: { symbol: "tok/s", scale: 1 },
   seconds: { symbol: "s", scale: 1 },
   ratio: { symbol: "", scale: 1 },
@@ -33,30 +35,32 @@ export function compactCount(value: number): { figure: string; unit: "" | "k" | 
 }
 
 /**
- * The 24 h totals of a per-model series response, one per model (a series without an alias is not a
- * model and is left out), and their sum. Display arithmetic on the Controller's totals; it moves to the
- * Controller's summary with M3.
+ * The totals of a per-model series response, one row per model with the Controller's share of the
+ * fleet total, and the fleet total (the series without a label). Nothing is added up here.
  */
 export function modelTotals(data: MetricsSeriesResponse | null): {
-  rows: { alias: string; total: number }[];
+  rows: { alias: string; total: number; share: number | null }[];
   sum: number;
   /** The lowest share of the range any series has data for (1 is complete). */
   coverage: number;
 } {
-  const series = (data?.series ?? []).flatMap((item) =>
+  const all = data?.series ?? [];
+  const series = all.flatMap((item) =>
     item.labels.alias && item.summary.total != null
       ? [
           {
             alias: item.labels.alias,
             total: Number(item.summary.total),
+            share: item.summary.share == null ? null : Number(item.summary.share),
             coverage: item.summary.coverage,
           },
         ]
       : [],
   );
+  const fleet = all.find((item) => !item.labels.alias)?.summary.total;
   return {
-    rows: series.map(({ alias, total }) => ({ alias, total })),
-    sum: series.reduce((sum, item) => sum + item.total, 0),
+    rows: series.map(({ alias, total, share }) => ({ alias, total, share })),
+    sum: fleet == null ? 0 : Number(fleet),
     coverage: series.reduce((lowest, item) => Math.min(lowest, item.coverage), 1),
   };
 }

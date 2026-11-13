@@ -28,6 +28,7 @@ const spec = (
   basis: "measured",
   source: "spark",
   summary_total: false,
+  fleet_sum: false,
   hint: "",
   ...extra,
 });
@@ -48,7 +49,7 @@ const SPECS: Record<string, MetricSpec> = {
   }),
   certificate_expiry: spec("certificate_expiry", "Certificate expiry", "seconds"),
 };
-const summary = { latest: 80, average: 50, peak: 90, total: null, coverage: 1 };
+const summary = { latest: 80, average: 50, peak: 90, total: null, share: null, coverage: 1 };
 
 /** The Controller answers with each metric's own spec; the fake does the same. */
 const fakeApi = (metricsSeries: (metric: string, ...rest: never[]) => unknown) =>
@@ -121,7 +122,7 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
 
 test("shows generated tokens per model as an estimate with the Controller's summary", async () => {
   // Break caught: the gateway's tokens look measured, or the page recomputes what the Controller owns.
-  const tokens = { latest: 42.5, average: 40, peak: 61.2, total: 12400, coverage: 1 };
+  const tokens = { latest: 42.5, average: 40, peak: 61.2, total: 12400, share: null, coverage: 1 };
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "output_token_rate"
       ? {

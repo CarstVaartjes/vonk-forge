@@ -12,8 +12,17 @@ const tokens = {
     hint: "Counted by the gateway; a Spark shows the models it serves.",
   },
   series: [
-    { labels: { alias: "fast" }, points: [], summary: { total: 320_000, coverage: 1 } },
-    { labels: { alias: "coder" }, points: [], summary: { total: 1_520_000, coverage: 1 } },
+    { labels: {}, points: [], summary: { total: 1_840_000, share: null, coverage: 1 } },
+    {
+      labels: { alias: "fast" },
+      points: [],
+      summary: { total: 320_000, share: 0.17, coverage: 1 },
+    },
+    {
+      labels: { alias: "coder" },
+      points: [],
+      summary: { total: 1_520_000, share: 0.83, coverage: 1 },
+    },
   ],
 } as unknown as MetricsSeriesResponse;
 const nodes = [
@@ -46,7 +55,14 @@ test("an empty range says No data in this range and a partial one says how much 
   unmount();
   const partial = {
     ...tokens,
-    series: [{ labels: { alias: "coder" }, points: [], summary: { total: 1_000, coverage: 0.5 } }],
+    series: [
+      { labels: {}, points: [], summary: { total: 1_000, share: null, coverage: 0.5 } },
+      {
+        labels: { alias: "coder" },
+        points: [],
+        summary: { total: 1_000, share: 1, coverage: 0.5 },
+      },
+    ],
   } as unknown as MetricsSeriesResponse;
   render(<TokensCard tokens={partial} nodes={nodes} />);
   expect(screen.getByText(/Data covers 50% of this range\./)).toBeInTheDocument();

@@ -14,6 +14,9 @@ import httpx2 as httpx
 import pytest
 from fastapi.testclient import TestClient
 from starlette import status
+from vonk_agent_protocol.gpu_clock import GpuClockObservation
+from vonk_agent_protocol.inventory import HostSettings
+from vonk_agent_protocol.swap import SwapObservation
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.litellm import PROMETHEUS_EXCLUDE_METRICS
@@ -24,7 +27,7 @@ from vonk_control.metrics_contract import (
     MetricRange,
     MetricsSeriesResponse,
 )
-from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader
+from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader, Source
 
 from .test_api import Jobs
 from .test_metrics import NODE, _fleet_snapshot
@@ -75,22 +78,31 @@ def test_every_query_window_covers_the_step_and_scrapes(metric, range):
     for selector in ("", '{node_id="x"}'):
         expressions = [
             query.series(selector, step),
+            query.series(selector, step, fleet=True),
             query.peak(selector, RANGES[range]),
+            query.peak(selector, RANGES[range], fleet=True),
             query.total(selector, RANGES[range]),
         ]
         for expression in filter(None, expressions):
-            assert expression.count("{") == selector.count("{")
-    found = re.search(r"\[(\d+)s\]", query.series("", step))
-    assert found
-    window = int(found.group(1))
+            assert (
+                "{" not in expression.replace(selector, "")
+                if selector
+                else "{" not in expression
+            )
+    windows = {int(w) for w in re.findall(r"\[(\d+)s\]", query.series("", step))}
+    assert len(windows) == 1
+    window = windows.pop()
     assert window >= step and window >= 2 * query.scrape
-    if query.kind == "counter":
+    if query.counted:
         assert window >= step + query.scrape
 
 
 def test_every_metric_has_one_spec_and_one_query():
     """Catches a metric added to the contract without its description or query."""
     assert set(METRIC_SPECS) == set(QUERIES) == set(get_args(Metric))
+    # The catalogue's source and the query's reader must agree.
+    reads = {"spark": Source.NODE, "engine": Source.ENGINE, "gateway": Source.GATEWAY}
+    assert all(QUERIES[m].source is reads[s.source] for m, s in METRIC_SPECS.items())
     assert {s.metric for s in METRIC_SPECS.values() if s.summary_total} == {
         m for m, q in QUERIES.items() if q.total("", 1)
     }
@@ -99,13 +111,51 @@ def test_every_metric_has_one_spec_and_one_query():
 def test_no_query_reads_a_gateway_family_the_gateway_does_not_export():
     """Catches a Trends query on a LiteLLM family dropped by PROMETHEUS_EXCLUDE_METRICS."""
     excluded = set(PROMETHEUS_EXCLUDE_METRICS)
+    suffixes = ("_total", "_bucket", "_sum", "_count")
+
+    def base(name: str) -> str:
+        return next((name.removesuffix(x) for x in suffixes if name.endswith(x)), name)
+
     hits = [
-        q.family
+        family
         for q in QUERIES.values()
-        if q.family.startswith("litellm_")
-        and {q.family, q.family.removesuffix("_total")} & excluded
+        for family in (q.family, q.over)
+        if family
+        and family.startswith("litellm_")
+        and {family, base(family)} & excluded
     ]
     assert not hits
+
+
+def test_gateway_estimates_read_buckets_and_divide_summed_rates():
+    """Catches a quantile over unsummed buckets (one value per key) or a speed of mismatched aliases."""
+    p95 = QUERIES["gateway_ttft_p95"].series("", 300)
+    assert p95.startswith("histogram_quantile(0.95, sum by (alias, le) (label_replace(")
+    assert "litellm_llm_api_time_to_first_token_metric_bucket" in p95
+    speed = QUERIES["gateway_generation_speed"].series("", 300)
+    assert speed.count("sum by (alias)") == 2 and " / " in speed
+
+
+def test_engine_speeds_divide_summed_rates_and_filter_by_alias(reader, monkeypatch):
+    """Catches an uncached-prefill speed that counts cached tokens, a KV ratio that is
+    summed across runs, and a Spark filter that names the gateway's label."""
+    assert QUERIES["prefill_speed"].series("", 300) == (
+        "(sum by (alias) (rate(vonk_engine_prompt_tokens_total[315s]))"
+        " - sum by (alias) (rate(vonk_engine_cached_prompt_tokens_total[315s])))"
+        " / sum by (alias) (rate(vonk_engine_prefill_seconds_sum[315s]))"
+    )
+    assert QUERIES["kv_cache_usage"].series("", 300).startswith("avg by (alias) (")
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.params["query"])
+        return reply(
+            resultType="matrix" if "range" in request.url.path else "vector", result=[]
+        )
+
+    mock_prometheus(monkeypatch, handle)
+    asyncio.run(reader.series("decode_speed", "1h", NODE, lambda node: ["glm-5"]))
+    assert seen and all(r'{alias=~"^(glm\\-5)$"}' in query for query in seen)
 
 
 def test_catalogue_lists_every_metric(client):
@@ -126,6 +176,7 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
     def handle(request):
         params = request.url.params
         seen.append(request.url.path)
+        fleet = "sum(" in params["query"] and "sum by" not in params["query"]
         if request.url.path == "/api/v1/query_range":
             rows = [
                 {
@@ -134,19 +185,33 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
                 },
                 {"metric": {label: "empty"}, "values": [[1, "NaN"]]},
             ]
+            if fleet:
+                rows = [{"metric": {}, "values": [[now, "8"]]}]
             return reply(resultType="matrix", result=rows)
         value = "9" if "max_over_time" in params["query"] else "100"
-        row = {"metric": {label: "a"}, "value": [3, value]}
+        row = {"metric": {} if fleet else {label: "a"}, "value": [3, value]}
+        if fleet:
+            row["value"] = [3, "400" if value == "100" else "11"]
         return reply(resultType="vector", result=[row])
 
     mock_prometheus(monkeypatch, handle)
     body = client.get(
         "/api/metrics/series", params={"metric": metric, "range": "1h"}
     ).json()
-    full, empty = MetricsSeriesResponse.model_validate(body).series
+    series = MetricsSeriesResponse.model_validate(body).series
+    if metric == "output_token_rate":
+        # The fleet line leads, has no label and carries the fleet total the shares divide by.
+        line, *series = series
+        assert line.labels == {} and (line.summary.latest, line.summary.total) == (
+            8,
+            400,
+        )
+        assert line.summary.share is None
+    full, empty = series
     assert full.labels == {label: "a"}
     assert (full.summary.latest, full.summary.average, full.summary.peak) == (6, 4, 9)
     assert full.summary.total == (100 if metric == "output_token_rate" else None)
+    assert full.summary.share == (0.25 if metric == "output_token_rate" else None)
     assert full.summary.coverage == 2 / (3600 // 15 + 1)
     assert (empty.summary.latest, empty.summary.average, empty.summary.peak) == (
         None,
@@ -154,7 +219,7 @@ def test_series_carry_their_summary(client, monkeypatch, metric):
         None,
     )
     assert empty.summary.coverage == 0
-    assert seen.count("/api/v1/query") == (2 if metric == "output_token_rate" else 1)
+    assert seen.count("/api/v1/query") == (4 if metric == "output_token_rate" else 1)
 
 
 def test_node_filter_on_a_model_metric_is_the_aliases_it_serves(reader, monkeypatch):
@@ -391,6 +456,62 @@ def test_exporter_publishes_memory_and_temperature_without_inventing_missing_val
         f'vonk_node_telemetry_gpu_memory_used_bytes{{node_id="{NODE}"}}'
         not in registry.render()
     )
+
+
+def test_exporter_publishes_the_spark_facts_that_trend():
+    """Catches a fact the Fleet row shows but Prometheus never sees, and a gap read as zero."""
+    snapshot = _fleet_snapshot(
+        readings={"gpu_power_watts": 35.5, "gpu_process_memory_bytes": 7}
+    )
+    node = snapshot.nodes[0]
+    inventory = node.inventory
+    assert inventory is not None and node.telemetry is not None
+    clock = GpuClockObservation(graphics_mhz=2190)
+    node.telemetry.sample = node.telemetry.sample.model_copy(
+        update={"gpu_clock": clock, "system_memory_bytes": 5}
+    )
+    node.inventory = inventory.model_copy(
+        update={
+            "host_settings": HostSettings(
+                display_manager_active=False,
+                graphical_default_target=False,
+                swap=SwapObservation(total_bytes=64, free_bytes=60),
+            )
+        }
+    )
+    registry = MetricsRegistry()
+    registry.set_fleet_source(lambda: snapshot)
+    text = registry.render()
+    label = f'{{node_id="{NODE}"}}'
+    for series, value in (
+        ("telemetry_gpu_power_watts", "35.5"),
+        ("telemetry_gpu_process_memory_bytes", "7"),
+        ("telemetry_system_memory_bytes", "5"),
+        ("telemetry_gpu_graphics_clock_mhz", "2190"),
+        ("inventory_swap_used_bytes", "4"),
+        ("inventory_disk_used_bytes", "3000"),
+    ):
+        assert f"vonk_node_{series}{label} {value}" in text
+    node.inventory = inventory
+    node.telemetry.sample = node.telemetry.sample.model_copy(
+        update={"gpu_clock": None, "gpu_power_watts": None}
+    )
+    text = registry.render()
+    for series in (
+        "inventory_swap_used_bytes",
+        "telemetry_gpu_graphics_clock_mhz",
+        "telemetry_gpu_power_watts",
+    ):
+        assert f"vonk_node_{series}" not in text
+
+    node.telemetry.sample = node.telemetry.sample.model_copy(
+        update={"gpu_power_watts": 35.5, "gpu_clock": clock}
+    )
+    node.telemetry.freshness = "stale"
+    text = registry.render()
+    # A silent Spark contributes no value, so fleet power and energy skip it.
+    assert "vonk_node_telemetry_gpu_power_watts" not in text
+    assert "vonk_node_telemetry_gpu_graphics_clock_mhz" not in text
 
 
 def test_application_owns_configured_monitoring_and_preserves_service_lifespan(
