@@ -28,7 +28,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import WAIT_STEP
-from .contracts import fencing_intent
+from .contracts import cancelled_job_run, fencing_intent
 from .endings import end_unobserved_order
 from .observation_receipts import (
     OBSERVATION_KINDS,
@@ -270,7 +270,7 @@ def _sweep_lapsed_attempts(
                     continue
                 if operation.state != aos.RUNNING:
                     continue
-                superseded_by = _superseding_intent(operation, node)
+                superseded_by = _superseding_intent(operation, node, parent)
                 if _attempt_holds_order(
                     operation, attempt, now, superseded=superseded_by is not None
                 ):
@@ -332,15 +332,21 @@ def _sweep_would_act(self: AgentJobService, operation_id: str, node_id: str) -> 
             operation,
             attempt,
             self._clock(),
-            superseded=_superseding_intent(operation, node) is not None,
+            superseded=_superseding_intent(
+                operation, node, session.get(Job, operation.parent_job_id)
+            )
+            is not None,
         )
 
 
-def _superseding_intent(operation: StoredOperation, node: AgentNode) -> int | None:
-    """The node's newer workload intent when it superseded ``operation``'s;
-    a cleanup order is never superseded."""
+def _superseding_intent(
+    operation: StoredOperation, node: AgentNode, parent: Job | None
+) -> int | None:
+    """The node's workload intent when ``operation`` is superseded: a newer
+    intent than its own, or a cancelled JobRun's (``cancelled_job_run``); a
+    cleanup order is never superseded."""
 
-    if (
+    if cancelled_job_run(operation, parent) or (
         operation.kind not in CLEANUP_KINDS
         and (intent := fencing_intent(operation)) is not None
         and intent < node.workload_intent_ordinal
