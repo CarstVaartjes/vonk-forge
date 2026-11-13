@@ -162,9 +162,7 @@ def _validate_artifact_execution(
                 RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        maximum_reclaimable = (
-            plan.storage.reclaimable_bytes + plan.runtime_storage.reclaimable_bytes
-        )
+        maximum_reclaimable = plan.runtime_storage.reclaimable_bytes
         if reclaimed > maximum_reclaimable:
             raise RunSwitchRetryLater(
                 RunSwitchCode.CLEANUP_RECLAIMED_BYTES_EXCEED_PLAN,
