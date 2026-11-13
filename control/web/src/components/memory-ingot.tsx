@@ -16,7 +16,7 @@ export function MemoryIngot({
 }: {
   label: string;
   memory: MemorySplit | null;
-  size?: "small" | "medium";
+  size?: "small" | "medium" | "tall";
   /** The 8 / 4 GiB free-memory warning is one Spark's; a fleet sum passes false. */
   warn?: boolean;
 }) {

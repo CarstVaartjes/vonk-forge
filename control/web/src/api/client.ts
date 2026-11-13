@@ -52,7 +52,6 @@ import type {
   JobResumeResponse,
   OperationsResponse,
   OperationDetail,
-  VisualFleetNode,
   VisualFleetSnapshot,
   ArtifactJob,
   ArtifactJobCapabilities,
@@ -469,12 +468,6 @@ export class ApiClient implements ControlApi {
           ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
           : AbortSignal.timeout(10000),
       }),
-    );
-  }
-
-  async fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode> {
-    return resultData(
-      await this.generated.GET("/api/fleet/{selector}", { params: { path: { selector } }, signal }),
     );
   }
 

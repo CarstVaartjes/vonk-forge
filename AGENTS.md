@@ -82,7 +82,7 @@ helper, agent, Controller, and clients under the
 [error policy](docs/error-reporting.md). Do not truncate away the cause or invent
 an ETA, percentage, missing value, or success when evidence is unknown.
 
-The Fleet words (vitals, what a Spark serves, the status line, attention items)
+The Fleet words (vitals, what a Spark serves, the status line, attention items, GPU throttle reasons)
 are shown identically by the web Fleet page and `vonkctl fleet`. A change to one
 changes the other in the same PR. Each screen has one fixture,
 `tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the

@@ -1161,7 +1161,9 @@ that policy limit.
 
 `fleet detail` and the Spark overview show current graphics/SM clocks next to
 CPU clocks, desired and last applied ranges, reported maxima, and the NVIDIA
-throttle-reason bitmask. A last applied range is a helper command receipt for
+throttle (clock event) reasons in words. The bitmask-to-words table is shared
+with the Controller web through `tests/fixtures/fleet-wording-throttle.json`;
+a bit outside the table reads `state unknown`. A last applied range is a helper command receipt for
 this boot, not a hardware readback: NVIDIA exposes no graphics-lock getter.
 Unknown readings stay unknown. A desired/applied mismatch remains a warning.
 
