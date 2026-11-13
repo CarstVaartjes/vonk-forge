@@ -91,7 +91,8 @@ test("a gauge is a meter with its value and caption, and an absent reading draws
   expect(meter).toHaveAttribute("aria-valuetext", "69 °C, warns at 85 °C");
   expect(container.querySelectorAll(".arc-tick")).toHaveLength(1);
   rerender(<ArcGauge title="Temperature" value={null} unit="°C" max={100} color="red" />);
-  expect(screen.getByRole("meter")).toHaveAttribute("aria-valuetext", "Not reported");
+  expect(screen.queryByRole("meter")).toBeNull();
+  expect(screen.getByText("Not reported")).toBeVisible();
   expect(container.querySelector("svg")).toBeNull();
 });
 

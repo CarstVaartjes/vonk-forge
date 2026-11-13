@@ -201,7 +201,14 @@ test("the frame shows the Spark's own facts, or Not reported", () => {
 
 test("an address that names no enrolled Spark says so", () => {
   nodes = [];
-  render(<SparkPage api={{} as ControlApi} id="spk_gone" onNavigate={vi.fn()} onGone={vi.fn()} />);
+  render(
+    <SparkPage
+      api={{ metricsSeries: vi.fn().mockRejectedValue(new Error("none")) } as unknown as ControlApi}
+      id="spk_gone"
+      onNavigate={vi.fn()}
+      onGone={vi.fn()}
+    />,
+  );
   expect(screen.getByRole("heading", { name: "Spark not found" })).toBeVisible();
 });
 
@@ -232,18 +239,13 @@ test("the Overview shows the memory split and the GPU gauges from the live sampl
     "aria-valuetext",
     "69 °C, warns at 85\u00a0°C, serious at 90\u00a0°C",
   );
-  // No clock maximum is reported, so the number shows and no arc is invented.
-  expect(screen.getByRole("meter", { name: "Clock" })).toHaveAttribute(
-    "aria-valuetext",
-    "2,200 MHz",
-  );
+  // No clock maximum is reported, so the number shows as text and no meter or arc is invented.
+  expect(screen.queryByRole("meter", { name: "Clock" })).toBeNull();
+  expect(screen.getByText("2,200 MHz")).toBeVisible();
 });
 
 test("a Spark that is not reporting live shows Not reported on every gauge", () => {
   show(node);
-  for (const name of ["Utilisation", "Temperature", "Clock"])
-    expect(screen.getByRole("meter", { name })).toHaveAttribute(
-      "aria-valuetext",
-      expect.stringMatching(/^Not reported/),
-    );
+  expect(screen.queryAllByRole("meter", { name: /Utilisation|Temperature|Clock/ })).toHaveLength(0);
+  expect(screen.getAllByText("Not reported").length).toBeGreaterThanOrEqual(3);
 });

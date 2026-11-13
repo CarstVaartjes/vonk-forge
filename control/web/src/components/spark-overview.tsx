@@ -9,7 +9,7 @@ import {
   nodeStatus,
   nodeSwap,
 } from "../lib/fleet";
-import { useTelemetryHistory } from "../hooks/use-telemetry-history";
+import type { HistoryPoint } from "../hooks/use-telemetry-history";
 import { InstallationReconcile } from "./installation-reconcile";
 import { MetricsChart } from "./metrics-chart";
 import { SparkGpuNow } from "./spark-gpu-now";
@@ -23,16 +23,18 @@ export function SparkOverview({
   now,
   range,
   color,
+  points,
 }: {
   api: ControlApi;
   node: VisualFleetNode;
   now: Date;
   range: MetricRange;
   color: string;
+  /** The last 30 minutes of the Spark's telemetry, kept by the page across tabs. */
+  points: readonly HistoryPoint[];
 }) {
   const cpu = nodeCpuClock(node);
   const status = nodeStatus(node, now);
-  const { points } = useTelemetryHistory({ api, nodeId: node.id, telemetry: node.telemetry, now });
   return (
     <>
       <div className="spark-panels">
