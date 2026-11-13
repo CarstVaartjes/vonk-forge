@@ -19,6 +19,7 @@ const apiFixture = {
       basis: "measured",
       source: "spark",
       summary_total: false,
+      fleet_sum: false,
       hint: "",
     },
     range,

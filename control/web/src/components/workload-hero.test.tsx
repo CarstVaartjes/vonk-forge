@@ -25,6 +25,7 @@ function series(metric: string, title: string, unitName: string, latest: number 
       basis: "estimated",
       source: "gateway",
       summary_total: true,
+      fleet_sum: false,
       hint: "",
     },
     range: "1h",
@@ -35,7 +36,7 @@ function series(metric: string, title: string, unitName: string, latest: number 
       {
         labels: { alias: "coder" },
         points,
-        summary: { latest, average: latest, peak: latest, total: null, coverage: 1 },
+        summary: { latest, average: latest, peak: latest, total: null, share: null, coverage: 1 },
       },
     ],
   } as unknown as MetricsSeriesResponse;

@@ -85,6 +85,9 @@ class _Controller:
             "progress": {},
         }
 
+    def metrics_catalogue(self):
+        raise AssertionError("the metric catalogue is not read here")
+
     def profile_endpoints(
         self, number: int, alias: str | None = None
     ) -> controller_cli.common.FleetProfileEndpointsView:

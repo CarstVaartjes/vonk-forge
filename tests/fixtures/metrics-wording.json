@@ -1,0 +1,26 @@
+{
+  "comment": "One set of number wording for metric values: `vonkctl metrics show` asserts every case below, and the Controller web charts follow the same rules (the web test joins this file in the first chart PR). Rules: tokens per second keep one decimal below 100, else whole; seconds read as whole ms below 1 s, else two decimals; watts, degrees, rpm and MHz are whole; watt-hours read as kWh (two decimals) from 1000; bytes use binary units with one decimal (B whole); percent and ratio read with one decimal and a percent sign (a ratio is x100); per-second rates and counts keep two decimals below 10, one below 100 and whole above, without trailing zeros; no value reads No data in this range.",
+  "cases": [
+    { "unit": "tokens_per_second", "value": 12.34, "text": "12.3 tok/s" },
+    { "unit": "tokens_per_second", "value": 1840.4, "text": "1840 tok/s" },
+    { "unit": "seconds", "value": 0.3504, "text": "350 ms" },
+    { "unit": "seconds", "value": 1.234, "text": "1.23 s" },
+    { "unit": "watts", "value": 35.4, "text": "35 W" },
+    { "unit": "watt_hours", "value": 950.2, "text": "950 Wh" },
+    { "unit": "watt_hours", "value": 1234, "text": "1.23 kWh" },
+    { "unit": "bytes", "value": 53687091200, "text": "50.0 GiB" },
+    { "unit": "bytes", "value": 2199023255552, "text": "2.0 TiB" },
+    { "unit": "bytes", "value": 512, "text": "512 B" },
+    { "unit": "bytes_per_second", "value": 125000000, "text": "119.2 MiB/s" },
+    { "unit": "celsius", "value": 65.4, "text": "65 °C" },
+    { "unit": "rpm", "value": 3213, "text": "3213 rpm" },
+    { "unit": "megahertz", "value": 2190, "text": "2190 MHz" },
+    { "unit": "percent", "value": 45.26, "text": "45.3%" },
+    { "unit": "ratio", "value": 0.8312, "text": "83.1%" },
+    { "unit": "per_second", "value": 2.5, "text": "2.5/s" },
+    { "unit": "count", "value": 2.63, "text": "2.63" },
+    { "unit": "count", "value": 15.26, "text": "15.3" },
+    { "unit": "count", "value": 124, "text": "124" },
+    { "unit": "count", "value": null, "text": "No data in this range" }
+  ]
+}

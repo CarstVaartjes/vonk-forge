@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from ..cli_platform_render import render_platform
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
 from ..control_client import ControlMalformedResponse
+from ..generated_control.models.metric_spec import MetricSpec
+from ..generated_control.models.metrics_series_response import MetricsSeriesResponse
 from ..generated_control.models.platform_observation import PlatformObservation
 from .activity import _activity, _locks
 from .administration import _catalog_sync, _enrollment, _error
@@ -16,6 +18,7 @@ from .artifact_jobs import _artifact_job
 from .common import _field, _object, _records, _table, _text, _time, _words
 from .fleet import _fleet_overview, _node
 from .library import _library
+from .metrics import _metric_list, _metric_series
 from .operations import _application, _job, _operation, _run_result
 from .profile import _gateway_keys, _profile, _profile_endpoints
 from .removal_review import _cache_removal_review
@@ -62,6 +65,21 @@ def render_payload(
             _field("CLI version", client.get("version"))
         elif noun == "platform":
             render_platform(PlatformObservation.from_dict(payload))
+        elif noun == "metrics":
+            if action == "show":
+                _metric_series(
+                    MetricsSeriesResponse.from_dict(payload),
+                    {
+                        str(key): str(value)
+                        for key, value in _object(
+                            payload.get("names", {}), "Spark names"
+                        ).items()
+                    },
+                )
+            else:
+                _metric_list(
+                    [MetricSpec.from_dict(row) for row in _records(payload, "metrics")]
+                )
         elif noun == "fleet":
             if action is None:
                 _fleet_overview(payload, wide=wide)

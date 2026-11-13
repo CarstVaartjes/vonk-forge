@@ -33,6 +33,7 @@ function controlApi(overrides: Partial<TestApi> = {}): TestApi {
         basis: "measured",
         source: "spark",
         summary_total: false,
+        fleet_sum: false,
         hint: "",
       },
       range,

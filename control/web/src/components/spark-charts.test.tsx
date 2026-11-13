@@ -14,6 +14,7 @@ const spec = (
   basis: "measured",
   source: "spark",
   summary_total: false,
+  fleet_sum: false,
   hint: "",
 });
 const SPECS = [
@@ -69,7 +70,7 @@ test("a failed read says Not reported and keeps the other cards", async () => {
   await waitFor(() => expect(within(failed).getByRole("status")).toHaveTextContent("Not reported"));
   expect(
     await within(screen.getByRole("region", { name: "GPU utilisation" })).findByText(
-      "24 h average 64.5 %",
+      "24 h average 64.5%",
     ),
   ).toBeVisible();
 });
