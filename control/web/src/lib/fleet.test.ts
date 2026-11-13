@@ -279,22 +279,38 @@ test("swap shows the active size beside the desired size and the helper's wait r
   expect(nodeSwap(node())).toContain("desired unknown");
 });
 
+function member(runId: string, rank: number, members: string[]) {
+  return {
+    run_id: runId,
+    title: runId === "run-1" ? "GLM 5.3 Flash" : "Qwen",
+    alias: runId === "run-1" ? "coder" : "fast",
+    rank,
+    run_state: "running",
+    healthy: true,
+    member_node_ids: members,
+  } as unknown as VisualFleetNode["loaded"][number];
+}
+
 test("groups a two-Spark workload as one unit in rank order and leaves an idle Spark on its own", () => {
-  const member = (rank: number) =>
-    ({
-      run_id: "run-1",
-      title: "GLM 5.3 Flash",
-      alias: "coder",
-      rank,
-      run_state: "running",
-      healthy: true,
-      member_node_ids: ["spk_a", "spk_b"],
-    }) as unknown as VisualFleetNode["loaded"][number];
-  const a = node({ id: "spk_a", loaded: [member(1)] });
-  const b = node({ id: "spk_b", loaded: [member(0)] });
-  const { units, idle } = groupByWorkload([a, b, node({ id: "spk_c" })]);
-  expect(units).toHaveLength(1);
-  expect(units[0]).toMatchObject({ title: "GLM 5.3 Flash", alias: "coder", state: "running" });
-  expect(units[0]!.nodes.map((n) => n.id)).toEqual(["spk_b", "spk_a"]);
+  const both = ["spk_a", "spk_b"];
+  const a = node({ id: "spk_a", loaded: [member("run-1", 1, both)] });
+  const b = node({ id: "spk_b", loaded: [member("run-1", 0, both)] });
+  const { clusters, idle } = groupByWorkload([a, b, node({ id: "spk_c" })]);
+  expect(clusters).toHaveLength(1);
+  const [unit] = clusters[0]!.units;
+  expect(unit).toMatchObject({ title: "GLM 5.3 Flash", alias: "coder", state: "running" });
+  expect(unit!.nodes.map((n) => n.id)).toEqual(["spk_b", "spk_a"]);
+  expect(unit!.ranks).toEqual({ spk_a: 1, spk_b: 0 });
   expect(idle.map((n) => n.id)).toEqual(["spk_c"]);
+});
+
+test("two workloads on one Spark are one cluster with that Spark once; separate Sparks stay separate", () => {
+  const a = node({
+    id: "spk_a",
+    loaded: [member("run-1", 0, ["spk_a"]), member("run-2", 0, ["spk_a"])],
+  });
+  const b = node({ id: "spk_b", loaded: [member("run-3", 0, ["spk_b"])] });
+  const { clusters } = groupByWorkload([a, b]);
+  expect(clusters.map((c) => c.units.map((u) => u.runId))).toEqual([["run-1", "run-2"], ["run-3"]]);
+  expect(clusters[0]!.nodes.map((n) => n.id)).toEqual(["spk_a"]);
 });

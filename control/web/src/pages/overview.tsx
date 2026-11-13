@@ -4,12 +4,11 @@ import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useSelectedSpark } from "../hooks/use-selected-spark";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
-import { fleetStatusLine, groupByWorkload } from "../lib/fleet";
+import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
 import { AttentionItem } from "../components/attention-item";
 import { FleetFeedback } from "../components/fleet-feedback";
-import { SparkCard } from "../components/spark-card";
-import { WorkloadUnit } from "../components/workload-unit";
+import { WorkloadUnits } from "../components/workload-units";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
@@ -85,17 +84,6 @@ export function OverviewPage({
   }
 
   const nodes = fleet.snapshot?.nodes ?? [];
-  const { units, idle } = groupByWorkload(nodes);
-  const card = (node: (typeof nodes)[number]) => (
-    <SparkCard
-      key={node.id}
-      api={api}
-      node={node}
-      now={fleet.now}
-      index={nodes.indexOf(node)}
-      onOpen={selectSpark}
-    />
-  );
   return (
     <div className="fleet-page">
       <PageHeader
@@ -194,23 +182,13 @@ export function OverviewPage({
             )}
           </div>
           <div className="overview-units">
-            {units.map((unit) => (
-              <WorkloadUnit key={unit.runId} unit={unit}>
-                {unit.nodes.map(card)}
-              </WorkloadUnit>
-            ))}
-            {idle.length > 0 && (
-              <section aria-label="Idle Sparks">
-                <h2>Idle</h2>
-                <div className="idle-sparks">
-                  {idle.map((node) => (
-                    <div className="card" key={node.id}>
-                      {card(node)}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+            <WorkloadUnits
+              api={api}
+              nodes={nodes}
+              now={fleet.now}
+              live={live === "live"}
+              onOpen={selectSpark}
+            />
           </div>
           <div className="overview-activity">
             <ActivityPreview

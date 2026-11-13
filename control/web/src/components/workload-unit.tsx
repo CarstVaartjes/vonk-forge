@@ -1,30 +1,47 @@
 import "./workload-unit.css";
+import type { MetricsSeriesResponse } from "../api/types";
+import { nodeDisplayName, type WorkloadCluster } from "../lib/fleet";
 import type { ReactNode } from "react";
-import { RunState } from "../api/vocabulary.generated";
-import type { WorkloadGroup } from "../lib/fleet";
-import { StatusPill, type StatusTone } from "./status-pill";
+import { WorkloadHero } from "./workload-hero";
 
-/** The run's state word (a RunState, or `degraded` / `state unknown` from `runStateWord`) as a tone. */
-const STATE_TONES: Record<string, StatusTone> = {
-  [RunState.RUNNING]: "ok",
-  [RunState.FAILED]: "bad",
-  [RunState.LOST]: "bad",
-  degraded: "warn",
-  "state unknown": "neutral",
-};
-
-/** One workload as a unit: its alias, title and state, with the Sparks that carry it below. */
-export function WorkloadUnit({ unit, children }: { unit: WorkloadGroup; children: ReactNode }) {
+/**
+ * Workloads that share Sparks as one unit: each workload's header, hero and chart, then a bracket down
+ * to the Spark cards (a "Runs on" line on a phone). `children` are the cards.
+ */
+export function WorkloadUnit({
+  cluster,
+  tokens,
+  requests,
+  live,
+  children,
+}: {
+  cluster: WorkloadCluster;
+  tokens: MetricsSeriesResponse | null;
+  requests: MetricsSeriesResponse | null;
+  live: boolean;
+  children: ReactNode;
+}) {
+  const names = cluster.nodes.map(nodeDisplayName);
   return (
-    <section className="workload-unit card" aria-label={unit.title}>
-      <header>
-        {unit.alias && <code className="alias">{unit.alias}</code>}
-        <h2>{unit.title}</h2>
-        <StatusPill tone={STATE_TONES[unit.state] ?? "info"}>{unit.state}</StatusPill>
-        <span className="unit-facts">
-          {unit.nodes.length} {unit.nodes.length === 1 ? "Spark" : "Sparks"}
-        </span>
-      </header>
+    <section
+      className="workload-unit card"
+      aria-label={cluster.units.map((unit) => unit.title).join(" and ")}
+    >
+      {cluster.units.map((unit) => (
+        <WorkloadHero
+          key={unit.runId}
+          unit={unit}
+          tokens={tokens}
+          requests={requests}
+          live={live}
+        />
+      ))}
+      {names.length > 1 && (
+        <>
+          <div className="unit-bracket" aria-hidden="true" />
+          <p className="unit-runs-on">Runs on {names.join(" and ")}</p>
+        </>
+      )}
       <div className="unit-sparks">{children}</div>
     </section>
   );

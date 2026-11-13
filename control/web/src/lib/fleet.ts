@@ -153,7 +153,7 @@ export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[
   return lines;
 }
 
-/** One workload and the Sparks that carry it, in rank order; a Spark with two workloads appears under each. */
+/** One workload and the Sparks that carry it, in rank order. */
 export type WorkloadGroup = {
   runId: string;
   title: string;
@@ -161,38 +161,55 @@ export type WorkloadGroup = {
   /** The run's state in a word, as `nodeWorkloadLines` prints it. */
   state: string;
   nodes: VisualFleetNode[];
+  /** Each member Spark's rank in this run. */
+  ranks: Record<string, number>;
 };
 
-/** The fleet's workloads, in order of first appearance, and the Sparks that run none. */
+/** Workloads that share a Spark stack as one cluster over one set of Spark cards. */
+export type WorkloadCluster = { units: WorkloadGroup[]; nodes: VisualFleetNode[] };
+
+/**
+ * The fleet's workloads grouped into clusters (in order of first appearance), and the Sparks that run
+ * none. A Spark carrying two workloads sits in one cluster with both, shown once.
+ */
 export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
-  units: WorkloadGroup[];
+  clusters: WorkloadCluster[];
   idle: VisualFleetNode[];
 } {
-  const units = new Map<string, WorkloadGroup & { ranks: Map<string, number> }>();
+  const units = new Map<string, WorkloadGroup>();
   for (const node of nodes) {
     for (const run of node.loaded) {
-      const unit: WorkloadGroup & { ranks: Map<string, number> } = units.get(run.run_id) ?? {
+      const unit: WorkloadGroup = units.get(run.run_id) ?? {
         runId: run.run_id,
         title: run.title ?? run.run_id,
         alias: run.alias ?? null,
         state: runStateWord(run),
         nodes: [],
-        ranks: new Map(),
+        ranks: {},
       };
-      if (!unit.ranks.has(node.id)) {
+      if (!(node.id in unit.ranks)) {
         unit.nodes.push(node);
-        unit.ranks.set(node.id, Number(run.rank ?? 0));
+        unit.ranks[node.id] = Number(run.rank ?? 0);
       }
       units.set(run.run_id, unit);
     }
   }
-  return {
-    units: [...units.values()].map(({ ranks, ...unit }) => ({
-      ...unit,
-      nodes: [...unit.nodes].sort((a, b) => (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0)),
-    })),
-    idle: nodes.filter((node) => node.loaded.length === 0),
-  };
+  const clusters: WorkloadCluster[] = [];
+  for (const unit of units.values()) {
+    unit.nodes.sort((a, b) => (unit.ranks[a.id] ?? 0) - (unit.ranks[b.id] ?? 0));
+    const shared = clusters.filter((cluster) =>
+      cluster.nodes.some((node) => unit.nodes.some((member) => member.id === node.id)),
+    );
+    const merged: WorkloadCluster = { units: [unit], nodes: [...unit.nodes] };
+    for (const cluster of shared) {
+      merged.units.unshift(...cluster.units);
+      for (const node of cluster.nodes)
+        if (!merged.nodes.some((member) => member.id === node.id)) merged.nodes.push(node);
+      clusters.splice(clusters.indexOf(cluster), 1);
+    }
+    clusters.push(merged);
+  }
+  return { clusters, idle: nodes.filter((node) => node.loaded.length === 0) };
 }
 
 export type FleetSummary = {

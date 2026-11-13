@@ -198,6 +198,11 @@
       "reason": "UI-only view model of one workload and its Sparks derived from generated API types; not an API document"
     },
     {
+      "file": "control/web/src/lib/fleet.ts",
+      "type": "WorkloadCluster",
+      "reason": "UI-only view model of workloads that share Sparks, derived from generated API types; not an API document"
+    },
+    {
       "file": "control/web/src/components/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
