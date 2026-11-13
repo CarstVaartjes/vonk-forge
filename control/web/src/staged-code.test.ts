@@ -43,7 +43,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
         files: ["src/api/generated.d.ts", "src/consumer.ts"],
       }),
     );
-    execFileSync("git", ["init", "--quiet"], { cwd: root, timeout: 30_000 });
+    execFileSync("git", ["init", "--quiet"], { cwd: root, timeout: 5000 });
     const generated = join(web, "src/api/generated.d.ts");
     writeFileSync(
       join(web, "src/consumer.ts"),
