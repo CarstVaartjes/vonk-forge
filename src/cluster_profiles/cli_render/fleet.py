@@ -504,12 +504,27 @@ def _fleet_status_line(payload: object) -> str:
         }
     )
     sparks = sum(1 for node in nodes if _needs_attention(node))
+    unhealthy = len(
+        {
+            run.get("run_id")
+            for node in nodes
+            for run in _records(node, "loaded")
+            if run.get("run_state") == RUN_RUNNING and run.get("healthy") is not True
+        }
+    )
     firing = document.get("attention")
     alerts = len(firing) if isinstance(firing, list) else 0
     attention = [
         *(
             [f"{sparks} {'Spark needs' if sparks == 1 else 'Sparks need'} attention"]
             if sparks
+            else []
+        ),
+        *(
+            [
+                f"{unhealthy} {'workload needs' if unhealthy == 1 else 'workloads need'} attention"
+            ]
+            if unhealthy
             else []
         ),
         *(
