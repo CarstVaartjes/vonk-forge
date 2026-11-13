@@ -64,7 +64,6 @@ def _uninstall(
 
     self._lifecycle.uninstall(
         installation_id,
-        plan_digest=plan.plan_digest,
         actor=ACTOR,
         request_id=str(uuid.uuid4()),
         unattended_guard=still_unused,

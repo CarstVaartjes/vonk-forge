@@ -149,7 +149,6 @@ class FakeLifecycle:
         self,
         installation_id: str,
         *,
-        plan_digest: str,
         actor: str,
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
@@ -1869,12 +1868,11 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     def refuse(_session: Session) -> None:
         raise RuntimeError("a load arrived")
 
-    plan = service.preview_uninstall(installation_id)
+    service.preview_uninstall(installation_id)
     observed_error = None
     try:
         service.uninstall(
             installation_id,
-            plan_digest=plan.plan_digest,
             actor=ACTOR,
             request_id=str(uuid.uuid4()),
             unattended_guard=refuse,
@@ -1895,10 +1893,9 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     assert _ordinals(sessions) == before
     # The refused attempt leaves no queue head or node ownership behind.
     fresh_key = str(uuid.uuid4())
-    fresh_plan = service.preview_uninstall(installation_id)
+    service.preview_uninstall(installation_id)
     service.uninstall(
         installation_id,
-        plan_digest=fresh_plan.plan_digest,
         actor=ACTOR,
         request_id=fresh_key,
     )
@@ -1932,10 +1929,9 @@ def test_the_guard_runs_while_the_target_spark_rows_are_locked(
 
     def remove() -> None:
         try:
-            plan = service.preview_uninstall(installation_id)
+            service.preview_uninstall(installation_id)
             outcome["view"] = service.uninstall(
                 installation_id,
-                plan_digest=plan.plan_digest,
                 actor=ACTOR,
                 request_id=str(uuid.uuid4()),
                 unattended_guard=guard,

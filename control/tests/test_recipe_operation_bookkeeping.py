@@ -1378,7 +1378,6 @@ def test_lost_install_history_completes_exact_cleanup_and_fresh_admission(tmp_pa
     assert uninstall_plan.allowed
     uninstall = service.uninstall(
         installed.owner_id,
-        plan_digest=uninstall_plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
     )
