@@ -483,18 +483,45 @@ class ArtifactJobService(OutputService):
                     str(error), reason=error.typed_reason
                 )
         assert unavailable is not None
+        if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
+            # The draft stays READY; a lost prior job is cancelled by its own
+            # job-scoped exact Stop, which takes no new workload ordinal.
+            self._cancel_lost_prior_jobs(job_id, actor=actor)
+            raise unavailable
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
-            if (
-                job is not None
-                and job.operation_id is None
-                and not ajs.is_ended(job)
-                and not self._available_inputs(session, job)
-            ):
-                # Lost input bytes never return by waiting: the draft ends and
-                # the client uploads again into a fresh draft.
-                return self._end_preparation(session, job)
-        raise unavailable
+            if job is None:
+                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
+            return self._end_preparation(session, job)
+
+    def _cancel_lost_prior_jobs(self, job_id: str, *, actor: str) -> None:
+        with self._sessions() as session:
+            job = session.get(ArtifactJob, job_id)
+            if job is None:
+                return
+            prior_ids = tuple(
+                session.scalars(
+                    select(ArtifactJob.id).where(
+                        ArtifactJob.run_id == job.run_id,
+                        ArtifactJob.id != job_id,
+                        ArtifactJob.operation_id.is_not(None),
+                    )
+                )
+            )
+        for prior_id in prior_ids:
+            try:
+                if "stop" not in self.get(prior_id).supported_actions:
+                    continue
+                self.cancel(
+                    prior_id,
+                    actor=actor,
+                    request_id=str(
+                        uuid.uuid5(uuid.NAMESPACE_URL, f"artifact-lost:{prior_id}")
+                    ),
+                    reason="superseded by a newer submission; effect unconfirmed",
+                )
+            except (ArtifactJobError, UnknownOutcomeError):
+                continue  # the same-key retry asks again
 
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
@@ -561,7 +588,7 @@ class ArtifactJobService(OutputService):
                         # attempt; healthy execution remains queued independently.
                         raise ArtifactJobUnavailableError(
                             "artifact run effect observation is unavailable",
-                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
                         )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (

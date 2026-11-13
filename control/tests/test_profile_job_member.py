@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobUnavailableError
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_items import inventory_items, runtime_value
@@ -701,6 +701,83 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
                     .where(AgentOperation.kind == "recipe.job.run.v1")
                 ).one()
                 == 1
+            )
+    finally:
+        world.close()
+
+
+def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
+    tmp_path: Path, postgres_engine
+) -> None:
+    """A lost job's effect is in doubt: the newest submission waits, then runs.
+
+    The first submit answers a retryable wait and asks for the lost job's own
+    cancellation. The job-scoped exact Stop settles it, and the same-key retry is
+    admitted on the same run: the run, the Spark's ordinal and every other job
+    stay untouched, and no run-level Stop is made.
+
+    Wrong implementation: the submit stopped the whole run (new Spark ordinal),
+    or waited forever for a receipt only an operator's Stop would produce.
+    """
+
+    world = build_world(
+        tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
+    )
+    try:
+        sim = Simulation(world, seed=0, sparks_type=_AgentSparks)
+        sim.round()
+        _member, lost, jobs, _job_id, _loads = _job_in_flight_on_an_offline_spark(
+            tmp_path, world, sim
+        )
+
+        def ordinals() -> list[tuple[str | int, ...]]:
+            with world.sessions() as session:
+                return sorted(
+                    tuple(row)
+                    for row in session.execute(
+                        select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                    )
+                )
+
+        before = ordinals()
+        with pytest.raises(ArtifactJobUnavailableError):
+            submitted_artifact_job(jobs, lost, request_suffix=710)
+        with world.sessions() as session:
+            draft = session.scalar(
+                select(ArtifactJob).where(
+                    ArtifactJob.run_id == lost, ArtifactJob.operation_id.is_(None)
+                )
+            )
+            assert draft is not None and not ajs.is_ended(draft)
+            draft_id = draft.id
+
+        admitted = None
+        for _ in range(30):
+            sim.round()
+            try:
+                admitted = jobs.submit(
+                    draft_id,
+                    actor="operator",
+                    request_id="00000000-0000-4000-8000-000000000711",
+                )
+            except ArtifactJobUnavailableError:
+                continue
+            break
+
+        assert admitted is not None and admitted.operation_id is not None
+        assert ordinals() == before
+        with world.sessions() as session:
+            run = session.get(RecipeRun, lost)
+            assert run is not None and run.state == "running"
+            assert (
+                session.scalar(
+                    select(Job.id).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_id"].as_string() == lost,
+                        Job.payload["execution_mode"].as_string() == "one-shot-jobs",
+                    )
+                )
+                is None
             )
     finally:
         world.close()
