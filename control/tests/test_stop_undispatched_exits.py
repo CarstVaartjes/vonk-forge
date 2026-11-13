@@ -9,17 +9,20 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, AdmissionLockBusy
+from vonk_control.recipe_operations import job_run_stop as job_run_stop_module
 from vonk_control.recipe_operations import stop as stop_module
 from vonk_control.recipe_operations.errors import _RouteNotWithdrawn
 from vonk_control.recipe_operations.interfaces import (
     RecipeOperationView,
     UndispatchedStopView,
 )
+from vonk_control.recipe_operations.job_run_stop import JobRunStopMixin
 from vonk_control.recipe_operations.stop import StopMixin
 from vonk_control.recipe_routes import RecipeRouteError
 from vonk_control.run_admission import RunAdmissionBusy
@@ -222,3 +225,66 @@ def test_lock_timeout_before_any_receipt_is_not_retried(monkeypatch):
             "run-1", plan_digest="digest", actor="admin", request_id="request-1"
         )
     assert len(attempts) == 1
+
+
+class _Deadlock(Exception):
+    sqlstate = "40P01"
+
+
+def test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted(
+    monkeypatch,
+):
+    deadlock = OperationalError("stmt", {}, _Deadlock())
+    monkeypatch.setattr(job_run_stop_module, "_run_is_one_shot", lambda *_a: True)
+    monkeypatch.setattr(
+        stop_module, "admission_attempts", lambda: iter(range(PATIENT_AFTER_RETRIES))
+    )
+
+    def deadlocked_prerequisite(*_a, **_k):
+        raise deadlock
+
+    session = SimpleNamespace(
+        get=lambda *_a, **_k: SimpleNamespace(id="run-1", state="running"),
+        scalar=deadlocked_prerequisite,
+    )
+
+    class Sessions:
+        def __call__(self):
+            return self
+
+        def begin(self):
+            return self
+
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *_exc):
+            return False
+
+    refusals = []
+    service = _Service(routes=_Routes(), dispatch=_raiser(AssertionError))
+    monkeypatch.setattr(service, "_sessions", Sessions(), raising=False)
+    monkeypatch.setattr(
+        service,
+        "_stop_plan_in_session",
+        lambda *_a, **_k: SimpleNamespace(),
+        raising=False,
+    )
+
+    def logical(*args, **kwargs):
+        if refusals:
+            return _view()
+        try:
+            return JobRunStopMixin._stop_logical_job_run(
+                cast(Any, service), *args, **kwargs
+            )
+        except RunAdmissionBusy as busy:
+            refusals.append(busy)
+            raise
+
+    monkeypatch.setattr(service, "_stop_logical_job_run", logical)
+    view = service.stop(
+        "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+    )
+    assert view.id == "stop-1"
+    assert len(refusals) == 1 and refusals[0].__cause__ is deadlock

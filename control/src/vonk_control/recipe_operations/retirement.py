@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     ReservationState,
     RunState,
+    UnknownOutcomeError,
     validate_result_for_operation,
 )
 
@@ -160,6 +161,7 @@ class RetirementMixin:
                 TypeError,
                 KeyError,
                 OSError,
+                UnknownOutcomeError,
             ) as error:
                 # One unavailable or invalid owner never starves unrelated
                 # cleanup. The normal admission path retains its blockers.

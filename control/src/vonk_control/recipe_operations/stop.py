@@ -325,24 +325,29 @@ class StopMixin:
         # the normal bounded Stop continuation owns the external retry.
         service = typing_cast("RecipeOperationService", self)
         now = service._clock()
-        with service._sessions.begin() as session:
-            parent = session.get(Job, parent_id, with_for_update=True)
-            if parent is None:
-                raise RecipeRetryLater("accepted Stop disappeared")
-            service._check_service_stop(session, parent)
-            parent.status_reason = (
-                f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
-            )[:1024]
-            schedule_wait(
-                parent,
-                now + timedelta(seconds=5),
-                now=now,
-                reason=WaitReason.CLEANUP_UNCONFIRMED,
-                detail=parent.status_reason,
-            )
-            parent.updated_at = now
-            session.flush()
-            return UndispatchedStopView.of(service._view(parent, session=session))
+        try:
+            with service._sessions.begin() as session:
+                parent = session.get(Job, parent_id, with_for_update=True)
+                if parent is None:
+                    raise RecipeRetryLater("accepted Stop disappeared")
+                service._check_service_stop(session, parent)
+                parent.status_reason = (
+                    f"accepted exact Stop deferred: {redact_text(str(error))}; next reconciliation at {(now + timedelta(seconds=5)).isoformat()}"
+                )[:1024]
+                schedule_wait(
+                    parent,
+                    now + timedelta(seconds=5),
+                    now=now,
+                    reason=WaitReason.CLEANUP_UNCONFIRMED,
+                    detail=parent.status_reason,
+                )
+                parent.updated_at = now
+                session.flush()
+                return UndispatchedStopView.of(service._view(parent, session=session))
+        except OperationalError as contention:
+            if not is_admission_contention(contention):
+                raise
+            raise RunAdmissionBusy("stop admission is busy") from contention
 
     @staticmethod
     def _service_stop_document(job: Job) -> RecipeStopParent:
