@@ -4429,6 +4429,61 @@ def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error() -> N
     assert isinstance(inner, dict) and len(inner["operations"]) == 4
 
 
+def test_fleet_upgrade_timeout_says_the_job_is_still_running(capsys) -> None:
+    """Catches a timed-out watch that shows a finished Spark as the outcome:
+    one Spark succeeded, one is still queued, so the job is not done."""
+    job_id = "upgrade-job"
+    request_key = "55555555-5555-4555-8555-555555555555"
+    nodes = ["spk_" + letter * 32 for letter in "ab"]
+    client = FakeClient(
+        {
+            ("POST", "/api/fleet/upgrade"): {
+                "action": "upgrade",
+                "state": "queued",
+                "operation_id": job_id,
+                "plan_digest": "a" * 64,
+                "request_key": request_key,
+                "targets": nodes,
+            },
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "state": "queued",
+                "kind": "agent-upgrade",
+                "targets": nodes,
+                "operations": [
+                    {"id": "operation-a", "node_id": nodes[0], "state": "queued"},
+                    {"id": "operation-b", "node_id": nodes[1], "state": "succeeded"},
+                ],
+                "progress": {"running": 1, "completed": 1, "failed": 0, "total": 2},
+            },
+        }
+    )
+
+    status = cli.main(
+        (
+            "fleet",
+            "upgrade",
+            "--all",
+            "--yes",
+            "--request-key",
+            request_key,
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "1",
+        ),
+        control_client=client,
+    )
+
+    captured = capsys.readouterr()
+    assert status == 2
+    assert "The job is still running: 1 / 2 done, not finished." in captured.err
+    assert "Reconnect:" in captured.err
+    assert "State: succeeded" not in captured.out
+    assert "State: queued" in captured.out
+    assert "Spark state: succeeded" in captured.out
+
+
 def test_fleet_upgrade_follow_still_refuses_another_jobs_targets() -> None:
     """The job, kind and target identity checks stay."""
     _status, result = _sticky_upgrade_follow({"targets": ["spk_" + "f" * 32]})

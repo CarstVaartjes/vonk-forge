@@ -183,7 +183,7 @@ def _job(payload: Mapping[str, object]) -> None:
     for operation in _records(payload, "operations"):
         _field("Operation", operation.get("id"))
         _field("Spark", operation.get("node_id"))
-        _field("State", operation.get("state"))
+        _field("Spark state", operation.get("state"))
         _field("Progress", progress_line(operation))
         failure = _optional(operation.get("failure"), "job failure")
         if "code" in failure:
