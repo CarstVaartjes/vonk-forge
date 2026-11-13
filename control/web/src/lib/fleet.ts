@@ -237,6 +237,47 @@ export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSum
   };
 }
 
+/** GPU power now, summed over the online Sparks whose live sample reports it. */
+export function fleetPower(
+  nodes: readonly VisualFleetNode[],
+): { watts: number; reporting: number } | null {
+  const readings = nodes.flatMap((node) => {
+    const watts =
+      node.connection.online_state === "online" ? liveSample(node)?.gpu_power_watts : null;
+    return watts == null ? [] : [Number(formatWire(watts))];
+  });
+  return readings.length
+    ? { watts: readings.reduce((total, watts) => total + watts, 0), reporting: readings.length }
+    : null;
+}
+
+/**
+ * Unified memory summed over the online Sparks that report it. Models and system are summed only when
+ * every counted Spark reports the split; otherwise the sum is Used and Free.
+ */
+export function fleetMemory(
+  nodes: readonly VisualFleetNode[],
+): { split: MemorySplit; reporting: number } | null {
+  const splits = nodes.flatMap((node) => {
+    const split = node.connection.online_state === "online" ? nodeMemorySplit(node) : null;
+    return split ? [split] : [];
+  });
+  if (!splits.length) return null;
+  const sum = (pick: (split: MemorySplit) => WireNumber) =>
+    splits.reduce<WireNumber>((total, split) => addWire(total, pick(split)), 0);
+  const whole = splits.every((split) => split.modelsBytes !== null && split.systemBytes !== null);
+  return {
+    reporting: splits.length,
+    split: {
+      totalBytes: sum((split) => split.totalBytes),
+      usedBytes: sum((split) => split.usedBytes),
+      freeBytes: sum((split) => split.freeBytes),
+      modelsBytes: whole ? sum((split) => split.modelsBytes as WireNumber) : null,
+      systemBytes: whole ? sum((split) => split.systemBytes as WireNumber) : null,
+    },
+  };
+}
+
 /** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */
 export function freeMemoryText(summary: FleetSummary): string | null {
   if (summary.freeMemoryBytes === null) return null;

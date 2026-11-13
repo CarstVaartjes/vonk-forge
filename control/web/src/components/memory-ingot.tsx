@@ -14,10 +14,13 @@ export function MemoryIngot({
   label,
   memory,
   size = "medium",
+  warn = true,
 }: {
   label: string;
   memory: MemorySplit | null;
   size?: "small" | "medium" | "large";
+  /** The 8 / 4 GiB free-memory warning is one Spark's; a fleet sum passes false. */
+  warn?: boolean;
 }) {
   if (!memory) return <span>Not reported</span>;
   const split = memory.modelsBytes !== null && memory.systemBytes !== null;
@@ -32,7 +35,7 @@ export function MemoryIngot({
         { key: "free", word: "Free", bytes: memory.freeBytes },
       ];
   const text = `${parts.map((part) => `${part.word} ${formatBytes(part.bytes)}`).join(", ")} of ${formatBytes(memory.totalBytes)}`;
-  const level = memoryLevel(memory.freeBytes);
+  const level = warn ? memoryLevel(memory.freeBytes) : "ok";
   return (
     <div className="memory-ingot">
       <div

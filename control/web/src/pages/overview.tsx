@@ -7,6 +7,7 @@ import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
 import { AttentionItem } from "../components/attention-item";
+import { FleetPulse } from "../components/fleet-pulse";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { WorkloadUnits } from "../components/workload-units";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -157,6 +158,7 @@ export function OverviewPage({
       {fleet.snapshot && (
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
+      {fleet.snapshot && nodes.length > 0 && <FleetPulse api={api} nodes={nodes} />}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
           title="No Sparks enrolled"

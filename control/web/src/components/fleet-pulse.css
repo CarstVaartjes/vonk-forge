@@ -1,0 +1,23 @@
+.fleet-pulse{display:grid;grid-template-columns:1.25fr 1fr 1.25fr 1fr 1.1fr;margin-top:1rem}
+.pulse-tile{min-width:0;padding:1rem 1.25rem .9rem}
+.pulse-tile+.pulse-tile{border-left:1px solid var(--line)}
+.pulse-label{margin:0;color:var(--faint);font:700 .6875rem/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.pulse-fig{margin:.15rem 0 0;font-size:1.75rem;font-weight:650;letter-spacing:-.03em;line-height:1.15;overflow-wrap:anywhere}
+.pulse-fig small{margin-left:.25em;color:var(--muted);font-size:.5em;font-weight:500;letter-spacing:0}
+.pulse-caption{margin:.1rem 0 0;color:var(--muted);font-size:.8125rem}
+.pulse-tile .memory-ingot{margin-top:.6rem}
+.pulse-tile .ingot-legend{display:none}
+@media(max-width:64rem){
+  .fleet-pulse{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .pulse-tile:nth-child(4){border-left:0}
+  .pulse-tile:nth-child(n+4){border-top:1px solid var(--line)}
+}
+@media(max-width:42rem){
+  .fleet-pulse{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .pulse-tile{padding:.8rem 1rem .75rem}
+  /* The Output tile is dropped: the workload unit below leads with its live number. */
+  .pulse-tile:first-child{display:none}
+  .pulse-tile:nth-child(2),.pulse-tile:nth-child(4){border-left:0}
+  .pulse-tile:nth-child(n+4){border-top:1px solid var(--line)}
+  .pulse-fig{font-size:1.375rem}
+}
