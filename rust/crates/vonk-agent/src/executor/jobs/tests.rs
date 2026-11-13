@@ -669,6 +669,39 @@ fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
 }
 
 #[test]
+fn a_helper_refusal_before_effect_ends_the_job_definite_not_uncertain() {
+    // Wrong implementation: the busy refusal was not classified as refused
+    // before effect, so the job was re-observed, found no container and ended
+    // UncertainEffect.
+    for code in [
+        HelperErrorCode::InstallationReconciliationBusy,
+        HelperErrorCode::ConcurrencyLimit,
+    ] {
+        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+            code,
+            diagnostic: None,
+            process_logs: None,
+        };
+        // Not an authority refusal: the start-reobserve and observation paths
+        // that stop or confirm on authority refusals keep their behaviour.
+        assert!(!refused_before_effect(&error));
+        let refused = refused_job_start(&error).expect("a pre-effect refusal ends the job");
+        let failure = refused.failure().expect("a failure");
+        assert_eq!(
+            failure.failure_kind,
+            Some(AgentFailureKind::TemporaryDependency)
+        );
+        assert_eq!(failure.retry_after_seconds, Some(2));
+    }
+    let possibly_effect = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::OperationFailed,
+        diagnostic: None,
+        process_logs: None,
+    };
+    assert!(refused_job_start(&possibly_effect).is_none());
+}
+
+#[test]
 fn job_outputs_leave_out_the_runtime_cache_mountpoint() {
     // The container runtime creates the cache mountpoint in the host output
     // root, because the cache mount nests inside the `/outputs` bind.
