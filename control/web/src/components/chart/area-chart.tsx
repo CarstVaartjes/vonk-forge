@@ -1,7 +1,7 @@
 import "./chart.css";
 import { useId, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
-import { linearScale, niceTicks, timeLabel } from "./scale";
+import { linePath, linearScale, niceTicks, runsOf, timeLabel, washPath } from "./scale";
 
 export type ChartSeries = {
   key: string;
@@ -83,20 +83,16 @@ export function AreaChart({
     event.preventDefault();
     setCursor(next);
   }
-  const lines = series.map((s) => {
-    let d = "";
-    let pen = false;
-    for (const p of s.points) {
-      if (p.v === null) pen = false;
-      else {
-        d += `${pen ? "L" : "M"}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`;
-        pen = true;
-      }
-    }
-    const finite = s.points.filter((p) => p.v !== null);
-    const tail = finite.at(-1);
-    return { s, d, tail };
+  const drawn = series.map((s) => {
+    const runs = runsOf(s.points, x, y);
+    return { s, runs, tail: runs.at(-1)?.at(-1) };
   });
+  // Each series' samples by time, for the tooltip and the table.
+  const valueAt = new Map(series.map((s) => [s.key, new Map(s.points.map((p) => [p.t, p.v]))]));
+  const readout = (s: ChartSeries, t: number) => {
+    const value = valueAt.get(s.key)?.get(t);
+    return value === null || value === undefined ? "no sample" : format(value);
+  };
   const tooltipAt = at === null ? null : x(at) / W;
   return (
     <div className="chart">
@@ -138,7 +134,7 @@ export function AreaChart({
               </text>
             </g>
           )}
-          {series.length === 1 && lines[0].d && (
+          {series.length === 1 && (
             <>
               <defs>
                 <linearGradient id={gradient} x1="0" y1="0" x2="0" y2="1">
@@ -146,20 +142,17 @@ export function AreaChart({
                   <stop offset="1" style={{ stopColor: series[0].color, stopOpacity: 0 }} />
                 </linearGradient>
               </defs>
-              <path
-                d={`${lines[0].d}L${x(lines[0].tail?.t ?? start)} ${y(domain[0])}L${LEFT} ${y(domain[0])}Z`}
-                fill={`url(#${gradient})`}
-              />
+              <path d={washPath(drawn[0].runs, y(domain[0]))} fill={`url(#${gradient})`} />
             </>
           )}
-          {lines.map(({ s, d, tail }) => (
+          {drawn.map(({ s, runs, tail }) => (
             <g key={s.key}>
-              {d && <path className="chart-line" d={d} style={{ stroke: s.color }} />}
-              {tail && tail.v !== null && (
+              <path className="chart-line" d={linePath(runs)} style={{ stroke: s.color }} />
+              {tail && (
                 <circle
                   className="chart-dot"
-                  cx={x(tail.t)}
-                  cy={y(tail.v)}
+                  cx={tail[0]}
+                  cy={tail[1]}
                   r="4"
                   style={{ fill: s.color }}
                 />
@@ -170,14 +163,14 @@ export function AreaChart({
             <g className="chart-crosshair">
               <line x1={x(at)} x2={x(at)} y1={TOP} y2={H - BOTTOM} />
               {series.flatMap((s) => {
-                const p = s.points.find((point) => point.t === at && point.v !== null);
-                return p && p.v !== null
+                const value = valueAt.get(s.key)?.get(at);
+                return value !== null && value !== undefined
                   ? [
                       <circle
                         key={s.key}
                         className="chart-dot"
                         cx={x(at)}
-                        cy={y(p.v)}
+                        cy={y(value)}
                         r="4"
                         style={{ fill: s.color }}
                       />,
@@ -195,14 +188,11 @@ export function AreaChart({
             data-flipped={tooltipAt > 0.6}
           >
             <strong>{timeLabel(at, span)}</strong>
-            {series.map((s) => {
-              const p = s.points.find((point) => point.t === at);
-              return (
-                <span key={s.key}>
-                  {s.name}: {p && p.v !== null ? format(p.v) : "no sample"}
-                </span>
-              );
-            })}
+            {series.map((s) => (
+              <span key={s.key}>
+                {s.name}: {readout(s, at)}
+              </span>
+            ))}
           </div>
         )}
       </div>
@@ -231,10 +221,9 @@ export function AreaChart({
             {times.map((t) => (
               <tr key={t}>
                 <th scope="row">{timeLabel(t, span)}</th>
-                {series.map((s) => {
-                  const p = s.points.find((point) => point.t === t);
-                  return <td key={s.key}>{p && p.v !== null ? format(p.v) : "no sample"}</td>;
-                })}
+                {series.map((s) => (
+                  <td key={s.key}>{readout(s, t)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
