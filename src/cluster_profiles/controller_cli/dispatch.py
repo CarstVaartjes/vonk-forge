@@ -10,6 +10,7 @@ from .common import ControllerClient, _quoted, _request_key
 from .confirmation import _confirm_action
 from .fleet import _fleet
 from .library import _model, _recipe
+from .metrics import _metrics
 from .profile import _profile
 from .run import _run
 
@@ -26,6 +27,8 @@ def run_controller(
         return _run(args, client, request_id_factory)
     if command == "fleet":
         return _fleet(args, client, request_id_factory)
+    if command == "metrics":
+        return _metrics(args, client)
     if command == "model":
         return _model(args, client, request_id_factory)
     if command == "recipe":

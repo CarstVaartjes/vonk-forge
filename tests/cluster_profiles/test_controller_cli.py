@@ -827,6 +827,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
         "recipe",
         "profile",
         "platform",
+        "metrics",
         "key",
         "run",
         "update",

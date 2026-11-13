@@ -4,6 +4,7 @@ from .cli_render import render_payload
 
 COMMAND_ACTIONS = {
     "platform": (None,),
+    "metrics": (None, "show"),
     "fleet": (
         None,
         "detail",

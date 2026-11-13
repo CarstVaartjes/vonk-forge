@@ -31,6 +31,9 @@ from .common import (
     _watch_controls,
 )
 
+#: The ranges `GET /api/metrics/series` accepts.
+METRIC_RANGES = ("1h", "6h", "24h", "7d", "30d")
+
 
 def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
@@ -40,6 +43,25 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "platform", help="Actual Controller processes and installed contracts"
     )
     _add_output(platform)
+    metrics = commands.add_parser(
+        "metrics",
+        help="Trends: what each metric is and how it moved",
+        description="Metrics the Controller serves, described by its catalogue.",
+        epilog="Without a command, lists the metrics.",
+    )
+    _add_output(metrics)
+    metrics_actions = metrics.add_subparsers(
+        dest="metrics_action", parser_class=type(metrics)
+    )
+    show = metrics_actions.add_parser("show", help="One metric over a time range")
+    show.add_argument("metric", help="A name from `vonkctl metrics`")
+    show.add_argument("--range", choices=METRIC_RANGES, default="24h")
+    show.add_argument(
+        "--spark",
+        metavar="SPARK",
+        help="Only this Spark (exact selector or friendly name)",
+    )
+    _add_output(show)
     fleet = commands.add_parser(
         "fleet",
         help="Sparks, their health, and what they run",
