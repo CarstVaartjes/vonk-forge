@@ -1,10 +1,14 @@
 import "./workload-unit.css";
 import type { ReactNode } from "react";
+import { RunState } from "../api/vocabulary.generated";
 import type { WorkloadGroup } from "../lib/fleet";
 import { StatusPill, type StatusTone } from "./status-pill";
 
+/** The run's state word (a RunState, or `degraded` / `state unknown` from `runStateWord`) as a tone. */
 const STATE_TONES: Record<string, StatusTone> = {
-  running: "ok",
+  [RunState.RUNNING]: "ok",
+  [RunState.FAILED]: "bad",
+  [RunState.LOST]: "bad",
   degraded: "warn",
   "state unknown": "neutral",
 };
