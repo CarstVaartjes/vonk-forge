@@ -263,3 +263,34 @@ test("without any verdict the toggle is disabled and the strip says so", () => {
   expect(screen.getByText(/has not assessed placement/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Fits my fleet now: 0 models" })).toBeDisabled();
 });
+
+test("the header gives the online Sparks' total and free memory with the fleet bar, and says what it covers", () => {
+  const GIB = 1024 ** 3;
+  const node = (id: string, online: boolean) => ({
+    id,
+    connection: { online_state: online ? "online" : "offline" },
+    telemetry: online
+      ? { sample: { memory_total_bytes: 100 * GIB, memory_available_bytes: 20 * GIB } }
+      : null,
+  });
+  const fleet = {
+    nodes: [node("a", true), node("b", true), node("c", false)],
+  } as unknown as VisualFleetSnapshot;
+  render(
+    <LibrarySetupStrip
+      fleet={fleet}
+      records={records}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByText(
+      /2 of 3 Sparks online · 200\.0 GiB unified memory · 40\.0 GiB unified memory free/,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "Fleet unified memory" })).toBeInTheDocument();
+  expect(screen.getByText("2 Sparks")).toBeInTheDocument();
+});

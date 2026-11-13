@@ -1,7 +1,7 @@
 import "./fleet-pulse.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
-import { fleetMemory, fleetPower, formatBytes } from "../lib/fleet";
+import { coverageText, fleetMemory, fleetPower, formatBytes } from "../lib/fleet";
 import { compactCount, modelTotals } from "../lib/metric-units";
 import { GPU_ONLY_CAPTION } from "./energy-card";
 import { Estimate } from "./estimate";
@@ -35,12 +35,6 @@ function Tile({
   );
 }
 
-/** "both Sparks", or how many of the online Sparks the figure covers. */
-function coverage(reporting: number, online: number): string {
-  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
-  return `${reporting} of ${online} online Sparks`;
-}
-
 /**
  * Five fleet figures in one band. Each is a Controller reading or a plain sum of Spark readings (GPU
  * power now, unified memory) or the Controller's fleet total (tokens); a figure with no reading says
@@ -66,7 +60,7 @@ export function FleetPulse({
         label="GPU power"
         figure={power ? power.watts.toFixed(1) : NOT_REPORTED}
         unit={power ? "W" : undefined}
-        caption={power ? coverage(power.reporting, online) : undefined}
+        caption={power ? coverageText(power.reporting, online) : undefined}
       />
       <Tile
         label="Unified memory"
@@ -76,7 +70,7 @@ export function FleetPulse({
           memory
             ? memory.split.modelsBytes !== null
               ? `${formatBytes(memory.split.modelsBytes)} in models`
-              : coverage(memory.reporting, online)
+              : coverageText(memory.reporting, online)
             : undefined
         }
       >

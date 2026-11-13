@@ -325,6 +325,12 @@ export function fleetMemory(
   };
 }
 
+/** "2 Sparks", or how many of the online Sparks a fleet figure covers. */
+export function coverageText(reporting: number, online: number): string {
+  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
+  return `${reporting} of ${online} online Sparks`;
+}
+
 /** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */
 export function freeMemoryText(summary: FleetSummary): string | null {
   if (summary.freeMemoryBytes === null) return null;
