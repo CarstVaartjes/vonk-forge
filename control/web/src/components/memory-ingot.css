@@ -1,5 +1,5 @@
 .ingot{display:flex;gap:2px;height:.875rem;overflow:hidden;border-radius:var(--r-pill)}
-.ingot-small{height:.5rem}
+.ingot-small{height:.5rem}.ingot-tall{height:2.25rem;border-radius:var(--r-ctl)}
 .ingot i{display:block;height:100%;min-width:3px}
 .ingot-models{background:var(--mem-model)}.ingot-used{background:var(--mem-model)}.ingot-system{background:var(--mem-system)}.ingot-free{background:var(--track)}
 .ingot-legend{display:flex;flex-wrap:wrap;gap:.25rem 1rem;margin:.45rem 0 0;padding:0;list-style:none;color:var(--muted);font-size:.8125rem}

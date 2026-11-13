@@ -1,9 +1,10 @@
 import { createContext, useContext, useMemo } from "react";
 import type { ReactNode } from "react";
 import type { LibraryVocabulary } from "../api/types";
+import { NOT_REPORTED_TEXT } from "../lib/fleet";
 
 /** The word shown where a Model or Recipe declares no capabilities. */
-export const NOT_REPORTED = "Not reported";
+export const NOT_REPORTED = NOT_REPORTED_TEXT;
 
 const VocabularyContext = createContext<LibraryVocabulary | null>(null);
 

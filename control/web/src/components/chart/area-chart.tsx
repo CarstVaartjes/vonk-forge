@@ -34,6 +34,7 @@ export function AreaChart({
   threshold,
   live = false,
   emptyText = "No samples in this range",
+  crosshair,
 }: {
   title: string;
   /** The sentence that names the chart to assistive technology. */
@@ -46,9 +47,13 @@ export function AreaChart({
   /** The newest reading is live: the end dot gets a halo (off under reduced motion). */
   live?: boolean;
   emptyText?: string;
+  /** Charts of one page share a cursor time: the page holds it, each chart snaps to its own nearest sample. */
+  crosshair?: { at: number | null; onChange(at: number | null): void };
 }) {
   const gradient = useId();
-  const [cursor, setCursor] = useState<number | null>(null);
+  const [ownAt, setOwnAt] = useState<number | null>(null);
+  const cursorTime = crosshair ? crosshair.at : ownAt;
+  const setCursorTime = crosshair ? crosshair.onChange : setOwnAt;
   const [table, setTable] = useState(false);
   const times = [
     ...new Set(series.flatMap((s) => s.points.flatMap((p) => (p.v === null ? [] : [p.t])))),
@@ -60,18 +65,20 @@ export function AreaChart({
   const x = linearScale([start, end], [LEFT, W - RIGHT]);
   const y = linearScale(domain, [H - BOTTOM, TOP]);
   const span = end - start;
-  const at = cursor === null ? null : times[cursor];
+  const at =
+    cursorTime === null
+      ? null
+      : times.reduce((nearest, t) =>
+          Math.abs(t - cursorTime) < Math.abs(nearest - cursorTime) ? t : nearest,
+        );
+  const cursor = at === null ? null : times.indexOf(at);
 
   function move(event: PointerEvent<SVGSVGElement>) {
     const box = event.currentTarget.getBoundingClientRect();
     if (!box.width) return;
-    const t =
-      start + ((((event.clientX - box.left) / box.width) * W - LEFT) / (W - LEFT - RIGHT)) * span;
-    let nearest = 0;
-    times.forEach((time, i) => {
-      if (Math.abs(time - t) < Math.abs(times[nearest] - t)) nearest = i;
-    });
-    setCursor(nearest);
+    setCursorTime(
+      start + ((((event.clientX - box.left) / box.width) * W - LEFT) / (W - LEFT - RIGHT)) * span,
+    );
   }
   function key(event: KeyboardEvent<SVGSVGElement>) {
     const last = times.length - 1;
@@ -81,10 +88,10 @@ export function AreaChart({
       Home: 0,
       End: last,
     }[event.key];
-    if (event.key === "Escape") setCursor(null);
+    if (event.key === "Escape") setCursorTime(null);
     if (next === undefined) return;
     event.preventDefault();
-    setCursor(next);
+    setCursorTime(times[next] as number);
   }
   const drawn = series.map((s) => {
     const runs = runsOf(s.points, x, y);
@@ -106,9 +113,9 @@ export function AreaChart({
           aria-label={label}
           tabIndex={0}
           onPointerMove={move}
-          onPointerLeave={() => setCursor(null)}
+          onPointerLeave={() => setCursorTime(null)}
           onKeyDown={key}
-          onBlur={() => setCursor(null)}
+          onBlur={() => setCursorTime(null)}
         >
           {ticks.map((tick) => (
             <g key={tick}>
