@@ -167,9 +167,16 @@ def test_lost_runtime_report_adopts_after_lease_without_reexecution_or_renewal(
     assert claim_agent(queue, NODE_A, "serial-a") is None
 
 
-@pytest.mark.parametrize("kind", RUNTIME_KINDS)
 @pytest.mark.parametrize(
-    "change", ["identity", "revoked", "attempt", "cancel", "owner"]
+    ("change", "kind"),
+    [
+        (change, kind)
+        for change in ("identity", "revoked", "attempt", "cancel", "owner")
+        for kind in RUNTIME_KINDS
+        # A JobRun is fenced by its run, never by its Spark's intent
+        # (``test_another_runs_load_keeps_a_jobruns_late_receipt``).
+        if (change, kind) != ("owner", Kind.RECIPE_JOB_RUN)
+    ],
 )
 def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
     # Wrong implementation: a syntactically valid receipt overwrote a newer
@@ -196,13 +203,23 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
         assert str(error)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None
-        if kind is Kind.RECIPE_JOB_RUN and change == "owner":
-            # A JobRun is fenced by its run, never by its Spark's intent:
-            # another run's load on the Spark keeps the job's own receipt.
-            assert row.state == LifecycleState.SUCCEEDED
-        else:
-            assert row.state != LifecycleState.SUCCEEDED
+        assert row is not None and row.state != LifecycleState.SUCCEEDED
+
+
+def test_another_runs_load_keeps_a_jobruns_late_receipt(service):
+    # Wrong implementation: a JobRun was fenced by its Spark's workload intent,
+    # so another run's load on the Spark refused the job's own late receipt.
+    queue, sessions, _clock, _owner, operation, _claim, receipt = _accepted(
+        service, Kind.RECIPE_JOB_RUN
+    )
+    with sessions.begin() as session:
+        node = session.get(AgentNode, NODE_A)
+        assert node is not None
+        node.workload_intent_ordinal += 1
+    assert queue.record_late_result(receipt)
+    with sessions() as session:
+        row = session.get(AgentOperation, operation.id)
+        assert row is not None and row.state == LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -407,9 +424,17 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     # intent, so another run's load (before it was queued, or while it ran)
     # left the cancelled job's container behind. A JobRun's container belongs
     # to its job and run, never to the Spark's intent.
-    from vonk_agent_protocol import RecipeStopPayload
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
+    from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
+    from vonk_control.host_helper_authority import (
+        HostHelperGrantIssuer,
+        HostRuntimeAuthorityService,
+    )
 
-    sessions, operations, artifacts, queue, _clock, job, _run_id, node_id = (
+    from .agent_grant_requests import stop_grant_request
+
+    sessions, operations, artifacts, queue, clock, job, _run_id, node_id = (
         _cancelled_job(tmp_path, postgres_engine)
     )
 
@@ -424,7 +449,22 @@ def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
     stop = claim_agent(queue, node_id, "serial-0")
     assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
     assert stop.payload.target_runtime_id == job.id
+    request = stop_grant_request(stop.payload, fence=stop.fence)
     newer_load()
+    grant = HostRuntimeAuthorityService(
+        sessions,
+        HostHelperGrantIssuer(
+            ed25519.Ed25519PrivateKey.from_private_bytes(bytes([19]) * 32), clock=clock
+        ),
+        clock=clock,
+    ).issue_grant(
+        node_id=node_id,
+        certificate_serial="serial-0",
+        action=ContainerRuntimeAction.STOP,
+        **request.model_dump(mode="python", exclude={"action"}),
+    )
+    assert isinstance(grant.claims.operation, ExecuteContainerRuntimeRequestOperation)
+    assert grant.claims.operation.runtime_target_id == job.id
     queue.record_result(
         AgentResult(
             fence=stop.fence,
