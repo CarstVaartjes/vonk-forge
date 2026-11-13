@@ -597,8 +597,9 @@ class ProfileJobRunStopMixin:
             ):
                 # Damaged order bookkeeping: a re-plan reads the same rows, so
                 # it never holds the Stop (a Spark reports its cancel only under
-                # a parent that names it). The Stop's newer intent fences the
-                # order, and the job settles once its run has ended.
+                # a parent that names it). Its run fences the order: the host
+                # grant refuses its container once the run has ended, and the
+                # job settles then.
                 retire_as_unknown(
                     "recipe.artifact-job",
                     artifact.id,
@@ -633,10 +634,12 @@ class ProfileJobRunStopMixin:
                 read_row_column(parent, "result")
             )
             if deadline is None:
-                # The newer intent fenced the order, yet it records no
-                # cancellation to wait for, and a re-plan reads the same rows.
-                # The Spark's heartbeat ends a fenced order that records none,
-                # and the exact JobRun Stop ends a job whose runtime may remain.
+                # The run Stop's cancellation
+                # (``request_run_job_cancellation_in_session``) recorded none
+                # on this order, and a re-plan reads the same rows. The run
+                # fences it (the host grant refuses its container once the run
+                # has ended), and the exact JobRun Stop ends a job whose
+                # runtime may remain.
                 retire_as_unknown(
                     "recipe.artifact-job",
                     artifact.id,
@@ -644,7 +647,7 @@ class ProfileJobRunStopMixin:
                     "artifact job order records no cancellation",
                 )
                 continue
-            # The order carries the superseding cancel: the job mirrors it
+            # The order carries the run Stop's cancel: the job mirrors it
             # (``cancelling``, or ended already) and reports the wait. A job
             # whose link names another order is never projected from that one.
             if not off_link:

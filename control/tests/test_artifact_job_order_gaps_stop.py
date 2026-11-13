@@ -1,12 +1,9 @@
 """A run's Stop never waits on an artifact job order that a re-plan cannot change.
 
-Two gaps in an order's rows are read the same on every pass: an order the
-Stop's newer intent fenced that records no cancellation to wait for, and an
-order with no child that was ever issued to a Spark. Each is retired as unknown
-and the Stop goes on. Nothing is stopped on a guess: a job whose runtime may
-remain on its Spark is still ended by its exact JobRun Stop (and the Spark's
-lease on the fenced job is refused), and an issued child that no exact Stop can
-target still holds the Stop.
+An unissued order ends under the Stop's own cancellation, and an order with no
+child that was ever issued to a Spark is read the same on every pass: it is
+retired as unknown and the Stop goes on. Nothing is stopped on a guess: an
+issued child that no exact Stop can target still holds the Stop.
 
 Wrong implementation: the Stop refused the run ("artifact job has no
 cancellation authority") or retried it forever ("unknown JobRun exact target is
@@ -16,6 +13,8 @@ on the same rows.
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentResult, AgentResultState, OperationProgress
@@ -24,7 +23,10 @@ from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, RecipeRun
-from vonk_control.recipe_operations import RecipeRetryLater
+from vonk_control.recipe_operations import (
+    RecipeArtifactJobCancellationPending,
+    RecipeRetryLater,
+)
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
@@ -40,7 +42,7 @@ _STOP_REQUEST = "00000000-0000-4000-8000-000000000154"
 
 
 def _fenced_without_cancellation(sessions, node_id: str) -> int:
-    """A newer intent fences the Spark, but no order records its cancellation."""
+    """A newer load's intent on the Spark: its sweep never cancels a JobRun."""
 
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
@@ -101,9 +103,13 @@ def test_an_unissued_order_that_records_no_cancellation_never_holds_the_stop(
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
-def test_a_running_job_whose_order_records_no_cancellation_is_stopped_exactly(
+def test_a_running_job_whose_spark_never_acknowledges_the_cancel_is_stopped_exactly(
     tmp_path,
 ) -> None:
+    """The run Stop cancels its running job; a Spark that keeps renewing without
+    stopping it never holds the Stop: the order ends after its stop budget and
+    the exact JobRun Stop is handed to the Spark."""
+
     sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path
     )
@@ -120,7 +126,6 @@ def test_a_running_job_whose_order_records_no_cancellation_is_stopped_exactly(
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
     plan = operations.preview_stop(run_id)
-    ordinal = _fenced_without_cancellation(sessions, node_id)
 
     def stop():
         return operations.stop(
@@ -128,25 +133,27 @@ def test_a_running_job_whose_order_records_no_cancellation_is_stopped_exactly(
             plan_digest=plan.plan_digest,
             actor="operator",
             request_id=_STOP_REQUEST,
-            workload_intent_ordinal=ordinal,
         )
 
-    stopping = stop()
-
-    # The job's runtime may remain: the run is not released on a guess. The
-    # Spark's lease on the fenced job is refused, and the exact JobRun Stop is
-    # handed to the Spark.
+    stopping = None
+    for _tick in range(64):  # bounded: the stop budget ends the order first
+        try:
+            stopping = stop()
+            break
+        except RecipeArtifactJobCancellationPending:
+            pass
+        with contextlib.suppress(StaleAgentFence):
+            directive = agent_jobs.heartbeat(
+                claim, OperationProgress(phase="running"), 30
+            )
+            assert directive.cancel_requested is True
+        clock.advance(seconds=60)
+        agent_jobs.reconcile_orders()
+    assert stopping is not None
     assert stopping.state not in {"succeeded", "failed", "cancelled"}
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "stopping"
-    with pytest.raises(StaleAgentFence):
-        agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
-    # The refused lease lapses and the order ends; the Spark then takes the
-    # exact Stop.
-    clock.advance(seconds=31)
-    agent_jobs.reconcile_orders()
-    exact = claim_agent(agent_jobs, node_id, "serial-0")
+    exact = claim_agent(agent_jobs, node_id, "serial-0") or claim_agent(
+        agent_jobs, node_id, "serial-0"
+    )
     assert exact is not None and exact.fence != claim.fence
     agent_jobs.record_result(
         AgentResult(

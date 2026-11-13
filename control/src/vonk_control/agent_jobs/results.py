@@ -41,6 +41,7 @@ from .contracts import (
     AgentFence,
     StaleAgentFence,
     StaleAgentRequest,
+    fencing_intent,
 )
 from .evidence import (
     _failure_result,
@@ -220,11 +221,9 @@ def record_late_result(
             evidence
         ):
             return False
-        superseded_intent = (
-            operation.kind not in CLEANUP_KINDS
-            and operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
-        )
+        superseded_intent = operation.kind not in CLEANUP_KINDS and fencing_intent(
+            operation
+        ) not in {None, node.workload_intent_ordinal}
         if adopt_observation_receipt(
             self,
             session,

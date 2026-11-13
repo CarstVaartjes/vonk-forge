@@ -47,9 +47,9 @@ _WORKLOAD_INTENT_KINDS = frozenset(
         WireAgentOperation.RECIPE_STOP.value,
         WireAgentOperation.RECIPE_UNINSTALL.value,
         WireAgentOperation.RECIPE_RECONCILE.value,
-        WireAgentOperation.RECIPE_JOB_RUN.value,
     }
 )
+# A JobRun takes no workload intent: its run fences it (``_WORKLOAD_INTENT_OPERATIONS``).
 
 
 # A child of these kinds is granted its container Start or Stop only when its

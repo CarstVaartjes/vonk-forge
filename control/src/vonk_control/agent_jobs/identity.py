@@ -40,6 +40,7 @@ from .contracts import (
     AgentContactIdentityMismatch,
     AgentFence,
     StaleAgentFence,
+    fencing_intent,
 )
 from .stored import column_field, column_is_document, column_value
 
@@ -134,14 +135,13 @@ def _active(
             != column_field(parent, "payload", "workload_intent_ordinal")
         )
         or (
-            operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            (intent := fencing_intent(operation)) is not None
+            and intent != node.workload_intent_ordinal
             # A cleanup order keeps the intent it was admitted under.
             and operation.kind not in CLEANUP_KINDS
             and not (
                 allow_superseded_cancellation
-                and operation.kind in _WORKLOAD_INTENT_OPERATIONS
-                and operation.workload_intent_ordinal < node.workload_intent_ordinal
+                and intent < node.workload_intent_ordinal
                 and column_is_document(parent, "result")
                 and column_field(parent, "result", "cancel_requested") is True
             )

@@ -40,7 +40,11 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
-from .contracts import _TERMINAL_PARENT_STATES, _WORKLOAD_INTENT_OPERATIONS
+from .contracts import (
+    _TERMINAL_PARENT_STATES,
+    _WORKLOAD_INTENT_OPERATIONS,
+    fencing_intent,
+)
 from .endings import end_unobserved_order
 from .evidence import _failure_result
 from .retry import _retry_authorized_for_current_attempt, schedule_agent_upgrade_retry
@@ -335,9 +339,8 @@ def _claim_has_authority(
         or (
             # A cleanup order keeps the intent it was admitted under.
             current_operation.kind not in CLEANUP_KINDS
-            and current_operation.workload_intent_ordinal is not None
-            and current_operation.workload_intent_ordinal
-            != node.workload_intent_ordinal
+            and fencing_intent(current_operation)
+            not in {None, node.workload_intent_ordinal}
         )
     ):
         self._record_claim_refusal(

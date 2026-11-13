@@ -144,17 +144,34 @@ def holds_claim(queued: StoredOperation, holder: StoredOperation) -> bool:
     return holder.kind not in OFF_LANE_OPERATIONS or mutations_conflict(queued, holder)
 
 
+#: Orders a Spark's workload intent fences. A JobRun is never one: it belongs
+#: to its run and is fenced by that run (RUNNING, its RunNode RUNNING, its
+#: generation), so a load or Stop of another run on the Spark never cancels it.
+#: The run's own Stop cancels exactly its jobs
+#: (``request_run_job_cancellation_in_session``).
 _WORKLOAD_INTENT_OPERATIONS = frozenset(
     {
         AgentOperation.RECIPE_INSTALL.value,
         AgentOperation.ARTIFACT_DISTRIBUTION.value,
         AgentOperation.RECIPE_START.value,
-        AgentOperation.RECIPE_JOB_RUN.value,
         AgentOperation.RECIPE_STOP.value,
         AgentOperation.RECIPE_UNINSTALL.value,
         AgentOperation.RECIPE_RECONCILE.value,
     }
 )
+
+
+def fencing_intent(operation: StoredOperation) -> int | None:
+    """The Spark workload intent that fences ``operation``, if any.
+
+    Decided by its kind, never by the ordinal column alone: an order of any
+    other kind is never superseded by an intent, whatever ordinal it carries
+    (a JobRun an older Controller stamped with one keeps running).
+    """
+
+    if operation.kind not in _WORKLOAD_INTENT_OPERATIONS:
+        return None
+    return operation.workload_intent_ordinal
 
 
 _TERMINAL_PARENT_STATES = frozenset(

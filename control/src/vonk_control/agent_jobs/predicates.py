@@ -33,6 +33,7 @@ from .contracts import (
     _CLAIM_NOTE_PREFIX,
     _CLAIM_REFUSAL_PREFIX,
     _MAX_CLAIM_REFUSAL_REASON,
+    _WORKLOAD_INTENT_OPERATIONS,
 )
 
 
@@ -283,6 +284,8 @@ def _claim_predicate(now: datetime) -> _ClaimPredicate:
                     == AgentNode.workload_intent_ordinal,
                     # A cleanup order keeps the intent it was admitted under.
                     StoredOperation.kind.in_(CLEANUP_KINDS),
+                    # Only a workload-intent kind is fenced by it (``fencing_intent``).
+                    StoredOperation.kind.not_in(_WORKLOAD_INTENT_OPERATIONS),
                 ),
             ),
             _ClaimCondition(

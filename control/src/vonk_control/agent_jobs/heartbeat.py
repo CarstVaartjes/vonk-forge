@@ -36,6 +36,7 @@ from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     PROGRESSING_LEASE,
     AgentFence,
+    fencing_intent,
 )
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
@@ -77,8 +78,7 @@ def heartbeat(
         superseded = bool(
             node is not None
             and operation.kind not in CLEANUP_KINDS
-            and operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            and fencing_intent(operation) not in {None, node.workload_intent_ordinal}
         )
         if superseded:
             cancellation_deadline = superseded_cancellation_deadline(

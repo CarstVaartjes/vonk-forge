@@ -87,6 +87,7 @@ from .contracts import (
     AgentResultRefused,
     ResultConsumer,
     SupersededAgentEffect,
+    fencing_intent,
 )
 from .endings import end_unobserved_order
 from .evidence import sanitized_failure_report
@@ -117,6 +118,7 @@ from .stored import column_value
 from .supersession import (
     abandon_superseded_idempotent_operations_in_session,
     assess_superseded_agent_effects_in_session,
+    request_run_job_cancellation_in_session,
     request_superseded_workload_cancellation_in_session,
 )
 from .waits import refresh_queue_waits
@@ -213,6 +215,18 @@ class AgentJobService:
     ) -> None:
         return request_superseded_workload_cancellation_in_session(
             session, targets, ordinal, now
+        )
+
+    @staticmethod
+    def request_run_job_cancellation_in_session(
+        session: Session,
+        run_id: str,
+        targets: Sequence[str],
+        ordinal: int,
+        now: datetime,
+    ) -> None:
+        return request_run_job_cancellation_in_session(
+            session, run_id, targets, ordinal, now
         )
 
     @staticmethod
@@ -601,8 +615,8 @@ class AgentJobService:
             superseded = bool(
                 node is not None
                 and operation.kind not in CLEANUP_KINDS
-                and operation.workload_intent_ordinal is not None
-                and operation.workload_intent_ordinal != node.workload_intent_ordinal
+                and fencing_intent(operation)
+                not in {None, node.workload_intent_ordinal}
             )
             if superseded:
                 cancellation_deadline = superseded_cancellation_deadline(
