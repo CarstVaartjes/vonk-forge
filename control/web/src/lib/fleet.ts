@@ -362,9 +362,12 @@ function liveSample(node: VisualFleetNode) {
 }
 
 /** Used and total memory of the Spark, from the live sample when there is one. */
-export function nodeMemory(
-  node: VisualFleetNode,
-): { usedPercent: number; usedBytes: WireNumber; totalBytes: WireNumber } | null {
+export function nodeMemory(node: VisualFleetNode): {
+  usedPercent: number;
+  usedBytes: WireNumber;
+  freeBytes: WireNumber;
+  totalBytes: WireNumber;
+} | null {
   const sample = liveSample(node);
   const total = sample ? sample.memory_total_bytes : node.inventory?.host_memory_total_bytes;
   const free = sample ? sample.memory_available_bytes : node.inventory?.host_memory_free_bytes;
@@ -373,12 +376,54 @@ export function nodeMemory(
   return {
     usedPercent: halfUp(100 * displayRatio(used, total)),
     usedBytes: used,
+    freeBytes: free,
     totalBytes: total,
   };
 }
 
 export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
+}
+
+const GIB = 1024 ** 3;
+/** Free unified memory under this is a warning; the memory guard acts on the same figure. */
+const MEMORY_WARN_FREE_BYTES = 8 * GIB;
+const MEMORY_SERIOUS_FREE_BYTES = 4 * GIB;
+
+export type MemoryLevel = "ok" | "warn" | "serious";
+
+/** Memory is judged by what is left, not by what is used: a model that owns the Spark is the normal state. */
+export function memoryLevel(freeBytes: WireNumber): MemoryLevel {
+  if (compareWire(freeBytes, MEMORY_SERIOUS_FREE_BYTES) < 0) return "serious";
+  return compareWire(freeBytes, MEMORY_WARN_FREE_BYTES) < 0 ? "warn" : "ok";
+}
+
+/**
+ * Where a Spark's unified memory goes. Models and system are what the Spark reported; when it did not
+ * report both, they are null and the caller shows Used and Free only.
+ */
+export type MemorySplit = {
+  totalBytes: WireNumber;
+  freeBytes: WireNumber;
+  usedBytes: WireNumber;
+  modelsBytes: WireNumber | null;
+  systemBytes: WireNumber | null;
+};
+
+export function nodeMemorySplit(node: VisualFleetNode): MemorySplit | null {
+  const memory = nodeMemory(node);
+  if (!memory) return null;
+  const sample = liveSample(node);
+  const models = sample?.gpu_process_memory_bytes;
+  const system = sample?.system_memory_bytes;
+  const reported = isWireNumber(models) && isWireNumber(system);
+  return {
+    totalBytes: memory.totalBytes,
+    usedBytes: memory.usedBytes,
+    freeBytes: memory.freeBytes,
+    modelsBytes: reported ? models : null,
+    systemBytes: reported ? system : null,
+  };
 }
 
 /** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
@@ -419,7 +464,7 @@ export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital;
       ? {
           percent: memory.usedPercent,
           text: `${formatBytes(memory.usedBytes)} of ${formatBytes(memory.totalBytes)} (${memory.usedPercent}%)`,
-          amber: memory.usedPercent >= 90,
+          amber: memoryLevel(memory.freeBytes) !== "ok",
         }
       : NOT_REPORTED,
     disk:

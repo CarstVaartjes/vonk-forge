@@ -1,0 +1,9 @@
+.ingot{display:flex;gap:2px;height:.875rem}
+.ingot-small{height:.5rem}.ingot-large{height:1.75rem}
+.ingot i{display:block;height:100%;min-width:3px;border-radius:3px}
+.ingot i:first-child{border-radius:7px 3px 3px 7px}.ingot i:last-child{border-radius:3px 7px 7px 3px}
+.ingot-models{background:var(--mem-model)}.ingot-used{background:var(--mem-model)}.ingot-system{background:var(--mem-system)}.ingot-free{background:var(--track)}
+.ingot-legend{display:flex;flex-wrap:wrap;gap:.25rem 1rem;margin:.45rem 0 0;padding:0;list-style:none;color:var(--muted);font-size:.8125rem}
+.ingot-legend strong{color:var(--ink);font-weight:600}
+.ingot-key{display:inline-block;width:.6rem;height:.6rem;margin-right:.35rem;border-radius:3px}
+@media(forced-colors:active){.ingot i{forced-color-adjust:none;background:CanvasText;border:1px solid CanvasText}.ingot i.ingot-free{background:Canvas}.ingot i.ingot-system{background:GrayText}}
