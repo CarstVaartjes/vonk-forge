@@ -1,22 +1,12 @@
 import type { MetricsSeriesResponse } from "../api/types";
-import { RunState } from "../api/vocabulary.generated";
 import { formatValue, UNITS } from "../lib/metric-units";
 import type { WorkloadGroup } from "../lib/fleet";
 import { AreaChart } from "./chart/area-chart";
 import { Estimate, EstimateTag } from "./estimate";
-import { StatusPill, type StatusTone } from "./status-pill";
+import { StatusPill } from "./status-pill";
 
 const NOT_REPORTED = "Not reported";
 const WINDOW_SECONDS = 1800;
-
-/** The run's state word (a RunState, or `degraded` / `state unknown` from `runStateWord`) as a tone. */
-const STATE_TONES: Record<string, StatusTone> = {
-  [RunState.RUNNING]: "ok",
-  [RunState.FAILED]: "bad",
-  [RunState.LOST]: "bad",
-  degraded: "warn",
-  "state unknown": "neutral",
-};
 
 /** The slots the engine will fill once it reports them (M6); until then they read Not reported. */
 const ENGINE_FIGURES = [
@@ -30,6 +20,20 @@ const ENGINE_FIGURES = [
 function seriesOf(data: MetricsSeriesResponse | null, alias: string | null) {
   const series = data?.series.find((item) => item.labels.alias === alias);
   return data && series ? { data, series } : null;
+}
+
+/** A workload's alias, title, state and Spark count: the header of a hero, and the whole strip of a second workload on the same Sparks. */
+export function WorkloadHeader({ unit }: { unit: WorkloadGroup }) {
+  return (
+    <header>
+      {unit.alias && <code className="unit-alias">{unit.alias}</code>}
+      <h2>{unit.title}</h2>
+      <StatusPill tone={unit.tone}>{unit.state}</StatusPill>
+      <span className="unit-facts">
+        {unit.nodes.length} {unit.nodes.length === 1 ? "Spark" : "Sparks"}
+      </span>
+    </header>
+  );
 }
 
 /**
@@ -60,14 +64,7 @@ export function WorkloadHero({
   const end = hero ? Number(hero.data.end) : 0;
   return (
     <div className="workload-hero">
-      <header>
-        {unit.alias && <code className="alias">{unit.alias}</code>}
-        <h2>{unit.title}</h2>
-        <StatusPill tone={STATE_TONES[unit.state] ?? "info"}>{unit.state}</StatusPill>
-        <span className="unit-facts">
-          {unit.nodes.length} {unit.nodes.length === 1 ? "Spark" : "Sparks"}
-        </span>
-      </header>
+      <WorkloadHeader unit={unit} />
       <div className="hero-body">
         <div className="hero-read">
           {spec && value !== null ? (
@@ -77,7 +74,7 @@ export function WorkloadHero({
                 <small>{symbol}</small>
               </p>
               <p className="hero-caption">
-                {value === 0 && unit.state === RunState.RUNNING
+                {value === 0 && unit.tone === "ok"
                   ? "idle, model loaded"
                   : `${spec.title} · last 30 minutes`}
                 <EstimateTag basis={spec.basis} />
