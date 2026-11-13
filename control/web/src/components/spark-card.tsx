@@ -7,6 +7,7 @@ import {
 } from "../hooks/use-telemetry-history";
 import {
   halfUp,
+  liveSample,
   nodeDisplayName,
   nodeMemorySplit,
   nodeSecondaryName,
@@ -15,29 +16,32 @@ import {
   nodeVitals,
   uptimeText,
 } from "../lib/fleet";
-import { relativeTime } from "../lib/time";
+import { sparkColor } from "./chart/series";
 import { Sparkline } from "./chart/sparkline";
 import { MemoryIngot } from "./memory-ingot";
 import { StatusPill } from "./status-pill";
 
-const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
 const NOT_REPORTED = "Not reported";
 
-type Reading = {
-  key: "utilization" | "temperature" | "power" | "clockMhz";
-  title: string;
-  unit: string;
-};
-const READINGS: Reading[] = [
+const READINGS = [
   { key: "utilization", title: "GPU", unit: "%" },
   { key: "temperature", title: "GPU temperature", unit: "°C" },
   { key: "power", title: "GPU power", unit: "W" },
   { key: "clockMhz", title: "GPU clock", unit: "MHz" },
-];
+] as const;
 
-function formatReading(key: Reading["key"], value: number | null): string | null {
-  if (value === null) return null;
-  return key === "power" ? value.toFixed(1) : String(halfUp(value));
+/** Each reading of the live sample, as the Spark reported it; null is not reported. */
+function liveReadings(sample: ReturnType<typeof liveSample>) {
+  const num = (value: unknown) =>
+    typeof value === "number" && Number.isFinite(value) ? value : null;
+  const read = (value: number | null, digits = 0) =>
+    value === null ? null : digits ? value.toFixed(digits) : String(halfUp(value));
+  return {
+    utilization: read(num(sample?.gpu_utilization_percent)),
+    temperature: read(num(sample?.gpu_temperature_c)),
+    power: read(num(sample?.gpu_power_watts == null ? null : Number(sample.gpu_power_watts)), 1),
+    clockMhz: read(num(sample?.gpu_clock?.graphics_mhz)),
+  };
 }
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */
@@ -54,18 +58,18 @@ function Traces({
   color: string;
   name: string;
 }) {
-  const { points, live } = useTelemetryHistory({
+  const { points } = useTelemetryHistory({
     api,
     nodeId: node.id,
     telemetry: node.telemetry,
     now,
   });
   const end = now.getTime() / 1000;
-  const latest = points.at(-1);
+  const values = liveReadings(liveSample(node));
   return (
     <div className="spark-traces">
       {READINGS.map(({ key, title, unit }) => {
-        const value = live && latest ? formatReading(key, latest[key]) : null;
+        const value = values[key];
         const series = points.map((point: HistoryPoint) => ({ t: point.t, v: point[key] }));
         return (
           <div className="spark-trace" key={key}>
@@ -115,12 +119,9 @@ export function SparkCard({
 }) {
   const name = nodeDisplayName(node);
   const { status, reasons } = nodeStatus(node, now);
-  const color = SERIES[index % SERIES.length];
+  const color = sparkColor(index);
   const run = node.loaded.find((item) => (item.member_node_ids?.length ?? 0) > 1);
   const uptime = uptimeText(node.telemetry?.sample.uptime_seconds);
-  const seen = node.connection.last_seen_at
-    ? relativeTime(node.connection.last_seen_at, now)
-    : null;
   const agent = node.agent_runtime?.semantic_version;
   const vitals = nodeVitals(node);
   return (
@@ -144,7 +145,6 @@ export function SparkCard({
       </header>
       <p className="spark-sub">
         <StatusPill tone={nodeStatusTone(status)}>{status}</StatusPill>
-        {seen && <span>seen {seen}</span>}
         {agent && <span>agent {agent}</span>}
         {nodeSecondaryName(node) && <span>{nodeSecondaryName(node)}</span>}
       </p>
