@@ -67,7 +67,7 @@ export function WorkloadRow({
         <div className="row-name">
           {unit.alias && <code className="unit-alias">{unit.alias}</code>}
           <h3>
-            <button type="button" aria-expanded={open} onClick={onToggle}>
+            <button type="button" className="row-toggle" aria-expanded={open} onClick={onToggle}>
               {unit.title}
             </button>
           </h3>

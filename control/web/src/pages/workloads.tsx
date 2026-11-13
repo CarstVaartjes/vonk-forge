@@ -47,7 +47,7 @@ export function WorkloadsPage({
       />
       <FleetFeedback fleet={fleet} />
       {fleet.snapshot && (
-        <section aria-labelledby="workloads-heading">
+        <section className="workloads-section" aria-labelledby="workloads-heading">
           <h2 id="workloads-heading">By workload</h2>
           {clusters.length === 0 ? (
             <p>Nothing is loaded on any Spark.</p>
@@ -82,7 +82,7 @@ export function WorkloadsPage({
         </section>
       )}
       {nodes.length > 0 && (
-        <section aria-labelledby="all-sparks-heading">
+        <section className="workloads-section" aria-labelledby="all-sparks-heading">
           <h2 id="all-sparks-heading">All Sparks</h2>
           <SparksTable nodes={nodes} now={fleet.now} onSelect={onOpenSpark} />
         </section>

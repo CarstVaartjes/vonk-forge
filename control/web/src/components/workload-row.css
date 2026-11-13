@@ -1,3 +1,4 @@
+.workloads-section>h2{margin:1.5rem 0 .5rem;font-size:1.0625rem}
 .workload-rows{display:grid;gap:.75rem;margin:1rem 0;padding:0;list-style:none}
 .workload-row{position:relative;padding:0}
 .workload-row:has(button[aria-expanded="true"]){border-color:var(--line-strong)}
@@ -5,11 +6,11 @@
 .row-grid>div{min-width:0}
 .row-name{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem}
 .row-name h3{margin:0;font-size:1.0625rem;letter-spacing:-.02em}
-.row-name button{padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:inherit;letter-spacing:inherit;text-align:left;cursor:pointer}
+.row-toggle{padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:inherit;letter-spacing:inherit;text-align:left;cursor:pointer}
 /* The whole row is the target of its title button. */
-.row-name button::after{content:"";position:absolute;inset:0}
-.row-name button:focus-visible{outline:none}
-.row-name button:focus-visible::after{outline:3px solid var(--gold-text);outline-offset:-3px;border-radius:var(--r-card)}
+.row-toggle::after{content:"";position:absolute;inset:0}
+.row-toggle:focus-visible{outline:none}
+.row-toggle:focus-visible::after{outline:3px solid var(--gold-text);outline-offset:-3px;border-radius:var(--r-card)}
 .row-sparks{display:flex;flex-wrap:wrap;gap:.2rem 1rem;flex-basis:100%;margin:0;padding:0;list-style:none;color:var(--muted);font-size:.8125rem}
 .row-sparks .spark-key{display:inline-block;margin-right:.4rem}
 .row-label{display:block;color:var(--faint);font-size:.75rem}
