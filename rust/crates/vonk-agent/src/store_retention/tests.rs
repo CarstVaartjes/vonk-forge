@@ -1664,7 +1664,7 @@ fn stops_of(root: &Path, manager: UserManager) -> Vec<String> {
         failure: None,
     };
     pass.build_staging(&root.join("build-staging"), &manager);
-    manager.stops.take()
+    manager.stops.replace(Vec::new())
 }
 
 fn names(names: &[&str]) -> Vec<String> {
