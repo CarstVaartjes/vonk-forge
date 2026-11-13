@@ -246,13 +246,13 @@ export function LibrarySetupStrip({
               key={tile.value}
               type="button"
               aria-pressed={pressed}
-              aria-label={`${sparkLabel(Number(tile.value))}: ${tile.count} ${noun}${tile.yours ? " (your fleet)" : ""}`}
+              aria-label={`${sparkLabel(Number(tile.value))} or fewer: ${tile.count} ${noun}${tile.yours ? " (your fleet)" : ""}`}
               data-fleet={tile.yours ? "yours" : undefined}
               disabled={tile.count === 0 && !pressed}
               onClick={() => onFiltersChange({ ...filters, sparks: pressed ? "" : tile.value })}
             >
               <strong>{tile.value}</strong>
-              <span>{sparkLabel(Number(tile.value))}</span>
+              <span>{sparkLabel(Number(tile.value))} or fewer</span>
               <small>
                 {tile.count} {noun}
                 {tile.yours ? " · your fleet" : ""}
