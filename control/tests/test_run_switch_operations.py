@@ -321,10 +321,7 @@ def _runtime_receipt(
 
 
 class CompleteArtifactInspector:
-    def __init__(
-        self, *, reclaimable_bytes: int = 0, missing_spark_bytes: int = 0
-    ) -> None:
-        self.reclaimable_bytes = reclaimable_bytes
+    def __init__(self, *, missing_spark_bytes: int = 0) -> None:
         self.missing_spark_bytes = missing_spark_bytes
 
     def inspect(
@@ -334,10 +331,9 @@ class CompleteArtifactInspector:
         model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection:
-        del session, model_content_sha256, recipe_revision_id, retention, now
+        del session, model_content_sha256, recipe_revision_id, now
         required = 1024 * len(node_ids)
         missing_spark_bytes = self.missing_spark_bytes
         return ArtifactInspection(
@@ -346,7 +342,6 @@ class CompleteArtifactInspector:
             copied_bytes=missing_spark_bytes,
             missing_nas_bytes=0,
             missing_spark_bytes=missing_spark_bytes,
-            reclaimable_bytes=self.reclaimable_bytes,
             artifact_count=1,
             nas_coverage="complete",
             spark_coverage="complete" if missing_spark_bytes == 0 else "partial",
@@ -5098,7 +5093,7 @@ def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
         lifecycle._clock(),
         lifecycle,
         artifact_executor,
-        artifacts=CompleteArtifactInspector(reclaimable_bytes=30),
+        artifacts=CompleteArtifactInspector(),
     )
     request = _request(sessions, nodes[0], retention="reclaim-unreferenced")
     plan = service.preview(request, actor="admin")
@@ -5123,7 +5118,7 @@ def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
         lifecycle._clock(),
         lifecycle,
         NasEvictingExecutor(),
-        artifacts=CompleteArtifactInspector(reclaimable_bytes=30),
+        artifacts=CompleteArtifactInspector(),
     )
     bad_plan = bad_service.preview(request, actor="admin")
     operation = bad_service.apply(
@@ -7231,7 +7226,6 @@ def _uneven_dual_preparation(tmp_path: Path, *, image_by_node, model_by_node):
             model_content_sha256=request.model_content_sha256,
             recipe_revision_id=request.recipe_revision_id,
             node_ids=(SPARK_A, SPARK_B),
-            retention="retain-cached",
             now=NOW,
         )
     inspection = replace(

@@ -382,7 +382,6 @@ def _inspection_unavailable(detail: str) -> ArtifactInspection:
         copied_bytes=0,
         missing_nas_bytes=None,
         missing_spark_bytes=None,
-        reclaimable_bytes=0,
         nas_coverage="unknown",
         spark_coverage="unknown",
         blockers=(

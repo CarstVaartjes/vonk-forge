@@ -143,7 +143,6 @@ class CleanupPlanningMixin:
                 model_digest,
                 revision.id if revision is not None else None,
                 group,
-                retention="retain-cached",
                 now=now,
             )
             build = (

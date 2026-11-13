@@ -178,9 +178,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             return super().execute(plan, phase, **kwargs)
 
     executor = FaultyObservation()
-    inspector = CompleteArtifactInspector(
-        reclaimable_bytes=30, missing_spark_bytes=1024
-    )
+    inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
 
     def restart():
         service = _service(sessions, now[0], lifecycle, executor, artifacts=inspector)
@@ -417,9 +415,7 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
             )
 
     executor = SlowTransfer(child_transfer=True)
-    inspector = CompleteArtifactInspector(
-        reclaimable_bytes=30, missing_spark_bytes=1024
-    )
+    inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
     service = _service(sessions, now[0], lifecycle, executor, artifacts=inspector)
     service._clock = lambda: now[0]
     request = _request(sessions, nodes[0], retention="reclaim-unreferenced")

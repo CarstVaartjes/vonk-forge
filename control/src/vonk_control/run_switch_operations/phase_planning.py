@@ -67,7 +67,6 @@ class PhasePlanningMixin:
         revision_id: str | None,
         group: SparkGroup,
         *,
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection:
         service = typing_cast("RunSwitchOperationService", self)
@@ -78,7 +77,6 @@ class PhasePlanningMixin:
                 copied_bytes=0,
                 missing_nas_bytes=None,
                 missing_spark_bytes=None,
-                reclaimable_bytes=0,
                 nas_coverage="unknown",
                 spark_coverage="unknown",
                 blockers=(
@@ -95,7 +93,6 @@ class PhasePlanningMixin:
                 model_content_sha256=model_digest,
                 recipe_revision_id=revision_id,
                 node_ids=tuple(node.node_id for node in group.nodes),
-                retention=retention,
                 now=now,
             )
         except (OSError, RuntimeError, TypeError, ValueError, KeyError) as error:
@@ -134,12 +131,6 @@ class PhasePlanningMixin:
                 dict(inspection.missing_spark_bytes_by_node)
                 if inspection.missing_spark_bytes_by_node is not None
                 else None
-            ),
-            reclaimable_bytes=inspection.reclaimable_bytes,
-            reclaimed_bytes=(
-                inspection.reclaimable_bytes
-                if retention == "reclaim-unreferenced"
-                else 0
             ),
             nas_coverage=inspection.nas_coverage,
             spark_coverage=inspection.spark_coverage,
@@ -281,9 +272,10 @@ class PhasePlanningMixin:
         needs_prepare = (
             installation_id is None or installation_state != InstallationState.INSTALLED
         )
-        needs_cleanup = retention == "reclaim-unreferenced" and (
-            inspection.reclaimable_bytes > 0
-            or (runtime_storage is not None and runtime_storage.reclaimable_bytes > 0)
+        needs_cleanup = (
+            retention == "reclaim-unreferenced"
+            and runtime_storage is not None
+            and runtime_storage.reclaimable_bytes > 0
         )
         stop_added = False
 

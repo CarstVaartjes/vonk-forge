@@ -40,7 +40,6 @@ class _ModelSetSizeUntilPrepared(CompleteArtifactInspector):
         model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection:
         inspection = super().inspect(
@@ -48,7 +47,6 @@ class _ModelSetSizeUntilPrepared(CompleteArtifactInspector):
             model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             node_ids=node_ids,
-            retention=retention,
             now=now,
         )
         if self.prepared:

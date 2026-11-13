@@ -182,7 +182,6 @@ class RunPlanningMixin:
                 request.model_content_sha256,
                 revision.id,
                 group,
-                retention=request.retention,
                 now=now,
             )
             blockers.extend(inspection.blockers)
@@ -628,7 +627,7 @@ class RunPlanningMixin:
                     "conflicts": conflicts,
                     "stops": stops,
                     "reclaimed_bytes": (
-                        inspection.reclaimable_bytes + runtime_storage.reclaimable_bytes
+                        runtime_storage.reclaimable_bytes
                         if request.retention == "reclaim-unreferenced"
                         else 0
                     ),

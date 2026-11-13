@@ -462,7 +462,6 @@ def test_off_target_build_runs_once_before_an_early_memory_stop() -> None:
         copied_bytes=0,
         missing_nas_bytes=0,
         missing_spark_bytes=0,
-        reclaimable_bytes=0,
         nas_coverage="complete",
         spark_coverage="complete",
     )

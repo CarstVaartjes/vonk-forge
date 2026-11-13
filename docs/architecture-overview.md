@@ -152,7 +152,9 @@ A Spark keeps one content-addressed object per model file under
 not copy it: its `models/<selection>/<path>` is a hard link to that object, so a
 new installation of a model the Spark already holds, including every recipe
 revision and every other recipe that uses the model, takes seconds and no
-extra disk. The object stays the one trusted inode: the agent accepts an
+extra disk. The agent reports the objects it holds (`model_objects`) in each
+inventory; that scan is the Controller's only answer to whether a Spark holds a
+model file, so a re-run on a Spark that reports the files plans no target copy. The object stays the one trusted inode: the agent accepts an
 installation file with more than one link only when it is exactly the store
 object of that file's digest, and new installation files are always hardlinked.
 A hardlink failure (another filesystem, the link limit) reports a named model-store layout fault with the
