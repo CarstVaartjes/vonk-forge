@@ -168,6 +168,9 @@ def test_a_job_that_waits_before_launch_on_every_attempt_ends_at_the_recovery_de
     assert ended.state == State.FAILED.value
     assert ended.status_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value
     assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
+    fresh = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    assert claim_agent(jobs, NODE_A, "serial-a") is not None
+    assert _stored(sessions, fresh.id).current_attempt == 1
 
 
 @pytest.mark.parametrize("stage", sorted(JOB_PRE_LAUNCH_STAGES))

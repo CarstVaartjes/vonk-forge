@@ -886,50 +886,6 @@ fn corrupt_persistent_cache_still_reaches_docker_with_fresh_run_backing() {
     assert!(mount.contains("/compile-cache-fallback/"), "{mount}");
 }
 
-/// A job that runs out its deadline while a stop or inspection holds the
-/// installation lock is not refused as busy: the Start already ran, so the end
-/// reports the container as remaining (`stop_uncertain`), and the agent keeps
-/// reading the job instead of treating it as a pre-launch refusal.
-#[test]
-fn a_job_deadline_that_finds_the_installation_lock_held_is_stop_uncertain() {
-    let mut plan = job_plan(recipe_start_plan_for_authority(1));
-    let (_temp, roots) = start_fixture(&mut plan);
-    let runner = LaunchRunner {
-        calls: Arc::default(),
-        config: String::new(),
-        earlier_job: String::new(),
-        run: RunAnswer::NoId,
-        launched: Some(format!(
-            "true\tfalse\t{}\ttrue\t{}\t{}\t{}\t{}\t{}\n",
-            "f".repeat(64),
-            plan.run_id,
-            plan.run_id,
-            plan.installation_id,
-            plan.run_generation,
-            plan.plan_digest
-        )),
-        created: Arc::new(Mutex::new(true)),
-    };
-    let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
-    let identity = RuntimeEffectIdentity {
-        installation_id: plan.installation_id,
-        runtime_id: plan.run_id,
-        run_generation: plan.run_generation,
-    };
-    let _held = executor
-        .lock_installation_runtime(&plan.installation_id.to_string())
-        .unwrap();
-    let ended =
-        executor.runtime_wait_for_job(identity, plan.run_id, &plan.plan_digest, 0, Instant::now());
-    assert!(matches!(
-        ended,
-        Ok(RuntimeRequestOutcome {
-            stop_uncertain: true,
-            ..
-        })
-    ));
-}
-
 /// Every job end that cleans up while the installation lock is held reports
 /// the container as remaining, never the busy refusal of a Start. Wrong
 /// implementation: a `?` on the cleanup returned `InstallationReconciliationBusy`
@@ -941,11 +897,15 @@ fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
         Gone,
         Unreadable,
     }
-    for (name, listing, cancelled) in [
-        ("unobserved", Listing::Unreadable, false),
-        ("unobserved and cancelled", Listing::Unreadable, true),
-        ("vanished and cancelled", Listing::Gone, true),
-        ("deadline and cancelled", Listing::Running, true),
+    // `ends_ok`: the end reports the container as remaining. A job that was
+    // never read until its deadline and is not cancelled keeps its wait-failed
+    // error.
+    for (name, listing, cancelled, ends_ok) in [
+        ("unobserved", Listing::Unreadable, false, false),
+        ("unobserved and cancelled", Listing::Unreadable, true, true),
+        ("vanished and cancelled", Listing::Gone, true, true),
+        ("deadline", Listing::Running, false, true),
+        ("deadline and cancelled", Listing::Running, true, true),
     ] {
         let mut plan = job_plan(recipe_start_plan_for_authority(1));
         let (_temp, roots) = start_fixture(&mut plan);
@@ -991,7 +951,7 @@ fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
             0,
             Instant::now(),
         );
-        if cancelled {
+        if ends_ok {
             assert!(
                 matches!(
                     ended,
@@ -1003,7 +963,6 @@ fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
                 "{name}"
             );
         } else {
-            // A job never read until its deadline keeps its wait-failed error.
             assert!(
                 matches!(ended, Err(OperationError::RuntimeJobWaitFailed { .. })),
                 "{name}"

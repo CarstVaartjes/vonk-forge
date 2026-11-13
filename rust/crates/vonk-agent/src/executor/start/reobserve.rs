@@ -110,8 +110,9 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                 }
             }
             // Proven absent after a helper answer given before it did anything
-            // (a busy installation lock): this attempt never launched, so the
-            // Controller issues the Start again within its start deadline.
+            // (a busy installation lock): the container is absent; the
+            // Controller reissues within the start deadline or the order's
+            // recovery budget.
             Err(absent)
                 if helper_said(&absent, HelperErrorCode::RuntimeRunMissing)
                     && refused_without_effect(error) =>
