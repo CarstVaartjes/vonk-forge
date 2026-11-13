@@ -11,8 +11,9 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
-from vonk_control.admission_locking import AdmissionLockBusy
+from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, AdmissionLockBusy
 from vonk_control.recipe_operations import stop as stop_module
 from vonk_control.recipe_operations.errors import _RouteNotWithdrawn
 from vonk_control.recipe_operations.interfaces import (
@@ -21,6 +22,7 @@ from vonk_control.recipe_operations.interfaces import (
 )
 from vonk_control.recipe_operations.stop import StopMixin
 from vonk_control.recipe_routes import RecipeRouteError
+from vonk_control.run_admission import RunAdmissionBusy
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -162,3 +164,61 @@ def test_every_non_dispatch_exit_of_stop_returns_an_undispatched_view(
         "run-1", plan_digest="digest", actor="admin", request_id="request-1"
     )
     assert isinstance(view, UndispatchedStopView)
+
+
+def test_deadlocks_before_any_receipt_are_retried_then_refused_as_run_admission_busy(
+    monkeypatch,
+):
+    monkeypatch.setattr(stop_module, "_bound_workload_intent", lambda _job: 1)
+    monkeypatch.setattr(stop_module, "schedule_wait", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        stop_module, "admission_attempts", lambda: iter(range(PATIENT_AFTER_RETRIES))
+    )
+
+    class Deadlock(Exception):
+        sqlstate = "40P01"
+
+    deadlock = OperationalError("stmt", {}, Deadlock())
+    attempts = []
+
+    def accept(*_args, **_kwargs):
+        attempts.append(1)
+        raise deadlock
+
+    service = _Service(
+        routes=_Routes(),
+        dispatch=_raiser(AssertionError("must not dispatch")),
+        accept=accept,
+    )
+    with pytest.raises(RunAdmissionBusy) as refused:
+        service.stop(
+            "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+        )
+    assert refused.value.__cause__ is deadlock
+    assert len(attempts) > 1
+
+
+def test_lock_timeout_before_any_receipt_is_not_retried(monkeypatch):
+    monkeypatch.setattr(stop_module, "_bound_workload_intent", lambda _job: 1)
+    monkeypatch.setattr(stop_module, "schedule_wait", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        stop_module, "admission_attempts", lambda: iter(range(PATIENT_AFTER_RETRIES))
+    )
+
+    class LockTimeout(Exception):
+        sqlstate = "55P03"
+
+    attempts = []
+
+    def accept(*_args, **_kwargs):
+        attempts.append(1)
+        raise OperationalError("stmt", {}, LockTimeout())
+
+    service = _Service(
+        routes=_Routes(), dispatch=_raiser(AssertionError), accept=accept
+    )
+    with pytest.raises(RunAdmissionBusy):
+        service.stop(
+            "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+        )
+    assert len(attempts) == 1
