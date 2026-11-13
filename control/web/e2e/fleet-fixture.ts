@@ -143,7 +143,7 @@ const METRICS: [Spec, number, number | null][] = (
       "node",
       "measured",
       "spark",
-      97,
+      90,
       false,
       false,
     ],
@@ -159,6 +159,7 @@ const METRICS: [Spec, number, number | null][] = (
       false,
     ],
     ["gpu_power", "GPU power", "watts", "node", "measured", "spark", 38, false, true],
+    ["gpu_energy", "GPU energy", "watt_hours", "node", "estimated", "spark", 38, true, true],
     [
       "request_rate",
       "Requests per model",
@@ -217,7 +218,7 @@ const METRICS: [Spec, number, number | null][] = (
     hint: "Counted by the gateway.",
   } as Spec,
   latest,
-  total ? 1840000 : null,
+  total ? (metric === "gpu_energy" ? 1500 : 1840000) : null,
 ]);
 
 /**
@@ -287,10 +288,13 @@ export async function serveOverviewFleet(page: Page) {
         coverage: 1,
       },
     });
-    const one =
-      spec.scope === "alias"
-        ? line({ alias: "coder" }, latest)
-        : line({ node_id: SPARK_IDS[0] as string }, latest);
+    // A Spark-scoped fleet metric has one series per reporting Spark and the Controller's sum on top.
+    const sparks = SPARK_IDS.slice(0, 2).map((id) => line({ node_id: id }, latest));
+    const one = spec.scope === "alias" ? line({ alias: "coder" }, latest) : sparks[0];
+    const fleetLine = line({}, spec.scope === "alias" ? latest : latest * sparks.length);
+    const series = spec.fleet_sum
+      ? [fleetLine, ...(spec.scope === "alias" ? [one] : sparks)]
+      : [one];
     return route.fulfill({
       json: {
         metric,
@@ -300,7 +304,7 @@ export async function serveOverviewFleet(page: Page) {
         end,
         step_seconds: 15,
         // The Controller's fleet line (no label) leads where a metric has one.
-        series: spec.fleet_sum ? [line({}, latest), one] : [one],
+        series,
       },
     });
   });

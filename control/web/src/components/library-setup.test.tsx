@@ -72,6 +72,21 @@ test("summarises the fleet from online nodes and their free memory", () => {
   expect(isYourFleet(summarizeFleet(fleetOf([{ online: false }])), 1)).toBe(false);
 });
 
+test("the Sparks filter reads N or fewer: the largest count keeps every recipe", () => {
+  const sizes = records.flatMap((record) =>
+    record.recipe ? [Number(record.recipe.recipe_document.topology.node_count)] : [],
+  );
+  const withRecipe = records.filter((record) => record.recipe);
+  const keep = (sparks: number) =>
+    filterLibraryRecipeRecords(
+      records,
+      { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sparks: String(sparks) },
+      "",
+    ).filter((record) => record.recipe).length;
+  expect(keep(Math.max(...sizes))).toBe(withRecipe.length);
+  expect(keep(Math.min(...sizes))).toBe(sizes.filter((size) => size === Math.min(...sizes)).length);
+});
+
 test("Spark tiles count the library, mark the operator's fleet, and set the same --sparks filter", () => {
   const onFiltersChange = vi.fn();
   const counts = [

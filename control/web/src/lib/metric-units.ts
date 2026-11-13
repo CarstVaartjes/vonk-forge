@@ -155,3 +155,21 @@ export function windowPoints(
       v: point.value === null ? null : Number(point.value),
     }));
 }
+
+/**
+ * The Controller's fleet line of a response (the series without a label, which sums the others) and how many
+ * per-Spark series have a latest value behind it. Nothing is summed here.
+ */
+export function fleetLine(data: MetricsSeriesResponse | null): {
+  data: MetricsSeriesResponse;
+  summary: MetricsSeriesResponse["series"][number]["summary"];
+  reporting: number;
+} | null {
+  const line = data?.series.find((item) => Object.keys(item.labels).length === 0);
+  if (!data || !line || line.summary.latest == null) return null;
+  return {
+    data,
+    summary: line.summary,
+    reporting: data.series.filter((item) => item !== line && item.summary.latest != null).length,
+  };
+}

@@ -1,6 +1,12 @@
 import "./memory-ingot.css";
 import { displayRatio, type WireNumber } from "../api/contract-numeric";
-import { formatBytes, MEMORY_LOW_WORDS, memoryLevel, type MemorySplit } from "../lib/fleet";
+import {
+  formatBytes,
+  MEMORY_LOW_WORDS,
+  memoryLevel,
+  NOT_REPORTED_TEXT,
+  type MemorySplit,
+} from "../lib/fleet";
 import { StatusPill } from "./status-pill";
 
 /**
@@ -20,7 +26,7 @@ export function MemoryIngot({
   /** The 8 / 4 GiB free-memory warning is one Spark's; a fleet sum passes false. */
   warn?: boolean;
 }) {
-  if (!memory) return <span>Not reported</span>;
+  if (!memory) return <span>{NOT_REPORTED_TEXT}</span>;
   const split = memory.modelsBytes !== null && memory.systemBytes !== null;
   const parts: { key: string; word: string; bytes: WireNumber }[] = split
     ? [

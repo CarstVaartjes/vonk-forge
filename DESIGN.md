@@ -24,6 +24,7 @@ colors:
   bad: "#ff7a6b"
   info: "#8fc4ff"
   model-ink: "#f2efe8"
+  mem-model: "#f2efe8"
   mem-system: "#7f7a6e"
   track: "#2a2e27"
   series-1: "#6aa82e"
@@ -158,6 +159,42 @@ The palette is one graphite operating shell with a small state vocabulary that t
 - **Recessed Graphite:** Search wells, metric cells, and inset evidence areas.
 - **Structural Line / Strong Structural Line:** Thin separators and control outlines that carry most grouping.
 - **Primary Text / Muted Text / Subtle Text:** The three-level graphite-surface text hierarchy.
+
+### Light theme
+
+The front-matter above is the dark set. The light set follows the system setting until the owner picks one (theme switch in the top bar); every token is one `light-dark(light, dark)` pair in `:root`, so the two never drift. Tokens not listed here (`green`, `green-ink`, `gold`) are the same in both themes.
+
+| Token | Light | Dark |
+|---|---|---|
+| `bg` | `#f3f1ea` | `#090a09` |
+| `recess` | `#ebe8df` | `#060706` |
+| `panel` | `#ffffff` | `#121412` |
+| `panel-2` | `#fbfaf6` | `#0f110f` |
+| `raised` | `#f6f4ee` | `#1a1d19` |
+| `hover` | `#efece4` | `#20231e` |
+| `line` | `#e1ddd1` | `#262924` |
+| `line-strong` | `#cbc5b6` | `#3a3e36` |
+| `line-control` | `#857f70` | `#666b5f` |
+| `ink` | `#171813` | `#f2efe8` |
+| `muted` | `#55524a` | `#aaa396` |
+| `faint` | `#6b675d` | `#958e80` |
+| `green-text` | `#3d6a00` | `#a3d93a` |
+| `gold-text` | `#7d5c12` | `#d9b56f` |
+| `ok` | `#3d6a00` | `#a3d93a` |
+| `warn` | `#8f5200` | `#ffb347` |
+| `bad` | `#b3261e` | `#ff7a6b` |
+| `info` | `#1c5fb0` | `#8fc4ff` |
+| `model-ink` | `#171813` | `#f2efe8` |
+| `mem-model` | `#1f201b` | `#f2efe8` |
+| `mem-system` | `#7d786c` | `#7f7a6e` |
+| `track` | `#e6e2d8` | `#2a2e27` |
+| `series-1` | `#4f8a1a` | `#6aa82e` |
+| `series-2` | `#2f6fd0` | `#4a8ae6` |
+| `series-3` | `#a86a12` | `#c4862c` |
+| `series-4` | `#b04a94` | `#c765ac` |
+| `neutral-series` | `#8b867a` | `#8d877a` |
+| `grid` | `#ebe8df` | `#23261f` |
+| `axis` | `#6b675d` | `#958e80` |
 
 ### Named Rules
 

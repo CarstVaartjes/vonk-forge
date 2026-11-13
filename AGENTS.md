@@ -88,6 +88,9 @@ changes the other in the same PR. Each screen has one fixture,
 `tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the
 exact text: the page's DOM text and the string `vonkctl` prints. Missing values read
 "Not reported" on both sides, and .5 rounds up on both.
+In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet.ts`; a component never
+types the words. Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
+the metric series, never a sum made in the browser.
 
 Persist request identity before effects and reconcile a lost response before
 retrying. Reconnect to the original operation. A client timeout, disconnect, or

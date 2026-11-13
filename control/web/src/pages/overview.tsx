@@ -34,6 +34,9 @@ export function OverviewPage({
 }) {
   const fleet = useFleetStream(api);
   const tokens = useMetricSeries(api, "output_token_rate", "24h");
+  const decode = useMetricSeries(api, "decode_throughput", "1h");
+  const power = useMetricSeries(api, "gpu_power", "1h");
+  const energy = useMetricSeries(api, "gpu_energy", "24h");
   const live = liveStatus(fleet);
   useEffect(() => onLive?.(live), [onLive, live]);
   useEffect(() => () => onLive?.(null), [onLive]);
@@ -161,7 +164,9 @@ export function OverviewPage({
       {fleet.snapshot && (
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
-      {fleet.snapshot && nodes.length > 0 && <FleetPulse tokens={tokens} nodes={nodes} />}
+      {fleet.snapshot && nodes.length > 0 && (
+        <FleetPulse decode={decode} power={power} tokens={tokens} energy={energy} nodes={nodes} />
+      )}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
           title="No Sparks enrolled"
@@ -195,7 +200,7 @@ export function OverviewPage({
               onOpen={onOpenSpark}
             />
             <div className="overview-cards">
-              <EnergyCard nodes={nodes} />
+              <EnergyCard energy={energy} power={power} />
               <TokensCard tokens={tokens} nodes={nodes} />
             </div>
           </div>
