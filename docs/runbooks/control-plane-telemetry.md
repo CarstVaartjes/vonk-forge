@@ -38,16 +38,16 @@ reads the engine readings from each ready run's own `/metrics` (below).
 
 ### Engine readings
 
-The agent leaves one `EngineTarget` file (`run_id`, `port`) per ready run in
+The agent leaves one `EngineTarget` file (`run_id`, `address`, `port`; the address is the one its readiness probe uses) per ready run in
 `/run/vonk-forge-agent/engine-targets/` and rewrites it on every observation; a
-run that is not ready has none, and a file older than two minutes is ignored.
-The monitor scrapes `127.0.0.1:<port>/metrics` of every target at once under one
-750 ms deadline (2 MiB cap per reply) beside the host readings; an engine that is
+run that is not ready has none, a stop or retirement removes it, and a file older than two minutes is ignored.
+The monitor scrapes `<address>:<port>/metrics` of the targets (eight at a time) under one
+750 ms deadline (2 MiB cap per reply) beside the host readings, so an upload may wait up to 750 ms for it; an engine that is
 late, oversized, not answering 200 or in an unknown format is left out of that
 sample. The format is recognised by the metric-name prefix; only TensorFold's
 names are mapped so far (from a verbatim capture), so vLLM, SGLang and llama.cpp
 runs report no engine reading until their captures add rows. Values are summed
-across label sets, except the KV cache ratio, which is the largest pool's.
+across label sets, except the KV cache ratio, which is the fullest pool's.
 
 `engines` (one per running endpoint) carries each run's metrics as
 the monitor reads them from the engine's own `/metrics` on loopback. An entry

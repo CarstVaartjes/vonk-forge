@@ -268,6 +268,7 @@ impl<R> RecipeExecutor<'_, R> {
     {
         match self.runtime.complete_stop(run_id) {
             Ok(()) => {
+                self.drop_engine_target(run_id);
                 eprintln!(
                     "vonk-agent: retired exact recipe run {run_id}: {reason} and not owned by the Controller"
                 );
@@ -280,6 +281,32 @@ impl<R> RecipeExecutor<'_, R> {
                 );
                 false
             }
+        }
+    }
+}
+
+impl<R> RecipeExecutor<'_, R> {
+    fn engine_targets(&self) -> std::path::PathBuf {
+        self.runtime_root
+            .join(crate::telemetry::engine_metrics::TARGETS_DIRECTORY)
+    }
+
+    fn publish_engine_target(&self, run_id: uuid::Uuid, address: std::net::IpAddr, port: u16) {
+        if let Err(error) = crate::telemetry::engine_metrics::write_target(
+            &self.engine_targets(),
+            run_id,
+            address,
+            port,
+        ) && first_report_of_run("engine-target-write")
+        {
+            eprintln!("vonk-agent: engine metrics target not written: {error}");
+        }
+    }
+
+    /// A stopped or retired run has no metrics target.
+    pub(super) fn drop_engine_target(&self, run_id: &str) {
+        if let Ok(run_id) = uuid::Uuid::parse_str(run_id) {
+            crate::telemetry::engine_metrics::remove_target(&self.engine_targets(), run_id);
         }
     }
 }
@@ -552,20 +579,10 @@ impl<R> RecipeExecutor<'_, R> {
                 };
                 // The monitor reads the engine's own metrics from this file. Each
                 // observation of a ready run refreshes it; anything else removes it.
-                if let Some(ready) = endpoint_ready {
-                    let targets = self.runtime_root.join(crate::telemetry::engine_metrics::TARGETS_DIRECTORY);
-                    if ready {
-                        if let Err(error) = crate::telemetry::engine_metrics::write_target(
-                            &targets,
-                            plan.run_id,
-                            plan.endpoint_port,
-                        ) && first_report_of_run("engine-target-write")
-                        {
-                            eprintln!("vonk-agent: engine metrics target not written: {error}");
-                        }
-                    } else {
-                        crate::telemetry::engine_metrics::remove_target(&targets, plan.run_id);
-                    }
+                if let (Some(true), Some(address)) = (endpoint_ready, plan.endpoint_address) {
+                    self.publish_engine_target(plan.run_id, address, plan.endpoint_port);
+                } else if endpoint_ready.is_some() {
+                    self.drop_engine_target(&plan.run_id.to_string());
                 }
                 Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     run_id: plan.run_id,

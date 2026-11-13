@@ -12,12 +12,10 @@ use vonk_agent::{
     process::SystemProcessRunner,
     telemetry::{
         SystemFileSystemProvider, TelemetryCollector, TelemetryPaths,
-        engine_metrics::{SCRAPE_DEADLINE, TARGETS_DIRECTORY, scrape_engines},
+        engine_metrics::{RUNTIME_DIRECTORY, SCRAPE_DEADLINE, TARGETS_DIRECTORY, scrape_engines},
         read_boot_id,
     },
 };
-
-const RUNTIME_DIRECTORY: &str = "/run/vonk-forge-agent";
 
 const INTERVAL: Duration = Duration::from_secs(2);
 

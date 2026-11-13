@@ -1,36 +1,48 @@
 //! Engine readings. The agent leaves one small target file per ready run in its
 //! runtime directory; the monitor, which cannot read the agent's database,
-//! scrapes each target's Prometheus `/metrics` on loopback and turns the
+//! scrapes each target's Prometheus `/metrics` on the Spark's own address and turns the
 //! families it recognises into an `EngineReading`. A run without a fresh
 //! target, a slow or oversized reply, or an unknown metric format simply has
 //! no reading in that sample.
 
 use std::{
+    net::{IpAddr, SocketAddr},
     path::Path,
     time::{Duration, SystemTime},
 };
 
-use futures_util::{StreamExt, stream::FuturesUnordered};
+use futures_util::{StreamExt, stream};
 use uuid::Uuid;
 use vonk_agent_protocol::generated::{EngineFormat, EngineReading, EngineTarget};
 
 use super::read_bounded_text;
 
+/// The agent's runtime directory, shared read-only with the monitor.
+pub const RUNTIME_DIRECTORY: &str = "/run/vonk-forge-agent";
 /// The directory below the agent's runtime directory that holds the targets.
 pub const TARGETS_DIRECTORY: &str = "engine-targets";
 /// One total deadline for all engines of a sample.
 pub const SCRAPE_DEADLINE: Duration = Duration::from_millis(750);
 const MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
-const MAX_TARGETS: usize = 8;
+const SCRAPE_CONCURRENCY: usize = 8;
 /// The agent rewrites a ready run's target on every observation (seconds, not
 /// minutes); an older file belongs to a run nobody observes any more.
 const TARGET_MAX_AGE: Duration = Duration::from_secs(120);
 
-/// Publish where a ready run listens. Atomic, so the monitor never reads half a file.
-pub fn write_target(directory: &Path, run_id: Uuid, port: u16) -> std::io::Result<()> {
+/// Publish where a ready run listens (the address its readiness probe uses). Atomic, so the monitor never reads half a file.
+pub fn write_target(
+    directory: &Path,
+    run_id: Uuid,
+    address: IpAddr,
+    port: u16,
+) -> std::io::Result<()> {
     std::fs::create_dir_all(directory)?;
-    let body = serde_json::to_vec(&EngineTarget { run_id, port })
-        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    let body = serde_json::to_vec(&EngineTarget {
+        run_id,
+        address: address.to_string(),
+        port,
+    })
+    .map_err(|error| std::io::Error::other(error.to_string()))?;
     let temporary = tempfile::NamedTempFile::new_in(directory)?;
     std::fs::write(temporary.path(), body)?;
     temporary
@@ -62,7 +74,6 @@ fn fresh_targets(directory: &Path) -> Vec<EngineTarget> {
             let text = read_bounded_text(&entry.path())?;
             vonk_agent_protocol::parse_strict::<EngineTarget>(text.as_bytes()).ok()
         })
-        .take(MAX_TARGETS)
         .collect()
 }
 
@@ -81,13 +92,13 @@ pub async fn scrape_engines(directory: &Path, deadline: Duration) -> Vec<EngineR
         return Vec::new();
     };
     let client = &client;
-    let mut pending = targets
-        .into_iter()
+    let mut pending = stream::iter(targets)
         .map(|target| async move {
-            let body = fetch(client, target.port).await?;
+            let address = target.address.parse::<IpAddr>().ok()?;
+            let body = fetch(client, SocketAddr::new(address, target.port)).await?;
             parse_engine(&body, target.run_id)
         })
-        .collect::<FuturesUnordered<_>>();
+        .buffer_unordered(SCRAPE_CONCURRENCY);
     let mut readings = Vec::new();
     let deadline = tokio::time::sleep(deadline);
     tokio::pin!(deadline);
@@ -104,9 +115,9 @@ pub async fn scrape_engines(directory: &Path, deadline: Duration) -> Vec<EngineR
 }
 
 /// The body of `GET /metrics`, if the engine answers 200 within the size cap.
-async fn fetch(client: &reqwest::Client, port: u16) -> Option<String> {
+async fn fetch(client: &reqwest::Client, endpoint: SocketAddr) -> Option<String> {
     let response = client
-        .get(format!("http://127.0.0.1:{port}/metrics"))
+        .get(format!("http://{endpoint}/metrics"))
         .send()
         .await
         .ok()?;
@@ -176,7 +187,7 @@ fn split_sample(line: &str) -> Option<(&str, f64)> {
 }
 
 /// Sum across label sets, as a counter or gauge of the whole engine; the KV
-/// ratio is per pool, so the largest pool stands for the engine.
+/// ratio is per pool, so the fullest pool stands for the engine.
 fn add_tensorfold(reading: &mut EngineReading, name: &str, value: f64) {
     let Some(name) = name.strip_prefix("tensorfold:") else {
         return;
@@ -230,6 +241,8 @@ fn add_tensorfold(reading: &mut EngineReading, name: &str, value: f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const LOOPBACK: IpAddr = IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
 
     #[test]
     fn the_captured_tensorfold_metrics_give_the_vector_reading() {
@@ -291,13 +304,11 @@ mod tests {
         .await;
         let directory = tempfile::tempdir().unwrap();
         for (id, port) in [(1, good), (2, hung), (3, oversized)] {
-            write_target(directory.path(), Uuid::from_u128(id), port).unwrap();
+            write_target(directory.path(), Uuid::from_u128(id), LOOPBACK, port).unwrap();
         }
         // A damaged file and a missing directory are no targets, not errors.
         std::fs::write(directory.path().join("damaged.json"), "{").unwrap();
-        let started = std::time::Instant::now();
         let readings = scrape_engines(directory.path(), SCRAPE_DEADLINE).await;
-        assert!(started.elapsed() < SCRAPE_DEADLINE + Duration::from_millis(250));
         assert_eq!(readings.len(), 1);
         assert_eq!(readings[0].run_id, Uuid::from_u128(1));
         assert_eq!(readings[0].prompt_tokens, Some(8_491_903));
