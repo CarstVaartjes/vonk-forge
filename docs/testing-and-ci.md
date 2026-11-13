@@ -486,7 +486,9 @@ imperative remedy text, anti-principle
 test assertions, short wall-clock limits on test work, and the existing
 coordination syntax violations. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
-cancellation and request-local retries remain valid. A whole-tree policy-user
+cancellation and request-local retries remain valid. A broad handler that parks
+or defers work must consult `disposition()` or `is_definite()` first
+(`retry-dispositions`). A whole-tree policy-user
 check requires ongoing-intent scheduling for durable recovery owners. Small fixtures
 prove that added violations fail, untouched old occurrences do not, and bounded
 waits and security ingress remain valid. Detection is a syntax check; behavior,
