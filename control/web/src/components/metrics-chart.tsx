@@ -233,8 +233,7 @@ export function MetricsChart({
           return (
             <section key={metric} className="metric-tile card" aria-label={spec.title}>
               <h3>
-                {spec.title}
-                <EstimateTag basis={spec.basis} />
+                {spec.title} <EstimateTag basis={spec.basis} />
               </h3>
               {typeof state === "string" ? (
                 <p role="status">Metrics unavailable: {state}</p>
