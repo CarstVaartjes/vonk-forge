@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
 from vonk_control.admission_locking import AdmissionLockBusy
 from vonk_control.recipe_operations import stop as stop_module
@@ -162,3 +163,23 @@ def test_every_non_dispatch_exit_of_stop_returns_an_undispatched_view(
         "run-1", plan_digest="digest", actor="admin", request_id="request-1"
     )
     assert isinstance(view, UndispatchedStopView)
+
+
+def test_deadlock_before_any_receipt_is_a_retryable_admission_refusal(monkeypatch):
+    monkeypatch.setattr(stop_module, "_bound_workload_intent", lambda _job: 1)
+    monkeypatch.setattr(stop_module, "schedule_wait", lambda *_a, **_k: None)
+
+    class Deadlock(Exception):
+        sqlstate = "40P01"
+
+    deadlock = OperationalError("stmt", {}, Deadlock())
+    service = _Service(
+        routes=_Routes(),
+        dispatch=_raiser(AssertionError("must not dispatch")),
+        accept=_raiser(deadlock),
+    )
+    with pytest.raises(AdmissionLockBusy) as refused:
+        service.stop(
+            "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+        )
+    assert refused.value.__cause__ is deadlock

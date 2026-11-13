@@ -30,6 +30,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
     admitting,
+    busy_from_contention,
     is_admission_contention,
 )
 from ..bounded_json import require_mapping
@@ -240,6 +241,10 @@ class StopMixin:
                 owner_id=run_id,
             )
             if replay is None:
+                # No receipt yet: the in-process admission retry absorbs the
+                # contention instead of surfacing a raw database error.
+                if isinstance(error, OperationalError):
+                    raise busy_from_contention(error) from error
                 raise
             service._service_stop_pending(
                 request_id, profile_target_node_ids, profile_application_id
