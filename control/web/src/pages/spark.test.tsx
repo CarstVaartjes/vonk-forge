@@ -15,20 +15,18 @@ vi.mock("../hooks/use-fleet-stream", () => ({
 }));
 
 /** The Spark page for `shown`, which the mocked fleet stream carries; `api` holds only what a test calls. */
-function show(shown: unknown, api: object = {}, onGone = vi.fn()) {
-  nodes = [shown];
-  const history = {
+/** The API calls the page makes by itself; a test adds what it exercises. */
+function apiOf(api: object = {}) {
+  return {
     metricsCatalogue: vi.fn().mockResolvedValue([]),
     metricsSeries: vi.fn().mockRejectedValue(new Error("no history")),
-  };
-  return render(
-    <SparkPage
-      api={{ ...history, ...api } as unknown as ControlApi}
-      id="spk_1"
-      onNavigate={vi.fn()}
-      onGone={onGone}
-    />,
-  );
+    ...api,
+  } as unknown as ControlApi;
+}
+
+function show(shown: unknown, api: object = {}, onGone = vi.fn()) {
+  nodes = [shown];
+  return render(<SparkPage api={apiOf(api)} id="spk_1" onNavigate={vi.fn()} onGone={onGone} />);
 }
 
 const node = {
@@ -248,4 +246,41 @@ test("a Spark that is not reporting live shows Not reported on every gauge", () 
       "aria-valuetext",
       expect.stringMatching(/^Not reported/),
     );
+});
+
+test("Serving names the run, its rank and partner as a link; Storage lists models with their sizes", () => {
+  const onNavigate = vi.fn((event: { preventDefault(): void }) => event.preventDefault());
+  nodes = [
+    {
+      ...node,
+      loaded: [
+        {
+          run_id: "r1",
+          rank: 0,
+          expected_rank_count: 2,
+          title: "GLM",
+          alias: "coder",
+          healthy: true,
+          run_state: "running",
+          installation_id: "i1",
+          member_node_ids: ["spk_1", "spk_2"],
+        },
+      ],
+      installed: [
+        { installation_id: "i1", title: "GLM", complete: true, installed_bytes: 212 * 1024 ** 3 },
+        { installation_id: "i2", title: "Qwen", complete: true, installed_bytes: null },
+      ],
+    },
+    { ...node, id: "spk_2", display_name: "Garage" },
+  ];
+  render(<SparkPage api={apiOf()} id="spk_1" onNavigate={onNavigate} onGone={vi.fn()} />);
+  const serving = screen.getByRole("region", { name: "Serving" });
+  expect(serving).toHaveTextContent("coder");
+  expect(serving).toHaveTextContent("Rank 0 of 2, one unit with Garage");
+  expect(serving).toHaveTextContent("Decode speed: Not reported");
+  fireEvent.click(screen.getByRole("link", { name: "Garage" }));
+  expect(onNavigate).toHaveBeenCalledWith(expect.anything(), "/sparks/spk_2");
+  const models = screen.getByRole("list", { name: "Models on disk" });
+  expect(models).toHaveTextContent("GLM212.0 GiB · in use");
+  expect(models).toHaveTextContent("QwenNot reported");
 });

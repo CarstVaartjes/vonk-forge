@@ -137,31 +137,44 @@ export function runStateTone(
 }
 
 /**
- * What a Spark serves, one line per run: title, alias, state, and the other Sparks of a
- * multi-Spark run. `vonkctl fleet` prints the same lines.
+ * The runs a Spark carries, once per run: title, alias, state in a word with its tone, the Spark's rank of
+ * the run's rank count, and the other Sparks of a multi-Spark run (by display name).
  */
-export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+export function nodeRuns(node: VisualFleetNode, fleet: readonly VisualFleetNode[]) {
   const names = new Map(fleet.map((member) => [member.id, nodeDisplayName(member)]));
   const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const run of node.loaded) {
-    if (seen.has(run.run_id)) continue;
+  return node.loaded.flatMap((run) => {
+    if (seen.has(run.run_id)) return [];
     seen.add(run.run_id);
-    const partners = (run.member_node_ids ?? [])
-      .filter((id) => id !== node.id)
-      .map((id) => names.get(id) ?? id);
-    lines.push(
-      [
-        run.title ?? run.run_id,
-        run.alias,
-        runStateWord(run),
-        partners.length ? `with ${partners.join(", ")}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    );
-  }
-  return lines;
+    return [
+      {
+        runId: run.run_id,
+        title: run.title ?? run.run_id,
+        alias: run.alias ?? null,
+        state: runStateWord(run),
+        tone: runStateTone(run),
+        rank: run.rank ?? null,
+        rankCount: run.expected_rank_count ?? null,
+        partners: (run.member_node_ids ?? [])
+          .filter((id) => id !== node.id)
+          .map((id) => ({ id, name: names.get(id) ?? id })),
+      },
+    ];
+  });
+}
+
+/** What a Spark serves, one line per run: `vonkctl fleet` prints the same lines. */
+export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+  return nodeRuns(node, fleet).map((run) =>
+    [
+      run.title,
+      run.alias,
+      run.state,
+      run.partners.length ? `with ${run.partners.map((partner) => partner.name).join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  );
 }
 
 /** One workload and the Sparks that carry it, in rank order. */
@@ -597,6 +610,19 @@ function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber 
     }
   }
   return null;
+}
+
+/** The Spark's disk as the same two-part split the memory bar draws (Used and Free); null when not reported. */
+export function nodeDiskSplit(node: VisualFleetNode): MemorySplit | null {
+  const disk = diskPair(node);
+  if (!disk) return null;
+  return {
+    totalBytes: disk.total,
+    usedBytes: subtractWire(disk.total, disk.free),
+    freeBytes: disk.free,
+    modelsBytes: null,
+    systemBytes: null,
+  };
 }
 
 /** The three vitals of a Fleet row; `vonkctl fleet` prints the same words (shared vectors). */

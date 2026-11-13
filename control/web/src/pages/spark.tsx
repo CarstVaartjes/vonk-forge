@@ -137,6 +137,10 @@ export function SparkPage({
                 now={fleet.now}
                 range={range}
                 color={sparkColor(index)}
+                nodes={nodes}
+                attention={fleet.snapshot?.attention}
+                attentionUnavailable={fleet.snapshot?.attention_unavailable === true}
+                onNavigate={onNavigate}
               />
             )}
             {tab === "settings" && (
