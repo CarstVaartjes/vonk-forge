@@ -1336,6 +1336,49 @@ def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load
     assert fresh.id != waiting.id
 
 
+def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A deterministic internal refusal (``InvalidValue``) of the plan a retry
+    made afresh is repeated by every later retry with nothing changed: the load
+    ends failed with it as evidence instead of backing off for ever, and a
+    fresh load is admitted."""
+
+    from vonk_agent_protocol import ProfileReasonCode
+    from vonk_control.categorized_errors import InvalidValue
+
+    _sessions, lifecycle, service, profile, _desired, first, _child, _nodes = (
+        _failed_profile(tmp_path)
+    )
+    admit = service._queue_application
+    refused: list[str] = []
+
+    def refuse_retry(preview, **kwargs):
+        if kwargs.get("retry_of_application_id") is None:
+            return admit(preview, **kwargs)
+        refused.append(kwargs["retry_of_application_id"])
+        raise InvalidValue("internal bookkeeping refused the plan")
+
+    monkeypatch.setattr(service, "_queue_application", refuse_retry)
+    later = lifecycle._clock() + timedelta(hours=2)
+    service._clock = lambda: later
+    for _ in range(6):
+        service.tick()
+        later += timedelta(minutes=30)
+
+    ended = service.application(first.id)
+    assert refused == [first.id]
+    assert ended.state == LifecycleState.FAILED
+    assert ended.next_attempt_at is None
+    assert any(
+        item.code == ProfileReasonCode.ADMISSION_DEFECT
+        and "internal bookkeeping refused the plan" in item.detail
+        for item in ended.blockers
+    )
+    fresh = service.load(profile.number, request_key=_uuid(19103), actor="admin")
+    assert fresh.id != first.id and fresh.state == "queued"
+
+
 def test_a_child_start_reobserves_stale_effects_without_new_intent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

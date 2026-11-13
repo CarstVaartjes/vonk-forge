@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import object_session
 from vonk_agent_protocol import (
+    Disposition,
     InvalidRequestReason,
     ProfileReasonCode,
     SupersedeCode,
@@ -26,6 +27,7 @@ from .. import fleet_profile_states
 from ..admission_locking import ConstraintReplan, patient_admission
 from ..categorized_errors import MissingRecord
 from ..evidence_repeats import load_subject, note_repeat, note_success
+from ..failure_classification import disposition, error_detail
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -41,6 +43,7 @@ from .assessment_support import (
     _require_recovery_preparations,
 )
 from .contracts import (
+    FleetProfileAdmissionDefect,
     FleetProfileConflict,
     FleetProfileInvalid,
     FleetProfileReviewStale,
@@ -259,7 +262,9 @@ class FleetProfileService:
         What cannot be reconciled now (a child the executor cannot show, a scope or
         assignment set that changed, a plan that is not admissible yet) leaves the
         receipt parked or noted and returns it; only a request for something that
-        cannot be retried at all is refused.
+        cannot be retried at all is refused. A deterministic internal refusal of
+        the plan made afresh here ends the load failed with it as evidence,
+        since every later retry would repeat it unchanged.
         """
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
         decline: tuple[str, str] | None = None
@@ -443,16 +448,30 @@ class FleetProfileService:
             # An adopted lane may continue, but replaying its original whole
             # scope would undo the newer load. End it instead of parking it.
             return self._decline_stale_retry(application_id, error)
-        except (
-            FleetProfileConflict,
-            UnknownOutcomeError,
-            KeyError,
-            ValueError,
-        ) as error:
+        except FleetProfileAdmissionDefect as error:
+            # An internal contract or database constraint refused the plan
+            # this retry made from current state: the next retry makes the same
+            # plan and is refused alike, so the load ends failed with it as
+            # evidence (ENDING_BLOCKER_CODES), as a pending admission does.
+            return self._decline_retry_application(
+                application_id, ProfileReasonCode.ADMISSION_DEFECT, str(error)
+            )
+        except (FleetProfileConflict, UnknownOutcomeError) as error:
             # Queue admission has rolled back. An observation cannot enlarge
             # accepted effects; their owner re-observes within its original budget.
             return self._decline_retry_application(
                 application_id, ProfileReasonCode.RETRY_CONFLICT, str(error)
+            )
+        except (KeyError, ValueError) as error:
+            # Any other refusal is internal bookkeeping. One that clears by
+            # itself waits; a deterministic one is a defect that every retry
+            # would repeat with no change elsewhere, so it ends the load.
+            if disposition(error) is not Disposition.FAIL:
+                return self._decline_retry_application(
+                    application_id, ProfileReasonCode.RETRY_CONFLICT, str(error)
+                )
+            return self._decline_retry_application(
+                application_id, ProfileReasonCode.ADMISSION_DEFECT, error_detail(error)
             )
         with suppress(SQLAlchemyError), self._sessions.begin() as session:
             for node_id in intended.scope.node_ids:
