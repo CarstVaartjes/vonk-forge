@@ -30,7 +30,7 @@ from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobView
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, Job, RecipeRun
+from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, RecipeRun
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
     RecipeOperationService,
@@ -215,10 +215,9 @@ def test_a_late_cancelled_receipt_ends_a_cancelled_job_without_cleanup(
     tmp_path,
 ) -> None:
     """The Spark's exit-130 receipt arrives after its lease: the job ends
-    cancelled with its effect proved stopped, so no cleanup Stop is queued.
+    cancelled with its effect proved stopped, so the run's Stop completes.
 
-    Wrong implementation: the late receipt was read as a lapsed lease, leaving
-    the job's runtime in doubt and a cleanup Stop queued for it.
+    Wrong implementation: the order stayed observing and the run's Stop waited.
     """
 
     cancelled = _cancelled_running_job(tmp_path)
@@ -234,14 +233,6 @@ def test_a_late_cancelled_receipt_ends_a_cancelled_job_without_cleanup(
 
     assert cancelled.order_state() == "cancelled"
     assert cancelled.service.get(cancelled.job.id).state == ajs.CANCELLED
-    with cancelled.sessions() as session:
-        stops = session.scalars(
-            select(Job.id).where(
-                Job.kind == "recipe.stop",
-                Job.payload["owner_kind"].as_string() == "artifact-job",
-            )
-        ).all()
-    assert stops == []
     assert cancelled.stop().state == "succeeded"
     _activate_fresh_job_run(cancelled.sessions, cancelled.operations, cancelled.run_id)
 

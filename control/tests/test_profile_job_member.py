@@ -628,17 +628,18 @@ def _job_in_flight_on_an_offline_spark(tmp_path: Path, world: World, sim: Simula
 def _assert_ended_and_stopped_exactly(
     world: World, jobs: ArtifactJobService, job_id: str
 ) -> None:
-    """The lost job ended by the newer intent; an exact Stop proved it gone.
+    """The lost job ended under its run's Stop; an exact Stop proved it gone.
 
     Wrong implementations: a deadline ended the lost job failed while it may
     still run, or the exact Stop's receipt left its runtime recorded in doubt.
     """
 
     ended = jobs.get(job_id)
-    assert ended.state in ajs.ENDED and ended.supported_actions == ()
+    # The run's Stop cancels the live lost job; the exact Stop's receipt ends it.
+    assert ended.state == ajs.CANCELLED and ended.supported_actions == ()
     assert ended.result_evidence is not None
     assert ended.result_evidence.active_scope_may_remain is False
-    assert ended.result_evidence.residue_resolved_by == "exact-stop"
+    assert not ended.result_evidence.scope_unproven
     with world.sessions() as session:
         order = session.get(Job, ended.operation_id)
         assert order is not None and order.state in ENDED
@@ -706,6 +707,9 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
         world.close()
 
 
+# A full multi-tick profile simulation: the lost job ends only after its
+# owner's bounded looks, so the retried submission needs many simulated ticks.
+@pytest.mark.slow(30)
 def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:

@@ -357,7 +357,9 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
             clock(),
             reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
         )
-    assert service.get(original.id).state == ajs.FAILED
+    ended = service.get(original.id)
+    assert ended.status_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value
+    assert ended.state == ajs.FAILED
     retry = service.submit(
         draft_id,
         actor="operator",

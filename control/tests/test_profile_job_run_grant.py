@@ -27,7 +27,7 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.host_helper import ExecuteContainerRuntimeRequestOperation
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_control.agent_api.authority import issue_host_runtime_grant
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs import AgentJobService, StaleAgentFence
 from vonk_control.agent_jobs.retry import superseded_cancellation_deadline
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.artifact_blob_store import ArtifactBlobStore
@@ -241,9 +241,9 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert isinstance(later_stop, ExecuteContainerRuntimeRequestOperation)
         assert later_stop.runtime_target_id == later.id
 
-        # A slow agent, still heartbeating, past the cancellation window: its
+        # A slow agent, still heartbeating late in the cancellation window: its
         # cleanup Stop of its own job container is still granted; a Start is not.
-        for _ in range(SUPERSEDED_CANCELLATION_SECONDS // 20 + 1):
+        for _ in range(SUPERSEDED_CANCELLATION_SECONDS // 20 - 3):
             world.advance(20)
             orders.heartbeat(later_claim, None, 60)
             world.tick()
@@ -254,6 +254,14 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert late_stop.runtime_target_id == later.id
         with pytest.raises(HostHelperAuthorityError):
             _grant_start(authority, spark[0], later_claim.fence, later_plan)
+        # The window bounds the cancelled job: past it the order ends, the job
+        # ends cancelled, and the exact cleanup Stop of its container is queued.
+        world.advance(SUPERSEDED_CANCELLATION_SECONDS)
+        assert orders.heartbeat(later_claim, None, 60).cancel_requested is True
+        with pytest.raises(StaleAgentFence):
+            orders.heartbeat(later_claim, None, 60)
+        assert jobs.get(later.id).state == "cancelled"
+        assert world.controller.lifecycle.reconcile_pending_service_stops()
     finally:
         world.close()
 

@@ -196,7 +196,13 @@ def test_late_runtime_receipt_rejects_changed_authority(service, kind, change):
         assert str(error)
     with sessions() as session:
         row = session.get(AgentOperation, operation.id)
-        assert row is not None and row.state != LifecycleState.SUCCEEDED
+        assert row is not None
+        if kind is Kind.RECIPE_JOB_RUN and change == "owner":
+            # A JobRun is fenced by its run, never by its Spark's intent:
+            # another run's load on the Spark keeps the job's own receipt.
+            assert row.state == LifecycleState.SUCCEEDED
+        else:
+            assert row.state != LifecycleState.SUCCEEDED
 
 
 @pytest.mark.parametrize("kind", RUNTIME_KINDS)
@@ -331,20 +337,14 @@ def test_terminal_uncertain_cancel_independently_drives_only_its_exact_stop(
     assert claim_agent(queue, node_id, "serial-0") is None
 
 
-@pytest.mark.parametrize("change", ["owner", "revoked"])
-def test_cancel_cleanup_cannot_adopt_newer_or_revoked_node(
-    tmp_path, postgres_engine, change
-):
+def test_cancel_cleanup_cannot_adopt_a_revoked_node(tmp_path, postgres_engine):
     sessions, operations, _artifacts, _queue, clock, _job, _run, node_id = (
         _cancelled_job(tmp_path, postgres_engine)
     )
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        if change == "owner":
-            node.workload_intent_ordinal += 1
-        else:
-            node.revoked_at = clock.now
+        node.revoked_at = clock.now
     assert not operations.reconcile_pending_service_stops()
     with sessions() as session:
         assert (
@@ -400,12 +400,48 @@ def test_worker_recovers_retained_output_receipt_as_delivery_only(service, exit_
         assert attempt is not None and attempt.lease_deadline == deadline
 
 
-@pytest.mark.parametrize("change", ["owner", "revoked", "identity", "document"])
+def test_a_load_on_the_spark_never_holds_a_cancelled_jobs_exact_cleanup(
+    tmp_path, postgres_engine
+):
+    # Wrong implementation: the cleanup was fenced by the Spark's workload
+    # intent, so another run's load (before it was queued, or while it ran)
+    # left the cancelled job's container behind. A JobRun's container belongs
+    # to its job and run, never to the Spark's intent.
+    from vonk_agent_protocol import RecipeStopPayload
+
+    sessions, operations, artifacts, queue, _clock, job, _run_id, node_id = (
+        _cancelled_job(tmp_path, postgres_engine)
+    )
+
+    def newer_load() -> None:
+        with sessions.begin() as session:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal += 1
+
+    newer_load()
+    assert operations.reconcile_pending_service_stops()
+    stop = claim_agent(queue, node_id, "serial-0")
+    assert stop is not None and isinstance(stop.payload, RecipeStopPayload)
+    assert stop.payload.target_runtime_id == job.id
+    newer_load()
+    queue.record_result(
+        AgentResult(
+            fence=stop.fence,
+            state=AgentResultState.SUCCEEDED,
+            result=RecipeStopResult(),
+        )
+    )
+    evidence = artifacts.get(job.id).result_evidence
+    assert evidence is not None and evidence.active_scope_may_remain is False
+
+
+@pytest.mark.parametrize("change", ["revoked", "identity", "document"])
 def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     tmp_path, postgres_engine, change
 ):
-    # Wrong implementation: ordinary own-effect cleanup may outlive newer
-    # intent; an inherited cancellation must not capture that newer owner.
+    # Wrong implementation: an accepted cancellation's Stop kept its grant or
+    # receipt after its node was revoked or its exact document changed.
     from cryptography.hazmat.primitives.asymmetric import ed25519
     from vonk_agent_protocol import ContainerRuntimeAction, RecipeStopPayload
     from vonk_control.host_helper_authority import (
@@ -445,9 +481,7 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
     with sessions.begin() as session:
         node = session.get(AgentNode, node_id)
         assert node is not None
-        if change == "owner":
-            node.workload_intent_ordinal += 1
-        elif change == "revoked":
+        if change == "revoked":
             node.revoked_at = clock.now
         elif change == "document":
             # Another Stop document than the accepted order: the only exact
@@ -480,8 +514,8 @@ def test_accepted_cancel_stop_rechecks_authority_before_grant_and_receipt(
             )
         )
 
-    # A changed accepted owner ends the inherited cleanup through the normal
-    # bounded lifecycle, retaining the original job's unproven physical scope.
+    # A revoked node or changed identity ends the inherited cleanup through the
+    # normal bounded lifecycle, retaining the original job's unproven scope.
     for _ in range(40):
         clock.advance(seconds=120)
         queue.reconcile_orders()

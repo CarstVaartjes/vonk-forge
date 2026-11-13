@@ -7,7 +7,7 @@ SERVICE = Path("control/src/vonk_control/artifact_jobs/service.py")
 FORBIDDEN = {"preview_stop", "stop", "_reconcile_run_for_submission"}
 
 
-def stop_calls(source: str) -> list[int]:
+def forbidden_call_lines(source: str) -> list[int]:
     return [
         node.lineno
         for node in ast.walk(ast.parse(source))
@@ -21,12 +21,14 @@ def stop_calls(source: str) -> list[int]:
 
 def test_artifact_job_requests_never_call_a_stop():
     """Catches a submit stopping the run to clear an unobservable previous job."""
-    assert stop_calls(SERVICE.read_text()) == []
+    assert forbidden_call_lines(SERVICE.read_text()) == []
 
 
 def test_the_scan_sees_the_calls_it_forbids():
     """Catches a scan that matches nothing."""
-    assert stop_calls("self._recipe_operations.stop(run_id)\npreview_stop(r)\n") == [
+    assert forbidden_call_lines(
+        "self._recipe_operations.stop(run_id)\npreview_stop(r)\n"
+    ) == [
         1,
         2,
     ]
