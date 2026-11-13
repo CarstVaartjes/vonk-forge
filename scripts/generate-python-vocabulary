@@ -65,6 +65,7 @@ def cli_words() -> str:
         "QUEUED": LifecycleState.QUEUED,
         "RUNNING": LifecycleState.RUNNING,
         "RUN_RUNNING": RunState.RUNNING,
+        "RUN_LOST": RunState.LOST,
         "BACKOFF": LifecycleState.BACKOFF,
         "OBSERVING": LifecycleState.OBSERVING,
         "SUCCEEDED": LifecycleState.SUCCEEDED,
