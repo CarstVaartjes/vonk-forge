@@ -372,7 +372,7 @@ export function nodeSecondaryName(node: VisualFleetNode): string | null {
 }
 
 /** The live telemetry sample while its freshness is live; otherwise the Spark shows its inventory. */
-function liveSample(node: VisualFleetNode) {
+export function liveSample(node: VisualFleetNode) {
   return node.telemetry?.freshness === "live" ? node.telemetry.sample : null;
 }
 

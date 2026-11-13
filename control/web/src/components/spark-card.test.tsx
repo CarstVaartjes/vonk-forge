@@ -74,3 +74,11 @@ test("an offline Spark draws no traces", () => {
   expect(screen.getByText("offline")).toBeInTheDocument();
   expect(screen.queryByText("GPU temperature")).toBeNull();
 });
+
+test("a stale sample reads Not reported on every tile, as the table does", () => {
+  const stale = spark();
+  (stale.telemetry as { freshness: string }).freshness = "stale";
+  render(<SparkCard api={api} node={stale} now={NOW} index={0} />);
+  for (const title of ["GPU", "GPU temperature", "GPU power", "GPU clock"])
+    expect(screen.getByText(title).nextSibling).toHaveTextContent("Not reported");
+});

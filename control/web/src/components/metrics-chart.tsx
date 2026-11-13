@@ -3,6 +3,7 @@ import { useEffect, useId, useState } from "react";
 import { safeErrorText } from "../lib/error-display";
 import { useMetricCatalogue } from "../hooks/use-metric-catalogue";
 import { AreaChart, type ChartSeries } from "./chart/area-chart";
+import { sparkColor } from "./chart/series";
 import { EstimateTag } from "./estimate";
 
 import type {
@@ -36,7 +37,6 @@ const TILES: Metric[] = [
   "request_rate",
   "output_token_rate",
 ];
-const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
 
 /**
  * A Spark keeps one colour in every tile: its position in `names`, which the Fleet page builds in
@@ -45,7 +45,7 @@ const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", 
  */
 function seriesColor(labels: Record<string, string>, names: Record<string, string>, index: number) {
   const position = labels.node_id ? Object.keys(names).indexOf(labels.node_id) : -1;
-  return SERIES_COLORS[(position >= 0 ? position : index) % SERIES_COLORS.length];
+  return sparkColor(position >= 0 ? position : index);
 }
 
 function formatValue(value: number, unit: string): string {
