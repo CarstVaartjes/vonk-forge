@@ -822,8 +822,9 @@ def scan_source(
                     r"(?:^|_)(cancel|stop|retire|supersede|uninstall|remove)(?:_|$)"
                 )
                 # Builders of a request or payload (stop_grant_request,
-                # recipe_stop_payload, forbidden_call_lines) end nothing.
-                builder = re.compile(r"_(?:request|payload|payloads|lines)$")
+                # recipe_stop_payload) end nothing, and a name with an ending
+                # word never counts as the fresh admission either.
+                builder = re.compile(r"_(?:request|payload|payloads)$")
                 fresh = re.compile(
                     r"(?:^|_)(start|install|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
@@ -884,6 +885,7 @@ def scan_source(
                     if not any(
                         (n.lineno, n.col_offset) > last_end
                         and fresh.search(name(n.func))
+                        and not ending.search(name(n.func))
                         and not name(n.func).startswith("preview_")
                         for n in calls
                     ):

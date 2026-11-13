@@ -114,8 +114,8 @@ bounded observation and retry, reuse after a fault clears, and fresh admission
 after an operation ends. `non_blocking.assert_ended_without_blocking` checks
 release of explicitly inventoried holds and admission with a fresh request key.
 The `ending-without-fresh-request` guard names an ending by call name but
-ignores request and payload builders (`*_request`, `*_payload`, `*_payloads`,
-`*_lines`), which end nothing.
+ignores request and payload builders (`*_request`, `*_payload`, `*_payloads`),
+which end nothing; a name with an ending word never counts as the fresh request.
 `upgrade_continuity.assert_upgrade_keeps_serving` checks serving continuity with
 real observations and an upgrade/restart callback in its owning lane.
 
