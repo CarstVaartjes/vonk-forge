@@ -920,13 +920,12 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             if path.endswith(".rs")
             else set()
         )
-        # A CSS class name and an SVG paint value are markup, not contract words
-        # (`className="alias"`, `fill="none"`).
+        # An SVG paint value is markup, not a contract word (`fill="none"`).
         if path.endswith((".ts", ".tsx")):
             path_components = {
                 match.start(1)
                 for match in re.finditer(
-                    r"""\b(?:className|fill|stroke)=(["'][^"'\n]*["'])""", source
+                    r"""\b(?:fill|stroke)=(["'][^"'\n]*["'])""", source
                 )
             }
         return [

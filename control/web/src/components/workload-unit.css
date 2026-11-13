@@ -1,9 +1,11 @@
 .workload-unit{padding-bottom:0}
 .workload-hero{padding:1.25rem 1.5rem 0}
-.workload-hero+.workload-hero{margin-top:1.25rem;border-top:1px solid var(--line)}
+.workload-strip{padding:.9rem 1.5rem 0;margin-top:1rem;border-top:1px solid var(--line)}
+.workload-strip>header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
+.workload-strip h2{margin:0;font-size:1rem}
 .workload-hero>header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
 .workload-hero h2{margin:0;font-size:1.25rem;letter-spacing:-.02em}
-.alias{padding:.15rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-in);background:var(--recess);color:var(--ink);font:700 .875rem/1.4 var(--mono)}
+.unit-alias{padding:.15rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-in);background:var(--recess);color:var(--ink);font:700 .875rem/1.4 var(--mono)}
 .unit-facts{color:var(--muted);font-size:.8125rem}
 .hero-body{display:grid;grid-template-columns:minmax(14rem,22rem) minmax(0,1fr);gap:1rem 1.5rem;margin-top:1rem}
 .hero-read{min-width:0}
