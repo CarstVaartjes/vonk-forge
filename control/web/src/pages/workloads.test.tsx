@@ -39,7 +39,7 @@ function series(metric: string, unit: string, latest: number, total: number | nu
       title: `${metric} title`,
       unit,
       scope: "alias",
-      basis: metric === "decode_throughput" ? "measured" : "estimated",
+      basis: "measured",
       source: "gateway",
       summary_total: true,
       fleet_sum: false,
@@ -189,7 +189,6 @@ test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the share
 
 test("a workload is one row with its Sparks, measured speed and requests; opening it shows the unit", async () => {
   reads = {
-    decode_throughput: series("decode_throughput", "tokens_per_second", 41.2),
     requests_running: series("requests_running", "count", 3),
     requests_waiting: series("requests_waiting", "count", 1),
     output_token_rate: series("output_token_rate", "tokens_per_second", 38, 1_840_000),
@@ -206,10 +205,10 @@ test("a workload is one row with its Sparks, measured speed and requests; openin
   expect(
     within(within(row).getByRole("list", { name: "Sparks" })).getAllByRole("listitem"),
   ).toHaveLength(2);
-  // Measured decode has no "≈"; the gateway's tokens do; the queue is the engine's.
-  await waitFor(() => expect(row.textContent).toContain("41.2tok/s"));
+  // The lead figure is the gateway's counted tokens per second; the queue is the engine's.
+  await waitFor(() => expect(row.textContent).toContain("38tok/s"));
   expect(row.textContent).toContain("3 running · 1 waiting");
-  expect(row.textContent).toContain("≈1.84M");
+  expect(row.textContent).toContain("1.84M");
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");

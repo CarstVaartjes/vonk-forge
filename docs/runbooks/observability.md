@@ -14,10 +14,9 @@ Caddy answers 404 for
 it. Prometheus keeps one year (`365d`, capped at 40GB; the oldest blocks go
 first if the cap is reached). Changing the retention flags keeps the existing
 TSDB. Time to first token covers streaming requests only; the error rate is
-failed over total deployment attempts, so it can include retried attempts.
+failed requests per second, so it can include retried attempts.
 The Controller Trends page shows requests and generated (output) tokens per
-model as `request_rate` and `output_token_rate`. They are estimates: the gateway
-counts what it forwarded, and the catalogue labels them so. A Spark view shows
+model as `request_rate` and `output_token_rate`. A Spark view shows
 the models that Spark's loaded runs serve; the Controller does not split a
 model's tokens across Sparks.
 
@@ -42,8 +41,14 @@ a page shows "fleet tokens" and "model share" without adding anything up. Every
 query is fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM
 family listed in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
 
-Gateway estimates (per model alias, basis `estimated`): `input_token_rate`,
-`error_rate`, `gateway_ttft_p50/p95` (streaming requests only; histogram buckets
+Gateway counts (per model alias, basis `measured`): `request_rate`,
+`output_token_rate`, `input_token_rate` and `error_rate` are counted at the
+gateway from each request's usage, so they are measured (a per-second rate or a
+range total is a Prometheus `rate`/`increase`, which extrapolates). The dashboard's lead
+speed for every workload is `output_token_rate`, then `request_rate`; the
+engine's decode speed stays in the engine panel.
+
+Gateway estimates (per model alias, basis `estimated`): `gateway_ttft_p50/p95` (streaming requests only; histogram buckets
 are coarse, so the percentile moves in steps), `gateway_latency_p50/p95` (the
 whole request, queue included) and `gateway_generation_speed` (output tokens over
 the summed engine-call time, so it includes prompt processing and understates

@@ -139,7 +139,8 @@ type Spec = components["schemas"]["MetricSpec"];
  * shares are summed from these, as the Controller does.
  */
 const [S1, S2] = SPARK_IDS as [string, string, string];
-const COUNTED = "Counted by the gateway; a Spark shows the models it serves.";
+const COUNTED =
+  "Counted at the gateway from each request's usage; a Spark shows the models it serves.";
 const METRICS: { spec: Spec; latest: Record<string, number>; total?: Record<string, number> }[] = [
   {
     spec: spec(
@@ -198,7 +199,7 @@ const METRICS: { spec: Spec; latest: Record<string, number>; total?: Record<stri
       "Requests per model",
       "per_second",
       "alias",
-      "estimated",
+      "measured",
       "gateway",
       COUNTED,
       { total: true, fleet: true },
@@ -212,7 +213,7 @@ const METRICS: { spec: Spec; latest: Record<string, number>; total?: Record<stri
       "Generated tokens per model",
       "tokens_per_second",
       "alias",
-      "estimated",
+      "measured",
       "gateway",
       COUNTED,
       { total: true, fleet: true },

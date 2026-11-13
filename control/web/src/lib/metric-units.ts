@@ -127,19 +127,23 @@ export function aliasSeries(
 }
 
 /**
- * A workload's speed: the first read, in the order given, that has a latest value for the alias. Callers
- * pass the engine's measured throughput, then the gateway's estimate, then requests, so the figure
- * is the best the Controller has; none of them is computed here.
+ * A workload's lead figure, the same source for every engine: the gateway's generated tokens per second,
+ * else its requests per second. `pending` is true while a read is still out and none has a value yet.
+ * Nothing is computed here; the engine's own decode speed is shown in the engine panel.
  */
 export function leadReading(
-  reads: readonly (MetricsSeriesResponse | null | undefined)[],
+  reads: {
+    tokens: MetricsSeriesResponse | null | undefined;
+    requests: MetricsSeriesResponse | null | undefined;
+  },
   alias: string | null,
-): AliasReading | null {
-  for (const read of reads) {
+): { reading: AliasReading | null; pending: boolean } {
+  const order = [reads.tokens, reads.requests];
+  for (const read of order) {
     const reading = aliasSeries(read, alias);
-    if (reading?.series.summary.latest != null) return reading;
+    if (reading?.series.summary.latest != null) return { reading, pending: false };
   }
-  return null;
+  return { reading: null, pending: order.includes(undefined) };
 }
 
 /** The reading's points inside the last `seconds` of its range, as chart points. */

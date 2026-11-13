@@ -39,21 +39,22 @@ function Tile({
  * reading says Not reported.
  */
 export function FleetPulse({
-  decode,
+  output,
   power,
   tokens,
   energy,
   nodes,
 }: {
-  /** The engine's decode throughput, GPU power, gateway tokens and GPU energy as the Controller serves them. */
-  decode: MetricsSeriesResponse | null | undefined;
+  /** The gateway's tokens per second over the last hour (their latest is "Output now"); the workload rows' read. */
+  output: MetricsSeriesResponse | null | undefined;
+  /** GPU power, gateway tokens (24 h) and GPU energy as the Controller serves them. */
   power: MetricsSeriesResponse | null;
   tokens: MetricsSeriesResponse | null;
   energy: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
-  const speed = fleetFigure(decode, "latest");
+  const speed = fleetFigure(output, "latest");
   const watts = fleetFigure(power, "latest");
   const gpuEnergy = fleetFigure(energy, "total");
   const memory = fleetMemory(nodes);
@@ -65,7 +66,7 @@ export function FleetPulse({
         label="Output now"
         figure={speed ? formatValue(speed.value, "") : NOT_REPORTED_TEXT}
         unit={speed?.symbol}
-        caption="decode, measured at the engine"
+        caption="generated, counted by the gateway"
       />
       <Tile
         label="GPU power"

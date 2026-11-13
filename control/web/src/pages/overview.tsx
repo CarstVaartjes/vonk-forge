@@ -167,7 +167,7 @@ export function OverviewPage({
       )}
       {fleet.snapshot && nodes.length > 0 && (
         <FleetPulse
-          decode={reads.decode}
+          output={reads.tokens}
           power={power}
           tokens={tokens}
           energy={energy}
