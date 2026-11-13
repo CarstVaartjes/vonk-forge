@@ -484,7 +484,7 @@ class ArtifactJobService(OutputService):
         assert unavailable is not None
         if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
             # The draft stays READY. A submit never cancels or stops anything: a
-            # lost prior job ends when its owner's deadline passes, then admits.
+            # lost prior job ends shortly after its owner's deadline, then admits.
             raise unavailable
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
@@ -555,7 +555,7 @@ class ArtifactJobService(OutputService):
                 if uncertain:
                     observed = adapter.observe(recorded).effect
                     if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
-                        # The lost job ends at its owner's deadline; this submit
+                        # The lost job ends shortly after its owner's deadline; this submit
                         # waits (bounded) and never cancels or stops anything.
                         deadline = recorded.recovery_deadline
                         raise ArtifactJobUnavailableError(
