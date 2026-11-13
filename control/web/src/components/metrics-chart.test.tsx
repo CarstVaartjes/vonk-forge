@@ -69,8 +69,8 @@ const data: MetricsSeriesResponse = {
 
 test("renders the measured series, axes and identity instead of an empty chart", () => {
   const { container } = render(<SeriesChart data={data} names={{ "Spark A": "Kitchen" }} />);
-  expect(screen.getByRole("img", { name: "Time series in %" })).toBeVisible();
-  expect(container.querySelector('path[stroke-width="2"]')).toHaveAttribute("d", "M50,125 L580,20");
+  expect(screen.getByRole("img", { name: /^GPU utilisation, 6h: Kitchen now 80 %/ })).toBeVisible();
+  expect(container.querySelectorAll("path.chart-line")).toHaveLength(1);
   expect(screen.getByText("Kitchen · %")).toBeVisible();
 });
 
@@ -101,7 +101,7 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
 
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
-  expect(memory).toHaveTextContent("64 GiB");
+  expect(memory).toHaveTextContent("60 GiB");
   expect(await screen.findByText("Kitchen: certificate expires in 12 days")).toBeVisible();
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });

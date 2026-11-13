@@ -1,6 +1,7 @@
 import type { LosslessNumber } from "lossless-json";
 import { useEffect, useId, useState } from "react";
 import { safeErrorText } from "../lib/error-display";
+import { AreaChart, type ChartSeries } from "./chart/area-chart";
 
 import type {
   ControlApi,
@@ -92,66 +93,32 @@ export function SeriesChart({
   names?: Record<string, string>;
 }) {
   const { symbol: unit, scale } = UNITS[data.spec.unit];
-  const values = data.series.flatMap((series) =>
-    series.points.flatMap((point) => (point.value === null ? [] : [Number(point.value) / scale])),
-  );
-  if (!values.length) return <p role="status">No samples in this range</p>;
-  const low = values.reduce((min, value) => Math.min(min, value), 0),
-    high = values.reduce((max, value) => Math.max(max, value), 1);
-  const clock: Intl.DateTimeFormatOptions =
-    Number(data.end) - Number(data.start) > 86400 * 2
-      ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
-      : { hour: "2-digit", minute: "2-digit" };
-  const x = (timestamp: number) =>
-    50 + (530 * (timestamp - Number(data.start))) / (Number(data.end) - Number(data.start));
-  const y = (value: number) => 160 - (140 * (value / scale - low)) / (high - low);
+  if (!data.series.some((series) => series.points.some((point) => point.value !== null)))
+    return <p role="status">No samples in this range</p>;
+  const chartSeries: ChartSeries[] = data.series.map((series, index) => ({
+    key: JSON.stringify(series.labels),
+    name: seriesName(series.labels, names),
+    color: seriesColor(series.labels, names, index),
+    points: series.points.map((point) => ({
+      t: Number(point.timestamp),
+      v: point.value === null ? null : Number(point.value) / scale,
+    })),
+  }));
+  const sentence = `${data.spec.title}, ${data.range}: ${data.series
+    .map(
+      (series) => `${seriesName(series.labels, names)} ${summaryText(series.summary, data.spec)}`,
+    )
+    .join("; ")}`;
   return (
     <>
-      <svg
-        viewBox="0 0 600 200"
-        role="img"
-        aria-label={`Time series in ${unit}`}
-        style={{ width: "100%", maxHeight: 240 }}
-      >
-        <text x="0" y="18" fill="currentColor" fontSize="11">
-          {formatValue(high, unit)}
-        </text>
-        <text x="0" y="163" fill="currentColor" fontSize="11">
-          {formatValue(low, unit)}
-        </text>
-        <path d="M50 20V160H580" fillOpacity={0} stroke="currentColor" opacity="0.3" />
-        {data.series.map((series, index) => {
-          let connected = false;
-          const path = series.points
-            .map((point) => {
-              if (point.value === null) {
-                connected = false;
-                return "";
-              }
-              const command = connected ? "L" : "M";
-              connected = true;
-              return `${command}${x(Number(point.timestamp))},${y(Number(point.value))}`;
-            })
-            .join(" ");
-          return (
-            <path
-              key={JSON.stringify(series.labels)}
-              d={path}
-              fillOpacity={0}
-              stroke={seriesColor(series.labels, names, index)}
-              strokeWidth="2"
-            >
-              <title>{Object.values(series.labels).join(" · ")}</title>
-            </path>
-          );
-        })}
-        <text x="50" y="185" fill="currentColor" fontSize="11">
-          {new Date(Number(data.start) * 1000).toLocaleString([], clock)}
-        </text>
-        <text x="580" y="185" textAnchor="end" fill="currentColor" fontSize="11">
-          {new Date(Number(data.end) * 1000).toLocaleString([], clock)}
-        </text>
-      </svg>
+      <AreaChart
+        title={data.spec.title}
+        label={sentence}
+        series={chartSeries}
+        start={Number(data.start)}
+        end={Number(data.end)}
+        format={(value) => formatValue(value, unit)}
+      />
       <ul aria-label="Series legend">
         {data.series.map((series, index) => (
           <li
