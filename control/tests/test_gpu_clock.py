@@ -306,7 +306,7 @@ def test_shared_agent_observation_crosses_controller_storage_projection_and_cli(
     assert "graphics 1700 / SM 1695 MHz" in output
     assert "last applied 300–2200 MHz (helper receipt)" in output
     assert "reported max graphics 2400 / SM 2300 MHz" in output
-    assert "throttle bits 4" in output
+    assert "throttle reasons software power cap" in output
 
 
 def test_inventory_without_supported_levels_still_gets_a_clock_reconciliation_grant(

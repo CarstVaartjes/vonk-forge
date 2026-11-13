@@ -8,9 +8,11 @@ import type { AppRoute } from "./components/app-shell";
 import type { LiveStatus } from "./hooks/fleet-stream-state";
 import { ActivityPage } from "./pages/activity";
 import { OverviewPage } from "./pages/overview";
+import { SparkPage } from "./pages/spark";
 import { KeysPage } from "./pages/keys";
 import { LibraryPage } from "./pages/library";
 import { WorkloadsPage } from "./pages/workloads";
+import { sparkPath, sparkRouteId } from "./lib/spark-route";
 
 const pages: AppRoute[] = ["overview", "workloads", "library", "keys", "activity"];
 function pageTitle(pathname: string): string {
@@ -19,6 +21,7 @@ function pageTitle(pathname: string): string {
   if (pathname === "/keys") return "API keys · Vonk Forge";
   if (pathname === "/activity") return "Activity · Vonk Forge";
   if (pathname === "/workloads") return "Workloads · Vonk Forge";
+  if (sparkRouteId(pathname) !== null) return "Spark · Vonk Forge";
   if (pathname === "/" || pathname === "/fleet" || pathname === "/overview")
     return "Overview · Vonk Forge";
   return "Page not found · Vonk Forge";
@@ -26,7 +29,7 @@ function pageTitle(pathname: string): string {
 
 function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
-  if (value === "" || value === "fleet") return "overview";
+  if (value === "" || value === "fleet" || sparkRouteId(pathname) !== null) return "overview";
   if (/^library(?:\/|$)/.test(value)) return "library";
   return pages.includes(value as AppRoute) ? (value as AppRoute) : undefined;
 }
@@ -44,6 +47,7 @@ export function App({ api }: { api: ControlApi }) {
   }, []);
   const pathname = new URL(url, location.origin).pathname;
   const page = currentPage(pathname);
+  const sparkId = sparkRouteId(pathname);
   useEffect(() => {
     document.title = pageTitle(pathname);
   }, [pathname]);
@@ -110,7 +114,16 @@ export function App({ api }: { api: ControlApi }) {
       setUrl(nextUrl);
     });
   }
-  const content = page ? (
+  const openSpark = (id: string) => navigateUrl(sparkPath(id));
+  const content = sparkId ? (
+    <SparkPage
+      api={api}
+      id={sparkId}
+      onLive={setLive}
+      onNavigate={navigatePath}
+      onGone={() => navigateUrl("/overview", true)}
+    />
+  ) : page ? (
     {
       overview: (
         <OverviewPage
@@ -118,9 +131,10 @@ export function App({ api }: { api: ControlApi }) {
           onBusyChange={setNavigationLocked}
           onLive={setLive}
           onNavigate={navigatePath}
+          onOpenSpark={openSpark}
         />
       ),
-      workloads: <WorkloadsPage api={api} onLive={setLive} />,
+      workloads: <WorkloadsPage api={api} onLive={setLive} onOpenSpark={openSpark} />,
       library: (
         <LibraryPage
           api={api}
