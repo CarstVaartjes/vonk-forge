@@ -39,7 +39,6 @@ export function SparkStorage({ node }: { node: VisualFleetNode }) {
           </li>
         ))}
       </ul>
-      <p className="spark-panel-note">Unused model files are removed when space runs short.</p>
     </section>
   );
 }

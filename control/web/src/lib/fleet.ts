@@ -371,6 +371,13 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   ].join(" · ");
 }
 
+/** The pill tone of a firing alert: critical is bad, anything else warns. */
+export function attentionTone(
+  alert: NonNullable<VisualFleetSnapshot["attention"]>[number],
+): "bad" | "warn" {
+  return alert.severity === "critical" ? "bad" : "warn";
+}
+
 /**
  * A firing alert in plain words: its severity as a word, and its summary with the Spark it
  * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.

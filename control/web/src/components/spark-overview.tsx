@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import type { ControlApi, MetricRange, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import { formatBytes, nodeCpuClock, nodeDisplayMemory, nodeGpuClock, nodeSwap } from "../lib/fleet";
-import { useTelemetryHistory } from "../hooks/use-telemetry-history";
+import type { HistoryPoint } from "../hooks/use-telemetry-history";
 import { nodeHealth } from "../lib/node-health";
 import { HealthList } from "./health-list";
 import { SparkCharts } from "./spark-charts";
@@ -18,6 +18,7 @@ export function SparkOverview({
   now,
   range,
   color,
+  points,
   nodes,
   attention,
   attentionUnavailable,
@@ -28,6 +29,8 @@ export function SparkOverview({
   now: Date;
   range: MetricRange;
   color: string;
+  /** The last 30 minutes of the Spark's telemetry, kept by the page across tabs. */
+  points: readonly HistoryPoint[];
   /** The fleet, for the names of the Sparks this one shares a workload with. */
   nodes: readonly VisualFleetNode[];
   attention: VisualFleetSnapshot["attention"];
@@ -35,7 +38,6 @@ export function SparkOverview({
   onNavigate(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const cpu = nodeCpuClock(node);
-  const { points } = useTelemetryHistory({ api, nodeId: node.id, telemetry: node.telemetry, now });
   return (
     <>
       <div className="spark-panels">
@@ -50,7 +52,10 @@ export function SparkOverview({
           <header>
             <h2 id={`health-${node.id}`}>Health</h2>
           </header>
-          <HealthList api={api} rows={nodeHealth(node, now, attention, attentionUnavailable)} />
+          <HealthList
+            api={api}
+            rows={nodeHealth(node, nodes, now, attention, attentionUnavailable)}
+          />
         </section>
       </div>
       <dl className="spark-facts">

@@ -1,11 +1,11 @@
 import { type WireNumber, formatWire } from "../api/contract-numeric";
 
 // NVML nvmlClocksEventReason* bits (nvml.h), in bit order. `throttling` is false for the reasons that
-// are the clock working as designed (idle, an applications-clocks setting, sync boost, a display setting).
+// are the clock working as designed (idle, an applications-clocks setting, a software power cap, sync boost, a display setting).
 const REASONS = [
   { bit: 0x1n, word: "GPU idle", throttling: false },
   { bit: 0x2n, word: "application clocks setting", throttling: false },
-  { bit: 0x4n, word: "software power cap", throttling: true },
+  { bit: 0x4n, word: "software power cap", throttling: false },
   { bit: 0x8n, word: "hardware slowdown", throttling: true },
   { bit: 0x10n, word: "sync boost", throttling: false },
   { bit: 0x20n, word: "software thermal slowdown", throttling: true },

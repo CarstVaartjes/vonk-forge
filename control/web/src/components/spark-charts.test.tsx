@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ControlApi, MetricSpec } from "../api/types";
 import { SparkCharts } from "./spark-charts";
 
@@ -72,4 +72,20 @@ test("a failed read says Not reported and keeps the other cards", async () => {
       "24 h average 64.5 %",
     ),
   ).toBeVisible();
+});
+
+test("a failed catalogue read says so, and Refresh metrics reads it again and heals", async () => {
+  const metricsCatalogue = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("down"))
+    .mockResolvedValue(SPECS);
+  const api = {
+    metricsCatalogue,
+    metricsSeries: async (metric: string) => reply(metric),
+  } as unknown as ControlApi;
+  render(<SparkCharts api={api} nodeId="spk_1" range="24h" color="var(--series-1)" />);
+  expect(await screen.findByText("Metrics unavailable: down")).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh metrics" }));
+  expect(await screen.findByRole("region", { name: "GPU temperature" })).toBeVisible();
+  expect(screen.queryByText(/Metrics unavailable/)).toBeNull();
 });

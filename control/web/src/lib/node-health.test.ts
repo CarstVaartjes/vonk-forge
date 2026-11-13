@@ -35,6 +35,7 @@ test("findings come worst first, with the all-clear ones the live snapshot prove
   });
   const rows = nodeHealth(
     node,
+    [node],
     NOW,
     [
       alert("spk_1", "warning", "Agent is one release behind."),
@@ -44,8 +45,8 @@ test("findings come worst first, with the all-clear ones the live snapshot prove
   );
   expect(rows.map((row) => [row.tone, row.title, row.detail])).toEqual([
     ["warn", "Warning", "Agent is one release behind."],
-    ["warn", "GPU clock throttled", "software power cap"],
     ["ok", "GPU temperature normal", "69 °C"],
+    ["ok", "GPU clock normal", "software power cap"],
     ["ok", "Memory headroom fine", "10.0 GiB free"],
   ]);
 });
@@ -53,13 +54,15 @@ test("findings come worst first, with the all-clear ones the live snapshot prove
 test("a hot GPU and low memory are rows; alerts that could not be read are said, not assumed clear", () => {
   const node = live({
     gpu_temperature_c: 91,
+    gpu_clock: { throttle_reasons: 32 },
     memory_total_bytes: 100 * GIB,
     memory_available_bytes: 3 * GIB,
   });
-  const rows = nodeHealth(node, NOW, undefined, true);
+  const rows = nodeHealth(node, [node], NOW, undefined, true);
   expect(rows.map((row) => [row.tone, row.title])).toEqual([
     ["bad", "GPU temperature serious"],
     ["bad", "Memory headroom low"],
+    ["warn", "GPU clock throttled"],
     ["neutral", "Alerts unavailable"],
   ]);
 });
@@ -70,8 +73,10 @@ test("a Spark that is not reporting live gets no all-clear row, only what is kno
     telemetry: null,
     connection: { online_state: "offline", offline_reason: "stale" },
   };
-  expect(nodeHealth(node as never, NOW, [], false).map((row) => [row.tone, row.title])).toEqual([
-    ["bad", "Offline"],
-    ["ok", "No alerts firing"],
-  ]);
+  expect(nodeHealth(node as never, [], NOW, [], false).map((row) => [row.tone, row.title])).toEqual(
+    [
+      ["bad", "Offline"],
+      ["ok", "No alerts firing"],
+    ],
+  );
 });
