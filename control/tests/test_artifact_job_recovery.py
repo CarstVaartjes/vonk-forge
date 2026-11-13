@@ -305,11 +305,20 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
         f"{digest[:2]}/{digest}", digest, len(content)
     )
     assert restored is not None and restored.read_bytes() == content
-    next_attempt = submitted_artifact_job(service, run_id, request_suffix=1040)
-    assert next_attempt.state in ajs.ENDED and next_attempt.operation_id is None
-    # The newer request steers: it superseded the lost job, whose cancel
-    # completes within its stop budget (its residue kept), and its run's exact
-    # Stop continues.
+    # The lost job's effect cannot be observed: a newer submit answers a
+    # retryable wait and never stops the run. The operator's Stop does.
+    with pytest.raises(ArtifactJobUnavailableError):
+        submitted_artifact_job(service, run_id, request_suffix=1040)
+    with sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == RunState.RUNNING
+    operations.stop(
+        run_id,
+        plan_digest=operations.preview_stop(run_id).plan_digest,
+        actor="operator",
+        request_id=str(uuid.uuid4()),
+    )
+    # The Stop cancels the lost job within its stop budget (its residue kept).
     for _ in range(40):
         if service.get(original.id).state in ajs.ENDED:
             break
@@ -320,17 +329,6 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     assert (
         superseded.result_evidence is not None
         and superseded.result_evidence.active_scope_may_remain
-    )
-    operations.stop(
-        run_id,
-        plan_digest=operations.preview_stop(run_id).plan_digest,
-        actor="operator",
-        request_id=str(
-            uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"artifact-stop:{next_attempt.id}:00000000-0000-4000-8000-000000001041",
-            )
-        ),
     )
     exact, payload, _grant = _issue_exact_stop_grant(
         sessions,

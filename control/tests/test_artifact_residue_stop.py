@@ -7,7 +7,7 @@ from datetime import datetime
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
-from sqlalchemy import event, select, text
+from sqlalchemy import select, text
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -24,7 +24,9 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
+from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.artifact_jobs.contracts import ArtifactJobUnavailableError
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -34,12 +36,13 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
 )
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
+    ArtifactJob,
     Job,
     RecipeRun,
     ResourceReservation,
 )
-from vonk_control.recipe_operations import RecipeRetryLater
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_job_lifecycle import CANCEL_KEY, _drive, _issued_job
@@ -112,42 +115,52 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
             )
         )
     assert held
-    # A retained physical reservation is not an admission mutex for fresh work.
-    fresh = submitted_artifact_job(artifacts, run_id, request_suffix=900)
-    assert fresh.id != job.id
-    # Accepted intent waits on exact cleanup; acceptance is not dispatch.
-    assert fresh.operation_id is None
-    # New intent drives exact cleanup, while its own bounded attempt ends.
-    # It never treats a logical ending as observed free physical capacity.
-    stop_plan = operations.preview_stop(run_id)
-    observations = 0
 
-    def unavailable_once(connection, cursor, statement, parameters, context, many):
-        nonlocal observations
-        if "FROM artifact_jobs" in statement:
-            observations += 1
-            if observations == 1:
-                raise RecipeRetryLater("exact JobRun source observation is unavailable")
+    # A retained physical reservation is not an admission mutex for fresh work,
+    # yet a submit that cannot observe the old job's effect never stops the run:
+    # it answers a retryable wait, keeps its draft READY, and leaves the run, the
+    # Spark's workload ordinal and the old job untouched.
+    def ordinals() -> list[tuple[str | int, ...]]:
+        with sessions() as session:
+            return sorted(
+                tuple(row)
+                for row in session.execute(
+                    select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                )
+            )
 
-    engine = sessions.kw["bind"]
-    event.listen(engine, "before_cursor_execute", unavailable_once)
-    try:
-        newer = submitted_artifact_job(artifacts, run_id, request_suffix=900)
-    finally:
-        event.remove(engine, "before_cursor_execute", unavailable_once)
-    assert newer.operation_id is None
-    stop_key = str(
-        uuid.uuid5(
-            uuid.NAMESPACE_URL,
-            f"artifact-stop:{newer.id}:00000000-0000-4000-8000-000000000901",
-        )
-    )
+    before = ordinals()
+    with pytest.raises(ArtifactJobUnavailableError):
+        submitted_artifact_job(artifacts, run_id, request_suffix=900)
     with sessions() as session:
-        accepted_stop = session.scalar(select(Job).where(Job.request_id == stop_key))
-        assert accepted_stop is not None
-        stop_id = accepted_stop.id
+        run = session.get(RecipeRun, run_id)
+        assert run is not None and run.state == "running"
+        draft = session.scalar(
+            select(ArtifactJob).where(
+                ArtifactJob.run_id == run_id, ArtifactJob.id != job.id
+            )
+        )
+        assert draft is not None and draft.operation_id is None
+        assert not ajs.is_ended(draft)
+        assert (
+            session.scalar(
+                select(Job).where(
+                    Job.kind == "recipe.stop",
+                    Job.payload["owner_id"].as_string() == run_id,
+                )
+            )
+            is None
+        )
+    assert ordinals() == before
+    stop_plan = operations.preview_stop(run_id)
+    stop_key = str(uuid.uuid4())
+    stop_id = operations.stop(
+        run_id,
+        plan_digest=stop_plan.plan_digest,
+        actor="operator",
+        request_id=stop_key,
+    ).id
     stopping = operations.get(stop_id)
-    assert observations >= 2
     # No successful job-target Stop receipt has arrived. A terminal cancellation
     # and a newer workload ordinal are decisions, not observations of absence.
     assert stopping.state != "succeeded"

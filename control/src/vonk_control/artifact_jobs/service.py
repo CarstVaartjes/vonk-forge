@@ -45,9 +45,7 @@ from ..models import (
 )
 from ..recipe_execution_contract import RecipeExecutionContractError
 from ..recipe_operations import (
-    RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
-    RecipeRetryLater,
 )
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
@@ -473,64 +471,30 @@ class ArtifactJobService(OutputService):
 
     def submit(self, job_id: str, *, actor: str, request_id: str) -> ArtifactJobView:
         # Each pass releases its transaction before the shared bounded backoff.
-        # The draft is already durable intent. Unknown old effects drive exact
-        # cleanup, never dispatch over occupied capacity or inherit a spent wait.
+        # The draft is already durable intent. A previous job whose effect cannot
+        # be observed is never answered by stopping the run: the draft stays
+        # READY and the client retries the same key once that receipt settles.
+        unavailable: ArtifactJobUnavailableError | None = None
         for _attempt in bounded_attempts():
             try:
                 return self._submit_once(job_id, actor=actor, request_id=request_id)
-            except UnknownOutcomeError:
-                self._reconcile_run_for_submission(
-                    job_id, actor=actor, request_id=request_id
+            except UnknownOutcomeError as error:
+                unavailable = ArtifactJobUnavailableError(
+                    str(error), reason=error.typed_reason
                 )
+        assert unavailable is not None
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
-            if job is None:
-                raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
-            return self._end_preparation(session, job)
-
-    def _reconcile_run_for_submission(
-        self, job_id: str, *, actor: str, request_id: str
-    ) -> None:
-        with self._sessions() as session:
-            job = session.get(ArtifactJob, job_id)
-            if job is None:
-                return
-            run_id = job.run_id
-            adapter = ArtifactJobAdapter(session, clock=self._clock)
-            occupied = any(
-                prior.operation_id is not None
-                and (
-                    prior.state in ajs.LIVE
-                    or adapter.adopt(prior).effect is Effect.UNKNOWN
-                    or (
-                        prior.result_evidence is not None
-                        and read_result_evidence(prior.result_evidence) is None
-                    )
-                )
-                for prior in session.scalars(
-                    select(ArtifactJob).where(
-                        ArtifactJob.run_id == run_id,
-                        ArtifactJob.id != job_id,
-                    )
-                )
-            )
-        if not occupied:
-            return
-        # The run's Stop authority freezes and fences the exact JobRun targets.
-        # Its durable worker survives this request's bounded observation ending.
-        key = str(
-            uuid.uuid5(uuid.NAMESPACE_URL, f"artifact-stop:{job_id}:{request_id}")
-        )
-        try:
-            plan = self._recipe_operations.preview_stop(run_id)
-            self._recipe_operations.stop(
-                run_id,
-                plan_digest=plan.plan_digest,
-                actor=actor,
-                request_id=key,
-            )
-        except (RecipeArtifactJobCancellationPending, RecipeRetryLater):
-            return
+            if (
+                job is not None
+                and job.operation_id is None
+                and not ajs.is_ended(job)
+                and not self._available_inputs(session, job)
+            ):
+                # Lost input bytes never return by waiting: the draft ends and
+                # the client uploads again into a fresh draft.
+                return self._end_preparation(session, job)
+        raise unavailable
 
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
