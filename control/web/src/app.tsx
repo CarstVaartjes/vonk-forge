@@ -112,7 +112,14 @@ export function App({ api }: { api: ControlApi }) {
   }
   const content = page ? (
     {
-      overview: <OverviewPage api={api} onBusyChange={setNavigationLocked} onLive={setLive} />,
+      overview: (
+        <OverviewPage
+          api={api}
+          onBusyChange={setNavigationLocked}
+          onLive={setLive}
+          onNavigate={navigatePath}
+        />
+      ),
       workloads: <WorkloadsPage api={api} onLive={setLive} />,
       library: (
         <LibraryPage

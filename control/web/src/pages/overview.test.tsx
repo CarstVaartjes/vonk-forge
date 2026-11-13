@@ -50,6 +50,7 @@ const grant: EnrollmentGrantResponse = {
 
 const api = {
   metricsSeries: () => Promise.reject(new Error("no history")),
+  operations: () => Promise.reject(new Error("no activity")),
 } as unknown as ControlApi;
 
 test("Fleet creates a one-use grant and shows the exact Spark command, token, and expiry", async () => {

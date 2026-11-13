@@ -1,10 +1,11 @@
 import "./overview.css";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useSelectedSpark } from "../hooks/use-selected-spark";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine, groupByWorkload } from "../lib/fleet";
+import { ActivityPreview } from "../components/activity-preview";
 import { AttentionItem } from "../components/attention-item";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { SparkCard } from "../components/spark-card";
@@ -21,10 +22,12 @@ import { safeErrorText } from "../lib/error-display";
 export function OverviewPage({
   api,
   onLive,
+  onNavigate,
 }: {
   api: ControlApi;
   onBusyChange?(busy: boolean): void;
   onLive?(status: LiveStatus | null): void;
+  onNavigate?(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const fleet = useFleetStream(api);
   const live = liveStatus(fleet);
@@ -208,6 +211,14 @@ export function OverviewPage({
                 </div>
               </section>
             )}
+          </div>
+          <div className="overview-activity">
+            <ActivityPreview
+              api={api}
+              nodes={nodes}
+              now={fleet.now}
+              onViewAll={onNavigate && ((event) => onNavigate(event, "/activity"))}
+            />
           </div>
           <div className="overview-serving">
             <ServingNow

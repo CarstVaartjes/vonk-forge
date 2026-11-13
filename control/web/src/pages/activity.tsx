@@ -1201,6 +1201,36 @@ function sortActivityByTime(left: ActivityRecord, right: ActivityRecord): number
   return eventTimestamp(right) - eventTimestamp(left);
 }
 
+/** The newest activity as short rows (what it was, to whom, how it ended), in the Activity page's own words. */
+export function activityPreviewRows(
+  operations: OperationDetail[],
+  names: Map<string, string>,
+  limit: number,
+): {
+  id: string;
+  occurredAt: string | null;
+  label: string;
+  targets: string;
+  tone: ReturnType<typeof statusTone>;
+  word: string;
+}[] {
+  return operations
+    .map((operation) => canonicalRecord(operation, names))
+    .sort(sortActivityByTime)
+    .slice(0, limit)
+    .map((record) => {
+      const status = activityStatus(record);
+      return {
+        id: record.request_id,
+        occurredAt: record.occurred_at ?? null,
+        label: activityActionLabel(record.action),
+        targets: targetSummaryNames(record).join(" · "),
+        tone: statusTone(status),
+        word: statusLabel(status),
+      };
+    });
+}
+
 export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?: Date }) {
   const [events, setEvents] = useState<ActivityRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
