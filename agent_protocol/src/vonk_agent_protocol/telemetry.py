@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import uuid
 from collections.abc import Mapping
@@ -182,6 +183,22 @@ class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
         return self
 
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
+
+
+class EngineTarget(TelemetryWireModel):
+    """Where one ready run's engine listens, node-local: the agent writes one
+    small file per run into its runtime directory and the monitor, which cannot
+    read the agent's database, scrapes ``address:port/metrics`` for it (the
+    address is the one the readiness probe uses)."""
+
+    run_id: CanonicalUUID
+    address: str
+    port: int = Field(ge=1024, le=65535)
+
+    @field_validator("address")
+    @classmethod
+    def address_is_an_ip(cls, value: str) -> str:
+        return str(ipaddress.ip_address(value))
 
 
 class HostResourceSample(TelemetryWireModel):
@@ -495,6 +512,7 @@ __all__ = [
     "MAX_TELEMETRY_REPORT_BYTES",
     "EngineFormat",
     "EngineReading",
+    "EngineTarget",
     "TelemetryReadings",
     "TelemetryRequest",
     "TelemetrySample",

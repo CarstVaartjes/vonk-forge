@@ -21,7 +21,7 @@ are nullable because a platform may not expose a value at a given sample:
 | CPU time busy/total | seconds (counters) | `/proc/stat` jiffies over USER_HZ since boot. Utilization is a Prometheus rate of busy over total. |
 | Load average | 1m | `/proc/loadavg`. |
 | LAN receive/transmit | bytes (counters) | The default-route interface's netdev counters. |
-| Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of ACTIVE ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
+| Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of all ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
 | Disk read/written | bytes (counters) | The disk that holds the model store. |
 | OOM kills | count (counter) | `/proc/vmstat` `oom_kill` since boot. |
 | Board, NVMe, NIC temperature | °C | Hottest unlabelled `acpitz` zone (never called "CPU"), NVMe Composite, hottest ConnectX ASIC. |
@@ -31,11 +31,23 @@ Protocol 4.4 adds the rows from CPU time down and the per-run engine readings be
 Every one is optional: an older agent omits them and the Controller stores NULL
 and exports nothing for them (a gap, never a zero). An invalid reading is
 dropped alone, and the optional-evidence recovery starts from the groups the
-validation error names, so many invalid readings cost a few validations. The agent collects the host readings
-(M5a) and the engine readings (M5b) in later changes; until then the Rust
-literal reports them as absent.
+validation error names, so many invalid readings cost a few validations. The monitor reads the host readings
+without privilege from `/proc` and `/sys`; a source that is missing on a Spark
+leaves only its own readings absent, and every sample reads again. The monitor
+reads the engine readings from each ready run's own `/metrics` (below).
 
 ### Engine readings
+
+The agent leaves one `EngineTarget` file (`run_id`, `address`, `port`; the address is the one its readiness probe uses) per ready run in
+`/run/vonk-forge-agent/engine-targets/` and rewrites it on every observation; a
+run that is not ready has none, a stop or retirement removes it, and a file older than two minutes is ignored.
+The monitor scrapes `<address>:<port>/metrics` of the targets (eight at a time) under one
+750 ms deadline (2 MiB cap per reply) beside the host readings, so an upload may wait up to 750 ms for it; an engine that is
+late, oversized, not answering 200 or in an unknown format is left out of that
+sample. The format is recognised by the metric-name prefix; only TensorFold's
+names are mapped so far (from a verbatim capture), so vLLM, SGLang and llama.cpp
+runs report no engine reading until their captures add rows. Values are summed
+across label sets, except the KV cache ratio, which is the fullest pool's.
 
 `engines` (one per running endpoint) carries each run's metrics as
 the monitor reads them from the engine's own `/metrics` on loopback. An entry

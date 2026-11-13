@@ -150,6 +150,14 @@ async fn an_unowned_container_is_stopped_and_retired_and_a_known_one_is_left_alo
         .run(known, Some(labels_of(known, known_installation, 2)));
     world.controller.say(unowned, FakeDisposition::Unowned);
     world.controller.say(known, FakeDisposition::Wanted(2));
+    let targets = world.runtime.path().join("engine-targets");
+    crate::telemetry::engine_metrics::write_target(
+        &targets,
+        unowned,
+        std::net::Ipv4Addr::LOCALHOST.into(),
+        8000,
+    )
+    .unwrap();
     let runner = NoProcess;
     let executor = world.executor(&runner);
 
@@ -157,6 +165,10 @@ async fn an_unowned_container_is_stopped_and_retired_and_a_known_one_is_left_alo
         cycle(&executor).await;
     }
 
+    assert!(
+        !targets.join(format!("{unowned}.json")).exists(),
+        "a retired run kept its metrics target"
+    );
     assert!(
         !world.host.is_running(unowned),
         "the orphan was not stopped"

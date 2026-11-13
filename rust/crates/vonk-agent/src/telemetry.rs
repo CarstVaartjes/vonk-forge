@@ -17,6 +17,10 @@ use crate::{
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 pub const MAX_REPORT_SAMPLES: usize = 16;
 
+pub mod engine_metrics;
+pub mod host_readings;
+
+use host_readings::{HostRoots, read_host};
 use vonk_agent_protocol::MAX_TELEMETRY_CAPACITY_BYTES;
 pub use vonk_agent_protocol::generated::{GpuUnavailableReason, TelemetryRequest, TelemetrySample};
 
@@ -59,6 +63,8 @@ pub struct TelemetryPaths {
     /// `/sys/devices/system/cpu`: per-CPU `cpufreq` clocks live below it.
     pub cpu_root: PathBuf,
     pub store: PathBuf,
+    /// `/proc` and `/sys`, where the unprivileged host readings come from.
+    pub host: HostRoots,
 }
 
 pub struct TelemetryCollector<R, F> {
@@ -178,6 +184,7 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
                     "GPU requires reset; see the fleet health warning for recovery.".to_owned();
             }
         }
+        let host = read_host(&self.paths.host, &self.paths.store);
         TelemetrySample {
             boot_id: self.boot_id,
             observed_at: observed_at.fixed_offset(),
@@ -197,21 +204,21 @@ impl<R: ProcessRunner, F: FileSystemProvider> TelemetryCollector<R, F> {
             gpu_power_watts: accelerator.as_ref().and_then(|value| value.power_watts),
             uptime_seconds: read_uptime(&self.paths.uptime),
             gpu_process_memory_bytes,
-            cpu_busy_seconds: None,
-            cpu_total_seconds: None,
-            load_average_1m: None,
-            network_lan_rx_bytes: None,
-            network_lan_tx_bytes: None,
-            fabric_rx_bytes: None,
-            fabric_tx_bytes: None,
-            fabric_ports_active: None,
-            disk_read_bytes: None,
-            disk_written_bytes: None,
-            oom_kills: None,
-            board_temperature_max_c: None,
-            nvme_temperature_c: None,
-            nic_temperature_c: None,
-            fan_rpm_max: None,
+            cpu_busy_seconds: host.cpu_busy_seconds,
+            cpu_total_seconds: host.cpu_total_seconds,
+            load_average_1m: host.load_average_1m,
+            network_lan_rx_bytes: host.network_lan_rx_bytes,
+            network_lan_tx_bytes: host.network_lan_tx_bytes,
+            fabric_rx_bytes: host.fabric_rx_bytes,
+            fabric_tx_bytes: host.fabric_tx_bytes,
+            fabric_ports_active: host.fabric_ports_active,
+            disk_read_bytes: host.disk_read_bytes,
+            disk_written_bytes: host.disk_written_bytes,
+            oom_kills: host.oom_kills,
+            board_temperature_max_c: host.board_temperature_max_c,
+            nvme_temperature_c: host.nvme_temperature_c,
+            nic_temperature_c: host.nic_temperature_c,
+            fan_rpm_max: host.fan_rpm_max,
             engines: None,
         }
     }

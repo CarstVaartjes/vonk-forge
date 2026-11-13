@@ -10,7 +10,11 @@ use vonk_agent::{
     client::AgentHttpClient,
     config::{AgentConfig, DEFAULT_CONFIG_PATH},
     process::SystemProcessRunner,
-    telemetry::{SystemFileSystemProvider, TelemetryCollector, TelemetryPaths, read_boot_id},
+    telemetry::{
+        SystemFileSystemProvider, TelemetryCollector, TelemetryPaths,
+        engine_metrics::{RUNTIME_DIRECTORY, SCRAPE_DEADLINE, TARGETS_DIRECTORY, scrape_engines},
+        read_boot_id,
+    },
 };
 
 const INTERVAL: Duration = Duration::from_secs(2);
@@ -38,19 +42,43 @@ async fn run(config_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
         // budget. Slow driver failures carry evidence that must be uploaded.
         if sampling.is_none() {
             let config_path = config_path.to_owned();
-            let task = tokio::task::spawn_blocking(move || {
-                // Initialization belongs to this sample, not service startup.
-                // Reload every tick so collector paths follow current config.
-                let config = match AgentConfig::load(&config_path) {
-                    Ok(config) => config,
+            // Engines are read beside the host sample under their own short
+            // deadline; a slow engine only goes missing from this sample.
+            let task = tokio::spawn(async move {
+                let scrape = tokio::spawn(async {
+                    scrape_engines(
+                        &Path::new(RUNTIME_DIRECTORY).join(TARGETS_DIRECTORY),
+                        SCRAPE_DEADLINE,
+                    )
+                    .await
+                });
+                let sampled = tokio::task::spawn_blocking(move || {
+                    // Initialization belongs to this sample, not service startup.
+                    // Reload every tick so collector paths follow current config.
+                    let config = match AgentConfig::load(&config_path) {
+                        Ok(config) => config,
+                        Err(error) => {
+                            eprintln!(
+                                "vonk-monitor: configuration observation unavailable: {error}"
+                            );
+                            return None;
+                        }
+                    };
+                    let collector =
+                        collector_for(&config, Path::new("/proc/sys/kernel/random/boot_id"))?;
+                    Some((config, collector.sample()))
+                })
+                .await;
+                let (config, mut sample) = match sampled {
+                    Ok(observed) => observed?,
                     Err(error) => {
-                        eprintln!("vonk-monitor: configuration observation unavailable: {error}");
+                        eprintln!("vonk-monitor: sample worker failed: {error}");
                         return None;
                     }
                 };
-                let collector =
-                    collector_for(&config, Path::new("/proc/sys/kernel/random/boot_id"))?;
-                Some((config, collector.sample()))
+                let engines = scrape.await.unwrap_or_default();
+                sample.engines = (!engines.is_empty()).then_some(engines);
+                Some((config, sample))
             });
             sampling = Some(task);
         }
@@ -143,6 +171,7 @@ fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
         uptime: PathBuf::from("/proc/uptime"),
         cpu_root: PathBuf::from("/sys/devices/system/cpu"),
         store: config.data_dir.clone(),
+        host: Default::default(),
     }
 }
 
