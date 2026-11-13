@@ -17,6 +17,7 @@ use crate::{
 const SOURCE_TEXT_LIMIT: u64 = 64 * 1024;
 pub const MAX_REPORT_SAMPLES: usize = 16;
 
+pub mod engine_metrics;
 pub mod host_readings;
 
 use host_readings::{HostRoots, read_host};

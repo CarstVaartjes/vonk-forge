@@ -550,6 +550,23 @@ impl<R> RecipeExecutor<'_, R> {
                     ),
                     None => None,
                 };
+                // The monitor reads the engine's own metrics from this file. Each
+                // observation of a ready run refreshes it; anything else removes it.
+                if let Some(ready) = endpoint_ready {
+                    let targets = self.runtime_root.join(crate::telemetry::engine_metrics::TARGETS_DIRECTORY);
+                    if ready {
+                        if let Err(error) = crate::telemetry::engine_metrics::write_target(
+                            &targets,
+                            plan.run_id,
+                            plan.endpoint_port,
+                        ) && first_report_of_run("engine-target-write")
+                        {
+                            eprintln!("vonk-agent: engine metrics target not written: {error}");
+                        }
+                    } else {
+                        crate::telemetry::engine_metrics::remove_target(&targets, plan.run_id);
+                    }
+                }
                 Ok::<_, RecipeObservationError>(ExactRecipeRunObservation {
                     run_id: plan.run_id,
                     run_generation: plan.run_generation,

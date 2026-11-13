@@ -184,6 +184,15 @@ class EngineReading(OptionalEvidenceModel, TelemetryWireModel):
     drop_invalid_optional_evidence = fail_open_on_optional_evidence()
 
 
+class EngineTarget(TelemetryWireModel):
+    """Where one ready run's engine listens, node-local: the agent writes one
+    small file per run into its runtime directory and the monitor, which cannot
+    read the agent's database, scrapes ``127.0.0.1:port/metrics`` for it."""
+
+    run_id: CanonicalUUID
+    port: int = Field(ge=1024, le=65535)
+
+
 class HostResourceSample(TelemetryWireModel):
     """RAM and filesystem readings, owned by the inventory store."""
 
@@ -495,6 +504,7 @@ __all__ = [
     "MAX_TELEMETRY_REPORT_BYTES",
     "EngineFormat",
     "EngineReading",
+    "EngineTarget",
     "TelemetryReadings",
     "TelemetryRequest",
     "TelemetrySample",
