@@ -1,0 +1,13 @@
+{
+  "comment": "The NVIDIA clock event (throttle) reasons in words, for the Controller web Spark page and `vonkctl fleet detail`. The agent reports the driver's `clocks_event_reasons.active` bitmask; bit meanings are NVML's nvmlClocksEventReason* constants (nvml.h; `nvidia-smi --help-query-gpu`): 0x1 GPU idle, 0x2 applications clocks setting, 0x4 SW power cap, 0x8 HW slowdown, 0x10 sync boost, 0x20 SW thermal slowdown, 0x40 HW thermal slowdown, 0x80 HW power brake slowdown, 0x100 display clock setting. The web test calls `throttleReasons(...).words` and the vonkctl test calls `throttle_words` for each case; both must equal `words` exactly. Zero says none active; the known words follow in bit order; any bit outside the table adds `state unknown` last (the bitmask keeps new driver bits, so an unknown one is said, never dropped or guessed).",
+  "cases": [
+    { "reasons": 0, "words": "none active" },
+    { "reasons": 1, "words": "GPU idle" },
+    { "reasons": 4, "words": "software power cap" },
+    { "reasons": 36, "words": "software power cap, software thermal slowdown" },
+    { "reasons": 192, "words": "hardware thermal slowdown, hardware power brake slowdown" },
+    { "reasons": 511, "words": "GPU idle, application clocks setting, software power cap, hardware slowdown, sync boost, software thermal slowdown, hardware thermal slowdown, hardware power brake slowdown, display clock setting" },
+    { "reasons": 512, "words": "state unknown" },
+    { "reasons": 516, "words": "software power cap, state unknown" }
+  ]
+}

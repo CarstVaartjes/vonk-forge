@@ -97,8 +97,12 @@ function spark(
         gpu_utilization_percent: 97,
         gpu_temperature_c: 69,
         gpu_power_watts: 38.04,
-        gpu_clock: { graphics_mhz: 2200, sm_mhz: 2200 },
+        gpu_clock: { graphics_mhz: 2200, sm_mhz: 2200, throttle_reasons: 4 },
         uptime_seconds: 20 * 86400 + 21 * 3600,
+        board_temperature_max_c: 61,
+        nvme_temperature_c: 58,
+        nic_temperature_c: 70,
+        fan_rpm_max: 3210,
         ...sample,
       },
     },
@@ -162,7 +166,23 @@ export async function serveOverviewFleet(page: Page) {
       },
     ],
   } as components["schemas"]["FleetSnapshot"]);
-  await page.route("**/api/metrics/catalogue", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/metrics/catalogue", (route) =>
+    route.fulfill({
+      json: [
+        ["gpu_utilization", "GPU utilisation", "percent"],
+        ["gpu_temperature", "GPU temperature", "celsius"],
+      ].map(([metric, title, unit]) => ({
+        metric,
+        title,
+        unit,
+        scope: "node",
+        basis: "measured",
+        source: "spark",
+        summary_total: false,
+        hint: "",
+      })),
+    }),
+  );
   await page.route("**/api/metrics/series**", (route) => {
     const metric = new URL(route.request().url()).searchParams.get("metric") ?? "";
     const model = metric === "output_token_rate" || metric === "request_rate";

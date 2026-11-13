@@ -42,6 +42,7 @@ from .common import (
     _warn,
     _words,
 )
+from .throttle import throttle_words
 
 NO_SPARKS = "No Sparks are enrolled."
 
@@ -262,11 +263,17 @@ def _gpu_clock(node: object) -> str:
                     return f"{failure.reason.replace('-', ' ')} ({failure.detail})"
         return _clock_reading(value)
 
+    reasons = clock.throttle_reasons
+    throttle = (
+        throttle_words(reasons)
+        if isinstance(reasons, int)
+        else metric(reasons, GpuClockMetric.THROTTLE)
+    )
     return (
         f"graphics {metric(clock.graphics_mhz, GpuClockMetric.GRAPHICS)} / SM {metric(clock.sm_mhz, GpuClockMetric.SM)} MHz; "
         f"last applied {clock_range(applied)} (helper receipt); desired {clock_range(desired)}; "
         f"reported max graphics {metric(clock.max_graphics_mhz, GpuClockMetric.MAX_GRAPHICS)} / SM {metric(clock.max_sm_mhz, GpuClockMetric.MAX_SM)} MHz; "
-        f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle bits {metric(clock.throttle_reasons, GpuClockMetric.THROTTLE)}; "
+        f"policy limit {_clock_reading(policy.hard_max_mhz if policy is not None else None)} MHz; throttle reasons {throttle}; "
         f"{_clock_reading(clock.apply_state)}; next {_clock_reading(clock.next_attempt_at)}; deadline {_clock_reading(clock.deadline)}; "
         f"{_clock_reading(clock.detail)}"
         + (

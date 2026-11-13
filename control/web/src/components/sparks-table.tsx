@@ -12,6 +12,7 @@ import {
   nodeWorkloadLines,
   type NodeStatus,
 } from "../lib/fleet";
+import { sparkPath } from "../lib/spark-route";
 import { EmptyState } from "./empty-state";
 import { Meter } from "./meter";
 import { SortHeader, useSort } from "./sort-header";
@@ -20,17 +21,15 @@ import { StatusPill } from "./status-pill";
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
 
-/** Every Spark in one sortable table with a search; `selected` marks the open Spark. */
+/** Every Spark in one sortable table with a search; a name opens that Spark. */
 export function SparksTable({
   nodes,
   now,
-  selected,
   onSelect,
 }: {
   nodes: VisualFleetNode[];
   now: Date;
-  selected: string | null;
-  onSelect(id: string): void;
+  onSelect?(id: string): void;
 }) {
   const [query, setQuery] = useState("");
   const visibleNodes = useMemo(() => {
@@ -99,9 +98,9 @@ export function SparksTable({
                     <tr key={node.id}>
                       <th scope="row">
                         <a
-                          href={`?spark=${encodeURIComponent(node.id)}`}
-                          aria-current={selected === node.id ? "true" : undefined}
+                          href={sparkPath(node.id)}
                           onClick={(event) => {
+                            if (!onSelect) return;
                             event.preventDefault();
                             onSelect(node.id);
                           }}

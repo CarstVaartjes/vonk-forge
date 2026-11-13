@@ -254,7 +254,7 @@ test("a failed call carries the Controller's request ID on the error", async () 
         headers: { "Content-Type": "application/json", "X-Request-ID": id },
       }),
   );
-  const failure = await new ApiClient().fleetNode("missing").then(
+  const failure = await new ApiClient().fleetLogs("missing").then(
     () => null,
     (error) => error,
   );
