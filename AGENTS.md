@@ -161,7 +161,7 @@ writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `control/tests/intent_ordinal_writers.py`. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never
-lock `agent_nodes` (`test_agent_node_lock_tree.py`). A recipe revision's source bundle digest is the typed, indexed column
+lock `agent_nodes` (`test_agent_node_lock_tree.py`). An artifact-job submit or create never calls a Stop (it would bump the Spark ordinal and cancel unrelated jobs): an unobservable previous job answers a bounded retryable wait (`tests/test_submit_never_stops_guard.py`). A recipe revision's source bundle digest is the typed, indexed column
 `catalog_document_revisions.source_bundle_sha256`, written by the import and read
 by every lookup (build planning, reconcile, collection); the `projected` JSON
 carries no copy. Revisions from before it are moved by `fill_revision_source_bundles`

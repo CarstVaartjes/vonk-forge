@@ -233,7 +233,7 @@ def test_submitted_limits_are_recovered_from_the_exact_accepted_request(tmp_path
 
 
 def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
-    """Exercise consumer/store/restart/Stop authority and fresh physical admission."""
+    """A lost job: a newer submit waits (stopping nothing), then is admitted when it ends."""
     sessions, operations, service, queue, clock, original, _claim, run_id = _issued_job(
         tmp_path, 1030
     )
@@ -366,12 +366,14 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     assert retry.operation_id is not None
 
 
-def test_unreadable_peer_result_is_lost_until_new_intent_stops_it_exactly(tmp_path):
+def test_unreadable_peer_result_is_lost_and_a_newer_submit_waits_then_is_admitted(
+    tmp_path,
+):
     """Catches treating an unreadable reply as a definite failure or replaying it."""
     recover_unknown_job_under_new_intent(tmp_path, malformed=True)
 
 
-def test_lapsed_job_is_lost_until_new_intent_drives_exact_stop_without_manual_cancel(
+def test_lapsed_job_is_lost_and_a_newer_submit_waits_then_is_admitted(
     tmp_path,
 ):
     """Catches an old uncertain result permanently vetoing every newer submit."""

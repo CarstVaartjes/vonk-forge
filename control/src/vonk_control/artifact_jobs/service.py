@@ -475,16 +475,12 @@ class ArtifactJobService(OutputService):
         # The draft is already durable intent. A previous job whose effect cannot
         # be observed is never answered by stopping the run: the draft stays
         # READY and the client retries the same key once that receipt settles.
-        unavailable: ArtifactJobUnavailableError | None = None
+        unavailable: UnknownOutcomeError | None = None
         for _attempt in bounded_attempts():
             try:
                 return self._submit_once(job_id, actor=actor, request_id=request_id)
             except UnknownOutcomeError as error:
-                unavailable = ArtifactJobUnavailableError(
-                    str(error),
-                    reason=error.typed_reason,
-                    retry_after_seconds=getattr(error, "retry_after_seconds", None),
-                )
+                unavailable = error
         assert unavailable is not None
         if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
             # The draft stays READY. A submit never cancels or stops anything: a
@@ -559,18 +555,16 @@ class ArtifactJobService(OutputService):
                 if uncertain:
                     observed = adapter.observe(recorded).effect
                     if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
-                        # New intent drives exact cleanup under its own bounded
-                        # attempt; healthy execution remains queued independently.
+                        # The lost job ends at its owner's deadline; this submit
+                        # waits (bounded) and never cancels or stops anything.
                         deadline = recorded.recovery_deadline
                         raise ArtifactJobUnavailableError(
                             "artifact run effect observation is unavailable",
                             reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
                             retry_after_seconds=(
                                 None
-                                if deadline is None
-                                else max(
-                                    1, int((aware(deadline) - now).total_seconds())
-                                )
+                                if deadline is None or aware(deadline) <= now
+                                else int((aware(deadline) - now).total_seconds()) + 1
                             ),
                         )
             installation = session.get(RecipeInstallation, run.installation_id)
