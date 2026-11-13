@@ -127,13 +127,16 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "GLM 5.3 Flash" })).toBeVisible();
   await expect(page.getByRole("region", { name: "spark-3542" })).toBeVisible();
-  for (const [width, height] of [
-    [400, 800],
-    [1440, 900],
-  ]) {
-    await page.setViewportSize({ width, height });
-    await expectNoDocumentOverflow(page);
-    await expectNoSeriousAccessibilityViolations(page);
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [width, height] of [
+      [400, 800],
+      [1440, 900],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await expectNoDocumentOverflow(page);
+      await expectNoSeriousAccessibilityViolations(page);
+    }
   }
   await page.setViewportSize({ width: 400, height: 800 });
   for (const link of await page.getByRole("link", { name: /^spark-/ }).all()) {

@@ -11,6 +11,9 @@
 .chart-dot{stroke:var(--panel);stroke-width:2}
 .chart-halo{display:none}
 @media(prefers-reduced-motion:no-preference){.chart-halo{display:block;opacity:.2;transform-box:fill-box;transform-origin:center;animation:chart-pulse 2.4s ease-in-out infinite}}
+/* Glows are dark-theme data ink only. */
+:root[data-theme="light"] .chart-halo{display:none!important}
+@media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .chart-halo{display:none!important}}
 @keyframes chart-pulse{0%,100%{transform:scale(.55);opacity:.28}50%{transform:scale(1);opacity:.06}}
 .chart-crosshair line{stroke:var(--axis);stroke-width:1;stroke-dasharray:3 3}
 .chart-tooltip{position:absolute;top:0;z-index:5;display:grid;gap:.15rem;padding:.4rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-ctl);background:var(--raised);color:var(--ink);font-size:.75rem;white-space:nowrap;pointer-events:none;transform:translateX(.75rem)}
