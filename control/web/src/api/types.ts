@@ -356,7 +356,6 @@ export interface ControlApi extends LibraryApi {
     signal?: AbortSignal,
   ): Promise<MetricsSeriesResponse>;
   metricsCatalogue(signal?: AbortSignal): Promise<MetricSpec[]>;
-  fleetNode(selector: string, signal?: AbortSignal): Promise<VisualFleetNode>;
   renameFleetNode(selector: string, displayName: string): Promise<FleetNodeIdentity>;
   removeFleetNode(selector: string): Promise<FleetActionResponse>;
   reenrollFleetNode(selector: string, requestKey: string): Promise<FleetActionResponse>;

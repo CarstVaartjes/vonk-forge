@@ -14,6 +14,7 @@ import {
   ProjectionCode,
   RunState,
 } from "../api/vocabulary.generated";
+import { throttleReasons } from "./throttle";
 
 export type TelemetryFreshness = "live" | "delayed" | "stale";
 /** The words `vonkctl fleet` uses. */
@@ -137,31 +138,44 @@ export function runStateTone(
 }
 
 /**
- * What a Spark serves, one line per run: title, alias, state, and the other Sparks of a
- * multi-Spark run. `vonkctl fleet` prints the same lines.
+ * The runs a Spark carries, once per run: title, alias, state in a word with its tone, the Spark's rank of
+ * the run's rank count, and the other Sparks of a multi-Spark run (by display name).
  */
-export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+export function nodeRuns(node: VisualFleetNode, fleet: readonly VisualFleetNode[]) {
   const names = new Map(fleet.map((member) => [member.id, nodeDisplayName(member)]));
   const seen = new Set<string>();
-  const lines: string[] = [];
-  for (const run of node.loaded) {
-    if (seen.has(run.run_id)) continue;
+  return node.loaded.flatMap((run) => {
+    if (seen.has(run.run_id)) return [];
     seen.add(run.run_id);
-    const partners = (run.member_node_ids ?? [])
-      .filter((id) => id !== node.id)
-      .map((id) => names.get(id) ?? id);
-    lines.push(
-      [
-        run.title ?? run.run_id,
-        run.alias,
-        runStateWord(run),
-        partners.length ? `with ${partners.join(", ")}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    );
-  }
-  return lines;
+    return [
+      {
+        runId: run.run_id,
+        title: run.title ?? run.run_id,
+        alias: run.alias ?? null,
+        state: runStateWord(run),
+        tone: runStateTone(run),
+        rank: run.rank ?? null,
+        rankCount: run.expected_rank_count ?? null,
+        partners: (run.member_node_ids ?? [])
+          .filter((id) => id !== node.id)
+          .map((id) => ({ id, name: names.get(id) ?? id })),
+      },
+    ];
+  });
+}
+
+/** What a Spark serves, one line per run: `vonkctl fleet` prints the same lines. */
+export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[]): string[] {
+  return nodeRuns(node, fleet).map((run) =>
+    [
+      run.title,
+      run.alias,
+      run.state,
+      run.partners.length ? `with ${run.partners.map((partner) => partner.name).join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  );
 }
 
 /** One workload and the Sparks that carry it, in rank order. */
@@ -357,6 +371,13 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   ].join(" · ");
 }
 
+/** The pill tone of a firing alert: critical is bad, anything else warns. */
+export function attentionTone(
+  alert: NonNullable<VisualFleetSnapshot["attention"]>[number],
+): "bad" | "warn" {
+  return alert.severity === "critical" ? "bad" : "warn";
+}
+
 /**
  * A firing alert in plain words: its severity as a word, and its summary with the Spark it
  * names by display name rather than by identity. `vonkctl fleet` prints `severity: text`.
@@ -424,11 +445,11 @@ export function formatMetric(
   value: number | null | undefined,
   format: (value: number) => string,
 ): string {
-  return typeof value === "number" && Number.isFinite(value) ? format(value) : "Not reported";
+  return typeof value === "number" && Number.isFinite(value) ? format(value) : NOT_REPORTED_TEXT;
 }
 
 export function formatBytes(value: WireNumber | null | undefined): string {
-  if (!isWireNumber(value)) return "Not reported";
+  if (!isWireNumber(value)) return NOT_REPORTED_TEXT;
   if (compareWire(value, 1024) < 0) return `${formatWire(value)} B`;
   const unit =
     compareWire(value, 1024 ** 2) < 0
@@ -533,9 +554,9 @@ export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
 }
 
-const GIB = 1024 ** 3;
+export const GIB = 1024 ** 3;
 /** Free unified memory under this is a display warning (not an admission rule). */
-const MEMORY_WARN_FREE_BYTES = 8 * GIB;
+export const MEMORY_WARN_FREE_BYTES = 8 * GIB;
 const MEMORY_SERIOUS_FREE_BYTES = 4 * GIB;
 
 export type MemoryLevel = "ok" | "warn" | "serious";
@@ -583,7 +604,9 @@ export function nodeMemorySplit(node: VisualFleetNode): MemorySplit | null {
 /** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
 type Vital = { percent: number | null; text: string; amber: boolean };
 
-const NOT_REPORTED: Vital = { percent: null, text: "Not reported", amber: false };
+/** What every reading says when the Spark did not report it. */
+export const NOT_REPORTED_TEXT = "Not reported";
+const NOT_REPORTED: Vital = { percent: null, text: NOT_REPORTED_TEXT, amber: false };
 
 /** Free disk and its total: the inventory's pair, else the live sample's. */
 function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber } | null {
@@ -595,6 +618,19 @@ function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber 
     }
   }
   return null;
+}
+
+/** The Spark's disk as the same two-part split the memory bar draws (Used and Free); null when not reported. */
+export function nodeDiskSplit(node: VisualFleetNode): MemorySplit | null {
+  const disk = diskPair(node);
+  if (!disk) return null;
+  return {
+    totalBytes: disk.total,
+    usedBytes: subtractWire(disk.total, disk.free),
+    freeBytes: disk.free,
+    modelsBytes: null,
+    systemBytes: null,
+  };
 }
 
 /** The three vitals of a Fleet row; `vonkctl fleet` prints the same words (shared vectors). */
@@ -639,7 +675,7 @@ export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital;
           text: readings.join(", "),
           amber: false,
         }
-      : { ...NOT_REPORTED, text: reason ? `Not reported (${reason})` : "Not reported" },
+      : { ...NOT_REPORTED, text: reason ? `${NOT_REPORTED_TEXT} (${reason})` : NOT_REPORTED_TEXT },
   };
 }
 
@@ -674,7 +710,7 @@ export function nodeGpuClock(node: VisualFleetNode): string {
       ? `${formatWire(value)} UTC epoch seconds`
       : date.toLocaleString();
   };
-  return `Graphics ${clock?.graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.sm_mhz ?? OutcomeKind.UNKNOWN} MHz · last applied ${range(clock?.locked_range)} (helper receipt) · desired ${range(node.gpu_clock_desired)} · reported maximum graphics ${clock?.max_graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.max_sm_mhz ?? OutcomeKind.UNKNOWN} MHz · policy limit ${node.gpu_clock_policy?.hard_max_mhz ?? OutcomeKind.UNKNOWN} MHz · throttle bits ${clock?.throttle_reasons ?? OutcomeKind.UNKNOWN}${clock?.apply_state ? ` · enforcement ${clock.apply_state}` : ""}${clock?.next_attempt_at != null ? ` · next attempt ${when(clock.next_attempt_at)}` : ""}${clock?.deadline != null ? ` · deadline ${when(clock.deadline)}` : ""}${clock?.detail ? ` · ${clock.detail}` : ""}`;
+  return `Graphics ${clock?.graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.sm_mhz ?? OutcomeKind.UNKNOWN} MHz · last applied ${range(clock?.locked_range)} (helper receipt) · desired ${range(node.gpu_clock_desired)} · reported maximum graphics ${clock?.max_graphics_mhz ?? OutcomeKind.UNKNOWN} / SM ${clock?.max_sm_mhz ?? OutcomeKind.UNKNOWN} MHz · policy limit ${node.gpu_clock_policy?.hard_max_mhz ?? OutcomeKind.UNKNOWN} MHz · throttle reasons ${clock?.throttle_reasons == null ? OutcomeKind.UNKNOWN : throttleReasons(clock.throttle_reasons).words}${clock?.apply_state ? ` · enforcement ${clock.apply_state}` : ""}${clock?.next_attempt_at != null ? ` · next attempt ${when(clock.next_attempt_at)}` : ""}${clock?.deadline != null ? ` · deadline ${when(clock.deadline)}` : ""}${clock?.detail ? ` · ${clock.detail}` : ""}`;
 }
 
 /** Active swap beside the desired size and the helper's last receipt. */

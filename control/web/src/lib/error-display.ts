@@ -14,3 +14,8 @@ export function failureNotice(message: string, requestId: string): string {
   const text = safeErrorText(message, 256);
   return /request ID/i.test(text) ? text : `${text} (request ID ${requestId})`;
 }
+
+/** Safe text for a caught value: its message when it is an Error, else the fallback. */
+export function errorText(error: unknown, fallback: string): string {
+  return safeErrorText(error instanceof Error ? error.message : fallback);
+}

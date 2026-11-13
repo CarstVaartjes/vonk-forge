@@ -5,6 +5,7 @@ import type { CliTokenDownload } from "../api/types";
 import type { LiveStatus } from "../hooks/fleet-stream-state";
 import { BrandMark } from "./brand-mark";
 import { StatusPill } from "./status-pill";
+import { ThemeToggle } from "./theme-toggle";
 import { ActivityIcon, FleetIcon, LibraryIcon, WorkloadsIcon } from "./icons";
 
 const LIVE_TONES = {
@@ -122,6 +123,7 @@ export function AppShell({
         <div className="header-utility">
           {live && <StatusPill tone={LIVE_TONES[live]}>{live}</StatusPill>}
           <span className="authority-note">Local Controller</span>
+          <ThemeToggle />
           {operator && (
             <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate} />
           )}
