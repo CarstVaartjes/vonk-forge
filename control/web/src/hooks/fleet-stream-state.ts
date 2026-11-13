@@ -15,6 +15,24 @@ export type FleetStreamState = {
   snapshot?: VisualFleetSnapshot;
 };
 
+/** The word the header pill and the stale banner share for a snapshot that has stopped updating. */
+export const staleWord = (refreshError: string) => (refreshError ? "disconnected" : "stale");
+
+/** What the header pill says about the stream; no pill until the first connection attempt resolves. */
+export type LiveStatus = "live" | "delayed" | "reconnecting" | "stale" | "disconnected";
+
+export function liveStatus(stream: {
+  connection: FleetConnectionState;
+  stale: boolean;
+  refreshError: string;
+}): LiveStatus | null {
+  const { connection, stale, refreshError } = stream;
+  if (connection === "connecting") return null;
+  if (stale) return staleWord(refreshError);
+  if (connection === "reconnecting") return "reconnecting";
+  return connection === "polling" ? "delayed" : "live";
+}
+
 export const initialFleetStreamState: FleetStreamState = {
   connection: "connecting",
   error: "",

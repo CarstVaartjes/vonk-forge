@@ -1,0 +1,19 @@
+.chart{position:relative;min-width:0}
+.chart-plot{position:relative}
+.chart svg,.sparkline{display:block;width:100%;height:auto;overflow:visible}
+.chart svg:focus-visible{outline:2px solid var(--gold-text);outline-offset:3px;border-radius:var(--r-ctl)}
+.chart-grid{stroke:var(--grid);stroke-width:1}
+.chart-tick{fill:var(--axis);font-size:11px;font-variant-numeric:tabular-nums}
+.chart-tick-y,.chart-tick-x2{text-anchor:end}.chart-tick-x1{text-anchor:middle}.chart-tick-x0{text-anchor:start}
+.chart-threshold{stroke:var(--warn);stroke-width:1;opacity:.7}
+.chart-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.sparkline .chart-line{stroke-width:1.75}
+.chart-dot{stroke:var(--panel);stroke-width:2}
+.chart-crosshair line{stroke:var(--axis);stroke-width:1;stroke-dasharray:3 3}
+.chart-tooltip{position:absolute;top:0;z-index:5;display:grid;gap:.15rem;padding:.4rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-ctl);background:var(--raised);color:var(--ink);font-size:.75rem;white-space:nowrap;pointer-events:none;transform:translateX(.75rem)}
+.chart-tooltip[data-flipped="true"]{transform:translateX(calc(-100% - .75rem))}
+.chart-tooltip strong{color:var(--muted);font-weight:650}
+.chart-table-toggle{min-height:2rem;margin-top:.25rem;padding:.2rem .6rem;font-size:.75rem}
+.chart-table{margin-top:.5rem;font-size:.75rem}
+.chart-table th,.chart-table td{padding:.3rem .5rem}
+@media(forced-colors:active){.chart-line{stroke:CanvasText!important}.chart-dot{fill:CanvasText!important;stroke:Canvas}.column{fill:CanvasText}}

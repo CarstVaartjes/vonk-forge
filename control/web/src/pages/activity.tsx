@@ -158,12 +158,12 @@ function statusLabel(status: ActivityStatus): string {
   return "Recorded";
 }
 
-function statusTone(status: ActivityStatus): "neutral" | "healthy" | "warning" | "danger" | "info" {
-  if (status === "unsuccessful") return "danger";
-  if (status === "attention") return "warning";
+function statusTone(status: ActivityStatus): "neutral" | "ok" | "warn" | "bad" | "info" {
+  if (status === "unsuccessful") return "bad";
+  if (status === "attention") return "warn";
   if (status === "in_progress") return "info";
   if (status === "unknown") return "neutral";
-  return "healthy";
+  return "ok";
 }
 
 const OPERATION_STATES = [
@@ -422,7 +422,7 @@ function AgentUpgradeDiagnostics({
           <strong>{expected.version || "Not recorded"}</strong>
         </div>
         <StatusPill
-          tone={diagnostics.targets.every((target) => target.target_proven) ? "healthy" : "warning"}
+          tone={diagnostics.targets.every((target) => target.target_proven) ? "ok" : "warn"}
         >
           {diagnostics.targets.every((target) => target.target_proven)
             ? "Identity proven"
@@ -1607,7 +1607,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               Clear filters
             </button>
           )}
-          <div className="activity-view-switcher" role="group" aria-label="Activity view">
+          <div className="segmented" role="group" aria-label="Activity view">
             <button
               type="button"
               aria-pressed={view === "timeline"}

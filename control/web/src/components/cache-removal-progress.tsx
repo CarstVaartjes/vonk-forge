@@ -170,7 +170,7 @@ export function CacheRemovalProgress({
         (receipt.state === LifecycleState.FAILED ||
           receipt.state === LifecycleState.CANCELLED ||
           (intent.review.fleet && receipt.state === LifecycleState.SUCCEEDED)) && (
-          <button type="button" className="button secondary" disabled={busy} onClick={onDismiss}>
+          <button type="button" className="button quiet" disabled={busy} onClick={onDismiss}>
             Dismiss result
           </button>
         )}
