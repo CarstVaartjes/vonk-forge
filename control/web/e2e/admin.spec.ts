@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import type { components } from "../src/api/generated";
-import { serveEmptyFleet } from "./fleet-fixture";
+import { serveEmptyFleet, serveOverviewFleet } from "./fleet-fixture";
 
 async function expectNoSeriousAccessibilityViolations(page: Page) {
   const results = await new AxeBuilder({ page })
@@ -96,7 +96,7 @@ test("the redesigned shell exposes the focused workspace routes", async ({ page 
   await expect(page.getByRole("heading", { name: "Library", exact: true })).toBeVisible();
   await expect(page.locator("h1")).toHaveCount(1);
   const primaryLinks = page.getByRole("navigation", { name: "Primary" }).getByRole("link");
-  await expect(primaryLinks).toHaveText(["Fleet", "Library", "Activity"]);
+  await expect(primaryLinks).toHaveText(["Overview", "Workloads", "Library", "Activity"]);
   await expect(page).toHaveURL(/\/library$/);
 
   for (const width of [760, 761, 768, 864, 865]) {
@@ -117,6 +117,27 @@ test("Fleet status line reads as one sentence at narrow and wide widths", async 
   for (const width of [360, 768, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await expectNoDocumentOverflow(page);
+  }
+});
+
+test("Overview fits a phone and a desktop and passes the accessibility checks", async ({
+  page,
+}) => {
+  await serveOverviewFleet(page);
+  await page.goto("/overview");
+  await expect(page.getByRole("heading", { name: "GLM 5.3 Flash" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "spark-3542" })).toBeVisible();
+  for (const [width, height] of [
+    [400, 800],
+    [1440, 900],
+  ]) {
+    await page.setViewportSize({ width, height });
+    await expectNoDocumentOverflow(page);
+    await expectNoSeriousAccessibilityViolations(page);
+  }
+  await page.setViewportSize({ width: 400, height: 800 });
+  for (const link of await page.getByRole("link", { name: /^spark-/ }).all()) {
+    expect((await link.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
   }
 });
 

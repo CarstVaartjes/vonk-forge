@@ -9,6 +9,9 @@
 .chart-line{fill:none;stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
 .sparkline .chart-line{stroke-width:1.75}
 .chart-dot{stroke:var(--panel);stroke-width:2}
+.chart-halo{display:none}
+@media(prefers-reduced-motion:no-preference){.chart-halo{display:block;opacity:.2;transform-box:fill-box;transform-origin:center;animation:chart-pulse 2.4s ease-in-out infinite}}
+@keyframes chart-pulse{0%,100%{transform:scale(.55);opacity:.28}50%{transform:scale(1);opacity:.06}}
 .chart-crosshair line{stroke:var(--axis);stroke-width:1;stroke-dasharray:3 3}
 .chart-tooltip{position:absolute;top:0;z-index:5;display:grid;gap:.15rem;padding:.4rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-ctl);background:var(--raised);color:var(--ink);font-size:.75rem;white-space:nowrap;pointer-events:none;transform:translateX(.75rem)}
 .chart-tooltip[data-flipped="true"]{transform:translateX(calc(-100% - .75rem))}
@@ -16,4 +19,4 @@
 .chart-table-toggle{min-height:2rem;margin-top:.25rem;padding:.2rem .6rem;font-size:.75rem}
 .chart-table{margin-top:.5rem;font-size:.75rem}
 .chart-table th,.chart-table td{padding:.3rem .5rem}
-@media(forced-colors:active){.chart-line{stroke:CanvasText!important}.chart-dot{fill:CanvasText!important;stroke:Canvas}.column{fill:CanvasText}}
+@media(forced-colors:active){.chart-halo{display:none!important}.chart-line{stroke:CanvasText!important}.chart-dot{fill:CanvasText!important;stroke:Canvas}.column{fill:CanvasText}}

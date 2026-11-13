@@ -920,6 +920,14 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
             if path.endswith(".rs")
             else set()
         )
+        # An SVG paint value is markup, not a contract word (`fill="none"`).
+        if path.endswith((".ts", ".tsx")):
+            path_components = {
+                match.start(1)
+                for match in re.finditer(
+                    r"""\b(?:fill|stroke)=(["'][^"'\n]*["'])""", source
+                )
+            }
         return [
             source.count("\n", 0, match.start()) + 1
             for match in re.finditer(r"""(["'])([^"'\n]*)\1""", source)

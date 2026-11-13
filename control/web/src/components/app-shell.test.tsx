@@ -77,13 +77,13 @@ test("provides browser-equivalent local storage semantics", () => {
   expect(localStorage.key(0)).toBeNull();
 });
 
-test("shows Fleet, Library and Activity as the primary views", () => {
+test("shows Overview, Workloads, Library and Activity as the primary views", () => {
   render(
-    <AppShell activeRoute="fleet" onNavigate={() => undefined}>
+    <AppShell activeRoute="overview" onNavigate={() => undefined}>
       {null}
     </AppShell>,
   );
-  expect(screen.getByRole("link", { name: "Fleet" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Overview" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Library" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Activity" })).toBeVisible();
   expect(screen.getByText("Controller")).toBeVisible();
@@ -97,19 +97,20 @@ test("shows Fleet, Library and Activity as the primary views", () => {
 
 test("keeps the focused workspace routes directly reachable in the compact header", () => {
   const { container } = render(
-    <AppShell activeRoute="fleet" onNavigate={() => undefined}>
+    <AppShell activeRoute="overview" onNavigate={() => undefined}>
       {null}
     </AppShell>,
   );
 
-  expect(screen.getByRole("link", { name: "Fleet" })).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   const library = screen.getByRole("link", { name: "Library" });
   expect(library).toHaveAttribute("href", "/library");
   expect(library).toBeVisible();
 
   const primary = screen.getByRole("navigation", { name: "Primary" });
   const routes = new Map([
-    ["Fleet", "/fleet"],
+    ["Overview", "/overview"],
+    ["Workloads", "/workloads"],
     ["Library", "/library"],
   ]);
   for (const [name, href] of routes) {
@@ -149,16 +150,16 @@ test("renders a focused recovery page for unsupported URLs", async () => {
   });
   const notFound = await screen.findByRole("heading", { name: "Page not found" });
   await waitFor(() => expect(notFound).toHaveFocus());
-  expect(screen.getByRole("link", { name: "Go to Fleet" })).toHaveAttribute("href", "/fleet");
+  expect(screen.getByRole("link", { name: "Go to Overview" })).toHaveAttribute("href", "/overview");
   expect(screen.getByRole("link", { name: "Go to Library" })).toHaveAttribute("href", "/library");
   expect(document.title).toBe("Page not found · Vonk Forge");
-  expect(screen.getByRole("link", { name: "Fleet" })).not.toHaveAttribute("aria-current");
+  expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", { name: "Library" })).not.toHaveAttribute("aria-current");
   expect(location.pathname).toBe("/unsupported-route");
 
-  await user.click(screen.getByRole("link", { name: "Go to Fleet" }));
-  expect(await screen.findByRole("heading", { name: "Fleet" })).toBeVisible();
-  expect(document.title).toBe("Fleet · Vonk Forge");
+  await user.click(screen.getByRole("link", { name: "Go to Overview" }));
+  expect(await screen.findByRole("heading", { name: "Overview" })).toBeVisible();
+  expect(document.title).toBe("Overview · Vonk Forge");
 });
 
 test("supports Activity as a primary route", async () => {
@@ -187,7 +188,7 @@ test("keeps administrative actions behind the account menu", async () => {
   const user = userEvent.setup();
   render(
     <AppShell
-      activeRoute="fleet"
+      activeRoute="overview"
       onNavigate={() => undefined}
       operator={{
         subject: "admin@example.test",
@@ -241,18 +242,18 @@ test("makes shell routes visibly and keyboard disabled while navigation is locke
     </AppShell>,
   );
 
-  for (const name of ["Fleet", "Library", "Activity"]) {
+  for (const name of ["Overview", "Workloads", "Library", "Activity"]) {
     const link = screen.getByRole("link", { name });
     expect(link).toHaveAttribute("aria-disabled", "true");
     expect(link).toHaveAttribute("tabindex", "-1");
   }
 
-  await user.click(screen.getByRole("link", { name: "Fleet" }));
+  await user.click(screen.getByRole("link", { name: "Overview" }));
   expect(onNavigate).not.toHaveBeenCalled();
 });
 
 test("the header shows the live state as a word, and nothing when unknown", () => {
-  const props = { onNavigate: () => undefined, activeRoute: "fleet" as const };
+  const props = { onNavigate: () => undefined, activeRoute: "overview" as const };
   const { rerender } = render(<AppShell {...props}>content</AppShell>);
   expect(screen.queryByText("live")).toBeNull();
   rerender(

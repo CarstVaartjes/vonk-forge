@@ -161,6 +161,8 @@ The palette is one graphite operating shell with a small state vocabulary that t
 
 **The Green Means Go Rule.** Reserve green for positive health, readiness, and safe primary action; never use it as general decoration or as the only state signal.
 
+**The Free Memory Rule.** Unified memory warns on what is left, not on what is used: a model that owns the Spark makes it 92 % full, which is normal. Under 8 GiB free is a warning and under 4 GiB serious, each with its own word and shape. GPU and disk meters keep the 90 % rule. The memory bar splits Models, System and Free; when the Spark does not report the split it is Used and Free.
+
 ## Typography
 
 **Display Font:** UI Sans (with system-ui and platform sans-serif fallbacks)
@@ -183,7 +185,7 @@ The palette is one graphite operating shell with a small state vocabulary that t
 
 ## Layout
 
-The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Fleet is table-first: a fleet summary line, a Spark search, and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), then a detail view for the selected Spark. Needs-attention items sit above the summary.
+The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Overview (`/`, `/fleet`, `/overview`) leads with the workload: one unit per running workload with a card for each Spark that carries it (idle Sparks as cards of their own), the fleet summary line above, Needs attention and Serving now in the right column (first on a phone). Workloads (`/workloads`) is the table: a Spark search and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), the trends, then a detail view for the selected Spark. Needs-attention items carry no buttons.
 
 At 54rem the shell becomes a compact top bar and action groups stack. Below 54rem each Spark row of the fleet table becomes a stacked block (label beside value) instead of a table row, so labels are never shrunk past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
 

@@ -1424,7 +1424,8 @@ def check_source(
         return []
     is_test = (
         "/tests/" in path
-        or path.startswith("tests/")
+        # Browser fixtures (control/web/e2e) hold the wire documents, like the .spec files.
+        or path.startswith(("tests/", "control/web/e2e/"))
         or path.endswith(
             ("/tests.rs", ".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         )

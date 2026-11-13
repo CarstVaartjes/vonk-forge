@@ -32,6 +32,7 @@ export function AreaChart({
   end,
   format,
   threshold,
+  live = false,
   emptyText = "No samples in this range",
 }: {
   title: string;
@@ -42,6 +43,8 @@ export function AreaChart({
   end: number;
   format: (value: number) => string;
   threshold?: { value: number; label: string };
+  /** The newest reading is live: the end dot gets a halo (off under reduced motion). */
+  live?: boolean;
   emptyText?: string;
 }) {
   const gradient = useId();
@@ -148,6 +151,15 @@ export function AreaChart({
           {drawn.map(({ s, runs, tail }) => (
             <g key={s.key}>
               <path className="chart-line" d={linePath(runs)} style={{ stroke: s.color }} />
+              {tail && live && (
+                <circle
+                  className="chart-halo"
+                  cx={tail[0]}
+                  cy={tail[1]}
+                  r="10"
+                  style={{ fill: s.color }}
+                />
+              )}
               {tail && (
                 <circle
                   className="chart-dot"
