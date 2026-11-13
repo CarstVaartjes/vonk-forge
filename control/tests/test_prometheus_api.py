@@ -133,6 +133,28 @@ def test_gateway_estimates_read_buckets_and_divide_summed_rates():
     assert speed.count("sum by (alias)") == 2 and " / " in speed
 
 
+def test_engine_speeds_divide_summed_rates_and_filter_by_alias(reader, monkeypatch):
+    """Catches an uncached-prefill speed that counts cached tokens, a KV ratio that is
+    summed across runs, and a Spark filter that names the gateway's label."""
+    assert QUERIES["prefill_speed"].series("", 300) == (
+        "(sum by (alias) (rate(vonk_engine_prompt_tokens_total[315s]))"
+        " - sum by (alias) (rate(vonk_engine_cached_prompt_tokens_total[315s])))"
+        " / sum by (alias) (rate(vonk_engine_prefill_seconds_sum[315s]))"
+    )
+    assert QUERIES["kv_cache_usage"].series("", 300).startswith("avg by (alias) (")
+    seen = []
+
+    def handle(request):
+        seen.append(request.url.params["query"])
+        return reply(
+            resultType="matrix" if "range" in request.url.path else "vector", result=[]
+        )
+
+    mock_prometheus(monkeypatch, handle)
+    asyncio.run(reader.series("decode_speed", "1h", NODE, lambda node: ["glm-5"]))
+    assert seen and all(r'{alias=~"^(glm\\-5)$"}' in query for query in seen)
+
+
 def test_energy_integrates_power_over_reported_samples_only():
     """Catches an energy total that bills the time a Spark reported nothing."""
     query = QUERIES["gpu_energy"]

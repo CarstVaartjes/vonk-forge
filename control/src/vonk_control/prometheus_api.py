@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import Annotated, Any, Literal
 
 import httpx2 as httpx
@@ -44,6 +45,14 @@ RANGES: dict[MetricRange, int] = {
 }
 
 
+class Source(Enum):
+    """Whose families a query reads, which decides how its series get their labels."""
+
+    NODE = auto()  # control-api, per `node_id`
+    ENGINE = auto()  # control-api, per `{node_id, alias}`
+    GATEWAY = auto()  # LiteLLM, per `requested_model`
+
+
 @dataclass(frozen=True)
 class MetricQuery:
     """One metric's fixed PromQL, rendered from its family; no client text reaches it.
@@ -52,20 +61,27 @@ class MetricQuery:
     counts down), `rate` is a counter's per-second rate (`over` divides it by
     another counter's rate, times `scale`), `increase` counts what a counter
     gained, `energy` is a power gauge's Wh per step, `quantile` is that quantile
-    of a gateway histogram's recent observations. A `gateway` metric reads
-    LiteLLM's families and is summed by alias; any other keeps its `node_id`.
+    of a gateway histogram's recent observations. `less` is subtracted from a
+    ratio's numerator, `mean` averages (not sums) a gauge across a model's runs.
+    A gateway or engine metric is summed by alias; a node metric keeps `node_id`.
     """
 
     family: str
     kind: Literal["gauge", "last", "rate", "increase", "energy", "quantile"]
-    gateway: bool = False
+    source: Source = Source.NODE
     over: str | None = None
     scale: int = 1
     quantile: float = 0.0
+    less: str | None = None
+    mean: bool = False
 
     @property
     def scrape(self) -> int:
-        return GATEWAY_SCRAPE_SECONDS if self.gateway else CONTROL_SCRAPE_SECONDS
+        return (
+            GATEWAY_SCRAPE_SECONDS
+            if self.source is Source.GATEWAY
+            else CONTROL_SCRAPE_SECONDS
+        )
 
     @property
     def floor(self) -> int:
@@ -86,17 +102,23 @@ class MetricQuery:
             return max(step + self.scrape, self.floor)
         return max(step, self.floor)
 
+    @property
+    def model_label(self) -> str:
+        """The label that names a model in this query's families."""
+        return "requested_model" if self.source is Source.GATEWAY else SeriesLabel.ALIAS
+
     def _group(
         self, expression: str, fleet: bool, keep: str = SeriesLabel.ALIAS
     ) -> str:
         if fleet:
             return f"sum({expression})"
-        if not self.gateway:
+        if self.source is Source.NODE:
             return expression
-        return (
-            f"sum by ({keep}) (label_replace({expression}, "
-            '"alias", "$1", "requested_model", "(.+)"))'
-        )
+        if self.source is Source.GATEWAY:
+            expression = (
+                f'label_replace({expression}, "alias", "$1", "requested_model", "(.+)")'
+            )
+        return f"{'avg' if self.mean else 'sum'} by ({keep}) ({expression})"
 
     def series(self, selector: str, step: int, fleet: bool = False) -> str:
         window = self.window(step)
@@ -124,6 +146,8 @@ class MetricQuery:
                 rate = read("rate", self.family)
                 if self.over is None:
                     return rate
+                if self.less:
+                    rate = f"({rate} - {read('rate', self.less)})"
                 scaled = f"{self.scale} * " if self.scale != 1 else ""
                 return f"{scaled}{rate} / {read('rate', self.over)}"
 
@@ -153,15 +177,35 @@ def _node(
     over: str | None = None,
     scale: int = 1,
 ) -> MetricQuery:
-    return MetricQuery(f"vonk_node_{family}", kind, False, over, scale)
+    return MetricQuery(f"vonk_node_{family}", kind, Source.NODE, over, scale)
 
 
 def _gateway(family: str) -> MetricQuery:
-    return MetricQuery(f"litellm_{family}", "rate", True)
+    return MetricQuery(f"litellm_{family}", "rate", Source.GATEWAY)
+
+
+def _engine(
+    family: str,
+    kind: Literal["gauge", "rate"] = "rate",
+    over: str | None = None,
+    less: str | None = None,
+    mean: bool = False,
+) -> MetricQuery:
+    """An engine reading; `over` and `less` name families by their `vonk_engine_` suffix."""
+    return MetricQuery(
+        f"vonk_engine_{family}",
+        kind,
+        Source.ENGINE,
+        over and f"vonk_engine_{over}",
+        less=less and f"vonk_engine_{less}",
+        mean=mean,
+    )
 
 
 def _percentile(family: str, quantile: float) -> MetricQuery:
-    return MetricQuery(f"litellm_{family}", "quantile", True, quantile=quantile)
+    return MetricQuery(
+        f"litellm_{family}", "quantile", Source.GATEWAY, quantile=quantile
+    )
 
 
 QUERIES: dict[Metric, MetricQuery] = {
@@ -181,9 +225,30 @@ QUERIES: dict[Metric, MetricQuery] = {
     "gateway_generation_speed": MetricQuery(
         "litellm_output_tokens_metric_total",
         "rate",
-        True,
+        Source.GATEWAY,
         over="litellm_llm_api_latency_metric_sum",
     ),
+    "decode_throughput": _engine("generation_tokens_total"),
+    "prefill_throughput": _engine("prompt_tokens_total"),
+    "decode_speed": _engine("generation_tokens_total", over="decode_seconds_sum"),
+    "prefill_speed": _engine(
+        "prompt_tokens_total",
+        over="prefill_seconds_sum",
+        less="cached_prompt_tokens_total",
+    ),
+    "ttft_mean": _engine("ttft_seconds_sum", over="ttft_seconds_count"),
+    "requests_running": _engine("requests_running", "gauge"),
+    "requests_waiting": _engine("requests_waiting", "gauge"),
+    "kv_cache_usage": _engine("kv_cache_usage_ratio", "gauge", mean=True),
+    "prefix_cache_hit_rate": _engine(
+        "cached_prompt_tokens_total", over="prompt_tokens_total"
+    ),
+    "spec_decode_acceptance": _engine(
+        "spec_decode_accepted_total", over="spec_decode_draft_total"
+    ),
+    "e2e_latency_mean": _engine("e2e_seconds_sum", over="e2e_seconds_count"),
+    "time_per_token_mean": _engine("tpot_seconds_sum", over="tpot_seconds_count"),
+    "preemption_rate": _engine("preemptions_total"),
     "gpu_power": _node("telemetry_gpu_power_watts"),
     "gpu_energy": _node("telemetry_gpu_power_watts", "energy"),
     "models_memory": _node("telemetry_gpu_process_memory_bytes"),
@@ -209,14 +274,14 @@ QUERIES: dict[Metric, MetricQuery] = {
 }
 
 
-def _selector(label: SeriesLabel, values: list[str]) -> str:
+def _selector(label: SeriesLabel, values: list[str], model_label: str) -> str:
     """A label filter from validated Spark ids or published aliases, never client PromQL."""
     if label is SeriesLabel.NODE_ID:
         return f'{{node_id="{values[0]}"}}'
     pattern = "^(" + "|".join(re.escape(value) for value in values) + ")$"
     # PromQL strings treat a backslash as an escape, so each one is doubled.
     quoted = pattern.replace("\\", "\\\\").replace('"', '\\"')
-    return '{requested_model=~"' + quoted + '"}'
+    return "{" + model_label + '=~"' + quoted + '"}'
 
 
 class _External(BaseModel):
@@ -412,7 +477,7 @@ class PrometheusReader:
             )
             if not values:
                 return _response(spec, range, end, step, [])
-            selector = _selector(label, values)
+            selector = _selector(label, values, query.model_label)
         # The fleet line sums the Sparks' (or models') series, so only an unfiltered read has one.
         lines = (False, True) if spec.fleet_sum and node is None else (False,)
         reads = await asyncio.gather(

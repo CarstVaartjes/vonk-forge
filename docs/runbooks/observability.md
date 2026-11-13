@@ -52,6 +52,21 @@ The per-output-token histogram stays excluded: LiteLLM 1.106.7 observes it as th
 time to first token divided by output tokens for streaming requests, which is not
 a speed.
 
+Engine metrics (per model alias, basis `measured`, source `engine`) come from
+the `vonk_engine_*` series the agents report: `decode_throughput` and
+`prefill_throughput` (tokens per second, with a range total and a fleet line),
+`decode_speed` (generated tokens over decode seconds: what one request sees),
+`prefill_speed` (uncached prompt tokens over prefill seconds), `ttft_mean`,
+`e2e_latency_mean`, `time_per_token_mean`, `requests_running`,
+`requests_waiting`, `kv_cache_usage`, `prefix_cache_hit_rate` (cached over
+prompt tokens in the window, not lifetime), `spec_decode_acceptance` and
+`preemption_rate`. Ratios divide rates summed by alias, so a quiet window is
+`None` ("No requests"), never 0. Only engines with verified metric names report
+today (TensorFold); the others show Not reported and keep their gateway
+estimates. A Spark view shows the aliases that Spark serves; a dual run shows the
+same alias on both Sparks. There is no `kv_pool_memory`: no agent reports the
+pool size yet.
+
 Spark metrics (one series per `node_id`): `gpu_power`, `models_memory` (memory
 held by GPU processes), `system_memory`, `gpu_clock`, `swap_used`, `disk_used`
 (swap and disk come with the inventory, so they move every few minutes),

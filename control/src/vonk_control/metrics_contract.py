@@ -22,6 +22,19 @@ Metric = Literal[
     "gateway_latency_p50",
     "gateway_latency_p95",
     "gateway_generation_speed",
+    "decode_throughput",
+    "prefill_throughput",
+    "decode_speed",
+    "prefill_speed",
+    "ttft_mean",
+    "requests_running",
+    "requests_waiting",
+    "kv_cache_usage",
+    "prefix_cache_hit_rate",
+    "spec_decode_acceptance",
+    "e2e_latency_mean",
+    "time_per_token_mean",
+    "preemption_rate",
     "gpu_power",
     "gpu_energy",
     "models_memory",
@@ -146,8 +159,35 @@ def _gateway(
     )
 
 
+_ENGINE_COVERAGE = (
+    "Only engines whose metric names are verified report; others show Not reported."
+)
 _TTFT_HINT = "Streaming requests only, seen at the gateway: includes network and queue. Histogram buckets are coarse, so it moves in steps."
 _LATENCY_HINT = "Whole request as the gateway saw it, queue included. Histogram buckets are coarse, so it moves in steps."
+
+
+def _engine(
+    metric: Metric,
+    title: str,
+    unit: MetricUnit,
+    hint: str,
+    *,
+    total: bool = False,
+    fleet: bool = False,
+) -> MetricSpec:
+    """A per-model figure the engine reported through the Spark agent."""
+    return MetricSpec(
+        metric=metric,
+        title=title,
+        unit=unit,
+        scope=MetricScope.ALIAS,
+        basis="measured",
+        source="engine",
+        summary_total=total,
+        fleet_sum=fleet,
+        hint=f"{hint} {_ENGINE_COVERAGE}",
+    )
+
 
 # The one table of what each metric means; the queries live in prometheus_api.
 METRIC_SPECS: dict[Metric, MetricSpec] = {
@@ -264,6 +304,89 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
             "Generation speed per request",
             "tokens_per_second",
             "Output tokens over the time the engine call took, so it includes prompt processing and queueing: it understates the engine's decode speed.",
+        ),
+        _engine(
+            "decode_throughput",
+            "Decode throughput",
+            "tokens_per_second",
+            "Tokens generated per second, all requests together.",
+            total=True,
+            fleet=True,
+        ),
+        _engine(
+            "prefill_throughput",
+            "Prefill throughput",
+            "tokens_per_second",
+            "Prompt tokens processed per second, all requests together.",
+            total=True,
+            fleet=True,
+        ),
+        _engine(
+            "decode_speed",
+            "Decode speed per request",
+            "tokens_per_second",
+            "Generated tokens per second of decode time: what one request sees.",
+        ),
+        _engine(
+            "prefill_speed",
+            "Prefill speed per request",
+            "tokens_per_second",
+            "Prompt tokens not served from cache, per second of prefill time.",
+        ),
+        _engine(
+            "ttft_mean",
+            "Time to first token, mean",
+            "seconds",
+            "Mean over finished requests.",
+        ),
+        _engine(
+            "requests_running",
+            "Requests running",
+            "count",
+            "Requests being served now.",
+        ),
+        _engine(
+            "requests_waiting",
+            "Requests waiting",
+            "count",
+            "Requests queued behind the running ones.",
+        ),
+        _engine(
+            "kv_cache_usage",
+            "KV cache in use",
+            "ratio",
+            "Share of the KV cache pool holding live requests.",
+        ),
+        _engine(
+            "prefix_cache_hit_rate",
+            "Prefix-cache hit rate",
+            "ratio",
+            "Share of prompt tokens served from the prefix cache.",
+        ),
+        _engine(
+            "spec_decode_acceptance",
+            "Speculative decoding acceptance",
+            "ratio",
+            "Share of drafted tokens accepted; engines without speculative decoding show Not reported.",
+        ),
+        _engine(
+            "e2e_latency_mean",
+            "Request time at the engine, mean",
+            "seconds",
+            "Mean over finished requests, queue excluded.",
+        ),
+        _engine(
+            "time_per_token_mean",
+            "Time per output token, mean",
+            "seconds",
+            "Mean gap between output tokens (inter-token latency).",
+        ),
+        _engine(
+            "preemption_rate",
+            "Preemptions",
+            "per_second",
+            "Requests the engine paused under KV cache pressure.",
+            total=True,
         ),
         MetricSpec(
             metric="certificate_expiry",
