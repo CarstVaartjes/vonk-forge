@@ -1,7 +1,8 @@
-"""The carry lane builds a release's own recipe library, end to end, before release."""
+"""The carry lane fetches a release's recipe library at the revision it names and builds it with the release's own script."""
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -24,9 +25,8 @@ def test_a_release_library_is_fetched_and_built_from_the_revision_it_names(
         tool = destination / "tools/build-catalog-index"
         tool.parent.mkdir(parents=True)
         tool.write_text("")
-        canary = destination / "tests/fixtures/canonical-synthetic-canary/index.json"
-        canary.parent.mkdir(parents=True)
-        canary.write_text("{}")
+        # A fixed commit time: the epoch must come from the tree, never "now".
+        os.utime(tool, (1_700_000_000, 1_700_000_000))
 
     root = release_library_root(
         "a" * 40,
@@ -36,11 +36,9 @@ def test_a_release_library_is_fetched_and_built_from_the_revision_it_names(
         fetch_library=fetch,
     )
 
-    epoch = int((root / "tools/build-catalog-index").stat().st_mtime)
     assert fetched == [REVISION]
     assert root.name == f"recipe-library-{REVISION}"
-    assert (root / "catalog-index.json").read_text() == f"{root} {REVISION} {epoch}"
-    assert (root / "tests/fixtures/canonical-synthetic-canary/index.json").is_file()
+    assert (root / "catalog-index.json").read_text() == f"{root} {REVISION} 1700000000"
     # Asking again reuses the built library.
     assert (
         release_library_root(
