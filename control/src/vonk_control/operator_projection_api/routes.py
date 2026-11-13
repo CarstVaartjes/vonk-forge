@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 
-from ..agent_api.ended_runs import ENDED_RUN_STATES
 from ..agent_upgrade_contract import AgentUpgradeRequestIntent
 from ..api_availability import AVAILABILITY_ERRORS
 from ..auth import Actor
@@ -49,6 +48,7 @@ from ..prometheus_api import (
     PrometheusReader,
     install_metrics_routes,
 )
+from ..run_states import ENDED_RUN_STATES
 from .contracts import (
     _SELECTOR_PATTERN,
     FLEET_OPERATION_IDS,

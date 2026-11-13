@@ -201,7 +201,6 @@ class UninstallMixin:
         self,
         installation_id: str,
         *,
-        plan_digest: str,
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None = None,

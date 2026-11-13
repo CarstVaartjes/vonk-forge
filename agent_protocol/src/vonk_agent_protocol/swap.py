@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import Field, field_validator
 
+from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from .wire_model import MAX_RUN_GENERATION, WireEnum, WireModel
 
 GIB = 1024**3
@@ -117,8 +118,8 @@ class SwapCheckpoint(WireModel):
 class SwapObservation(WireModel):
     """Active swap as the kernel reports it, beside the helper's last receipt."""
 
-    total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    free_bytes: int = Field(ge=0, le=16 * 1024**4)
+    total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     # The helper's receipt; None with receipt_detail naming why it is missing.
     receipt: SwapCheckpoint | None = None
     receipt_detail: str | None = Field(default=None, max_length=512)

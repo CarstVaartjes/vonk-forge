@@ -156,7 +156,7 @@ fn device_tree_total(root: &Path) -> Option<u64> {
             total = total.checked_add(amount)?;
         }
     }
-    (total > 0 && total <= 16 * 1024u64.pow(4)).then_some(total)
+    (total > 0 && total <= vonk_agent_protocol::MAX_TELEMETRY_CAPACITY_BYTES).then_some(total)
 }
 
 pub fn observe(root: &Path, memory_total_bytes: Option<u64>) -> DisplayMemoryObservation {

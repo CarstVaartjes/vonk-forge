@@ -14,9 +14,8 @@ from ..models import RecipeRun, RunNode
 from ..owner_liveness import run_has_live_operation
 from ..persisted_waits import schedule_wait
 from ..recipe_stop_payloads import durable_run_stop_payloads
+from ..run_states import ENDED_RUN_STATES
 from .common import _LOGGER, _now
-
-ENDED_RUN_STATES = frozenset({RunState.FAILED, RunState.STOPPED})
 
 
 def reopen_ended_runs_still_running(

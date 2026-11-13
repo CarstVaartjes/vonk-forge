@@ -30,9 +30,8 @@ export function WorkloadHeader({ unit }: { unit: WorkloadGroup }) {
 
 /**
  * One workload: alias, title and state, its live speed as the hero number with the last 30 minutes
- * behind it, and the figures beside it. The hero is the engine's measured decode speed, else the gateway's
- * generated tokens per second, else its requests per second, else Not reported (nothing while the reads are out); "≈" shows while the
- * Controller calls the figure an estimate. Every number is the Controller's latest reading; the browser
+ * behind it, and the figures beside it. The hero is leadReading's figure (nothing while the reads are out;
+ * Not reported when none has a value); "≈" shows while the Controller calls it an estimate. Every number is the Controller's latest reading; the browser
  * computes none.
  */
 export function WorkloadHero({
@@ -44,14 +43,13 @@ export function WorkloadHero({
   reads: WorkloadReads;
   live: boolean;
 }) {
-  const hero = leadReading([reads.decode, reads.tokens, reads.requests], unit.alias);
+  const { reading: hero, pending } = leadReading(reads, unit.alias);
   const spec = hero?.data.spec;
   const latest = hero?.series.summary.latest;
   const symbol = spec ? UNITS[spec.unit].symbol : "";
   const value = latest == null ? null : Number(latest);
   const queue = queueText(reads.running, reads.waiting, unit.alias);
   // While the speed reads are out nothing is claimed; once they are in, no latest value is Not reported.
-  const pending = !hero && [reads.decode, reads.tokens, reads.requests].includes(undefined);
   return (
     <div className="workload-hero">
       <WorkloadHeader unit={unit} />

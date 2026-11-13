@@ -20,6 +20,7 @@ from .optional_evidence import (
 from .reason_codes import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
+from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from .wire_model import WireEnum, WireModel, strict_json_datetime
 
 
@@ -171,12 +172,12 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
 
     schema_version: Literal[1]
     observed_at: datetime
-    disk_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    disk_free_bytes: int = Field(ge=0, le=16 * 1024**4)
-    host_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    host_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
-    gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
+    disk_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    host_memory_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    host_memory_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_memory_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_memory_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     gpu_count: int = Field(ge=0, le=64)
     # None means no health observation, never inferred from metric support.
     gpu_health: GpuHealth | None = None

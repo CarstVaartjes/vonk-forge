@@ -3998,10 +3998,8 @@ def test_new_uninstall_intent_replans_after_unissued_old_uninstall(
         nodes,
         request_id="installed-for-uninstall-intent",
     )
-    old_plan = service.preview_uninstall(installation.owner_id)
     old = service.uninstall(
         installation.owner_id,
-        plan_digest=old_plan.plan_digest,
         actor="admin",
         request_id="old-uninstall-intent",
     )
@@ -4019,7 +4017,6 @@ def test_new_uninstall_intent_replans_after_unissued_old_uninstall(
     )
     new = service.uninstall(
         installation.owner_id,
-        plan_digest=prospective.plan_digest,
         actor="admin",
         request_id="new-uninstall-intent",
         workload_intent_ordinal=3,
@@ -4088,7 +4085,6 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
     with pytest.raises(Exception) as _ending:
         service.uninstall(
             install.owner_id,
-            plan_digest=blocked_uninstall.plan_digest,
             actor="admin",
             request_id="6" * 36,
         )
@@ -4135,10 +4131,8 @@ def test_start_stop_and_uninstall_preserve_capacity_safely(tmp_path: Path) -> No
         assert run.state == "stopped"
         assert reservations == []
 
-    uninstall_plan = service.preview_uninstall(install.owner_id)
     uninstall = service.uninstall(
         install.owner_id,
-        plan_digest=uninstall_plan.plan_digest,
         actor="admin",
         request_id="8" * 36,
     )
@@ -4257,7 +4251,6 @@ def test_uninstall_validates_stored_identity_without_requiring_launch_placement(
     assert preview.allowed
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=preview.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
     )
@@ -4299,7 +4292,6 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
     assert preview.model_impact.retained_node_ids == nodes
     operation = service.uninstall(
         first.owner_id,
-        plan_digest=preview.plan_digest,
         actor="admin",
         request_id="8" * 35 + "3",
     )
@@ -4348,7 +4340,6 @@ def test_installations_removed_together_do_not_keep_each_others_model_files(
     assert together.model_impact.cleanup_node_ids == nodes
     operation = service.uninstall(
         first.owner_id,
-        plan_digest=together.plan_digest,
         actor="admin",
         request_id="9" * 35 + "3",
         also_removing=(second.owner_id,),
@@ -4391,7 +4382,6 @@ def test_uninstall_cleans_model_per_spark_when_dependency_is_node_local(
     assert preview.model_impact.cleanup_node_ids == (nodes[1],)
     operation = service.uninstall(
         target.owner_id,
-        plan_digest=preview.plan_digest,
         actor="admin",
         request_id="8" * 35 + "6",
     )
@@ -4431,7 +4421,6 @@ def test_uninstall_warns_on_unknown_bytes_but_blocks_active_runs_without_implici
     with pytest.raises(Exception) as _ending:
         service.uninstall(
             installation.owner_id,
-            plan_digest=active.plan_digest,
             actor="admin",
             request_id="8" * 35 + "d",
         )
@@ -4642,13 +4631,11 @@ def test_uninstall_replans_a_stale_review_from_the_installation_as_it_is_now(
     # Uninstall is declarative: the stale review is re-planned, never refused.
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=stale.plan_digest,
         actor="admin",
         request_id="8" * 35 + "f",
     )
     replay = service.uninstall(
         installation.owner_id,
-        plan_digest="0" * 64,
         actor="admin",
         request_id="8" * 35 + "f",
     )
@@ -4700,14 +4687,11 @@ def test_uninstall_queue_rollback_and_request_key_are_owner_bound(
     second = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="9" * 35 + "b"
     )
-    first_plan = service.preview_uninstall(first.owner_id)
-    second_plan = service.preview_uninstall(second.owner_id)
     service._agent_jobs = FailingQueue()
 
     with pytest.raises(Exception) as _ending:
         service.uninstall(
             first.owner_id,
-            plan_digest=first_plan.plan_digest,
             actor="admin",
             request_id="9" * 35 + "c",
         )
@@ -4723,14 +4707,12 @@ def test_uninstall_queue_rollback_and_request_key_are_owner_bound(
     service._agent_jobs = RecordingQueue()
     operation = service.uninstall(
         first.owner_id,
-        plan_digest=first_plan.plan_digest,
         actor="admin",
         request_id="9" * 35 + "d",
     )
     with pytest.raises(Exception) as _ending:
         service.uninstall(
             second.owner_id,
-            plan_digest=second_plan.plan_digest,
             actor="admin",
             request_id="9" * 35 + "d",
         )
@@ -4751,10 +4733,8 @@ def test_start_fences_only_active_uninstall_operations_after_installation_lock(
     run_plan = service.preview_run(
         installation.owner_id, "fenced" if blocked else "allowed"
     )
-    uninstall_plan = service.preview_uninstall(installation.owner_id)
     uninstall = service.uninstall(
         installation.owner_id,
-        plan_digest=uninstall_plan.plan_digest,
         actor="admin",
         request_id="9" * 35 + "f",
     )
@@ -4797,10 +4777,8 @@ def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="a" * 35 + "0"
     )
-    plan = service.preview_uninstall(installation.owner_id)
     first = service.uninstall(
         installation.owner_id,
-        plan_digest=plan.plan_digest,
         actor="admin",
         request_id="a" * 35 + "1",
     )
@@ -4809,7 +4787,6 @@ def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
     assert fresh_plan.allowed
     fresh = service.uninstall(
         installation.owner_id,
-        plan_digest=fresh_plan.plan_digest,
         actor="admin",
         request_id="a" * 35 + "2",
     )
@@ -4838,7 +4815,6 @@ def test_fresh_uninstall_request_supersedes_prior_cleanup_without_blocking(
         assert next_plan.allowed
         return service.uninstall(
             installation.owner_id,
-            plan_digest=next_plan.plan_digest,
             actor="admin",
             request_id="a" * 35 + "3",
         )
@@ -6625,7 +6601,6 @@ def test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock(
     installation = installed_recipe(
         service, mapping_id, build_id, nodes, request_id="f" * 35 + "2"
     )
-    plan = service.preview_uninstall(installation.owner_id)
     request_key = "f" * 35 + "3"
     available_before = queue.available
     role = threading.local()
@@ -6657,7 +6632,6 @@ def test_postgres_duplicate_uninstall_rechecks_replay_after_installation_lock(
         role.value = label
         return service.uninstall(
             installation.owner_id,
-            plan_digest=plan.plan_digest,
             actor="admin",
             request_id=request_key,
         )
@@ -6712,7 +6686,6 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
         service, mapping_id, build_id, nodes, request_id="f" * 35 + "4"
     )
     run_plan = service.preview_run(installation.owner_id, "must-not-start")
-    uninstall_plan = service.preview_uninstall(installation.owner_id)
     available_before = queue.available
     role = threading.local()
     uninstall_locked = threading.Event()
@@ -6742,7 +6715,6 @@ def test_postgres_start_waiting_on_accepted_uninstall_is_rejected(
         role.value = "uninstall"
         return service.uninstall(
             installation.owner_id,
-            plan_digest=uninstall_plan.plan_digest,
             actor="admin",
             request_id="f" * 35 + "5",
         )

@@ -47,6 +47,7 @@ from ..route_bundle_contract import (
     RouteRunIdentity,
 )
 from ..route_model_info import RouteModelInfoReader
+from ..run_states import ENDED_RUN_STATES
 from ..security.route_authority import require_route_authority
 from .shared import (
     _UPSTREAM_MODEL,
@@ -139,7 +140,7 @@ def _candidate_once(
         serving = run.route_state == RunRouteState.PUBLISHED or (
             run.route_state == RunRouteState.FAILED and run.id != include_run_id
         )
-        if any(node.state in {RunState.STOPPED, RunState.FAILED} for node in nodes):
+        if any(node.state in ENDED_RUN_STATES for node in nodes):
             raise RecipeRankStopped(
                 "recipe rank reports a stopped or failed workload",
                 run_id=run.id,

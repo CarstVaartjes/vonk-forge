@@ -45,20 +45,19 @@ export function WorkloadRow({
   reads: WorkloadReads;
   /** The gateway's generated tokens per model over 24 hours. */
   day: MetricsSeriesResponse | null;
-  /** Each Spark's place in the snapshot's node order, which fixes its colour. */
+  /** Each Spark's place in the enrolment order, which fixes its colour. */
   order: ReadonlyMap<string, number>;
   open: boolean;
   onToggle(): void;
   children?: ReactNode;
 }) {
-  const speed = leadReading([reads.decode, reads.tokens, reads.requests], unit.alias);
+  const { reading: speed, pending: speedPending } = leadReading(reads, unit.alias);
   const queue = queueText(reads.running, reads.waiting, unit.alias);
   const tokens = modelTotals(day).rows.find((row) => row.alias === unit.alias);
   const speedNow = speed?.series.summary.latest;
   const speedSymbol = speed ? UNITS[speed.data.spec.unit].symbol : "";
   const end = speed ? Number(speed.data.end) : 0;
   const total = tokens && compactCount(tokens.total);
-  const speedPending = !speed && [reads.decode, reads.tokens, reads.requests].includes(undefined);
   return (
     <li className="workload-row card">
       <div className="row-grid">

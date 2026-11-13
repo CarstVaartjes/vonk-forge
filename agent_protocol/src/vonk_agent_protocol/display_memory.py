@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import Field
 
+from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from .wire_model import WireEnum, WireModel
 
 
@@ -25,10 +26,16 @@ class DisplayMemoryObservation(WireModel):
     bios_version: str | None = Field(default=None, min_length=1, max_length=256)
     soc_firmware_version: int | None = Field(default=None, ge=0, le=2**32 - 1)
     display_connected: bool | None = None
-    memory_total_bytes: int | None = Field(default=None, gt=0, le=16 * 1024**4)
+    memory_total_bytes: int | None = Field(
+        default=None, gt=0, le=MAX_TELEMETRY_CAPACITY_BYTES
+    )
     # Firmware-advertised RAM, not a claim about installed physical capacity.
-    device_tree_memory_bytes: int | None = Field(default=None, gt=0, le=16 * 1024**4)
-    carveout_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
+    device_tree_memory_bytes: int | None = Field(
+        default=None, gt=0, le=MAX_TELEMETRY_CAPACITY_BYTES
+    )
+    carveout_bytes: int | None = Field(
+        default=None, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES
+    )
     signal: DisplayMemorySignal = DisplayMemorySignal.UNKNOWN
 
 

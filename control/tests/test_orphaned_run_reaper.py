@@ -126,10 +126,8 @@ def _supersede_by_removal(world: _World) -> None:
     """Removing the unused installation takes a newer intent: the unissued
     Start is settled cancelled, as a production uninstall does."""
 
-    plan = world.service.preview_uninstall(world.unused.owner_id)
     world.service.uninstall(
         world.unused.owner_id,
-        plan_digest=plan.plan_digest,
         actor="admin",
         request_id=str(uuid.uuid4()),
     )

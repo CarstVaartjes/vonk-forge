@@ -14,9 +14,8 @@ export const ENGINE_FIGURES = [
   "spec_decode_acceptance",
 ] as const satisfies readonly Metric[];
 
-/** The last hour of the per-model series a workload shows: three speeds and the engine's queue. */
+/** The last hour of the per-model series a workload shows: two speeds and the engine's queue. */
 export type WorkloadReads = {
-  decode: Read;
   tokens: Read;
   requests: Read;
   running: Read;
@@ -33,7 +32,6 @@ export function useWorkloadReads(
 ): WorkloadReads {
   const catalogue = useMetricCatalogue(api);
   return {
-    decode: useMetricRead(api, "decode_throughput", "1h"),
     tokens: useMetricRead(api, "output_token_rate", "1h"),
     requests: useMetricRead(api, "request_rate", "1h"),
     running: useMetricRead(api, "requests_running", "1h"),

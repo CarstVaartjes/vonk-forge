@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     InstallationState,
     InstallDegradedReason,
     ReservationState,
-    RunState,
 )
 
 from ..auth import CursorError
@@ -42,6 +41,7 @@ from ..observation_capture import begin_observation_capture
 from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
+from ..run_states import ENDED_RUN_STATES
 from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
@@ -234,6 +234,9 @@ class FleetProjection:
 
     @staticmethod
     def _registered_agents(session: Session) -> dict[str, AgentNode]:
+        # Enrolment order, so adding a Spark never moves an existing one: the
+        # dashboard colours each Spark by its place in this order. Sparks
+        # enrolled before the column existed (None) keep node_id order, first.
         rows = tuple(
             session.scalars(
                 select(AgentNode)
@@ -241,7 +244,7 @@ class FleetProjection:
                     AgentNode.state != "revoked",
                     AgentNode.revoked_at.is_(None),
                 )
-                .order_by(AgentNode.node_id)
+                .order_by(AgentNode.enrolled_at.asc().nulls_first(), AgentNode.node_id)
             )
         )
         return {row.node_id: row for row in rows}
@@ -427,7 +430,7 @@ class FleetProjection:
             .join(RunNode, RunNode.run_id == RecipeRun.id)
             .where(
                 RunNode.node_id.in_(node_ids),
-                RecipeRun.state.not_in({RunState.STOPPED, RunState.FAILED}),
+                RecipeRun.state.not_in(ENDED_RUN_STATES),
             )
             .group_by(RecipeRun.id, RecipeRun.updated_at)
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())

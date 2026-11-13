@@ -23,11 +23,10 @@ from typing import Any
 import httpx2
 import pytest
 from sqlalchemy import Engine, select
-from vonk_agent_protocol import LifecycleState, ModelCacheCode
+from vonk_agent_protocol import LifecycleState
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.distribution_executor import CompositeDistributionPhaseExecutor
 from vonk_control.model_cache import ModelCacheService
-from vonk_control.model_cache.errors import ModelCacheConflictInvalid
 from vonk_control.models import CatalogDocumentRevision, ModelCacheSet, RecipeBuild
 from vonk_control.run_switch_contract import (
     ArtifactStorageImpact,
@@ -281,12 +280,11 @@ def test_download_plan_binds_content_across_publication(
     assert nas.settle(admitted.id).downloaded_bytes == 0
     assert nas.upstream.served_bytes == len(WEIGHTS)
 
-    # Identity binding still rejects an unrelated plan before creating work.
-    with pytest.raises(ModelCacheConflictInvalid) as refused:
-        nas.cache.start_download(
-            actor="admin",
-            request_key=str(uuid.uuid4()),
-            plan_digest="0" * 64,
-            artifact_set_sha256=wanted,
-        )
-    assert refused.value.code == ModelCacheCode.STALE_PLAN
+    # A plan that moved on since the caller's preview is re-planned, not refused.
+    replanned = nas.cache.start_download(
+        actor="admin",
+        request_key=str(uuid.uuid4()),
+        plan_digest="0" * 64,
+        artifact_set_sha256=wanted,
+    )
+    assert replanned.artifact_set_sha256 == wanted

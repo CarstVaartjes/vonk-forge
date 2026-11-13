@@ -34,7 +34,7 @@ const spec = (
 });
 const model = {
   scope: "alias",
-  basis: "estimated",
+  basis: "measured",
   source: "gateway",
   summary_total: true,
 } as const;
@@ -122,8 +122,8 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
 
-test("shows generated tokens per model as an estimate with the Controller's summary", async () => {
-  // Break caught: the gateway's tokens look measured, or the page recomputes what the Controller owns.
+test("shows generated tokens per model, counted, with the Controller's summary", async () => {
+  // Break caught: the gateway's counted tokens get an estimate mark, or the page recomputes what the Controller owns.
   const tokens = { latest: 42.5, average: 40, peak: 61.2, total: 12400, share: null, coverage: 1 };
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "output_token_rate"
@@ -138,7 +138,7 @@ test("shows generated tokens per model as an estimate with the Controller's summ
   const tile = await screen.findByRole("region", { name: "Generated tokens per model" });
   await within(tile).findByText("glm · tok/s");
   expect(tile).toHaveTextContent(
-    "glm: now 42.5 tok/s · average 40.0 tok/s · peak 61.2 tok/s · total 12400 (estimate)",
+    "glm: now 42.5 tok/s · average 40.0 tok/s · peak 61.2 tok/s · total 12400",
   );
   rerender(<Ranged api={fakeApi(metricsSeries)} node="spk_abc" />);
   await waitFor(() =>
@@ -198,7 +198,7 @@ test("an expired certificate says expired, never 'expires in now'", async () => 
   expect(screen.queryByText(/expires in/)).toBeNull();
 });
 
-test("a Spark has the same colour in every tile, by its place in the snapshot order", async () => {
+test("a Spark has the same colour in every tile, by its place in the enrolment order", async () => {
   // Break caught: colour follows the order series arrive in, so a Spark changes colour between tiles.
   const both = (first: string, second: string): MetricsSeriesResponse => ({
     ...data,
@@ -274,7 +274,11 @@ test("range change aborts the old read and a late response cannot replace curren
 });
 
 test("a metric the catalogue does not list is not drawn, and an estimated one carries the est. tag", async () => {
-  const listed = Object.values(SPECS).filter((entry) => entry.metric !== "gpu_temperature");
+  const listed = Object.values(SPECS)
+    .filter((entry) => entry.metric !== "gpu_temperature")
+    .map((entry) =>
+      entry.metric === "request_rate" ? { ...entry, basis: "estimated" as const } : entry,
+    );
   const api = {
     metricsCatalogue: async () => listed,
     metricsSeries: async () => data,

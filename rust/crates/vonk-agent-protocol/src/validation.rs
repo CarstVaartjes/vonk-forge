@@ -67,12 +67,12 @@ pub const MAX_REPORTED_RUNS: usize = 4096;
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
-            || self.disk_total_bytes > 16 * 1024_u64.pow(4)
-            || self.disk_free_bytes > 16 * 1024_u64.pow(4)
-            || self.host_memory_total_bytes > 16 * 1024_u64.pow(4)
-            || self.host_memory_free_bytes > 16 * 1024_u64.pow(4)
-            || self.gpu_memory_total_bytes > 16 * 1024_u64.pow(4)
-            || self.gpu_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.disk_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.disk_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.host_memory_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.host_memory_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.gpu_memory_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.gpu_memory_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
             || self.gpu_count > 64
             || self.disk_free_bytes > self.disk_total_bytes
             || self.host_memory_free_bytes > self.host_memory_total_bytes

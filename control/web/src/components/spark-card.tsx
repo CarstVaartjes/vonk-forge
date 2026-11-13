@@ -73,7 +73,7 @@ function Traces({
 
 /**
  * One Spark: its colour key and name, status, unified memory and four live traces. `index` is the Spark's
- * place in the snapshot's node order and fixes its colour; `rank` shows when the workload spans Sparks. An offline Spark draws no traces. Readings the Spark
+ * place in the enrolment order and fixes its colour; `rank` shows when the workload spans Sparks. An offline Spark draws no traces. Readings the Spark
  * does not report say "Not reported"; the card never fills them in.
  */
 export function SparkCard({
