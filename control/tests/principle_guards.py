@@ -821,6 +821,9 @@ def scan_source(
                 ending = re.compile(
                     r"(?:^|_)(cancel|stop|retire|supersede|uninstall|remove)(?:_|$)"
                 )
+                # Builders of a request or payload (stop_grant_request,
+                # recipe_stop_payload, forbidden_call_lines) end nothing.
+                builder = re.compile(r"_(?:request|payload|payloads|lines)$")
                 fresh = re.compile(
                     r"(?:^|_)(start|install|load|apply|prepare|request|create|enqueue|admit|activate|submit)(?:_|$)"
                 )
@@ -866,7 +869,9 @@ def scan_source(
                 ends = [
                     n
                     for n in calls
-                    if ending.search(name(n.func)) and not is_instrumentation(n)
+                    if ending.search(name(n.func))
+                    and not builder.search(name(n.func))
+                    and not is_instrumentation(n)
                 ]
                 if (
                     ends

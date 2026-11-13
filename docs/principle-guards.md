@@ -113,6 +113,9 @@ These syntax checks do not prove recovery. Behavior tests must demonstrate
 bounded observation and retry, reuse after a fault clears, and fresh admission
 after an operation ends. `non_blocking.assert_ended_without_blocking` checks
 release of explicitly inventoried holds and admission with a fresh request key.
+The `ending-without-fresh-request` guard names an ending by call name but
+ignores request and payload builders (`*_request`, `*_payload`, `*_payloads`,
+`*_lines`), which end nothing.
 `upgrade_continuity.assert_upgrade_keeps_serving` checks serving continuity with
 real observations and an upgrade/restart callback in its owning lane.
 

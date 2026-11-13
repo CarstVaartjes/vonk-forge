@@ -229,6 +229,18 @@ def test_ending_inventory_requires_a_later_fresh_operation():
     assert not scan_source(helper, path="test_service.py", mode="tests")
 
 
+def test_request_and_payload_builders_do_not_end_a_workload():
+    for builder in ("stop_grant_request", "recipe_stop_payload", "stop_call_lines"):
+        source = f"def test_build():\n    {builder}(run)"
+        assert not scan_source(source, path="test_build.py", mode="tests")
+    # A real ending next to a builder is still an ending.
+    source = "def test_stop():\n    stop_grant_request(run)\n    operations.stop(run)"
+    assert scan_source(source, path="test_stop.py", mode="tests")
+    assert not scan_source(
+        source + "\n    service.submit(plan)", path="test_stop.py", mode="tests"
+    )
+
+
 def test_sqlalchemy_hook_cleanup_is_not_a_service_lifecycle_ending():
     for imported, call in (
         ("from sqlalchemy import event", "event.remove"),
