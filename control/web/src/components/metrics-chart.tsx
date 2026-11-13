@@ -26,7 +26,7 @@ const TILES: Metric[] = [
 
 /**
  * A Spark keeps one colour in every tile: its position in `names`, which the Fleet page builds in
- * the snapshot's node order. Series that are not Sparks (models) take the colour of their order
+ * the enrolment order. Series that are not Sparks (models) take the colour of their order
  * in the tile.
  */
 function seriesColor(labels: Record<string, string>, names: Record<string, string>, index: number) {

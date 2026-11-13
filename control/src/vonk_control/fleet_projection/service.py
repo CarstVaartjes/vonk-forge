@@ -234,6 +234,14 @@ class FleetProjection:
 
     @staticmethod
     def _registered_agents(session: Session) -> dict[str, AgentNode]:
+        # Enrolment order, so adding a Spark never moves an existing one: the
+        # dashboard colours each Spark by its place in this order. A node's
+        # first certificate marks its enrolment; node_id breaks ties.
+        enrolled_at = (
+            select(func.min(AgentCertificate.not_before))
+            .where(AgentCertificate.node_id == AgentNode.node_id)
+            .scalar_subquery()
+        )
         rows = tuple(
             session.scalars(
                 select(AgentNode)
@@ -241,7 +249,7 @@ class FleetProjection:
                     AgentNode.state != "revoked",
                     AgentNode.revoked_at.is_(None),
                 )
-                .order_by(AgentNode.node_id)
+                .order_by(enrolled_at.asc().nulls_last(), AgentNode.node_id)
             )
         )
         return {row.node_id: row for row in rows}

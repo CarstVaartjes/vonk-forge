@@ -317,6 +317,30 @@ def test_fleet_excludes_revoked_agent_nodes() -> None:
     assert [node.id for node in projection.read().nodes] == []
 
 
+def test_fleet_lists_nodes_in_enrolment_order_not_node_id_order() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    node_c = "spk_" + "3" * 32
+    with sessions.begin() as session:
+        for node_id in (NODE_A, NODE_B, node_c):
+            session.add(AgentNode(node_id=node_id, state="active"))
+        session.flush()
+        # B enrolled first, then C, then A: the reverse of node_id order for A.
+        session.add_all(
+            [
+                _certificate(NODE_B, "b1", not_before=NOW - timedelta(days=3)),
+                _certificate(node_c, "c1", not_before=NOW - timedelta(days=2)),
+                _certificate(NODE_A, "a1", not_before=NOW - timedelta(days=1)),
+                _certificate(NODE_A, "a2", generation=2, not_before=NOW),
+            ]
+        )
+
+    snapshot = FleetProjection(sessions, clock=lambda: NOW).read()
+
+    assert [node.id for node in snapshot.nodes] == [NODE_B, node_c, NODE_A]
+
+
 def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set() -> (
     None
 ):

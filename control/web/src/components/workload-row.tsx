@@ -45,7 +45,7 @@ export function WorkloadRow({
   reads: WorkloadReads;
   /** The gateway's generated tokens per model over 24 hours. */
   day: MetricsSeriesResponse | null;
-  /** Each Spark's place in the snapshot's node order, which fixes its colour. */
+  /** Each Spark's place in the enrolment order, which fixes its colour. */
   order: ReadonlyMap<string, number>;
   open: boolean;
   onToggle(): void;

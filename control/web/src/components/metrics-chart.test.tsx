@@ -198,7 +198,7 @@ test("an expired certificate says expired, never 'expires in now'", async () => 
   expect(screen.queryByText(/expires in/)).toBeNull();
 });
 
-test("a Spark has the same colour in every tile, by its place in the snapshot order", async () => {
+test("a Spark has the same colour in every tile, by its place in the enrolment order", async () => {
   // Break caught: colour follows the order series arrive in, so a Spark changes colour between tiles.
   const both = (first: string, second: string): MetricsSeriesResponse => ({
     ...data,
