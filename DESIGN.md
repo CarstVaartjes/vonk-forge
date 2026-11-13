@@ -24,6 +24,7 @@ colors:
   bad: "#ff7a6b"
   info: "#8fc4ff"
   model-ink: "#f2efe8"
+  mem-model: "#f2efe8"
   mem-system: "#7f7a6e"
   track: "#2a2e27"
   series-1: "#6aa82e"
@@ -159,6 +160,42 @@ The palette is one graphite operating shell with a small state vocabulary that t
 - **Structural Line / Strong Structural Line:** Thin separators and control outlines that carry most grouping.
 - **Primary Text / Muted Text / Subtle Text:** The three-level graphite-surface text hierarchy.
 
+### Light theme
+
+The front-matter above is the dark set. The light set follows the system setting until the owner picks one (theme switch in the top bar); every token is one `light-dark(light, dark)` pair in `:root`, so the two never drift. Tokens not listed here (`green`, `green-ink`, `gold`) are the same in both themes.
+
+| Token | Light | Dark |
+|---|---|---|
+| `bg` | `#f3f1ea` | `#090a09` |
+| `recess` | `#ebe8df` | `#060706` |
+| `panel` | `#ffffff` | `#121412` |
+| `panel-2` | `#fbfaf6` | `#0f110f` |
+| `raised` | `#f6f4ee` | `#1a1d19` |
+| `hover` | `#efece4` | `#20231e` |
+| `line` | `#e1ddd1` | `#262924` |
+| `line-strong` | `#cbc5b6` | `#3a3e36` |
+| `line-control` | `#857f70` | `#666b5f` |
+| `ink` | `#171813` | `#f2efe8` |
+| `muted` | `#55524a` | `#aaa396` |
+| `faint` | `#6b675d` | `#958e80` |
+| `green-text` | `#3d6a00` | `#a3d93a` |
+| `gold-text` | `#7d5c12` | `#d9b56f` |
+| `ok` | `#3d6a00` | `#a3d93a` |
+| `warn` | `#8f5200` | `#ffb347` |
+| `bad` | `#b3261e` | `#ff7a6b` |
+| `info` | `#1c5fb0` | `#8fc4ff` |
+| `model-ink` | `#171813` | `#f2efe8` |
+| `mem-model` | `#1f201b` | `#f2efe8` |
+| `mem-system` | `#7d786c` | `#7f7a6e` |
+| `track` | `#e6e2d8` | `#2a2e27` |
+| `series-1` | `#4f8a1a` | `#6aa82e` |
+| `series-2` | `#2f6fd0` | `#4a8ae6` |
+| `series-3` | `#a86a12` | `#c4862c` |
+| `series-4` | `#b04a94` | `#c765ac` |
+| `neutral-series` | `#8b867a` | `#8d877a` |
+| `grid` | `#ebe8df` | `#23261f` |
+| `axis` | `#6b675d` | `#958e80` |
+
 ### Named Rules
 
 **The Green Means Go Rule.** Reserve green for positive health, readiness, and safe primary action; never use it as general decoration or as the only state signal.
@@ -187,7 +224,7 @@ The palette is one graphite operating shell with a small state vocabulary that t
 
 ## Layout
 
-The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Overview (`/`, `/fleet`, `/overview`) leads with the workload: one unit per running workload with a card for each Spark that carries it (idle Sparks as cards of their own), the fleet summary line above, Needs attention and Serving now in the right column (first on a phone). Workloads (`/workloads`) is the table: a Spark search and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), the trends, then a detail view for the selected Spark. Needs-attention items carry no buttons.
+The shell is a sticky graphite header above a centered content frame capped at 88rem. Main padding is fluid, and working surfaces favor grid rows, aligned facts, and dividers over independent floating cards. Overview (`/`, `/fleet`, `/overview`) leads with the workload: one unit per running workload with a card for each Spark that carries it (idle Sparks as cards of their own), the fleet summary line above, Needs attention and Serving now in the right column (first on a phone). Workloads (`/workloads`) is one line per workload (alias, title, state, its Sparks, speed now with a 30-minute trace, requests running and waiting at the engine, tokens in 24 hours, the models memory of each Spark); its title opens the full unit and, under it, the engine panel: one chart per catalogue metric the engine (or gateway, marked "est.") reports for that alias, with one range and one cursor; a metric with no samples for the alias is not drawn. Below, "All Sparks": a Spark search and one sortable table with a row per Spark (state, unified memory, GPU, disk, running recipes), then the fleet trends. A workload's speed is the first of the engine's measured decode throughput, the gateway's generated tokens per second, then requests per second that the Controller has a latest value for (one rule, `leadReading`, shared with the Overview hero). Needs-attention items carry no buttons.
 
 At 54rem the shell becomes a compact top bar and action groups stack. Below 54rem each Spark row of the fleet table becomes a stacked block (label beside value) instead of a table row, so labels are never shrunk past legibility. At 34rem primary actions become full-width and dense legends become two columns. Horizontal overflow is confined to explicit data regions; the document itself never scrolls sideways.
 

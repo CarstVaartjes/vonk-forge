@@ -364,7 +364,7 @@ vonkctl recipe sync-status
 vonkctl recipe library
 vonkctl recipe library --cached
 vonkctl recipe library --model "Qwen 3.8"
-vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2
+vonkctl recipe library --engine sglang --creator MiaAI-Lab --sparks 2   # 2 Sparks or fewer
 vonkctl recipe library --fits-fleet
 vonkctl recipe library --ready
 vonkctl recipe detail qwen-code         # Usage and the status Meaning use the release's published words

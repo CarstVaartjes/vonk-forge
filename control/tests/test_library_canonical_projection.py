@@ -321,10 +321,13 @@ def test_published_corpus_projects_all_models_and_exact_recipe_bindings(
     assert {item.node_count for item in recipe_page.recipes} == set(
         recipe_page.facets.sparks
     )
-    sparks = max(recipe_page.facets.sparks)
-    by_sparks = all_recipes(projection, sparks=[sparks])
+    # The filter reads "N or fewer": the smallest count keeps only that size, the largest keeps all.
+    smallest = min(recipe_page.facets.sparks)
+    by_sparks = all_recipes(projection, sparks=[smallest])
     assert by_sparks
-    assert {item.node_count for item in by_sparks} == {sparks}
+    assert {item.node_count for item in by_sparks} == {smallest}
+    largest = max(recipe_page.facets.sparks)
+    assert len(all_recipes(projection, sparks=[largest])) == len(recipe_page.recipes)
 
     # Engine and creator are recipe facets and filters.
     assert {item.engine for item in recipe_page.recipes} == set(

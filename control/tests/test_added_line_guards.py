@@ -3932,3 +3932,22 @@ def test_a_readiness_reader_does_not_key_on_the_asking_recipe():
     ):
         assert check_source(reader, line, {1}, modes=("identity",))
         assert not check_source(PATH, line, {1}, modes=("identity",))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'const text = "Not reported";\n',
+        "<dd>Not reported</dd>\n",
+        "return `Not reported`;\n",
+    ],
+)
+def test_a_component_may_not_type_not_reported(source: str) -> None:
+    path = "control/web/src/components/example.tsx"
+    assert check_source(path, source, {1}, modes=("web-not-reported",))
+    # The constant's own file and prose in a comment are fine.
+    assert not check_source(
+        "control/web/src/lib/fleet.ts", source, {1}, modes=("web-not-reported",)
+    )
+    comment = ' * so the caller says "Not reported".\n'
+    assert not check_source(path, comment, {1}, modes=("web-not-reported",))

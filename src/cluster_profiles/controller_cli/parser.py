@@ -319,7 +319,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         recipe_library,
         "--sparks",
         "count",
-        "Exact topology node count",
+        "This many Sparks or fewer (largest value given)",
         item=int,
     )
     _add_output(recipe_library)

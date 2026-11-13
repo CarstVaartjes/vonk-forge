@@ -233,6 +233,11 @@
       "reason": "Browser-local 30-minute history buffer entry (time, reported reading or gap marker) kept for charts; values are the generated telemetry fields, never serialized."
     },
     {
+      "file": "control/web/src/hooks/use-workload-reads.ts",
+      "type": "WorkloadReads",
+      "reason": "UI-only bundle of the three per-model series reads one workload line needs, each the generated series response or null; not an API document"
+    },
+    {
       "file": "control/web/src/lib/fleet.ts",
       "type": "FleetSummary",
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
@@ -256,6 +261,11 @@
       "file": "control/web/src/lib/fleet.ts",
       "type": "WorkloadGroup",
       "reason": "UI-only view model of one workload and its Sparks derived from generated API types; not an API document"
+    },
+    {
+      "file": "control/web/src/lib/metric-units.ts",
+      "type": "AliasReading",
+      "reason": "UI-only pairing of one alias's generated series with the generated response that carries its spec; not an API document"
     },
     {
       "file": "control/web/src/pages/activity.tsx",

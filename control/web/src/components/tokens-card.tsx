@@ -1,10 +1,9 @@
 import "./stat-card.css";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
+import { NOT_REPORTED_TEXT } from "../lib/fleet";
 import { compactCount, modelTotals } from "../lib/metric-units";
 import { Estimate, EstimateTag } from "./estimate";
 import { Meter } from "./meter";
-
-const NOT_REPORTED = "Not reported";
 
 function count(value: number): string {
   const { figure, unit } = compactCount(value);
@@ -51,7 +50,7 @@ export function TokensCard({
             <EstimateTag basis={tokens.spec.basis} />
           </p>
           <p className="stat-caption">
-            {tokens.spec.hint} Prompt tokens: {NOT_REPORTED}.
+            {tokens.spec.hint} Prompt tokens: {NOT_REPORTED_TEXT}.
             {coverage < 1 && ` Data covers ${Math.floor(coverage * 100)}% of this range.`}
           </p>
           <div className="stat-table">
@@ -92,7 +91,7 @@ export function TokensCard({
       ) : tokens ? (
         <p className="stat-caption">No data in this range</p>
       ) : (
-        <p className="stat-fig">{NOT_REPORTED}</p>
+        <p className="stat-fig">{NOT_REPORTED_TEXT}</p>
       )}
     </section>
   );

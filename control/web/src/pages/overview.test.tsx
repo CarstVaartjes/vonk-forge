@@ -51,6 +51,7 @@ const grant: EnrollmentGrantResponse = {
 const api = {
   metricsSeries: () => Promise.reject(new Error("no history")),
   operations: () => Promise.reject(new Error("no activity")),
+  metricsCatalogue: () => Promise.resolve([]),
 } as unknown as ControlApi;
 
 test("Fleet creates a one-use grant and shows the exact Spark command, token, and expiry", async () => {
@@ -67,6 +68,7 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
         {
           visualFleet: vi.fn(),
           metricsSeries: api.metricsSeries,
+          metricsCatalogue: api.metricsCatalogue,
           enrollFleetNode,
           enrollmentStatus: vi.fn().mockResolvedValue({ state: "pending" }),
         } as unknown as ControlApi
@@ -113,6 +115,7 @@ test("Fleet reports grant creation failures without losing the form", async () =
           {
             visualFleet: vi.fn(),
             metricsSeries: api.metricsSeries,
+            metricsCatalogue: api.metricsCatalogue,
             enrollFleetNode,
           } as unknown as ControlApi
         }

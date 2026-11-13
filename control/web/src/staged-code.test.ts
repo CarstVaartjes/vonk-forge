@@ -53,7 +53,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
       spawnSync("python3", ["scripts/check-staged-code"], {
         cwd: root,
         encoding: "utf8",
-        timeout: 10_000,
+        timeout: 30_000,
       });
     writeFileSync(generated, "export type CurrentWire = string;\n");
     execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {
@@ -82,4 +82,4 @@ test("generated-only commit checks skip formatting and still reject invalid type
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+}, 120_000); // real Biome and tsc run here; a loaded machine needs far more than vitest's 5 s
