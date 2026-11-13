@@ -50,6 +50,11 @@ export function MetricCard({
           {rangeWords(range)} {line} {extra}
         </p>
       )}
+      {summary && summary.coverage < 1 && (
+        <p className="spark-chart-line">
+          covers {Math.floor(summary.coverage * 100)} % of this range
+        </p>
+      )}
       {data === undefined && <p role="status">Reading metrics…</p>}
       {data === null && <p role="status">{NOT_REPORTED_TEXT}</p>}
       {data && (

@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useMetricSeries } from "../hooks/use-metric-series";
+import { useWorkloadReads } from "../hooks/use-workload-reads";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
@@ -34,6 +35,7 @@ export function OverviewPage({
 }) {
   const fleet = useFleetStream(api);
   const tokens = useMetricSeries(api, "output_token_rate", "24h");
+  const reads = useWorkloadReads(api);
   const live = liveStatus(fleet);
   useEffect(() => onLive?.(live), [onLive, live]);
   useEffect(() => () => onLive?.(null), [onLive]);
@@ -190,6 +192,7 @@ export function OverviewPage({
             <WorkloadUnits
               api={api}
               nodes={nodes}
+              reads={reads}
               now={fleet.now}
               live={live === "live"}
               onOpen={onOpenSpark}
