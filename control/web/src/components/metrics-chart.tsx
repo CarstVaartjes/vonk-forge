@@ -279,7 +279,7 @@ export function MetricsChart({
           const state = tiles[metric];
           if (!spec) return null;
           return (
-            <section key={metric} className="metric-tile" aria-label={spec.title}>
+            <section key={metric} className="metric-tile card" aria-label={spec.title}>
               <h3>{spec.title}</h3>
               {typeof state === "string" ? (
                 <p role="status">Metrics unavailable: {state}</p>

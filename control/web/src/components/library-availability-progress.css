@@ -1,7 +1,7 @@
 .library-availability-progress { display: grid; gap: .4rem; min-width: 0; width: 100%; }
 .library-availability-progress-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .25rem 1rem; }
 .library-availability-progress-heading span, .library-availability-progress-observation { color: var(--muted); font-size: .875rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.library-availability-progress-track { height: .25rem; overflow: hidden; background: var(--bg); border-radius: .25rem; }
+.library-availability-progress-track { height: .25rem; overflow: hidden; background: var(--bg); border-radius: var(--r-ctl); }
 .library-availability-progress-track > span { display: block; height: 100%; background: var(--green); }
 .library-availability-progress-track.is-indeterminate { background: var(--line-control); }
 .library-availability-progress-observation { display: flex; flex-wrap: wrap; gap: .2rem 1rem; margin: 0; }

@@ -6,7 +6,7 @@
 .recipe-fit-strip {
   background: var(--recess);
   border: 1px solid var(--line-control);
-  border-radius: 0.8rem;
+  border-radius: var(--r-card);
   display: grid;
   grid-template-columns: minmax(10rem, 0.9fr) minmax(12rem, 1.1fr) minmax(16rem, 1.5fr);
   margin-top: 1rem;
@@ -93,7 +93,7 @@
 
 .visual-field-grid > div {
   background: color-mix(in srgb, var(--panel-2) 55%, transparent);
-  border-radius: 0.55rem;
+  border-radius: var(--r-in);
   min-width: 0;
   padding: 0.6rem;
 }
@@ -116,7 +116,7 @@
 }
 
 .profile-composer-open{width:100%;margin:.7rem 0 0;border-color:var(--faint);color:var(--gold-text)}
-.library-profile-composer,.profile-composer-success{margin:.8rem 0 0;padding:1rem;border:1px solid var(--line-control);border-radius:.85rem;background:var(--raised);box-shadow:0 .8rem 2rem rgb(0 0 0 / 20%)}
+.library-profile-composer,.profile-composer-success{margin:.8rem 0 0;padding:1rem;border:1px solid var(--line-control);border-radius:var(--r-card);background:var(--raised);}
 .library-profile-composer>header,.library-profile-composer>footer,.profile-composer-success{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.library-profile-composer h4,.library-profile-composer p,.profile-composer-success p{margin:0}.library-profile-composer>header p,.profile-composer-success p{margin-top:.25rem;color:var(--muted);font-size:.74rem;line-height:1.45}.library-profile-composer>header .secondary-button{min-height:2.2rem;padding:.35rem .55rem}
 .profile-composer-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem 1rem;margin-top:.8rem}.profile-composer-grid label{max-width:none;margin:0}.profile-composer-grid label>span{color:var(--muted);font-size:.68rem;font-weight:750}.profile-composer-grid input,.profile-composer-grid select,.profile-composer-grid textarea{width:100%;background:var(--panel-2)}.profile-composer-wide{grid-column:1/-1}
 .profile-rank-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:1px;margin:.8rem 0;padding:1px;background:var(--line-strong);list-style:none}.profile-rank-preview li{display:grid;gap:.12rem;min-width:0;padding:.6rem;background:var(--panel)}.profile-rank-preview li span{color:var(--gold-text);font-size:.62rem;font-weight:800;text-transform:uppercase}.profile-rank-preview li strong{overflow:hidden;font-size:.73rem;text-overflow:ellipsis;white-space:nowrap}.profile-rank-preview li small{color:var(--muted);font-size:.63rem}
@@ -126,16 +126,16 @@
 .spark-run-options{list-style:none;padding:0;display:grid;gap:.4rem}
 
 .library-badges { display: flex; flex-wrap: wrap; gap: .3rem; }
-.library-badge { padding: .05rem .4rem; border: 1px solid var(--line-strong, var(--line-strong)); border-radius: 999px; color: var(--muted, var(--muted)); font-size: .68rem; line-height: 1.4; white-space: nowrap; }
-.library-badge[data-fit="ready"] { border-color: color-mix(in srgb, var(--green-text) 40%, transparent); color: var(--green-text, var(--green-text)); }
+.library-badge { padding: .05rem .4rem; border: 1px solid var(--line-strong); border-radius: var(--r-pill); color: var(--muted); font-size: .68rem; line-height: 1.4; white-space: nowrap; }
+.library-badge[data-fit="ready"] { border-color: color-mix(in srgb, var(--green-text) 40%, transparent); color: var(--green-text); }
 .library-badge[data-fit="blocked"] { border-color: color-mix(in srgb, var(--bad) 26%, transparent); color: var(--bad); }
-.library-badge[data-qualification="pass"] { border-color: color-mix(in srgb, var(--green-text) 40%, transparent); color: var(--green-text, var(--green-text)); }
-.library-badge[data-qualification="recheck"] { border-color: color-mix(in srgb, var(--warn) 40%, transparent); color: var(--warn, var(--warn)); }
+.library-badge[data-qualification="pass"] { border-color: color-mix(in srgb, var(--green-text) 40%, transparent); color: var(--green-text); }
+.library-badge[data-qualification="recheck"] { border-color: color-mix(in srgb, var(--warn) 40%, transparent); color: var(--warn); }
 .library-badge[data-qualification="fail"] { border-color: color-mix(in srgb, var(--bad) 26%, transparent); color: var(--bad); }
 .library-alternatives { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
 .library-alternatives a { display: grid; gap: .15rem; padding: .5rem .2rem; color: inherit; text-decoration: none; }
 .library-alternatives a:hover strong { text-decoration: underline; }
-.library-alternatives small { color: var(--muted, var(--muted)); font-size: .72rem; }
+.library-alternatives small { color: var(--muted); font-size: .72rem; }
 
 .library-recipe-links {
   display: grid;
