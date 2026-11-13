@@ -42,6 +42,15 @@ instead of naming the re-entry. Each thread passes a rendezvous once; a second
 wait fails at once. `collide_inserts` holds two real admissions at their INSERT
 so the unique key, not commit timing, decides the race.
 
+A handler that catches a broad `Exception`, `ValueError`, `RuntimeError` or
+`KeyError` and parks or defers work (`_decline_retry*`, `_defer_*`,
+`_park_for_retry`) must classify the error with `disposition(` or
+`is_definite(` in the same handler (added-line mode `retry-dispositions`). An
+internal `InvalidValue` is a `ValueError`: parked as a conflict, it repeats on
+every retry with nothing changed (#2299). A deterministic cause ends the work
+with its evidence; a cause that clears by itself keeps waiting. An edit inside
+an older handler of that shape is flagged too.
+
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

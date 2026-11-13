@@ -1336,18 +1336,18 @@ def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load
     assert fresh.id != waiting.id
 
 
-@pytest.mark.parametrize("defect", [True, False], ids=["defect", "unknown"])
+@pytest.mark.parametrize("defect", [True, False], ids=["defect", "transient"])
 def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, defect: bool
 ) -> None:
     """A deterministic internal refusal (``InvalidValue``) of the plan a retry
     made afresh is repeated by every later retry with nothing changed: the load
     ends failed with it as evidence instead of backing off for ever, and a
-    fresh load is admitted. Bookkeeping that is only unknown
-    (``BookkeepingUnknown``, also a ``ValueError``) keeps waiting."""
+    fresh load is admitted. The same refusal raised from a cause that clears
+    by itself (a timeout) keeps waiting."""
 
     from vonk_agent_protocol import ProfileReasonCode
-    from vonk_control.categorized_errors import BookkeepingUnknown, InvalidValue
+    from vonk_control.categorized_errors import InvalidValue
 
     _sessions, lifecycle, service, profile, _desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
@@ -1359,8 +1359,10 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
         if kwargs.get("retry_of_application_id") is None:
             return admit(preview, **kwargs)
         refused.append(kwargs["retry_of_application_id"])
-        error = InvalidValue if defect else BookkeepingUnknown
-        raise error("internal bookkeeping refused the plan")
+        error = InvalidValue("internal bookkeeping refused the plan")
+        if defect:
+            raise error
+        raise error from TimeoutError()
 
     monkeypatch.setattr(service, "_queue_application", refuse_retry)
     later = lifecycle._clock() + timedelta(hours=2)
@@ -1378,11 +1380,8 @@ def test_a_retry_refused_by_an_internal_defect_ends_instead_of_backing_off(
     assert refused == [first.id]
     assert view.state == LifecycleState.FAILED
     assert view.next_attempt_at is None
-    assert any(
-        item.code == ProfileReasonCode.ADMISSION_DEFECT
-        and "internal bookkeeping refused the plan" in item.detail
-        for item in view.blockers
-    )
+    evidence = [b for b in view.blockers if "refused the plan" in b.detail]
+    assert [b.code for b in evidence] == [ProfileReasonCode.ADMISSION_DEFECT]
     fresh = service.load(profile.number, request_key=_uuid(19103), actor="admin")
     assert fresh.id != first.id and fresh.state == "queued"
 

@@ -3951,3 +3951,65 @@ def test_a_component_may_not_type_not_reported(source: str) -> None:
     )
     comment = ' * so the caller says "Not reported".\n'
     assert not check_source(path, comment, {1}, modes=("web-not-reported",))
+
+
+_RETRY_PATH = "control/src/vonk_control/fleet_profiles/retry.py"
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        (
+            "except (KeyError, ValueError) as error:\n"
+            "    return self._decline_retry_application(app, CONFLICT, str(error))\n"
+        ),
+        (
+            "except (\n    Busy,\n    RuntimeError,\n) as error:\n"
+            "    self._defer_exact_step(row, progress, str(error), now)\n"
+        ),
+        "except Exception:  # internal\n    self._park_for_retry(row, progress, [])\n",
+    ],
+)
+def test_a_broad_handler_that_parks_work_is_flagged(handler: str) -> None:
+    # Wrong implementation (#2299): an internal InvalidValue during a load
+    # retry was parked as a conflict and backed off for ever.
+    source = "try:\n    work()\n" + handler
+    assert check_source(_RETRY_PATH, source, {3}, modes=("retry-dispositions",))
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        (
+            "except (KeyError, ValueError) as error:\n"
+            "    if disposition(error) is not Disposition.FAIL:\n"
+            "        return self._decline_retry_application(app, CONFLICT, str(error))\n"
+            "    return self._decline_retry_application(app, DEFECT, str(error))\n"
+        ),
+        (
+            "except ValueError as error:\n"
+            "    self._defer_exact_step(row, progress, str(error), now,\n"
+            "        ending=_ending(error) if is_definite(error) else ())\n"
+        ),
+        (
+            "except FleetProfileAdmissionBusy as error:\n"
+            "    self._park_for_retry(row, progress, [])\n"
+        ),
+        "except ValueError:\n    return None\n",
+    ],
+)
+def test_a_classified_or_narrow_handler_may_park(handler: str) -> None:
+    source = "try:\n    work()\n" + handler
+    added = set(range(1, source.count("\n") + 1))
+    assert not check_source(_RETRY_PATH, source, added, modes=("retry-dispositions",))
+
+
+def test_an_edit_inside_an_old_broad_parking_handler_is_flagged() -> None:
+    source = (
+        "try:\n    work()\nexcept ValueError as error:\n"
+        "    log(error)\n    self._defer_pending_application(app, str(error))\n"
+    )
+    assert check_source(_RETRY_PATH, source, {5}, modes=("retry-dispositions",))
+    assert check_source(_RETRY_PATH, source, {4}, modes=("retry-dispositions",))
+    # An added line outside the old handler leaves it alone.
+    assert not check_source(_RETRY_PATH, source, {2}, modes=("retry-dispositions",))

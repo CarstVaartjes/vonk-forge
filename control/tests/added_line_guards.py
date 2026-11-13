@@ -117,6 +117,7 @@ MODES = (
     "fixture-closures",
     "contract-constants",
     "web-not-reported",
+    "retry-dispositions",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -1395,6 +1396,14 @@ _BROAD_EXCEPT = re.compile(
 )
 
 
+# A broad handler that parks or defers work repeats a deterministic refusal on
+# every attempt with nothing changed (#2299: an internal InvalidValue during a
+# load retry backed off for ever). It asks the one classifier first.
+_BROAD_PARKED_EXCEPT = re.compile(r"\b(?:Exception|ValueError|RuntimeError|KeyError)\b")
+_PARKS_WORK = re.compile(r"\b(?:_decline_retry\w*|_defer_\w+|_park_for_retry)\(")
+_CONSULTS_DISPOSITION = re.compile(r"\b(?:disposition|is_definite)\(")
+
+
 def _except_header(lines: list[str], except_line: int) -> tuple[str, int]:
     """The `except` clause at except_line (may span lines) and its last line."""
     parts = []
@@ -2160,6 +2169,36 @@ def check_source(
                     "broad exception answers 401/403; use contract_verdict_or_wait",
                 )
                 for number in (*([line] if fatal else []), *fatal)
+            )
+    if (
+        python
+        and not is_test
+        and "retry-dispositions" in modes
+        and path.startswith("control/src/")
+    ):
+        lines = source.splitlines()
+        for line, text in enumerate(lines, 1):
+            if not re.match(r"\s*except\b", text):
+                continue
+            header, header_end = _except_header(lines, line)
+            if not _BROAD_PARKED_EXCEPT.search(header):
+                continue
+            body = _handler_body(lines, header_end)
+            if any(_CONSULTS_DISPOSITION.search(handled) for handled, _ in body):
+                continue
+            # The except line and every parking line are flagged, so a park
+            # added into an existing handler is caught by its own line.
+            parks = [
+                number
+                for number, (handled, _) in enumerate(body, header_end + 1)
+                if _PARKS_WORK.search(handled)
+            ]
+            hits.extend(
+                (
+                    number,
+                    "broad exception parks work; classify it with disposition() first",
+                )
+                for number in (*([line] if parks else []), *parks)
             )
     if (
         python
