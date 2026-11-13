@@ -58,7 +58,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
     writeFileSync(generated, "export type CurrentWire = string;\n");
     execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {
       cwd: root,
-      timeout: 30_000,
+      timeout: 5000,
     });
     const validBytes = readFileSync(generated);
     const valid = check();
@@ -68,7 +68,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
     writeFileSync(generated, "export type CurrentWire = number;\n");
     execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {
       cwd: root,
-      timeout: 30_000,
+      timeout: 5000,
     });
     const invalid = check();
     expect(invalid.status).not.toBe(0);
@@ -76,7 +76,7 @@ test("generated-only commit checks skip formatting and still reject invalid type
     writeFileSync(generated, "export type CurrentWire = string;\n");
     execFileSync("git", ["add", "control/web/src/api/generated.d.ts"], {
       cwd: root,
-      timeout: 30_000,
+      timeout: 5000,
     });
     expect(check().status).toBe(0);
   } finally {

@@ -376,10 +376,8 @@ export function filterLibraryRecipeRecords(
         recipeCreator(record.recipe ?? ({} as LibraryViewRecipe))?.toLocaleLowerCase() ===
           filters.creator.toLocaleLowerCase()) &&
       (!filters.alignment || record.recipe?.recipe_display?.alignment === filters.alignment) &&
-      // "N or fewer", like the Controller's `sparks` filter and the public site.
       (!filters.sparks ||
-        Number(record.recipe?.recipe_document.topology.node_count ?? Infinity) <=
-          Number(filters.sparks))
+        String(record.recipe?.recipe_document.topology.node_count) === filters.sparks)
     );
   });
 }
@@ -703,7 +701,7 @@ export function LibraryWorkcell({
               .sort((a, b) => Number(a) - Number(b))
               .map((value) => (
                 <option key={value} value={value}>
-                  {value} or fewer
+                  {value}
                 </option>
               ))}
           </select>

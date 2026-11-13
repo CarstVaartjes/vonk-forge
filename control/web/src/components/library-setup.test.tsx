@@ -72,21 +72,6 @@ test("summarises the fleet from online nodes and their free memory", () => {
   expect(isYourFleet(summarizeFleet(fleetOf([{ online: false }])), 1)).toBe(false);
 });
 
-test("the Sparks filter reads N or fewer: the largest count keeps every recipe", () => {
-  const sizes = records.flatMap((record) =>
-    record.recipe ? [Number(record.recipe.recipe_document.topology.node_count)] : [],
-  );
-  const withRecipe = records.filter((record) => record.recipe);
-  const keep = (sparks: number) =>
-    filterLibraryRecipeRecords(
-      records,
-      { ...EMPTY_LIBRARY_WORKCELL_FILTERS, sparks: String(sparks) },
-      "",
-    ).filter((record) => record.recipe).length;
-  expect(keep(Math.max(...sizes))).toBe(withRecipe.length);
-  expect(keep(Math.min(...sizes))).toBe(sizes.filter((size) => size === Math.min(...sizes)).length);
-});
-
 test("Spark tiles count the library, mark the operator's fleet, and set the same --sparks filter", () => {
   const onFiltersChange = vi.fn();
   const counts = [
@@ -277,4 +262,35 @@ test("without any verdict the toggle is disabled and the strip says so", () => {
   );
   expect(screen.getByText(/has not assessed placement/)).toBeVisible();
   expect(screen.getByRole("button", { name: "Fits my fleet now: 0 models" })).toBeDisabled();
+});
+
+test("the header gives the online Sparks' total and free memory with the fleet bar, and says what it covers", () => {
+  const GIB = 1024 ** 3;
+  const node = (id: string, online: boolean) => ({
+    id,
+    connection: { online_state: online ? "online" : "offline" },
+    telemetry: online
+      ? { sample: { memory_total_bytes: 100 * GIB, memory_available_bytes: 20 * GIB } }
+      : null,
+  });
+  const fleet = {
+    nodes: [node("a", true), node("b", true), node("c", false)],
+  } as unknown as VisualFleetSnapshot;
+  render(
+    <LibrarySetupStrip
+      fleet={fleet}
+      records={records}
+      filters={EMPTY_LIBRARY_WORKCELL_FILTERS}
+      query=""
+      noun="recipes"
+      onFiltersChange={vi.fn()}
+    />,
+  );
+  expect(
+    screen.getByText(
+      /2 of 3 Sparks online · 200\.0 GiB unified memory · 40\.0 GiB unified memory free/,
+    ),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "Fleet unified memory" })).toBeInTheDocument();
+  expect(screen.getByText("2 Sparks")).toBeInTheDocument();
 });

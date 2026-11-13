@@ -186,8 +186,6 @@ export type WorkloadGroup = {
   /** The run's state in a word, as `nodeWorkloadLines` prints it. */
   state: string;
   tone: ReturnType<typeof runStateTone>;
-  /** The workload is still being planned or started: it has no speed to show yet. */
-  loading: boolean;
   nodes: VisualFleetNode[];
   /** Each member Spark's rank in this run. */
   ranks: Record<string, number>;
@@ -213,7 +211,6 @@ export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
         alias: run.alias ?? null,
         state: runStateWord(run),
         tone: runStateTone(run),
-        loading: run.run_state === RunState.PLANNED || run.run_state === RunState.STARTING,
         nodes: [],
         ranks: {},
       };
@@ -309,6 +306,12 @@ export function fleetMemory(
       systemBytes: whole ? sum((split) => split.systemBytes as WireNumber) : null,
     },
   };
+}
+
+/** "2 Sparks", or how many of the online Sparks a fleet figure covers. */
+export function coverageText(reporting: number, online: number): string {
+  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
+  return `${reporting} of ${online} online Sparks`;
 }
 
 /** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */

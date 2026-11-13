@@ -119,7 +119,7 @@ export type AliasReading = {
 };
 
 export function aliasSeries(
-  data: MetricsSeriesResponse | null,
+  data: MetricsSeriesResponse | null | undefined,
   alias: string | null,
 ): AliasReading | null {
   const series = data?.series.find((item) => item.labels.alias === alias);
@@ -132,7 +132,7 @@ export function aliasSeries(
  * is the best the Controller has; none of them is computed here.
  */
 export function leadReading(
-  reads: readonly (MetricsSeriesResponse | null)[],
+  reads: readonly (MetricsSeriesResponse | null | undefined)[],
   alias: string | null,
 ): AliasReading | null {
   for (const read of reads) {
@@ -157,19 +157,46 @@ export function windowPoints(
 }
 
 /**
- * The Controller's fleet line of a response (the series without a label, which sums the others) and how many
- * per-Spark series have a latest value behind it. Nothing is summed here.
+ * One figure of the Controller's fleet line (the series without a label, which sums the others): its
+ * latest value or its range total, in the metric's display unit, with its basis and hint and how many
+ * per-Spark series have a latest value behind it. Nothing is summed here; null when the line or the field
+ * is missing.
  */
-export function fleetLine(data: MetricsSeriesResponse | null): {
-  data: MetricsSeriesResponse;
-  summary: MetricsSeriesResponse["series"][number]["summary"];
-  reporting: number;
-} | null {
+export function fleetFigure(
+  data: MetricsSeriesResponse | null | undefined,
+  field: "latest" | "total",
+) {
   const line = data?.series.find((item) => Object.keys(item.labels).length === 0);
-  if (!data || !line || line.summary.latest == null) return null;
+  const raw = line?.summary[field];
+  if (!data || !line || raw == null) return null;
+  const { symbol, scale } = UNITS[data.spec.unit];
   return {
-    data,
-    summary: line.summary,
+    value: Number(raw) / scale,
+    symbol,
+    basis: data.spec.basis,
+    hint: data.spec.hint,
     reporting: data.series.filter((item) => item !== line && item.summary.latest != null).length,
   };
+}
+
+/**
+ * The engine's request queue for an alias: "3 running · 1 waiting", only the parts the engine reports.
+ * undefined while either read is out (nothing shown), null when the engine reports neither.
+ */
+export function queueText(
+  running: MetricsSeriesResponse | null | undefined,
+  waiting: MetricsSeriesResponse | null | undefined,
+  alias: string | null,
+): string | null | undefined {
+  if (running === undefined || waiting === undefined) return undefined;
+  const count = (data: MetricsSeriesResponse | null) => {
+    const latest = aliasSeries(data, alias)?.series.summary.latest;
+    return latest == null ? null : formatValue(Number(latest), "");
+  };
+  const [busy, queued] = [count(running), count(waiting)];
+  const parts = [
+    ...(busy === null ? [] : [`${busy} running`]),
+    ...(queued === null ? [] : [`${queued} waiting`]),
+  ];
+  return parts.length ? parts.join(" · ") : null;
 }

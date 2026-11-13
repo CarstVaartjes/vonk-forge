@@ -116,6 +116,7 @@ MODES = (
     "job-owner-payload",
     "fixture-closures",
     "contract-constants",
+    "web-not-reported",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -179,6 +180,12 @@ TABLE_LOCK_OWNERS = frozenset(
 # The agent's messages a Controller test may send only as the stand-in pinned
 # to the agent's shared vector; built by hand they are the Controller's idea of
 # the agent, which agrees with the Controller whatever the agent sends (#1579).
+# The words for a reading nobody reported are one constant, NOT_REPORTED_TEXT in
+# control/web/src/lib/fleet.ts (a .ts file); a component never types them.
+WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<""")
+WEB_NOT_REPORTED_KIND = (
+    "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
+)
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
@@ -2385,6 +2392,18 @@ def check_source(
                 if is_test
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
+        )
+    if (
+        "web-not-reported" in modes
+        and not is_test
+        and path.startswith("control/web/src/")
+        and path.endswith(".tsx")
+    ):
+        hits.extend(
+            (number, WEB_NOT_REPORTED_KIND)
+            for number, text in enumerate(source.splitlines(), 1)
+            if not text.lstrip().startswith(("*", "/*", "//"))
+            and WEB_NOT_REPORTED.search(text)
         )
     if python and "contract-constants" in modes:
         hits.extend(

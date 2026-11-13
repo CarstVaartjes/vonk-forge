@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useMetricSeries } from "../hooks/use-metric-series";
+import { useWorkloadReads } from "../hooks/use-workload-reads";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
@@ -34,7 +35,7 @@ export function OverviewPage({
 }) {
   const fleet = useFleetStream(api);
   const tokens = useMetricSeries(api, "output_token_rate", "24h");
-  const decode = useMetricSeries(api, "decode_throughput", "1h");
+  const reads = useWorkloadReads(api);
   const power = useMetricSeries(api, "gpu_power", "1h");
   const energy = useMetricSeries(api, "gpu_energy", "24h");
   const live = liveStatus(fleet);
@@ -165,7 +166,13 @@ export function OverviewPage({
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && nodes.length > 0 && (
-        <FleetPulse decode={decode} power={power} tokens={tokens} energy={energy} nodes={nodes} />
+        <FleetPulse
+          decode={reads.decode}
+          power={power}
+          tokens={tokens}
+          energy={energy}
+          nodes={nodes}
+        />
       )}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
@@ -195,6 +202,7 @@ export function OverviewPage({
             <WorkloadUnits
               api={api}
               nodes={nodes}
+              reads={reads}
               now={fleet.now}
               live={live === "live"}
               onOpen={onOpenSpark}

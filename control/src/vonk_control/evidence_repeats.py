@@ -323,7 +323,14 @@ def repeating_evidence(
     for contact in session.scalars(
         select(AgentNodeContact).where(AgentNodeContact.node_id.in_(node_ids))
     ):
-        summaries.extend(owner_evidence(contact) or [])
+        # Refused agent results age out of what is shown, like the application records below. A refused
+        # grant is a security refusal and stays until one is accepted.
+        summaries.extend(
+            item
+            for item in owner_evidence(contact) or []
+            if item.subject != RepeatedEvidenceSubject.AGENT_RESULT
+            or _utc(item.last_at) >= _utc(now) - _SHOWN_FOR
+        )
     for application in session.scalars(
         select(FleetProfileApplication).where(
             FleetProfileApplication.repeated_evidence.is_not(None)

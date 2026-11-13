@@ -28,7 +28,7 @@ export function WorkloadUnit({
     >
       {cluster.units.map((unit, index) =>
         index === 0 ? (
-          <WorkloadHero key={unit.runId} unit={unit} {...reads} live={live} />
+          <WorkloadHero key={unit.runId} unit={unit} reads={reads} live={live} />
         ) : (
           // A second workload on the same Sparks is one line under the first.
           <div className="workload-strip" key={unit.runId}>

@@ -1,7 +1,7 @@
 import "./stat-card.css";
 import type { MetricsSeriesResponse } from "../api/types";
 import { NOT_REPORTED_TEXT } from "../lib/fleet";
-import { fleetLine, formatValue } from "../lib/metric-units";
+import { fleetFigure, formatValue } from "../lib/metric-units";
 import { Estimate, EstimateTag } from "./estimate";
 
 /** What every GPU energy and power figure says about its scope. */
@@ -20,8 +20,8 @@ export function EnergyCard({
   energy: MetricsSeriesResponse | null;
   power: MetricsSeriesResponse | null;
 }) {
-  const total = fleetLine(energy);
-  const watts = fleetLine(power);
+  const total = fleetFigure(energy, "total");
+  const watts = fleetFigure(power, "latest");
   return (
     <section className="card stat-card" aria-labelledby="energy-card-heading">
       <header>
@@ -29,22 +29,20 @@ export function EnergyCard({
         <small>last 24 hours</small>
       </header>
       <p className="stat-fig">
-        {total?.summary.total != null ? (
+        {total ? (
           <>
-            <Estimate basis={total.data.spec.basis}>
-              {formatValue(Number(total.summary.total), "Wh")}
-            </Estimate>
-            <EstimateTag basis={total.data.spec.basis} />
+            <Estimate basis={total.basis}>{formatValue(total.value, total.symbol)}</Estimate>
+            <EstimateTag basis={total.basis} />
           </>
         ) : (
           NOT_REPORTED_TEXT
         )}
       </p>
-      <p className="stat-caption">{total ? total.data.spec.hint : GPU_ONLY_CAPTION}</p>
+      <p className="stat-caption">{total ? total.hint : GPU_ONLY_CAPTION}</p>
       <dl className="stat-facts">
         <div>
           <dt>GPU power now</dt>
-          <dd>{watts ? `${Number(watts.summary.latest).toFixed(1)} W` : NOT_REPORTED_TEXT}</dd>
+          <dd>{watts ? `${watts.value.toFixed(1)} ${watts.symbol}` : NOT_REPORTED_TEXT}</dd>
         </div>
         <div>
           <dt>Last 31 days</dt>

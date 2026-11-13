@@ -133,93 +133,202 @@ const run = (rank: number) => ({
 
 type Spec = components["schemas"]["MetricSpec"];
 
-/** Each metric the fixture serves: its catalogue entry, the latest value of its one series, and the 24 h total. */
-const METRICS: [Spec, number, number | null][] = (
-  [
-    [
+/**
+ * Each metric the fixture serves, as the Controller's catalogue describes it, with the latest value of each
+ * of its series (by Spark id or alias) and the 24 h total of a metric that has one. Fleet lines, totals and
+ * shares are summed from these, as the Controller does.
+ */
+const [S1, S2] = SPARK_IDS as [string, string, string];
+const COUNTED = "Counted by the gateway; a Spark shows the models it serves.";
+const METRICS: { spec: Spec; latest: Record<string, number>; total?: Record<string, number> }[] = [
+  {
+    spec: spec(
       "gpu_utilization",
       "GPU utilisation",
       "percent",
       "node",
       "measured",
       "spark",
-      90,
-      false,
-      false,
-    ],
-    [
+      "Share of time the GPU was busy.",
+    ),
+    latest: { [S1]: 90, [S2]: 88 },
+  },
+  {
+    spec: spec(
       "gpu_temperature",
       "GPU temperature",
       "celsius",
       "node",
       "measured",
       "spark",
-      69,
-      false,
-      false,
-    ],
-    ["gpu_power", "GPU power", "watts", "node", "measured", "spark", 38, false, true],
-    ["gpu_energy", "GPU energy", "watt_hours", "node", "estimated", "spark", 38, true, true],
-    [
+      "GPU die temperature.",
+    ),
+    latest: { [S1]: 69, [S2]: 69 },
+  },
+  {
+    spec: spec(
+      "gpu_power",
+      "GPU power",
+      "watts",
+      "node",
+      "measured",
+      "spark",
+      "GPU draw only; the whole Spark's power is not readable on GB10.",
+      { fleet: true },
+    ),
+    latest: { [S1]: 38, [S2]: 39 },
+  },
+  {
+    spec: spec(
+      "gpu_energy",
+      "GPU energy",
+      "watt_hours",
+      "node",
+      "estimated",
+      "spark",
+      "GPU only. Estimate: GPU power summed over the samples the Spark reported.",
+      { total: true, fleet: true },
+    ),
+    latest: { [S1]: 38, [S2]: 39 },
+    total: { [S1]: 912, [S2]: 936 },
+  },
+  {
+    spec: spec(
       "request_rate",
       "Requests per model",
       "per_second",
       "alias",
       "estimated",
       "gateway",
-      60,
-      true,
-      true,
-    ],
-    [
+      COUNTED,
+      { total: true, fleet: true },
+    ),
+    latest: { coder: 60 },
+    total: { coder: 1_840_000 },
+  },
+  {
+    spec: spec(
       "output_token_rate",
       "Generated tokens per model",
       "tokens_per_second",
       "alias",
       "estimated",
       "gateway",
-      60,
-      true,
-      true,
-    ],
-    [
+      COUNTED,
+      { total: true, fleet: true },
+    ),
+    latest: { coder: 60 },
+    total: { coder: 1_840_000 },
+  },
+  {
+    spec: spec(
       "decode_throughput",
       "Decode throughput",
       "tokens_per_second",
       "alias",
       "measured",
       "engine",
-      41.2,
-      true,
-      true,
-    ],
-    [
+      "Tokens generated per second, all requests together. Only engines whose metric names are verified report; others show Not reported.",
+      { total: true, fleet: true },
+    ),
+    latest: { coder: 41.2 },
+    total: { coder: 1_200_000 },
+  },
+  {
+    spec: spec(
       "kv_cache_usage",
       "KV cache in use",
       "ratio",
       "alias",
       "measured",
       "engine",
-      0.42,
-      false,
-      false,
-    ],
-  ] as const
-).map(([metric, title, unit, scope, basis, source, latest, total, fleet]) => [
-  {
+      "Share of the KV cache pool holding live requests. Only engines whose metric names are verified report; others show Not reported.",
+    ),
+    latest: { coder: 0.42 },
+  },
+];
+
+function spec(
+  metric: string,
+  title: string,
+  unit: string,
+  scope: string,
+  basis: string,
+  source: string,
+  hint: string,
+  flags: { total?: boolean; fleet?: boolean } = {},
+): Spec {
+  return {
     metric,
     title,
     unit,
     scope,
     basis,
     source,
-    summary_total: total,
-    fleet_sum: fleet,
-    hint: "Counted by the gateway.",
-  } as Spec,
-  latest,
-  total ? (metric === "gpu_energy" ? 1500 : 1840000) : null,
-]);
+    summary_total: flags.total ?? false,
+    fleet_sum: flags.fleet ?? false,
+    hint,
+  } as Spec;
+}
+
+/** The series of one read: every series of the metric, or only the node's, plus the fleet line when it is an unfiltered read. */
+function seriesResponse(metric: string, range: string, node: string | null) {
+  const entry = METRICS.find((item) => item.spec.metric === metric);
+  const end = Math.floor(Date.now() / 1000);
+  const base = { metric, range, start: end - 1800, end, step_seconds: 15 };
+  if (!entry) {
+    // A valid metric the catalogue does not list: the read succeeds with nothing in it.
+    return {
+      ...base,
+      spec: spec(metric, metric, "count", "node", "measured", "spark", ""),
+      series: [],
+    };
+  }
+  const { spec: described, latest, total } = entry;
+  // A node read sees its own series, or the models it serves; a Spark that is not in the run serves none.
+  const served = (key: string) =>
+    node === null || key === node || (described.scope === "alias" && [S1, S2].includes(node));
+  const keys = Object.keys(latest).filter(served);
+  const cap =
+    described.unit === "percent" ? 100 : described.unit === "ratio" ? 1 : Number.POSITIVE_INFINITY;
+  const sum = (values: Record<string, number>) =>
+    keys.reduce((all, key) => all + (values[key] ?? 0), 0);
+  const fleetTotal = total ? sum(total) : null;
+  const line = (
+    labels: Record<string, string>,
+    value: number,
+    own: number | null,
+    share: number | null,
+  ) => ({
+    labels,
+    points: Array.from({ length: 120 }, (_, i) => ({
+      timestamp: end - (120 - i) * 15,
+      value: Math.min(cap, value * (1 + Math.sin(i / 7) * 0.05)),
+    })),
+    summary: {
+      latest: value,
+      average: value,
+      peak: Math.min(cap, value * 1.05),
+      total: own,
+      share,
+      coverage: 1,
+    },
+  });
+  const own = keys.map((key) =>
+    line(
+      described.scope === "alias" ? { alias: key } : { node_id: key },
+      latest[key] as number,
+      total ? (total[key] as number) : null,
+      total && fleetTotal ? (total[key] as number) / fleetTotal : null,
+    ),
+  );
+  // The Controller's sum leads, only on a read of the whole fleet.
+  const fleet =
+    described.fleet_sum && node === null
+      ? [line({}, sum(latest), fleetTotal, fleetTotal === null ? null : 1)]
+      : [];
+  return { ...base, spec: described, series: [...fleet, ...own] };
+}
 
 /**
  * An Overview fleet for layout and accessibility checks: one workload on two Sparks (the D12 memory
@@ -239,8 +348,11 @@ export async function serveOverviewFleet(page: Page) {
       "spark-0007",
       {},
       {
-        memory_available_bytes: 5 * GIB,
-        system_memory_bytes: Math.round(12.4 * GIB),
+        // Idle: nothing loaded, so almost nothing is held for models.
+        memory_available_bytes: Math.round(115.8 * GIB),
+        gpu_process_memory_bytes: Math.round(0.3 * GIB),
+        system_memory_bytes: Math.round(7.1 * GIB),
+        gpu_utilization_percent: 0,
         gpu_power_watts: null,
         uptime_seconds: null,
       },
@@ -262,50 +374,16 @@ export async function serveOverviewFleet(page: Page) {
     ],
   } as components["schemas"]["FleetSnapshot"]);
   await page.route("**/api/metrics/catalogue", (route) =>
-    route.fulfill({ json: METRICS.map(([spec]) => spec) }),
+    route.fulfill({ json: METRICS.map((entry) => entry.spec) }),
   );
   await page.route("**/api/metrics/series**", (route) => {
-    const metric = new URL(route.request().url()).searchParams.get("metric") ?? "";
-    const entry = METRICS.find(([spec]) => spec.metric === metric);
-    // A metric the Controller does not serve fails the read, as a real one would.
-    if (!entry) return route.fulfill({ status: 404, json: { detail: "unknown metric" } });
-    const [spec, latest, total] = entry;
-    const end = Math.floor(Date.now() / 1000);
-    const wave = (scale: number) =>
-      Array.from({ length: 120 }, (_, i) => ({
-        timestamp: end - (120 - i) * 15,
-        value: scale * (1 + Math.sin(i / 7) * 0.05),
-      }));
-    const line = (labels: Record<string, string>, value: number) => ({
-      labels,
-      points: wave(value),
-      summary: {
-        latest: value,
-        average: value,
-        peak: value * 1.05,
-        total: spec.summary_total ? total : null,
-        share: spec.fleet_sum && spec.summary_total ? 1 : null,
-        coverage: 1,
-      },
-    });
-    // A Spark-scoped fleet metric has one series per reporting Spark and the Controller's sum on top.
-    const sparks = SPARK_IDS.slice(0, 2).map((id) => line({ node_id: id }, latest));
-    const one = spec.scope === "alias" ? line({ alias: "coder" }, latest) : sparks[0];
-    const fleetLine = line({}, spec.scope === "alias" ? latest : latest * sparks.length);
-    const series = spec.fleet_sum
-      ? [fleetLine, ...(spec.scope === "alias" ? [one] : sparks)]
-      : [one];
+    const query = new URL(route.request().url()).searchParams;
     return route.fulfill({
-      json: {
-        metric,
-        spec,
-        range: "1h",
-        start: end - 1800,
-        end,
-        step_seconds: 15,
-        // The Controller's fleet line (no label) leads where a metric has one.
-        series,
-      },
+      json: seriesResponse(
+        query.get("metric") ?? "",
+        query.get("range") ?? "1h",
+        query.get("node"),
+      ),
     });
   });
   await page.route("**/api/operations**", (route) =>

@@ -401,8 +401,7 @@ def recipe_library(
         and self._matches_any(item.usage, usage)
         and self._matches_any([item.identity.publisher], publisher)
         and self._matches_any([item.alignment] if item.alignment else [], alignment)
-        # "N or fewer", like the public site: the largest requested count is the limit.
-        and (not sparks or item.node_count <= max(sparks))
+        and (not sparks or item.node_count in sparks)
         and self._matches_any([item.engine], engine)
         and self._matches_any([item.creator] if item.creator else [], creator)
         and (

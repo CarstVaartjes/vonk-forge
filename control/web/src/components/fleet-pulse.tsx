@@ -1,8 +1,8 @@
 import "./fleet-pulse.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
-import { NOT_REPORTED_TEXT, fleetMemory, formatBytes } from "../lib/fleet";
-import { compactCount, fleetLine, formatValue, modelTotals } from "../lib/metric-units";
+import { NOT_REPORTED_TEXT, coverageText, fleetMemory, formatBytes } from "../lib/fleet";
+import { compactCount, fleetFigure, formatValue, modelTotals } from "../lib/metric-units";
 import { GPU_ONLY_CAPTION } from "./energy-card";
 import { Estimate } from "./estimate";
 import { MemoryIngot } from "./memory-ingot";
@@ -33,12 +33,6 @@ function Tile({
   );
 }
 
-/** "both Sparks", or how many of the online Sparks the figure covers. */
-function coverage(reporting: number, online: number): string {
-  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
-  return `${reporting} of ${online} online Sparks`;
-}
-
 /**
  * Five fleet figures in one band. Each is the Controller's fleet line or total of a metric (output speed,
  * GPU power, tokens, GPU energy) or a plain sum of the snapshot's memory samples; a figure with no
@@ -52,16 +46,16 @@ export function FleetPulse({
   nodes,
 }: {
   /** The engine's decode throughput, GPU power, gateway tokens and GPU energy as the Controller serves them. */
-  decode: MetricsSeriesResponse | null;
+  decode: MetricsSeriesResponse | null | undefined;
   power: MetricsSeriesResponse | null;
   tokens: MetricsSeriesResponse | null;
   energy: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
-  const speed = fleetLine(decode);
-  const watts = fleetLine(power);
-  const gpuEnergy = fleetLine(energy);
+  const speed = fleetFigure(decode, "latest");
+  const watts = fleetFigure(power, "latest");
+  const gpuEnergy = fleetFigure(energy, "total");
   const memory = fleetMemory(nodes);
   const { rows, sum } = modelTotals(tokens);
   const generated = rows.length ? compactCount(sum) : null;
@@ -69,15 +63,15 @@ export function FleetPulse({
     <div className="fleet-pulse card">
       <Tile
         label="Output now"
-        figure={speed ? formatValue(Number(speed.summary.latest), "") : NOT_REPORTED_TEXT}
-        unit={speed ? "tok/s" : undefined}
+        figure={speed ? formatValue(speed.value, "") : NOT_REPORTED_TEXT}
+        unit={speed?.symbol}
         caption="decode, measured at the engine"
       />
       <Tile
         label="GPU power"
-        figure={watts ? Number(watts.summary.latest).toFixed(1) : NOT_REPORTED_TEXT}
-        unit={watts ? "W" : undefined}
-        caption={watts ? coverage(watts.reporting, online) : undefined}
+        figure={watts ? watts.value.toFixed(1) : NOT_REPORTED_TEXT}
+        unit={watts?.symbol}
+        caption={watts ? coverageText(watts.reporting, online) : undefined}
       />
       <Tile
         label="Unified memory"
@@ -89,7 +83,7 @@ export function FleetPulse({
           memory
             ? memory.split.modelsBytes !== null
               ? `${formatBytes(memory.split.modelsBytes)} in models`
-              : coverage(memory.reporting, online)
+              : coverageText(memory.reporting, online)
             : undefined
         }
       >
@@ -117,9 +111,9 @@ export function FleetPulse({
       <Tile
         label="GPU energy, 24 h"
         figure={
-          gpuEnergy?.summary.total != null ? (
-            <Estimate basis={gpuEnergy.data.spec.basis}>
-              {formatValue(Number(gpuEnergy.summary.total), "Wh")}
+          gpuEnergy ? (
+            <Estimate basis={gpuEnergy.basis}>
+              {formatValue(gpuEnergy.value, gpuEnergy.symbol)}
             </Estimate>
           ) : (
             NOT_REPORTED_TEXT
