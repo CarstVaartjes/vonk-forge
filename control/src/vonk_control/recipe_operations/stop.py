@@ -55,6 +55,7 @@ from ..recipe_routes import (
     RecipeRouteError,
     route_publication_transaction,
 )
+from ..run_admission import RunAdmissionBusy
 from ..stored_json import read_row_column
 from .constants import _STOP_WITHDRAWAL_ATTEMPTS
 from .errors import (
@@ -240,6 +241,10 @@ class StopMixin:
                 owner_id=run_id,
             )
             if replay is None:
+                # No receipt yet: the admission retry judges the database cause
+                # (a deadlock retries, a spent lock wait stops).
+                if isinstance(error, OperationalError):
+                    raise RunAdmissionBusy("stop admission is busy") from error
                 raise
             service._service_stop_pending(
                 request_id, profile_target_node_ids, profile_application_id
