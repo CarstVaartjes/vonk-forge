@@ -512,7 +512,7 @@ def _unfinished_job_line(result: Mapping[str, object]) -> str:
     """
 
     progress = result.get("progress")
-    if not isinstance(progress, Mapping) or result.get("kind") is None:
+    if not isinstance(progress, Mapping):
         return ""
     done, total = progress.get("completed"), progress.get("total")
     if not isinstance(done, int) or not isinstance(total, int) or done >= total:

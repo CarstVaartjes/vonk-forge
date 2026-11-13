@@ -142,7 +142,7 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         for child in children:
             _field("Recipe", child.get("recipe_name"))
             _field("Revision", child.get("recipe_revision_id"))
-            _field("State", child.get("state"))
+            _field("Recipe state", child.get("state"))
             if child.get("operation_id") is not None:
                 _field("Child", child["operation_id"])
             _failure(child.get("failure"))
