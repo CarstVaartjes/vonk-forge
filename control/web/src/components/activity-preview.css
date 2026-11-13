@@ -7,3 +7,4 @@
 .activity-preview li:first-child{border-top:0}
 .activity-preview time{color:var(--faint);font-variant-numeric:tabular-nums}
 .activity-preview-what{display:grid;min-width:0;overflow-wrap:anywhere}.activity-preview-what small{color:var(--muted)}
+@media(max-width:42rem){.activity-preview header a{display:inline-flex;align-items:center;min-height:2.75rem}}
