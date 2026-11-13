@@ -125,6 +125,17 @@ export function runStateWord(run: VisualFleetNode["loaded"][number]): string {
   return run.healthy === false ? "degraded" : run.run_state;
 }
 
+/** The pill tone for a run, from the same facts as its word: failed or lost is bad, degraded warns, unknown is neutral. */
+export function runStateTone(
+  run: VisualFleetNode["loaded"][number],
+): "ok" | "warn" | "bad" | "info" | "neutral" {
+  if (run.run_state == null) return "neutral";
+  if (run.run_state === RunState.FAILED || run.run_state === RunState.LOST) return "bad";
+  if (run.run_state !== RunState.RUNNING) return "info";
+  if (run.healthy == null) return "neutral";
+  return run.healthy === false ? "warn" : "ok";
+}
+
 /**
  * What a Spark serves, one line per run: title, alias, state, and the other Sparks of a
  * multi-Spark run. `vonkctl fleet` prints the same lines.
@@ -160,6 +171,7 @@ export type WorkloadGroup = {
   alias: string | null;
   /** The run's state in a word, as `nodeWorkloadLines` prints it. */
   state: string;
+  tone: ReturnType<typeof runStateTone>;
   nodes: VisualFleetNode[];
 };
 
@@ -176,6 +188,7 @@ export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
         title: run.title ?? run.run_id,
         alias: run.alias ?? null,
         state: runStateWord(run),
+        tone: runStateTone(run),
         nodes: [],
         ranks: new Map(),
       };
