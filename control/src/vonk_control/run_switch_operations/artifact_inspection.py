@@ -6,7 +6,6 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    ModelFileState,
     RunSwitchCode,
     WaitReason,
 )
@@ -17,7 +16,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_items import inventory_artifacts
+from ..inventory_repository import spark_model_objects
 from ..model_cache import ModelCacheService
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
 from ..run_switch_contract import (
@@ -64,7 +63,6 @@ class DatabaseRunSwitchArtifactInspector:
             model_content_sha256=model_content_sha256,
             recipe_revision_id=recipe_revision_id,
             node_ids=node_ids,
-            retention=retention,
             now=now,
         )
 
@@ -76,7 +74,6 @@ class DatabaseRunSwitchArtifactInspector:
         model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection:
         """Read exact model identity from the cache manifest provider.
@@ -162,32 +159,17 @@ class DatabaseRunSwitchArtifactInspector:
         reused = 0
         missing_spark = 0
         missing_by_node: dict[str, int] = {}
-        inventories = []
         for node_id in node_ids:
+            # The agent's own store scan; unknown counts as missing, and the
+            # copy it then plans reuses what the Spark already holds.
+            held = spark_model_objects(session, node_id, now=now) or {}
             missing_by_node[node_id] = 0
-            rows = inventory_artifacts(session, node_id)
-            inventories.append(rows)
-            by_digest = {row.digest: row for row in rows}
             for digest, size in expected_by_digest.items():
-                row = by_digest.get(digest)
-                if (
-                    row is not None
-                    and row.state == ModelFileState.VERIFIED
-                    and row.size_bytes == size
-                ):
+                if held.get(digest) == size:
                     reused += size
                 else:
                     missing_spark += size
                     missing_by_node[node_id] += size
-        # The cache owns which of a set's files are unused: callers see models
-        # (set digest + bytes), never files.
-        reclaimable = (
-            model_cache.reclaimable_bytes_for_sets(
-                session, (artifact_set_sha256,), inventories
-            )
-            if retention == "reclaim-unreferenced"
-            else 0
-        )
         if missing_nas_bytes:
             warnings.append(
                 _as_reason(
@@ -208,7 +190,10 @@ class DatabaseRunSwitchArtifactInspector:
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark,
             missing_spark_bytes_by_node=missing_by_node,
-            reclaimable_bytes=reclaimable,
+            # Model files carry no per-Spark reference count, so no unused
+            # model bytes are promised here; the agent's store retention frees
+            # them when space is short.
+            reclaimable_bytes=0,
             nas_coverage=(
                 PlacementInstallState.UNKNOWN.value
                 if preview is None

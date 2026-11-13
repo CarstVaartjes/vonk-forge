@@ -57,7 +57,6 @@ from .runtime_identity_support import (
 )
 from .stored_documents_support import valid_policy_report
 
-MODEL_SOURCE = "vonk-forge/synthetic-tiny@0123456789abcdef0123456789abcdef01234567"
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
 MODEL_REVISION_ID = "00000000-0000-4000-8000-000000000011"
 RECIPE_DOCUMENT_ID = "00000000-0000-4000-8000-000000000020"
@@ -375,6 +374,7 @@ def setup(
     observed_age=0,
     denied_jurisdictions=(),
     disk_estimates=(30, 70),
+    model_objects=None,
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -430,6 +430,7 @@ def setup(
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
+                    "model_objects": model_objects,
                 }
             )
         )
@@ -666,20 +667,9 @@ def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> Non
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
-    sessions, now, node, mapping, build = setup(tmp_path, free=80)
-    with sessions.begin() as session:
-        seed_inventory_artifact(
-            session,
-            node_id=node,
-            kind="model",
-            digest="3" * 64,
-            source=MODEL_SOURCE,
-            size_bytes=70,
-            state="verified",
-            ref_count=0,
-            verified_at=now,
-            updated_at=now,
-        )
+    sessions, now, _node, mapping, build = setup(
+        tmp_path, free=80, model_objects=[{"sha256": "3" * 64, "bytes": 70}]
+    )
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )

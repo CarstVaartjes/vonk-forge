@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
@@ -30,6 +30,8 @@ _LOG = logging.getLogger(__name__)
 # Agent inventory may lead the Controller clock by this much. Consumers that
 # order it against Controller-owned events must retain the same uncertainty.
 MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
+# A report received longer ago than this no longer says what a Spark holds.
+INVENTORY_MAX_AGE = timedelta(minutes=5)
 
 
 class NodeInventoryReport(InventoryRequest):
@@ -73,6 +75,43 @@ def _validated_inventory(
             node_id=value.node_id,
         )
     return validated
+
+
+def spark_model_objects(
+    session: Session,
+    node_id: str,
+    *,
+    now: datetime,
+    received_after: datetime | None = None,
+) -> Mapping[str, int] | None:
+    """The model objects (sha256 -> bytes) a Spark's store holds.
+
+    The one reader of "does this Spark hold model file X": the agent's own
+    store scan in its newest inventory. ``None`` (unknown) when that report is
+    missing, older than :data:`INVENTORY_MAX_AGE` or ``received_after``, or
+    carries no readable scan. Copy planning and disk admission count unknown
+    as missing (the transfer that follows is idempotent: the agent reuses an
+    object it holds); removal confirmation waits for a fresh scan instead.
+    """
+
+    row = session.execute(
+        select(NodeInventorySnapshot.model_objects, NodeInventorySnapshot.received_at)
+        .where(NodeInventorySnapshot.node_id == node_id)
+        .order_by(NodeInventorySnapshot.observed_at.desc())
+        .limit(1)
+    ).first()
+    if row is None or not isinstance(row.model_objects, list):
+        return None
+    received = (
+        row.received_at
+        if row.received_at.tzinfo is not None
+        else row.received_at.replace(tzinfo=UTC)
+    )
+    if received < now - INVENTORY_MAX_AGE or (
+        received_after is not None and received <= received_after
+    ):
+        return None
+    return {item.sha256: item.bytes for item in row.model_objects}
 
 
 class InventoryRepository:

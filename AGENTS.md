@@ -151,7 +151,12 @@ total complexity; do not build a second job scheduler out of JSON files.
 Per-Spark facts have one owner: agent-reported data uses one canonical typed
 Pydantic contract per item in a typed column of `node_inventory_snapshots` or
 `node_telemetry_samples`; Controller observations of contact use columns of
-`agent_node_contacts`, written only through `agent_contacts.py`. Contact,
+`agent_node_contacts`, written only through `agent_contacts.py`. Whether a
+Spark holds a model file has one reader, `inventory_repository.spark_model_objects`
+(the agent's store scan in its newest fresh inventory). Copy planning and disk
+admission count unknown as missing (the copy reuses what the agent already
+holds); fleet model removal waits for a fresh scan instead.
+Controller-written inventory items carry no model kind. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
 child row's foreign-key KEY SHARE never blocks. The recipe intent check reads the
