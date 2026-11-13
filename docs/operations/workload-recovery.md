@@ -94,6 +94,7 @@ orders, waits for their cancellation receipts, and then stops the run. A newer
 submit on the same run still supersedes that run's older unstarted jobs. A
 running job holds its Spark's claim lane until it ends, so a load for another
 run on that Spark waits for it rather than ending it.
+
 Builds and package upgrades do not inherit automatic workload replay. Invalid
 ownership, revoked authorization, malformed contracts, integrity failures and
 denied access remain explicit blockers.
