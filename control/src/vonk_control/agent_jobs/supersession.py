@@ -53,14 +53,13 @@ def request_superseded_workload_cancellation_in_session(
 
     A cleanup order (``CLEANUP_KINDS``) is never one of them: it removes its
     owner's own effect and runs alongside the newer intent until its receipt.
+    An empty scope cancels nothing: a recovery that changes no Spark fences
+    none, and is admitted rather than refused on every retry.
     """
     scope = tuple(sorted(set(targets)))
-    if (
-        not scope
-        or len(scope) != len(targets)
-        or type(ordinal) is not int
-        or ordinal < 1
-    ):
+    if not scope:
+        return
+    if len(scope) != len(targets) or type(ordinal) is not int or ordinal < 1:
         raise InvalidValue(
             "workload cancellation scope is invalid",
             reason=InvalidRequestReason.MALFORMED,

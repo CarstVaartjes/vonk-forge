@@ -508,6 +508,24 @@ def test_new_intent_cancels_issued_order_and_receives_exact_stop_ack(service) ->
     )
 
 
+def test_an_intent_that_fences_no_spark_cancels_nothing(service) -> None:
+    """Liveness seed 57: a recovery that changes no Spark fences none; it is
+    admitted, not refused on every retry."""
+
+    jobs, sessions, clock = service
+    job = parent(sessions, clock)
+    queued = jobs.enqueue(
+        job.id, NODE_A, "recipe.start", COMMIT, superseded_order_payload(clock)
+    )
+    with sessions.begin() as session:
+        jobs.request_superseded_workload_cancellation_in_session(
+            session, (), 2, clock.now
+        )
+    with sessions() as session:
+        queued_row = session.get(AgentOperation, queued.id)
+        assert queued_row is not None and queued_row.state == "queued"
+
+
 def test_new_intent_cancels_an_order_by_its_children_never_its_targets(
     service,
 ) -> None:
