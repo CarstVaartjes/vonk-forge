@@ -424,11 +424,11 @@ export function formatMetric(
   value: number | null | undefined,
   format: (value: number) => string,
 ): string {
-  return typeof value === "number" && Number.isFinite(value) ? format(value) : "Not reported";
+  return typeof value === "number" && Number.isFinite(value) ? format(value) : NOT_REPORTED_TEXT;
 }
 
 export function formatBytes(value: WireNumber | null | undefined): string {
-  if (!isWireNumber(value)) return "Not reported";
+  if (!isWireNumber(value)) return NOT_REPORTED_TEXT;
   if (compareWire(value, 1024) < 0) return `${formatWire(value)} B`;
   const unit =
     compareWire(value, 1024 ** 2) < 0
@@ -583,7 +583,9 @@ export function nodeMemorySplit(node: VisualFleetNode): MemorySplit | null {
 /** One Fleet vital: its fill (null draws no meter), the words beside it, and the amber warning. */
 type Vital = { percent: number | null; text: string; amber: boolean };
 
-const NOT_REPORTED: Vital = { percent: null, text: "Not reported", amber: false };
+/** What every reading says when the Spark did not report it. */
+export const NOT_REPORTED_TEXT = "Not reported";
+const NOT_REPORTED: Vital = { percent: null, text: NOT_REPORTED_TEXT, amber: false };
 
 /** Free disk and its total: the inventory's pair, else the live sample's. */
 function diskPair(node: VisualFleetNode): { free: WireNumber; total: WireNumber } | null {
@@ -639,7 +641,7 @@ export function nodeVitals(node: VisualFleetNode): { memory: Vital; disk: Vital;
           text: readings.join(", "),
           amber: false,
         }
-      : { ...NOT_REPORTED, text: reason ? `Not reported (${reason})` : "Not reported" },
+      : { ...NOT_REPORTED, text: reason ? `${NOT_REPORTED_TEXT} (${reason})` : NOT_REPORTED_TEXT },
   };
 }
 

@@ -1,6 +1,19 @@
+import { useState, type ComponentProps } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ControlApi, MetricSpec, MetricsSeriesResponse } from "../api/types";
+import type { ControlApi, MetricRange, MetricSpec, MetricsSeriesResponse } from "../api/types";
+import { RangeSwitch } from "./range-switch";
 import { MetricsChart, SeriesChart } from "./metrics-chart";
+
+/** The page owns the range; this is the smallest page. */
+function Ranged(props: Omit<ComponentProps<typeof MetricsChart>, "range">) {
+  const [range, setRange] = useState<MetricRange>("6h");
+  return (
+    <>
+      <RangeSwitch range={range} onChange={setRange} />
+      <MetricsChart {...props} range={range} />
+    </>
+  );
+}
 
 const spec = (
   metric: MetricSpec["metric"],
@@ -97,7 +110,7 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
         ? stable(12 * 86400 + 600)
         : stable(10),
   );
-  render(<MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
+  render(<Ranged api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
 
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
@@ -117,14 +130,14 @@ test("shows generated tokens per model as an estimate with the Controller's summ
         }
       : stable(10),
   );
-  const { rerender } = render(<MetricsChart api={fakeApi(metricsSeries)} />);
+  const { rerender } = render(<Ranged api={fakeApi(metricsSeries)} />);
 
   const tile = await screen.findByRole("region", { name: "Generated tokens per model" });
   await within(tile).findByText("glm · tok/s");
   expect(tile).toHaveTextContent(
     "glm: now 42.5 tok/s · average 40 tok/s · peak 61.2 tok/s · total 12400 (estimate)",
   );
-  rerender(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
+  rerender(<Ranged api={fakeApi(metricsSeries)} node="spk_abc" />);
   await waitFor(() =>
     expect(metricsSeries).toHaveBeenCalledWith(
       "output_token_rate",
@@ -141,7 +154,7 @@ test("an empty series says so and one failed tile leaves the others", async () =
     if (metric === "gpu_temperature") throw new Error("Temporarily unavailable");
     return metric === "gpu_utilization" ? { ...data, series: [] } : stable(40);
   });
-  render(<MetricsChart api={fakeApi(metricsSeries)} />);
+  render(<Ranged api={fakeApi(metricsSeries)} />);
 
   const gpu = await screen.findByRole("region", { name: "GPU utilisation" });
   await within(gpu).findByText("No samples in this range");
@@ -152,9 +165,9 @@ test("an empty series says so and one failed tile leaves the others", async () =
 
 test("one range switch re-reads every tile for the Spark, models included", async () => {
   const metricsSeries = vi.fn(async () => data);
-  render(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
+  render(<Ranged api={fakeApi(metricsSeries)} node="spk_abc" />);
   await screen.findAllByRole("img");
-  fireEvent.change(screen.getByRole("combobox", { name: "Range" }), { target: { value: "24h" } });
+  fireEvent.click(screen.getByRole("button", { name: "24h" }));
   await waitFor(() =>
     expect(metricsSeries).toHaveBeenCalledWith(
       "gpu_temperature",
@@ -176,7 +189,7 @@ test("an expired certificate says expired, never 'expires in now'", async () => 
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "certificate_expiry" ? stable(0) : stable(10),
   );
-  render(<MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
+  render(<Ranged api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen" }} />);
 
   expect(await screen.findByText("Kitchen: certificate expired")).toBeVisible();
   expect(screen.queryByText(/expires in/)).toBeNull();
@@ -198,9 +211,7 @@ test("a Spark has the same colour in every tile, by its place in the snapshot or
   const metricsSeries = vi.fn(async (metric: string) =>
     metric === "gpu_temperature" ? both("spk_b", "spk_a") : both("spk_a", "spk_b"),
   );
-  render(
-    <MetricsChart api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen", spk_b: "Garage" }} />,
-  );
+  render(<Ranged api={fakeApi(metricsSeries)} names={{ spk_a: "Kitchen", spk_b: "Garage" }} />);
 
   const color = async (tile: string, name: string) => {
     const region = await screen.findByRole("region", { name: tile });
@@ -219,7 +230,7 @@ test("range changes request Spark samples and a fresh read recovers from failure
     if (failing && range === "24h") throw new Error("Temporarily unavailable, retry");
     return data;
   });
-  render(<MetricsChart api={fakeApi(metricsSeries)} node="spk_abc" />);
+  render(<Ranged api={fakeApi(metricsSeries)} node="spk_abc" />);
   await screen.findAllByRole("img");
   expect(metricsSeries).toHaveBeenCalledWith(
     "gpu_utilization",
@@ -228,7 +239,7 @@ test("range changes request Spark samples and a fresh read recovers from failure
     expect.any(AbortSignal),
   );
   failing = true;
-  fireEvent.change(screen.getByRole("combobox", { name: "Range" }), { target: { value: "24h" } });
+  fireEvent.click(screen.getByRole("button", { name: "24h" }));
   await screen.findAllByText(/Metrics unavailable: Temporarily unavailable/);
   expect(screen.queryByRole("img")).toBeNull();
   failing = false;
@@ -248,8 +259,8 @@ test("range change aborts the old read and a late response cannot replace curren
           })
         : Promise.resolve(data),
   );
-  render(<MetricsChart api={fakeApi(metricsSeries)} />);
-  fireEvent.change(screen.getByRole("combobox", { name: "Range" }), { target: { value: "1h" } });
+  render(<Ranged api={fakeApi(metricsSeries)} />);
+  fireEvent.click(screen.getByRole("button", { name: "1h" }));
   await screen.findAllByRole("img");
   const stale = metricsSeries.mock.calls.filter((call) => call[1] === "6h");
   expect(stale.length).toBeGreaterThan(0);
@@ -265,7 +276,7 @@ test("a metric the catalogue does not list is not drawn, and an estimated one ca
     metricsCatalogue: async () => listed,
     metricsSeries: async () => data,
   } as unknown as ControlApi;
-  render(<MetricsChart api={api} />);
+  render(<Ranged api={api} />);
   await screen.findByRole("region", { name: "Requests per model" });
   expect(screen.queryByRole("region", { name: "GPU temperature" })).toBeNull();
   expect(

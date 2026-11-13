@@ -1,0 +1,10 @@
+.breadcrumb{margin:0 0 .75rem;color:var(--muted);font-size:.8125rem}.breadcrumb a{color:inherit}.breadcrumb [aria-current]{color:var(--ink);font-weight:600}
+.spark-page-head{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .9rem}
+.spark-page-head h1{margin:0;font-size:1.75rem;letter-spacing:-.02em}
+.spark-page-head .spark-key{width:.9rem;height:.9rem}
+.spark-seen{color:var(--muted);font-size:.8125rem}
+.spark-page-controls{display:flex;flex-wrap:wrap;gap:.5rem;margin-left:auto}.spark-page-controls .segmented{margin-left:0}
+.spark-chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:1rem 0;padding:0;list-style:none}
+.spark-chips li{padding:.3rem .8rem;border:1px solid var(--line);border-radius:var(--r-pill);background:var(--panel);color:var(--muted);font-size:.8125rem}.spark-chips strong{color:var(--ink);font-weight:600}
+.spark-panel{margin-top:1rem}
+@media(max-width:42rem){.spark-page-controls{width:100%;margin-left:0}.spark-page-controls .segmented{flex:1 1 auto}.spark-page-controls button{min-height:2.75rem}}

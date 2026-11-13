@@ -144,14 +144,15 @@ function timeLeft(data: MetricsSeriesResponse, names: Record<string, string>): s
 export function MetricsChart({
   api,
   node,
+  range,
   names = {},
 }: {
   api: ControlApi;
   node?: string;
+  range: MetricRange;
   names?: Record<string, string>;
 }) {
   const id = useId();
-  const [range, setRange] = useState<MetricRange>("6h");
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
   const [retry, setRetry] = useState(0);
   const catalogue = useMetricCatalogue(api, retry);
@@ -184,19 +185,6 @@ export function MetricsChart({
     <section aria-labelledby={id} className="fleet-metrics">
       <h2 id={id}>Trends</h2>
       <div className="button-row">
-        <label>
-          Range{" "}
-          <select
-            value={range}
-            onChange={(event) => setRange(event.currentTarget.value as MetricRange)}
-          >
-            {(["1h", "6h", "24h", "7d", "30d"] as const).map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
         <button
           type="button"
           className="button secondary"

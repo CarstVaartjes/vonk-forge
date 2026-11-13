@@ -144,6 +144,27 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
   }
 });
 
+test("a Spark page fits a phone and a desktop and passes the accessibility checks", async ({
+  page,
+}) => {
+  await serveOverviewFleet(page);
+  await page.goto("/overview");
+  await page.getByRole("link", { name: "spark-3542" }).first().click();
+  await expect(page).toHaveURL(/\/sparks\/spk_/);
+  await expect(page.getByRole("heading", { name: "spark-3542", level: 1 })).toBeVisible();
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [width, height] of [
+      [400, 800],
+      [1440, 900],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await expectNoDocumentOverflow(page);
+      await expectNoSeriousAccessibilityViolations(page);
+    }
+  }
+});
+
 test("Activity shows operations and standalone jobs", async ({ page }) => {
   await serveEmptyFleet(page);
   const requestId = "f6e73ce3-3329-4ff4-b086-d8f87c879ce9";

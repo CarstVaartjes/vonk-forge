@@ -16,6 +16,7 @@ import {
   nodeVitals,
   uptimeText,
 } from "../lib/fleet";
+import { sparkPath } from "../lib/spark-route";
 import { sparkColor } from "./chart/series";
 import { Sparkline } from "./chart/sparkline";
 import { MemoryIngot } from "./memory-ingot";
@@ -152,7 +153,7 @@ export function SparkCard({
         <span className="spark-key" style={{ background: color }} aria-hidden="true" />
         <h3>
           <a
-            href={`?spark=${encodeURIComponent(node.id)}`}
+            href={sparkPath(node.id)}
             onClick={(event) => {
               if (!onOpen) return;
               event.preventDefault();
