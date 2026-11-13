@@ -34,3 +34,35 @@ def test_each_spark_row_prints_the_vector_serving_words(capsys):
     for node, row in zip(nodes, rows, strict=True):
         cells = dict(zip(columns, re.split(r"\s{2,}", row), strict=True))
         assert cells["SERVING"] == _VECTORS["expected"][node["id"]]["vonkctl"]
+
+
+def _notes(capsys, **run):
+    node = {
+        "id": "spk_1",
+        "display_name": "Spark 1",
+        "lifecycle": "ready",
+        "connection": {"online_state": "online", "last_seen_at": None},
+        "inventory": None,
+        "telemetry": None,
+        "installed": [],
+        "warnings": [],
+        "loaded": [
+            {
+                "run_id": "run-a",
+                "alias": "job",
+                "run_state": "running",
+                "group_state": "healthy",
+                "route_state": "withdrawn",
+                "rank_fresh": False,
+                **run,
+            }
+        ],
+    }
+    render_payload({"nodes": [node]}, "fleet")
+    return capsys.readouterr().out
+
+
+def test_workload_notes_follow_the_controller_verdict(capsys):
+    assert "job:" not in _notes(capsys, healthy=True)
+    degraded = {"healthy": False, "degraded_reason": {"code": "RANK_STALE"}}
+    assert "job: RANK_STALE" in _notes(capsys, **degraded)
