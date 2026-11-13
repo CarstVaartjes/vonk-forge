@@ -33,7 +33,8 @@ from .metrics_contract import (
 )
 from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 
-# Scrape intervals of the jobs in deploy/compose/prometheus/prometheus.yml.
+# Scrape intervals of the jobs in deploy/compose/prometheus/prometheus.yml (its owner:
+# change both together).
 CONTROL_SCRAPE_SECONDS = 15
 GATEWAY_SCRAPE_SECONDS = 30
 RANGES: dict[MetricRange, int] = {
@@ -155,7 +156,7 @@ class MetricQuery:
         """The highest raw value in the range; averaged points would understate it."""
         if self.kind == "energy":
             return None
-        if self.kind in ("gauge", "last") and not fleet:
+        if self.kind in ("gauge", "last") and not fleet and self.source is Source.NODE:
             return f"max_over_time({self.family}{selector}[{duration}s])"
         # Evaluated every floor seconds over a window that leaves no gap between them.
         raw = self.series(selector, self.floor, fleet)

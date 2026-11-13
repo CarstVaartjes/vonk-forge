@@ -130,6 +130,8 @@ Precision comes from rows, rails, thin dividers, tabular measurements, and exact
 
 The palette is one graphite operating shell with a small state vocabulary that text and shape reinforce.
 
+**Themes.** Dark is the first theme and light is a designed one (warm paper, darker green, gold, warning and series steps, not an inversion). Every colour token is one `light-dark(light, dark)` pair in `:root` of `control/web/src/styles.css`, the single owner of both values. The system setting decides until the owner picks with the top-bar switch; `lib/theme.ts` then stores the pick per browser and sets `data-theme`. Glows (the live-dot halo) are dark only. A new colour is added as a pair, never as a hex outside `:root`.
+
 ### Primary
 
 - **NVIDIA Action Green:** The scarce primary accent for healthy, ready, or safe-to-apply states and the main affirmative action.

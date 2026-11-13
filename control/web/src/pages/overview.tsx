@@ -3,7 +3,6 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { useMetricSeries } from "../hooks/use-metric-series";
-import { useSelectedSpark } from "../hooks/use-selected-spark";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
@@ -19,18 +18,19 @@ import { PageHeader } from "../components/page-header";
 import { useToast } from "../components/toast";
 import { EnrollmentGrant } from "../components/enrollment-grant";
 import { ServingNow, servingKey } from "../components/serving-now";
-import { SparkDetail } from "../components/spark-detail";
 import { safeErrorText } from "../lib/error-display";
 
 export function OverviewPage({
   api,
   onLive,
   onNavigate,
+  onOpenSpark,
 }: {
   api: ControlApi;
   onBusyChange?(busy: boolean): void;
   onLive?(status: LiveStatus | null): void;
   onNavigate?(event: MouseEvent<HTMLAnchorElement>, path: string): void;
+  onOpenSpark?(id: string): void;
 }) {
   const fleet = useFleetStream(api);
   const tokens = useMetricSeries(api, "output_token_rate", "24h");
@@ -42,7 +42,6 @@ export function OverviewPage({
   const [grant, setGrant] = useState<EnrollmentGrantResponse | null>(null);
   const toast = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [spark, selectSpark] = useSelectedSpark();
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
   async function upgradeAll() {
@@ -193,7 +192,7 @@ export function OverviewPage({
               nodes={nodes}
               now={fleet.now}
               live={live === "live"}
-              onOpen={selectSpark}
+              onOpen={onOpenSpark}
             />
             <div className="overview-cards">
               <EnergyCard nodes={nodes} />
@@ -217,7 +216,6 @@ export function OverviewPage({
           </div>
         </div>
       )}
-      {spark && <SparkDetail api={api} id={spark} onClose={() => selectSpark(null)} />}
     </div>
   );
 }

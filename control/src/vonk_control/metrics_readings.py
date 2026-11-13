@@ -86,7 +86,9 @@ _FACTS = (
 def node_facts(snapshot: FleetSnapshot) -> dict[str, NodeFacts]:
     facts: dict[str, NodeFacts] = {}
     for node in snapshot.nodes:
-        clock = None if node.telemetry is None else node.telemetry.sample.gpu_clock
+        if node.telemetry is None or node.telemetry.freshness == "stale":
+            continue
+        clock = node.telemetry.sample.gpu_clock
         inventory = node.inventory
         swap = (
             None

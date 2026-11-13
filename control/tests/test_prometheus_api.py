@@ -27,7 +27,7 @@ from vonk_control.metrics_contract import (
     MetricRange,
     MetricsSeriesResponse,
 )
-from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader
+from vonk_control.prometheus_api import QUERIES, RANGES, PrometheusReader, Source
 
 from .test_api import Jobs
 from .test_metrics import NODE, _fleet_snapshot
@@ -100,6 +100,9 @@ def test_every_query_window_covers_the_step_and_scrapes(metric, range):
 def test_every_metric_has_one_spec_and_one_query():
     """Catches a metric added to the contract without its description or query."""
     assert set(METRIC_SPECS) == set(QUERIES) == set(get_args(Metric))
+    # The catalogue's source and the query's reader must agree.
+    reads = {"spark": Source.NODE, "engine": Source.ENGINE, "gateway": Source.GATEWAY}
+    assert all(QUERIES[m].source is reads[s.source] for m, s in METRIC_SPECS.items())
     assert {s.metric for s in METRIC_SPECS.values() if s.summary_total} == {
         m for m, q in QUERIES.items() if q.total("", 1)
     }
@@ -153,16 +156,6 @@ def test_engine_speeds_divide_summed_rates_and_filter_by_alias(reader, monkeypat
     mock_prometheus(monkeypatch, handle)
     asyncio.run(reader.series("decode_speed", "1h", NODE, lambda node: ["glm-5"]))
     assert seen and all(r'{alias=~"^(glm\\-5)$"}' in query for query in seen)
-
-
-def test_energy_integrates_power_over_reported_samples_only():
-    """Catches an energy total that bills the time a Spark reported nothing."""
-    query = QUERIES["gpu_energy"]
-    assert query.total("", 86400) == (
-        "sum_over_time(vonk_node_telemetry_gpu_power_watts[86400s]) * 15 / 3600"
-    )
-    assert query.peak("", 86400) is None
-    assert query.series("", 900).endswith(" * 900 / 3600")
 
 
 def test_catalogue_lists_every_metric(client):
@@ -510,6 +503,15 @@ def test_exporter_publishes_the_spark_facts_that_trend():
         "telemetry_gpu_power_watts",
     ):
         assert f"vonk_node_{series}" not in text
+
+    node.telemetry.sample = node.telemetry.sample.model_copy(
+        update={"gpu_power_watts": 35.5, "gpu_clock": clock}
+    )
+    node.telemetry.freshness = "stale"
+    text = registry.render()
+    # A silent Spark contributes no value, so fleet power and energy skip it.
+    assert "vonk_node_telemetry_gpu_power_watts" not in text
+    assert "vonk_node_telemetry_gpu_graphics_clock_mhz" not in text
 
 
 def test_application_owns_configured_monitoring_and_preserves_service_lifespan(

@@ -127,17 +127,41 @@ test("Overview fits a phone and a desktop and passes the accessibility checks", 
   await page.goto("/overview");
   await expect(page.getByRole("heading", { name: "GLM 5.3 Flash" })).toBeVisible();
   await expect(page.getByRole("region", { name: "spark-3542" })).toBeVisible();
-  for (const [width, height] of [
-    [400, 800],
-    [1440, 900],
-  ]) {
-    await page.setViewportSize({ width, height });
-    await expectNoDocumentOverflow(page);
-    await expectNoSeriousAccessibilityViolations(page);
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [width, height] of [
+      [400, 800],
+      [1440, 900],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await expectNoDocumentOverflow(page);
+      await expectNoSeriousAccessibilityViolations(page);
+    }
   }
   await page.setViewportSize({ width: 400, height: 800 });
   for (const link of await page.getByRole("link", { name: /^spark-/ }).all()) {
     expect((await link.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+  }
+});
+
+test("a Spark page fits a phone and a desktop and passes the accessibility checks", async ({
+  page,
+}) => {
+  await serveOverviewFleet(page);
+  await page.goto("/overview");
+  await page.getByRole("link", { name: "spark-3542" }).first().click();
+  await expect(page).toHaveURL(/\/sparks\/spk_/);
+  await expect(page.getByRole("heading", { name: "spark-3542", level: 1 })).toBeVisible();
+  for (const colorScheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme });
+    for (const [width, height] of [
+      [400, 800],
+      [1440, 900],
+    ]) {
+      await page.setViewportSize({ width, height });
+      await expectNoDocumentOverflow(page);
+      await expectNoSeriousAccessibilityViolations(page);
+    }
   }
 });
 

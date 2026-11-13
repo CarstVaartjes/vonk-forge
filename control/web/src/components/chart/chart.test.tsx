@@ -1,5 +1,8 @@
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { AreaChart } from "./area-chart";
+import { ArcGauge } from "./arc-gauge";
+import { StackedArea } from "./stacked-area";
 import { linearScale, niceTicks } from "./scale";
 import { Sparkline } from "./sparkline";
 
@@ -71,4 +74,94 @@ test("a sparkline places points by time and with nothing to show renders nothing
   expect(container.querySelector("path.chart-line")?.getAttribute("d")).toMatch(/^M57\.0 /);
   rerender(<Sparkline start={0} end={100} label="trace" points={[{ t: 0, v: null }]} />);
   expect(container.querySelector("svg")).toBeNull();
+});
+
+test("a gauge is a meter with its value and caption, and an absent reading draws no arc", () => {
+  const { container, rerender } = render(
+    <ArcGauge
+      title="Temperature"
+      value={69}
+      unit="°C"
+      max={100}
+      captions={["warns at 85 °C"]}
+      color="red"
+      ticks={[{ value: 85, tone: "warn" }]}
+    />,
+  );
+  const meter = screen.getByRole("meter", { name: "Temperature" });
+  expect(meter).toHaveAttribute("aria-valuetext", "69 °C, warns at 85 °C");
+  expect(container.querySelectorAll(".arc-tick")).toHaveLength(1);
+  rerender(<ArcGauge title="Temperature" value={null} unit="°C" max={100} color="red" />);
+  expect(screen.queryByRole("meter")).toBeNull();
+  expect(screen.getByText("Not reported")).toBeVisible();
+  expect(container.querySelector("svg")).toBeNull();
+});
+
+test("stacked layers break at a point with a missing layer", () => {
+  const layers = [
+    { key: "a", color: "red" },
+    { key: "b", color: "blue" },
+  ];
+  const points = [
+    { t: 0, values: [1, 1] },
+    { t: 10, values: [2, 1] },
+    { t: 20, values: [null, 1] },
+    { t: 30, values: [2, 2] },
+    { t: 40, values: [3, 2] },
+  ];
+  const { container } = render(
+    <StackedArea
+      points={points}
+      layers={layers}
+      start={0}
+      end={40}
+      max={6}
+      unit="GiB"
+      name="Memory"
+    />,
+  );
+  // Two runs per layer: no area crosses the missing point.
+  expect(container.querySelectorAll("path")[0]?.getAttribute("d")?.match(/M/g)).toHaveLength(2);
+  const empty = render(
+    <StackedArea
+      points={[{ t: 0, values: [null, null] }]}
+      layers={layers}
+      start={0}
+      end={40}
+      max={6}
+      unit="GiB"
+      name="Memory"
+      empty={<p>None</p>}
+    />,
+  );
+  expect(empty.getByText("None")).toBeVisible();
+});
+
+test("charts that share a crosshair follow one cursor time, each at its own nearest sample", () => {
+  const b = {
+    ...a,
+    key: "b",
+    name: "Garage",
+    points: [
+      { t: 5, v: 7 },
+      { t: 95, v: 8 },
+    ],
+  };
+  const Pair = () => {
+    const [at, setAt] = useState<number | null>(null);
+    const crosshair = { at, onChange: setAt };
+    return (
+      <>
+        <AreaChart {...base} title="One" label="one" series={[a]} crosshair={crosshair} />
+        <AreaChart {...base} title="Two" label="two" series={[b]} crosshair={crosshair} />
+      </>
+    );
+  };
+  render(<Pair />);
+  const [one] = screen.getAllByRole("img");
+  (one as Element).getBoundingClientRect = () => ({ left: 0, width: 600 }) as DOMRect;
+  fireEvent.pointerMove(one as Element, { clientX: 580 });
+  const tips = screen.getAllByRole("tooltip");
+  expect(tips[0]).toHaveTextContent("Kitchen: 30 W");
+  expect(tips[1]).toHaveTextContent("Garage: 8 W");
 });

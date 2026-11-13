@@ -916,7 +916,7 @@ def test_fleet_detail_keeps_zero_clock_and_reported_max_separate_from_policy(cap
     assert "graphics 0 / SM 1500 MHz" in output
     assert "last applied 300–2200 MHz (helper receipt); desired 300–1800 MHz" in output
     assert "reported max graphics 2400 / SM 2300 MHz; policy limit 2300 MHz" in output
-    assert "throttle bits 0" in output
+    assert "throttle reasons none active" in output
 
 
 def test_fleet_overview_shows_cpu_clock_only_through_attention_and_wide(capsys):

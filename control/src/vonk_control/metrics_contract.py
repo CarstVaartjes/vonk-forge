@@ -373,7 +373,7 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
             "e2e_latency_mean",
             "Request time at the engine, mean",
             "seconds",
-            "Mean over finished requests, queue excluded.",
+            "Mean over finished requests.",
         ),
         _engine(
             "time_per_token_mean",
