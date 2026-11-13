@@ -166,7 +166,6 @@ def _inspect(cache, *, sessions, manifest):
                 model_content_sha256=manifest.model_content_sha256,
                 recipe_revision_id=revision_id,
                 node_ids=(),
-                retention="retain",
                 now=cache._clock(),
             )
 

@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from vonk_agent_protocol import canonical_message
-from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
@@ -37,7 +36,6 @@ def test_missing_artifact_authority_does_not_poison_repaired_inspection(
         model_content_sha256="a" * 64,
         recipe_revision_id="recipe-revision",
         node_ids=("spk_" + "b" * 32,),
-        retention="retain",
         now=datetime(2026, 9, 6, tzinfo=UTC),
     )
 
@@ -54,7 +52,6 @@ def test_missing_artifact_authority_does_not_poison_repaired_inspection(
             model_content_sha256="a" * 64,
             recipe_revision_id="recipe-revision",
             node_ids=(nodes[0],),
-            retention="retain",
             now=datetime(2026, 9, 6, tzinfo=UTC),
         )
     assert not repaired.blockers
@@ -105,7 +102,7 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
     tmp_path, scan: str
 ) -> None:
     """Spark coverage is the agent's own store scan: a Spark that reports the
-    model's files is a cached target, so a re-run plans no target copy. One
+    model's files needs no target copy, so a re-run plans none. One
     that lacks them, or reports no scan, gets the copy, which the agent dedups."""
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
@@ -144,16 +141,12 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
 
     assert plan.allowed, [reason.code for reason in plan.blockers]
     copies = [phase for phase in plan.phases if phase.subphase == "target-copy"]
-    cached = DistributionIdentity._cached_targets(plan, (nodes[0],))
     missing = 0 if held else manifest.expected_bytes
     assert plan.storage.missing_spark_bytes_by_node == {nodes[0]: missing}
     assert bool(copies) is not held
-    assert cached == ((nodes[0],) if held else ())
-    with sessions() as session:
-        # A scan older than the freshness window says nothing any more.
-        assert (
-            spark_model_objects(
-                session, nodes[0], now=NOW + INVENTORY_MAX_AGE + timedelta(seconds=1)
-            )
-            is None
-        )
+    if held:
+        with sessions() as session:
+            # The same scan, once older than the freshness window, says nothing.
+            assert spark_model_objects(session, nodes[0], now=NOW)
+            stale = NOW + INVENTORY_MAX_AGE + timedelta(seconds=1)
+            assert spark_model_objects(session, nodes[0], now=stale) is None

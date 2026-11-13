@@ -86,8 +86,9 @@ def spark_model_objects(
 ) -> Mapping[str, int] | None:
     """The model objects (sha256 -> bytes) a Spark's store holds.
 
-    The one reader of "does this Spark hold model file X": the agent's own
-    store scan in its newest inventory. ``None`` (unknown) when that report is
+    "Does this Spark hold model file X", from the agent's own store scan in
+    its newest inventory (install admission reads the same scan from the
+    snapshot it already loaded). ``None`` (unknown) when that report is
     missing, older than :data:`INVENTORY_MAX_AGE` or ``received_after``, or
     carries no readable scan. Copy planning and disk admission count unknown
     as missing (the transfer that follows is idempotent: the agent reuses an

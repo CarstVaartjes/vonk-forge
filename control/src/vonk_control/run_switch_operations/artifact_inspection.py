@@ -50,7 +50,6 @@ class DatabaseRunSwitchArtifactInspector:
         model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection:
         if self._model_cache is None:
@@ -190,10 +189,6 @@ class DatabaseRunSwitchArtifactInspector:
             missing_nas_bytes=missing_nas_bytes,
             missing_spark_bytes=missing_spark,
             missing_spark_bytes_by_node=missing_by_node,
-            # Model files carry no per-Spark reference count, so no unused
-            # model bytes are promised here; the agent's store retention frees
-            # them when space is short.
-            reclaimable_bytes=0,
             nas_coverage=(
                 PlacementInstallState.UNKNOWN.value
                 if preview is None

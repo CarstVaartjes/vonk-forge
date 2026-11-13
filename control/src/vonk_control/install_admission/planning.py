@@ -33,11 +33,7 @@ from ..disk_reservations import (
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_artifacts, inventory_items
-from ..inventory_repository import (
-    InventoryRepository,
-    InventorySnapshotView,
-    spark_model_objects,
-)
+from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
     AgentNode,
@@ -413,9 +409,6 @@ class InstallPlanningService:
                     if item.state == ModelFileState.VERIFIED
                 )
                 stored_models = models_stored_on_node(session, mapping_node.node_id)
-                held_objects = (
-                    spark_model_objects(session, mapping_node.node_id, now=now) or {}
-                )
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
@@ -450,6 +443,15 @@ class InstallPlanningService:
                         "The exact built image will be imported by the ordered Run/Switch target-copy phase.",
                     )
                 )
+            # The agent's store scan in the inventory read above, under its
+            # freshness rule; unknown or stale counts as nothing held.
+            held_objects = (
+                {item.sha256: item.bytes for item in snapshot.model_objects}
+                if snapshot is not None
+                and not snapshot.stale
+                and snapshot.model_objects is not None
+                else {}
+            )
             reused_artifacts = sum(
                 size
                 for digest, size in artifact_sizes.items()

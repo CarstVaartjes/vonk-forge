@@ -265,7 +265,6 @@ def test_an_installation_of_an_unreadable_revision_does_not_stop_inspection(
             model_content_sha256=model_digest,
             recipe_revision_id=current_id,
             node_ids=(),
-            retention="keep-cached",
             now=now,
         )
 

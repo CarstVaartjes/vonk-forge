@@ -52,7 +52,6 @@ class ArtifactInspection:
     copied_bytes: int
     missing_nas_bytes: int | None
     missing_spark_bytes: int | None
-    reclaimable_bytes: int
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
     # How many files the set holds; the plan never lists them (a model is a set).
@@ -80,7 +79,6 @@ class RunSwitchArtifactInspector(Protocol):
         model_content_sha256: str,
         recipe_revision_id: str,
         node_ids: tuple[str, ...],
-        retention: str,
         now: datetime,
     ) -> ArtifactInspection: ...
 
