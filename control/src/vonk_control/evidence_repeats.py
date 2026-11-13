@@ -33,6 +33,8 @@ from .stored_json import read_row_column
 
 _LOGGER = logging.getLogger(__name__)
 _SHOWN_FOR = timedelta(seconds=PROFILE_STALL_WINDOW_SECONDS)
+# A command that has not failed again for a day is history; a live one keeps advancing last_at.
+COMMAND_REPETITION_SHOWN_FOR = timedelta(hours=24)
 _LOAD = RepeatedEvidenceSubject.PROFILE_LOAD.value.format(application_id="")
 type EvidenceOwner = AgentNodeContact | AgentOperation | FleetProfileApplication
 
@@ -366,11 +368,11 @@ def repeating_evidence(
                     event.detail,
                     event.observation_sequence,
                 )
-    # Command history ages out of what is shown like the application records above.
+    # Command repetitions age out a day after their last failure.
     summaries.extend(
         item
         for item in grouped.values()
-        if _utc(item.last_at) >= _utc(now) - _SHOWN_FOR
+        if _utc(item.last_at) >= _utc(now) - COMMAND_REPETITION_SHOWN_FOR
     )
     shown = _upgrade_identity_waits(session, node_ids)
     for node_id, subject in sorted(unreadable):

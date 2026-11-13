@@ -5,8 +5,9 @@ weeks, a refused runtime grant repeated on every Stop, and one profile retry
 was refused identically 139 times in three hours, while every operator surface
 stayed quiet.  Repetition is shown on the Spark as ``evidence.repeating`` once
 it reaches the one failure limit; it never ends or blocks the work, and the
-next success clears it.  A repetition about lasting work stays shown however
-old it is; only a profile load, which can end without succeeding, ages out.
+next success clears it.  A repetition about lasting work is shown
+until a success clears it or a day passes since its last failure; a profile
+load, which can end without succeeding, ages out sooner.
 """
 
 from __future__ import annotations
@@ -148,8 +149,11 @@ def test_every_stop_failing_with_the_same_code_is_attention_until_one_succeeds(
     [alarm] = _repeating(services.sessions, NODE_A, clock.now)
     assert code.value in alarm
     assert f"x{LIMIT}" in alarm
-    # Lasting work stays escalated until it succeeds, however long that takes.
-    assert _repeating(services.sessions, NODE_A, clock.now + MONTHS) == [alarm]
+    # Escalated until it succeeds or a day passes without another failure.
+    assert _repeating(services.sessions, NODE_A, clock.now + timedelta(hours=23)) == [
+        alarm
+    ]
+    assert _repeating(services.sessions, NODE_A, clock.now + timedelta(hours=25)) == []
 
     _report_order(client, services, clock, {"state": "succeeded", "result": {}})
     assert _repeating(services.sessions, NODE_A, clock.now) == []
