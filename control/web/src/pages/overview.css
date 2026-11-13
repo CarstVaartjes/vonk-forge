@@ -10,5 +10,5 @@
 .attention-card{padding:1.1rem 1.25rem;border-color:var(--warn-line);background:linear-gradient(var(--warn-wash),var(--warn-wash)),var(--panel)}
 .attention-card h2{margin:0 0 .5rem;font-size:1rem}
 .attention-list{margin:0;padding:0;list-style:none}
-.idle-sparks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1.25rem}
+.idle-sparks{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,26rem),1fr));gap:1.25rem}
 .overview-units>section>h2{margin:0 0 .5rem;font-size:1rem}

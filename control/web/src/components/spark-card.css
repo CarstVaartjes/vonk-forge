@@ -11,7 +11,7 @@
 .spark-memory+.memory-ingot{margin-top:.45rem}
 .spark-traces{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.625rem;margin-top:1.1rem}
 .spark-trace{min-width:0;padding:.65rem .75rem .35rem;border:1px solid var(--line);border-radius:var(--r-in);background:var(--recess)}
-.spark-trace-head{display:flex;justify-content:space-between;gap:.5rem}.spark-trace-head>:first-child{color:var(--muted);font-size:.75rem}
+.spark-trace-head{display:flex;flex-wrap:wrap;justify-content:space-between;gap:0 .5rem}.spark-trace-head>:first-child{color:var(--muted);font-size:.75rem}
 .spark-trace-value{font-size:1rem;letter-spacing:-.02em;white-space:nowrap}.spark-trace-value small{color:var(--muted);font-size:.72em}
 .spark-trace .sparkline{height:2.25rem;margin-top:.2rem}
 .spark-quiet{display:grid;margin-top:.9rem;font-size:.75rem;color:var(--muted)}.spark-quiet strong{color:var(--ink);font-weight:600;font-size:.8125rem}
