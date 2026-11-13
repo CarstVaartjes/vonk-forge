@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from ..generated_control.models.fleet_profile_endpoints_view import (
         FleetProfileEndpointsView,
     )
+    from ..generated_control.models.metric_spec import MetricSpec
 
 
 MAX_PAGE_LIMIT = 512
@@ -42,6 +43,8 @@ class ControllerClient(Protocol):
     def profile_endpoints(
         self, number: int, alias: str | None = None
     ) -> FleetProfileEndpointsView: ...
+
+    def metrics_catalogue(self) -> list[MetricSpec]: ...
 
 
 @runtime_checkable

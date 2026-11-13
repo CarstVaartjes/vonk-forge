@@ -31,9 +31,6 @@ from .common import (
     _watch_controls,
 )
 
-#: The ranges `GET /api/metrics/series` accepts.
-METRIC_RANGES = ("1h", "6h", "24h", "7d", "30d")
-
 
 def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     commands: argparse._SubParsersAction[ControllerParserT],
@@ -55,7 +52,11 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
     )
     show = metrics_actions.add_parser("show", help="One metric over a time range")
     show.add_argument("metric", help="A name from `vonkctl metrics`")
-    show.add_argument("--range", choices=METRIC_RANGES, default="24h")
+    show.add_argument(
+        "--range",
+        default="24h",
+        help="Time range, as the Controller names it (default 24h)",
+    )
     show.add_argument(
         "--spark",
         metavar="SPARK",

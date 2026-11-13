@@ -82,7 +82,9 @@ const data: MetricsSeriesResponse = {
 
 test("renders the measured series, axes and identity instead of an empty chart", () => {
   const { container } = render(<SeriesChart data={data} names={{ "Spark A": "Kitchen" }} />);
-  expect(screen.getByRole("img", { name: /^GPU utilisation, 6h: Kitchen now 80 %/ })).toBeVisible();
+  expect(
+    screen.getByRole("img", { name: /^GPU utilisation, 6h: Kitchen now 80.0%/ }),
+  ).toBeVisible();
   expect(container.querySelectorAll("path.chart-line")).toHaveLength(1);
   expect(screen.getByText("Kitchen · %")).toBeVisible();
 });
@@ -114,7 +116,7 @@ test("shows memory in GiB with Spark names and the certificate as a time left", 
 
   const memory = await screen.findByRole("region", { name: "Unified memory used" });
   await within(memory).findByText("Kitchen · GiB");
-  expect(memory).toHaveTextContent("60 GiB");
+  expect(memory).toHaveTextContent("60.0 GiB");
   expect(await screen.findByText("Kitchen: certificate expires in 12 days")).toBeVisible();
   expect(screen.getByRole("region", { name: "Requests per model" })).toBeVisible();
 });
@@ -135,7 +137,7 @@ test("shows generated tokens per model as an estimate with the Controller's summ
   const tile = await screen.findByRole("region", { name: "Generated tokens per model" });
   await within(tile).findByText("glm · tok/s");
   expect(tile).toHaveTextContent(
-    "glm: now 42.5 tok/s · average 40 tok/s · peak 61.2 tok/s · total 12400 (estimate)",
+    "glm: now 42.5 tok/s · average 40.0 tok/s · peak 61.2 tok/s · total 12400 (estimate)",
   );
   rerender(<Ranged api={fakeApi(metricsSeries)} node="spk_abc" />);
   await waitFor(() =>

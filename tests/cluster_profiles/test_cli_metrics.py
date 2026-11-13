@@ -49,6 +49,7 @@ def _spec(**fields):
         "basis": "measured",
         "source": "spark",
         "summary_total": False,
+        "fleet_sum": False,
         "hint": "GPU die temperature.",
         **fields,
     }
@@ -75,6 +76,7 @@ def _series(labels, values, **summary):
             "average": None,
             "peak": None,
             "total": None,
+            "share": None,
             "coverage": 1,
             **summary,
         },
@@ -115,15 +117,14 @@ def test_show_names_the_spark_and_marks_estimates(capsys):
         ],
     )
     client = _Client(_spec(), series)
-    status, out = _run(
-        ("metrics", "show", "gpu_temperature", "--spark", NODE), client, capsys
-    )
+    status, out = _run(("metrics", "show", "gpu_temperature"), client, capsys)
     assert status == 0
     assert client.calls[0] == (
         "GET",
         "/api/metrics/series",
-        {"metric": "gpu_temperature", "range": "24h", "node": NODE},
+        {"metric": "gpu_temperature", "range": "24h"},
     )
+    assert [call[1] for call in client.calls].count("/api/fleet") == 1
     assert "GPU temperature, last 24 hours (estimate)" in out
     assert "Alpha" in out and "60 °C" in out and "(estimate)" in out
     assert NO_DATA in out

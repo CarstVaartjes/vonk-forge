@@ -119,9 +119,7 @@ def _metric_list(specs: Sequence[MetricSpec]) -> None:
             for spec in specs
         ],
     )
-    print(
-        "Show one with: vonkctl metrics show METRIC [--range 1h|6h|24h|7d|30d] [--spark SPARK]"
-    )
+    print("Show one with: vonkctl metrics show METRIC [--range RANGE] [--spark SPARK]")
 
 
 def _metric_series(response: MetricsSeriesResponse, names: Mapping[str, str]) -> None:
