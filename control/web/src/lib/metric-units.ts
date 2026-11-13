@@ -111,3 +111,47 @@ export function modelTotals(data: MetricsSeriesResponse | null): {
     coverage: series.reduce((lowest, item) => Math.min(lowest, item.coverage), 1),
   };
 }
+
+/** One alias's series in a response, with the response that carries its spec. */
+export type AliasReading = {
+  data: MetricsSeriesResponse;
+  series: MetricsSeriesResponse["series"][number];
+};
+
+export function aliasSeries(
+  data: MetricsSeriesResponse | null,
+  alias: string | null,
+): AliasReading | null {
+  const series = data?.series.find((item) => item.labels.alias === alias);
+  return data && series ? { data, series } : null;
+}
+
+/**
+ * A workload's speed: the first read, in the order given, that has a latest value for the alias. Callers
+ * pass the engine's measured throughput, then the gateway's estimate, then requests, so the figure
+ * is the best the Controller has; none of them is computed here.
+ */
+export function leadReading(
+  reads: readonly (MetricsSeriesResponse | null)[],
+  alias: string | null,
+): AliasReading | null {
+  for (const read of reads) {
+    const reading = aliasSeries(read, alias);
+    if (reading?.series.summary.latest != null) return reading;
+  }
+  return null;
+}
+
+/** The reading's points inside the last `seconds` of its range, as chart points. */
+export function windowPoints(
+  reading: AliasReading,
+  seconds: number,
+): { t: number; v: number | null }[] {
+  const end = Number(reading.data.end);
+  return reading.series.points
+    .filter((point) => Number(point.timestamp) >= end - seconds)
+    .map((point) => ({
+      t: Number(point.timestamp),
+      v: point.value === null ? null : Number(point.value),
+    }));
+}

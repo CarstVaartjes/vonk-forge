@@ -22,6 +22,54 @@ vi.mock("../hooks/use-fleet-stream", () => ({
   }),
 }));
 
+// Series by metric; a metric not listed fails to read, which a figure shows as Not reported.
+let reads: Record<string, unknown> = {};
+const api = {
+  metricsSeries: (metric: string) =>
+    metric in reads ? Promise.resolve(reads[metric]) : Promise.reject(new Error("no history")),
+  operations: () => Promise.reject(new Error("no activity")),
+} as unknown as ControlApi;
+
+function series(metric: string, unit: string, latest: number, total: number | null = null) {
+  return {
+    metric,
+    spec: {
+      metric,
+      title: `${metric} title`,
+      unit,
+      scope: "alias",
+      basis: metric === "decode_throughput" ? "measured" : "estimated",
+      source: "gateway",
+      summary_total: true,
+      fleet_sum: false,
+      hint: "",
+    },
+    range: "1h",
+    start: 0,
+    end: 3600,
+    step_seconds: 15,
+    series: [
+      {
+        labels: { alias: "coder" },
+        points: [3000, 3300, 3600].map((timestamp) => ({ timestamp, value: latest })),
+        summary: { latest, average: latest, peak: latest, total, share: null, coverage: 1 },
+      },
+    ],
+  };
+}
+
+function run(state: string, members: string[], rank: number) {
+  return {
+    run_id: "run-1",
+    title: "GLM 5.3 Flash",
+    alias: "coder",
+    rank,
+    run_state: state,
+    healthy: true,
+    member_node_ids: members,
+  };
+}
+
 function order(): string[] {
   return screen
     .getAllByRole("row")
@@ -50,7 +98,7 @@ const grant: EnrollmentGrantResponse = {
 
 test("Fleet sorts by name, status, memory and disk, and uses the CLI's status words", () => {
   nodes = [spark("Bravo", 20, 500), spark("Alpha", 60, 100, false), spark("Charlie", 90, 900)];
-  render(<WorkloadsPage api={{} as ControlApi} />);
+  render(<WorkloadsPage api={api} />);
   expect(order()).toEqual(["Alpha", "Bravo", "Charlie"]);
   fireEvent.click(screen.getByRole("button", { name: /Status/ }));
   expect(order()[0]).toBe("Alpha");
@@ -76,7 +124,7 @@ test("Fleet vitals cells read exactly what `vonkctl fleet` prints for the shared
   };
   for (const { node, expected } of vectors.cases) {
     nodes = [{ ...spark("Alpha", 40, 250), ...node }];
-    const { container, unmount } = render(<WorkloadsPage api={{} as ControlApi} />);
+    const { container, unmount } = render(<WorkloadsPage api={api} />);
     const cell = (label: string) =>
       container.querySelector(`td[data-label="${label}"]`)?.textContent;
     expect(cell("Memory used")).toBe(expected.memory);
@@ -102,7 +150,7 @@ test("Fleet meters turn amber for low free memory and full disk, never for GPU u
       },
     },
   ];
-  render(<WorkloadsPage api={{} as ControlApi} />);
+  render(<WorkloadsPage api={api} />);
   const [memory, disk, gpu] = within(screen.getAllByRole("row")[1]!).getAllByRole("meter");
   expect(memory!.className).toContain("meter-high");
   expect(disk!.className).toContain("meter-high");
@@ -119,7 +167,7 @@ test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the share
     expected: Record<string, { page: string[] }>;
   };
   nodes = vectors.nodes.map((node) => ({ ...spark("Alpha", 40, 250), ...node }));
-  const { container } = render(<WorkloadsPage api={{} as ControlApi} />);
+  const { container } = render(<WorkloadsPage api={api} />);
   for (const node of vectors.nodes) {
     const row = [...container.querySelectorAll("tbody tr")].find((candidate) =>
       candidate.querySelector("th")?.textContent?.includes(node.display_name),
@@ -129,5 +177,51 @@ test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the share
     );
     expect(lines).toEqual(vectors.expected[node.id]!.page);
   }
+  nodes = [];
+});
+
+test("a workload is one row with its Sparks, measured speed and requests; opening it shows the unit", async () => {
+  reads = {
+    decode_throughput: series("decode_throughput", "tokens_per_second", 41.2),
+    request_rate: series("request_rate", "per_second", 2.5),
+    output_token_rate: series("output_token_rate", "tokens_per_second", 38, 1_840_000),
+  };
+  const both = ["spk_Alpha", "spk_Bravo"].map((id) => id.padEnd(36, "0"));
+  nodes = [
+    { ...spark("Alpha", 40, 250), id: both[0], loaded: [run("running", both, 0)] },
+    { ...spark("Bravo", 40, 250), id: both[1], loaded: [run("running", both, 1)] },
+  ];
+  render(<WorkloadsPage api={api} />);
+  const toggle = screen.getByRole("button", { name: "GLM 5.3 Flash" });
+  const row = toggle.closest("li")!;
+  expect(within(row).getByText("coder")).toBeInTheDocument();
+  expect(
+    within(within(row).getByRole("list", { name: "Sparks" })).getAllByRole("listitem"),
+  ).toHaveLength(2);
+  // Measured decode has no "≈"; the gateway's requests and tokens do.
+  await waitFor(() => expect(row.textContent).toContain("41.2tok/s"));
+  expect(row.textContent).toContain("≈2.5/s");
+  expect(row.textContent).toContain("≈1.84M");
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  expect(within(row).getByLabelText("GLM 5.3 Flash")).toBeInTheDocument();
+  nodes = [];
+  reads = {};
+});
+
+test("a workload still loading has no speed and points to Activity", () => {
+  nodes = [{ ...spark("Alpha", 40, 250), loaded: [run("starting", ["spk_Alpha"], 0)] }];
+  render(<WorkloadsPage api={api} />);
+  expect(screen.getByText("Follow it in Activity")).toHaveAttribute("href", "/activity");
+  expect(screen.queryByText("Requests")).toBeNull();
+  nodes = [];
+});
+
+test("with no workload loaded the page says so and still lists every Spark", () => {
+  nodes = [spark("Alpha", 40, 250)];
+  render(<WorkloadsPage api={api} />);
+  expect(screen.getByText("Nothing is loaded on any Spark.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "All Sparks" })).toBeInTheDocument();
   nodes = [];
 });

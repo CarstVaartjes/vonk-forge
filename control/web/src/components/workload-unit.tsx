@@ -1,5 +1,5 @@
 import "./workload-unit.css";
-import type { MetricsSeriesResponse } from "../api/types";
+import type { WorkloadReads } from "../hooks/use-workload-reads";
 import { nodeDisplayName, type WorkloadCluster } from "../lib/fleet";
 import type { ReactNode } from "react";
 import { WorkloadHeader, WorkloadHero } from "./workload-hero";
@@ -11,14 +11,12 @@ import { WorkloadHeader, WorkloadHero } from "./workload-hero";
  */
 export function WorkloadUnit({
   cluster,
-  tokens,
-  requests,
+  reads,
   live,
   children,
 }: {
   cluster: WorkloadCluster;
-  tokens: MetricsSeriesResponse | null;
-  requests: MetricsSeriesResponse | null;
+  reads: WorkloadReads;
   live: boolean;
   children: ReactNode;
 }) {
@@ -30,13 +28,7 @@ export function WorkloadUnit({
     >
       {cluster.units.map((unit, index) =>
         index === 0 ? (
-          <WorkloadHero
-            key={unit.runId}
-            unit={unit}
-            tokens={tokens}
-            requests={requests}
-            live={live}
-          />
+          <WorkloadHero key={unit.runId} unit={unit} {...reads} live={live} />
         ) : (
           // A second workload on the same Sparks is one line under the first.
           <div className="workload-strip" key={unit.runId}>

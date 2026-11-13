@@ -186,6 +186,8 @@ export type WorkloadGroup = {
   /** The run's state in a word, as `nodeWorkloadLines` prints it. */
   state: string;
   tone: ReturnType<typeof runStateTone>;
+  /** The workload is still being planned or started: it has no speed to show yet. */
+  loading: boolean;
   nodes: VisualFleetNode[];
   /** Each member Spark's rank in this run. */
   ranks: Record<string, number>;
@@ -211,6 +213,7 @@ export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
         alias: run.alias ?? null,
         state: runStateWord(run),
         tone: runStateTone(run),
+        loading: run.run_state === RunState.PLANNED || run.run_state === RunState.STARTING,
         nodes: [],
         ranks: {},
       };

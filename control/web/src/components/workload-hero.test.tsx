@@ -9,6 +9,7 @@ const unit = {
   alias: "coder",
   state: "running",
   tone: "ok",
+  loading: false,
   nodes: [],
   ranks: {},
 } as WorkloadGroup;
@@ -48,7 +49,13 @@ const requests = (latest: number | null) =>
 
 test("the hero is the gateway's generated tokens per second, marked as an estimate", () => {
   const { container } = render(
-    <WorkloadHero unit={unit} tokens={tokens(96.7)} requests={requests(2.5)} live={false} />,
+    <WorkloadHero
+      unit={unit}
+      decode={null}
+      tokens={tokens(96.7)}
+      requests={requests(2.5)}
+      live={false}
+    />,
   );
   expect(container.querySelector(".hero-num")).toHaveTextContent("≈96.7tok/s");
   expect(screen.getByText("Generated tokens per model · last 30 minutes")).toBeInTheDocument();
@@ -58,7 +65,13 @@ test("the hero is the gateway's generated tokens per second, marked as an estima
 
 test("zero traffic on a running workload reads 0 and idle, model loaded", () => {
   const { container } = render(
-    <WorkloadHero unit={unit} tokens={tokens(0)} requests={requests(0)} live={false} />,
+    <WorkloadHero
+      unit={unit}
+      decode={null}
+      tokens={tokens(0)}
+      requests={requests(0)}
+      live={false}
+    />,
   );
   expect(container.querySelector(".hero-num")).toHaveTextContent("≈0tok/s");
   expect(screen.getByText("idle, model loaded")).toBeInTheDocument();
@@ -66,11 +79,29 @@ test("zero traffic on a running workload reads 0 and idle, model loaded", () => 
 
 test("without tokens the hero falls back to requests; with neither it says Not reported and draws no chart", () => {
   const { unmount } = render(
-    <WorkloadHero unit={unit} tokens={null} requests={requests(2.5)} live={false} />,
+    <WorkloadHero unit={unit} decode={null} tokens={null} requests={requests(2.5)} live={false} />,
   );
   expect(screen.getByText("Requests per model · last 30 minutes")).toBeInTheDocument();
   unmount();
-  render(<WorkloadHero unit={unit} tokens={tokens(null)} requests={null} live={false} />);
+  render(
+    <WorkloadHero unit={unit} decode={null} tokens={tokens(null)} requests={null} live={false} />,
+  );
   expect(screen.getAllByText("Not reported")).toHaveLength(7);
   expect(screen.queryByRole("img")).toBeNull();
+});
+
+test("the engine's measured decode speed leads the gateway's estimate and carries no mark", () => {
+  const decode = series("decode_throughput", "Decode throughput", "tokens_per_second", 41.2);
+  decode.spec.basis = "measured";
+  const { container } = render(
+    <WorkloadHero
+      unit={unit}
+      decode={decode}
+      tokens={tokens(96.7)}
+      requests={requests(2.5)}
+      live={false}
+    />,
+  );
+  expect(container.querySelector(".hero-num")).toHaveTextContent("41.2tok/s");
+  expect(container.querySelector(".hero-num .estimate-mark")).toBeNull();
 });
