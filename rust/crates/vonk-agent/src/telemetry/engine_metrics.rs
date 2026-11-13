@@ -92,10 +92,11 @@ pub async fn scrape_engines(directory: &Path, deadline: Duration) -> Vec<EngineR
         return Vec::new();
     };
     let client = &client;
+    let until = tokio::time::Instant::now() + deadline;
     let mut pending = stream::iter(targets)
         .map(|target| async move {
             let address = target.address.parse::<IpAddr>().ok()?;
-            let body = fetch(client, SocketAddr::new(address, target.port)).await?;
+            let body = fetch(client, SocketAddr::new(address, target.port), until).await?;
             parse_engine(&body, target.run_id)
         })
         .buffer_unordered(SCRAPE_CONCURRENCY);
@@ -115,7 +116,11 @@ pub async fn scrape_engines(directory: &Path, deadline: Duration) -> Vec<EngineR
 }
 
 /// The body of `GET /metrics`, if the engine answers 200 within the size cap.
-async fn fetch(client: &reqwest::Client, endpoint: SocketAddr) -> Option<String> {
+async fn fetch(
+    client: &reqwest::Client,
+    endpoint: SocketAddr,
+    deadline: tokio::time::Instant,
+) -> Option<String> {
     let response = client
         .get(format!("http://{endpoint}/metrics"))
         .send()
@@ -126,7 +131,10 @@ async fn fetch(client: &reqwest::Client, endpoint: SocketAddr) -> Option<String>
     }
     let mut body = Vec::new();
     let mut chunks = response.bytes_stream();
-    while let Some(chunk) = chunks.next().await {
+    while let Some(chunk) = tokio::time::timeout_at(deadline, chunks.next())
+        .await
+        .ok()?
+    {
         body.extend_from_slice(&chunk.ok()?);
         if body.len() > MAX_BODY_BYTES {
             return None;
@@ -264,7 +272,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             use tokio::io::{AsyncReadExt, AsyncWriteExt};
-            loop {
+            for _ in 0..16 {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let body = body.clone();
                 tokio::spawn(async move {
