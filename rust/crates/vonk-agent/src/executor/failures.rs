@@ -418,20 +418,126 @@ pub(super) fn runtime_helper_code(
     }
 }
 
-/// The helper refused the request before it did anything: the grant or the
-/// caller was not accepted (`vonk-agent-helper` answers these before it claims
-/// the request). Nothing changed on the Spark, so the answer is definite.
-pub(super) fn refused_before_effect(error: &crate::host_runtime::HostRuntimeError) -> bool {
-    matches!(
-        error,
-        crate::host_runtime::HostRuntimeError::HelperRejected {
-            code: HelperErrorCode::GrantInvalid
-                | HelperErrorCode::GrantNodeMismatch
-                | HelperErrorCode::GrantUnauthorized
-                | HelperErrorCode::GrantTimeWindow
-                | HelperErrorCode::PeerIdentityInvalid,
-            ..
+/// What a helper answer proves about the Spark.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum HelperRefusal {
+    /// The caller or the grant was not accepted, before the helper claimed
+    /// the request.
+    Authority,
+    /// The helper answered before it executed the operation (unreadable
+    /// frame or ledger, or the busy installation lock a Start takes before it
+    /// does anything; a job's end-of-run cleanup reports stop-uncertain
+    /// instead of busy): nothing changed, and the work is asked again.
+    BeforeEffect,
+    /// The call may have changed the Spark, or the reply was lost or
+    /// malformed: re-observe instead of assuming.
+    MaybeEffect,
+}
+
+/// One exhaustive match with no wildcard arm, so a new `HelperErrorCode`
+/// cannot compile until it is decided here.
+pub(super) fn classify_helper_code(code: HelperErrorCode) -> HelperRefusal {
+    use HelperErrorCode as Code;
+    use HelperRefusal as Refusal;
+    match code {
+        Code::GrantInvalid
+        | Code::GrantNodeMismatch
+        | Code::GrantUnauthorized
+        | Code::GrantTimeWindow
+        | Code::PeerIdentityInvalid => Refusal::Authority,
+        Code::RequestInvalid | Code::RequestLedgerFailed | Code::InstallationReconciliationBusy => {
+            Refusal::BeforeEffect
         }
+        Code::CallJoinFailed
+        | Code::InspectionOutcomeInvalid
+        | Code::InstallationReconciliationStorageUnavailable
+        | Code::InstallationIntentObservationRequired
+        | Code::MessageFramingInvalid
+        | Code::OperationCommandFailed
+        | Code::OperationFailed
+        | Code::OperationInvalid
+        | Code::OperationInvalidArtifact
+        | Code::OperationIo
+        | Code::OperationStopUncertain
+        | Code::OperationUnsafePath
+        | Code::OutcomeMalformed
+        | Code::PackageCustodyFailed
+        | Code::PackageInstallFailed
+        | Code::PackageMetadataFailed
+        | Code::PackagePreparationUnavailable
+        | Code::PackagePreflightFailed
+        | Code::PackageVerificationFailed
+        | Code::RejectionMalformed
+        | Code::RequestArgumentsPresenceInvalid
+        | Code::RequestArgumentNulByte
+        | Code::RequestAttemptInvalid
+        | Code::RequestBytesInvalid
+        | Code::RequestDocumentInvalid
+        | Code::RequestEncodingInvalid
+        | Code::RequestInstallationIdentityInvalid
+        | Code::RequestPlanBindingInvalid
+        | Code::RequestPlanBytesInvalid
+        | Code::RequestReplayed
+        | Code::RequestSchemaVersionInvalid
+        | Code::RequestStorageInvalid
+        | Code::ResponseUnbound
+        | Code::RuntimeAuthorityUnavailable
+        | Code::RuntimeEndpointFirewallRejected
+        | Code::RuntimeFabricFirewallRejected
+        | Code::RuntimeFabricUnavailable
+        | Code::RuntimeHelperCallJoinFailed
+        | Code::RuntimeHelperInspectionOutcomeInvalid
+        | Code::RuntimeHelperMessageFramingInvalid
+        | Code::RuntimeHelperOutcomeMalformed
+        | Code::RuntimeHelperProtocolInvalid
+        | Code::RuntimeHelperRejectionMalformed
+        | Code::RuntimeHelperRequestArgumentsPresenceInvalid
+        | Code::RuntimeHelperRequestArgumentNulByte
+        | Code::RuntimeHelperRequestAttemptInvalid
+        | Code::RuntimeHelperRequestBytesInvalid
+        | Code::RuntimeHelperRequestDocumentInvalid
+        | Code::RuntimeHelperRequestEncodingInvalid
+        | Code::RuntimeHelperRequestInstallationIdentityInvalid
+        | Code::RuntimeHelperRequestPlanBindingInvalid
+        | Code::RuntimeHelperRequestPlanBytesInvalid
+        | Code::RuntimeHelperRequestSchemaVersionInvalid
+        | Code::RuntimeHelperRequestStorageInvalid
+        | Code::RuntimeHelperResponseUnbound
+        | Code::RuntimeHelperStopUncertain
+        | Code::RuntimeHelperSystemClockInvalid
+        | Code::RuntimeHelperUnavailable
+        | Code::RuntimeImageIdentityInvalid
+        | Code::RuntimeImageInspectFailed
+        | Code::RuntimeImageLoadFailed
+        | Code::RuntimeImageReceiptFailed
+        | Code::RuntimeProcessExited
+        | Code::RuntimeRunMissing
+        | Code::SystemClockInvalid
+        | Code::ConcurrencyLimit => Refusal::MaybeEffect,
+    }
+}
+
+fn helper_refusal(error: &crate::host_runtime::HostRuntimeError) -> Option<HelperRefusal> {
+    match error {
+        crate::host_runtime::HostRuntimeError::HelperRejected { code, .. } => {
+            Some(classify_helper_code(*code))
+        }
+        _ => None,
+    }
+}
+
+/// The helper refused the grant or the caller before it did anything. Nothing
+/// changed on the Spark, so the answer is definite.
+pub(super) fn refused_before_effect(error: &crate::host_runtime::HostRuntimeError) -> bool {
+    helper_refusal(error) == Some(HelperRefusal::Authority)
+}
+
+/// The helper answered before it executed the operation, for any reason:
+/// nothing changed on the Spark.
+pub(super) fn refused_without_effect(error: &crate::host_runtime::HostRuntimeError) -> bool {
+    matches!(
+        helper_refusal(error),
+        Some(HelperRefusal::Authority | HelperRefusal::BeforeEffect)
     )
 }
 

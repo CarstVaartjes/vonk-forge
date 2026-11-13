@@ -801,14 +801,24 @@ pub(super) fn cancelled_job(
     ExecutionResult::cancelled(reason)
 }
 
-/// The Controller's definite refusal of the job's Start grant. No grant was
-/// issued, so the container never started: the job ends with that refusal as
+/// The definite refusal of the job's Start: the Controller issued no grant, or
+/// the helper answered before it executed anything (including a busy
+/// installation lock). Either way the container never started: the job ends with that refusal as
 /// its evidence. A wait or an unconfirmed answer is not a refusal.
 pub(super) fn refused_job_start(
     error: &crate::host_runtime::HostRuntimeError,
 ) -> Option<ExecutionResult> {
     if refused_before_effect(error) {
         return Some(runtime_failure("job start refused before execution", error));
+    }
+    if refused_without_effect(error) {
+        // The helper answered before launching (busy installation lock): the
+        // attempt never ran the job, so the Controller issues it again.
+        return Some(temporary_preparation_failure(
+            FailureStage::RuntimeProjection,
+            "job_start",
+            &error.preflight_code(),
+        ));
     }
     match error {
         crate::host_runtime::HostRuntimeError::Controller(error)
