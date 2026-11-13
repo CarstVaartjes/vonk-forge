@@ -16,10 +16,16 @@ vi.mock("../hooks/use-fleet-stream", () => ({
 }));
 
 /** The Spark page for `shown`, which the mocked fleet stream carries; `api` holds only what a test calls. */
-function show(shown: unknown, api: unknown = {}, onGone = vi.fn()) {
+function show(shown: unknown, api: object = {}, onGone = vi.fn()) {
   nodes = [shown];
+  const history = { metricsSeries: vi.fn().mockRejectedValue(new Error("no history")) };
   return render(
-    <SparkPage api={api as ControlApi} id="spk_1" onNavigate={vi.fn()} onGone={onGone} />,
+    <SparkPage
+      api={{ ...history, ...api } as unknown as ControlApi}
+      id="spk_1"
+      onNavigate={vi.fn()}
+      onGone={onGone}
+    />,
   );
 }
 
@@ -119,8 +125,7 @@ test("the Overview shows the CPU clock next to the temperature", async () => {
     },
   };
   show(measured);
-  expect(await screen.findByText(/2\.1 of 3\.9 GHz/)).toBeVisible();
-  expect(screen.getByText(/84 °C/)).toBeVisible();
+  expect(await screen.findByText(/2\.1 of 3\.9 GHz/)).toHaveTextContent("84 °C");
 });
 
 test("the Overview omits the CPU clock when the agent does not report it", async () => {
@@ -198,4 +203,47 @@ test("an address that names no enrolled Spark says so", () => {
   nodes = [];
   render(<SparkPage api={{} as ControlApi} id="spk_gone" onNavigate={vi.fn()} onGone={vi.fn()} />);
   expect(screen.getByRole("heading", { name: "Spark not found" })).toBeVisible();
+});
+
+const GIB = 1024 ** 3;
+
+test("the Overview shows the memory split and the GPU gauges from the live sample", () => {
+  show({
+    ...node,
+    telemetry: {
+      freshness: "live",
+      age_seconds: 1,
+      sample: {
+        memory_total_bytes: 100 * GIB,
+        memory_available_bytes: 10 * GIB,
+        gpu_process_memory_bytes: 80 * GIB,
+        system_memory_bytes: 10 * GIB,
+        gpu_utilization_percent: 97,
+        gpu_temperature_c: 69,
+        gpu_clock: { graphics_mhz: 2200 },
+      },
+    },
+  });
+  expect(screen.getByRole("meter", { name: "Kitchen unified memory" })).toHaveAttribute(
+    "aria-valuetext",
+    "Models 80.0 GiB, System 10.0 GiB, Free 10.0 GiB of 100.0 GiB",
+  );
+  expect(screen.getByRole("meter", { name: "Temperature" })).toHaveAttribute(
+    "aria-valuetext",
+    "69 °C, warns at 85\u00a0°C, serious at 90\u00a0°C",
+  );
+  // No clock maximum is reported, so the number shows and no arc is invented.
+  expect(screen.getByRole("meter", { name: "Clock" })).toHaveAttribute(
+    "aria-valuetext",
+    "2,200 MHz",
+  );
+});
+
+test("a Spark that is not reporting live shows Not reported on every gauge", () => {
+  show(node);
+  for (const name of ["Utilisation", "Temperature", "Clock"])
+    expect(screen.getByRole("meter", { name })).toHaveAttribute(
+      "aria-valuetext",
+      expect.stringMatching(/^Not reported/),
+    );
 });

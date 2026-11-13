@@ -21,9 +21,19 @@ export type HistoryPoint = {
   temperature: number | null;
   power: number | null;
   clockMhz: number | null;
+  /** Memory the GPU driver reports for compute processes (the models), and the rest in use (system), in bytes. */
+  modelsBytes: number | null;
+  systemBytes: number | null;
 };
 
-const EMPTY = { utilization: null, temperature: null, power: null, clockMhz: null } as const;
+const EMPTY = {
+  utilization: null,
+  temperature: null,
+  power: null,
+  clockMhz: null,
+  modelsBytes: null,
+  systemBytes: null,
+} as const;
 const bucket = (t: number) => Math.floor(t / BUCKET_SECONDS);
 
 function pointOf(sample: TelemetryPoint): HistoryPoint | null {
@@ -37,6 +47,8 @@ function pointOf(sample: TelemetryPoint): HistoryPoint | null {
     temperature: reading(sample.gpu_temperature_c),
     power: reading(sample.gpu_power_watts),
     clockMhz: reading(sample.gpu_clock?.graphics_mhz),
+    modelsBytes: reading(sample.gpu_process_memory_bytes),
+    systemBytes: reading(sample.system_memory_bytes),
   };
 }
 
@@ -44,7 +56,9 @@ const isMarker = (point: HistoryPoint) =>
   point.utilization === null &&
   point.temperature === null &&
   point.power === null &&
-  point.clockMhz === null;
+  point.clockMhz === null &&
+  point.modelsBytes === null &&
+  point.systemBytes === null;
 
 /**
  * Sorted, within 30 minutes of the newest point, one per bucket (the newest wins), at most 180. Where

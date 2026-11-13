@@ -533,9 +533,9 @@ export function nodeDiskFreeBytes(node: VisualFleetNode): WireNumber | null {
   return node.inventory?.disk_free_bytes ?? node.telemetry?.sample.disk_free_bytes ?? null;
 }
 
-const GIB = 1024 ** 3;
+export const GIB = 1024 ** 3;
 /** Free unified memory under this is a display warning (not an admission rule). */
-const MEMORY_WARN_FREE_BYTES = 8 * GIB;
+export const MEMORY_WARN_FREE_BYTES = 8 * GIB;
 const MEMORY_SERIOUS_FREE_BYTES = 4 * GIB;
 
 export type MemoryLevel = "ok" | "warn" | "serious";

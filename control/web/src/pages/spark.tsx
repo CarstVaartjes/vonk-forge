@@ -131,7 +131,13 @@ export function SparkPage({
             aria-labelledby={`spark-tab-${tab}`}
           >
             {tab === "overview" && (
-              <SparkOverview api={api} node={node} now={fleet.now} range={range} />
+              <SparkOverview
+                api={api}
+                node={node}
+                now={fleet.now}
+                range={range}
+                color={sparkColor(index)}
+              />
             )}
             {tab === "settings" && (
               <SparkSettings api={api} node={node} onChanged={fleet.retry} onRemoved={onGone} />

@@ -23,3 +23,14 @@
 .chart-table{margin-top:.5rem;font-size:.75rem}
 .chart-table th,.chart-table td{padding:.3rem .5rem}
 @media(forced-colors:active){.chart-halo{display:none!important}.chart-line{stroke:CanvasText!important}.chart-dot{fill:CanvasText!important;stroke:Canvas}.column{fill:CanvasText}}
+.arc-gauge{display:grid;justify-items:center;min-width:0;text-align:center}
+.arc-gauge-dial{position:relative;width:100%;max-width:11rem}
+.arc-gauge svg{display:block;width:100%;height:auto}
+.arc-track,.arc-value{fill:none;stroke-width:8;stroke-linecap:round}.arc-track{stroke:var(--track)}
+.arc-tick{stroke-width:2.5}.arc-tick-warn{stroke:var(--warn)}.arc-tick-bad{stroke:var(--bad)}.arc-tick-limit{stroke:var(--ink)}
+.arc-gauge-text{display:grid;gap:.1rem;justify-items:center}.arc-gauge-dial svg+.arc-gauge-text{position:absolute;inset:0;align-content:center;padding-bottom:1.4rem}
+.arc-gauge-text strong{font-size:1.5rem;letter-spacing:-.02em;font-weight:600}.arc-gauge-text span{color:var(--muted);font-size:.8125rem}
+.arc-gauge-caption{margin:.25rem 0 0;color:var(--muted);font-size:.8125rem}
+.stacked-area{display:block;width:100%;height:auto;overflow:visible}
+.stack-layer{stroke:var(--panel);stroke-width:2;stroke-linejoin:round}
+@media(forced-colors:active){.arc-value{stroke:Highlight!important}.arc-tick{stroke:CanvasText}.stack-layer{fill:CanvasText!important}}

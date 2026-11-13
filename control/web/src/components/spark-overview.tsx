@@ -9,8 +9,11 @@ import {
   nodeStatus,
   nodeSwap,
 } from "../lib/fleet";
+import { useTelemetryHistory } from "../hooks/use-telemetry-history";
 import { InstallationReconcile } from "./installation-reconcile";
 import { MetricsChart } from "./metrics-chart";
+import { SparkGpuNow } from "./spark-gpu-now";
+import { SparkMemory } from "./spark-memory";
 import { StatusPill } from "./status-pill";
 
 /** The Overview tab: the Spark's trends, its readings and what needs attention. */
@@ -19,16 +22,23 @@ export function SparkOverview({
   node,
   now,
   range,
+  color,
 }: {
   api: ControlApi;
   node: VisualFleetNode;
   now: Date;
   range: MetricRange;
+  color: string;
 }) {
   const cpu = nodeCpuClock(node);
   const status = nodeStatus(node, now);
+  const { points } = useTelemetryHistory({ api, nodeId: node.id, telemetry: node.telemetry, now });
   return (
     <>
+      <div className="spark-panels">
+        <SparkMemory node={node} points={points} now={now} />
+        <SparkGpuNow node={node} points={points} now={now} color={color} />
+      </div>
       <MetricsChart api={api} node={node.id} range={range} />
       <dl className="spark-facts">
         <div>
