@@ -955,6 +955,7 @@ async fn an_expired_spark_copy_is_recopied_from_the_controller_on_the_next_load(
         None,
         &|| Some((500_000, 1_000_000)),
         &|| {},
+        &crate::store_retention::tests::UserManager::default(),
     );
     assert_eq!(swept.bytes, model.len() as u64);
     assert!(!first.model_paths[0].exists());

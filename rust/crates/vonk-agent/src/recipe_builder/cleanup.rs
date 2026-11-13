@@ -75,23 +75,11 @@ fn observe_unit<R: ProcessRunner + ?Sized>(
         String::from_utf8(output.stdout)
             .map_err(|_| format!("systemctl {query} output is unreadable"))
     };
-    let text = systemctl(
-        "list-units",
-        vec![
-            "--user".into(),
-            "list-units".into(),
-            "--all".into(),
-            "--plain".into(),
-            "--no-legend".into(),
-            "--no-pager".into(),
-            "--full".into(),
-            unit.into(),
-        ],
-    )?;
-    if text.trim().is_empty() {
+    let names = list_units(runner, &[unit], deadline).map_err(|error| error.to_string())?;
+    if names.is_empty() {
         return Ok(None);
     }
-    if text.lines().count() != 1 || text.split_whitespace().next() != Some(unit) {
+    if names != [unit] {
         return Err("systemctl list-units output is unreadable".into());
     }
     let text = systemctl(
@@ -455,6 +443,141 @@ fn build_units(request: &RecipeBuildCleanupRequest) -> [String; 3] {
         format!("vonk-runtime-adapter-{}.service", request.build_id),
         format!("vonk-recipe-build-{}-e.service", request.build_id),
     ]
+}
+
+/// Crash-only backstop for build effects that no build unit owns.
+///
+/// Rootless Podman starts each container (`libpod-*`) and its network
+/// namespace (`rootless-netns-*`) in scopes of their own beside the unit that
+/// ran it, so stopping that unit, or an agent restart that skips the
+/// in-process stop, leaves them running. In the agent's user manager only
+/// builds run containers and networks, and only inside build units, with state
+/// in the build's own runroot (loads run on Docker through the helper). So with
+/// no build unit live and no build beside the lane (`beside`, read after the
+/// units) every such scope is a leftover. An egress unit (`-e`) whose build is not beside
+/// the lane and whose recipe unit and runtime adapter are both gone serves
+/// nothing and is stopped; its scopes follow on a later pass. Any listing that
+/// cannot be read stops nothing, and a scope already stopped or failed is not
+/// asked again. Returns the units it asked to stop.
+pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    beside: &dyn Fn() -> std::collections::BTreeSet<Uuid>,
+    deadline: Instant,
+) -> Result<Vec<String>, RecipeBuildError> {
+    let scopes = list_units(
+        runner,
+        &[
+            "--state=active",
+            "libpod-*.scope",
+            "rootless-netns-*.scope",
+            // Never `podman-pause-*`: direct Podman calls share one pause
+            // process through `/run/user/<uid>/libpod/tmp/pause.pid`, and once
+            // it is stopped every build with a fresh runroot fails to join it
+            // ("cannot re-exec process to join the existing user namespace").
+        ],
+        deadline,
+    )?;
+    let mut live = Vec::new();
+    // One unit at a time on purpose: every query goes to the same single-
+    // threaded user manager, so fanning out would only queue there.
+    for unit in list_units(
+        runner,
+        &["vonk-recipe-build-*", "vonk-runtime-adapter-*"],
+        deadline,
+    )? {
+        match observe_unit(runner, &unit, deadline) {
+            Ok(None) => {}
+            Ok(Some(_)) => live.push(unit),
+            Err(cause) => {
+                return Err(RecipeBuildError::CleanupPending {
+                    subject: unit,
+                    observed: cause,
+                });
+            }
+        }
+    }
+    let beside = beside();
+    let stop = if live.is_empty() && beside.is_empty() {
+        scopes
+    } else {
+        live.iter()
+            .filter(|unit| {
+                unit.strip_prefix("vonk-recipe-build-")
+                    .and_then(|rest| rest.strip_suffix("-e.service"))
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .is_some_and(|build_id| {
+                        let request = RecipeBuildCleanupRequest {
+                            build_id,
+                            operation_id: build_id,
+                        };
+                        !beside.contains(&build_id)
+                            && build_units(&request)[..2]
+                                .iter()
+                                .all(|owner| !live.contains(owner))
+                    })
+            })
+            .cloned()
+            .collect()
+    };
+    if !stop.is_empty() {
+        let mut arguments = vec![
+            "--user".into(),
+            "--no-block".into(),
+            vonk_agent_protocol::generated::ProfileChildPhase::Stop
+                .as_str()
+                .into(),
+        ];
+        arguments.extend(stop.iter().cloned());
+        // Submitted, not awaited: the next pass observes what remains.
+        let _ = runner.run(
+            Program::Systemctl,
+            &arguments,
+            phase_time(deadline, Duration::from_secs(5))?,
+        );
+    }
+    Ok(stop)
+}
+
+/// The names of the user manager's loaded units matching `patterns` (which
+/// may start with a state filter).
+fn list_units<R: ProcessRunner + ?Sized>(
+    runner: &R,
+    patterns: &[&str],
+    deadline: Instant,
+) -> Result<Vec<String>, RecipeBuildError> {
+    let mut arguments: Vec<String> = [
+        "--user",
+        "list-units",
+        "--all",
+        "--plain",
+        "--no-legend",
+        "--no-pager",
+        "--full",
+    ]
+    .map(String::from)
+    .into();
+    arguments.extend(patterns.iter().map(|pattern| (*pattern).to_owned()));
+    let unreadable = |observed: String| RecipeBuildError::CleanupPending {
+        subject: patterns.join(" "),
+        observed,
+    };
+    let output = runner
+        .run(
+            Program::Systemctl,
+            &arguments,
+            phase_time(deadline, Duration::from_secs(5))?,
+        )
+        .map_err(|error| unreadable(process_error_diagnostic(&error).into()))?;
+    if !output.success {
+        return Err(unreadable("systemctl list-units failed".into()));
+    }
+    let text = String::from_utf8(output.stdout)
+        .map_err(|_| unreadable("systemctl list-units output is unreadable".into()))?;
+    Ok(text
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .map(str::to_owned)
+        .collect())
 }
 
 pub fn observe_build_running<R: ProcessRunner + ?Sized>(
