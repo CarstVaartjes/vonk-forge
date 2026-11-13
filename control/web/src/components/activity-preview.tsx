@@ -42,8 +42,13 @@ export function ActivityPreview({
     const read = () =>
       api.operations(undefined, controller.signal).then(
         (response) => {
+          // Unknown membership is not "nothing happened".
           if (!controller.signal.aborted)
-            setRows(activityPreviewRows(response.operations ?? [], names.current, ROWS));
+            setRows(
+              response.operations === null
+                ? null
+                : activityPreviewRows(response.operations, names.current, ROWS),
+            );
         },
         () => {
           if (!controller.signal.aborted) setRows(null);

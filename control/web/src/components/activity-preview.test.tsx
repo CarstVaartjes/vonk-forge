@@ -8,7 +8,7 @@ const nodes = [
 ] as unknown as VisualFleetNode[];
 
 function operation(id: string, state: string, createdAt: string) {
-  return { id, kind: "run_switch", state, created_at: createdAt, node_ids: ["spk_a"] };
+  return { id, kind: "recipe.start", state, created_at: createdAt, node_ids: ["spk_a"] };
 }
 const apiWith = (operations: unknown[]) =>
   ({
@@ -22,18 +22,24 @@ test("shows the newest seven activities in the Activity page's words, newest fir
   rows.push(operation("op-fail", "failed", "2026-11-12T12:30:00Z"));
   render(<ActivityPreview api={apiWith(rows)} nodes={nodes} now={NOW} />);
   expect(await screen.findAllByRole("listitem")).toHaveLength(7);
-  expect(screen.getAllByText("Run Switch · Completed").length).toBe(6);
-  expect(screen.getByText("Run Switch · Failed")).toBeInTheDocument();
+  expect(screen.getAllByText("Recipe Start · Completed").length).toBe(6);
+  expect(screen.getByText("Recipe Start · Failed")).toBeInTheDocument();
   expect(screen.getByText("Unsuccessful")).toBeInTheDocument();
   expect(screen.getAllByText("spark-3542")).toHaveLength(7);
   expect(screen.getByRole("link", { name: "View all" })).toHaveAttribute("href", "/activity");
 });
 
-test("says so when there is no activity, and when it cannot be read", async () => {
+test("says so when there is no activity, when it cannot be read, and when membership is unknown", async () => {
   const { unmount } = render(<ActivityPreview api={apiWith([])} nodes={nodes} now={NOW} />);
   expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
   unmount();
   const failing = { operations: () => Promise.reject(new Error("down")) } as unknown as ControlApi;
-  render(<ActivityPreview api={failing} nodes={nodes} now={NOW} />);
+  const { unmount: unmount2 } = render(<ActivityPreview api={failing} nodes={nodes} now={NOW} />);
+  expect(await screen.findByText("Activity is not available right now.")).toBeInTheDocument();
+  unmount2();
+  const unknown = {
+    operations: async () => ({ operations: null, total: null }),
+  } as unknown as ControlApi;
+  render(<ActivityPreview api={unknown} nodes={nodes} now={NOW} />);
   expect(await screen.findByText("Activity is not available right now.")).toBeInTheDocument();
 });
