@@ -669,6 +669,30 @@ fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
 }
 
 #[test]
+fn a_busy_job_start_waits_at_a_pre_launch_stage_for_reissue() {
+    // Wrong implementation: the busy refusal was re-observed, found no
+    // container and ended UncertainEffect, which the Controller never reissues.
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::InstallationReconciliationBusy,
+        diagnostic: None,
+        process_logs: None,
+    };
+    let refused = refused_job_start(&error).expect("a pre-launch refusal ends this attempt");
+    let failure = refused.failure().expect("a failure");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RuntimeProjection));
+    let possibly_effect = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::OperationFailed,
+        diagnostic: None,
+        process_logs: None,
+    };
+    assert!(refused_job_start(&possibly_effect).is_none());
+}
+
+#[test]
 fn job_outputs_leave_out_the_runtime_cache_mountpoint() {
     // The container runtime creates the cache mountpoint in the host output
     // root, because the cache mount nests inside the `/outputs` bind.
