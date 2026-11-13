@@ -1,6 +1,6 @@
 .workload-unit>header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem;padding:1.1rem 1.5rem .25rem}
 .workload-unit h2{margin:0;font-size:1.25rem;letter-spacing:-.02em}
-.alias{padding:.15rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-in);background:var(--recess);color:var(--ink);font:700 .875rem/1.4 var(--mono)}
+.unit-alias{padding:.15rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-in);background:var(--recess);color:var(--ink);font:700 .875rem/1.4 var(--mono)}
 .unit-facts{color:var(--muted);font-size:.8125rem}
 .unit-sparks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr))}
 .unit-sparks>.spark-card+.spark-card{border-left:1px solid var(--line)}

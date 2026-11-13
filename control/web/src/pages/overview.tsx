@@ -86,13 +86,14 @@ export function OverviewPage({
 
   const nodes = fleet.snapshot?.nodes ?? [];
   const { units, idle } = groupByWorkload(nodes);
+  const order = new Map(nodes.map((node, index) => [node.id, index]));
   const card = (node: (typeof nodes)[number]) => (
     <SparkCard
       key={node.id}
       api={api}
       node={node}
       now={fleet.now}
-      index={nodes.indexOf(node)}
+      index={order.get(node.id) ?? 0}
       onOpen={selectSpark}
     />
   );
