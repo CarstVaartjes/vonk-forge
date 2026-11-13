@@ -166,6 +166,7 @@ fn unprivileged_retention_child() {
             Some(&verdict),
             &|| ROOMY,
             &|| {},
+            &super::UserManager::default(),
             &|_| Ok(false),
             &remove,
         )
