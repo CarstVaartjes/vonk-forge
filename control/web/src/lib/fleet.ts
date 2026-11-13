@@ -335,7 +335,7 @@ function isServing(run: VisualFleetNode["loaded"][number]): boolean {
 
 /**
  * The Fleet in one line: Sparks online, unified memory free, workloads serving, and what needs
- * attention (Sparks, then firing alerts). `vonkctl fleet` prints the same line.
+ * attention (Sparks, running workloads not healthy, then firing alerts). `vonkctl fleet` prints the same line.
  */
 export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   if (fleet.nodes.length === 0) return NO_SPARKS;
@@ -344,9 +344,19 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
     fleet.nodes.flatMap((node) => node.loaded.filter(isServing).map((run) => run.run_id)),
   ).size;
   const sparks = fleet.nodes.filter((node) => nodeNeedsAttention(node, now)).length;
+  const unhealthy = new Set(
+    fleet.nodes.flatMap((node) =>
+      node.loaded
+        .filter((run) => run.run_state === RunState.RUNNING && run.healthy !== true)
+        .map((run) => run.run_id),
+    ),
+  ).size;
   const alerts = fleet.attention?.length ?? 0;
   const attention = [
     sparks > 0 ? `${sparks} ${sparks === 1 ? "Spark needs" : "Sparks need"} attention` : null,
+    unhealthy > 0
+      ? `${unhealthy} ${unhealthy === 1 ? "workload needs" : "workloads need"} attention`
+      : null,
     alerts > 0 ? `${alerts} ${alerts === 1 ? "alert" : "alerts"} firing` : null,
     alerts === 0 && fleet.attention_unavailable ? "alerts not reported" : null,
   ].filter((part): part is string => part !== null);

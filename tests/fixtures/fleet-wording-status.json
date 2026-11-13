@@ -191,7 +191,7 @@
           }
         }
       ],
-      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no workloads serving · nothing needs attention"
+      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no workloads serving · 2 workloads need attention"
     },
     {
       "name": "a stale inventory needs attention",
