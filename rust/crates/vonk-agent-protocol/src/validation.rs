@@ -67,12 +67,12 @@ pub const MAX_REPORTED_RUNS: usize = 4096;
 impl InventoryRequest {
     pub fn validate(&self) -> Result<(), ProtocolError> {
         if self.schema_version != 1
-            || self.disk_total_bytes > 16 * 1024_u64.pow(4)
-            || self.disk_free_bytes > 16 * 1024_u64.pow(4)
-            || self.host_memory_total_bytes > 16 * 1024_u64.pow(4)
-            || self.host_memory_free_bytes > 16 * 1024_u64.pow(4)
-            || self.gpu_memory_total_bytes > 16 * 1024_u64.pow(4)
-            || self.gpu_memory_free_bytes > 16 * 1024_u64.pow(4)
+            || self.disk_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.disk_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.host_memory_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.host_memory_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.gpu_memory_total_bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.gpu_memory_free_bytes > MAX_TELEMETRY_CAPACITY_BYTES
             || self.gpu_count > 64
             || self.disk_free_bytes > self.disk_total_bytes
             || self.host_memory_free_bytes > self.host_memory_total_bytes
@@ -100,7 +100,9 @@ impl InventoryRequest {
                 .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
             || self.installation_bytes.as_ref().is_some_and(|sizes| {
                 sizes.len() > MAX_REPORTED_INSTALLATIONS
-                    || sizes.iter().any(|size| size.bytes > 16 * 1024_u64.pow(4))
+                    || sizes
+                        .iter()
+                        .any(|size| size.bytes > MAX_TELEMETRY_CAPACITY_BYTES)
             })
             || self
                 .runs
@@ -108,7 +110,7 @@ impl InventoryRequest {
                 .is_some_and(|names| names.len() > MAX_REPORTED_RUNS)
             || self
                 .unused_model_bytes
-                .is_some_and(|bytes| bytes > 16 * 1024_u64.pow(4))
+                .is_some_and(|bytes| bytes > MAX_TELEMETRY_CAPACITY_BYTES)
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
             || self
                 .fabric_bandwidth_mbps
@@ -254,7 +256,7 @@ impl DistributionObject {
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
             || !lower_hex(&self.sha256, 64)
-            || self.bytes > 16 * 1024_u64.pow(4)
+            || self.bytes > MAX_TELEMETRY_CAPACITY_BYTES
             || self.bytes == 0
                 && !(self.kind == "model"
                     && self.sha256

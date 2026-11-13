@@ -29,6 +29,8 @@ from .wire_model import WireModel
 
 # Authenticated transport memory safeguard.
 MAX_TELEMETRY_REPORT_BYTES = 1024 * 1024
+# The one byte-capacity bound for telemetry, inventory and display-memory
+# evidence; Rust reads it from the exported schema (build.rs).
 MAX_TELEMETRY_CAPACITY_BYTES = 16 * 1024**4
 
 

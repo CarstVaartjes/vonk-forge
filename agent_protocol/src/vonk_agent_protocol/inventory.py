@@ -20,6 +20,7 @@ from .optional_evidence import (
 from .reason_codes import AgentEvidenceCode
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
+from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from .wire_model import WireEnum, WireModel, strict_json_datetime
 
 
@@ -69,7 +70,7 @@ class InstallationBytes(WireModel):
     )
 
     installation_id: InstallationId
-    bytes: int = Field(ge=0, le=16 * 1024**4)
+    bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
 
 
 class NetworkInterface(WireModel):
@@ -121,7 +122,7 @@ class ModelStoreObject(WireModel):
     """Measured object identity in the Spark model store; absence needs a full scan."""
 
     sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
-    bytes: int = Field(ge=0, le=16 * 1024**4)
+    bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
 
 
 class InventoryRequest(OptionalEvidenceModel, WireModel):
@@ -171,12 +172,12 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
 
     schema_version: Literal[1]
     observed_at: datetime
-    disk_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    disk_free_bytes: int = Field(ge=0, le=16 * 1024**4)
-    host_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    host_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
-    gpu_memory_total_bytes: int = Field(ge=0, le=16 * 1024**4)
-    gpu_memory_free_bytes: int = Field(ge=0, le=16 * 1024**4)
+    disk_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    disk_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    host_memory_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    host_memory_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_memory_total_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
+    gpu_memory_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     gpu_count: int = Field(ge=0, le=64)
     # None means no health observation, never inferred from metric support.
     gpu_health: GpuHealth | None = None
@@ -212,7 +213,9 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     # Bytes of the model objects no installation links or names: space the
     # Spark frees itself, least recently used first, before a claim writes.
     # None: the agent predates this evidence or could not read every plan.
-    unused_model_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
+    unused_model_bytes: int | None = Field(
+        default=None, ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES
+    )
     model_objects: list[ModelStoreObject] | None = None
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
@@ -273,7 +276,7 @@ class StoreRetentionRequest(WireModel):
 
     issued_at: int = Field(ge=0, le=2**53 - 1)
     expires_at: int = Field(ge=0, le=2**53 - 1)
-    required_free_bytes: int = Field(ge=0, le=16 * 1024**4)
+    required_free_bytes: int = Field(ge=0, le=MAX_TELEMETRY_CAPACITY_BYTES)
     protected_model_objects: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
     protected_image_addresses: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]]
 
