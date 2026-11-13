@@ -1,0 +1,17 @@
+.stat-card{min-width:0;padding:1.1rem 1.25rem 1.25rem}
+.stat-card>header{display:flex;flex-wrap:wrap;align-items:baseline;gap:.25rem .5rem}
+.stat-card h2{margin:0;font-size:1rem}
+.stat-card h2+small{color:var(--faint);font-size:.8125rem}
+.stat-fig{margin:.9rem 0 0;font-size:2rem;font-weight:650;letter-spacing:-.03em;line-height:1.15}
+.stat-fig small{margin-left:.25em;color:var(--muted);font-size:.5em;font-weight:500;letter-spacing:0}
+.stat-caption{margin:.35rem 0 0;color:var(--muted);font-size:.8125rem}
+.stat-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem 1rem;margin:1.25rem 0 0;padding-top:1rem;border-top:1px solid var(--line)}
+.stat-facts dt{color:var(--faint);font-size:.75rem}
+.stat-facts dd{margin:0;font-size:.9375rem;font-weight:650}
+.stat-table{margin-top:1rem}
+.stat-table table{border:0;background:transparent}
+.stat-table thead th{color:var(--faint);font:700 .6875rem/1.4 var(--mono);letter-spacing:.06em;text-transform:uppercase}
+.stat-table tbody th{font-weight:600}
+.stat-table td,.stat-table th{padding:.5rem .5rem .5rem 0}
+.stat-table td small{display:block;color:var(--muted)}
+.stat-table .meter-cell{min-width:5rem}

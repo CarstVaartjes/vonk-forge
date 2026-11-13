@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { FleetPulse } from "./fleet-pulse";
-import type { ControlApi, MetricsSeriesResponse, VisualFleetNode } from "../api/types";
+import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
 
 const GIB = 1024 ** 3;
 
@@ -44,14 +44,10 @@ const tokens = {
     { labels: { alias: "fast" }, points: [], summary: { total: 840_000 } },
   ],
 } as unknown as MetricsSeriesResponse;
-const api = (response: MetricsSeriesResponse | null) =>
-  ({
-    metricsSeries: () => (response ? Promise.resolve(response) : Promise.reject(new Error("no"))),
-  }) as unknown as ControlApi;
 const tile = (name: string) => screen.getByRole("region", { name });
 
-test("the band sums the online Sparks' readings and the gateway's per-model totals", async () => {
-  render(<FleetPulse api={api(tokens)} nodes={fleet} />);
+test("the band sums the online Sparks' readings and the gateway's per-model totals", () => {
+  render(<FleetPulse tokens={tokens} nodes={fleet} />);
   expect(tile("GPU power")).toHaveTextContent("77.0W2 Sparks");
   expect(tile("Unified memory")).toHaveTextContent("212.0GiB of 240.0 GiB198.0 GiB in models");
   expect(
@@ -60,7 +56,7 @@ test("the band sums the online Sparks' readings and the gateway's per-model tota
     "aria-valuetext",
     "Models 198.0 GiB, System 14.0 GiB, Free 28.0 GiB of 240.0 GiB",
   );
-  expect(await within(tile("Tokens, 24 h")).findByText("1.84")).toBeInTheDocument();
+  expect(within(tile("Tokens, 24 h")).getByText("1.84")).toBeInTheDocument();
   expect(tile("Tokens, 24 h")).toHaveTextContent("≈1.84M generated");
   expect(tile("Output now")).toHaveTextContent("Not reported");
   expect(tile("GPU energy, 24 h")).toHaveTextContent("Not reported");
@@ -79,12 +75,12 @@ test("the 8 GiB warning is a Spark's: a fleet sum of low free memory shows no wa
       system_memory_bytes: 8 * GIB,
     }),
   ];
-  render(<FleetPulse api={api(null)} nodes={low} />);
+  render(<FleetPulse tokens={null} nodes={low} />);
   expect(screen.queryByText(/Under \d GiB free/)).toBeNull();
 });
 
 test("without readings every figure says Not reported", () => {
-  render(<FleetPulse api={api(null)} nodes={[spark("c", {}, false)]} />);
+  render(<FleetPulse tokens={null} nodes={[spark("c", {}, false)]} />);
   for (const name of ["GPU power", "Unified memory", "Tokens, 24 h"])
     expect(tile(name)).toHaveTextContent("Not reported");
 });

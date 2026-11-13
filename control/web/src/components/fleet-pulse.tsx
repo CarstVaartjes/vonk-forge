@@ -1,7 +1,6 @@
 import "./fleet-pulse.css";
 import type { ReactNode } from "react";
-import type { ControlApi, VisualFleetNode } from "../api/types";
-import { useMetricSeries } from "../hooks/use-metric-series";
+import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
 import { fleetMemory, fleetPower, formatBytes } from "../lib/fleet";
 import { compactCount } from "../lib/metric-units";
 import { Estimate } from "./estimate";
@@ -47,13 +46,13 @@ function coverage(reporting: number, online: number): string {
  * Not reported. The engine's output speed and GPU energy wait for their metrics.
  */
 export function FleetPulse({
-  api,
+  tokens,
   nodes,
 }: {
-  api: Pick<ControlApi, "metricsSeries">;
+  /** The gateway's generated tokens per model over 24 hours, as read by the page. */
+  tokens: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
-  const tokens = useMetricSeries(api, "output_token_rate", "24h");
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
   const power = fleetPower(nodes);
   const memory = fleetMemory(nodes);

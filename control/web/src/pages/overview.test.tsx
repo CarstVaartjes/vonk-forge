@@ -66,6 +66,7 @@ test("Fleet creates a one-use grant and shows the exact Spark command, token, an
       api={
         {
           visualFleet: vi.fn(),
+          metricsSeries: api.metricsSeries,
           enrollFleetNode,
           enrollmentStatus: vi.fn().mockResolvedValue({ state: "pending" }),
         } as unknown as ControlApi
@@ -107,7 +108,15 @@ test("Fleet reports grant creation failures without losing the form", async () =
     .mockRejectedValue(new Error("Control API returned 503: enrollment unavailable"));
   render(
     <ToastProvider>
-      <OverviewPage api={{ visualFleet: vi.fn(), enrollFleetNode } as unknown as ControlApi} />
+      <OverviewPage
+        api={
+          {
+            visualFleet: vi.fn(),
+            metricsSeries: api.metricsSeries,
+            enrollFleetNode,
+          } as unknown as ControlApi
+        }
+      />
     </ToastProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Enroll Spark" }));

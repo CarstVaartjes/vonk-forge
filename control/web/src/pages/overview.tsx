@@ -2,12 +2,15 @@ import "./overview.css";
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
+import { useMetricSeries } from "../hooks/use-metric-series";
 import { useSelectedSpark } from "../hooks/use-selected-spark";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { fleetStatusLine } from "../lib/fleet";
 import { ActivityPreview } from "../components/activity-preview";
 import { AttentionItem } from "../components/attention-item";
+import { EnergyCard } from "../components/energy-card";
 import { FleetPulse } from "../components/fleet-pulse";
+import { TokensCard } from "../components/tokens-card";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { WorkloadUnits } from "../components/workload-units";
 import { ConfirmDialog } from "../components/confirm-dialog";
@@ -30,6 +33,7 @@ export function OverviewPage({
   onNavigate?(event: MouseEvent<HTMLAnchorElement>, path: string): void;
 }) {
   const fleet = useFleetStream(api);
+  const tokens = useMetricSeries(api, "output_token_rate", "24h");
   const live = liveStatus(fleet);
   useEffect(() => onLive?.(live), [onLive, live]);
   useEffect(() => () => onLive?.(null), [onLive]);
@@ -158,7 +162,7 @@ export function OverviewPage({
       {fleet.snapshot && (
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
-      {fleet.snapshot && nodes.length > 0 && <FleetPulse api={api} nodes={nodes} />}
+      {fleet.snapshot && nodes.length > 0 && <FleetPulse tokens={tokens} nodes={nodes} />}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
           title="No Sparks enrolled"
@@ -191,6 +195,10 @@ export function OverviewPage({
               live={live === "live"}
               onOpen={selectSpark}
             />
+            <div className="overview-cards">
+              <EnergyCard nodes={nodes} />
+              <TokensCard tokens={tokens} nodes={nodes} />
+            </div>
           </div>
           <div className="overview-activity">
             <ActivityPreview
