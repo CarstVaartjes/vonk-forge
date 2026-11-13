@@ -6,7 +6,25 @@ use std::{
     path::Path,
     time::{Duration, Instant, SystemTime},
 };
-use vonk_agent::store_retention::{LatestVerdict, sweep};
+use vonk_agent::{
+    process::{ProcessError, ProcessOutput, ProcessRunner, Program},
+    store_retention::{LatestVerdict, sweep},
+};
+
+/// The probe drives the model store only: the user manager it reports holds
+/// no build unit and no Podman scope, so it never stops the host's.
+struct IdleUserManager;
+
+impl ProcessRunner for IdleUserManager {
+    fn run(&self, _: Program, _: &[String], _: Duration) -> Result<ProcessOutput, ProcessError> {
+        Ok(ProcessOutput {
+            exit_code: None,
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        })
+    }
+}
 
 fn free(root: &Path, capacity: u64) -> Option<(u64, u64)> {
     let mut used = 0_u64;
@@ -37,6 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         verdict.fresh().as_ref(),
         &|| free(root, capacity),
         &|| {},
+        &IdleUserManager,
     );
     println!(
         "{}",

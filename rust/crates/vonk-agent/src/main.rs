@@ -727,6 +727,7 @@ async fn collect_stores(
             untracked.as_ref(),
             &|| vonk_agent::store_retention::disk_usage(&data_root),
             &systemd_notify::watchdog,
+            &SystemProcessRunner,
         )
     })
     .await

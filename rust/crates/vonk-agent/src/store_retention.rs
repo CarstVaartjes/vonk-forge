@@ -311,7 +311,8 @@ pub fn installation_sizes(
 /// `now`, then relieve low space from younger unused model objects. `untracked` is the Controller's fresh
 /// verdict (`None`: there is none, and no installation or run scope leaves). `disk`
 /// observes `(free, total)`; `tick` runs after each removal (the service
-/// watchdog).
+/// watchdog). `runner` reaches the agent's user manager, where build units
+/// and the Podman scopes they leave are observed and stopped.
 pub fn sweep(
     data_root: &Path,
     now: SystemTime,
@@ -319,6 +320,7 @@ pub fn sweep(
     untracked: Option<&Untracked>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
+    runner: &dyn crate::process::ProcessRunner,
 ) -> Swept {
     sweep_with(
         data_root,
@@ -327,6 +329,7 @@ pub fn sweep(
         untracked,
         disk,
         tick,
+        runner,
         &|id| {
             let id = uuid::Uuid::parse_str(id).map_err(|error| error.to_string())?;
             crate::host_runtime::installation_in_use(id).map_err(|error| error.to_string())
@@ -343,6 +346,7 @@ fn sweep_with(
     untracked: Option<&Untracked>,
     disk: &dyn Fn() -> Option<(u64, u64)>,
     tick: &dyn Fn(),
+    runner: &dyn crate::process::ProcessRunner,
     in_use: &dyn Fn(&str) -> Result<bool, String>,
     remover: &dyn Fn(
         &vonk_agent_protocol::generated::AgentStoreRemovalRequest,
@@ -381,7 +385,7 @@ fn sweep_with(
                 pass.ended(&root, &|name, _| name != "models");
                 pass.ended(&objects, &|name, metadata| !model_object(name, metadata));
             }
-            BuildStaging => pass.build_staging(&root, &crate::process::SystemProcessRunner),
+            BuildStaging => pass.build_staging(&root, runner),
             BaseImages => {
                 let images = root.join("sha256");
                 pass.ended(&images, &|name, _| name.starts_with(".damaged-"));
@@ -838,8 +842,27 @@ impl Pass<'_> {
     /// A crashed build can leave private Podman databases that no longer open.
     /// Their contents are not liveness: only the exact owning cgroups are.
     /// A build beside the lane keeps its tree through its live units; unknown
-    /// systemd evidence keeps the tree too.
-    fn build_staging(&mut self, root: &Path, runner: &impl crate::process::ProcessRunner) {
+    /// systemd evidence keeps the tree too. First, build effects no build owns
+    /// any more are stopped (an agent restart skips a build's own stop).
+    fn build_staging(
+        &mut self,
+        root: &Path,
+        runner: &(impl crate::process::ProcessRunner + ?Sized),
+    ) {
+        match crate::recipe_builder::stop_orphaned_build_effects(
+            runner,
+            &|| crate::executor::builds_beside(self.data_root),
+            self.deadline,
+        ) {
+            Ok(stopped) if !stopped.is_empty() => eprintln!(
+                "vonk-agent: stopping build effects no build owns: {}",
+                stopped.join(" ")
+            ),
+            Ok(_) => {}
+            Err(error) => eprintln!(
+                "vonk-agent: orphaned build effects unobserved: {error}; retried next pass"
+            ),
+        }
         let beside = crate::executor::builds_beside(self.data_root);
         for (name, metadata) in self.list(root).into_iter().flatten() {
             if !self

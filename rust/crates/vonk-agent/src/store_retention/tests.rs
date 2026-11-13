@@ -50,6 +50,7 @@ fn sweep(
         untracked,
         disk,
         tick,
+        &UserManager::default(),
         &|id| {
             Ok(fs::read_dir(root.join("run-metadata"))
                 .into_iter()
@@ -64,6 +65,78 @@ fn sweep(
         },
         &|request| local_remove(root, request),
     )
+}
+
+/// The agent's user manager: `units` are live build units, `scopes` are
+/// Podman's running scopes and `ended` its stopped or failed ones; `stops`
+/// records each stop submitted. The default is an
+/// idle manager with nothing to stop.
+#[derive(Default)]
+pub(crate) struct UserManager {
+    units: Vec<String>,
+    scopes: Vec<String>,
+    ended: Vec<String>,
+    unavailable: bool,
+    stops: std::cell::RefCell<Vec<String>>,
+}
+
+impl crate::process::ProcessRunner for UserManager {
+    fn run(
+        &self,
+        program: crate::process::Program,
+        args: &[String],
+        _: Duration,
+    ) -> Result<crate::process::ProcessOutput, crate::process::ProcessError> {
+        assert_eq!(program, crate::process::Program::Systemctl);
+        let words = |names: &[String]| {
+            names
+                .iter()
+                .map(|name| format!("{name} loaded active running\n"))
+                .collect::<String>()
+        };
+        let stdout = if let Some(at) = args.iter().position(|arg| arg == "stop") {
+            self.stops
+                .borrow_mut()
+                .extend(args[at + 1..].iter().cloned());
+            String::new()
+        } else if args.iter().any(|arg| arg == "show") {
+            "LoadState=loaded\nActiveState=active\nMainPID=7\nControlGroup=/build\n".into()
+        } else {
+            let pattern = args.last().unwrap();
+            if pattern.ends_with(".scope") {
+                let mut scopes = self.scopes.clone();
+                if !args.iter().any(|arg| arg == "--state=active") {
+                    scopes.extend(self.ended.iter().cloned());
+                }
+                // systemd matches each requested glob.
+                let requested = |scope: &String| {
+                    args.iter().any(|glob| {
+                        glob.split_once('*').is_some_and(|(prefix, suffix)| {
+                            scope.starts_with(prefix) && scope.ends_with(suffix)
+                        })
+                    })
+                };
+                scopes.retain(requested);
+                words(&scopes)
+            } else if pattern.contains('*') {
+                words(&self.units)
+            } else {
+                words(
+                    &self.units[..]
+                        .iter()
+                        .filter(|unit| *unit == pattern)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+            }
+        };
+        Ok(crate::process::ProcessOutput {
+            success: !self.unavailable,
+            stdout: stdout.into_bytes(),
+            stderr: vec![],
+            exit_code: Some(i32::from(self.unavailable)),
+        })
+    }
 }
 
 // Most policy fixtures contain agent-owned bytes. Delegate through the same
@@ -1504,6 +1577,7 @@ fn corrupt_idle_installations_expire_but_live_and_unknown_neighbours_survive() {
             None,
             &|| ROOMY,
             &|| {},
+            &UserManager::default(),
             probe,
             &|request| local_remove(root.path(), request),
         )
@@ -1566,6 +1640,7 @@ fn retention_failure_is_durable_deduplicated_and_clears_after_recovery() {
             Some(&verdict),
             &|| ROOMY,
             &|| {},
+            &UserManager::default(),
             &|_| Ok(false),
             remove,
         )
@@ -1583,4 +1658,71 @@ fn retention_failure_is_durable_deduplicated_and_clears_after_recovery() {
     assert_eq!(collect(&|_| fs::remove_dir_all(&directory)).entries, 1);
     assert!(super::retention_failure(root.path()).is_none());
     assert!(!evidence.exists());
+}
+
+/// One build-staging pass of the agent at `root`; the stops it submitted.
+fn stops_of(root: &Path, manager: UserManager) -> Vec<String> {
+    let mut pass = super::Pass {
+        now: SystemTime::now(),
+        deadline: Instant::now() + Duration::from_secs(60),
+        tick: &|| {},
+        owner: rustix::process::geteuid().as_raw(),
+        swept: Swept::default(),
+        data_root: root,
+        remover: &|_| unreachable!("build staging has no runtime scope"),
+        failure: None,
+    };
+    pass.build_staging(&root.join("build-staging"), &manager);
+    manager.stops.take()
+}
+
+fn names(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+#[test]
+fn podman_scopes_no_build_owns_are_stopped_only_while_no_build_is_live() {
+    // Catches the 2026-10-27 leak: an agent restart mid-build left the egress
+    // proxy, its slirp4netns and one pause process per runroot running for
+    // weeks, because every reaper only looked at the build's own unit names.
+    // The shared pause process stays: stopping it broke every later build
+    // with a fresh runroot (batch #2302 acceptance).
+    let root = tempfile::tempdir().unwrap();
+    let scopes = names(&["libpod-32d5.scope", "rootless-netns-2525.scope"]);
+    let manager = |units: &[&str], unavailable| UserManager {
+        units: names(units),
+        scopes: [&scopes[..], &names(&["podman-pause-0b6c.scope"])].concat(),
+        ended: names(&["libpod-ended.scope"]),
+        unavailable,
+        ..UserManager::default()
+    };
+    assert_eq!(stops_of(root.path(), manager(&[], false)), scopes);
+    let build = format!("vonk-recipe-build-{ORPHAN}.service");
+    assert!(stops_of(root.path(), manager(&[&build], false)).is_empty());
+    assert!(stops_of(root.path(), manager(&[], true)).is_empty());
+    let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
+    assert!(stops_of(root.path(), manager(&[], false)).is_empty());
+}
+
+#[test]
+fn an_egress_unit_whose_build_is_gone_is_stopped_before_its_envelope() {
+    // Catches observation waiting on a proxy that serves no build for the
+    // whole envelope after a restart skipped the build's own stop.
+    let root = tempfile::tempdir().unwrap();
+    let egress = format!("vonk-recipe-build-{ORPHAN}-e.service");
+    let manager = |units: &[&str]| UserManager {
+        units: names(units),
+        scopes: names(&["libpod-32d5.scope"]),
+        ..UserManager::default()
+    };
+    assert_eq!(
+        stops_of(root.path(), manager(&[&egress])),
+        vec![egress.clone()]
+    );
+    let build = format!("vonk-recipe-build-{ORPHAN}.service");
+    assert!(stops_of(root.path(), manager(&[&build, &egress])).is_empty());
+    let adapter = format!("vonk-runtime-adapter-{ORPHAN}.service");
+    assert!(stops_of(root.path(), manager(&[&adapter, &egress])).is_empty());
+    let _beside = crate::executor::BuildBeside::hold(root.path(), ORPHAN.parse().unwrap());
+    assert!(stops_of(root.path(), manager(&[&egress])).is_empty());
 }
