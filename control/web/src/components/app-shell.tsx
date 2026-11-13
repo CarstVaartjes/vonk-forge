@@ -4,8 +4,16 @@ import { AdminMenu } from "./admin-menu";
 import type { CliTokenDownload } from "../api/types";
 import type { LiveStatus } from "../hooks/fleet-stream-state";
 import { BrandMark } from "./brand-mark";
-import { LivePill } from "./live-pill";
+import { StatusPill } from "./status-pill";
 import { ActivityIcon, FleetIcon, LibraryIcon } from "./icons";
+
+const LIVE_TONES = {
+  live: "ok",
+  delayed: "warn",
+  reconnecting: "neutral",
+  stale: "warn",
+  disconnected: "warn",
+} as const;
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
 
@@ -102,7 +110,7 @@ export function AppShell({
           </a>
         </nav>
         <div className="header-utility">
-          {live && <LivePill status={live} />}
+          {live && <StatusPill tone={LIVE_TONES[live]}>{live}</StatusPill>}
           <span className="authority-note">Local Controller</span>
           {operator && (
             <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate} />

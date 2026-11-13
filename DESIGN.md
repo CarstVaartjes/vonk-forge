@@ -35,40 +35,39 @@ colors:
   axis: "#958e80"
 typography:
   display:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "clamp(1.55rem, 3vw, 2.2rem)"
     fontWeight: 700
     lineHeight: 1
     letterSpacing: "-0.04em"
   headline:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "1.15rem"
     fontWeight: 760
     lineHeight: 1.15
     letterSpacing: "-0.035em"
   title:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "1rem"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "normal"
   body:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-    fontSize: "0.8rem"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.45
+    lineHeight: 1.5
     letterSpacing: "normal"
   label:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "0.7rem"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "0.08em"
 rounded:
-  control: "0.45rem"
-  item: "0.65rem"
-  fixture: "0.85rem"
-  panel: "1rem"
+  card: "1rem"
+  inner: "0.625rem"
+  control: "0.5rem"
   pill: "999px"
 spacing:
   compact: "0.35rem"
@@ -95,7 +94,7 @@ components:
   nav-link-active:
     backgroundColor: "{colors.raised}"
     textColor: "{colors.green-text}"
-    rounded: "{rounded.item}"
+    rounded: "{rounded.inner}"
     padding: "0.65rem 0.75rem"
   status-pill-healthy:
     backgroundColor: "{colors.raised}"
@@ -105,7 +104,7 @@ components:
   spark-workcell:
     backgroundColor: "{colors.panel}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.panel}"
+    rounded: "{rounded.card}"
     padding: "1rem"
 ---
 
@@ -227,8 +226,8 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 ### Chips
 
-- **Style:** Compact pill with tinted background, matching border, bold state text, and a textual label.
-- **State:** Healthy is green, attention is amber, proven failure is red, and informational/installed is blue. Never rely on the tint alone.
+- **Style:** Status is a small shape and the word, never a filled pill: filled circle with a soft ring is ok (green), diamond is warning (amber), square is failure (red), triangle is information (blue), hollow circle is neutral or unknown. Tones are named `ok`, `warn`, `bad`, `info`, `neutral`.
+- **State:** The word always repeats the meaning; the shape and colour never carry it alone.
 
 ### Cards / Containers
 

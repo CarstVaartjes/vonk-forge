@@ -30,3 +30,43 @@ export function timeLabel(seconds: number, spanSeconds: number): string {
       : { hour: "2-digit", minute: "2-digit" };
   return new Date(seconds * 1000).toLocaleString([], options);
 }
+
+export type Point = { t: number; v: number | null };
+export type Run = [number, number][];
+
+/** Consecutive present values as pixel runs; a missing value ends a run, so no line or fill crosses a gap. */
+export function runsOf(
+  points: readonly Point[],
+  x: (t: number) => number,
+  y: (v: number) => number,
+): Run[] {
+  const runs: Run[] = [];
+  let run: Run = [];
+  for (const point of points) {
+    if (point.v === null) {
+      if (run.length) runs.push(run);
+      run = [];
+    } else run.push([x(point.t), y(point.v)]);
+  }
+  if (run.length) runs.push(run);
+  return runs;
+}
+
+/** An SVG line through each run; single points draw nothing. */
+export const linePath = (runs: readonly Run[]): string =>
+  runs
+    .filter((run) => run.length > 1)
+    .map((run) =>
+      run.map(([px, py], i) => `${i ? "L" : "M"}${px.toFixed(1)} ${py.toFixed(1)}`).join(""),
+    )
+    .join("");
+
+/** A wash from each run down to the baseline, closed at that run's own ends. */
+export const washPath = (runs: readonly Run[], baseline: number): string =>
+  runs
+    .filter((run) => run.length > 1)
+    .map((run) => {
+      const line = linePath([run]);
+      return `${line}L${run[run.length - 1][0].toFixed(1)} ${baseline}L${run[0][0].toFixed(1)} ${baseline}Z`;
+    })
+    .join("");
