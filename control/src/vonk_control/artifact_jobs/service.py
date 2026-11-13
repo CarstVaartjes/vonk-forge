@@ -22,6 +22,7 @@ from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
+from ..agent_operation_facts import aware
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
@@ -45,9 +46,7 @@ from ..models import (
 )
 from ..recipe_execution_contract import RecipeExecutionContractError
 from ..recipe_operations import (
-    RecipeArtifactJobCancellationPending,
     RecipeOperationConflict,
-    RecipeRetryLater,
 )
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
@@ -473,64 +472,25 @@ class ArtifactJobService(OutputService):
 
     def submit(self, job_id: str, *, actor: str, request_id: str) -> ArtifactJobView:
         # Each pass releases its transaction before the shared bounded backoff.
-        # The draft is already durable intent. Unknown old effects drive exact
-        # cleanup, never dispatch over occupied capacity or inherit a spent wait.
+        # The draft is already durable intent. A previous job whose effect cannot
+        # be observed is never answered by stopping the run: the draft stays
+        # READY and the client retries the same key once that receipt settles.
+        unavailable: UnknownOutcomeError | None = None
         for _attempt in bounded_attempts():
             try:
                 return self._submit_once(job_id, actor=actor, request_id=request_id)
-            except UnknownOutcomeError:
-                self._reconcile_run_for_submission(
-                    job_id, actor=actor, request_id=request_id
-                )
+            except UnknownOutcomeError as error:
+                unavailable = error
+        assert unavailable is not None
+        if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
+            # The draft stays READY. A submit never cancels or stops anything: a
+            # lost prior job ends shortly after its owner's deadline, then admits.
+            raise unavailable
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._end_preparation(session, job)
-
-    def _reconcile_run_for_submission(
-        self, job_id: str, *, actor: str, request_id: str
-    ) -> None:
-        with self._sessions() as session:
-            job = session.get(ArtifactJob, job_id)
-            if job is None:
-                return
-            run_id = job.run_id
-            adapter = ArtifactJobAdapter(session, clock=self._clock)
-            occupied = any(
-                prior.operation_id is not None
-                and (
-                    prior.state in ajs.LIVE
-                    or adapter.adopt(prior).effect is Effect.UNKNOWN
-                    or (
-                        prior.result_evidence is not None
-                        and read_result_evidence(prior.result_evidence) is None
-                    )
-                )
-                for prior in session.scalars(
-                    select(ArtifactJob).where(
-                        ArtifactJob.run_id == run_id,
-                        ArtifactJob.id != job_id,
-                    )
-                )
-            )
-        if not occupied:
-            return
-        # The run's Stop authority freezes and fences the exact JobRun targets.
-        # Its durable worker survives this request's bounded observation ending.
-        key = str(
-            uuid.uuid5(uuid.NAMESPACE_URL, f"artifact-stop:{job_id}:{request_id}")
-        )
-        try:
-            plan = self._recipe_operations.preview_stop(run_id)
-            self._recipe_operations.stop(
-                run_id,
-                plan_digest=plan.plan_digest,
-                actor=actor,
-                request_id=key,
-            )
-        except (RecipeArtifactJobCancellationPending, RecipeRetryLater):
-            return
 
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
@@ -585,6 +545,8 @@ class ArtifactJobService(OutputService):
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
                     continue
+                if ajs.state_of(prior) == ajs.FAILED:
+                    continue  # a FAILED job is ended; CANCELLED ones are released by their own Stop
                 uncertain = recorded.effect is Effect.UNKNOWN or (
                     prior.operation_id is not None
                     and prior.result_evidence is not None
@@ -593,11 +555,17 @@ class ArtifactJobService(OutputService):
                 if uncertain:
                     observed = adapter.observe(recorded).effect
                     if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
-                        # New intent drives exact cleanup under its own bounded
-                        # attempt; healthy execution remains queued independently.
+                        # The lost job ends shortly after its owner's deadline; this submit
+                        # waits (bounded) and never cancels or stops anything.
+                        deadline = recorded.recovery_deadline
                         raise ArtifactJobUnavailableError(
                             "artifact run effect observation is unavailable",
-                            reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
+                            retry_after_seconds=(
+                                None
+                                if deadline is None or aware(deadline) <= now
+                                else int((aware(deadline) - now).total_seconds()) + 1
+                            ),
                         )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (

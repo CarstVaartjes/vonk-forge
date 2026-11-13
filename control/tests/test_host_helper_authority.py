@@ -12,11 +12,13 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import ValidationError
 from sqlalchemy import Engine, create_engine
+from sqlalchemy import select as sa_select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     CompiledExecutionPlan,
     ContainerRuntimeAction,
     ExecuteContainerRuntimeRequestOperation,
+    RunState,
     SignedHostHelperGrant,
     canonical_message,
     host_helper_grant_signing_bytes,
@@ -1130,21 +1132,31 @@ def test_the_agent_grant_request_stand_in_is_the_agents_own_bytes() -> None:
 
 
 @pytest.mark.parametrize(
-    "state", ["current", "cancelled", "superseded", "delivery-only"]
+    "state",
+    [
+        "current",
+        "cancelled",
+        "newer-load",
+        "delivery-only",
+        "run-ended",
+        "newer-generation",
+    ],
 )
 def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
     state: str,
 ) -> None:
     # The agent's exact bodies (the shared vector its Rust suite produces),
     # through the route's own mapping. Its one Stop is granted after a failed
-    # run, under cancellation, and after a newer load; a Start only while the
-    # job is current.
+    # run and under cancellation; a Start only while the job is current. A
+    # newer load on its Spark leaves the job current: a JobRun is fenced by its
+    # run, never by the Spark's workload intent. Its run is that fence: once
+    # the run has ended or moved to a newer generation, its Start is refused.
     requests = vector(JOB_RUN_GRANT_REQUESTS)
     job_id = vector(requests["claim"])["payload"]["job_id"]
     service = runtime_service(
         operation_kind="recipe.job.run.v1",
         cancel_requested=state == "cancelled",
-        node_intent=2 if state == "superseded" else 1,
+        node_intent=2 if state == "newer-load" else 1,
         claim_as_sent=True,
     )
 
@@ -1168,6 +1180,13 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
             row.payload_digest = hashlib.sha256(
                 canonical_message(row.payload)
             ).hexdigest()
+    if state in {"run-ended", "newer-generation"}:
+        with service._sessions.begin() as session:
+            run = session.scalars(sa_select(RecipeRun)).one()
+            if state == "run-ended":
+                run.state = RunState.STOPPED
+            else:
+                run.run_generation += 1
 
     def grant(body: HostRuntimeGrantRequest) -> SignedHostHelperGrant:
         return issue_host_runtime_grant(
@@ -1181,7 +1200,7 @@ def test_the_agents_job_run_grant_requests_are_granted_in_each_controller_state(
         body = HostRuntimeGrantRequest.model_validate_json(
             json.dumps(case["grant_request"])
         )
-        if body.action == "start" and state != "current":
+        if body.action == "start" and state not in {"current", "newer-load"}:
             with pytest.raises(HostHelperAuthorityError):
                 grant(body)
             continue

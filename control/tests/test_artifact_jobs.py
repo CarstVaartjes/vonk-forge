@@ -4,6 +4,7 @@ import asyncio
 import copy
 import dataclasses
 import hashlib
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -14,6 +15,7 @@ from typing import TypedDict
 
 import pytest
 from sqlalchemy import event, select
+from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
@@ -28,7 +30,11 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService
+from vonk_control.agent_jobs import (
+    _WORKLOAD_INTENT_OPERATIONS,
+    AgentJobService,
+    fencing_intent,
+)
 from vonk_control.artifact_blob_store import (
     ArtifactBlobStore,
     ArtifactBlobStoreError,
@@ -59,11 +65,13 @@ from vonk_control.models import (
 )
 from vonk_control.recipe_execution_contract import parse_stored_run_plan
 from vonk_control.recipe_operations import (
+    _WORKLOAD_INTENT_KINDS,
     RecipeArtifactJobCancellationPending,
     RecipeOperationView,
     RecipeRequestInvalid,
 )
 from vonk_control.resource_planning import PLATFORM_MEMORY_FLOOR_BYTES
+from vonk_control.workload_intent import allocate_workload_intent
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
 from .non_blocking import assert_ended_without_blocking, assert_no_orphaned_holds
@@ -81,51 +89,162 @@ def _cancelling(view) -> bool:
     return view.cancel_requested_at is not None and view.state not in ajs.ENDED
 
 
-def test_one_shot_job_inherits_activation_intent(
-    tmp_path,
+def test_a_jobrun_is_never_fenced_by_its_sparks_workload_intent() -> None:
+    """Guard: a JobRun belongs to its run, never to its Spark's intent.
+
+    Wrong implementation caught: a JobRun kind back in either intent set, or
+    an intent fence decided by the stored ordinal instead of the kind (which
+    would cancel a JobRun an older Controller stamped with an ordinal).
+    """
+
+    job_run = AgentOperationKind.RECIPE_JOB_RUN.value
+    assert job_run not in _WORKLOAD_INTENT_OPERATIONS
+    assert job_run not in _WORKLOAD_INTENT_KINDS
+    assert (
+        fencing_intent(AgentOperation(kind=job_run, workload_intent_ordinal=3)) is None
+    )
+
+
+def _second_job_run(recipe_operations, run_id: str) -> str:
+    """Activate another job run of the same installation on the same Spark."""
+
+    with recipe_operations._sessions() as session:
+        run = session.get(RecipeRun, run_id)
+        assert run is not None
+        installation_id = run.installation_id
+    plan = recipe_operations.preview_run(installation_id, "image-job")
+    return recipe_operations.activate_job_run(
+        plan,
+        plan_digest=plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000190",
+    ).owner_id
+
+
+def _agent_queue(sessions, recipe_operations, service) -> AgentJobService:
+    agent_jobs = AgentJobService(sessions, clock=MutableClock(NOW))
+
+    def consume(session, operation, attempt, message) -> None:
+        service.consume_agent_result(session, operation, attempt, message)
+        recipe_operations.consume_agent_result(session, operation, attempt, message)
+
+    agent_jobs.set_result_consumer(consume)
+    recipe_operations._agent_jobs = agent_jobs
+    return agent_jobs
+
+
+@pytest.mark.parametrize("stamped_by_older_controller", [False, True])
+def test_replacing_a_run_never_cancels_another_runs_job_on_its_spark(
+    tmp_path, stamped_by_older_controller: bool
 ) -> None:
-    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
-        tmp_path
-    )
-    submitted = submitted_artifact_job(service, run_id, request_suffix=150)
-    with sessions() as session:
-        activation = session.scalar(
-            select(Job).where(
-                Job.kind == "recipe.job.activate.v1",
-                Job.payload["owner_id"].as_string() == run_id,
-            )
-        )
-        parent = session.get(Job, submitted.operation_id)
-        child = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == submitted.operation_id
-            )
-        )
-        node = session.get(AgentNode, node_id)
-        assert activation is not None and parent is not None
-        assert child is not None and node is not None
-        ordinal = activation.payload["workload_intent_ordinal"]
-        assert type(ordinal) is int and ordinal > 0
-        assert parent.payload["workload_intent_ordinal"] == ordinal
-        assert child.workload_intent_ordinal == ordinal
-        assert node.workload_intent_ordinal == ordinal
+    """A load that replaces run A leaves run B's running job and new submits alone.
 
+    Before: the load's new intent on the Spark cancelled B's job and refused
+    every later submit on B as superseded until B was restarted.
+    """
 
-def test_one_shot_job_rejects_submission_after_newer_workload_intent(tmp_path) -> None:
-    sessions, _operations, _queue, service, run_id, node_id = running_artifact_service(
-        tmp_path
+    sessions, recipe_operations, _queue, service, run_a, node_id = (
+        running_artifact_service(tmp_path)
     )
+    run_b = _second_job_run(recipe_operations, run_a)
+    agent_jobs = _agent_queue(sessions, recipe_operations, service)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    job_b = submitted_artifact_job(service, run_b, request_suffix=170)
+    if stamped_by_older_controller:
+        # Enqueued before the upgrade: the order carries the Spark's ordinal.
+        with sessions.begin() as session:
+            node = session.get(AgentNode, node_id)
+            order = session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == job_b.operation_id
+                )
+            )
+            assert node is not None and order is not None
+            order.workload_intent_ordinal = node.workload_intent_ordinal
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+
+    # The load replacing A: a new intent on the Spark, then A's Stop under it.
     with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        node.workload_intent_ordinal += 1
-    with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
-        submitted_artifact_job(service, run_id, request_suffix=152)
-    fresh = create_artifact_job(
-        service,
-        **artifact_create_request(run_id, "00000000-0000-4000-8000-000000000153"),
+        ordinal = allocate_workload_intent(session, (node_id,))
+        agent_jobs.request_superseded_workload_cancellation_in_session(
+            session, (node_id,), ordinal, NOW
+        )
+    stop_plan = recipe_operations.preview_stop(run_a)
+    stopped = recipe_operations.stop(
+        run_a,
+        plan_digest=stop_plan.plan_digest,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000172",
+        workload_intent_ordinal=ordinal,
     )
-    assert fresh.operation_id is None
+    assert stopped.state == "succeeded"
+
+    directive = agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
+    assert directive.cancel_requested is False
+    assert service.get(job_b.id).state == ajs.RUNNING
+    later = service.submit(
+        finalized_artifact_job(service, run_b, request_suffix=173).id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000174",
+    )
+    assert later.operation_id is not None and later.state == LifecycleState.QUEUED
+
+
+def test_a_run_stop_cancels_exactly_its_own_jobs(tmp_path) -> None:
+    """Stopping run A cancels A's live job directly and leaves run B's alone."""
+
+    sessions, recipe_operations, _queue, service, run_a, node_id = (
+        running_artifact_service(tmp_path)
+    )
+    run_b = _second_job_run(recipe_operations, run_a)
+    agent_jobs = _agent_queue(sessions, recipe_operations, service)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    job_a = submitted_artifact_job(service, run_a, request_suffix=176)
+    claim_a = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim_a is not None
+    job_b = submitted_artifact_job(service, run_b, request_suffix=178)
+
+    stop_plan = recipe_operations.preview_stop(run_a)
+
+    def stop():
+        return recipe_operations.stop(
+            run_a,
+            plan_digest=stop_plan.plan_digest,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000180",
+        )
+
+    with pytest.raises(RecipeArtifactJobCancellationPending):
+        stop()
+    directive = agent_jobs.heartbeat(claim_a, OperationProgress(phase="running"), 30)
+    assert directive.cancel_requested is True
+    assert _cancelling(service.get(job_a.id))
+    # A's accepted Stop refuses A's later submits; B is untouched.
+    with pytest.raises(RecipeRequestInvalid):
+        submitted_artifact_job(service, run_a, request_suffix=181)
+    assert service.get(job_b.id).state == ajs.QUEUED
+    assert submitted_artifact_job(service, run_b, request_suffix=183).operation_id
+
+    agent_jobs.record_result(
+        cancellation_result(
+            claim_a,
+            job_a,
+            state="cancelled",
+            reason="controller cancellation requested",
+        )
+    )
+    assert service.get(job_a.id).state == ajs.CANCELLED
+    assert stop().state == "succeeded"
+    claim_b = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim_b is not None
+    later = service.submit(
+        finalized_artifact_job(service, run_b, request_suffix=186).id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000000187",
+    )
+    assert later.state == LifecycleState.QUEUED
+    assert json.loads(canonical_message(claim_b.payload))["run_id"] == run_b
 
 
 class _ArtifactCreateRequest(TypedDict):
@@ -463,7 +582,7 @@ class MutableClock:
         self.now += timedelta(seconds=seconds)
 
 
-def submitted_artifact_job(
+def finalized_artifact_job(
     service: ArtifactJobService,
     run_id: str,
     *,
@@ -484,7 +603,19 @@ def submitted_artifact_job(
         expected_sha256=hashlib.sha256(content).hexdigest(),
         content=content,
     )
-    service.finalize(job.id)
+    return service.finalize(job.id)
+
+
+def submitted_artifact_job(
+    service: ArtifactJobService,
+    run_id: str,
+    *,
+    request_suffix: int,
+    output_limits: RecipeJobOutputLimits | None = None,
+):
+    job = finalized_artifact_job(
+        service, run_id, request_suffix=request_suffix, output_limits=output_limits
+    )
     return service.submit(
         job.id,
         actor="operator",

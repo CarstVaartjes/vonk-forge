@@ -94,11 +94,7 @@ class CancellationMixin:
                 raise RecipeRequestInvalid("recipe operation is not cancellable")
             bound_ordinal = _parent_intent(job)
             superseded = False
-            if (
-                job.kind
-                in _WORKLOAD_INTENT_KINDS | {WireAgentOperation.RECIPE_JOB_RUN.value}
-                and type(bound_ordinal) is int
-            ):
+            if job.kind in _WORKLOAD_INTENT_KINDS and type(bound_ordinal) is int:
                 nodes = tuple(
                     session.scalars(
                         select(AgentNode)

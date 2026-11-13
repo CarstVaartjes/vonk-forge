@@ -19,16 +19,23 @@ from vonk_agent_protocol import (
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.categorized_errors import InvalidType, SecurityRefused
-from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, RecipeRun
+from vonk_control.models import AgentOperation, ArtifactJob, RecipeRun
 from vonk_control.operation_api import BoundedErrorResponse, RequestValidationProblem
-from vonk_control.recipe_operations import RecipeRequestInvalid, RecipeRetryLater
+from vonk_control.recipe_operations import (
+    RecipeArtifactJobCancellationPending,
+    RecipeRequestInvalid,
+    RecipeRetryLater,
+)
 
+from .runtime_identity_support import claim_agent
 from .test_api import Jobs
 from .test_artifact_job_api import JOB_ID, REQUEST_ID, _TransferService
 from .test_artifact_jobs import (
+    _agent_queue,
     artifact_create_request,
     create_artifact_job,
     running_artifact_service,
+    submitted_artifact_job,
 )
 from .test_operator_acceptance_postgres import _api
 
@@ -128,8 +135,8 @@ def test_submit_maps_every_domain_category_without_builtin_inheritance(
 def test_live_run_submit_admission_conflict_is_typed_and_has_no_effects(
     tmp_path, postgres_engine, superseded
 ):
-    """Catches a live run's stale intent or reused request identity returning 500."""
-    sessions, _, _, service, run_id, node_id = running_artifact_service(
+    """Catches a stopping run or reused request identity returning 500."""
+    sessions, recipe_operations, _, service, run_id, node_id = running_artifact_service(
         tmp_path, engine=postgres_engine
     )
     draft = create_artifact_job(
@@ -145,10 +152,18 @@ def test_live_run_submit_admission_conflict_is_typed_and_has_no_effects(
     )
     service.finalize(draft.id)
     if superseded:
-        with sessions.begin() as session:
-            node = session.get(AgentNode, node_id)
-            assert node is not None
-            node.workload_intent_ordinal += 1
+        # The run's own accepted Stop waits on its running job's cancellation,
+        # the run still RUNNING: a job admitted now would escape that Stop.
+        agent_jobs = _agent_queue(sessions, recipe_operations, service)
+        submitted_artifact_job(service, run_id, request_suffix=190)
+        assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+        with pytest.raises(RecipeArtifactJobCancellationPending):
+            recipe_operations.stop(
+                run_id,
+                plan_digest=recipe_operations.preview_stop(run_id).plan_digest,
+                actor="operator",
+                request_id=str(uuid4()),
+            )
     api, headers = _api(sessions, artifact_jobs=service)
     # The activation's key names a different owner/kind, so it cannot be reused.
     headers["X-Request-ID"] = (

@@ -679,15 +679,12 @@ def validate_jobrun_stop_source(
     target: ProfileJobRunStopTarget,
     stop: RecipeStopPayload,
     run: RecipeRun,
-    *,
-    workload_intent_ordinal: int,
 ) -> tuple[ArtifactJob, Job, AgentOperation]:
     """Prove a cleanup Stop names the run's own issued JobRun, by identity.
 
-    The JobRun is the run's (its artifact job's order, on a Spark of the run),
-    older than the Stop's intent (a newer intent's JobRun belongs to its newer
-    owner), and the Stop names its container at no newer generation than the
-    run's. The order's own request names that container; what the run's plan,
+    The JobRun is the run's (its artifact job's order, on a Spark of the run;
+    a JobRun is fenced by its run, never by a workload intent), and the Stop
+    names its container at no newer generation than the run's. The order's own request names that container; what the run's plan,
     revision, mapping, the order's parent row or the rows' digests became since
     it launched never decides it.
     """
@@ -711,8 +708,6 @@ def validate_jobrun_stop_source(
         or source_operation.parent_job_id != source_job.id
         or source_operation.node_id != target.node_id
         or source_operation.kind != "recipe.job.run.v1"
-        or source_operation.workload_intent_ordinal is None
-        or source_operation.workload_intent_ordinal >= workload_intent_ordinal
     ):
         raise ProfileStopAuthorityError("source JobRun identity is inconsistent")
     try:
@@ -753,11 +748,7 @@ def validate_profile_jobrun_stop_target(
     if target not in authorization.targets:
         raise ProfileStopAuthorityError("profile Stop target is not authorized")
     _artifact, source_job, _source_operation = validate_jobrun_stop_source(
-        session,
-        target,
-        stop,
-        run,
-        workload_intent_ordinal=authorization.workload_intent_ordinal,
+        session, target, stop, run
     )
     source_cancel_request_id = str(
         uuid.uuid5(
@@ -765,9 +756,9 @@ def validate_profile_jobrun_stop_target(
             f"{target.source_job_id}:{authorization.workload_intent_ordinal}",
         )
     )
-    # A live source JobRun is stopped only under the Controller's own
-    # cancellation at this intent, so the Stop never ends a job another owner
-    # still runs.  A source that has ended has no job left to cancel: its
+    # A live source JobRun is stopped only under its run Stop's own
+    # cancellation at this intent (``request_run_job_cancellation_in_session``),
+    # so the Stop never ends a job another owner still runs.  A source that has ended has no job left to cancel: its
     # outcome is final, and the Stop only removes what its runtime may have
     # left on the Spark.
     if not job_states.means(

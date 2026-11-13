@@ -158,10 +158,14 @@ child row's foreign-key KEY SHARE never blocks. The recipe intent check reads th
 ordinal without a lock; numbering goes through `workload_intent.py`, the only
 writer of `workload_intent_ordinal` (a fenced conditional UPDATE through
 `allocate_workload_intent` / `take_workload_intent`), guarded by
-`control/tests/intent_ordinal_writers.py`. Admission still locks target nodes
+`control/tests/intent_ordinal_writers.py`. A one-shot JobRun is never fenced
+by a Spark's intent: it belongs to its run (run and RunNode RUNNING, run
+generation), and only the run's own Stop cancels it
+(`request_run_job_cancellation_in_session`). Decide an intent fence by kind
+(`fencing_intent`), never by a stored ordinal alone. Admission still locks target nodes
 through `lock_admission_rows`, and the cleanup Stop a failed start enqueues
 does too until lock-plan step 6. Telemetry, inventory and contact writes never
-lock `agent_nodes` (`test_agent_node_lock_tree.py`). A recipe revision's source bundle digest is the typed, indexed column
+lock `agent_nodes` (`test_agent_node_lock_tree.py`). An artifact-job submit or create never calls a Stop (a run Stop ends the whole run and every job on it): an unobservable previous job answers a bounded retryable wait (`tests/test_submit_never_stops_guard.py`). A recipe revision's source bundle digest is the typed, indexed column
 `catalog_document_revisions.source_bundle_sha256`, written by the import and read
 by every lookup (build planning, reconcile, collection); the `projected` JSON
 carries no copy. Revisions from before it are moved by `fill_revision_source_bundles`

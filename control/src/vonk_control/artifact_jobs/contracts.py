@@ -88,6 +88,15 @@ class ArtifactJobError(ValueError):
 class ArtifactJobUnavailableError(UnknownOutcomeError, ArtifactJobError):
     """Stored job state cannot be read now; the lifecycle core observes and retries."""
 
+    def __init__(
+        self,
+        *args: object,
+        reason: WaitReason | None = None,
+        retry_after_seconds: int | None = None,
+    ) -> None:
+        super().__init__(*args, reason=reason)
+        self.retry_after_seconds = retry_after_seconds
+
 
 class ArtifactJobTransferClosedError(InvalidRequestError, ArtifactJobError):
     """A request against a transfer that is already closed."""

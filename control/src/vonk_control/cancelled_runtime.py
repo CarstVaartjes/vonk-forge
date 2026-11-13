@@ -41,9 +41,11 @@ def cancelled_runtime_source(
 ) -> tuple[AgentOperation, RecipeStopPayload, str] | None:
     """Revalidate cancellation and exact current owner under admission locks.
 
-    A newer request owns the node: this old cancellation cannot create another
-    target or adopt its authority. Terminal result and physical settlement are
-    independent, so this reads the original issued JobRun after cancellation.
+    The JobRun is named by its own identity (its job, its run), never by its
+    Spark's workload intent: a newer load on the Spark does not own this job's
+    container, so its exact Stop removes only that. Terminal result and
+    physical settlement are independent, so this reads the original issued
+    JobRun after cancellation.
     """
     artifact = session.get(ArtifactJob, job_id, populate_existing=True)
     if artifact is None or artifact.state != LifecycleState.CANCELLED:
@@ -79,9 +81,6 @@ def cancelled_runtime_source(
         or node is None
         or node.state != NodeIdentityState.ACTIVE
         or node.revoked_at is not None
-        or source.workload_intent_ordinal != node.workload_intent_ordinal
-        or source.workload_intent_ordinal
-        != column_field(parent, "payload", "workload_intent_ordinal")
         or request.job_id != artifact.id
         or request.run_id != artifact.run_id
         or source.authority_revision != parent.authority_revision
@@ -110,7 +109,6 @@ def cancellation_stop_current(
         parent.request_id == cancellation_stop_key(document.owner_id, source[2])
         and operation.node_id == source[0].node_id
         and column_value(operation, "payload") == source[1]
-        and operation.workload_intent_ordinal == source[0].workload_intent_ordinal
     )
 
 
@@ -184,7 +182,8 @@ def reconcile_cancelled_runtime(
                     phases=(((order.node_id, stop),),),
                     authority_digest=order.authority_revision,
                     now=service._clock(),
-                    workload_intent_ordinal=order.workload_intent_ordinal,
+                    # Own cleanup joins the Spark's current intent and cancels
+                    # nothing (``unattended_guard``).
                     unattended_guard=guard,
                 )
                 progressed = True

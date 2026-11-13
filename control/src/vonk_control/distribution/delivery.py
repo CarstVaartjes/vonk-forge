@@ -59,6 +59,7 @@ class DeliveryMixin:
         Storage verification happens after releasing the database session.
         """
         service = cast("DistributionService", self)
+        from ..agent_jobs.contracts import _WORKLOAD_INTENT_OPERATIONS
         from ..agent_jobs.stored import column_field, column_value
 
         if service.sessions is None:
@@ -105,12 +106,20 @@ class DeliveryMixin:
                     and operation.authority_revision == parent.authority_revision
                     and node_id in parent.targets
                     and column_field(parent, "result", "cancel_requested") is not True
-                    and operation.workload_intent_ordinal is not None
-                    and operation.workload_intent_ordinal > 0
-                    and operation.workload_intent_ordinal
-                    == node.workload_intent_ordinal
-                    and operation.workload_intent_ordinal
-                    == column_field(parent, "payload", "workload_intent_ordinal")
+                    and (
+                        # A JobRun is fenced by its run, never by the intent.
+                        operation.kind not in _WORKLOAD_INTENT_OPERATIONS
+                        or (
+                            operation.workload_intent_ordinal is not None
+                            and operation.workload_intent_ordinal > 0
+                            and operation.workload_intent_ordinal
+                            == node.workload_intent_ordinal
+                            and operation.workload_intent_ordinal
+                            == column_field(
+                                parent, "payload", "workload_intent_ordinal"
+                            )
+                        )
+                    )
                 ):
                     accepted = payload.compiled_execution_plan
                     break

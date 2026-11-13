@@ -82,7 +82,19 @@ fails closed when the exact accepted compiled lifecycle plan differs from the
 installed plan.
 
 One-shot jobs remain fail-closed after a lost result because the job may already
-have produced external effects. Verify those effects before submitting a new authorized run.
+have produced external effects. A new submit on the same run answers a retryable wait (503 with Retry-After) and never stops anything; the platform ends the lost job shortly after its owner's deadline (a few bounded looks) and the same-key retry is then admitted, with no operator action.
+
+A one-shot job (JobRun) belongs to its run, not to its Spark's workload intent.
+It is admitted while its run and the run's node are running and no Stop of the
+run is underway, and the host grant binds its container to the run's
+generation. A load, Stop or other request for a different run on the same Spark
+never cancels it or refuses later submits on its run. The run's own Stop is
+the one path that cancels its jobs: it cancels exactly that run's live job
+orders, waits for their cancellation receipts, and then stops the run. A newer
+submit on the same run still supersedes that run's older unstarted jobs. A
+running job holds its Spark's claim lane until it ends, so a load for another
+run on that Spark waits for it rather than ending it.
+
 Builds and package upgrades do not inherit automatic workload replay. Invalid
 ownership, revoked authorization, malformed contracts, integrity failures and
 denied access remain explicit blockers.

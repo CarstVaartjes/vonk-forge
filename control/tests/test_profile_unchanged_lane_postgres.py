@@ -159,10 +159,19 @@ def test_sibling_load_keeps_ready_run_installation_and_running_job(
             later = submitted_artifact_job(jobs, run_id, request_suffix=760)
             _claimed_job(world, orders, kept)
             assignments[0] = choice(0, SOLO_B)
+            # Replacing the job lane stops its run; that Stop cancels its job.
             load("Replace job lane")
-            with world.sessions() as session:
-                order = session.get(Job, later.operation_id)
-                assert order is not None
-                assert superseded_cancellation_deadline(order.result) is not None
+
+            def cancelled() -> bool:
+                with world.sessions() as session:
+                    order = session.get(Job, later.operation_id)
+                    assert order is not None
+                    return superseded_cancellation_deadline(order.result) is not None
+
+            for _ in range(10):
+                if cancelled():
+                    break
+                sim.round()
+            assert cancelled()
     finally:
         world.close()

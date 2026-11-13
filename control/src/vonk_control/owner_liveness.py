@@ -392,10 +392,13 @@ def _agent_attempt(session: Session, ref: OwnerRef, now: datetime | None) -> Own
     if now is None:
         return Owner(ref, True, "attempt is not judged", state=operation.state)
     node = session.get(AgentNode, operation.node_id)
+    from .agent_jobs.contracts import fencing_intent
+
+    intent = fencing_intent(operation)
     superseded = (
-        operation.workload_intent_ordinal is not None
+        intent is not None
         and node is not None
-        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+        and intent < node.workload_intent_ordinal
     )
     live = attempt_holds_order(operation, attempt, now, superseded=superseded)
     return Owner(

@@ -41,6 +41,8 @@ from .contracts import (
     AgentFence,
     StaleAgentFence,
     StaleAgentRequest,
+    cancelled_job_run,
+    fencing_intent,
 )
 from .evidence import (
     _failure_result,
@@ -220,11 +222,9 @@ def record_late_result(
             evidence
         ):
             return False
-        superseded_intent = (
-            operation.kind not in CLEANUP_KINDS
-            and operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
-        )
+        superseded_intent = operation.kind not in CLEANUP_KINDS and fencing_intent(
+            operation
+        ) not in {None, node.workload_intent_ordinal}
         if adopt_observation_receipt(
             self,
             session,
@@ -239,10 +239,15 @@ def record_late_result(
             return True
         if (
             message.state == "cancelled"
-            and superseded_intent
-            and operation.kind in _WORKLOAD_INTENT_OPERATIONS
-            and operation.workload_intent_ordinal
-            == column_field(parent, "payload", "workload_intent_ordinal")
+            and (
+                (
+                    superseded_intent
+                    and operation.kind in _WORKLOAD_INTENT_OPERATIONS
+                    and operation.workload_intent_ordinal
+                    == column_field(parent, "payload", "workload_intent_ordinal")
+                )
+                or cancelled_job_run(operation, parent)
+            )
             and column_is_document(parent, "result")
             and superseded_cancellation_deadline(column_value(parent, "result"))
             is not None

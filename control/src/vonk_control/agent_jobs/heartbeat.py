@@ -36,6 +36,8 @@ from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     PROGRESSING_LEASE,
     AgentFence,
+    cancelled_job_run,
+    fencing_intent,
 )
 from .endings import end_unobserved_order
 from .retry import _renew_distribution_grant, superseded_cancellation_deadline
@@ -77,8 +79,10 @@ def heartbeat(
         superseded = bool(
             node is not None
             and operation.kind not in CLEANUP_KINDS
-            and operation.workload_intent_ordinal is not None
-            and operation.workload_intent_ordinal != node.workload_intent_ordinal
+            and (
+                fencing_intent(operation) not in {None, node.workload_intent_ordinal}
+                or cancelled_job_run(operation, parent)
+            )
         )
         if superseded:
             cancellation_deadline = superseded_cancellation_deadline(
@@ -206,7 +210,10 @@ def known_superseded_cancellation(
             attempt is None
             or operation is None
             or parent is None
-            or operation.kind not in _WORKLOAD_INTENT_OPERATIONS
+            or (
+                operation.kind not in _WORKLOAD_INTENT_OPERATIONS
+                and not cancelled_job_run(operation, parent)
+            )
             or operation.current_attempt != attempt.attempt
             or operation.workload_intent_ordinal
             != column_field(parent, "payload", "workload_intent_ordinal")
@@ -235,5 +242,7 @@ def known_superseded_cancellation(
                     operation.workload_intent_ordinal is not None
                     and operation.workload_intent_ordinal < node.workload_intent_ordinal
                 )
+                # A cancelled JobRun's stale fence: its run or caller ended it.
+                or cancelled_job_run(operation, parent)
             )
         )

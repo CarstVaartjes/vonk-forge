@@ -47,6 +47,7 @@ from .claim_reconcile import _first_claimable_id
 from .contracts import (
     _MUTATING_OPERATIONS,
     CLAIM_LEASE_SECONDS,
+    fencing_intent,
     mutations_conflict,
 )
 from .endings import end_unobserved_order
@@ -385,10 +386,9 @@ def _claim_once(
                         operation.workload_intent_ordinal
                         if (
                             old.kind not in CLEANUP_KINDS
-                            and old.workload_intent_ordinal is not None
+                            and (old_intent := fencing_intent(old)) is not None
                             and operation.workload_intent_ordinal is not None
-                            and old.workload_intent_ordinal
-                            < operation.workload_intent_ordinal
+                            and old_intent < operation.workload_intent_ordinal
                         )
                         else None
                     )

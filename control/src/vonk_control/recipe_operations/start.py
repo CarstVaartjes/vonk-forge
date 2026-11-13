@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.gpu_clock import GpuClockRange
 
+from .. import job_states
 from ..admission_locking import (
     AdmissionLockBusy,
     ConstraintReplay,
@@ -71,7 +72,6 @@ from .errors import (
     RecipeRetryLater,
     retry_later_unless_deterministic,
 )
-from .intent import _run_start_intent
 from .interfaces import RecipeOperationView
 from .observation_helpers import (
     _active_recipe_revision,
@@ -403,11 +403,36 @@ class StartMixin:
         authority_digest: str,
         now: datetime,
     ) -> Job:
-        """Enqueue one fenced job without changing the service run lifecycle."""
+        """Enqueue one job fenced by its run, never by its Spark's workload intent.
+
+        The job belongs to its run: it is admitted while the run and its node
+        are RUNNING and no Stop of the run is underway, and the host grant
+        binds its container to the run's generation. A load or Stop of another
+        run on the same Spark never fences it; the run's own Stop cancels it.
+        """
         service = typing_cast("RecipeOperationService", self)
         run = session.get(RecipeRun, run_id, with_for_update=True)
         if run is None or run.state != RunState.RUNNING:
             raise RecipeRetryLater("recipe run observation is not accepting jobs")
+        if (
+            session.scalar(
+                select(Job.id)
+                .where(
+                    Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                    Job.owner_kind == "run",
+                    Job.owner_id == run_id,
+                    Job.state.in_(job_states.LIVE),
+                )
+                .limit(1)
+            )
+            is not None
+        ):
+            # An accepted Stop of this run waits on its jobs' cancellation
+            # with the run still RUNNING: a job admitted now would escape it.
+            # Definite: a stopping run never takes jobs again.
+            raise RecipeRequestInvalid(
+                "recipe run is stopping", reason=InvalidRequestReason.SUPERSEDED
+            )
         node = session.scalar(
             select(RunNode).where(
                 RunNode.run_id == run_id,
@@ -431,7 +456,6 @@ class StartMixin:
             phases=(((node_id, payload),),),
             authority_digest=authority_digest,
             now=now,
-            workload_intent_ordinal=_run_start_intent(session, run_id),
         )
 
     def notify_agents(self) -> None:
