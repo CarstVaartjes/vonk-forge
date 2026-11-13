@@ -13,11 +13,13 @@ on the same rows.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from dataclasses import dataclass
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
+    AgentClaim,
     AgentProgress,
     AgentResult,
     AgentResultState,
@@ -25,12 +27,13 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopResult
 from vonk_control import artifact_job_states as ajs
-from vonk_control.agent_jobs import AgentJobService, StaleAgentAttempt
-from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
+from vonk_control.agent_jobs import AgentJobService
+from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobView
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, RecipeRun
+from vonk_control.models import AgentNode, AgentOperation, ArtifactJob, Job, RecipeRun
 from vonk_control.recipe_operations import (
     RecipeArtifactJobCancellationPending,
+    RecipeOperationService,
     RecipeRetryLater,
 )
 
@@ -39,6 +42,7 @@ from .test_artifact_jobs import (
     NOW,
     MutableClock,
     artifact_create_request,
+    cancellation_result,
     create_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
@@ -109,9 +113,35 @@ def test_an_unissued_order_that_records_no_cancellation_never_holds_the_stop(
     _activate_fresh_job_run(sessions, operations, run_id)
 
 
-def _cancelled_running_job(tmp_path):
-    """A claimed job its run's Stop cancelled; the Stop waits on its receipt."""
+@dataclass
+class _CancelledJob:
+    """A claimed job that its run's Stop cancelled; the Stop waits on it."""
 
+    sessions: sessionmaker[Session]
+    operations: RecipeOperationService
+    service: ArtifactJobService
+    run_id: str
+    node_id: str
+    agent_jobs: AgentJobService
+    clock: MutableClock
+    job: ArtifactJobView
+    claim: AgentClaim
+
+    def stop(self):
+        return self.operations.stop(
+            self.run_id,
+            plan_digest=self.operations.preview_stop(self.run_id).plan_digest,
+            actor="operator",
+            request_id=_STOP_REQUEST,
+        )
+
+    def order_state(self) -> str:
+        with self.sessions() as session:
+            (child,) = session.scalars(_order_child(session, self.job.id))
+            return child.state
+
+
+def _cancelled_running_job(tmp_path) -> _CancelledJob:
     sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
         tmp_path
     )
@@ -127,73 +157,45 @@ def _cancelled_running_job(tmp_path):
     job = submitted_artifact_job(service, run_id, request_suffix=118)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
-    plan = operations.preview_stop(run_id)
-
-    def stop():
-        return operations.stop(
-            run_id,
-            plan_digest=plan.plan_digest,
-            actor="operator",
-            request_id=_STOP_REQUEST,
-        )
-
+    cancelled = _CancelledJob(
+        sessions, operations, service, run_id, node_id, agent_jobs, clock, job, claim
+    )
     with pytest.raises(RecipeArtifactJobCancellationPending):
-        stop()
-    return sessions, operations, run_id, node_id, agent_jobs, clock, job, claim, stop
+        cancelled.stop()
+    # The real agent stops renewing on its first cancel directive.
+    directive = agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
+    assert directive.cancel_requested is True
+    clock.advance(seconds=31)
+    return cancelled
 
 
-def _order_state(sessions, artifact_job_id: str) -> str:
-    with sessions() as session:
-        (child,) = session.scalars(_order_child(session, artifact_job_id))
-        return child.state
-
-
-def _renew_past_the_cancellation_window(sessions, agent_jobs, clock, job, claim):
-    """The Spark renews inside its lease and never stops the job; the lease
-    ends with the cancellation window, and the lapsed order is then ended."""
-
-    window = NOW + timedelta(seconds=SUPERSEDED_CANCELLATION_SECONDS)
-    clock.advance(seconds=20)
-    while clock.now < window:
-        directive = agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
-        assert directive.cancel_requested is True
-        assert _order_state(sessions, job.id) == "running"
-        clock.advance(seconds=20)
-    with pytest.raises(StaleAgentAttempt):
-        agent_jobs.heartbeat(claim, OperationProgress(phase="running"), 30)
-    agent_jobs.reconcile_orders()
-    assert _order_state(sessions, job.id) not in {"queued", "running"}
-
-
-def test_a_running_job_whose_spark_never_acknowledges_the_cancel_is_stopped_exactly(
+def test_a_cancelled_job_whose_spark_goes_silent_is_stopped_exactly(
     tmp_path,
 ) -> None:
-    """A Spark that keeps renewing a cancelled job never holds the run's Stop:
-    the order ends when its cancellation window closes, and the exact JobRun
-    Stop is handed to the Spark.
+    """The Spark takes the cancel and never reports: the lapsed order ends, so
+    it never holds the run's Stop, and the exact JobRun Stop is handed to it.
 
-    Wrong implementation: a cancelled JobRun renewed forever, so its run's Stop
-    (and every load that stops the run) waited on it indefinitely.
+    Wrong implementation: the run's Stop (and every load that stops the run)
+    waited on a cancelled JobRun's receipt that could no longer arrive.
     """
 
-    sessions, operations, run_id, node_id, agent_jobs, clock, job, claim, stop = (
-        _cancelled_running_job(tmp_path)
-    )
-    _renew_past_the_cancellation_window(sessions, agent_jobs, clock, job, claim)
+    cancelled = _cancelled_running_job(tmp_path)
+    cancelled.agent_jobs.reconcile_orders()
+    assert cancelled.order_state() not in {"queued", "running"}
 
-    stopping = stop()
+    stopping = cancelled.stop()
     assert stopping.state not in {"succeeded", "failed", "cancelled"}
-    exact = claim_agent(agent_jobs, node_id, "serial-0")
-    assert exact is not None and exact.fence != claim.fence
-    agent_jobs.record_result(
+    exact = claim_agent(cancelled.agent_jobs, cancelled.node_id, "serial-0")
+    assert exact is not None and exact.fence != cancelled.claim.fence
+    cancelled.agent_jobs.record_result(
         AgentResult(
             fence=exact.fence,
             state=AgentResultState.SUCCEEDED,
             result=RecipeStopResult(),
         )
     )
-    assert stop().state == "succeeded"
-    _activate_fresh_job_run(sessions, operations, run_id)
+    assert cancelled.stop().state == "succeeded"
+    _activate_fresh_job_run(cancelled.sessions, cancelled.operations, cancelled.run_id)
 
 
 def test_a_stale_heartbeat_on_an_ended_cancelled_job_is_known_cancelled(
@@ -202,13 +204,46 @@ def test_a_stale_heartbeat_on_an_ended_cancelled_job_is_known_cancelled(
     """Catches a plain refusal (which the agent retries) instead of the typed
     ``superseded_operation_cancelled`` answer for a cancelled JobRun."""
 
-    sessions, _operations, _run_id, _node_id, agent_jobs, clock, job, claim, _stop = (
-        _cancelled_running_job(tmp_path)
-    )
-    _renew_past_the_cancellation_window(sessions, agent_jobs, clock, job, claim)
+    cancelled = _cancelled_running_job(tmp_path)
+    cancelled.agent_jobs.reconcile_orders()
 
-    stale = AgentProgress(fence=claim.fence, progress=None)
-    assert agent_jobs.known_superseded_cancellation(stale) is True
+    stale = AgentProgress(fence=cancelled.claim.fence, progress=None)
+    assert cancelled.agent_jobs.known_superseded_cancellation(stale) is True
+
+
+def test_a_late_cancelled_receipt_ends_a_cancelled_job_without_cleanup(
+    tmp_path,
+) -> None:
+    """The Spark's exit-130 receipt arrives after its lease: the job ends
+    cancelled with its effect proved stopped, so no cleanup Stop is queued.
+
+    Wrong implementation: the late receipt was read as a lapsed lease, leaving
+    the job's runtime in doubt and a cleanup Stop queued for it.
+    """
+
+    cancelled = _cancelled_running_job(tmp_path)
+    # Past its lease the receipt is late: the agent API hands it on as one.
+    assert cancelled.agent_jobs.record_late_result(
+        cancellation_result(
+            cancelled.claim,
+            cancelled.job,
+            state="cancelled",
+            reason="controller cancellation requested",
+        )
+    )
+
+    assert cancelled.order_state() == "cancelled"
+    assert cancelled.service.get(cancelled.job.id).state == ajs.CANCELLED
+    with cancelled.sessions() as session:
+        stops = session.scalars(
+            select(Job.id).where(
+                Job.kind == "recipe.stop",
+                Job.payload["owner_kind"].as_string() == "artifact-job",
+            )
+        ).all()
+    assert stops == []
+    assert cancelled.stop().state == "succeeded"
+    _activate_fresh_job_run(cancelled.sessions, cancelled.operations, cancelled.run_id)
 
 
 def test_an_order_without_its_child_never_holds_the_stop(tmp_path) -> None:
