@@ -4,7 +4,7 @@ import { vi } from "vitest";
 import { ApiClient } from "../api/client";
 import type { ControlApi, VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import { ToastProvider } from "../components/toast";
-import { FleetPage } from "./fleet-simplified";
+import { OverviewPage } from "./overview";
 
 const node: VisualFleetNode = {
   id: `spk_${"a".repeat(32)}`,
@@ -56,7 +56,7 @@ test("a failed background refresh keeps the last snapshot and says it is disconn
   const fleetEvents = vi.spyOn(api, "fleetEvents").mockReturnValue(connection);
   const { unmount } = render(
     <ToastProvider>
-      <FleetPage api={api} />
+      <OverviewPage api={api} />
     </ToastProvider>,
   );
   await act(async () => {

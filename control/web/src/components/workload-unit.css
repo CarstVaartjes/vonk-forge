@@ -1,0 +1,32 @@
+.workload-unit{padding-bottom:0}
+.workload-hero{padding:1.25rem 1.5rem 0}
+.workload-strip{padding:.9rem 1.5rem 0;margin-top:1rem;border-top:1px solid var(--line)}
+.workload-strip>header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
+.workload-strip h2{margin:0;font-size:1rem}
+.workload-hero>header{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .75rem}
+.workload-hero h2{margin:0;font-size:1.25rem;letter-spacing:-.02em}
+.unit-alias{padding:.15rem .6rem;border:1px solid var(--line-strong);border-radius:var(--r-in);background:var(--recess);color:var(--ink);font:700 .875rem/1.4 var(--mono)}
+.unit-facts{color:var(--muted);font-size:.8125rem}
+.hero-body{display:grid;grid-template-columns:minmax(14rem,22rem) minmax(0,1fr);gap:1rem 1.5rem;margin-top:1rem}
+.hero-read{min-width:0}
+.hero-num{margin:0;color:var(--model-ink);font-size:clamp(3rem,5vw,4.25rem);font-weight:700;letter-spacing:-.05em;line-height:.95;white-space:nowrap}
+.hero-num small{margin-left:.3em;color:var(--muted);font-size:.3em;font-weight:500;letter-spacing:-.01em}
+.hero-missing{color:var(--muted);font-size:1.5rem;letter-spacing:0;line-height:1.2}
+.hero-caption{margin:.35rem 0 0;color:var(--muted);font-size:.8125rem}
+.hero-figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem 1.25rem;margin:1.25rem 0 0}
+.hero-figures dt{color:var(--faint);font-size:.75rem}
+.hero-figures dd{margin:0;font-size:1.0625rem;font-weight:650;letter-spacing:-.02em;overflow-wrap:anywhere}
+.hero-figures small{color:var(--muted);font-size:.72em;font-weight:500}
+.hero-chart{min-width:0}
+.unit-bracket{height:1rem;margin:1rem 3rem 0;border:1px solid var(--line-strong);border-bottom:0;border-radius:var(--r-in) var(--r-in) 0 0}
+.unit-runs-on{display:none;margin:1rem 1.5rem 0;color:var(--muted);font-size:.8125rem}
+.unit-sparks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr))}
+.unit-sparks>.spark-card+.spark-card{border-left:1px solid var(--line)}
+@media(max-width:42rem){
+  .workload-hero{padding:1rem 1rem 0}
+  .hero-body{grid-template-columns:minmax(0,1fr)}
+  .hero-num{font-size:3.5rem}
+  .unit-bracket{display:none}.unit-runs-on{display:block;margin:1rem 1rem 0}
+  .unit-sparks>.spark-card+.spark-card{border-left:0;border-top:1px solid var(--line)}
+}
+.hero-num .estimate-mark{font-size:.5em;margin-right:.15em;vertical-align:.25em}
