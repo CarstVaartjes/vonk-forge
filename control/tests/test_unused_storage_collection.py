@@ -1868,7 +1868,6 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     def refuse(_session: Session) -> None:
         raise RuntimeError("a load arrived")
 
-    service.preview_uninstall(installation_id)
     observed_error = None
     try:
         service.uninstall(
@@ -1893,7 +1892,6 @@ def test_removal_a_guard_refuses_queues_nothing(tmp_path: Path) -> None:
     assert _ordinals(sessions) == before
     # The refused attempt leaves no queue head or node ownership behind.
     fresh_key = str(uuid.uuid4())
-    service.preview_uninstall(installation_id)
     service.uninstall(
         installation_id,
         actor=ACTOR,
@@ -1929,7 +1927,6 @@ def test_the_guard_runs_while_the_target_spark_rows_are_locked(
 
     def remove() -> None:
         try:
-            service.preview_uninstall(installation_id)
             outcome["view"] = service.uninstall(
                 installation_id,
                 actor=ACTOR,
