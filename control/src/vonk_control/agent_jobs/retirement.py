@@ -112,12 +112,21 @@ def operator_resume_candidates_in_session(
             select(AgentNode).where(AgentNode.node_id.in_(scope))
         )
     }
+    # Only an order its Spark's intent fences is bound to it: a JobRun is
+    # fenced by its run, whatever ordinal an older Controller stored.
+    fenced = any(
+        operation.kind in _WORKLOAD_INTENT_OPERATIONS for operation in candidates
+    )
     # A topology-wide request cannot resume only its still-current subset.
     # The mutation locks this complete target scope before this shared decision.
     if set(nodes) != set(scope) or any(
         node.state != "active"
         or node.revoked_at is not None
-        or (parent_intent is not None and node.workload_intent_ordinal != parent_intent)
+        or (
+            fenced
+            and parent_intent is not None
+            and node.workload_intent_ordinal != parent_intent
+        )
         for node in nodes.values()
     ):
         return ()
@@ -130,14 +139,9 @@ def operator_resume_candidates_in_session(
             continue
         if operation.current_attempt < 1:
             continue
-        if parent_intent is None:
-            if operation.workload_intent_ordinal is not None:
-                continue
-        elif operation.workload_intent_ordinal != parent_intent:
-            continue
-        if (
-            operation.kind in _WORKLOAD_INTENT_OPERATIONS
-            and operation.workload_intent_ordinal is None
+        if operation.kind in _WORKLOAD_INTENT_OPERATIONS and (
+            operation.workload_intent_ordinal is None
+            or operation.workload_intent_ordinal != parent_intent
         ):
             continue
         eligible.append(operation)

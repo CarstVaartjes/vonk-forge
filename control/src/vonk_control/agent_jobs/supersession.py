@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentOperation,
     InvalidRequestReason,
     LifecycleState,
     RunState,
@@ -191,69 +192,155 @@ def request_superseded_workload_cancellation_in_session(
                 "the order's workload identity does not match its children",
             )
             continue
-        for child in children:
-            # Superseded work is never retried: withdraw any schedule.  An
-            # order that never ran ends now; one that did stays until its
-            # cancellation receipt arrives or the cancellation window closes.
-            adapter.withdraw_retry(child)
-            if child.state == "queued" and child.current_attempt == 0:
-                adapter.settle(
-                    child,
-                    None,
-                    parent,
-                    CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
-                    now,
-                )
-        if any(
-            child.state in agent_operation_states.RUNNING_OR_PARKED
-            for child in children
-        ):
-            previous = (
-                json.loads(column_message(parent, "result"))
-                if column_is_document(parent, "result")
-                else {}
+        _cancel_order(adapter, parent, children, ordinal, now)
+
+
+def _cancel_order(
+    adapter: AgentOperationAdapter,
+    parent: Job,
+    children: Sequence[StoredOperation],
+    ordinal: int,
+    now: datetime,
+) -> None:
+    """Cancel one live order under the workload intent ``ordinal``.
+
+    The one cancellation both the Spark-wide supersession and a run's own
+    Stop (``request_run_job_cancellation_in_session``) apply: the request is
+    named by the order and the intent (``uuid5(order:ordinal)``), which the
+    exact JobRun Stop's authority binds.
+    """
+    for child in children:
+        # Superseded work is never retried: withdraw any schedule.  An
+        # order that never ran ends now; one that did stays until its
+        # cancellation receipt arrives or the cancellation window closes.
+        adapter.withdraw_retry(child)
+        if child.state == "queued" and child.current_attempt == 0:
+            adapter.settle(
+                child,
+                None,
+                parent,
+                CancelRequested(reason=SupersedeCode.SUPERSEDED_BY_INTENT),
+                now,
             )
-            if previous.get("cancel_requested") is not True:
-                parent.result = {
-                    **previous,
-                    "cancel_requested": True,
-                    "cancel_request_id": str(
-                        uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")
-                    ),
-                    "cancel_actor": "controller",
-                    "cancel_requested_at": _aware(now).isoformat(),
-                    "reason": SupersedeCode.SUPERSEDED_BY_INTENT.value,
-                }
-            elif superseded_cancellation_deadline(previous) is None:
-                # A repeated cancellation path must repair a result that
-                # carries the flag but no usable timestamp, not merely one
-                # with the key missing.  Without a parseable instant the
-                # cleanup STOP can never be authorised and the operation
-                # would wait forever.
-                parent.result = {
-                    **previous,
-                    "cancel_requested_at": _aware(now).isoformat(),
-                }
-            state = "running"
-        elif all(
-            child.state
-            in {"succeeded", "failed", "cancelled", *agent_operation_states.PARKED}
-            for child in children
-        ):
-            # A superseded parent may have one rank finish just before the
-            # replacement fences the other rank.  Once no child is still
-            # running or parked, the cancellation is terminal even when
-            # the children have mixed terminal outcomes.  Leaving the
-            # parent ``running`` here makes every newer intent wait for a
-            # receipt that can no longer arrive.
-            state = (
-                "failed"
-                if any(child.state == "failed" for child in children)
-                else "cancelled"
+    if any(
+        child.state in agent_operation_states.RUNNING_OR_PARKED for child in children
+    ):
+        previous = (
+            json.loads(column_message(parent, "result"))
+            if column_is_document(parent, "result")
+            else {}
+        )
+        if previous.get("cancel_requested") is not True:
+            parent.result = {
+                **previous,
+                "cancel_requested": True,
+                "cancel_request_id": str(
+                    uuid.uuid5(uuid.NAMESPACE_URL, f"{parent.id}:{ordinal}")
+                ),
+                "cancel_actor": "controller",
+                "cancel_requested_at": _aware(now).isoformat(),
+                "reason": SupersedeCode.SUPERSEDED_BY_INTENT.value,
+            }
+        elif superseded_cancellation_deadline(previous) is None:
+            # A repeated cancellation path must repair a result that
+            # carries the flag but no usable timestamp, not merely one
+            # with the key missing.  Without a parseable instant the
+            # cleanup STOP can never be authorised and the operation
+            # would wait forever.
+            parent.result = {
+                **previous,
+                "cancel_requested_at": _aware(now).isoformat(),
+            }
+        state = "running"
+    elif all(
+        child.state
+        in {"succeeded", "failed", "cancelled", *agent_operation_states.PARKED}
+        for child in children
+    ):
+        # A superseded parent may have one rank finish just before the
+        # replacement fences the other rank.  Once no child is still
+        # running or parked, the cancellation is terminal even when
+        # the children have mixed terminal outcomes.  Leaving the
+        # parent ``running`` here makes every newer intent wait for a
+        # receipt that can no longer arrive.
+        state = (
+            "failed"
+            if any(child.state == "failed" for child in children)
+            else "cancelled"
+        )
+    else:
+        state = parent.state
+    set_parent_state(parent, state, SupersedeCode.SUPERSEDED_BY_INTENT, now)
+
+
+def request_run_job_cancellation_in_session(
+    session: Session,
+    run_id: str,
+    targets: Sequence[str],
+    ordinal: int,
+    now: datetime,
+) -> None:
+    """Cancel the run's own live JobRun orders on ``targets`` for its Stop.
+
+    A JobRun is fenced by its run, never by its Spark's workload intent
+    (``_WORKLOAD_INTENT_OPERATIONS``): a load or Stop of another run on the
+    same Spark never cancels it. This is the one path that does, for the
+    run's Stop at ``ordinal``: exactly this run's jobs, under the same
+    cancellation the supersession applies. A repeat keeps the cancellation
+    already recorded, so every continuation of the Stop calls it again and a
+    job admitted since is cancelled too.
+    """
+
+    scope = tuple(sorted(set(targets)))
+    if not scope:
+        return
+    acquire_admission_keys(
+        session,
+        tuple(node_admission_key(node_id) for node_id in scope),
+        holder="agent-job",
+    )
+    # The orders are named by their children's own rows (kind, the run their
+    # request names, the Spark each was sent to), never by the parent row: a
+    # damaged parent must not leave the run's job uncancelled.
+    parent_ids = tuple(
+        session.scalars(
+            select(StoredOperation.parent_job_id)
+            .join(Job, Job.id == StoredOperation.parent_job_id)
+            .where(
+                StoredOperation.node_id.in_(scope),
+                StoredOperation.kind == AgentOperation.RECIPE_JOB_RUN.value,
+                StoredOperation.payload["run_id"].as_string() == run_id,
+                Job.state.in_(job_states.LIVE),
             )
-        else:
-            state = parent.state
-        set_parent_state(parent, state, SupersedeCode.SUPERSEDED_BY_INTENT, now)
+            .distinct()
+            .order_by(StoredOperation.parent_job_id)
+        )
+    )
+    if not parent_ids:
+        return
+    # The parent rows are versioned (an optimistic write); the children are
+    # locked as the supersession locks them.
+    children_by_parent: dict[str, list[StoredOperation]] = {}
+    for child in lock_admission_rows(
+        session,
+        (
+            AdmissionRowLock(
+                "run-job-children",
+                StoredOperation,
+                select(StoredOperation).where(
+                    StoredOperation.parent_job_id.in_(parent_ids)
+                ),
+            ),
+        ),
+    ).get("run-job-children", ()):
+        children_by_parent.setdefault(child.parent_job_id, []).append(child)
+    adapter = AgentOperationAdapter(session)
+    for parent in session.scalars(
+        select(Job).where(Job.id.in_(parent_ids)).order_by(Job.id)
+    ):
+        children = tuple(children_by_parent.get(parent.id, ()))
+        if parent.state in job_states.LIVE and children:
+            _cancel_order(adapter, parent, children, ordinal, now)
 
 
 def abandon_superseded_idempotent_operations_in_session(

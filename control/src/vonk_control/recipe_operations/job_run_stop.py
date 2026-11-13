@@ -254,6 +254,11 @@ class JobRunStopMixin:
                         "workload intent was superseded",
                         reason=InvalidRequestReason.SUPERSEDED,
                     )
+                # The one path that cancels the run's jobs: its own Stop, on
+                # every continuation. No other request on these Sparks does.
+                AgentJobService.request_run_job_cancellation_in_session(
+                    session, run_id, targets, workload_intent_ordinal, now
+                )
                 if profile_application_id is not None:
                     profile_job = service._profile_jobrun_stop_in_session(
                         session,
@@ -469,13 +474,7 @@ class JobRunStopMixin:
                 ).hexdigest(),
             )
             try:
-                validate_jobrun_stop_source(
-                    session,
-                    target,
-                    payload,
-                    run,
-                    workload_intent_ordinal=workload_intent_ordinal,
-                )
+                validate_jobrun_stop_source(session, target, payload, run)
             except ProfileStopAuthorityError as error:
                 # Drift in the Controller's own records since the Stop was
                 # reviewed: re-planned, as the profile Stop's refusal is.

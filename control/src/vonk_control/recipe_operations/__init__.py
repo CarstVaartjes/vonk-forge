@@ -342,7 +342,6 @@ from .intent import _cancel_reason as _cancel_reason
 from .intent import _intent_is_current as _intent_is_current
 from .intent import _job_workload_intent as _job_workload_intent
 from .intent import _profile_effect_scope as _profile_effect_scope
-from .intent import _run_start_intent as _run_start_intent
 from .intent import _shared_workload_intent as _shared_workload_intent
 from .intent import _unissued_workload_children as _unissued_workload_children
 from .intent import _workload_owner_scope as _workload_owner_scope
@@ -599,7 +598,6 @@ __all__ = [
     "_run_accepted_ranks",
     "_run_is_one_shot",
     "_run_observes_per_generation",
-    "_run_start_intent",
     "_shared_workload_intent",
     "_start_deadline_failure",
     "_start_endpoint",

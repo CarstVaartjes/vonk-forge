@@ -28,6 +28,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import WAIT_STEP
+from .contracts import fencing_intent
 from .endings import end_unobserved_order
 from .observation_receipts import (
     OBSERVATION_KINDS,
@@ -341,8 +342,8 @@ def _superseding_intent(operation: StoredOperation, node: AgentNode) -> int | No
 
     if (
         operation.kind not in CLEANUP_KINDS
-        and operation.workload_intent_ordinal is not None
-        and operation.workload_intent_ordinal < node.workload_intent_ordinal
+        and (intent := fencing_intent(operation)) is not None
+        and intent < node.workload_intent_ordinal
     ):
         return node.workload_intent_ordinal
     return None

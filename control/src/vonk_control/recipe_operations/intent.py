@@ -37,7 +37,6 @@ from ..recipe_progress import (
     _parent_intent as _parent_intent,  # noqa: PLC0414 -- shared helper export
 )
 from .errors import RecipeRequestInvalid, RecipeRetryLater
-from .rank_authority import _run_is_one_shot
 
 
 def _bound_workload_intent(job: Job) -> int:
@@ -75,33 +74,6 @@ def _job_workload_intent(session: Session, job: Job) -> int | None:
     if isinstance(loaded, Residue) or loaded < 1:
         return None
     return loaded
-
-
-def _run_start_intent(session: Session, run_id: str) -> int:
-    run = session.get(RecipeRun, run_id)
-    if run is None:
-        raise RecipeRequestInvalid("recipe run does not exist")
-    root_kind = (
-        "recipe.job.activate.v1"
-        if _run_is_one_shot(session, run)
-        else WireAgentOperation.RECIPE_START.value
-    )
-    starts = tuple(
-        session.scalars(
-            select(Job)
-            .where(
-                Job.kind == root_kind,
-                Job.owner_kind == "run",
-                Job.owner_id == run_id,
-                Job.payload["recovery"].as_string().is_(None),
-            )
-            .order_by(Job.created_at, Job.id)
-            .limit(2)
-        )
-    )
-    if len(starts) != 1:
-        raise RecipeRetryLater("recipe run lacks its original workload authority")
-    return _bound_workload_intent(starts[0])
 
 
 def _intent_is_current(session: Session, ordinal: int, targets: Sequence[str]) -> bool:
