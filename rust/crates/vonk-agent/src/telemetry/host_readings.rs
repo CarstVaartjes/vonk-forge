@@ -144,7 +144,8 @@ struct Fabric {
     ports_active: u32,
 }
 
-/// RDMA traffic of the ACTIVE ports. The fabric's netdev counters miss it
+/// RDMA traffic of all ports (a port going down must not make the counters
+/// drop) and the number of ACTIVE ports. The fabric's netdev counters miss it
 /// (RDMA bypasses them); the port counters are in 4-byte words.
 fn read_fabric(root: &Path) -> Option<Fabric> {
     let mut fabric = Fabric {
@@ -168,13 +169,11 @@ fn read_fabric(root: &Path) -> Option<Fabric> {
                 .ok()?
                 .checked_mul(4)
         };
-        if let (true, Some(rx), Some(tx)) =
-            (active, words("port_rcv_data"), words("port_xmit_data"))
-        {
+        if let (Some(rx), Some(tx)) = (words("port_rcv_data"), words("port_xmit_data")) {
             fabric.rx_bytes = fabric.rx_bytes.checked_add(rx)?;
             fabric.tx_bytes = fabric.tx_bytes.checked_add(tx)?;
-            fabric.ports_active += 1;
         }
+        fabric.ports_active += u32::from(active);
     }
     (fabric.rx_bytes <= COUNTER_MAX
         && fabric.tx_bytes <= COUNTER_MAX

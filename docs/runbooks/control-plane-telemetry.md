@@ -21,7 +21,7 @@ are nullable because a platform may not expose a value at a given sample:
 | CPU time busy/total | seconds (counters) | `/proc/stat` jiffies over USER_HZ since boot. Utilization is a Prometheus rate of busy over total. |
 | Load average | 1m | `/proc/loadavg`. |
 | LAN receive/transmit | bytes (counters) | The default-route interface's netdev counters. |
-| Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of ACTIVE ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
+| Fabric receive/transmit, active ports | bytes (counters), count | RDMA port counters of all ports (RoCE bypasses the netdev counters), and how many ports are ACTIVE. |
 | Disk read/written | bytes (counters) | The disk that holds the model store. |
 | OOM kills | count (counter) | `/proc/vmstat` `oom_kill` since boot. |
 | Board, NVMe, NIC temperature | °C | Hottest unlabelled `acpitz` zone (never called "CPU"), NVMe Composite, hottest ConnectX ASIC. |
