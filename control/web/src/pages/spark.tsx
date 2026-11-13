@@ -11,6 +11,7 @@ import { Time } from "../components/time";
 import { sparkColor } from "../components/chart/series";
 import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import { useFleetStream } from "../hooks/use-fleet-stream";
+import { useTelemetryHistory } from "../hooks/use-telemetry-history";
 import {
   NOT_REPORTED_TEXT,
   liveSample,
@@ -56,6 +57,12 @@ export function SparkPage({
   const nodes = fleet.snapshot?.nodes ?? [];
   const index = nodes.findIndex((candidate) => candidate.id === id);
   const node = nodes[index];
+  const { points } = useTelemetryHistory({
+    api,
+    nodeId: id,
+    telemetry: node?.telemetry,
+    now: fleet.now,
+  });
   const name = node ? nodeDisplayName(node) : id;
   const status = node ? nodeStatus(node, fleet.now).status : null;
   const uptime = node ? uptimeText(liveSample(node)?.uptime_seconds) : null;
@@ -141,6 +148,7 @@ export function SparkPage({
                 attention={fleet.snapshot?.attention}
                 attentionUnavailable={fleet.snapshot?.attention_unavailable === true}
                 onNavigate={onNavigate}
+                points={points}
               />
             )}
             {tab === "settings" && (

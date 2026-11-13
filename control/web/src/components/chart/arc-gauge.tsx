@@ -1,4 +1,5 @@
 import "./chart.css";
+import { NOT_REPORTED_TEXT } from "../../lib/fleet";
 
 const SIZE = 120;
 const CENTER = SIZE / 2;
@@ -40,20 +41,22 @@ export function ArcGauge({
   caption?: string;
   color: string;
 }) {
-  const shown = value === null ? "Not reported" : `${value.toLocaleString("en-US")} ${unit}`;
+  const shown = value === null ? NOT_REPORTED_TEXT : `${value.toLocaleString("en-US")} ${unit}`;
   const scaled = value !== null && max !== null && max > 0;
   const toDeg = (v: number) => START_DEG + SWEEP_DEG * Math.min(1, Math.max(0, v / (max ?? 1)));
-  const text = [shown, caption].filter(Boolean);
+  // Only a reading with a scale is a meter; anything else is plain text, so no meter lacks its maximum.
+  const meter = scaled
+    ? {
+        role: "meter",
+        "aria-label": title,
+        "aria-valuemin": 0,
+        "aria-valuemax": max,
+        "aria-valuenow": value,
+        "aria-valuetext": [shown, caption].filter(Boolean).join(", "),
+      }
+    : {};
   return (
-    <div
-      className="arc-gauge"
-      role="meter"
-      aria-label={title}
-      aria-valuemin={0}
-      aria-valuemax={max ?? undefined}
-      aria-valuenow={value ?? undefined}
-      aria-valuetext={text.join(", ")}
-    >
+    <div className="arc-gauge" {...meter}>
       <div className="arc-gauge-dial">
         {scaled && (
           <svg viewBox={`0 0 ${SIZE} ${SIZE - 14}`} aria-hidden="true" focusable="false">

@@ -2,12 +2,15 @@ import type { VisualFleetNode, VisualFleetSnapshot } from "../api/types";
 import { OutcomeKind } from "../api/vocabulary.generated";
 import {
   MEMORY_LOW_WORDS,
+  attentionText,
+  attentionTone,
   formatBytes,
   liveSample,
   memoryLevel,
   nodeMemory,
   nodeRecipeUpdates,
   nodeStatus,
+  nodeStatusTone,
 } from "./fleet";
 import { num } from "./gpu-readings";
 import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "./gpu-thresholds";
@@ -23,6 +26,7 @@ const ORDER: Record<Tone, number> = { bad: 0, warn: 1, info: 2, neutral: 3, ok: 
  */
 export function nodeHealth(
   node: VisualFleetNode,
+  nodes: readonly VisualFleetNode[],
   now: Date,
   attention: VisualFleetSnapshot["attention"],
   attentionUnavailable: boolean,
@@ -38,7 +42,7 @@ export function nodeHealth(
   reasons.forEach((reason, index) =>
     rows.push({
       key: `status-${index}`,
-      tone: status === "offline" ? "bad" : "warn",
+      tone: nodeStatusTone(status),
       title: status === "offline" ? "Offline" : "Attention",
       detail: reason,
     }),
@@ -47,8 +51,8 @@ export function nodeHealth(
   for (const alert of alerts)
     rows.push({
       key: `alert-${JSON.stringify(alert.labels)}`,
-      tone: alert.severity === "critical" ? "bad" : "warn",
-      title: alert.severity.charAt(0).toLocaleUpperCase() + alert.severity.slice(1),
+      tone: attentionTone(alert),
+      title: attentionText(alert, [...nodes]).severity,
       detail: alert.summary,
     });
   for (const update of nodeRecipeUpdates(node))
