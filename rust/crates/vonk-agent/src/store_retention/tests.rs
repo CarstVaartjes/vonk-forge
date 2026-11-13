@@ -68,12 +68,14 @@ fn sweep(
 }
 
 /// The agent's user manager: `units` are live build units, `scopes` are
-/// Podman's scopes; `stops` records each stop submitted. The default is an
+/// Podman's running scopes and `ended` its stopped or failed ones; `stops`
+/// records each stop submitted. The default is an
 /// idle manager with nothing to stop.
 #[derive(Default)]
 pub(crate) struct UserManager {
     units: Vec<String>,
     scopes: Vec<String>,
+    ended: Vec<String>,
     unavailable: bool,
     stops: std::cell::RefCell<Vec<String>>,
 }
@@ -102,7 +104,11 @@ impl crate::process::ProcessRunner for UserManager {
         } else {
             let pattern = args.last().unwrap();
             if pattern.ends_with(".scope") {
-                words(&self.scopes)
+                let mut scopes = self.scopes.clone();
+                if !args.iter().any(|arg| arg == "--state=active") {
+                    scopes.extend(self.ended.iter().cloned());
+                }
+                words(&scopes)
             } else if pattern.contains('*') {
                 words(&self.units)
             } else {
@@ -1679,6 +1685,7 @@ fn podman_scopes_no_build_owns_are_stopped_only_while_no_build_is_live() {
     let manager = |units: &[&str], unavailable| UserManager {
         units: names(units),
         scopes: scopes.clone(),
+        ended: names(&["libpod-ended.scope"]),
         unavailable,
         ..UserManager::default()
     };

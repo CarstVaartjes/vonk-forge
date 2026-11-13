@@ -470,7 +470,8 @@ fn build_units(request: &RecipeBuildCleanupRequest) -> [String; 3] {
 /// has its scopes in this list. An egress unit (`-e`) whose build is not beside
 /// the lane and whose recipe unit and runtime adapter are both gone serves
 /// nothing and is stopped; its scopes follow on a later pass. Any listing that
-/// cannot be read stops nothing. Returns the units it asked to stop.
+/// cannot be read stops nothing, and a scope already stopped or failed is not
+/// asked again. Returns the units it asked to stop.
 pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
     runner: &R,
     beside: &dyn Fn() -> std::collections::BTreeSet<Uuid>,
@@ -479,6 +480,7 @@ pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
     let scopes = list_units(
         runner,
         &[
+            "--state=active",
             "libpod-*.scope",
             "rootless-netns-*.scope",
             "podman-pause-*.scope",
@@ -544,7 +546,8 @@ pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
     Ok(stop)
 }
 
-/// The names of the user manager's loaded units matching `patterns`.
+/// The names of the user manager's loaded units matching `patterns` (which
+/// may start with a state filter).
 fn list_units<R: ProcessRunner + ?Sized>(
     runner: &R,
     patterns: &[&str],
