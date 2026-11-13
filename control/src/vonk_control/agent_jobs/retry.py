@@ -102,7 +102,7 @@ JOB_PRE_LAUNCH_STAGES = frozenset(
 )
 
 
-def job_attempt_did_not_launch(result: WireModel) -> bool:
+def job_attempt_did_not_launch(result: WireModel | Mapping[str, object]) -> bool:
     """A job run's failure report proves this attempt never ran the job: it
     stopped at a pre-launch stage and carries no process receipt."""
     return (

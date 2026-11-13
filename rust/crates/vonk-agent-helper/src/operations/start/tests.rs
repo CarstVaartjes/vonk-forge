@@ -929,3 +929,85 @@ fn a_job_deadline_that_finds_the_installation_lock_held_is_stop_uncertain() {
         })
     ));
 }
+
+/// Every job end that cleans up while the installation lock is held reports
+/// the container as remaining, never the busy refusal of a Start. Wrong
+/// implementation: a `?` on the cleanup returned `InstallationReconciliationBusy`
+/// after the container ran, which the agent reads as a refused Start.
+#[test]
+fn a_job_end_that_finds_the_installation_lock_held_is_stop_uncertain() {
+    enum Listing {
+        Running,
+        Gone,
+        Unreadable,
+    }
+    for (name, listing, cancelled) in [
+        ("unobserved", Listing::Unreadable, false),
+        ("unobserved and cancelled", Listing::Unreadable, true),
+        ("vanished and cancelled", Listing::Gone, true),
+        ("deadline and cancelled", Listing::Running, true),
+    ] {
+        let mut plan = job_plan(recipe_start_plan_for_authority(1));
+        let (_temp, roots) = start_fixture(&mut plan);
+        let launched = match listing {
+            Listing::Running => Some(format!(
+                "true\tfalse\t{}\ttrue\t{}\t{}\t{}\t{}\t{}\n",
+                "f".repeat(64),
+                plan.run_id,
+                plan.run_id,
+                plan.installation_id,
+                plan.run_generation,
+                plan.plan_digest
+            )),
+            Listing::Gone => None,
+            Listing::Unreadable => Some("not\tan\tanswer\nof\tone\tcontainer\n".to_owned()),
+        };
+        let launched_some = launched.is_some();
+        let runner = LaunchRunner {
+            calls: Arc::default(),
+            config: String::new(),
+            earlier_job: String::new(),
+            run: RunAnswer::NoId,
+            launched,
+            created: Arc::new(Mutex::new(launched_some)),
+        };
+        let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+        let identity = RuntimeEffectIdentity {
+            installation_id: plan.installation_id,
+            runtime_id: plan.run_id,
+            run_generation: plan.run_generation,
+        };
+        let _active = executor.job_cancellation.begin(identity).unwrap();
+        if cancelled {
+            executor.job_cancellation.cancel(identity).unwrap();
+        }
+        let _held = executor
+            .lock_installation_runtime(&plan.installation_id.to_string())
+            .unwrap();
+        let ended = executor.runtime_wait_for_job(
+            identity,
+            plan.run_id,
+            &plan.plan_digest,
+            0,
+            Instant::now(),
+        );
+        if cancelled {
+            assert!(
+                matches!(
+                    ended,
+                    Ok(RuntimeRequestOutcome {
+                        stop_uncertain: true,
+                        ..
+                    })
+                ),
+                "{name}"
+            );
+        } else {
+            // A job never read until its deadline keeps its wait-failed error.
+            assert!(
+                matches!(ended, Err(OperationError::RuntimeJobWaitFailed { .. })),
+                "{name}"
+            );
+        }
+    }
+}

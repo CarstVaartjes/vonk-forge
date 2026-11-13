@@ -11,6 +11,10 @@
 //! start's: the helper refuses it, which reads as unread, and the retry's Start
 //! refuses it by name.
 //!
+//! A helper answer given before it did anything (a busy installation lock) that
+//! finds the container absent is a pre-launch wait, not a failure; one that
+//! finds it running goes on: a retry's busy refusal never ends a live run.
+//!
 //! Two answers keep the exact stop they had. A container under the name that
 //! is not this start's (the helper already read it): the stop removes one of
 //! this order's and refuses any other. And a refused authority: the start is
@@ -104,6 +108,19 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     Err(uncertain) => uncertain,
                     Ok(()) => runtime_observation_failure(&exited),
                 }
+            }
+            // Proven absent after a helper answer given before it did anything
+            // (a busy installation lock): this attempt never launched, so the
+            // Controller issues the Start again within its start deadline.
+            Err(absent)
+                if helper_said(&absent, HelperErrorCode::RuntimeRunMissing)
+                    && refused_without_effect(error) =>
+            {
+                temporary_preparation_failure(
+                    FailureStage::RuntimeProjection,
+                    "service_start",
+                    &error.preflight_code(),
+                )
             }
             // Proven absent: nothing to stop. The Start's own error says why,
             // as it did after a stop.

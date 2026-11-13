@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import UTC, timedelta
 
 import pytest
-from vonk_agent_protocol import FailureStage, OutcomeKind
+from vonk_agent_protocol import FailureStage, OutcomeKind, WaitReason
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.agent_jobs.retry import JOB_PRE_LAUNCH_STAGES
-from vonk_control.lifecycle import State
+from vonk_control.lifecycle import LOST_OBSERVATION_BOUND, OBSERVE_BUDGET, State
 
 from .agent_fences import fenced_attempt
 from .runtime_identity_support import claim_agent
@@ -105,6 +105,69 @@ def test_dependency_recovery_is_bounded_and_fresh_request_is_claimable(
     assert _stored(sessions, fresh.id).current_attempt == 1
     jobs.succeed(admitted, RecipeStopResult())
     assert _stored(sessions, fresh.id).state == State.SUCCEEDED.value
+
+
+# Wrong implementation caught: a pre-launch wait that every attempt repeats
+# (a read-only ledger directory) is reissued forever instead of ending.
+def test_a_job_that_waits_before_launch_on_every_attempt_ends_at_the_recovery_deadline(
+    agent_service,
+) -> None:
+    from vonk_agent_protocol import (
+        AgentFailureKind,
+        AgentResult,
+        AgentResultState,
+        FailureCode,
+        OutcomeEvidence,
+        OutcomeFailed,
+    )
+
+    jobs, sessions, clock = agent_service
+    kind, payload = _job_run_payload()
+    operation = jobs.enqueue(parent(sessions, clock).id, NODE_A, kind, COMMIT, payload)
+    deadline = None
+    for _ in range(200):
+        claim = claim_agent(jobs, NODE_A, "serial-a")
+        if claim is None:
+            break
+        jobs.record_result(
+            AgentResult(
+                fence=claim.fence,
+                state=AgentResultState.FAILED,
+                result=OutcomeFailed(
+                    kind=OutcomeKind.FAILED,
+                    code=FailureCode.RUNTIME_OBSERVATION_UNAVAILABLE,
+                    reason="request ledger unavailable",
+                    failure_kind=AgentFailureKind.TEMPORARY_DEPENDENCY,
+                    evidence=OutcomeEvidence(
+                        stage=FailureStage.RUNTIME_PROJECTION.value
+                    ),
+                ),
+            )
+        )
+        stored = _stored(sessions, operation.id)
+        assert stored.recovery_deadline is not None
+        deadline = stored.recovery_deadline.replace(tzinfo=UTC)
+        assert stored.next_action_at is not None
+        clock.now = stored.next_action_at.replace(tzinfo=UTC) + timedelta(minutes=5)
+    else:
+        pytest.fail("the pre-launch wait was reissued without end")
+    assert deadline is not None
+    clock.now = max(clock.now, deadline)
+    # Past the stored deadline the order is looked at, never issued again, and
+    # ends failed with a typed reason after the bounded number of looks.
+    ended = _stored(sessions, operation.id)
+    for _ in range(OBSERVE_BUDGET + 2 * LOST_OBSERVATION_BOUND):
+        if ended.state == State.FAILED.value:
+            break
+        due = ended.next_action_at
+        assert due is not None
+        clock.now = max(clock.now, due.replace(tzinfo=UTC)) + timedelta(seconds=1)
+        jobs.reconcile_orders()
+        assert claim_agent(jobs, NODE_A, "serial-a") is None
+        ended = _stored(sessions, operation.id)
+    assert ended.state == State.FAILED.value
+    assert ended.status_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED.value
+    assert job_state(sessions, operation.parent_job_id).state == State.FAILED.value
 
 
 @pytest.mark.parametrize("stage", sorted(JOB_PRE_LAUNCH_STAGES))
