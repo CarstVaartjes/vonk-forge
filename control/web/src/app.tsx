@@ -7,23 +7,26 @@ import { VersionLine } from "./components/version-line";
 import type { AppRoute } from "./components/app-shell";
 import type { LiveStatus } from "./hooks/fleet-stream-state";
 import { ActivityPage } from "./pages/activity";
-import { FleetPage } from "./pages/fleet-simplified";
+import { OverviewPage } from "./pages/overview";
 import { KeysPage } from "./pages/keys";
 import { LibraryPage } from "./pages/library";
+import { WorkloadsPage } from "./pages/workloads";
 
-const pages: AppRoute[] = ["fleet", "library", "keys", "activity"];
+const pages: AppRoute[] = ["overview", "workloads", "library", "keys", "activity"];
 function pageTitle(pathname: string): string {
   if (/^\/library\/recipes\//.test(pathname)) return "Recipe · Library · Vonk Forge";
   if (/^\/library(?:\/|$)/.test(pathname)) return "Library · Vonk Forge";
   if (pathname === "/keys") return "API keys · Vonk Forge";
   if (pathname === "/activity") return "Activity · Vonk Forge";
-  if (pathname === "/" || pathname === "/fleet") return "Fleet · Vonk Forge";
+  if (pathname === "/workloads") return "Workloads · Vonk Forge";
+  if (pathname === "/" || pathname === "/fleet" || pathname === "/overview")
+    return "Overview · Vonk Forge";
   return "Page not found · Vonk Forge";
 }
 
 function currentPage(pathname = location.pathname): AppRoute | undefined {
   const value = pathname.replace(/^\//, "");
-  if (value === "" || value === "fleet") return "fleet";
+  if (value === "" || value === "fleet") return "overview";
   if (/^library(?:\/|$)/.test(value)) return "library";
   return pages.includes(value as AppRoute) ? (value as AppRoute) : undefined;
 }
@@ -109,7 +112,8 @@ export function App({ api }: { api: ControlApi }) {
   }
   const content = page ? (
     {
-      fleet: <FleetPage api={api} onBusyChange={setNavigationLocked} onLive={setLive} />,
+      overview: <OverviewPage api={api} onBusyChange={setNavigationLocked} onLive={setLive} />,
+      workloads: <WorkloadsPage api={api} onLive={setLive} />,
       library: (
         <LibraryPage
           api={api}
@@ -136,8 +140,8 @@ export function App({ api }: { api: ControlApi }) {
       </h1>
       <p>This address does not match a Vonk Forge workspace. Choose a safe destination below.</p>
       <div className="button-row">
-        <a className="button" href="/fleet" onClick={(event) => navigate(event, "fleet")}>
-          Go to Fleet
+        <a className="button" href="/overview" onClick={(event) => navigate(event, "overview")}>
+          Go to Overview
         </a>
         <a
           className="button secondary"

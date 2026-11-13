@@ -118,7 +118,7 @@ export function uptimeText(seconds: number | null | undefined): string | null {
 }
 
 /** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */
-function runStateWord(run: VisualFleetNode["loaded"][number]): string {
+export function runStateWord(run: VisualFleetNode["loaded"][number]): string {
   if (run.run_state == null) return "state unknown";
   if (run.run_state !== RunState.RUNNING) return run.run_state;
   if (run.healthy == null) return "state unknown";
@@ -151,6 +151,48 @@ export function nodeWorkloadLines(node: VisualFleetNode, fleet: VisualFleetNode[
     );
   }
   return lines;
+}
+
+/** One workload and the Sparks that carry it, in rank order; a Spark with two workloads appears under each. */
+export type WorkloadGroup = {
+  runId: string;
+  title: string;
+  alias: string | null;
+  /** The run's state in a word, as `nodeWorkloadLines` prints it. */
+  state: string;
+  nodes: VisualFleetNode[];
+};
+
+/** The fleet's workloads, in order of first appearance, and the Sparks that run none. */
+export function groupByWorkload(nodes: readonly VisualFleetNode[]): {
+  units: WorkloadGroup[];
+  idle: VisualFleetNode[];
+} {
+  const units = new Map<string, WorkloadGroup & { ranks: Map<string, number> }>();
+  for (const node of nodes) {
+    for (const run of node.loaded) {
+      const unit: WorkloadGroup & { ranks: Map<string, number> } = units.get(run.run_id) ?? {
+        runId: run.run_id,
+        title: run.title ?? run.run_id,
+        alias: run.alias ?? null,
+        state: runStateWord(run),
+        nodes: [],
+        ranks: new Map(),
+      };
+      if (!unit.ranks.has(node.id)) {
+        unit.nodes.push(node);
+        unit.ranks.set(node.id, Number(run.rank ?? 0));
+      }
+      units.set(run.run_id, unit);
+    }
+  }
+  return {
+    units: [...units.values()].map(({ ranks, ...unit }) => ({
+      ...unit,
+      nodes: [...unit.nodes].sort((a, b) => (ranks.get(a.id) ?? 0) - (ranks.get(b.id) ?? 0)),
+    })),
+    idle: nodes.filter((node) => node.loaded.length === 0),
+  };
 }
 
 export type FleetSummary = {

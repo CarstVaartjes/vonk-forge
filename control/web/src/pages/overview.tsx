@@ -1,28 +1,24 @@
-import { MetricsChart } from "../components/metrics-chart";
+import "./overview.css";
 import { useEffect, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
-import { type LiveStatus, liveStatus, staleWord } from "../hooks/fleet-stream-state";
-import { fleetStatusLine, nodeDisplayName } from "../lib/fleet";
-import { SparksTable } from "../components/sparks-table";
+import { useSelectedSpark } from "../hooks/use-selected-spark";
+import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
+import { fleetStatusLine, groupByWorkload } from "../lib/fleet";
 import { AttentionItem } from "../components/attention-item";
-import { StatusPill } from "../components/status-pill";
+import { FleetFeedback } from "../components/fleet-feedback";
+import { SparkCard } from "../components/spark-card";
+import { WorkloadUnit } from "../components/workload-unit";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
-import { SkeletonRows } from "../components/skeleton";
 import { useToast } from "../components/toast";
 import { EnrollmentGrant } from "../components/enrollment-grant";
 import { ServingNow, servingKey } from "../components/serving-now";
 import { SparkDetail } from "../components/spark-detail";
-import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
 
-function selectedSpark(): string | null {
-  return new URLSearchParams(location.search).get("spark");
-}
-
-export function FleetPage({
+export function OverviewPage({
   api,
   onLive,
 }: {
@@ -39,21 +35,9 @@ export function FleetPage({
   const [grant, setGrant] = useState<EnrollmentGrantResponse | null>(null);
   const toast = useToast();
   const [submitting, setSubmitting] = useState(false);
-  const [spark, setSpark] = useState(selectedSpark);
+  const [spark, selectSpark] = useSelectedSpark();
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeBusy, setUpgradeBusy] = useState(false);
-  useEffect(() => {
-    const listener = () => setSpark(selectedSpark());
-    addEventListener("popstate", listener);
-    return () => removeEventListener("popstate", listener);
-  }, []);
-  function selectSpark(id: string | null) {
-    const url = new URL(location.href);
-    if (id) url.searchParams.set("spark", id);
-    else url.searchParams.delete("spark");
-    history.pushState(null, "", `${url.pathname}${url.search}`);
-    setSpark(id);
-  }
   async function upgradeAll() {
     setUpgradeBusy(true);
     try {
@@ -97,11 +81,23 @@ export function FleetPage({
     setGrant(null);
   }
 
+  const nodes = fleet.snapshot?.nodes ?? [];
+  const { units, idle } = groupByWorkload(nodes);
+  const card = (node: (typeof nodes)[number]) => (
+    <SparkCard
+      key={node.id}
+      api={api}
+      node={node}
+      now={fleet.now}
+      index={nodes.indexOf(node)}
+      onOpen={selectSpark}
+    />
+  );
   return (
     <div className="fleet-page">
       <PageHeader
-        title="Fleet"
-        description="Every enrolled Spark, its health, and what is running there."
+        title="Overview"
+        description="What is serving, and the Sparks that carry it."
         actions={
           <>
             <button type="button" className="button secondary" onClick={fleet.retry}>
@@ -116,23 +112,6 @@ export function FleetPage({
           </>
         }
       />
-      {fleet.snapshot?.attention_unavailable && (
-        <p role="status">Prometheus alerts unavailable. Retrying automatically.</p>
-      )}
-      {!!fleet.snapshot?.attention?.length && (
-        <section aria-label="Needs attention">
-          <h2>Needs attention</h2>
-          <ul className="attention-list">
-            {fleet.snapshot.attention.map((alert) => (
-              <AttentionItem
-                key={JSON.stringify(alert.labels)}
-                alert={alert}
-                nodes={fleet.snapshot?.nodes ?? []}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
       {enrolling && (
         <section className="fleet-enrollment" aria-labelledby="fleet-enrollment-heading">
           <div>
@@ -183,45 +162,9 @@ export function FleetPage({
           onCancel={() => setUpgrading(false)}
         />
       )}
-      {fleet.snapshot && fleet.stale && (
-        <div className="fleet-stale">
-          <StatusPill tone="warn">{staleWord(fleet.refreshError)}</StatusPill>
-          <ObservationNotice
-            connection="reconnecting"
-            lastSuccessAt={fleet.lastUpdatedAt}
-            subject="the Fleet"
-          />
-        </div>
-      )}
-      {fleet.snapshot && (
-        <ServingNow
-          api={api}
-          refreshKey={servingKey(fleet.snapshot.nodes)}
-          pollKey={fleet.snapshot.generated_at}
-        />
-      )}
+      <FleetFeedback fleet={fleet} />
       {fleet.snapshot && (
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
-      )}
-      {fleet.snapshot && fleet.snapshot.nodes.length > 0 && (
-        <SparksTable
-          nodes={fleet.snapshot.nodes}
-          now={fleet.now}
-          selected={spark}
-          onSelect={selectSpark}
-        />
-      )}
-      {fleet.loading && !fleet.snapshot && !fleet.error && (
-        <SkeletonRows columns={6} label="Loading Fleet" />
-      )}
-      {fleet.error && !fleet.snapshot && (
-        <section className="fleet-error" role="alert">
-          <h2>Fleet unavailable</h2>
-          <p>{fleet.error}</p>
-          <button type="button" className="button" onClick={fleet.retry}>
-            Retry
-          </button>
-        </section>
       )}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
@@ -230,12 +173,51 @@ export function FleetPage({
           action={{ label: "Enroll a Spark", onClick: () => setEnrolling(true) }}
         />
       )}
-      <MetricsChart
-        api={api}
-        names={Object.fromEntries(
-          (fleet.snapshot?.nodes ?? []).map((node) => [node.id, nodeDisplayName(node)]),
-        )}
-      />
+      {fleet.snapshot && nodes.length > 0 && (
+        <div className="overview-grid">
+          <div className="overview-attention">
+            {fleet.snapshot.attention_unavailable && (
+              <p role="status">Prometheus alerts unavailable. Retrying automatically.</p>
+            )}
+            {!!fleet.snapshot.attention?.length && (
+              <section className="card attention-card" aria-label="Needs attention">
+                <h2>Needs attention</h2>
+                <ul className="attention-list">
+                  {fleet.snapshot.attention.map((alert) => (
+                    <AttentionItem key={JSON.stringify(alert.labels)} alert={alert} nodes={nodes} />
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+          <div className="overview-units">
+            {units.map((unit) => (
+              <WorkloadUnit key={unit.runId} unit={unit}>
+                {unit.nodes.map(card)}
+              </WorkloadUnit>
+            ))}
+            {idle.length > 0 && (
+              <section aria-label="Idle Sparks">
+                <h2>Idle</h2>
+                <div className="idle-sparks">
+                  {idle.map((node) => (
+                    <div className="card" key={node.id}>
+                      {card(node)}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </div>
+          <div className="overview-serving">
+            <ServingNow
+              api={api}
+              refreshKey={servingKey(nodes)}
+              pollKey={fleet.snapshot.generated_at}
+            />
+          </div>
+        </div>
+      )}
       {spark && <SparkDetail api={api} id={spark} onClose={() => selectSpark(null)} />}
     </div>
   );

@@ -95,10 +95,10 @@ it("keeps the control shell hidden until an unauthenticated startup check reache
 
   expect(screen.getByRole("status")).toHaveTextContent("Checking administrator session");
   expect(screen.queryByRole("navigation", { name: "Primary" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("heading", { name: "Fleet" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Overview" })).not.toBeInTheDocument();
 
   resolveSession(session);
-  expect(await screen.findByRole("heading", { name: "Fleet" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Overview" })).toBeVisible();
 });
 
 it("shows only the administrator sign-in form after a 401 session check", async () => {
@@ -173,7 +173,7 @@ it("opens Fleet with the authenticated administrator identity after a successful
   await user.type(screen.getByLabelText("Password"), "synthetic-test-password");
   await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-  expect(await screen.findByRole("heading", { name: "Fleet" })).toBeVisible();
+  expect(await screen.findByRole("heading", { name: "Overview" })).toBeVisible();
   expect(screen.getByText("admin")).toBeVisible();
   expect(screen.getByText("Administrator")).toBeVisible();
   expect(screen.queryByText("Development")).not.toBeInTheDocument();
@@ -197,7 +197,7 @@ it("returns the entire shell to login once when the API reports an expired sessi
       <App api={api} />
     </AuthProvider>,
   );
-  await screen.findByRole("heading", { name: "Fleet" });
+  await screen.findByRole("heading", { name: "Overview" });
   expire();
 
   expect(await screen.findByRole("heading", { name: "Sign in" })).toBeVisible();
@@ -219,11 +219,11 @@ it("waits for server logout before removing the authenticated shell", async () =
       <App api={api} />
     </AuthProvider>,
   );
-  await screen.findByRole("heading", { name: "Fleet" });
+  await screen.findByRole("heading", { name: "Overview" });
   await openOperatorMenu(user);
   await user.click(screen.getByRole("button", { name: "Logout" }));
 
-  expect(screen.getByRole("heading", { name: "Fleet" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible();
   expect(screen.getByRole("button", { name: "Signing out…" })).toBeDisabled();
   resolveLogout();
   expect(await screen.findByRole("heading", { name: "Sign in" })).toBeVisible();
@@ -245,12 +245,12 @@ it("keeps the authenticated shell visible when logout fails", async () => {
       <App api={api} />
     </AuthProvider>,
   );
-  await screen.findByRole("heading", { name: "Fleet" });
+  await screen.findByRole("heading", { name: "Overview" });
   await openOperatorMenu(user);
   await user.click(screen.getByRole("button", { name: "Logout" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "Unable to sign out. Your session may still be active.",
   );
-  expect(screen.getByRole("heading", { name: "Fleet" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Overview" })).toBeVisible();
 });

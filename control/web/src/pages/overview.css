@@ -1,0 +1,14 @@
+/* Two columns on a wide screen, one on a phone where the attention card comes first. */
+.overview-grid{display:grid;grid-template-columns:minmax(0,1fr);grid-template-areas:"attention" "units" "serving";gap:1.25rem;margin-top:1rem}
+.overview-attention{grid-area:attention;display:grid;gap:1.25rem;align-content:start}
+.overview-units{grid-area:units;display:grid;gap:1.25rem;align-content:start;min-width:0}
+.overview-serving{grid-area:serving;min-width:0}
+.overview-attention:empty,.overview-serving:empty{display:none}
+@media(min-width:64rem){
+  .overview-grid{grid-template-columns:minmax(0,1fr) 22rem;grid-template-areas:"units attention" "units serving" "units .";grid-template-rows:auto auto 1fr}
+}
+.attention-card{padding:1.1rem 1.25rem;border-color:var(--warn-line);background:linear-gradient(var(--warn-wash),var(--warn-wash)),var(--panel)}
+.attention-card h2{margin:0 0 .5rem;font-size:1rem}
+.attention-list{margin:0;padding:0;list-style:none}
+.idle-sparks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1.25rem}
+.overview-units>section>h2{margin:0 0 .5rem;font-size:1rem}

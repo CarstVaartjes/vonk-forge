@@ -5,7 +5,7 @@ import type { CliTokenDownload } from "../api/types";
 import type { LiveStatus } from "../hooks/fleet-stream-state";
 import { BrandMark } from "./brand-mark";
 import { StatusPill } from "./status-pill";
-import { ActivityIcon, FleetIcon, LibraryIcon } from "./icons";
+import { ActivityIcon, FleetIcon, LibraryIcon, WorkloadsIcon } from "./icons";
 
 const LIVE_TONES = {
   live: "ok",
@@ -15,7 +15,7 @@ const LIVE_TONES = {
   disconnected: "warn",
 } as const;
 
-export type AppRoute = "fleet" | "library" | "keys" | "activity";
+export type AppRoute = "overview" | "workloads" | "library" | "keys" | "activity";
 
 type Operator = {
   onDownloadCliToken(): Promise<CliTokenDownload>;
@@ -79,14 +79,24 @@ export function AppShell({
         </div>
         <nav className="primary-navigation" aria-label="Primary">
           <a
-            href="/fleet"
+            href="/overview"
             className="nav-link nav-link-primary"
-            aria-current={activeRoute === "fleet" ? "page" : undefined}
+            aria-current={activeRoute === "overview" ? "page" : undefined}
             {...disabledLinkProps}
-            onClick={(event) => navigate(event, "fleet")}
+            onClick={(event) => navigate(event, "overview")}
           >
             <FleetIcon />
-            <span>Fleet</span>
+            <span>Overview</span>
+          </a>
+          <a
+            href="/workloads"
+            className="nav-link nav-link-primary"
+            aria-current={activeRoute === "workloads" ? "page" : undefined}
+            {...disabledLinkProps}
+            onClick={(event) => navigate(event, "workloads")}
+          >
+            <WorkloadsIcon />
+            <span>Workloads</span>
           </a>
           <a
             href="/library"
