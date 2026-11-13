@@ -1607,7 +1607,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
               Clear filters
             </button>
           )}
-          <div className="activity-view-switcher" role="group" aria-label="Activity view">
+          <div className="segmented" role="group" aria-label="Activity view">
             <button
               type="button"
               aria-pressed={view === "timeline"}
