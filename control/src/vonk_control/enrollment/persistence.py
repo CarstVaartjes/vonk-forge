@@ -92,6 +92,7 @@ def _persist_issued_enrollment(
         node = AgentNode(
             node_id=enrollment.node_id,
             state=NodeIdentityState.ACTIVE,
+            enrolled_at=now,
         )
         session.add(node)
         # There is no ORM relationship between these operational rows. Flush

@@ -75,6 +75,9 @@ class AgentNode(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), index=True
     )
+    # Set once when the node is first enrolled and kept on re-enrolment. A Spark
+    # enrolled before this column existed has None and lists first.
+    enrolled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     inventory_snapshot: Mapped[NodeInventoryItemsSnapshot | None] = relationship(
         "NodeInventoryItemsSnapshot",
