@@ -121,7 +121,7 @@ function Traces({
 
 /**
  * One Spark: its colour key and name, status, unified memory and four live traces. `index` is the Spark's
- * place in enrolment order and fixes its colour. An offline Spark draws no traces. Readings the Spark
+ * place in the snapshot's node order and fixes its colour. An offline Spark draws no traces. Readings the Spark
  * does not report say "Not reported"; the card never fills them in.
  */
 export function SparkCard({
@@ -141,7 +141,7 @@ export function SparkCard({
   const { status, reasons } = nodeStatus(node, now);
   const color = sparkColor(index);
   const run = node.loaded.find((item) => (item.member_node_ids?.length ?? 0) > 1);
-  const uptime = uptimeText(node.telemetry?.sample.uptime_seconds);
+  const uptime = uptimeText(liveSample(node)?.uptime_seconds);
   const agent = node.agent_runtime?.semantic_version;
   const vitals = nodeVitals(node);
   return (
