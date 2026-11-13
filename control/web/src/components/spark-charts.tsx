@@ -97,28 +97,38 @@ export function SparkCharts({
   range: MetricRange;
   color: string;
 }) {
-  const catalogue = useMetricCatalogue(api);
+  const [retry, setRetry] = useState(0);
+  const catalogue = useMetricCatalogue(api, retry);
   const [at, setAt] = useState<number | null>(null);
-  if (typeof catalogue === "string") return <p role="status">Metrics unavailable: {catalogue}</p>;
+  const specs = Array.isArray(catalogue) ? catalogue : [];
   return (
-    <div className="spark-chart-grid">
-      {CARDS.flatMap((card) => {
-        const spec = catalogue?.find((entry) => entry.metric === card.metric);
-        return spec
-          ? [
-              <SparkChartCard
-                key={card.metric}
-                api={api}
-                nodeId={nodeId}
-                range={range}
-                spec={spec}
-                card={card}
-                color={color}
-                crosshair={{ at, onChange: setAt }}
-              />,
-            ]
-          : [];
-      })}
-    </div>
+    <>
+      <div className="button-row">
+        <button type="button" className="button secondary" onClick={() => setRetry((n) => n + 1)}>
+          Refresh metrics
+        </button>
+      </div>
+      {catalogue === undefined && <p role="status">Reading metrics…</p>}
+      {typeof catalogue === "string" && <p role="status">Metrics unavailable: {catalogue}</p>}
+      <div className="spark-chart-grid">
+        {CARDS.flatMap((card) => {
+          const spec = specs.find((entry) => entry.metric === card.metric);
+          return spec
+            ? [
+                <SparkChartCard
+                  key={card.metric}
+                  api={api}
+                  nodeId={nodeId}
+                  range={range}
+                  spec={spec}
+                  card={card}
+                  color={color}
+                  crosshair={{ at, onChange: setAt }}
+                />,
+              ]
+            : [];
+        })}
+      </div>
+    </>
   );
 }
