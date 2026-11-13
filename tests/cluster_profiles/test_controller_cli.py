@@ -103,6 +103,9 @@ class FakeClient:
             raise response
         return response
 
+    def metrics_catalogue(self):
+        raise AssertionError("the metric catalogue is not read here")
+
     def profile_endpoints(self, number, alias=None):
         payload = self.request(
             "GET",
@@ -827,6 +830,7 @@ def test_parser_exposes_current_singular_operator_roots_and_update() -> None:
         "recipe",
         "profile",
         "platform",
+        "metrics",
         "key",
         "run",
         "update",

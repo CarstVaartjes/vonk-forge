@@ -48,6 +48,9 @@ class Pages:
             return "definition"
         return "recipes" if "recipes" in page and "selector" not in page else "other"
 
+    def metrics_catalogue(self):
+        raise AssertionError("the metric catalogue is not read here")
+
     def profile_endpoints(self, number, alias=None):
         raise AssertionError("recipe selection must not inspect profile endpoints")
 

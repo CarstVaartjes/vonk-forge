@@ -14,12 +14,59 @@ export const UNITS: Record<MetricSpec["unit"], { symbol: string; scale: number }
   bytes_per_second: { symbol: "GiB/s", scale: GIB },
   tokens_per_second: { symbol: "tok/s", scale: 1 },
   seconds: { symbol: "s", scale: 1 },
-  ratio: { symbol: "", scale: 1 },
+  ratio: { symbol: "%", scale: 0.01 },
   count: { symbol: "", scale: 1 },
 };
+const BINARY = [
+  ["TiB", 1024 ** 4],
+  ["GiB", GIB],
+  ["MiB", 1024 ** 2],
+  ["KiB", 1024],
+] as const;
+
+/** Two decimals below 10, one below 100, whole above, without trailing zeros. */
+function short(value: number): string {
+  const digits = Math.abs(value) < 10 ? 2 : Math.abs(value) < 100 ? 1 : 0;
+  return String(Number(value.toFixed(digits)));
+}
+
+function size(bytes: number): string {
+  const step = BINARY.find(([, divisor]) => bytes >= divisor);
+  return step ? `${(bytes / step[1]).toFixed(1)} ${step[0]}` : `${bytes.toFixed(0)} B`;
+}
+
+/**
+ * A number in its unit symbol (the value already divided by the unit's scale), by the wording rules
+ * in tests/fixtures/metrics-wording.json that `vonkctl metrics` follows too.
+ */
 export function formatValue(value: number, unit: string): string {
-  const text = Math.abs(value) >= 100 ? value.toFixed(0) : value.toPrecision(3);
-  return `${Number(text)} ${unit}`.trim();
+  switch (unit) {
+    case "tok/s":
+      return `${Math.abs(value) < 100 ? value.toFixed(1) : value.toFixed(0)} tok/s`;
+    case "s":
+      return Math.abs(value) < 1 ? `${(value * 1000).toFixed(0)} ms` : `${value.toFixed(2)} s`;
+    case "W":
+    case "°C":
+    case "rpm":
+    case "MHz":
+      return `${value.toFixed(0)} ${unit}`;
+    case "Wh":
+      return Math.abs(value) >= 1000
+        ? `${(value / 1000).toFixed(2)} kWh`
+        : `${value.toFixed(0)} Wh`;
+    case "GiB":
+      return size(value * GIB);
+    case "GiB/s":
+      return `${size(value * GIB)}/s`;
+    case "%":
+      return `${value.toFixed(1)}%`;
+    case "/s":
+      return `${short(value)}/s`;
+    case "":
+      return short(value);
+    default:
+      return `${short(value)} ${unit}`;
+  }
 }
 
 /** A count as a short figure and its unit: 1840000 is "1.84" and "M". */

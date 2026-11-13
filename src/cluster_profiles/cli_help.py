@@ -31,6 +31,7 @@ GROUP_VIEWS = frozenset(
         "vonkctl recipe",
         "vonkctl profile",
         "vonkctl key",
+        "vonkctl metrics",
     }
 )
 

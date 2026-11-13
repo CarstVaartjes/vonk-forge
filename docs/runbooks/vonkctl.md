@@ -255,6 +255,30 @@ follow; it ends when every Spark is settled. This command upgrades enrolled Spar
 Controller deployment and the signed local CLI `update` command have separate
 owners.
 
+## Metrics
+
+```bash
+vonkctl metrics
+vonkctl metrics show gpu_power
+vonkctl metrics show output_token_rate --range 7d --spark Atlas
+vonkctl metrics show decode_speed --json
+```
+
+`vonkctl metrics` lists what the Controller can chart, one row per metric:
+name, title, unit, scope (`node` for a Spark reading, `alias` for a model
+figure) and basis (`measured`, or `estimated` when it is a gateway or modelled
+figure). The list is the Controller's catalogue, so new metrics appear with no
+vonkctl change. `show METRIC` prints one row per series with the Controller's
+own summary (now, average, peak, a range total where the metric has one) and an
+eight-cell trend; an estimated metric says `(estimate)` beside its numbers and
+in its heading. `--range` takes the Controller's range names (default `24h`); the Controller refuses an unknown one.
+`--spark` takes a friendly name or exact Spark ID and, for a model metric, shows
+the models that Spark serves. A series with no data in the range says
+`No data in this range`; it is never printed as zero. Number wording follows
+`tests/fixtures/metrics-wording.json`. `--json` prints the Controller's series
+document (its catalogue entry is under `spec`) plus a `names` map of Spark IDs to the friendly names the table uses; unlike `fleet`, the
+metrics documents are not part of the versioned `--json` contract.
+
 ## Model
 
 ```bash

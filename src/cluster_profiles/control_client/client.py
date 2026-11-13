@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     )
     from ..generated_control.models.fleet_snapshot import FleetSnapshot
     from ..generated_control.models.job_detail_response import JobDetailResponse
+    from ..generated_control.models.metric_spec import MetricSpec
     from ..generated_control.types import Response as GeneratedResponse
 
 
@@ -797,6 +798,12 @@ class ControlClient:
         from ..generated_control.models.fleet_snapshot import FleetSnapshot
 
         return FleetSnapshot.from_dict(self.request("GET", "/api/fleet"))
+
+    def metrics_catalogue(self) -> list[MetricSpec]:
+        """The metric descriptions (a JSON list, so not a ``request`` document)."""
+        from ..generated_control.api.default import get_metrics_catalogue
+
+        return self._call_generated(get_metrics_catalogue.sync_detailed)  # type: ignore[return-value]
 
     def job(
         self, job_id: str, *, timeout_seconds: float | None = None

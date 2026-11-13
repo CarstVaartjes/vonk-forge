@@ -151,6 +151,9 @@ class _BudgetClient:
     def profile_endpoints(self, number, alias=None):
         return self.client.profile_endpoints(number, alias)
 
+    def metrics_catalogue(self):
+        return self.client.metrics_catalogue()
+
     def upload_file(self, *args, **kwargs):
         # Transfers use a new client with the remaining deadline, never the
         # original normal timeout. Injected test peers implement this boundary.
