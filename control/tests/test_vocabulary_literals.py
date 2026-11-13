@@ -62,7 +62,7 @@ def test_a_docker_subcommand_is_not_a_contract_word() -> None:
         source,
         path="rust/crates/vonk-agent-helper/src/operations/example.rs",
         words=frozenset({"inspect"}),
-    ) == [1, 3]
+    ) == [3]
 
 
 def test_only_docker_subcommands_in_the_helper_are_exempt() -> None:
