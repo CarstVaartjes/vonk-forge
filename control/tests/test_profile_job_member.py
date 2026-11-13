@@ -726,7 +726,7 @@ def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
     try:
         sim = Simulation(world, seed=0, sparks_type=_AgentSparks)
         sim.round()
-        _member, lost, jobs, _job_id, _loads = _job_in_flight_on_an_offline_spark(
+        _member, lost, jobs, lost_job, _loads = _job_in_flight_on_an_offline_spark(
             tmp_path, world, sim
         )
 
@@ -769,6 +769,17 @@ def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
         with world.sessions() as session:
             run = session.get(RecipeRun, lost)
             assert run is not None and run.state == "running"
+            # The lost job itself was stopped, by its own job-scoped Stop.
+            assert (
+                session.scalar(
+                    select(Job.id).where(
+                        Job.kind == "recipe.stop",
+                        Job.payload["owner_kind"].as_string() == "artifact-job",
+                        Job.payload["owner_id"].as_string() == lost_job,
+                    )
+                )
+                is not None
+            )
             assert (
                 session.scalar(
                     select(Job.id).where(

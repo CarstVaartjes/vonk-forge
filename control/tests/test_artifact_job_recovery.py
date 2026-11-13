@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -315,6 +316,30 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
                 select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
             )
         )
+    # Before the lost job's own window has passed it is not cancelled: the wait
+    # is bounded by that window and says so in its Retry-After.
+    with sessions.begin() as session:
+        order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == original.operation_id
+            )
+        )
+        assert order is not None and order.recovery_deadline is not None
+        due = order.recovery_deadline
+        order.recovery_deadline = clock() + timedelta(seconds=600)
+    with pytest.raises(ArtifactJobUnavailableError) as early:
+        submitted_artifact_job(service, run_id, request_suffix=1038)
+    assert early.value.retry_after_seconds is not None
+    assert 590 <= early.value.retry_after_seconds <= 602
+    assert service.get(original.id).supported_actions == ("stop",)
+    with sessions.begin() as session:
+        order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == original.operation_id
+            )
+        )
+        assert order is not None
+        order.recovery_deadline = due
     with pytest.raises(ArtifactJobUnavailableError):
         submitted_artifact_job(service, run_id, request_suffix=1040)
     with sessions() as session:

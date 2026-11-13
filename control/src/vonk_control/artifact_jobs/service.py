@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    InvalidRequestError,
     InvalidRequestReason,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -22,6 +23,7 @@ from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
+from ..agent_operation_facts import aware
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
@@ -484,9 +486,12 @@ class ArtifactJobService(OutputService):
                 )
         assert unavailable is not None
         if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
-            # The draft stays READY; a lost prior job is cancelled by its own
-            # job-scoped exact Stop, which takes no new workload ordinal.
-            self._cancel_lost_prior_jobs(job_id, actor=actor)
+            # The draft stays READY. A lost prior job past its own accepted window
+            # is cancelled by its job-scoped exact Stop (no new workload ordinal);
+            # before that the wait is bounded by that window.
+            unavailable.retry_after_seconds = self._cancel_lost_prior_jobs(
+                job_id, actor=actor
+            )
             raise unavailable
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
@@ -494,24 +499,38 @@ class ArtifactJobService(OutputService):
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._end_preparation(session, job)
 
-    def _cancel_lost_prior_jobs(self, job_id: str, *, actor: str) -> None:
+    def _cancel_lost_prior_jobs(self, job_id: str, *, actor: str) -> int | None:
+        """Cancel lost (OBSERVING) prior jobs past their window; seconds until the next."""
+        now = self._clock()
+        due: list[str] = []
+        wait: float | None = None
         with self._sessions() as session:
             job = session.get(ArtifactJob, job_id)
             if job is None:
-                return
-            prior_ids = tuple(
-                session.scalars(
-                    select(ArtifactJob.id).where(
-                        ArtifactJob.run_id == job.run_id,
-                        ArtifactJob.id != job_id,
-                        ArtifactJob.operation_id.is_not(None),
-                    )
+                return None
+            adapter = ArtifactJobAdapter(session, clock=self._clock)
+            for prior in session.scalars(
+                select(ArtifactJob).where(
+                    ArtifactJob.run_id == job.run_id,
+                    ArtifactJob.id != job_id,
+                    ArtifactJob.operation_id.is_not(None),
+                    ArtifactJob.state == ajs.OBSERVING,
                 )
-            )
-        for prior_id in prior_ids:
+            ):
+                _parent, operation, _attempt = adapter.order_of(session, prior)
+                window_end = (
+                    aware(operation.recovery_deadline)
+                    if operation is not None and operation.recovery_deadline
+                    else aware(prior.submitted_at or prior.created_at)
+                    + timedelta(seconds=prior.timeout_seconds)
+                )
+                if now >= window_end:
+                    due.append(prior.id)
+                else:
+                    remaining = (window_end - now).total_seconds()
+                    wait = remaining if wait is None else min(wait, remaining)
+        for prior_id in due:
             try:
-                if "stop" not in self.get(prior_id).supported_actions:
-                    continue
                 self.cancel(
                     prior_id,
                     actor=actor,
@@ -520,8 +539,9 @@ class ArtifactJobService(OutputService):
                     ),
                     reason="superseded by a newer submission; effect unconfirmed",
                 )
-            except (ArtifactJobError, UnknownOutcomeError):
+            except (ArtifactJobError, UnknownOutcomeError, InvalidRequestError):
                 continue  # the same-key retry asks again
+        return None if wait is None else max(1, int(wait) + 1)
 
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
@@ -576,6 +596,8 @@ class ArtifactJobService(OutputService):
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
                     continue
+                if ajs.state_of(prior) == ajs.FAILED:
+                    continue  # an ended job never blocks a new submit
                 uncertain = recorded.effect is Effect.UNKNOWN or (
                     prior.operation_id is not None
                     and prior.result_evidence is not None
