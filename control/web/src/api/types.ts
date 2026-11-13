@@ -10,6 +10,7 @@ export type AuthSession = components["schemas"]["AuthSession"];
 export type AvailabilityOperationFailure = components["schemas"]["AvailabilityOperationFailure"];
 export type CliTokenDownload = components["schemas"]["CliTokenDownload"];
 export type TelemetryPoint = components["schemas"]["TelemetryPoint"];
+export type TelemetryState = components["schemas"]["TelemetryState"];
 export type FleetTelemetryState = components["schemas"]["TelemetryState"];
 export type VisualFleetNode = components["schemas"]["FleetNode"];
 export type VisualFleetSnapshot = components["schemas"]["FleetSnapshot"];
