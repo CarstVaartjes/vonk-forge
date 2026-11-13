@@ -113,6 +113,9 @@ def _rank(rank, *, group="healthy"):
         "rank": rank,
         "role": "entrypoint" if rank == 0 else "worker",
         "rank_fresh": True,
+        # The Controller sets degraded_reason exactly when the group is degraded.
+        "healthy": group == "healthy",
+        "degraded_reason": None if group == "healthy" else "missing-ranks",
     }
 
 
@@ -140,7 +143,7 @@ def test_fleet_overview_names_workload_members_and_what_needs_attention(capsys):
     output = capsys.readouterr().out
     attention = output[output.index("Needs attention") :]
     assert "boreas" in attention and "heartbeat missed" in attention
-    assert "glm-dual" in attention and "degraded" in attention
+    assert "glm-dual: missing-ranks" in attention
 
 
 def test_rename_reports_the_new_name_of_the_renamed_spark(capsys):

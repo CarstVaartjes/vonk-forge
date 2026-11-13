@@ -333,9 +333,16 @@ function isServing(run: VisualFleetNode["loaded"][number]): boolean {
   return run.run_state === RunState.RUNNING && run.healthy === true;
 }
 
+/** A run needs attention when it is lost, or running without a healthy verdict. */
+function runNeedsAttention(run: VisualFleetNode["loaded"][number]): boolean {
+  return (
+    run.run_state === RunState.LOST || (run.run_state === RunState.RUNNING && run.healthy !== true)
+  );
+}
+
 /**
  * The Fleet in one line: Sparks online, unified memory free, workloads serving, and what needs
- * attention (Sparks, running workloads not healthy, then firing alerts). `vonkctl fleet` prints the same line.
+ * attention (Sparks, lost or unhealthy running workloads, then firing alerts). `vonkctl fleet` prints the same line.
  */
 export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   if (fleet.nodes.length === 0) return NO_SPARKS;
@@ -345,11 +352,7 @@ export function fleetStatusLine(fleet: VisualFleetSnapshot, now: Date): string {
   ).size;
   const sparks = fleet.nodes.filter((node) => nodeNeedsAttention(node, now)).length;
   const unhealthy = new Set(
-    fleet.nodes.flatMap((node) =>
-      node.loaded
-        .filter((run) => run.run_state === RunState.RUNNING && run.healthy !== true)
-        .map((run) => run.run_id),
-    ),
+    fleet.nodes.flatMap((node) => node.loaded.filter(runNeedsAttention).map((run) => run.run_id)),
   ).size;
   const alerts = fleet.attention?.length ?? 0;
   const attention = [

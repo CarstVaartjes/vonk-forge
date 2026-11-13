@@ -220,6 +220,9 @@ must fence old results and reconcile exact effects before taking over. Scope
 failures to their owner; do not turn a busy artifact, malformed history row, or
 unavailable source into a barrier for unrelated eligible work. Verify these
 rules with concurrent PostgreSQL/process tests, not mocked locks or SQLite.
+A handler that parks or defers work on a broad exception classifies it with
+`disposition()` first: a deterministic refusal ends the work with its evidence
+instead of repeating on every retry (the `retry-dispositions` added-line guard).
 
 ## Verification and completion
 

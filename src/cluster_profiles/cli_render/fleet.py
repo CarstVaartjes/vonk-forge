@@ -7,6 +7,7 @@ from enum import Enum
 
 from ..cli_states_generated import (
     ENDPOINT_UNAVAILABLE,
+    RUN_LOST,
     RUN_RUNNING,
     UNKNOWN,
     GpuClockMetric,
@@ -454,6 +455,15 @@ def _needs_attention(node: object) -> bool:
     return bool(_fleet_attention([_object(node, "Fleet node")]))
 
 
+def _run_needs_attention(run: object) -> bool:
+    """A run needs attention when it is lost, or running without a healthy verdict."""
+    document = _object(run, "run")
+    state = document.get("run_state")
+    return state == RUN_LOST or (
+        state == RUN_RUNNING and document.get("healthy") is not True
+    )
+
+
 def _is_serving(run: object) -> bool:
     """A workload is serving while it is running and reported healthy."""
     document = _object(run, "run")
@@ -508,7 +518,7 @@ def _fleet_status_line(payload: object) -> str:
             run.get("run_id")
             for node in nodes
             for run in _records(node, "loaded")
-            if run.get("run_state") == RUN_RUNNING and run.get("healthy") is not True
+            if _run_needs_attention(run)
         }
     )
     firing = document.get("attention")
@@ -624,14 +634,6 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             print(f"    Installation: {_text(first.get('installation_id'))}")
         if first.get("run_state") != "running":
             notes.append(f"{title} is {_text(first.get('run_state'))}")
-        if first.get("group_state") != "healthy":
-            notes.append(f"{title} group is {_text(first.get('group_state'))}")
-        if (
-            isinstance(present, list)
-            and type(expected) is int
-            and len(present) < expected
-        ):
-            notes.append(f"{title} reports {ranks}")
         for _, member in members:
             if member.get("projection_issue") is not None:
                 notes.append(f"{title}: {_text(member.get('projection_issue'))}")

@@ -619,6 +619,15 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
         )
     assert snapshot == expected
     assert EXTRA_NODE not in {node.id for node in snapshot.nodes}
+    # PostgreSQL sorts NULL last on ASC and SQLite first, so the rows alone cannot show
+    # that Sparks without an enrolment time list first: the SQL has to say so.
+    registered = [
+        statement
+        for statement in statements
+        if "from agent_nodes" in statement and "order by" in statement
+    ]
+    assert registered
+    assert all("enrolled_at asc nulls first" in statement for statement in registered)
     # A fresh read consumes the same committed observations without mutating
     # registrations, reservations or their reported capacity.
     again = FleetProjection(sessions, clock=lambda: NOW).read()
