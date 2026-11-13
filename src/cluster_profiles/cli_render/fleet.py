@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from enum import Enum
 
-from .. import cli_states
 from ..cli_states_generated import (
     ENDPOINT_UNAVAILABLE,
     RUN_RUNNING,
@@ -504,12 +503,27 @@ def _fleet_status_line(payload: object) -> str:
         }
     )
     sparks = sum(1 for node in nodes if _needs_attention(node))
+    unhealthy = len(
+        {
+            run.get("run_id")
+            for node in nodes
+            for run in _records(node, "loaded")
+            if run.get("run_state") == RUN_RUNNING and run.get("healthy") is not True
+        }
+    )
     firing = document.get("attention")
     alerts = len(firing) if isinstance(firing, list) else 0
     attention = [
         *(
             [f"{sparks} {'Spark needs' if sparks == 1 else 'Sparks need'} attention"]
             if sparks
+            else []
+        ),
+        *(
+            [
+                f"{unhealthy} {'workload needs' if unhealthy == 1 else 'workloads need'} attention"
+            ]
+            if unhealthy
             else []
         ),
         *(
@@ -612,32 +626,21 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             notes.append(f"{title} is {_text(first.get('run_state'))}")
         if first.get("group_state") != "healthy":
             notes.append(f"{title} group is {_text(first.get('group_state'))}")
-        if first.get("route_state") != cli_states.PUBLISHED:
-            route_note = f"{title} route is {_text(first.get('route_state'))}"
-            if first.get("route_reason") is not None:
-                route_note += f": {_text(first.get('route_reason'))}"
-            notes.append(route_note)
         if (
             isinstance(present, list)
             and type(expected) is int
             and len(present) < expected
         ):
             notes.append(f"{title} reports {ranks}")
-        stale = [name for name, member in members if member.get("rank_fresh") is False]
-        if stale:
-            notes.append(f"{title} has stale rank reports from {', '.join(stale)}")
         for _, member in members:
             if member.get("projection_issue") is not None:
                 notes.append(f"{title}: {_text(member.get('projection_issue'))}")
                 break
             if member.get("degraded_reason") is not None:
-                reason = member["degraded_reason"]
-                detail = (
-                    reason.get("detail") or reason.get("code")
-                    if isinstance(reason, Mapping)
-                    else reason
-                )
-                notes.append(f"{title}: {_text(detail)}")
+                note = f"{title}: {_text(member['degraded_reason'])}"
+                if first.get("route_reason") is not None:
+                    note += f" ({_text(first.get('route_reason'))})"
+                notes.append(note)
                 break
     loaded = {
         member.get("installation_id")
