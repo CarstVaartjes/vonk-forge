@@ -276,15 +276,6 @@
   box-shadow: inset 3px 0 var(--green);
 }
 
-.state-dot {
-  background: var(--faint);
-  border-radius: 50%;
-  display: inline-block;
-  height: 0.55rem;
-  margin-top: 0.3rem;
-  width: 0.55rem;
-}
-
 .library-profile-empty-editor {
   background: var(--panel);
   border: 1px dashed var(--line-control);

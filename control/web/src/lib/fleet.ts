@@ -266,23 +266,6 @@ export function summarizeFleet(fleet: VisualFleetSnapshot | undefined): FleetSum
 }
 
 /**
- * GPU power now, summed over the online Sparks whose live sample reports it. A plain sum of Spark
- * readings kept here until the Controller summarises power (M2); then this moves there.
- */
-export function fleetPower(
-  nodes: readonly VisualFleetNode[],
-): { watts: number; reporting: number } | null {
-  const readings = nodes.flatMap((node) => {
-    const watts =
-      node.connection.online_state === "online" ? liveSample(node)?.gpu_power_watts : null;
-    return watts == null ? [] : [Number(formatWire(watts))];
-  });
-  return readings.length
-    ? { watts: readings.reduce((total, watts) => total + watts, 0), reporting: readings.length }
-    : null;
-}
-
-/**
  * Unified memory summed over the online Sparks that report it, by the rule `summarizeFleet` uses (the
  * node's latest telemetry sample), so the status sentence and the band agree. Models and system are
  * summed only when every counted Spark reports the split; otherwise the sum is Used and Free.
@@ -323,6 +306,12 @@ export function fleetMemory(
       systemBytes: whole ? sum((split) => split.systemBytes as WireNumber) : null,
     },
   };
+}
+
+/** "2 Sparks", or how many of the online Sparks a fleet figure covers. */
+export function coverageText(reporting: number, online: number): string {
+  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
+  return `${reporting} of ${online} online Sparks`;
 }
 
 /** Free memory across the fleet, saying so when only some online Sparks reported it; null when none did. */

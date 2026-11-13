@@ -32,7 +32,7 @@ import { EmptyState } from "../components/empty-state";
 import { PageHeader } from "../components/page-header";
 import { SkeletonBlock, SkeletonRows } from "../components/skeleton";
 import { StatusPill } from "../components/status-pill";
-import { nodeDisplayName } from "../lib/fleet";
+import { NOT_REPORTED_TEXT, nodeDisplayName } from "../lib/fleet";
 import { exactTime, relativeTime } from "../lib/time";
 
 export { relativeTime };
@@ -447,7 +447,7 @@ function AgentUpgradeDiagnostics({
             <dl>
               <div>
                 <dt>Observed version</dt>
-                <dd>{target.observed_identity.version || "Not reported"}</dd>
+                <dd>{target.observed_identity.version || NOT_REPORTED_TEXT}</dd>
               </div>
               <CopyableValue
                 label="Observed binary digest"

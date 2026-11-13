@@ -1,0 +1,7 @@
+.spark-chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;margin-bottom:1rem}
+.spark-chart-card{min-width:0;padding:1.25rem 1.5rem}
+.spark-chart-card header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:.25rem .75rem}.spark-chart-card h3{margin:0;font-size:1rem}.spark-chart-card header strong{font-size:1.25rem;font-weight:600}
+.spark-chart-line{margin:.15rem 0 .75rem;color:var(--muted);font-size:.8125rem;text-align:right}
+.engine-panel{padding:1rem 1.25rem 1.25rem;border-top:1px solid var(--line)}
+.engine-panel>header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.5rem 1rem;margin-bottom:.75rem}
+.engine-panel h3{margin:0;font-size:1rem}

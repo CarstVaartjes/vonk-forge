@@ -3711,9 +3711,11 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
         "result": {"status": "failed", "error_code": "stop/failed"},
     }
 
-    def shown() -> tuple[str, ...]:
+    def shown(later: timedelta = timedelta()) -> tuple[str, ...]:
         with services.sessions() as session:
-            return repeating_evidence(session, [NODE_A], clock.now).get(NODE_A, ())
+            return repeating_evidence(session, [NODE_A], clock.now + later).get(
+                NODE_A, ()
+            )
 
     for _ in range(RECOVERY.max_failures):
         response = client.post(
@@ -3722,6 +3724,8 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
         assert response.status_code == 422
     (warning,) = shown()
     assert RESULT_REFUSALS in warning and "controller.invalid_request" in warning
+    # Weeks later the same record is old news and is no longer shown.
+    assert shown(timedelta(days=14)) == ()
 
     accepted = refused | {"result": {"status": "failed", "error_code": "stop_failed"}}
     response = client.post(

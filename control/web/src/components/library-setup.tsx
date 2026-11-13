@@ -1,6 +1,14 @@
 import { compareWire, formatWire, type WireNumber } from "../api/contract-numeric";
 import type { VisualFleetSnapshot } from "../api/types";
-import { freeMemoryText, summarizeFleet, type FleetSummary } from "../lib/fleet";
+import {
+  coverageText,
+  fleetMemory,
+  formatBytes,
+  freeMemoryText,
+  summarizeFleet,
+  type FleetSummary,
+} from "../lib/fleet";
+import { MemoryIngot } from "./memory-ingot";
 import type { LibraryRecipeRecord, LibraryWorkcellFilters } from "./library-workcell";
 import {
   filterLibraryRecipeRecords,
@@ -169,6 +177,8 @@ export function LibrarySetupStrip({
   onFiltersChange(filters: LibraryWorkcellFilters): void;
 }) {
   const summary = summarizeFleet(fleet);
+  // The online Sparks' memory, the same set the Spark count and the free figure cover.
+  const memory = fleet ? fleetMemory(fleet.nodes) : null;
   const sparkCounts = [
     ...new Set(
       records.flatMap((record) =>
@@ -194,12 +204,26 @@ export function LibrarySetupStrip({
             {summary === undefined
               ? "Fleet state is not available yet; pick a Spark count to narrow the Library."
               : `${summary.online} of ${summary.enrolled} Spark${summary.enrolled === 1 ? "" : "s"} online` +
+                (memory ? ` · ${formatBytes(memory.split.totalBytes)} unified memory` : "") +
                 (freeMemoryText(summary) === null ? "." : ` · ${freeMemoryText(summary)}.`)}
             {assessed
               ? ` ${fit.fits} of ${fit.fits + fit.nonFit} assessed ${noun} fit it now.`
               : " The Controller has not assessed placement for this page yet."}
             {fit.unknown > 0 && assessed ? ` ${fit.unknown} awaiting assessment.` : ""}
           </p>
+          {memory && (
+            <>
+              <MemoryIngot
+                label="Fleet unified memory"
+                memory={memory.split}
+                size="small"
+                warn={false}
+              />
+              {summary && memory.reporting < summary.enrolled && (
+                <small>{coverageText(memory.reporting, summary.online)}</small>
+              )}
+            </>
+          )}
         </div>
         <button
           type="button"
@@ -222,13 +246,13 @@ export function LibrarySetupStrip({
               key={tile.value}
               type="button"
               aria-pressed={pressed}
-              aria-label={`${sparkLabel(Number(tile.value))}: ${tile.count} ${noun}${tile.yours ? " (your fleet)" : ""}`}
+              aria-label={`${sparkLabel(Number(tile.value))} or fewer: ${tile.count} ${noun}${tile.yours ? " (your fleet)" : ""}`}
               data-fleet={tile.yours ? "yours" : undefined}
               disabled={tile.count === 0 && !pressed}
               onClick={() => onFiltersChange({ ...filters, sparks: pressed ? "" : tile.value })}
             >
               <strong>{tile.value}</strong>
-              <span>{sparkLabel(Number(tile.value))}</span>
+              <span>{sparkLabel(Number(tile.value))} or fewer</span>
               <small>
                 {tile.count} {noun}
                 {tile.yours ? " · your fleet" : ""}

@@ -1,13 +1,11 @@
 import "./fleet-pulse.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
-import { fleetMemory, fleetPower, formatBytes } from "../lib/fleet";
-import { compactCount, modelTotals } from "../lib/metric-units";
+import { NOT_REPORTED_TEXT, coverageText, fleetMemory, formatBytes } from "../lib/fleet";
+import { compactCount, fleetFigure, formatValue, modelTotals } from "../lib/metric-units";
 import { GPU_ONLY_CAPTION } from "./energy-card";
 import { Estimate } from "./estimate";
 import { MemoryIngot } from "./memory-ingot";
-
-const NOT_REPORTED = "Not reported";
 
 function Tile({
   label,
@@ -35,48 +33,57 @@ function Tile({
   );
 }
 
-/** "both Sparks", or how many of the online Sparks the figure covers. */
-function coverage(reporting: number, online: number): string {
-  if (reporting === online) return online === 1 ? "this Spark" : `${online} Sparks`;
-  return `${reporting} of ${online} online Sparks`;
-}
-
 /**
- * Five fleet figures in one band. Each is a Controller reading or a plain sum of Spark readings (GPU
- * power now, unified memory) or the Controller's fleet total (tokens); a figure with no reading says
- * Not reported. The engine's output speed and GPU energy wait for their metrics.
+ * Five fleet figures in one band. Each is the Controller's fleet line or total of a metric (output speed,
+ * GPU power, tokens, GPU energy) or a plain sum of the snapshot's memory samples; a figure with no
+ * reading says Not reported.
  */
 export function FleetPulse({
+  decode,
+  power,
   tokens,
+  energy,
   nodes,
 }: {
-  /** The gateway's generated tokens per model over 24 hours, as read by the page. */
+  /** The engine's decode throughput, GPU power, gateway tokens and GPU energy as the Controller serves them. */
+  decode: MetricsSeriesResponse | null | undefined;
+  power: MetricsSeriesResponse | null;
   tokens: MetricsSeriesResponse | null;
+  energy: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
-  const power = fleetPower(nodes);
+  const speed = fleetFigure(decode, "latest");
+  const watts = fleetFigure(power, "latest");
+  const gpuEnergy = fleetFigure(energy, "total");
   const memory = fleetMemory(nodes);
   const { rows, sum } = modelTotals(tokens);
   const generated = rows.length ? compactCount(sum) : null;
   return (
     <div className="fleet-pulse card">
-      <Tile label="Output now" figure={NOT_REPORTED} caption="decode, measured at the engine" />
+      <Tile
+        label="Output now"
+        figure={speed ? formatValue(speed.value, "") : NOT_REPORTED_TEXT}
+        unit={speed?.symbol}
+        caption="decode, measured at the engine"
+      />
       <Tile
         label="GPU power"
-        figure={power ? power.watts.toFixed(1) : NOT_REPORTED}
-        unit={power ? "W" : undefined}
-        caption={power ? coverage(power.reporting, online) : undefined}
+        figure={watts ? watts.value.toFixed(1) : NOT_REPORTED_TEXT}
+        unit={watts?.symbol}
+        caption={watts ? coverageText(watts.reporting, online) : undefined}
       />
       <Tile
         label="Unified memory"
-        figure={memory ? formatBytes(memory.split.usedBytes).replace(/ GiB$/, "") : NOT_REPORTED}
+        figure={
+          memory ? formatBytes(memory.split.usedBytes).replace(/ GiB$/, "") : NOT_REPORTED_TEXT
+        }
         unit={memory ? `GiB of ${formatBytes(memory.split.totalBytes)}` : undefined}
         caption={
           memory
             ? memory.split.modelsBytes !== null
               ? `${formatBytes(memory.split.modelsBytes)} in models`
-              : coverage(memory.reporting, online)
+              : coverageText(memory.reporting, online)
             : undefined
         }
       >
@@ -95,13 +102,25 @@ export function FleetPulse({
           generated && tokens ? (
             <Estimate basis={tokens.spec.basis}>{generated.figure}</Estimate>
           ) : (
-            NOT_REPORTED
+            NOT_REPORTED_TEXT
           )
         }
         unit={generated ? `${generated.unit} generated`.trim() : undefined}
         caption={generated ? "counted by the gateway, all models" : undefined}
       />
-      <Tile label="GPU energy, 24 h" figure={NOT_REPORTED} caption={GPU_ONLY_CAPTION} />
+      <Tile
+        label="GPU energy, 24 h"
+        figure={
+          gpuEnergy ? (
+            <Estimate basis={gpuEnergy.basis}>
+              {formatValue(gpuEnergy.value, gpuEnergy.symbol)}
+            </Estimate>
+          ) : (
+            NOT_REPORTED_TEXT
+          )
+        }
+        caption={GPU_ONLY_CAPTION}
+      />
     </div>
   );
 }

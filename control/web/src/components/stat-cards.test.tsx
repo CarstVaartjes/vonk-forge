@@ -68,20 +68,23 @@ test("an empty range says No data in this range and a partial one says how much 
   expect(screen.getByText(/Data covers 50% of this range\./)).toBeInTheDocument();
 });
 
-test("the GPU energy card is named GPU energy, says Not reported until a metric exists, and shows power now", () => {
-  const live = [
-    {
-      connection: { online_state: "online" },
-      telemetry: { freshness: "live", sample: { gpu_power_watts: 38 } },
-    },
-    {
-      connection: { online_state: "online" },
-      telemetry: { freshness: "live", sample: { gpu_power_watts: 39 } },
-    },
-  ] as unknown as VisualFleetNode[];
-  render(<EnergyCard nodes={live} />);
+test("the GPU energy card is named GPU energy, shows the Controller's total as an estimate and power now", () => {
+  const response = (spec: Record<string, unknown>, line: Record<string, unknown>) =>
+    ({
+      spec,
+      series: [{ labels: {}, points: [], summary: line }],
+    }) as unknown as MetricsSeriesResponse;
+  const energy = response(
+    { basis: "estimated", unit: "watt_hours", hint: "GPU only. Estimate." },
+    { latest: 77, total: 1500 },
+  );
+  const power = response({ basis: "measured", unit: "watts" }, { latest: 77 });
+  const { unmount } = render(<EnergyCard energy={energy} power={power} />);
   const card = screen.getByRole("region", { name: "GPU energy" });
-  expect(card).toHaveTextContent("Not reported");
-  expect(card).toHaveTextContent("GPU only, not the whole Spark.");
+  expect(card).toHaveTextContent("≈1.50 kWhest.");
   expect(card).toHaveTextContent("GPU power now77.0 W");
+  unmount();
+  render(<EnergyCard energy={null} power={null} />);
+  expect(screen.getByRole("region", { name: "GPU energy" })).toHaveTextContent("Not reported");
+  expect(screen.getByText("GPU only, not the whole Spark.")).toBeInTheDocument();
 });
