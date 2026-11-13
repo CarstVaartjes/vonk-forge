@@ -131,6 +131,95 @@ const run = (rank: number) => ({
   title: "GLM 5.3 Flash",
 });
 
+type Spec = components["schemas"]["MetricSpec"];
+
+/** Each metric the fixture serves: its catalogue entry, the latest value of its one series, and the 24 h total. */
+const METRICS: [Spec, number, number | null][] = (
+  [
+    [
+      "gpu_utilization",
+      "GPU utilisation",
+      "percent",
+      "node",
+      "measured",
+      "spark",
+      97,
+      false,
+      false,
+    ],
+    [
+      "gpu_temperature",
+      "GPU temperature",
+      "celsius",
+      "node",
+      "measured",
+      "spark",
+      69,
+      false,
+      false,
+    ],
+    ["gpu_power", "GPU power", "watts", "node", "measured", "spark", 38, false, true],
+    [
+      "request_rate",
+      "Requests per model",
+      "per_second",
+      "alias",
+      "estimated",
+      "gateway",
+      60,
+      true,
+      true,
+    ],
+    [
+      "output_token_rate",
+      "Generated tokens per model",
+      "tokens_per_second",
+      "alias",
+      "estimated",
+      "gateway",
+      60,
+      true,
+      true,
+    ],
+    [
+      "decode_throughput",
+      "Decode throughput",
+      "tokens_per_second",
+      "alias",
+      "measured",
+      "engine",
+      41.2,
+      true,
+      true,
+    ],
+    [
+      "kv_cache_usage",
+      "KV cache in use",
+      "ratio",
+      "alias",
+      "measured",
+      "engine",
+      0.42,
+      false,
+      false,
+    ],
+  ] as const
+).map(([metric, title, unit, scope, basis, source, latest, total, fleet]) => [
+  {
+    metric,
+    title,
+    unit,
+    scope,
+    basis,
+    source,
+    summary_total: total,
+    fleet_sum: fleet,
+    hint: "Counted by the gateway.",
+  } as Spec,
+  latest,
+  total ? 1840000 : null,
+]);
+
 /**
  * An Overview fleet for layout and accessibility checks: one workload on two Sparks (the D12 memory
  * capture), an idle Spark, a firing alert, gateway series and a few operations.
@@ -148,7 +237,12 @@ export async function serveOverviewFleet(page: Page) {
       3,
       "spark-0007",
       {},
-      { memory_available_bytes: 5 * GIB, gpu_power_watts: null, uptime_seconds: null },
+      {
+        memory_available_bytes: 5 * GIB,
+        system_memory_bytes: Math.round(12.4 * GIB),
+        gpu_power_watts: null,
+        uptime_seconds: null,
+      },
     ),
   ];
   await serveSnapshot(page, {
@@ -167,85 +261,46 @@ export async function serveOverviewFleet(page: Page) {
     ],
   } as components["schemas"]["FleetSnapshot"]);
   await page.route("**/api/metrics/catalogue", (route) =>
-    route.fulfill({
-      json: [
-        ["gpu_utilization", "GPU utilisation", "percent"],
-        ["gpu_temperature", "GPU temperature", "celsius"],
-      ].map(([metric, title, unit]) => ({
-        metric,
-        title,
-        unit,
-        scope: "node",
-        basis: "measured",
-        source: "spark",
-        summary_total: false,
-        hint: "",
-      })),
-    }),
+    route.fulfill({ json: METRICS.map(([spec]) => spec) }),
   );
   await page.route("**/api/metrics/series**", (route) => {
     const metric = new URL(route.request().url()).searchParams.get("metric") ?? "";
-    const model = metric === "output_token_rate" || metric === "request_rate";
-    const unit =
-      metric === "output_token_rate"
-        ? "tokens_per_second"
-        : metric === "request_rate"
-          ? "per_second"
-          : "percent";
+    const entry = METRICS.find(([spec]) => spec.metric === metric);
+    // A metric the Controller does not serve fails the read, as a real one would.
+    if (!entry) return route.fulfill({ status: 404, json: { detail: "unknown metric" } });
+    const [spec, latest, total] = entry;
     const end = Math.floor(Date.now() / 1000);
-    const points = Array.from({ length: 120 }, (_, i) => ({
-      timestamp: end - (120 - i) * 15,
-      value: 60 + Math.sin(i / 7) * 3,
-    }));
+    const wave = (scale: number) =>
+      Array.from({ length: 120 }, (_, i) => ({
+        timestamp: end - (120 - i) * 15,
+        value: scale * (1 + Math.sin(i / 7) * 0.05),
+      }));
+    const line = (labels: Record<string, string>, value: number) => ({
+      labels,
+      points: wave(value),
+      summary: {
+        latest: value,
+        average: value,
+        peak: value * 1.05,
+        total: spec.summary_total ? total : null,
+        share: spec.fleet_sum && spec.summary_total ? 1 : null,
+        coverage: 1,
+      },
+    });
+    const one =
+      spec.scope === "alias"
+        ? line({ alias: "coder" }, latest)
+        : line({ node_id: SPARK_IDS[0] as string }, latest);
     return route.fulfill({
       json: {
         metric,
-        spec: {
-          metric,
-          title: model ? "Generated tokens per model" : metric,
-          unit,
-          scope: model ? "alias" : "node",
-          basis: model ? "estimated" : "measured",
-          source: model ? "gateway" : "spark",
-          summary_total: model,
-          fleet_sum: metric === "output_token_rate",
-          hint: "Counted by the gateway.",
-        },
+        spec,
         range: "1h",
         start: end - 1800,
         end,
         step_seconds: 15,
-        series: [
-          // The Controller's fleet line (no label) leads where a metric has one.
-          ...(metric === "output_token_rate"
-            ? [
-                {
-                  labels: {},
-                  points,
-                  summary: {
-                    latest: 60,
-                    average: 60,
-                    peak: 63,
-                    total: 1840000,
-                    share: null,
-                    coverage: 1,
-                  },
-                },
-              ]
-            : []),
-          {
-            labels: model ? { alias: "coder" } : {},
-            points,
-            summary: {
-              latest: 60,
-              average: 60,
-              peak: 63,
-              total: model ? 1840000 : null,
-              share: metric === "output_token_rate" ? 1 : null,
-              coverage: 1,
-            },
-          },
-        ],
+        // The Controller's fleet line (no label) leads where a metric has one.
+        series: spec.fleet_sum ? [line({}, latest), one] : [one],
       },
     });
   });

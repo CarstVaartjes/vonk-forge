@@ -3,18 +3,10 @@ import { aliasSeries, formatValue, leadReading, UNITS, windowPoints } from "../l
 import { NOT_REPORTED_TEXT, type WorkloadGroup } from "../lib/fleet";
 import { AreaChart } from "./chart/area-chart";
 import { Estimate, EstimateTag } from "./estimate";
+import { ENGINE_FIGURES } from "../hooks/use-workload-reads";
 import { StatusPill } from "./status-pill";
 
 const WINDOW_SECONDS = 1800;
-
-/** The slots the engine will fill once it reports them (M6); until then they read Not reported. */
-const ENGINE_FIGURES = [
-  "Prefill",
-  "First token",
-  "KV cache in use",
-  "Prompt cache hits",
-  "Draft tokens accepted",
-] as const;
 
 /** A workload's alias, title, state and Spark count: the header of a hero, and the whole strip of a second workload on the same Sparks. */
 export function WorkloadHeader({ unit }: { unit: WorkloadGroup }) {
@@ -42,12 +34,14 @@ export function WorkloadHero({
   decode,
   tokens,
   requests,
+  figures,
   live,
 }: {
   unit: WorkloadGroup;
   decode: MetricsSeriesResponse | null;
   tokens: MetricsSeriesResponse | null;
   requests: MetricsSeriesResponse | null;
+  figures: (MetricsSeriesResponse | null)[];
   live: boolean;
 }) {
   const requestSeries = aliasSeries(requests, unit.alias);
@@ -94,12 +88,27 @@ export function WorkloadHero({
                 )}
               </dd>
             </div>
-            {ENGINE_FIGURES.map((name) => (
-              <div key={name}>
-                <dt>{name}</dt>
-                <dd>{NOT_REPORTED_TEXT}</dd>
-              </div>
-            ))}
+            {ENGINE_FIGURES.map(({ title }, index) => {
+              const reading = aliasSeries(figures[index] ?? null, unit.alias);
+              const latest = reading?.series.summary.latest;
+              return (
+                <div key={title}>
+                  <dt>{title}</dt>
+                  <dd>
+                    {reading && latest != null ? (
+                      <Estimate basis={reading.data.spec.basis}>
+                        {formatValue(
+                          Number(latest) / UNITS[reading.data.spec.unit].scale,
+                          UNITS[reading.data.spec.unit].symbol,
+                        )}
+                      </Estimate>
+                    ) : (
+                      NOT_REPORTED_TEXT
+                    )}
+                  </dd>
+                </div>
+              );
+            })}
           </dl>
         </div>
         {hero && spec && value !== null && (

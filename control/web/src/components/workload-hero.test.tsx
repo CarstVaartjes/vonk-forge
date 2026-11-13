@@ -54,6 +54,7 @@ test("the hero is the gateway's generated tokens per second, marked as an estima
       decode={null}
       tokens={tokens(96.7)}
       requests={requests(2.5)}
+      figures={[]}
       live={false}
     />,
   );
@@ -70,6 +71,7 @@ test("zero traffic on a running workload reads 0 and idle, model loaded", () => 
       decode={null}
       tokens={tokens(0)}
       requests={requests(0)}
+      figures={[]}
       live={false}
     />,
   );
@@ -79,12 +81,26 @@ test("zero traffic on a running workload reads 0 and idle, model loaded", () => 
 
 test("without tokens the hero falls back to requests; with neither it says Not reported and draws no chart", () => {
   const { unmount } = render(
-    <WorkloadHero unit={unit} decode={null} tokens={null} requests={requests(2.5)} live={false} />,
+    <WorkloadHero
+      unit={unit}
+      decode={null}
+      tokens={null}
+      requests={requests(2.5)}
+      figures={[]}
+      live={false}
+    />,
   );
   expect(screen.getByText("Requests per model · last 30 minutes")).toBeInTheDocument();
   unmount();
   render(
-    <WorkloadHero unit={unit} decode={null} tokens={tokens(null)} requests={null} live={false} />,
+    <WorkloadHero
+      unit={unit}
+      decode={null}
+      tokens={tokens(null)}
+      requests={null}
+      figures={[]}
+      live={false}
+    />,
   );
   expect(screen.getAllByText("Not reported")).toHaveLength(7);
   expect(screen.queryByRole("img")).toBeNull();
@@ -99,9 +115,27 @@ test("the engine's measured decode speed leads the gateway's estimate and carrie
       decode={decode}
       tokens={tokens(96.7)}
       requests={requests(2.5)}
+      figures={[]}
       live={false}
     />,
   );
   expect(container.querySelector(".hero-num")).toHaveTextContent("41.2tok/s");
   expect(container.querySelector(".hero-num .estimate-mark")).toBeNull();
+});
+
+test("an engine figure reads the Controller's latest in its unit; one the engine lacks says Not reported", () => {
+  const kv = series("kv_cache_usage", "KV cache in use", "ratio", 0.42);
+  kv.spec.basis = "measured";
+  render(
+    <WorkloadHero
+      unit={unit}
+      decode={null}
+      tokens={tokens(1)}
+      requests={null}
+      figures={[null, null, kv, null, null]}
+      live={false}
+    />,
+  );
+  expect(screen.getByText("KV cache in use").nextSibling).toHaveTextContent("42.0%");
+  expect(screen.getByText("Prefill").nextSibling).toHaveTextContent("Not reported");
 });

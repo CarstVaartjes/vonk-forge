@@ -1,5 +1,6 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
+import { EnginePanel } from "../components/engine-panel";
 import { ClusterUnit } from "../components/workload-units";
 import { FleetFeedback } from "../components/fleet-feedback";
 import { MetricsChart } from "../components/metrics-chart";
@@ -74,6 +75,7 @@ export function WorkloadsPage({
                       live={live === "live"}
                       onOpen={onOpenSpark}
                     />
+                    {unit.alias && <EnginePanel api={api} alias={unit.alias} title={unit.title} />}
                   </WorkloadRow>
                 )),
               )}

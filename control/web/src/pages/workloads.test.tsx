@@ -28,6 +28,7 @@ const api = {
   metricsSeries: (metric: string) =>
     metric in reads ? Promise.resolve(reads[metric]) : Promise.reject(new Error("no history")),
   operations: () => Promise.reject(new Error("no activity")),
+  metricsCatalogue: () => Promise.resolve([]),
 } as unknown as ControlApi;
 
 function series(metric: string, unit: string, latest: number, total: number | null = null) {
@@ -206,6 +207,7 @@ test("a workload is one row with its Sparks, measured speed and requests; openin
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(within(row).getByLabelText("GLM 5.3 Flash")).toBeInTheDocument();
+  expect(within(row).getByLabelText("GLM 5.3 Flash engine")).toBeInTheDocument();
   nodes = [];
   reads = {};
 });
