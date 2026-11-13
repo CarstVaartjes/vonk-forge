@@ -8,7 +8,7 @@ const tokens = {
     metric: "output_token_rate",
     title: "Generated tokens per model",
     unit: "tokens_per_second",
-    basis: "estimated",
+    basis: "measured",
     hint: "Counted by the gateway; a Spark shows the models it serves.",
   },
   series: [
@@ -29,14 +29,14 @@ const nodes = [
   { id: "a", loaded: [{ alias: "coder", title: "GLM 5.3 Flash" }] },
 ] as unknown as VisualFleetNode[];
 
-test("the Tokens card shows the total as an estimate, the Controller's hint, and each model's share, largest first", () => {
+test("the Tokens card shows the total, the Controller's hint, and each model's share, largest first", () => {
   render(<TokensCard tokens={tokens} nodes={nodes} />);
   const card = screen.getByRole("region", { name: "Tokens" });
-  expect(card).toHaveTextContent("≈1.84 Mgeneratedest.");
+  expect(card).toHaveTextContent("1.84 Mgenerated");
   expect(card).toHaveTextContent("Counted by the gateway; a Spark shows the models it serves.");
   const rows = within(card).getAllByRole("row").slice(1);
-  expect(rows[0]).toHaveTextContent("coderGLM 5.3 Flash≈1.52 M83%");
-  expect(rows[1]).toHaveTextContent("fast≈320 k17%");
+  expect(rows[0]).toHaveTextContent("coderGLM 5.3 Flash1.52 M83%");
+  expect(rows[1]).toHaveTextContent("fast320 k17%");
   expect(
     within(card).getByRole("meter", { name: "coder share of generated tokens" }),
   ).toHaveAttribute("aria-valuenow", "83");

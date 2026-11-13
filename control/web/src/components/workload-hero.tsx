@@ -30,9 +30,8 @@ export function WorkloadHeader({ unit }: { unit: WorkloadGroup }) {
 
 /**
  * One workload: alias, title and state, its live speed as the hero number with the last 30 minutes
- * behind it, and the figures beside it. The hero is the engine's measured decode speed, else the gateway's
- * generated tokens per second, else its requests per second, else Not reported (nothing while the reads are out); "≈" shows while the
- * Controller calls the figure an estimate. Every number is the Controller's latest reading; the browser
+ * behind it, and the figures beside it. The hero is leadReading's figure (nothing while the reads are out;
+ * Not reported when none has a value); "≈" shows while the Controller calls it an estimate. Every number is the Controller's latest reading; the browser
  * computes none.
  */
 export function WorkloadHero({

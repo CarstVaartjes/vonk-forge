@@ -266,8 +266,8 @@ vonkctl metrics show decode_speed --json
 
 `vonkctl metrics` lists what the Controller can chart, one row per metric:
 name, title, unit, scope (`node` for a Spark reading, `alias` for a model
-figure) and basis (`measured`, or `estimated` when it is a gateway or modelled
-figure). The list is the Controller's catalogue, so new metrics appear with no
+figure) and basis (`measured`, or `estimated` when it is a gateway percentile,
+a derived speed or a modelled figure). The list is the Controller's catalogue, so new metrics appear with no
 vonkctl change. `show METRIC` prints one row per series with the Controller's
 own summary (now, average, peak, a range total where the metric has one) and an
 eight-cell trend; an estimated metric says `(estimate)` beside its numbers and

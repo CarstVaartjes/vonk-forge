@@ -58,11 +58,13 @@ const fleetSeries = (spec: Record<string, unknown>, line: Record<string, unknown
   }) as unknown as MetricsSeriesResponse;
 const power = fleetSeries({ basis: "measured", unit: "watts" }, { latest: 77 });
 const energy = fleetSeries({ basis: "estimated", unit: "watt_hours" }, { latest: 77, total: 1500 });
-const none = { power: null, energy: null };
+const none = { output: null, power: null, energy: null };
 const tile = (name: string) => screen.getByRole("region", { name });
 
 test("the band shows the Controller's fleet lines and totals and sums only the memory samples", () => {
-  render(<FleetPulse power={power} energy={energy} tokens={tokens} nodes={fleet} />);
+  render(
+    <FleetPulse output={tokens} power={power} energy={energy} tokens={tokens} nodes={fleet} />,
+  );
   expect(tile("GPU power")).toHaveTextContent("77.0W2 Sparks");
   expect(tile("Unified memory")).toHaveTextContent("212.0GiB of 240.0 GiB198.0 GiB in models");
   expect(

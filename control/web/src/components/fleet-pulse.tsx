@@ -39,19 +39,22 @@ function Tile({
  * reading says Not reported.
  */
 export function FleetPulse({
+  output,
   power,
   tokens,
   energy,
   nodes,
 }: {
-  /** GPU power, gateway tokens (24 h; their latest is "Output now") and GPU energy as the Controller serves them. */
+  /** The gateway's tokens per second over the last hour (their latest is "Output now"); the workload rows' read. */
+  output: MetricsSeriesResponse | null | undefined;
+  /** GPU power, gateway tokens (24 h) and GPU energy as the Controller serves them. */
   power: MetricsSeriesResponse | null;
   tokens: MetricsSeriesResponse | null;
   energy: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
-  const speed = fleetFigure(tokens, "latest");
+  const speed = fleetFigure(output, "latest");
   const watts = fleetFigure(power, "latest");
   const gpuEnergy = fleetFigure(energy, "total");
   const memory = fleetMemory(nodes);

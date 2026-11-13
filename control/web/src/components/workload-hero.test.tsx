@@ -23,7 +23,7 @@ function series(metric: string, title: string, unitName: string, latest: number 
       title,
       unit: unitName,
       scope: "alias",
-      basis: "estimated",
+      basis: "measured",
       source: "gateway",
       summary_total: true,
       fleet_sum: false,
@@ -60,17 +60,16 @@ const reads = (over: Partial<WorkloadReads>): WorkloadReads => ({
 const show = (over: Partial<WorkloadReads>) =>
   render(<WorkloadHero unit={unit} reads={reads(over)} live={false} />);
 
-test("the hero is the gateway's generated tokens per second, marked as an estimate", () => {
+test("the hero is the gateway's generated tokens per second", () => {
   const { container } = show({ tokens: tokens(96.7), requests: requests(2.5) });
-  expect(container.querySelector(".hero-num")).toHaveTextContent("≈96.7tok/s");
+  expect(container.querySelector(".hero-num")).toHaveTextContent("96.7tok/s");
   expect(screen.getByText("Generated tokens per model · last 30 minutes")).toBeInTheDocument();
-  expect(screen.getByText("est.")).toBeInTheDocument();
   expect(screen.getByRole("img", { name: /now 96.7 tok\/s/ })).toBeInTheDocument();
 });
 
 test("zero traffic on a running workload reads 0 and idle, model loaded", () => {
   const { container } = show({ tokens: tokens(0), requests: requests(0) });
-  expect(container.querySelector(".hero-num")).toHaveTextContent("≈0tok/s");
+  expect(container.querySelector(".hero-num")).toHaveTextContent("0tok/s");
   expect(screen.getByText("idle, model loaded")).toBeInTheDocument();
 });
 
@@ -91,11 +90,6 @@ test("while the speed reads are out the hero claims nothing", () => {
     waiting: undefined,
   });
   expect(screen.queryByText("Not reported", { selector: ".hero-num" })).toBeNull();
-});
-
-test("the gateway's generated tokens lead the requests for every workload", () => {
-  const { container } = show({ tokens: tokens(96.7), requests: requests(2.5) });
-  expect(container.querySelector(".hero-num")).toHaveTextContent("96.7tok/s");
 });
 
 test("the Requests figure is the engine's running and waiting counts", () => {
