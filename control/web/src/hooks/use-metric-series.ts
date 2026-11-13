@@ -4,19 +4,22 @@ import type { ControlApi, Metric, MetricRange, MetricsSeriesResponse } from "../
 const REFRESH_MS = 15_000;
 
 /**
- * One metric's series as the Controller serves it, read again every 15 seconds. null until a read
- * succeeds and after one fails (the next read heals it); a stale series is never shown as live.
+ * One metric's series as the Controller serves it (for one Spark when `node` is given), read again every
+ * 15 seconds: undefined while the first read is out, null after a read failed (the next read heals it),
+ * never a stale series shown as live.
  */
-export function useMetricSeries(
+export function useMetricRead(
   api: Pick<ControlApi, "metricsSeries">,
   metric: Metric,
   range: MetricRange,
-): MetricsSeriesResponse | null {
-  const [data, setData] = useState<MetricsSeriesResponse | null>(null);
+  node?: string,
+): MetricsSeriesResponse | null | undefined {
+  const [data, setData] = useState<MetricsSeriesResponse | null>();
   useEffect(() => {
     const controller = new AbortController();
+    setData(undefined);
     const read = () =>
-      api.metricsSeries(metric, range, undefined, controller.signal).then(
+      api.metricsSeries(metric, range, node, controller.signal).then(
         (response) => {
           if (!controller.signal.aborted) setData(response);
         },
@@ -31,6 +34,15 @@ export function useMetricSeries(
       controller.abort();
       clearInterval(timer);
     };
-  }, [api, metric, range]);
+  }, [api, metric, range, node]);
   return data;
+}
+
+/** The series, or null while loading and after a failed read: for figures that say Not reported either way. */
+export function useMetricSeries(
+  api: Pick<ControlApi, "metricsSeries">,
+  metric: Metric,
+  range: MetricRange,
+): MetricsSeriesResponse | null {
+  return useMetricRead(api, metric, range) ?? null;
 }

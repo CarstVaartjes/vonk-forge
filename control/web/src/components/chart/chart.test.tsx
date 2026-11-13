@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { AreaChart } from "./area-chart";
 import { ArcGauge } from "./arc-gauge";
@@ -133,4 +134,33 @@ test("stacked layers break at a point with a missing layer", () => {
     />,
   );
   expect(empty.getByText("None")).toBeVisible();
+});
+
+test("charts that share a crosshair follow one cursor time, each at its own nearest sample", () => {
+  const b = {
+    ...a,
+    key: "b",
+    name: "Garage",
+    points: [
+      { t: 5, v: 7 },
+      { t: 95, v: 8 },
+    ],
+  };
+  const Pair = () => {
+    const [at, setAt] = useState<number | null>(null);
+    const crosshair = { at, onChange: setAt };
+    return (
+      <>
+        <AreaChart {...base} title="One" label="one" series={[a]} crosshair={crosshair} />
+        <AreaChart {...base} title="Two" label="two" series={[b]} crosshair={crosshair} />
+      </>
+    );
+  };
+  render(<Pair />);
+  const [one] = screen.getAllByRole("img");
+  (one as Element).getBoundingClientRect = () => ({ left: 0, width: 600 }) as DOMRect;
+  fireEvent.pointerMove(one as Element, { clientX: 580 });
+  const tips = screen.getAllByRole("tooltip");
+  expect(tips[0]).toHaveTextContent("Kitchen: 30 W");
+  expect(tips[1]).toHaveTextContent("Garage: 8 W");
 });

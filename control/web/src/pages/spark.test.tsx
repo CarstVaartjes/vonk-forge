@@ -1,4 +1,3 @@
-vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SparkPage } from "./spark";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
@@ -18,7 +17,10 @@ vi.mock("../hooks/use-fleet-stream", () => ({
 /** The Spark page for `shown`, which the mocked fleet stream carries; `api` holds only what a test calls. */
 function show(shown: unknown, api: object = {}, onGone = vi.fn()) {
   nodes = [shown];
-  const history = { metricsSeries: vi.fn().mockRejectedValue(new Error("no history")) };
+  const history = {
+    metricsCatalogue: vi.fn().mockResolvedValue([]),
+    metricsSeries: vi.fn().mockRejectedValue(new Error("no history")),
+  };
   return render(
     <SparkPage
       api={{ ...history, ...api } as unknown as ControlApi}

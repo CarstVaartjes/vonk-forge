@@ -11,7 +11,7 @@ import {
 } from "../lib/fleet";
 import { useTelemetryHistory } from "../hooks/use-telemetry-history";
 import { InstallationReconcile } from "./installation-reconcile";
-import { MetricsChart } from "./metrics-chart";
+import { SparkCharts } from "./spark-charts";
 import { SparkGpuNow } from "./spark-gpu-now";
 import { SparkMemory } from "./spark-memory";
 import { StatusPill } from "./status-pill";
@@ -39,7 +39,7 @@ export function SparkOverview({
         <SparkMemory node={node} points={points} now={now} />
         <SparkGpuNow node={node} points={points} now={now} color={color} />
       </div>
-      <MetricsChart api={api} node={node.id} range={range} />
+      <SparkCharts api={api} nodeId={node.id} range={range} color={color} />
       <dl className="spark-facts">
         <div>
           <dt>Display memory</dt>

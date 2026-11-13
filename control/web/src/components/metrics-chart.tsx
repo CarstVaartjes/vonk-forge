@@ -68,6 +68,23 @@ function summaryText(
   return spec.basis === "estimated" ? `${text} (estimate)` : text;
 }
 
+/** The chart's series for a response: display units, a Spark's own colour, gaps kept as gaps. */
+export function toChartSeries(
+  data: MetricsSeriesResponse,
+  names: Record<string, string> = {},
+): ChartSeries[] {
+  const { scale } = UNITS[data.spec.unit];
+  return data.series.map((series, index) => ({
+    key: JSON.stringify(series.labels),
+    name: seriesName(series.labels, names),
+    color: seriesColor(series.labels, names, index),
+    points: series.points.map((point) => ({
+      t: Number(point.timestamp),
+      v: point.value === null ? null : Number(point.value) / scale,
+    })),
+  }));
+}
+
 export function SeriesChart({
   data,
   names = {},
@@ -78,15 +95,7 @@ export function SeriesChart({
   const { symbol: unit, scale } = UNITS[data.spec.unit];
   if (!data.series.some((series) => series.points.some((point) => point.value !== null)))
     return <p role="status">No samples in this range</p>;
-  const chartSeries: ChartSeries[] = data.series.map((series, index) => ({
-    key: JSON.stringify(series.labels),
-    name: seriesName(series.labels, names),
-    color: seriesColor(series.labels, names, index),
-    points: series.points.map((point) => ({
-      t: Number(point.timestamp),
-      v: point.value === null ? null : Number(point.value) / scale,
-    })),
-  }));
+  const chartSeries = toChartSeries(data, names);
   const sentence = `${data.spec.title}, ${data.range}: ${data.series
     .map(
       (series) => `${seriesName(series.labels, names)} ${summaryText(series.summary, data.spec)}`,

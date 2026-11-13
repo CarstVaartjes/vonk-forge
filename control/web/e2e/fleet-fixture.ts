@@ -162,7 +162,23 @@ export async function serveOverviewFleet(page: Page) {
       },
     ],
   } as components["schemas"]["FleetSnapshot"]);
-  await page.route("**/api/metrics/catalogue", (route) => route.fulfill({ json: [] }));
+  await page.route("**/api/metrics/catalogue", (route) =>
+    route.fulfill({
+      json: [
+        ["gpu_utilization", "GPU utilisation", "percent"],
+        ["gpu_temperature", "GPU temperature", "celsius"],
+      ].map(([metric, title, unit]) => ({
+        metric,
+        title,
+        unit,
+        scope: "node",
+        basis: "measured",
+        source: "spark",
+        summary_total: false,
+        hint: "",
+      })),
+    }),
+  );
   await page.route("**/api/metrics/series**", (route) => {
     const metric = new URL(route.request().url()).searchParams.get("metric") ?? "";
     const model = metric === "output_token_rate" || metric === "request_rate";
