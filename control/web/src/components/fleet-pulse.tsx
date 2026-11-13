@@ -2,7 +2,8 @@ import "./fleet-pulse.css";
 import type { ReactNode } from "react";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
 import { fleetMemory, fleetPower, formatBytes } from "../lib/fleet";
-import { compactCount } from "../lib/metric-units";
+import { compactCount, modelTotals } from "../lib/metric-units";
+import { GPU_ONLY_CAPTION } from "./energy-card";
 import { Estimate } from "./estimate";
 import { MemoryIngot } from "./memory-ingot";
 
@@ -56,12 +57,8 @@ export function FleetPulse({
   const online = nodes.filter((node) => node.connection.online_state === "online").length;
   const power = fleetPower(nodes);
   const memory = fleetMemory(nodes);
-  const totals = tokens?.series.flatMap((series) =>
-    series.summary.total == null ? [] : [Number(series.summary.total)],
-  );
-  const generated = totals?.length
-    ? compactCount(totals.reduce((sum, total) => sum + total, 0))
-    : null;
+  const { rows, sum } = modelTotals(tokens);
+  const generated = rows.length ? compactCount(sum) : null;
   return (
     <div className="fleet-pulse card">
       <Tile label="Output now" figure={NOT_REPORTED} caption="decode, measured at the engine" />
@@ -104,11 +101,7 @@ export function FleetPulse({
         unit={generated ? `${generated.unit} generated`.trim() : undefined}
         caption={generated ? "counted by the gateway, all models" : undefined}
       />
-      <Tile
-        label="GPU energy, 24 h"
-        figure={NOT_REPORTED}
-        caption="GPU only, not the whole Spark"
-      />
+      <Tile label="GPU energy, 24 h" figure={NOT_REPORTED} caption={GPU_ONLY_CAPTION} />
     </div>
   );
 }

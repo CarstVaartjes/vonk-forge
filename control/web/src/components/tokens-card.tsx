@@ -1,6 +1,6 @@
 import "./stat-card.css";
 import type { MetricsSeriesResponse, VisualFleetNode } from "../api/types";
-import { compactCount } from "../lib/metric-units";
+import { compactCount, modelTotals } from "../lib/metric-units";
 import { Estimate, EstimateTag } from "./estimate";
 import { Meter } from "./meter";
 
@@ -24,7 +24,7 @@ function titles(nodes: VisualFleetNode[]): Map<string, string> {
 
 /**
  * Generated tokens over 24 hours: the total and one row per model with its share. The numbers are the
- * Controller's per-model totals; a share is a model's total over their sum. Prompt tokens and cache share
+ * Controller's per-model totals; a share is a model's total over their sum (display arithmetic). Prompt tokens and cache share
  * wait for their metric and say Not reported. The hint under the figure is the Controller's.
  */
 export function TokensCard({
@@ -34,14 +34,8 @@ export function TokensCard({
   tokens: MetricsSeriesResponse | null;
   nodes: VisualFleetNode[];
 }) {
-  const rows = (tokens?.series ?? [])
-    .flatMap((series) =>
-      series.summary.total == null
-        ? []
-        : [{ alias: series.labels.alias ?? "All models", total: Number(series.summary.total) }],
-    )
-    .sort((a, b) => b.total - a.total);
-  const sum = rows.reduce((total, row) => total + row.total, 0);
+  const { rows: unsorted, sum, coverage } = modelTotals(tokens);
+  const rows = [...unsorted].sort((a, b) => b.total - a.total);
   const names = titles(nodes);
   return (
     <section className="card stat-card" aria-labelledby="tokens-card-heading">
@@ -58,6 +52,7 @@ export function TokensCard({
           </p>
           <p className="stat-caption">
             {tokens.spec.hint} Prompt tokens: {NOT_REPORTED}.
+            {coverage < 1 && ` Data covers ${Math.floor(coverage * 100)}% of this range.`}
           </p>
           <div className="stat-table">
             <table>
@@ -71,6 +66,8 @@ export function TokensCard({
               </thead>
               <tbody>
                 {rows.map((row) => {
+                  // A share is the model's total over the models' sum (meter arithmetic until the
+                  // Controller serves a share).
                   const share = sum > 0 ? Math.round((100 * row.total) / sum) : 0;
                   return (
                     <tr key={row.alias}>
@@ -94,6 +91,8 @@ export function TokensCard({
             </table>
           </div>
         </>
+      ) : tokens ? (
+        <p className="stat-caption">No data in this range</p>
       ) : (
         <p className="stat-fig">{NOT_REPORTED}</p>
       )}
