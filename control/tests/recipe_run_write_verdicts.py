@@ -126,7 +126,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_run_stop.py": {
         "_stop_logical_job_run": (
-            "4b7cf368767e47b54c3b902f1389f2f8db6a17a12ee7836ed7a8415b7d241960",
+            "e0e803b7497f3aa265ba4be35c829e31fcf7dd926d17e02d00dfd8aa678673d3",
             "retain: exact logical Stop admission owns run settlement",
         ),
     },
@@ -136,7 +136,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
-            "2c269907f69fb51b3f1571591616271befbf501a8f154dc2991067dde028a195",
+            "25b520c9a6691ff7f63f43920de5ec7b3765deea9becefa969e620e76d07e655",
             "caller-owned: recovery dispatch fences child-only effects",
         ),
     },

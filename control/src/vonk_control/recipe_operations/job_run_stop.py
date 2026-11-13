@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -23,6 +24,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from ..admission_locking import is_admission_contention
 from ..agent_jobs import (
     AgentJobService,
 )
@@ -57,6 +59,7 @@ from ..recipe_progress import (
 from ..recipe_stop_payloads import (
     stop_payload_from_job_run,
 )
+from ..run_admission import RunAdmissionBusy
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from ..workload_intent import allocate_workload_intent
@@ -101,12 +104,17 @@ class JobRunStopMixin:
         with service._sessions.begin() as session:
             # The locked plan read takes the run fence every Stop continuation
             # commits under, so the lookup behind it sees this key's Stop.
-            admitted = service._stop_plan_in_session(
-                session,
-                run_id,
-                lock=True,
-                profile_target_node_ids=profile_target_node_ids,
-            )
+            try:
+                admitted = service._stop_plan_in_session(
+                    session,
+                    run_id,
+                    lock=True,
+                    profile_target_node_ids=profile_target_node_ids,
+                )
+            except OperationalError as error:
+                if not is_admission_contention(error):
+                    raise
+                raise RunAdmissionBusy("stop admission is busy") from error
             pending_job = session.scalar(
                 select(Job).where(Job.request_id == request_id)
             )

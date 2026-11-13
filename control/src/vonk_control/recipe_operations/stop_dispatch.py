@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -24,7 +25,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..admission_locking import ConstraintReplay, admitting
+from ..admission_locking import ConstraintReplay, admitting, is_admission_contention
 from ..bounded_json import require_mapping
 from ..distributed_lifecycle import (
     DistributedLifecycleError,
@@ -69,6 +70,7 @@ from ..recipe_stop_payloads import (
     RecipeStopAuthorityError,
     durable_run_stop_payloads,
 )
+from ..run_admission import RunAdmissionBusy
 from ..stored_json import read_row_column
 from ..strict_json import read_stored_model, serialize_json_value
 from .contracts import RecipeOperationContext
@@ -432,7 +434,12 @@ class StopDispatchMixin:
         )
         if existing is not None:
             return existing
-        admitted = service._stop_plan_in_session(session, run.id, lock=True)
+        try:
+            admitted = service._stop_plan_in_session(session, run.id, lock=True)
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            raise RunAdmissionBusy("stop admission is busy") from error
         if (
             not admitted.allowed
             or admitted.authority_digest != run.plan_digest

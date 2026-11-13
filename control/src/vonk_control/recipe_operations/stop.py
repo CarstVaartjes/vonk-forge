@@ -476,19 +476,24 @@ class StopMixin:
         # The accepted Stop stops its own run as the run is now: its current
         # generation, route, plan, reservations and the Controller's derived
         # digests never refuse it. Only its targets and requester decide.
-        run = session.get(RecipeRun, document.owner_id, with_for_update=True)
-        if run is None:
-            raise RecipeRequestInvalid(
-                "accepted Stop run disappeared",
-                reason=InvalidRequestReason.SUPERSEDED,
+        try:
+            run = session.get(RecipeRun, document.owner_id, with_for_update=True)
+            if run is None:
+                raise RecipeRequestInvalid(
+                    "accepted Stop run disappeared",
+                    reason=InvalidRequestReason.SUPERSEDED,
+                )
+            admitted = service._stop_plan_in_session(
+                session,
+                run.id,
+                lock=True,
+                profile_target_node_ids=review.profile_target_node_ids,
+                reviewed_route_state=review.route_state.value,
             )
-        admitted = service._stop_plan_in_session(
-            session,
-            run.id,
-            lock=True,
-            profile_target_node_ids=review.profile_target_node_ids,
-            reviewed_route_state=review.route_state.value,
-        )
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            raise RunAdmissionBusy("stop admission is busy") from error
         if (
             not admitted.allowed
             or list(admitted.target_node_ids) != review.target_node_ids

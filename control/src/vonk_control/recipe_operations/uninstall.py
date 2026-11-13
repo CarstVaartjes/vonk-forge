@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
@@ -27,6 +28,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
     admitting,
+    is_admission_contention,
     node_admission_key,
 )
 from ..install_admission import (
@@ -39,6 +41,7 @@ from ..models import (
     RecipeInstallation,
 )
 from ..persisted_waits import schedule_wait
+from ..run_admission import RunAdmissionBusy
 from ..run_switch_contract import (
     RunSwitchReconciliationAuthority,
 )
@@ -328,6 +331,10 @@ class UninstallMixin:
                     owner_id=installation_id,
                 )
             )
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            raise RunAdmissionBusy("uninstall admission is busy") from error
         service._agent_jobs.notify_available()
         return service.get(job.id)
 

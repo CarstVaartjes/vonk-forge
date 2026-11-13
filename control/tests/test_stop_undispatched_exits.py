@@ -14,13 +14,16 @@ import pytest
 from sqlalchemy.exc import OperationalError
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError
 from vonk_control.admission_locking import PATIENT_AFTER_RETRIES, AdmissionLockBusy
+from vonk_control.recipe_operations import job_run_stop as job_run_stop_module
 from vonk_control.recipe_operations import stop as stop_module
 from vonk_control.recipe_operations.errors import _RouteNotWithdrawn
 from vonk_control.recipe_operations.interfaces import (
     RecipeOperationView,
     UndispatchedStopView,
 )
+from vonk_control.recipe_operations.job_run_stop import JobRunStopMixin
 from vonk_control.recipe_operations.stop import StopMixin
+from vonk_control.recipe_operations.uninstall import UninstallMixin
 from vonk_control.recipe_routes import RecipeRouteError
 from vonk_control.run_admission import RunAdmissionBusy
 
@@ -222,3 +225,68 @@ def test_lock_timeout_before_any_receipt_is_not_retried(monkeypatch):
             "run-1", plan_digest="digest", actor="admin", request_id="request-1"
         )
     assert len(attempts) == 1
+
+
+class _Deadlock(Exception):
+    sqlstate = "40P01"
+
+
+def _contended_sessions(deadlock):
+    """Sessions whose first locked read is aborted by PostgreSQL."""
+
+    def locked_read(*_a, **_k):
+        raise deadlock
+
+    session = SimpleNamespace(
+        get=lambda *_a, **_k: SimpleNamespace(id="run-1"), scalar=locked_read
+    )
+
+    class Sessions:
+        def __call__(self):
+            return self
+
+        def begin(self):
+            return self
+
+        def __enter__(self):
+            return session
+
+        def __exit__(self, *_exc):
+            return False
+
+    return Sessions()
+
+
+def test_deadlock_in_locked_plan_surfaces_run_admission_busy(monkeypatch):
+    deadlock = OperationalError("stmt", {}, _Deadlock())
+    monkeypatch.setattr(job_run_stop_module, "_run_is_one_shot", lambda *_a: True)
+
+    def locked_plan(*_a, **_k):
+        raise deadlock
+
+    service = SimpleNamespace(
+        _clock=lambda: NOW,
+        _sessions=_contended_sessions(deadlock),
+        _stop_plan_in_session=locked_plan,
+    )
+    with pytest.raises(RunAdmissionBusy) as one_shot:
+        JobRunStopMixin._stop_logical_job_run(
+            service,
+            "run-1",
+            plan_digest="digest",
+            actor="admin",
+            request_id="request-1",
+            workload_intent_ordinal=1,
+        )
+    assert one_shot.value.__cause__ is deadlock
+
+    service = SimpleNamespace(
+        _clock=lambda: NOW,
+        _sessions=_contended_sessions(deadlock),
+        _idempotent=lambda *_a, **_k: None,
+    )
+    with pytest.raises(RunAdmissionBusy) as removal:
+        UninstallMixin.uninstall(
+            service, "inst-1", actor="admin", request_id="request-2"
+        )
+    assert removal.value.__cause__ is deadlock

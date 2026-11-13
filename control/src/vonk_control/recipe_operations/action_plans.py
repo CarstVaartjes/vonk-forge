@@ -76,10 +76,10 @@ class ActionPlansMixin:
     ) -> StopPlan:
         # Lock order is run, then installation (this function locks the run
         # first). Uninstall locks installation, then its runs; the two can
-        # deadlock. Service-Stop acceptance retries it (stop.py
-        # `_stop_service_run_once`). The one-shot JobRun Stop, the dispatch after
-        # acceptance, the recovery Stop and uninstall surface the database error
-        # (follow-up).
+        # deadlock. Every Stop path (service acceptance, the one-shot JobRun
+        # Stop, the dispatch after acceptance, the recovery Stop) and uninstall
+        # convert admission contention into a typed RunAdmissionBusy: a
+        # deadlock retries in the admission loop, a spent lock wait stops.
         run_statement = select(RecipeRun).where(RecipeRun.id == run_id)
         if lock:
             run_statement = run_statement.with_for_update(of=RecipeRun)
