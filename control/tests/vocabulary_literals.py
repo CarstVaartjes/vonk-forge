@@ -885,9 +885,6 @@ def scan_source(source: str, *, path: str, words: frozenset[str]) -> list[int]:
         owner = False
     if (
         path in TYPESCRIPT_GENERATED
-        # Browser fixtures spell the wire documents the Controller sends, as the
-        # `.test` and `.spec` files do (a fixture is not a consumer).
-        or path.startswith("control/web/e2e/")
         or path
         in {
             "rust/crates/vonk-agent-protocol/src/generated.rs",

@@ -52,18 +52,6 @@ def test_an_svg_paint_is_markup_not_a_contract_word() -> None:
     ) == [1, 3]
 
 
-def test_a_browser_fixture_may_spell_the_wire_document() -> None:
-    source = 'const run = { run_state: "running" };\n'
-    words = frozenset({"running"})
-    assert (
-        scan.scan_source(source, path="control/web/e2e/fleet-fixture.ts", words=words)
-        == []
-    )
-    assert scan.scan_source(
-        source, path="control/web/src/pages/example.tsx", words=words
-    ) == [1]
-
-
 def test_a_docker_subcommand_is_not_a_contract_word() -> None:
     source = (
         'let a = ["container".to_owned(), "inspect".to_owned()];\n'
