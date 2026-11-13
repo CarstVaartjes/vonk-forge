@@ -15,6 +15,20 @@ export type FleetStreamState = {
   snapshot?: VisualFleetSnapshot;
 };
 
+/** What the header pill says about the stream; no pill until the first connection attempt resolves. */
+export type LiveStatus = { state: "live" | "delayed" | "reconnecting"; updatedAt?: number };
+
+export function liveStatus(stream: {
+  connection: FleetConnectionState;
+  stale: boolean;
+  lastUpdatedAt?: number;
+}): LiveStatus | null {
+  const { connection, stale, lastUpdatedAt: updatedAt } = stream;
+  if (connection === "connecting") return null;
+  if (connection === "reconnecting") return { state: "reconnecting", updatedAt };
+  return { state: stale || connection === "polling" ? "delayed" : "live", updatedAt };
+}
+
 export const initialFleetStreamState: FleetStreamState = {
   connection: "connecting",
   error: "",

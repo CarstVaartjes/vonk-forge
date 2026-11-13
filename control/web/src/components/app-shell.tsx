@@ -2,7 +2,9 @@ import { useEffect, useRef } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { AdminMenu } from "./admin-menu";
 import type { CliTokenDownload } from "../api/types";
+import type { LiveStatus } from "../hooks/fleet-stream-state";
 import { BrandMark } from "./brand-mark";
+import { LivePill } from "./live-pill";
 import { ActivityIcon, FleetIcon, LibraryIcon } from "./icons";
 
 export type AppRoute = "fleet" | "library" | "keys" | "activity";
@@ -20,6 +22,7 @@ type AppShellProps = {
   activeRoute?: AppRoute;
   children: ReactNode;
   footer?: ReactNode;
+  live?: LiveStatus | null;
   navigationKey?: string;
   navigationLocked?: boolean;
   onNavigate(event: MouseEvent<HTMLAnchorElement>, route: AppRoute): boolean | void;
@@ -30,6 +33,7 @@ export function AppShell({
   activeRoute,
   children,
   footer,
+  live,
   navigationKey = activeRoute,
   navigationLocked = false,
   onNavigate,
@@ -98,6 +102,7 @@ export function AppShell({
           </a>
         </nav>
         <div className="header-utility">
+          {live && <LivePill status={live} />}
           <span className="authority-note">Local Controller</span>
           {operator && (
             <AdminMenu {...operator} navigationLocked={navigationLocked} onNavigate={navigate} />

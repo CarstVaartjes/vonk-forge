@@ -5,6 +5,7 @@ import { AppShell } from "./components/app-shell";
 import { ToastProvider } from "./components/toast";
 import { VersionLine } from "./components/version-line";
 import type { AppRoute } from "./components/app-shell";
+import type { LiveStatus } from "./hooks/fleet-stream-state";
 import { ActivityPage } from "./pages/activity";
 import { FleetPage } from "./pages/fleet-simplified";
 import { KeysPage } from "./pages/keys";
@@ -31,6 +32,7 @@ export function App({ api }: { api: ControlApi }) {
   const auth = useOptionalAuth();
   const [url, setUrl] = useState(`${location.pathname}${location.search}`);
   const activeUrl = useRef(url);
+  const [live, setLive] = useState<LiveStatus | null>(null);
   const [navigationLocked, setNavigationLockedState] = useState(false);
   const navigationLockedRef = useRef(false);
   const setNavigationLocked = useCallback((locked: boolean) => {
@@ -107,7 +109,7 @@ export function App({ api }: { api: ControlApi }) {
   }
   const content = page ? (
     {
-      fleet: <FleetPage api={api} onBusyChange={setNavigationLocked} />,
+      fleet: <FleetPage api={api} onBusyChange={setNavigationLocked} onLive={setLive} />,
       library: (
         <LibraryPage
           api={api}
@@ -153,6 +155,7 @@ export function App({ api }: { api: ControlApi }) {
       <AppShell
         activeRoute={page}
         navigationKey={pathname}
+        live={live}
         navigationLocked={navigationLocked}
         onNavigate={navigate}
         footer={auth ? <VersionLine api={api} readKey={pathname} /> : undefined}

@@ -1,5 +1,5 @@
 import type { TelemetryPoint, VisualFleetSnapshot } from "../api/types";
-import { fleetStreamReducer, initialFleetStreamState } from "./fleet-stream-state";
+import { fleetStreamReducer, initialFleetStreamState, liveStatus } from "./fleet-stream-state";
 
 function snapshot(cursor: number, gpu = 10): VisualFleetSnapshot {
   return {
@@ -292,4 +292,16 @@ test("exposes reconnect and recovery state without discarding the snapshot", () 
   expect(reconnecting.snapshot).toBe(ready.snapshot);
   expect(recovered.connection).toBe("live");
   expect(recovered.error).toBe("");
+});
+
+test("the header pill reads live, delayed or reconnecting from the stream state", () => {
+  const at = 1_000;
+  expect(liveStatus({ connection: "live", stale: false, lastUpdatedAt: at })).toEqual({
+    state: "live",
+    updatedAt: at,
+  });
+  expect(liveStatus({ connection: "live", stale: true, lastUpdatedAt: at })?.state).toBe("delayed");
+  expect(liveStatus({ connection: "polling", stale: false })?.state).toBe("delayed");
+  expect(liveStatus({ connection: "reconnecting", stale: false })?.state).toBe("reconnecting");
+  expect(liveStatus({ connection: "connecting", stale: false })).toBeNull();
 });

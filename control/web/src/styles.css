@@ -59,11 +59,11 @@ pre{max-height:28rem;overflow:auto;padding:1rem;background:var(--recess);border:
 /* Status: a shape and the word, never a fill. Circle = ok, diamond = warning, square = failure, triangle = information, hollow circle = unknown. */
 .status-pill{display:inline-flex;align-items:center;gap:.45rem;width:max-content;max-width:100%;color:var(--muted);font-size:.8125rem;font-weight:650;line-height:1.2}
 .status-mark{flex:0 0 auto;width:.6rem;height:.6rem;background:currentColor}
-.status-pill.status-pill-healthy{color:var(--ok)}.status-pill-healthy .status-mark{border-radius:50%;box-shadow:0 0 0 .18rem color-mix(in srgb, currentColor 22%, transparent)}
-.status-pill.status-pill-warning{color:var(--warn)}.status-pill-warning .status-mark{clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+.status-pill.status-pill-healthy,.status-pill.live-pill-live{color:var(--ok)}.status-pill-healthy .status-mark,.live-pill-live .status-mark{border-radius:50%;box-shadow:0 0 0 .18rem color-mix(in srgb, currentColor 22%, transparent)}
+.status-pill.status-pill-warning,.status-pill.live-pill-delayed{color:var(--warn)}.status-pill-warning .status-mark,.live-pill-delayed .status-mark{clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
 .status-pill.status-pill-danger{color:var(--bad)}.status-pill-danger .status-mark{border-radius:1px}
 .status-pill.status-pill-info{color:var(--info)}.status-pill-info .status-mark{clip-path:polygon(50% 0,100% 100%,0 100%)}
-.status-pill-neutral .status-mark{background:transparent;border:1.5px solid currentColor;border-radius:50%}
+.status-pill-neutral .status-mark,.live-pill-reconnecting .status-mark{background:transparent;border:1.5px solid currentColor;border-radius:50%}
 code{color:var(--info)}.actions{display:flex;flex-wrap:wrap;align-items:center;gap:.65rem}
 .pagination{display:flex;gap:.5rem;margin:.5rem 0}
 .danger-zone,[role="alert"]{border-color:color-mix(in srgb, var(--bad) 32%, var(--panel))}
@@ -125,8 +125,8 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
   :root{forced-color-adjust:auto}
   .mark,.status,.status-pill,.status-mark,.activity-marker,.activity-outcome-bar span{forced-color-adjust:none}
   .mark{border:1px solid CanvasText}.mark i{background:CanvasText}
-  .status{background:Canvas;color:CanvasText;border:2px solid currentColor}.status-pill.status-pill-neutral{color:CanvasText}
-  .status-pill.status-pill-healthy{color:LinkText}.status-pill.status-pill-warning{color:CanvasText}.status-pill.status-pill-danger{color:Mark}.status-pill.status-pill-info{color:Highlight}
+  .status{background:Canvas;color:CanvasText;border:2px solid currentColor}.status-pill.status-pill-neutral,.status-pill.live-pill-reconnecting{color:CanvasText}
+  .status-pill.status-pill-healthy,.status-pill.live-pill-live{color:LinkText}.status-pill.status-pill-warning,.status-pill.live-pill-delayed{color:CanvasText}.status-pill.status-pill-danger{color:Mark}.status-pill.status-pill-info{color:Highlight}
   .nav-link[aria-current="page"],.segmented button[aria-pressed="true"]{outline:2px solid Highlight;outline-offset:2px}
   .activity-timeline::before{background:CanvasText}
   .activity-marker{background:Highlight;border-color:Canvas;box-shadow:0 0 0 2px CanvasText}
@@ -143,7 +143,7 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
 .header-utility .admin-menu-panel .secondary-button,.header-utility .admin-menu-panel .logout{min-height:2.5rem}
 .shell>main{min-width:0;padding:1.5rem clamp(1rem,3vw,2.25rem) 3rem}.content-frame{width:min(100%,100rem);margin:0 auto}
 @media(max-width:54rem){.app-header{grid-template-columns:auto minmax(0,1fr) auto;gap:.6rem;padding:.6rem 1rem}.app-header .brand small,.header-utility .authority-note{display:none}.primary-navigation{justify-content:flex-start}.primary-navigation .nav-link{padding:.5rem .6rem}.shell>main{padding:1.25rem 1rem 2.5rem}}
-@media(max-width:34rem){.app-header{gap:.45rem}.app-header .brand strong{font-size:.82rem}.app-header .mark{font-size:.88rem}.primary-navigation .nav-link{gap:.35rem;padding:.45rem .5rem;font-size:.75rem}.primary-navigation .nav-link svg{display:none}.header-utility .operator-summary{padding:.25rem}.shell>main{padding:.95rem 1rem 2rem}}
+@media(max-width:34rem){.app-header{gap:.45rem}.app-header .brand strong{font-size:.82rem}.app-header .mark{font-size:.88rem}.header-utility .operator-summary{padding:.25rem}.shell>main{padding:.95rem 1rem 2rem}}
 
 /* The workspace uses a compact top bar. Primary navigation stays available on
    narrow screens; the overflow sheet only owns account and administrative
@@ -235,3 +235,20 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
 /* Card: a two-step fade, the one shadow, the 16 px radius. The listed surfaces are cards already. */
 .card{border:1px solid var(--line)}
 .card,.login-card,.fleet-error,.fleet-empty,.fleet-discovery,.fleet-enrollment,.activity-overview>div:not(.activity-outcome-bar),.activity-controls,.activity-state,.activity-event article,.settings-form,.spark-detail,.library-profile-saved,.metric-tile{border-radius:var(--r-card);background:linear-gradient(180deg,var(--panel),var(--panel-2));box-shadow:var(--shadow)}
+
+/* Top bar: brand, navigation, live pill, Controller name, account. */
+.app-header .brand small{color:var(--gold-text);font-family:var(--mono);font-size:.625rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.live-pill{display:inline-flex;align-items:center;gap:.5rem;white-space:nowrap}.live-pill-age{color:var(--faint);font-size:.8125rem}
+@media(min-width:54rem){.header-utility .authority-note{display:inline;color:var(--faint);font-size:.8125rem}}
+@media(max-width:54rem){.live-pill-age{display:none}}
+/* Below 42rem the same navigation docks at the bottom as a tab bar. */
+@media(max-width:42rem){
+  html{scroll-padding-bottom:4.5rem}
+  .app-header{grid-template-columns:minmax(0,1fr) auto}
+  .primary-navigation{position:fixed;inset:auto 0 0 0;z-index:30;justify-content:space-around;gap:0;padding:.25rem .5rem calc(.25rem + env(safe-area-inset-bottom));border-top:1px solid var(--line);background:var(--panel-2)}
+  .primary-navigation .nav-link{flex:1;flex-direction:column;justify-content:center;gap:.2rem;min-height:3rem;padding:.35rem .25rem;font-size:.6875rem}
+  .primary-navigation .nav-link svg{display:block;width:1.25rem;height:1.25rem}
+  .primary-navigation .nav-link[aria-current="page"]{box-shadow:inset 0 2px var(--green)}
+  .shell>main{padding-bottom:5.5rem}
+  .toast-region{bottom:4.5rem}
+}

@@ -3,6 +3,7 @@ import { MetricsChart } from "../components/metrics-chart";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
+import { type LiveStatus, liveStatus } from "../hooks/fleet-stream-state";
 import {
   fleetStatusLine,
   nodeDiskFreeBytes,
@@ -41,8 +42,18 @@ function selectedSpark(): string | null {
   return new URLSearchParams(location.search).get("spark");
 }
 
-export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolean): void }) {
+export function FleetPage({
+  api,
+  onLive,
+}: {
+  api: ControlApi;
+  onBusyChange?(busy: boolean): void;
+  onLive?(status: LiveStatus | null): void;
+}) {
   const fleet = useFleetStream(api);
+  const live = liveStatus(fleet);
+  useEffect(() => onLive?.(live), [onLive, live?.state, live?.updatedAt]);
+  useEffect(() => () => onLive?.(null), [onLive]);
   const [query, setQuery] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [sparkName, setSparkName] = useState("");

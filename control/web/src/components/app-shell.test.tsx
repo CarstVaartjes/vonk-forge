@@ -250,3 +250,16 @@ test("makes shell routes visibly and keyboard disabled while navigation is locke
   await user.click(screen.getByRole("link", { name: "Fleet" }));
   expect(onNavigate).not.toHaveBeenCalled();
 });
+
+test("the header shows the live state with its shape and word, and nothing when unknown", () => {
+  const props = { onNavigate: () => undefined, activeRoute: "fleet" as const };
+  const { rerender } = render(<AppShell {...props}>content</AppShell>);
+  expect(screen.queryByText("Live")).toBeNull();
+  rerender(
+    <AppShell {...props} live={{ state: "delayed", updatedAt: Date.now() - 40_000 }}>
+      content
+    </AppShell>,
+  );
+  expect(screen.getByText("Delayed").closest(".status-pill")).toHaveClass("live-pill-delayed");
+  expect(screen.getByText(/updated/)).toBeVisible();
+});
