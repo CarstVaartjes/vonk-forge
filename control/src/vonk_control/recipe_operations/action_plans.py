@@ -77,9 +77,9 @@ class ActionPlansMixin:
         # Lock order is run, then installation (this function locks the run
         # first). Uninstall locks installation, then its runs; the two can
         # deadlock. Every Stop path (service acceptance, the one-shot JobRun
-        # Stop, the dispatch after acceptance, the recovery Stop) and uninstall
-        # convert admission contention into a typed RunAdmissionBusy: a
-        # deadlock retries in the admission loop, a spent lock wait stops.
+        # Stop, the dispatch after acceptance) and uninstall convert admission
+        # contention into RunAdmissionBusy; each caller retries or defers it.
+        # The recovery Stop runs inside transition() and re-plans on its own.
         run_statement = select(RecipeRun).where(RecipeRun.id == run_id)
         if lock:
             run_statement = run_statement.with_for_update(of=RecipeRun)

@@ -190,6 +190,10 @@ class StopDispatchMixin:
                     owner_id=run_id,
                 )
             )
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            raise RunAdmissionBusy("stop admission is busy") from error
         return service.get(job.id)
 
     @staticmethod
@@ -434,12 +438,7 @@ class StopDispatchMixin:
         )
         if existing is not None:
             return existing
-        try:
-            admitted = service._stop_plan_in_session(session, run.id, lock=True)
-        except OperationalError as error:
-            if not is_admission_contention(error):
-                raise
-            raise RunAdmissionBusy("stop admission is busy") from error
+        admitted = service._stop_plan_in_session(session, run.id, lock=True)
         if (
             not admitted.allowed
             or admitted.authority_digest != run.plan_digest

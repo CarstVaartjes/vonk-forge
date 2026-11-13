@@ -126,17 +126,17 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/job_run_stop.py": {
         "_stop_logical_job_run": (
-            "e0e803b7497f3aa265ba4be35c829e31fcf7dd926d17e02d00dfd8aa678673d3",
+            "7de70cddd825fb97056a24872a09c20b9d3cb7867bb474bbbbee82f7afc5e5b6",
             "retain: exact logical Stop admission owns run settlement",
         ),
     },
     "recipe_operations/stop_dispatch.py": {
         "_dispatch_stop_after_withdrawal": (
-            "7009cf49e277b6b0b9cb55fdf8350f4fdfff595cd1ae2df5ab0d06aa647114ea",
+            "fdc46fa30f3541ff9c6a5a63c3b42f7047693e2b7ae27405eadfadbd11700347",
             "caller-owned: accepted Stop continuation binds exact dispatch",
         ),
         "queue_recovery_stop_in_session": (
-            "25b520c9a6691ff7f63f43920de5ec7b3765deea9becefa969e620e76d07e655",
+            "2c269907f69fb51b3f1571591616271befbf501a8f154dc2991067dde028a195",
             "caller-owned: recovery dispatch fences child-only effects",
         ),
     },

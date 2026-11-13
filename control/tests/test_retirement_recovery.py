@@ -38,6 +38,7 @@ from vonk_control.recipe_lifecycle_contract import RecipeOperationCancellationRe
 from vonk_control.recipe_operation_worker import RecipeOperationWorker
 from vonk_control.recipe_operations import RecipeOperationService
 from vonk_control.recovery_policy import RecoveryPolicy
+from vonk_control.run_admission import RunAdmissionBusy
 from vonk_control.stored_json import read_row_column
 
 from .agent_fences import fenced_attempt, fenced_operation
@@ -601,3 +602,36 @@ def test_retired_installation_cleanup_is_reissued_after_a_denial(
     )
     assert fresh.id != install.id
     assert fresh.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
+
+
+def test_retired_cleanup_that_is_busy_waits_instead_of_aborting_the_pass(
+    tmp_path: Path, postgres_engine, monkeypatch
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, _nodes = setup_services(
+        tmp_path, engine=postgres_engine
+    )
+    now = [NOW]
+    lifecycle._clock = lambda: now[0]
+    plan = lifecycle.preview_install(mapping_id, build_id)
+    install = lifecycle.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="busy-install"
+    )
+    projection = durable_operation_services(
+        sessions,
+        tmp_path / "routes",
+        clock=lambda: now[0],
+        cursors=TokenCodec(b"k" * 32).cursor_codec(),
+    )
+    assert projection.retire_job is not None
+    projection.retire_job(install.id)
+
+    def busy(*_args, **_kwargs):
+        raise RunAdmissionBusy("uninstall admission is busy")
+
+    monkeypatch.setattr(lifecycle, "uninstall", busy)
+    now[0] += timedelta(seconds=6)
+    assert not lifecycle.reconcile_retired_operations()
+    with sessions() as session:
+        job = _required(session.get(Job, install.id))
+        assert "next reconciliation at" in (job.status_reason or "")
+        assert job.next_action_at is not None

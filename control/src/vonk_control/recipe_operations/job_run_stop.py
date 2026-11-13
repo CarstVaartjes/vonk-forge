@@ -101,292 +101,299 @@ class JobRunStopMixin:
                 raise RecipeRequestInvalid(
                     "partial one-shot Stop requires current profile ownership"
                 )
-        with service._sessions.begin() as session:
-            # The locked plan read takes the run fence every Stop continuation
-            # commits under, so the lookup behind it sees this key's Stop.
-            try:
+        try:
+            with service._sessions.begin() as session:
+                # The locked plan read takes the run fence every Stop continuation
+                # commits under, so the lookup behind it sees this key's Stop.
                 admitted = service._stop_plan_in_session(
                     session,
                     run_id,
                     lock=True,
                     profile_target_node_ids=profile_target_node_ids,
                 )
-            except OperationalError as error:
-                if not is_admission_contention(error):
-                    raise
-                raise RunAdmissionBusy("stop admission is busy") from error
-            pending_job = session.scalar(
-                select(Job).where(Job.request_id == request_id)
-            )
-            if pending_job is not None:
-                if _parent_execution_mode(pending_job) == "profile-jobrun-stop":
-                    if profile_application_id is None:
-                        raise RecipeRequestInvalid(
-                            "profile JobRun Stop request identity changed"
-                        )
-                    typed_parent = _profile_jobrun_parent(pending_job)
-                    if isinstance(typed_parent, Residue):
-                        # The Stop this request key already queued is in flight
-                        # under its own orders; its damaged parent cannot be
-                        # re-checked here, so the request adopts it (its result
-                        # projection settles it).
+                pending_job = session.scalar(
+                    select(Job).where(Job.request_id == request_id)
+                )
+                if pending_job is not None:
+                    if _parent_execution_mode(pending_job) == "profile-jobrun-stop":
+                        if profile_application_id is None:
+                            raise RecipeRequestInvalid(
+                                "profile JobRun Stop request identity changed"
+                            )
+                        typed_parent = _profile_jobrun_parent(pending_job)
+                        if isinstance(typed_parent, Residue):
+                            # The Stop this request key already queued is in flight
+                            # under its own orders; its damaged parent cannot be
+                            # re-checked here, so the request adopts it (its result
+                            # projection settles it).
+                            return service._view(pending_job, session=session)
+                        authorization = typed_parent.profile_stop_authorization
+                        if (
+                            typed_parent.profile_application_id
+                            != profile_application_id
+                            or typed_parent.owner_id != run_id
+                            or typed_parent.workload_intent_ordinal
+                            != workload_intent_ordinal
+                        ):
+                            raise RecipeRequestInvalid(
+                                "profile JobRun Stop request changed its owner",
+                                reason=InvalidRequestReason.CONFLICT,
+                            )
+                        if pending_job.state != LifecycleState.RUNNING.value:
+                            # The caller's pending probe was read before this lock;
+                            # the Stop has ended since. A duplicate replays it.
+                            return service._view(pending_job, session=session)
+                        try:
+                            validate_profile_stop_owner(session, authorization, now=now)
+                            for item in typed_parent.flattened_phase_items:
+                                target = next(
+                                    target
+                                    for target in authorization.targets
+                                    if target.key
+                                    == jobrun_stop_key(item.node_id, item.payload)
+                                )
+                                validate_profile_jobrun_stop_target(
+                                    session,
+                                    authorization,
+                                    target,
+                                    item.payload,
+                                    stop_parent=pending_job,
+                                    now=now,
+                                )
+                        except (ProfileStopAuthorityError, StopIteration) as error:
+                            raise RecipeRequestInvalid(
+                                "profile JobRun Stop authority is stale",
+                                reason=InvalidRequestReason.SUPERSEDED,
+                            ) from error
                         return service._view(pending_job, session=session)
-                    authorization = typed_parent.profile_stop_authorization
                     if (
-                        typed_parent.profile_application_id != profile_application_id
-                        or typed_parent.owner_id != run_id
-                        or typed_parent.workload_intent_ordinal
-                        != workload_intent_ordinal
+                        pending_job.kind != WireAgentOperation.RECIPE_STOP.value
+                        or _parent_identity(pending_job, "owner_id") != run_id
+                        or _parent_execution_mode(pending_job) != "one-shot-jobs"
                     ):
                         raise RecipeRequestInvalid(
-                            "profile JobRun Stop request changed its owner",
+                            "request key was already used differently",
                             reason=InvalidRequestReason.CONFLICT,
                         )
-                    if pending_job.state != LifecycleState.RUNNING.value:
-                        # The caller's pending probe was read before this lock;
-                        # the Stop has ended since. A duplicate replays it.
-                        return service._view(pending_job, session=session)
-                    try:
-                        validate_profile_stop_owner(session, authorization, now=now)
-                        for item in typed_parent.flattened_phase_items:
-                            target = next(
-                                target
-                                for target in authorization.targets
-                                if target.key
-                                == jobrun_stop_key(item.node_id, item.payload)
-                            )
-                            validate_profile_jobrun_stop_target(
-                                session,
-                                authorization,
-                                target,
-                                item.payload,
-                                stop_parent=pending_job,
-                                now=now,
-                            )
-                    except (ProfileStopAuthorityError, StopIteration) as error:
+                    bound = _bound_workload_intent(pending_job)
+                    if (
+                        workload_intent_ordinal is not None
+                        and workload_intent_ordinal != bound
+                    ):
+                        # One load sends one intent under its key: another intent
+                        # under the same key is key reuse, not a newer intent.
                         raise RecipeRequestInvalid(
-                            "profile JobRun Stop authority is stale",
-                            reason=InvalidRequestReason.SUPERSEDED,
-                        ) from error
-                    return service._view(pending_job, session=session)
-                if (
-                    pending_job.kind != WireAgentOperation.RECIPE_STOP.value
-                    or _parent_identity(pending_job, "owner_id") != run_id
-                    or _parent_execution_mode(pending_job) != "one-shot-jobs"
+                            "request key was already used for another workload intent",
+                            reason=InvalidRequestReason.CONFLICT,
+                        )
+                    if not _one_shot_stop_awaits_continuation(pending_job):
+                        # A completed or dispatched Stop is an immediate replay.
+                        return service._view(pending_job, session=session)
+                    workload_intent_ordinal = bound
+                run = session.get(RecipeRun, run_id, with_for_update=True)
+                # The run passed this check before the lock: the reviewed Stop names
+                # a run whose records moved on, which the owner re-plans.
+                if run is None or not _run_is_one_shot(session, run):
+                    raise RecipeRequestInvalid(
+                        "logical recipe run changed while stopping",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
+                # Stop is declarative: it stops the run as it is now, so a plan
+                # that moved on since the caller's preview is re-planned, never
+                # refused; only a run that cannot be stopped is.
+                if not admitted.allowed:
+                    raise RecipeRequestInvalid(
+                        "stop plan is blocked",
+                        reason=InvalidRequestReason.SUPERSEDED,
+                    )
+                plan_digest = admitted.plan_digest
+                installation = session.get(RecipeInstallation, run.installation_id)
+                if installation is None:
+                    raise RecipeRequestInvalid("recipe installation does not exist")
+                revision = _active_recipe_revision(
+                    session, installation.recipe_revision_id
+                )
+                # The accepted Stop plan carries the run's own authority; the recipe
+                # revision's digest is used when it is readable, never required.
+                authority_revision = (
+                    revision.content_digest
+                    if revision is not None and revision.content_digest
+                    else admitted.authority_digest.removeprefix("sha256:")
+                )
+                nodes = tuple(
+                    session.scalars(
+                        select(RunNode)
+                        .where(RunNode.run_id == run_id)
+                        .order_by(RunNode.rank)
+                    )
+                )
+                targets = admitted.target_node_ids
+                target_nodes = tuple(
+                    session.scalars(
+                        select(AgentNode)
+                        .where(AgentNode.node_id.in_(targets))
+                        .order_by(AgentNode.node_id)
+                    )
+                )
+                if tuple(node.node_id for node in target_nodes) != targets:
+                    raise RecipeRequestInvalid("artifact workload target disappeared")
+                if workload_intent_ordinal is None:
+                    workload_intent_ordinal = allocate_workload_intent(session, targets)
+                    AgentJobService.request_superseded_workload_cancellation_in_session(
+                        session, targets, workload_intent_ordinal, now
+                    )
+                elif (
+                    type(workload_intent_ordinal) is not int
+                    or workload_intent_ordinal < 1
+                    or any(
+                        node.workload_intent_ordinal != workload_intent_ordinal
+                        for node in target_nodes
+                    )
                 ):
                     raise RecipeRequestInvalid(
-                        "request key was already used differently",
-                        reason=InvalidRequestReason.CONFLICT,
+                        "workload intent was superseded",
+                        reason=InvalidRequestReason.SUPERSEDED,
                     )
-                bound = _bound_workload_intent(pending_job)
-                if (
-                    workload_intent_ordinal is not None
-                    and workload_intent_ordinal != bound
-                ):
-                    # One load sends one intent under its key: another intent
-                    # under the same key is key reuse, not a newer intent.
-                    raise RecipeRequestInvalid(
-                        "request key was already used for another workload intent",
-                        reason=InvalidRequestReason.CONFLICT,
-                    )
-                if not _one_shot_stop_awaits_continuation(pending_job):
-                    # A completed or dispatched Stop is an immediate replay.
-                    return service._view(pending_job, session=session)
-                workload_intent_ordinal = bound
-            run = session.get(RecipeRun, run_id, with_for_update=True)
-            # The run passed this check before the lock: the reviewed Stop names
-            # a run whose records moved on, which the owner re-plans.
-            if run is None or not _run_is_one_shot(session, run):
-                raise RecipeRequestInvalid(
-                    "logical recipe run changed while stopping",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            # Stop is declarative: it stops the run as it is now, so a plan
-            # that moved on since the caller's preview is re-planned, never
-            # refused; only a run that cannot be stopped is.
-            if not admitted.allowed:
-                raise RecipeRequestInvalid(
-                    "stop plan is blocked",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            plan_digest = admitted.plan_digest
-            installation = session.get(RecipeInstallation, run.installation_id)
-            if installation is None:
-                raise RecipeRequestInvalid("recipe installation does not exist")
-            revision = _active_recipe_revision(session, installation.recipe_revision_id)
-            # The accepted Stop plan carries the run's own authority; the recipe
-            # revision's digest is used when it is readable, never required.
-            authority_revision = (
-                revision.content_digest
-                if revision is not None and revision.content_digest
-                else admitted.authority_digest.removeprefix("sha256:")
-            )
-            nodes = tuple(
-                session.scalars(
-                    select(RunNode)
-                    .where(RunNode.run_id == run_id)
-                    .order_by(RunNode.rank)
-                )
-            )
-            targets = admitted.target_node_ids
-            target_nodes = tuple(
-                session.scalars(
-                    select(AgentNode)
-                    .where(AgentNode.node_id.in_(targets))
-                    .order_by(AgentNode.node_id)
-                )
-            )
-            if tuple(node.node_id for node in target_nodes) != targets:
-                raise RecipeRequestInvalid("artifact workload target disappeared")
-            if workload_intent_ordinal is None:
-                workload_intent_ordinal = allocate_workload_intent(session, targets)
-                AgentJobService.request_superseded_workload_cancellation_in_session(
-                    session, targets, workload_intent_ordinal, now
-                )
-            elif (
-                type(workload_intent_ordinal) is not int
-                or workload_intent_ordinal < 1
-                or any(
-                    node.workload_intent_ordinal != workload_intent_ordinal
-                    for node in target_nodes
-                )
-            ):
-                raise RecipeRequestInvalid(
-                    "workload intent was superseded",
-                    reason=InvalidRequestReason.SUPERSEDED,
-                )
-            if profile_application_id is not None:
-                profile_job = service._profile_jobrun_stop_in_session(
-                    session,
-                    run=run,
-                    nodes=nodes,
-                    installation=installation,
-                    authority_revision=authority_revision,
-                    target_node_ids=targets,
-                    stop_plan_digest=admitted.plan_digest,
-                    actor=actor,
-                    request_id=request_id,
-                    profile_application_id=profile_application_id,
-                    workload_intent_ordinal=workload_intent_ordinal,
-                    now=now,
-                )
-                if isinstance(profile_job, Residue):
-                    # The accepted profile Stop cannot be read yet: nothing is
-                    # stopped on a guess, and the profile's retry asks again.
-                    raise RecipeRetryLater(
-                        "the accepted profile Stop is not readable yet; it is "
-                        "recorded and the stop is retried"
-                    )
-                if profile_job is not None:
-                    return service._view(profile_job, session=session)
-            else:
-                exact_job = service._run_jobrun_stop_in_session(
-                    session,
-                    run=run,
-                    nodes=nodes,
-                    target_node_ids=targets,
-                    stop_plan_digest=plan_digest,
-                    actor=actor,
-                    request_id=request_id,
-                    workload_intent_ordinal=workload_intent_ordinal,
-                    now=now,
-                    pending_job=pending_job,
-                )
-                if isinstance(exact_job, RecipeArtifactJobCancellationPending):
-                    return exact_job
-                if exact_job is not None:
-                    return service._view(exact_job, session=session)
-            payload = {
-                "schema_version": 1,
-                "owner_kind": "run",
-                "owner_id": run_id,
-                "plan_digest": plan_digest,
-                "execution_mode": "one-shot-jobs",
-                "workload_intent_ordinal": workload_intent_ordinal,
-            }
-            pending = service._one_shot_stop_prerequisite(
-                session,
-                run_id,
-                now,
-                target_node_ids=targets if admitted.missing_node_ids else None,
-            )
-            if pending is not None:
-                if pending_job is None:
-                    service._insert_job(
+                if profile_application_id is not None:
+                    profile_job = service._profile_jobrun_stop_in_session(
                         session,
-                        new_recipe_job(
-                            id=str(uuid.uuid4()),
-                            request_id=request_id,
-                            kind=WireAgentOperation.RECIPE_STOP.value,
-                            state=LifecycleState.RUNNING.value,
-                            actor=actor,
-                            authority_revision=authority_revision,
-                            targets=list(targets),
-                            payload_digest=hashlib.sha256(
-                                canonical_message(payload)
-                            ).hexdigest(),
-                            payload=controller_recipe_document(
-                                RecipeStopParent.model_validate_json(
+                        run=run,
+                        nodes=nodes,
+                        installation=installation,
+                        authority_revision=authority_revision,
+                        target_node_ids=targets,
+                        stop_plan_digest=admitted.plan_digest,
+                        actor=actor,
+                        request_id=request_id,
+                        profile_application_id=profile_application_id,
+                        workload_intent_ordinal=workload_intent_ordinal,
+                        now=now,
+                    )
+                    if isinstance(profile_job, Residue):
+                        # The accepted profile Stop cannot be read yet: nothing is
+                        # stopped on a guess, and the profile's retry asks again.
+                        raise RecipeRetryLater(
+                            "the accepted profile Stop is not readable yet; it is "
+                            "recorded and the stop is retried"
+                        )
+                    if profile_job is not None:
+                        return service._view(profile_job, session=session)
+                else:
+                    exact_job = service._run_jobrun_stop_in_session(
+                        session,
+                        run=run,
+                        nodes=nodes,
+                        target_node_ids=targets,
+                        stop_plan_digest=plan_digest,
+                        actor=actor,
+                        request_id=request_id,
+                        workload_intent_ordinal=workload_intent_ordinal,
+                        now=now,
+                        pending_job=pending_job,
+                    )
+                    if isinstance(exact_job, RecipeArtifactJobCancellationPending):
+                        return exact_job
+                    if exact_job is not None:
+                        return service._view(exact_job, session=session)
+                payload = {
+                    "schema_version": 1,
+                    "owner_kind": "run",
+                    "owner_id": run_id,
+                    "plan_digest": plan_digest,
+                    "execution_mode": "one-shot-jobs",
+                    "workload_intent_ordinal": workload_intent_ordinal,
+                }
+                pending = service._one_shot_stop_prerequisite(
+                    session,
+                    run_id,
+                    now,
+                    target_node_ids=targets if admitted.missing_node_ids else None,
+                )
+                if pending is not None:
+                    if pending_job is None:
+                        service._insert_job(
+                            session,
+                            new_recipe_job(
+                                id=str(uuid.uuid4()),
+                                request_id=request_id,
+                                kind=WireAgentOperation.RECIPE_STOP.value,
+                                state=LifecycleState.RUNNING.value,
+                                actor=actor,
+                                authority_revision=authority_revision,
+                                targets=list(targets),
+                                payload_digest=hashlib.sha256(
                                     canonical_message(payload)
-                                )
+                                ).hexdigest(),
+                                payload=controller_recipe_document(
+                                    RecipeStopParent.model_validate_json(
+                                        canonical_message(payload)
+                                    )
+                                ),
+                                result=None,
+                                created_at=now,
+                                updated_at=now,
                             ),
-                            result=None,
-                            created_at=now,
-                            updated_at=now,
-                        ),
-                    )
-                    session.flush()
-                return pending
-            for node in nodes:
-                if node.node_id in targets:
-                    node.state = RunState.STOPPED
-                    node.updated_at = now
-            run.state = RunState.LOST if admitted.missing_node_ids else RunState.STOPPED
-            run.route_state = RouteState.WITHDRAWN
-            run.stopped_at = None if admitted.missing_node_ids else now
-            if admitted.missing_node_ids:
-                run.route_error = (
-                    "incomplete multi-Spark model; missing ranks were not stopped"
+                        )
+                        session.flush()
+                    return pending
+                for node in nodes:
+                    if node.node_id in targets:
+                        node.state = RunState.STOPPED
+                        node.updated_at = now
+                run.state = (
+                    RunState.LOST if admitted.missing_node_ids else RunState.STOPPED
                 )
-            run.updated_at = now
-            if admitted.missing_node_ids:
-                service._release_node_reservations(session, run_id, targets, now)
-            else:
-                service._release(session, "run", run_id, now)
-            job = pending_job or new_recipe_job(
-                id=str(uuid.uuid4()),
-                request_id=request_id,
-                kind=WireAgentOperation.RECIPE_STOP.value,
-                state=LifecycleState.SUCCEEDED.value,
-                actor=actor,
-                authority_revision=authority_revision,
-                targets=list(targets),
-                payload_digest=hashlib.sha256(canonical_message(payload)).hexdigest(),
-                payload=controller_recipe_document(
-                    RecipeStopParent.model_validate_json(canonical_message(payload))
-                ),
-                result=serialize_json_value(
-                    _validated_result(
-                        WireAgentOperation.RECIPE_STOP.value,
-                        {RunState.STOPPED.value: True},
+                run.route_state = RouteState.WITHDRAWN
+                run.stopped_at = None if admitted.missing_node_ids else now
+                if admitted.missing_node_ids:
+                    run.route_error = (
+                        "incomplete multi-Spark model; missing ranks were not stopped"
                     )
-                ),
-                created_at=now,
-                updated_at=now,
-            )
-            if pending_job is not None:
-                RecipeOperationAdapter().finish(pending_job, now, failed=False)
-                pending_job.result = serialize_json_value(
-                    _validated_result(
-                        WireAgentOperation.RECIPE_STOP.value,
-                        {RunState.STOPPED.value: True},
-                    )
+                run.updated_at = now
+                if admitted.missing_node_ids:
+                    service._release_node_reservations(session, run_id, targets, now)
+                else:
+                    service._release(session, "run", run_id, now)
+                job = pending_job or new_recipe_job(
+                    id=str(uuid.uuid4()),
+                    request_id=request_id,
+                    kind=WireAgentOperation.RECIPE_STOP.value,
+                    state=LifecycleState.SUCCEEDED.value,
+                    actor=actor,
+                    authority_revision=authority_revision,
+                    targets=list(targets),
+                    payload_digest=hashlib.sha256(
+                        canonical_message(payload)
+                    ).hexdigest(),
+                    payload=controller_recipe_document(
+                        RecipeStopParent.model_validate_json(canonical_message(payload))
+                    ),
+                    result=serialize_json_value(
+                        _validated_result(
+                            WireAgentOperation.RECIPE_STOP.value,
+                            {RunState.STOPPED.value: True},
+                        )
+                    ),
+                    created_at=now,
+                    updated_at=now,
                 )
-                pending_job.updated_at = now
-            else:
-                job = service._insert_job(session, job)
-            session.flush()
-            return service._view(job)
+                if pending_job is not None:
+                    RecipeOperationAdapter().finish(pending_job, now, failed=False)
+                    pending_job.result = serialize_json_value(
+                        _validated_result(
+                            WireAgentOperation.RECIPE_STOP.value,
+                            {RunState.STOPPED.value: True},
+                        )
+                    )
+                    pending_job.updated_at = now
+                else:
+                    job = service._insert_job(session, job)
+                session.flush()
+                return service._view(job)
+        except OperationalError as error:
+            if not is_admission_contention(error):
+                raise
+            raise RunAdmissionBusy("stop admission is busy") from error
 
     def _one_shot_stop_is_pending(self, request_id: str) -> bool:
         service = typing_cast("RecipeOperationService", self)
