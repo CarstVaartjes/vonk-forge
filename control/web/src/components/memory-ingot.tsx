@@ -1,9 +1,7 @@
 import "./memory-ingot.css";
 import { displayRatio, type WireNumber } from "../api/contract-numeric";
-import { formatBytes, memoryLevel, type MemorySplit } from "../lib/fleet";
+import { formatBytes, MEMORY_LOW_WORDS, memoryLevel, type MemorySplit } from "../lib/fleet";
 import { StatusPill } from "./status-pill";
-
-const LOW_WORDS = { warn: "Under 8 GiB free", serious: "Under 4 GiB free" } as const;
 
 /**
  * A Spark's unified memory as one bar: Models, System and Free, with the amounts in a legend. When the
@@ -18,7 +16,7 @@ export function MemoryIngot({
 }: {
   label: string;
   memory: MemorySplit | null;
-  size?: "small" | "medium" | "large";
+  size?: "small" | "medium";
   /** The 8 / 4 GiB free-memory warning is one Spark's; a fleet sum passes false. */
   warn?: boolean;
 }) {
@@ -66,7 +64,9 @@ export function MemoryIngot({
         ))}
         {level !== "ok" && (
           <li>
-            <StatusPill tone={level === "serious" ? "bad" : "warn"}>{LOW_WORDS[level]}</StatusPill>
+            <StatusPill tone={level === "serious" ? "bad" : "warn"}>
+              {MEMORY_LOW_WORDS[level]}
+            </StatusPill>
           </li>
         )}
       </ul>

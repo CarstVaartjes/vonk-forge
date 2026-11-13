@@ -8,6 +8,7 @@ const unit = {
   title: "GLM 5.3 Flash",
   alias: "coder",
   state: "running",
+  tone: "ok",
   nodes: [],
   ranks: {},
 } as WorkloadGroup;

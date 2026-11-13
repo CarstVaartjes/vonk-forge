@@ -32,8 +32,8 @@ export function ActivityPreview({
   now: Date;
   onViewAll?(event: MouseEvent<HTMLAnchorElement>): void;
 }) {
-  // null: the last read failed, which is not the same as nothing having happened
-  const [rows, setRows] = useState<Rows | null>([]);
+  // undefined: not read yet; null: the last read failed, which is not the same as nothing happening
+  const [rows, setRows] = useState<Rows | null>();
   // Each read names Sparks as they are called now.
   const names = useRef(new Map<string, string>());
   names.current = new Map(nodes.map((node) => [node.id, nodeDisplayName(node)]));
@@ -69,7 +69,7 @@ export function ActivityPreview({
           View all
         </a>
       </header>
-      {rows === null ? (
+      {rows === undefined ? null : rows === null ? (
         <p role="status">Activity is not available right now.</p>
       ) : rows.length === 0 ? (
         <p>No activity yet.</p>
