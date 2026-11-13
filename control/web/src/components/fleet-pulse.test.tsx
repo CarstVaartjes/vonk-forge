@@ -40,13 +40,14 @@ const tokens = {
     basis: "estimated",
   },
   series: [
+    { labels: {}, points: [], summary: { total: 1_840_000 } },
     { labels: { alias: "coder" }, points: [], summary: { total: 1_000_000 } },
     { labels: { alias: "fast" }, points: [], summary: { total: 840_000 } },
   ],
 } as unknown as MetricsSeriesResponse;
 const tile = (name: string) => screen.getByRole("region", { name });
 
-test("the band sums the online Sparks' readings and the gateway's per-model totals", () => {
+test("the band sums the online Sparks' readings and shows the Controller's fleet token total", () => {
   render(<FleetPulse tokens={tokens} nodes={fleet} />);
   expect(tile("GPU power")).toHaveTextContent("77.0W2 Sparks");
   expect(tile("Unified memory")).toHaveTextContent("212.0GiB of 240.0 GiB198.0 GiB in models");

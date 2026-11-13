@@ -49,78 +49,136 @@ class MetricQuery:
     """One metric's fixed PromQL, rendered from its family; no client text reaches it.
 
     `gauge` averages a gauge, `last` keeps its newest sample (a value that only
-    counts down), `counter` is the per-second rate of a gateway counter by alias.
+    counts down), `rate` is a counter's per-second rate (`over` divides it by
+    another counter's rate, times `scale`), `increase` counts what a counter
+    gained, `energy` is a power gauge's Wh per step. A `gateway` metric reads
+    LiteLLM's families and is summed by alias; any other keeps its `node_id`.
     """
 
     family: str
-    kind: Literal["gauge", "last", "counter"]
+    kind: Literal["gauge", "last", "rate", "increase", "energy"]
+    gateway: bool = False
+    over: str | None = None
+    scale: int = 1
 
     @property
     def scrape(self) -> int:
-        return (
-            GATEWAY_SCRAPE_SECONDS if self.kind == "counter" else CONTROL_SCRAPE_SECONDS
-        )
+        return GATEWAY_SCRAPE_SECONDS if self.gateway else CONTROL_SCRAPE_SECONDS
 
     @property
     def floor(self) -> int:
         """Four scrapes: enough samples for a rate to exist and not flap."""
         return 4 * self.scrape
 
+    @property
+    def counted(self) -> bool:
+        return self.kind in ("rate", "increase")
+
     def window(self, step: int) -> int:
         """Never smaller than the step, so no sample falls between two points.
 
-        A counter rate needs two samples inside its window, so (Grafana's rate
+        A counter needs two samples inside its window, so (Grafana's rate
         interval) it also spans the step plus one scrape.
         """
-        if self.kind == "counter":
+        if self.counted:
             return max(step + self.scrape, self.floor)
         return max(step, self.floor)
 
-    def _by_alias(self, expression: str) -> str:
+    def _group(self, expression: str, fleet: bool) -> str:
+        if fleet:
+            return f"sum({expression})"
+        if not self.gateway:
+            return expression
         return (
             f"sum by (alias) (label_replace({expression}, "
             '"alias", "$1", "requested_model", "(.+)"))'
         )
 
-    def series(self, selector: str, step: int) -> str:
+    def series(self, selector: str, step: int, fleet: bool = False) -> str:
         window = self.window(step)
+
+        def read(function: str, family: str) -> str:
+            return self._group(f"{function}({family}{selector}[{window}s])", fleet)
+
         match self.kind:
             case "gauge":
-                return f"avg_over_time({self.family}{selector}[{window}s])"
+                return read("avg_over_time", self.family)
             case "last":
-                return f"last_over_time({self.family}{selector}[{window}s])"
-            case "counter":
-                return self._by_alias(f"rate({self.family}{selector}[{window}s])")
+                return read("last_over_time", self.family)
+            case "increase":
+                return read("increase", self.family)
+            case "energy":
+                return f"{read('avg_over_time', self.family)} * {step} / 3600"
+            case "rate":
+                rate = read("rate", self.family)
+                if self.over is None:
+                    return rate
+                scaled = f"{self.scale} * " if self.scale != 1 else ""
+                return f"{scaled}{rate} / {read('rate', self.over)}"
 
-    def peak(self, selector: str, duration: int) -> str:
+    def peak(self, selector: str, duration: int, fleet: bool = False) -> str | None:
         """The highest raw value in the range; averaged points would understate it."""
-        if self.kind != "counter":
-            return f"max_over_time({self.family}{selector}[{duration}s])"
-        # Evaluated every floor seconds, each over floor + one scrape: no gap between windows.
-        window = self.floor + self.scrape
-        raw = self._by_alias(f"rate({self.family}{selector}[{window}s])")
-        return f"max_over_time({raw}[{duration}s:{self.floor}s])"
-
-    def total(self, selector: str, duration: int) -> str | None:
-        if self.kind != "counter":
+        if self.kind == "energy":
             return None
-        return self._by_alias(f"increase({self.family}{selector}[{duration}s])")
+        if self.kind in ("gauge", "last") and not fleet:
+            return f"max_over_time({self.family}{selector}[{duration}s])"
+        # Evaluated every floor seconds over a window that leaves no gap between them.
+        raw = self.series(selector, self.floor, fleet)
+        return f"max_over_time(({raw})[{duration}s:{self.floor}s])"
+
+    def total(self, selector: str, duration: int, fleet: bool = False) -> str | None:
+        """What the range added up to; only for counted and energy metrics."""
+        if self.kind == "energy":
+            window = f"sum_over_time({self.family}{selector}[{duration}s])"
+            return f"{self._group(window, fleet)} * {self.scrape} / 3600"
+        if self.counted and self.over is None:
+            return self._group(f"increase({self.family}{selector}[{duration}s])", fleet)
+        return None
+
+
+def _node(
+    family: str,
+    kind: Literal["gauge", "rate", "increase", "energy"] = "gauge",
+    over: str | None = None,
+    scale: int = 1,
+) -> MetricQuery:
+    return MetricQuery(f"vonk_node_{family}", kind, False, over, scale)
+
+
+def _gateway(family: str) -> MetricQuery:
+    return MetricQuery(f"litellm_{family}", "rate", True)
 
 
 QUERIES: dict[Metric, MetricQuery] = {
-    "gpu_utilization": MetricQuery(
-        "vonk_node_telemetry_gpu_utilization_percent", "gauge"
-    ),
-    "gpu_memory_used": MetricQuery(
-        "vonk_node_telemetry_gpu_memory_used_bytes", "gauge"
-    ),
-    "host_memory_used": MetricQuery(
-        "vonk_node_telemetry_host_memory_used_bytes", "gauge"
-    ),
-    "gpu_temperature": MetricQuery("vonk_node_telemetry_gpu_temperature_c", "gauge"),
-    "request_rate": MetricQuery("litellm_requests_metric_total", "counter"),
-    "output_token_rate": MetricQuery("litellm_output_tokens_metric_total", "counter"),
+    "gpu_utilization": _node("telemetry_gpu_utilization_percent"),
+    "gpu_memory_used": _node("telemetry_gpu_memory_used_bytes"),
+    "host_memory_used": _node("telemetry_host_memory_used_bytes"),
+    "gpu_temperature": _node("telemetry_gpu_temperature_c"),
+    "request_rate": _gateway("requests_metric_total"),
+    "output_token_rate": _gateway("output_tokens_metric_total"),
     "certificate_expiry": MetricQuery("vonk_agent_certificate_expiry_seconds", "last"),
+    "gpu_power": _node("telemetry_gpu_power_watts"),
+    "gpu_energy": _node("telemetry_gpu_power_watts", "energy"),
+    "models_memory": _node("telemetry_gpu_process_memory_bytes"),
+    "system_memory": _node("telemetry_system_memory_bytes"),
+    "gpu_clock": _node("telemetry_gpu_graphics_clock_mhz"),
+    "swap_used": _node("inventory_swap_used_bytes"),
+    "disk_used": _node("inventory_disk_used_bytes"),
+    "cpu_utilization": _node(
+        "cpu_busy_seconds_total", "rate", "vonk_node_cpu_seconds_total", 100
+    ),
+    "load_average": _node("load_average_1m"),
+    "board_temperature": _node("board_temperature_c"),
+    "nvme_temperature": _node("nvme_temperature_c"),
+    "nic_temperature": _node("nic_temperature_c"),
+    "fan_speed": _node("fan_rpm"),
+    "network_lan_rx": _node("network_lan_rx_bytes_total", "rate"),
+    "network_lan_tx": _node("network_lan_tx_bytes_total", "rate"),
+    "fabric_rx": _node("fabric_rx_bytes_total", "rate"),
+    "fabric_tx": _node("fabric_tx_bytes_total", "rate"),
+    "disk_read": _node("disk_read_bytes_total", "rate"),
+    "disk_write": _node("disk_written_bytes_total", "rate"),
+    "oom_kills": _node("oom_kills_total", "increase"),
 }
 
 
@@ -198,8 +256,9 @@ def _series(
     label: SeriesLabel,
     fresh_after: float,
 ) -> MetricSeries:
-    """A series with its summary; a series without its label is the whole fleet."""
+    """A series with its summary; a series without its label is the fleet line."""
     key = name or ""
+    total, fleet_total = totals.get(key), totals.get("")
     found = [point.value for point in points if point.value is not None]
     return MetricSeries(
         labels={label.value: name} if name else {},
@@ -213,7 +272,10 @@ def _series(
             else None,
             average=sum(found) / len(found) if found else None,
             peak=peaks.get(key),
-            total=totals.get(key),
+            total=total,
+            share=min(1.0, total / fleet_total)
+            if name and total is not None and fleet_total
+            else None,
             coverage=min(1.0, len(found) / expected),
         ),
     )
@@ -324,22 +386,18 @@ class PrometheusReader:
             if not values:
                 return _response(spec, range, end, step, [])
             selector = _selector(label, values)
-        total = query.total(selector, duration)
-        matrix, peaks, totals = await asyncio.gather(
-            self.read(
-                "/api/v1/query_range",
-                _RangeQuery(
-                    query=query.series(selector, step),
-                    start=end - duration,
-                    end=end,
-                    step=step,
-                ).model_dump(),
-            ),
-            self._instant(query.peak(selector, duration), end, label),
-            self._instant(total, end, label) if total else _nothing(),
+        # The fleet line sums the Sparks' (or models') series, so only an unfiltered read has one.
+        lines = (False, True) if spec.fleet_sum and node is None else (False,)
+        reads = await asyncio.gather(
+            *(
+                self._read_one(query, selector, duration, step, end, label, fleet)
+                for fleet in lines
+            )
         )
-        if not isinstance(matrix, _Matrix):
-            raise PrometheusUnavailable("Prometheus returned no matrix")
+        # The fleet line leads; its peak and total are keyed by no label.
+        matrix = [row for read in reversed(reads) for row in read[0]]
+        peaks = {key: value for read in reads for key, value in read[1].items()}
+        totals = {key: value for read in reads for key, value in read[2].items()}
         expected = duration // step + 1
         try:
             series = [
@@ -358,13 +416,45 @@ class PrometheusReader:
                     label,
                     end - step,
                 )
-                for row in matrix.result
+                for row in matrix
             ]
         except ValueError as error:
             raise PrometheusUnavailable(
                 "Prometheus returned invalid samples"
             ) from error
         return _response(spec, range, end, step, series)
+
+    async def _read_one(
+        self,
+        query: MetricQuery,
+        selector: str,
+        duration: int,
+        step: int,
+        end: float,
+        label: SeriesLabel,
+        fleet: bool,
+    ) -> tuple[list[_MatrixRow], dict[str, float], dict[str, float]]:
+        """The range read with its peak and total reads, for the series or the fleet line."""
+        peak, total = (
+            query.peak(selector, duration, fleet),
+            query.total(selector, duration, fleet),
+        )
+        matrix, peaks, totals = await asyncio.gather(
+            self.read(
+                "/api/v1/query_range",
+                _RangeQuery(
+                    query=query.series(selector, step, fleet),
+                    start=end - duration,
+                    end=end,
+                    step=step,
+                ).model_dump(),
+            ),
+            self._instant(peak, end, label) if peak else _nothing(),
+            self._instant(total, end, label) if total else _nothing(),
+        )
+        if not isinstance(matrix, _Matrix):
+            raise PrometheusUnavailable("Prometheus returned no matrix")
+        return matrix.result, peaks, totals
 
     async def _instant(
         self, expression: str, at: float, label: SeriesLabel

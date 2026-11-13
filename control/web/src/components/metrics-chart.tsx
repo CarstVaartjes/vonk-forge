@@ -45,7 +45,8 @@ export function formatTimeLeft(seconds: number): string {
 function seriesName(labels: Record<string, string>, names: Record<string, string>): string {
   const node = labels.node_id;
   if (node) return names[node] ?? node;
-  return labels.alias ?? "All Sparks";
+  // A series without a label is the Controller's fleet line.
+  return labels.alias ?? "Fleet";
 }
 
 /** Latest, average, peak and total as the Controller computed them; an estimate says so. */

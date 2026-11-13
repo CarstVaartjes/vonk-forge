@@ -24,7 +24,12 @@ from vonk_agent_protocol.state_machines import CertificateRecordState
 from . import agent_operation_states, job_states
 from .compose_bundle import ComposeBundle
 from .jobs import without_agent_operation
-from .metrics_readings import engine_reading_lines, host_reading_lines
+from .metrics_readings import (
+    engine_reading_lines,
+    host_reading_lines,
+    node_fact_lines,
+    node_facts,
+)
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -500,10 +505,9 @@ class MetricsRegistry:
             worker_memory = self._worker_memory
             worker_memory_age = self._worker_memory_age
             compose_bundle = self._compose_bundle
+        snapshot = None if self._fleet_source is None else self._fleet_source()
         nodes, telemetry_samples = (
-            ({}, {})
-            if self._fleet_source is None
-            else self._fleet_values(self._fleet_source())
+            ({}, {}) if snapshot is None else self._fleet_values(snapshot)
         )
         contact_lines = [] if self._contact_source is None else self._contact_source()
         lines = [
@@ -620,6 +624,8 @@ class MetricsRegistry:
                 if value is not None:
                     lines.append(f'{metric}{{node_id="{node_id}"}} {value}')
         lines.extend(host_reading_lines(telemetry_samples))
+        if snapshot is not None:
+            lines.extend(node_fact_lines(node_facts(snapshot)))
         if self._engine_source is not None:
             lines.extend(engine_reading_lines(self._engine_source()))
         lines.extend(

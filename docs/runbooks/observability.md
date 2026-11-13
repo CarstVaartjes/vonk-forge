@@ -23,19 +23,37 @@ model's tokens across Sparks.
 
 Trends read two Controller routes. `GET /api/metrics/catalogue` describes every
 metric once: title, unit, scope (`node` or `alias`), basis (`measured` or
-`estimated`), source and a hint; the page renders that and hard-codes none of
-it (vonkctl will in M7). `GET /api/metrics/series?metric&range[&node]` returns, per series,
-its points and a summary (`latest`, `average`, `peak`, `total`, `coverage`)
-computed by the Controller. Ranges are 1h, 6h, 24h, 7d and 30d (Prometheus keeps
+`estimated`), source, whether its summary carries a total (`summary_total`),
+whether it has a fleet line (`fleet_sum`) and a hint; the page renders that and
+hard-codes none of it (vonkctl will in M7). `GET /api/metrics/series?metric&range[&node]`
+returns, per series, its points and a summary (`latest`, `average`, `peak`, `total`,
+`share`, `coverage`) computed by the Controller. Ranges are 1h, 6h, 24h, 7d and 30d (Prometheus keeps
 a year). Each point averages a window that is never smaller than the step and at
 least four scrapes (15 s for Controller series, 30 s for the LiteLLM job); a
 counter rate's window also spans the step plus one scrape, so consecutive points
 leave no gap. `latest` is only a value from the last step, else `None`. `peak` is the highest raw value in
-the range, not the highest averaged point. `total` (gateway counters only) is
-`increase()` over the range. `coverage` is the share of the range's steps that
-have a value. `None` means no data and is never drawn as zero. Every query is
-fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM family listed
-in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
+the range, not the highest averaged point. `total` (counted metrics: gateway
+tokens and requests, bytes moved, OOM kills) is `increase()` over the range.
+`coverage` is the share of the range's steps that have a value. `None` means no
+data and is never drawn as zero. A metric with `fleet_sum` also returns, when no
+Spark is chosen, a first series without a label: the sum of the others, with its
+own summary. Each labelled series' `share` is its total over that fleet total, so
+a page shows "fleet tokens" and "model share" without adding anything up. Every
+query is fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM
+family listed in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
+
+Spark metrics (one series per `node_id`): `gpu_power`, `models_memory` (memory
+held by GPU processes), `system_memory`, `gpu_clock`, `swap_used`, `disk_used`
+(swap and disk come with the inventory, so they move every few minutes),
+`cpu_utilization`, `load_average`, `board_temperature` (the hottest unlabelled
+board sensor, never called the CPU), `nvme_temperature`, `nic_temperature`,
+`fan_speed`, `network_lan_{rx,tx}`, `fabric_{rx,tx}` (RDMA ports),
+`disk_{read,write}` and `oom_kills`. Bytes are rates (`bytes_per_second`) with a
+range total. `gpu_energy` is an estimate: GPU power only (the whole Spark's power
+is not readable on GB10), integrated over the samples that were reported, so time
+a Spark was silent is not counted. Its points are Wh per step (average power times
+the step), its total is the exact sum of samples times the scrape interval, and
+it has no peak.
 
 Operational JSON logs are rotated by Docker's local driver. Remote output is
 redacted and truncated before persistence. Full sanitized job evidence is

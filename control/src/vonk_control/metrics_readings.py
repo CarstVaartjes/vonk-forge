@@ -11,9 +11,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, NamedTuple
 
-from vonk_agent_protocol.telemetry import TelemetryReadings
-
 if TYPE_CHECKING:
+    from .fleet_projection import FleetSnapshot, TelemetryPoint
     from .telemetry import LiveEngineReading
 
 
@@ -25,6 +24,9 @@ class Reading(NamedTuple):
 
 
 _HOST = (
+    Reading("gpu_power_watts", "vonk_node_telemetry_gpu_power_watts", "gauge", "GPU power draw in watts (not the whole Spark)"),
+    Reading("gpu_process_memory_bytes", "vonk_node_telemetry_gpu_process_memory_bytes", "gauge", "Memory held by GPU processes in bytes"),
+    Reading("system_memory_bytes", "vonk_node_telemetry_system_memory_bytes", "gauge", "Memory in use outside GPU processes in bytes"),
     Reading("cpu_busy_seconds", "vonk_node_cpu_busy_seconds_total", "counter", "Cumulative CPU time spent not idle, in seconds"),
     Reading("cpu_total_seconds", "vonk_node_cpu_seconds_total", "counter", "Cumulative CPU time in seconds, idle included"),
     Reading("load_average_1m", "vonk_node_load_average_1m", "gauge", "One-minute load average"),
@@ -66,6 +68,41 @@ _ENGINE = (
 )  # fmt: skip
 
 
+class NodeFacts(NamedTuple):
+    """Gauges that ride on a Spark's clock observation and inventory, not a sample."""
+
+    gpu_graphics_clock_mhz: int | None
+    swap_used_bytes: int | None
+    disk_used_bytes: int | None
+
+
+_FACTS = (
+    Reading("gpu_graphics_clock_mhz", "vonk_node_telemetry_gpu_graphics_clock_mhz", "gauge", "GPU graphics clock in MHz"),
+    Reading("swap_used_bytes", "vonk_node_inventory_swap_used_bytes", "gauge", "Swap in use in bytes"),
+    Reading("disk_used_bytes", "vonk_node_inventory_disk_used_bytes", "gauge", "Model-store disk in use in bytes"),
+)  # fmt: skip
+
+
+def node_facts(snapshot: FleetSnapshot) -> dict[str, NodeFacts]:
+    facts: dict[str, NodeFacts] = {}
+    for node in snapshot.nodes:
+        clock = None if node.telemetry is None else node.telemetry.sample.gpu_clock
+        inventory = node.inventory
+        swap = (
+            None
+            if inventory is None or inventory.host_settings is None
+            else inventory.host_settings.swap
+        )
+        facts[node.id] = NodeFacts(
+            None if clock is None else clock.graphics_mhz,
+            None if swap is None else max(0, swap.total_bytes - swap.free_bytes),
+            None
+            if inventory is None
+            else max(0, inventory.disk_total_bytes - inventory.disk_free_bytes),
+        )
+    return facts
+
+
 def _number(value: float) -> str:
     return repr(value) if isinstance(value, float) else str(value)
 
@@ -92,10 +129,16 @@ def _lines(table: Sequence[Reading], rows: Sequence[tuple[str, object]]) -> list
     return lines
 
 
-def host_reading_lines(samples: Mapping[str, TelemetryReadings]) -> list[str]:
+def host_reading_lines(samples: Mapping[str, TelemetryPoint]) -> list[str]:
     return _lines(
         _HOST,
         [(f'node_id="{node}"', sample) for node, sample in sorted(samples.items())],
+    )
+
+
+def node_fact_lines(facts: Mapping[str, NodeFacts]) -> list[str]:
+    return _lines(
+        _FACTS, [(f'node_id="{node}"', fact) for node, fact in sorted(facts.items())]
     )
 
 
