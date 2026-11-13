@@ -51,15 +51,17 @@ class MetricQuery:
     `gauge` averages a gauge, `last` keeps its newest sample (a value that only
     counts down), `rate` is a counter's per-second rate (`over` divides it by
     another counter's rate, times `scale`), `increase` counts what a counter
-    gained, `energy` is a power gauge's Wh per step. A `gateway` metric reads
+    gained, `energy` is a power gauge's Wh per step, `quantile` is that quantile
+    of a gateway histogram's recent observations. A `gateway` metric reads
     LiteLLM's families and is summed by alias; any other keeps its `node_id`.
     """
 
     family: str
-    kind: Literal["gauge", "last", "rate", "increase", "energy"]
+    kind: Literal["gauge", "last", "rate", "increase", "energy", "quantile"]
     gateway: bool = False
     over: str | None = None
     scale: int = 1
+    quantile: float = 0.0
 
     @property
     def scrape(self) -> int:
@@ -72,7 +74,7 @@ class MetricQuery:
 
     @property
     def counted(self) -> bool:
-        return self.kind in ("rate", "increase")
+        return self.kind in ("rate", "increase", "quantile")
 
     def window(self, step: int) -> int:
         """Never smaller than the step, so no sample falls between two points.
@@ -84,13 +86,15 @@ class MetricQuery:
             return max(step + self.scrape, self.floor)
         return max(step, self.floor)
 
-    def _group(self, expression: str, fleet: bool) -> str:
+    def _group(
+        self, expression: str, fleet: bool, keep: str = SeriesLabel.ALIAS
+    ) -> str:
         if fleet:
             return f"sum({expression})"
         if not self.gateway:
             return expression
         return (
-            f"sum by (alias) (label_replace({expression}, "
+            f"sum by ({keep}) (label_replace({expression}, "
             '"alias", "$1", "requested_model", "(.+)"))'
         )
 
@@ -109,6 +113,13 @@ class MetricQuery:
                 return read("increase", self.family)
             case "energy":
                 return f"{read('avg_over_time', self.family)} * {step} / 3600"
+            case "quantile":
+                buckets = self._group(
+                    f"rate({self.family}_bucket{selector}[{window}s])",
+                    False,
+                    "alias, le",
+                )
+                return f"histogram_quantile({self.quantile}, {buckets})"
             case "rate":
                 rate = read("rate", self.family)
                 if self.over is None:
@@ -131,7 +142,7 @@ class MetricQuery:
         if self.kind == "energy":
             window = f"sum_over_time({self.family}{selector}[{duration}s])"
             return f"{self._group(window, fleet)} * {self.scrape} / 3600"
-        if self.counted and self.over is None:
+        if self.kind in ("rate", "increase") and self.over is None:
             return self._group(f"increase({self.family}{selector}[{duration}s])", fleet)
         return None
 
@@ -149,6 +160,10 @@ def _gateway(family: str) -> MetricQuery:
     return MetricQuery(f"litellm_{family}", "rate", True)
 
 
+def _percentile(family: str, quantile: float) -> MetricQuery:
+    return MetricQuery(f"litellm_{family}", "quantile", True, quantile=quantile)
+
+
 QUERIES: dict[Metric, MetricQuery] = {
     "gpu_utilization": _node("telemetry_gpu_utilization_percent"),
     "gpu_memory_used": _node("telemetry_gpu_memory_used_bytes"),
@@ -157,6 +172,18 @@ QUERIES: dict[Metric, MetricQuery] = {
     "request_rate": _gateway("requests_metric_total"),
     "output_token_rate": _gateway("output_tokens_metric_total"),
     "certificate_expiry": MetricQuery("vonk_agent_certificate_expiry_seconds", "last"),
+    "input_token_rate": _gateway("input_tokens_metric_total"),
+    "error_rate": _gateway("proxy_failed_requests_metric_total"),
+    "gateway_ttft_p50": _percentile("llm_api_time_to_first_token_metric", 0.5),
+    "gateway_ttft_p95": _percentile("llm_api_time_to_first_token_metric", 0.95),
+    "gateway_latency_p50": _percentile("request_total_latency_metric", 0.5),
+    "gateway_latency_p95": _percentile("request_total_latency_metric", 0.95),
+    "gateway_generation_speed": MetricQuery(
+        "litellm_output_tokens_metric_total",
+        "rate",
+        True,
+        over="litellm_llm_api_latency_metric_sum",
+    ),
     "gpu_power": _node("telemetry_gpu_power_watts"),
     "gpu_energy": _node("telemetry_gpu_power_watts", "energy"),
     "models_memory": _node("telemetry_gpu_process_memory_bytes"),

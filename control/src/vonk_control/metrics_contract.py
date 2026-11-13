@@ -15,6 +15,13 @@ Metric = Literal[
     "request_rate",
     "output_token_rate",
     "certificate_expiry",
+    "input_token_rate",
+    "error_rate",
+    "gateway_ttft_p50",
+    "gateway_ttft_p95",
+    "gateway_latency_p50",
+    "gateway_latency_p95",
+    "gateway_generation_speed",
     "gpu_power",
     "gpu_energy",
     "models_memory",
@@ -116,6 +123,32 @@ def _spark(
     )
 
 
+def _gateway(
+    metric: Metric,
+    title: str,
+    unit: MetricUnit,
+    hint: str,
+    *,
+    total: bool = False,
+    fleet: bool = False,
+) -> MetricSpec:
+    """A per-model figure from the gateway's counters: always an estimate of the engine's work."""
+    return MetricSpec(
+        metric=metric,
+        title=title,
+        unit=unit,
+        scope=MetricScope.ALIAS,
+        basis="estimated",
+        source="gateway",
+        summary_total=total,
+        fleet_sum=fleet,
+        hint=hint,
+    )
+
+
+_TTFT_HINT = "Streaming requests only, seen at the gateway: includes network and queue. Histogram buckets are coarse, so it moves in steps."
+_LATENCY_HINT = "Whole request as the gateway saw it, queue included. Histogram buckets are coarse, so it moves in steps."
+
 # The one table of what each metric means; the queries live in prometheus_api.
 METRIC_SPECS: dict[Metric, MetricSpec] = {
     spec.metric: spec
@@ -185,6 +218,52 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
             summary_total=True,
             fleet_sum=True,
             hint="Counted by the gateway; a Spark shows the models it serves.",
+        ),
+        _gateway(
+            "input_token_rate",
+            "Prompt tokens per model",
+            "tokens_per_second",
+            "Counted by the gateway; a Spark shows the models it serves.",
+            total=True,
+            fleet=True,
+        ),
+        _gateway(
+            "error_rate",
+            "Failed requests per model",
+            "per_second",
+            "Requests the gateway answered with an error, retries included.",
+            total=True,
+            fleet=True,
+        ),
+        _gateway(
+            "gateway_ttft_p50",
+            "Time to first token, median",
+            "seconds",
+            _TTFT_HINT,
+        ),
+        _gateway(
+            "gateway_ttft_p95",
+            "Time to first token, 95th percentile",
+            "seconds",
+            _TTFT_HINT,
+        ),
+        _gateway(
+            "gateway_latency_p50",
+            "Request latency, median",
+            "seconds",
+            _LATENCY_HINT,
+        ),
+        _gateway(
+            "gateway_latency_p95",
+            "Request latency, 95th percentile",
+            "seconds",
+            _LATENCY_HINT,
+        ),
+        _gateway(
+            "gateway_generation_speed",
+            "Generation speed per request",
+            "tokens_per_second",
+            "Output tokens over the time the engine call took, so it includes prompt processing and queueing: it understates the engine's decode speed.",
         ),
         MetricSpec(
             metric="certificate_expiry",

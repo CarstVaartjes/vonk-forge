@@ -42,6 +42,16 @@ a page shows "fleet tokens" and "model share" without adding anything up. Every
 query is fixed in `prometheus_api.py`; a test fails if one reads a LiteLLM
 family listed in `PROMETHEUS_EXCLUDE_METRICS`, which the gateway does not export.
 
+Gateway estimates (per model alias, basis `estimated`): `input_token_rate`,
+`error_rate`, `gateway_ttft_p50/p95` (streaming requests only; histogram buckets
+are coarse, so the percentile moves in steps), `gateway_latency_p50/p95` (the
+whole request, queue included) and `gateway_generation_speed` (output tokens over
+the summed engine-call time, so it includes prompt processing and understates
+decode speed). Quantiles are `histogram_quantile` over buckets summed by alias.
+The per-output-token histogram stays excluded: LiteLLM 1.106.7 observes it as the
+time to first token divided by output tokens for streaming requests, which is not
+a speed.
+
 Spark metrics (one series per `node_id`): `gpu_power`, `models_memory` (memory
 held by GPU processes), `system_memory`, `gpu_clock`, `swap_used`, `disk_used`
 (swap and disk come with the inventory, so they move every few minutes),

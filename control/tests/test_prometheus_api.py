@@ -108,13 +108,29 @@ def test_every_metric_has_one_spec_and_one_query():
 def test_no_query_reads_a_gateway_family_the_gateway_does_not_export():
     """Catches a Trends query on a LiteLLM family dropped by PROMETHEUS_EXCLUDE_METRICS."""
     excluded = set(PROMETHEUS_EXCLUDE_METRICS)
+    suffixes = ("_total", "_bucket", "_sum", "_count")
+
+    def base(name: str) -> str:
+        return next((name.removesuffix(x) for x in suffixes if name.endswith(x)), name)
+
     hits = [
-        q.family
+        family
         for q in QUERIES.values()
-        if q.family.startswith("litellm_")
-        and {q.family, q.family.removesuffix("_total")} & excluded
+        for family in (q.family, q.over)
+        if family
+        and family.startswith("litellm_")
+        and {family, base(family)} & excluded
     ]
     assert not hits
+
+
+def test_gateway_estimates_read_buckets_and_divide_summed_rates():
+    """Catches a quantile over unsummed buckets (one value per key) or a speed of mismatched aliases."""
+    p95 = QUERIES["gateway_ttft_p95"].series("", 300)
+    assert p95.startswith("histogram_quantile(0.95, sum by (alias, le) (label_replace(")
+    assert "litellm_llm_api_time_to_first_token_metric_bucket" in p95
+    speed = QUERIES["gateway_generation_speed"].series("", 300)
+    assert speed.count("sum by (alias)") == 2 and " / " in speed
 
 
 def test_energy_integrates_power_over_reported_samples_only():
