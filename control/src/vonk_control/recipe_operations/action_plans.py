@@ -74,6 +74,11 @@ class ActionPlansMixin:
         profile_target_node_ids: Sequence[str] | None = None,
         reviewed_route_state: str | None = None,
     ) -> StopPlan:
+        # Lock order is run, then installation: the Stop family fences on the run
+        # row first (callers lock it before planning) and learns the installation
+        # from it. Uninstall locks installation, then its runs. The two can
+        # deadlock; PostgreSQL ends one and both admission retries absorb it
+        # (AdmissionLockBusy), so the order is not changed here.
         run_statement = select(RecipeRun).where(RecipeRun.id == run_id)
         if lock:
             run_statement = run_statement.with_for_update(of=RecipeRun)
