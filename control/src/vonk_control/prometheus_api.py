@@ -32,7 +32,8 @@ from .metrics_contract import (
 )
 from .operation_api import _ADMIN_OPERATION_IDS, bounded_error_responses
 
-# Scrape intervals of the jobs in deploy/compose/prometheus/prometheus.yml.
+# Scrape intervals of the jobs in deploy/compose/prometheus/prometheus.yml (its owner:
+# change both together).
 CONTROL_SCRAPE_SECONDS = 15
 GATEWAY_SCRAPE_SECONDS = 30
 RANGES: dict[MetricRange, int] = {

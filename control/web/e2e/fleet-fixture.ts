@@ -208,7 +208,7 @@ export async function serveOverviewFleet(page: Page) {
           basis: model ? "estimated" : "measured",
           source: model ? "gateway" : "spark",
           summary_total: model,
-          fleet_sum: false,
+          fleet_sum: metric === "output_token_rate",
           hint: "Counted by the gateway.",
         },
         range: "1h",
@@ -216,6 +216,23 @@ export async function serveOverviewFleet(page: Page) {
         end,
         step_seconds: 15,
         series: [
+          // The Controller's fleet line (no label) leads where a metric has one.
+          ...(metric === "output_token_rate"
+            ? [
+                {
+                  labels: {},
+                  points,
+                  summary: {
+                    latest: 60,
+                    average: 60,
+                    peak: 63,
+                    total: 1840000,
+                    share: null,
+                    coverage: 1,
+                  },
+                },
+              ]
+            : []),
           {
             labels: model ? { alias: "coder" } : {},
             points,
@@ -224,7 +241,7 @@ export async function serveOverviewFleet(page: Page) {
               average: 60,
               peak: 63,
               total: model ? 1840000 : null,
-              share: null,
+              share: metric === "output_token_rate" ? 1 : null,
               coverage: 1,
             },
           },

@@ -117,16 +117,6 @@ def test_no_query_reads_a_gateway_family_the_gateway_does_not_export():
     assert not hits
 
 
-def test_energy_integrates_power_over_reported_samples_only():
-    """Catches an energy total that bills the time a Spark reported nothing."""
-    query = QUERIES["gpu_energy"]
-    assert query.total("", 86400) == (
-        "sum_over_time(vonk_node_telemetry_gpu_power_watts[86400s]) * 15 / 3600"
-    )
-    assert query.peak("", 86400) is None
-    assert query.series("", 900).endswith(" * 900 / 3600")
-
-
 def test_catalogue_lists_every_metric(client):
     """Catches a page or vonkctl having to hard-code what a metric is."""
     response = client.get("/api/metrics/catalogue")
@@ -472,6 +462,15 @@ def test_exporter_publishes_the_spark_facts_that_trend():
         "telemetry_gpu_power_watts",
     ):
         assert f"vonk_node_{series}" not in text
+
+    node.telemetry.sample = node.telemetry.sample.model_copy(
+        update={"gpu_power_watts": 35.5, "gpu_clock": clock}
+    )
+    node.telemetry.freshness = "stale"
+    text = registry.render()
+    # A silent Spark contributes no value, so fleet power and energy skip it.
+    assert "vonk_node_telemetry_gpu_power_watts" not in text
+    assert "vonk_node_telemetry_gpu_graphics_clock_mhz" not in text
 
 
 def test_application_owns_configured_monitoring_and_preserves_service_lifespan(

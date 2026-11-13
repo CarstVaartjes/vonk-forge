@@ -353,7 +353,8 @@ class MetricsRegistry:
         return nodes, {
             node.id: node.telemetry.sample
             for node in snapshot.nodes
-            if node.telemetry is not None
+            # A silent Spark contributes no value, so sums and energy skip it.
+            if node.telemetry is not None and node.telemetry.freshness != "stale"
         }
 
     def set_job_count(self, kind: str, state: str, count: int) -> None:
