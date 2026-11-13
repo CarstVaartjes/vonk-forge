@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
 import type { ControlApi, MetricRange } from "../api/types";
 import { ClusterUnit } from "../components/workload-units";
 import { FleetFeedback } from "../components/fleet-feedback";
@@ -20,12 +20,10 @@ import { groupByWorkload, nodeDisplayName } from "../lib/fleet";
 export function WorkloadsPage({
   api,
   onLive,
-  onNavigate,
   onOpenSpark,
 }: {
   api: ControlApi;
   onLive?(status: LiveStatus | null): void;
-  onNavigate?(event: MouseEvent<HTMLAnchorElement>, path: string): void;
   onOpenSpark?(id: string): void;
 }) {
   const fleet = useFleetStream(api);
@@ -63,11 +61,10 @@ export function WorkloadsPage({
                     order={order}
                     open={openRun === unit.runId}
                     onToggle={() => setOpenRun(openRun === unit.runId ? null : unit.runId)}
-                    onActivity={onNavigate && ((event) => onNavigate(event, "/activity"))}
                   >
                     <ClusterUnit
                       api={api}
-                      cluster={cluster}
+                      cluster={{ units: [unit], nodes: cluster.nodes }}
                       order={order}
                       reads={reads}
                       now={fleet.now}

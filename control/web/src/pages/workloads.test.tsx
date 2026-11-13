@@ -1,7 +1,7 @@
 vi.mock("../components/metrics-chart", () => ({ MetricsChart: () => null }));
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 import { WorkloadsPage } from "./workloads";
 import { ProjectionCode, ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { ToastProvider } from "../components/toast";
@@ -76,6 +76,12 @@ function order(): string[] {
     .slice(1)
     .map((row) => within(row).getAllByRole("link")[0]!.textContent ?? "");
 }
+
+beforeEach(() => {
+  nodes = [];
+  attention = [];
+  reads = {};
+});
 
 const originalClipboard = navigator.clipboard;
 afterEach(() => {
@@ -183,7 +189,8 @@ test("Fleet Serving cells read exactly what `vonkctl fleet` prints for the share
 test("a workload is one row with its Sparks, measured speed and requests; opening it shows the unit", async () => {
   reads = {
     decode_throughput: series("decode_throughput", "tokens_per_second", 41.2),
-    request_rate: series("request_rate", "per_second", 2.5),
+    requests_running: series("requests_running", "count", 3),
+    requests_waiting: series("requests_waiting", "count", 1),
     output_token_rate: series("output_token_rate", "tokens_per_second", 38, 1_840_000),
   };
   const both = ["spk_Alpha", "spk_Bravo"].map((id) => id.padEnd(36, "0"));
@@ -198,24 +205,14 @@ test("a workload is one row with its Sparks, measured speed and requests; openin
   expect(
     within(within(row).getByRole("list", { name: "Sparks" })).getAllByRole("listitem"),
   ).toHaveLength(2);
-  // Measured decode has no "≈"; the gateway's requests and tokens do.
+  // Measured decode has no "≈"; the gateway's tokens do; the queue is the engine's.
   await waitFor(() => expect(row.textContent).toContain("41.2tok/s"));
-  expect(row.textContent).toContain("≈2.5/s");
+  expect(row.textContent).toContain("3 running · 1 waiting");
   expect(row.textContent).toContain("≈1.84M");
   expect(toggle).toHaveAttribute("aria-expanded", "false");
   fireEvent.click(toggle);
   expect(toggle).toHaveAttribute("aria-expanded", "true");
   expect(within(row).getByLabelText("GLM 5.3 Flash")).toBeInTheDocument();
-  nodes = [];
-  reads = {};
-});
-
-test("a workload still loading has no speed and points to Activity", () => {
-  nodes = [{ ...spark("Alpha", 40, 250), loaded: [run("starting", ["spk_Alpha"], 0)] }];
-  render(<WorkloadsPage api={api} />);
-  expect(screen.getByText("Follow it in Activity")).toHaveAttribute("href", "/activity");
-  expect(screen.queryByText("Requests")).toBeNull();
-  nodes = [];
 });
 
 test("with no workload loaded the page says so and still lists every Spark", () => {

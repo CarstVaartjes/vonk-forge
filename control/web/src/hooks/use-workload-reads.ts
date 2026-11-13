@@ -1,18 +1,25 @@
 import type { ControlApi, MetricsSeriesResponse } from "../api/types";
-import { useMetricSeries } from "./use-metric-series";
+import { useMetricRead } from "./use-metric-series";
 
-/** The last hour of the three per-model speeds a workload shows: engine decode, gateway tokens, requests. */
+/** One read: undefined while it loads (nothing is shown), null after it failed (Not reported). */
+type Read = MetricsSeriesResponse | null | undefined;
+
+/** The last hour of the per-model series a workload shows: three speeds and the engine's queue. */
 export type WorkloadReads = {
-  decode: MetricsSeriesResponse | null;
-  tokens: MetricsSeriesResponse | null;
-  requests: MetricsSeriesResponse | null;
+  decode: Read;
+  tokens: Read;
+  requests: Read;
+  running: Read;
+  waiting: Read;
 };
 
-/** Each read is null while it loads and after it failed, so a workload says Not reported for it. */
+/** The reads of every workload, once per page, so a page and its fleet band never read a metric twice. */
 export function useWorkloadReads(api: Pick<ControlApi, "metricsSeries">): WorkloadReads {
   return {
-    decode: useMetricSeries(api, "decode_throughput", "1h"),
-    tokens: useMetricSeries(api, "output_token_rate", "1h"),
-    requests: useMetricSeries(api, "request_rate", "1h"),
+    decode: useMetricRead(api, "decode_throughput", "1h"),
+    tokens: useMetricRead(api, "output_token_rate", "1h"),
+    requests: useMetricRead(api, "request_rate", "1h"),
+    running: useMetricRead(api, "requests_running", "1h"),
+    waiting: useMetricRead(api, "requests_waiting", "1h"),
   };
 }

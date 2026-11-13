@@ -1,5 +1,5 @@
 import type { ControlApi, VisualFleetNode } from "../api/types";
-import { useWorkloadReads, type WorkloadReads } from "../hooks/use-workload-reads";
+import type { WorkloadReads } from "../hooks/use-workload-reads";
 import { groupByWorkload, type WorkloadCluster } from "../lib/fleet";
 import { SparkCard } from "./spark-card";
 import { WorkloadUnit } from "./workload-unit";
@@ -47,17 +47,19 @@ export function ClusterUnit({
 export function WorkloadUnits({
   api,
   nodes,
+  reads,
   now,
   live,
   onOpen,
 }: {
   api: Pick<ControlApi, "metricsSeries">;
   nodes: VisualFleetNode[];
+  /** The page's reads: the units and the page's own figures share them. */
+  reads: WorkloadReads;
   now: Date;
   live: boolean;
   onOpen?(id: string): void;
 }) {
-  const reads = useWorkloadReads(api);
   const { clusters, idle } = groupByWorkload(nodes);
   const order = new Map(nodes.map((node, index) => [node.id, index]));
   return (

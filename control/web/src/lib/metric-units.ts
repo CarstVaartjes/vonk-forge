@@ -119,7 +119,7 @@ export type AliasReading = {
 };
 
 export function aliasSeries(
-  data: MetricsSeriesResponse | null,
+  data: MetricsSeriesResponse | null | undefined,
   alias: string | null,
 ): AliasReading | null {
   const series = data?.series.find((item) => item.labels.alias === alias);
@@ -132,7 +132,7 @@ export function aliasSeries(
  * is the best the Controller has; none of them is computed here.
  */
 export function leadReading(
-  reads: readonly (MetricsSeriesResponse | null)[],
+  reads: readonly (MetricsSeriesResponse | null | undefined)[],
   alias: string | null,
 ): AliasReading | null {
   for (const read of reads) {
@@ -154,4 +154,24 @@ export function windowPoints(
       t: Number(point.timestamp),
       v: point.value === null ? null : Number(point.value),
     }));
+}
+
+/**
+ * The engine's request queue for an alias: "3 running · 1 waiting", only the parts the engine reports.
+ * undefined while either read is out (nothing shown), null when the engine reports neither.
+ */
+export function queueText(
+  running: MetricsSeriesResponse | null | undefined,
+  waiting: MetricsSeriesResponse | null | undefined,
+  alias: string | null,
+): string | null | undefined {
+  if (running === undefined || waiting === undefined) return undefined;
+  const parts = [
+    [aliasSeries(running, alias), "running"],
+    [aliasSeries(waiting, alias), "waiting"],
+  ].flatMap(([reading, word]) => {
+    const latest = (reading as AliasReading | null)?.series.summary.latest;
+    return latest == null ? [] : [`${formatValue(Number(latest), "")} ${word}`];
+  });
+  return parts.length ? parts.join(" · ") : null;
 }
