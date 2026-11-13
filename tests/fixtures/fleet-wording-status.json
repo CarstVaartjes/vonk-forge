@@ -353,6 +353,93 @@
       "expected": "0 of 1 Spark online · unified memory not reported · no workloads serving · 1 Spark needs attention · 1 alert firing"
     },
     {
+      "name": "a lost run still shown needs attention",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "lost",
+              "healthy": null
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 8589934592
+            }
+          }
+        }
+      ],
+      "expected": "1 of 1 Spark online · 8.0 GiB unified memory free · no workloads serving · 1 workload needs attention"
+    },
+    {
+      "name": "one unhealthy run on two Sparks is one workload",
+      "nodes": [
+        {
+          "id": "spk_00000000000000000000000000000001",
+          "display_name": "Spark 1",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": false
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 8589934592
+            }
+          }
+        },
+        {
+          "id": "spk_00000000000000000000000000000002",
+          "display_name": "Spark 2",
+          "connection": {
+            "online_state": "online",
+            "offline_reason": null,
+            "last_seen_at": "2026-08-15T12:00:00Z"
+          },
+          "inventory": null,
+          "warnings": [],
+          "loaded": [
+            {
+              "run_id": "run-a",
+              "run_state": "running",
+              "healthy": false
+            }
+          ],
+          "telemetry": {
+            "freshness": "live",
+            "sample": {
+              "observed_at": "2026-08-15T12:00:00Z",
+              "memory_available_bytes": 8589934592
+            }
+          }
+        }
+      ],
+      "expected": "2 of 2 Sparks online · 16.0 GiB unified memory free · no workloads serving · 1 workload needs attention"
+    },
+    {
       "name": "no Sparks",
       "nodes": [],
       "expected": "No Sparks are enrolled."
