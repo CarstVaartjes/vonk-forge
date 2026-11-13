@@ -166,12 +166,14 @@ export function queueText(
   alias: string | null,
 ): string | null | undefined {
   if (running === undefined || waiting === undefined) return undefined;
+  const count = (data: MetricsSeriesResponse | null) => {
+    const latest = aliasSeries(data, alias)?.series.summary.latest;
+    return latest == null ? null : formatValue(Number(latest), "");
+  };
+  const [busy, queued] = [count(running), count(waiting)];
   const parts = [
-    [aliasSeries(running, alias), "running"],
-    [aliasSeries(waiting, alias), "waiting"],
-  ].flatMap(([reading, word]) => {
-    const latest = (reading as AliasReading | null)?.series.summary.latest;
-    return latest == null ? [] : [`${formatValue(Number(latest), "")} ${word}`];
-  });
+    ...(busy === null ? [] : [`${busy} running`]),
+    ...(queued === null ? [] : [`${queued} waiting`]),
+  ];
   return parts.length ? parts.join(" · ") : null;
 }
