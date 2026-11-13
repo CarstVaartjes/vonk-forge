@@ -22,6 +22,7 @@ from vonk_control.recipe_operations.interfaces import (
 )
 from vonk_control.recipe_operations.stop import StopMixin
 from vonk_control.recipe_routes import RecipeRouteError
+from vonk_control.run_admission import RunAdmissionBusy
 
 NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -178,8 +179,31 @@ def test_deadlock_before_any_receipt_is_a_retryable_admission_refusal(monkeypatc
         dispatch=_raiser(AssertionError("must not dispatch")),
         accept=_raiser(deadlock),
     )
-    with pytest.raises(AdmissionLockBusy) as refused:
+    with pytest.raises(RunAdmissionBusy) as refused:
         service.stop(
             "run-1", plan_digest="digest", actor="admin", request_id="request-1"
         )
     assert refused.value.__cause__ is deadlock
+
+
+def test_lock_timeout_before_any_receipt_is_not_retried(monkeypatch):
+    monkeypatch.setattr(stop_module, "_bound_workload_intent", lambda _job: 1)
+    monkeypatch.setattr(stop_module, "schedule_wait", lambda *_a, **_k: None)
+
+    class LockTimeout(Exception):
+        sqlstate = "55P03"
+
+    attempts = []
+
+    def accept(*_args, **_kwargs):
+        attempts.append(1)
+        raise OperationalError("stmt", {}, LockTimeout())
+
+    service = _Service(
+        routes=_Routes(), dispatch=_raiser(AssertionError), accept=accept
+    )
+    with pytest.raises(RunAdmissionBusy):
+        service.stop(
+            "run-1", plan_digest="digest", actor="admin", request_id="request-1"
+        )
+    assert len(attempts) == 1

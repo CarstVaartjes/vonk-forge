@@ -599,25 +599,17 @@ def _raise_if_busy(
 ) -> None:
     if not is_admission_contention(error):
         return
-    raise busy_from_contention(error, table=table) from error
-
-
-def busy_from_contention(
-    error: OperationalError, *, table: str | None = None
-) -> AdmissionLockBusy:
-    """The lock-busy refusal for a database lock-contention error."""
-
     sqlstate = _sqlstate(error)
     # NOWAIT never queues, and a timeout has already removed its wait edge.
     # pg_blocking_pids cannot identify that former holder; a bystander's last
     # SELECT is no evidence of which transaction retained the row lock.
-    return AdmissionLockBusy(
+    raise AdmissionLockBusy(
         "admission lock is busy"
         + (f" on {table}" if table else "")
         + f" (SQLSTATE {sqlstate})"
         + "; blocking pid unavailable after lock refusal",
         sqlstate=sqlstate,
-    )
+    ) from error
 
 
 @dataclass(frozen=True, slots=True)
