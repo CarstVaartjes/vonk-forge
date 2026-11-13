@@ -29,6 +29,7 @@ const alert = (node_id: string, severity: string, summary: string) =>
 test("findings come worst first, with the all-clear ones the live snapshot proves", () => {
   const node = live({
     gpu_temperature_c: 69,
+    gpu_clock: { graphics_mhz: 1700, throttle_reasons: 4 },
     memory_total_bytes: 100 * GIB,
     memory_available_bytes: 10 * GIB,
   });
@@ -43,6 +44,7 @@ test("findings come worst first, with the all-clear ones the live snapshot prove
   );
   expect(rows.map((row) => [row.tone, row.title, row.detail])).toEqual([
     ["warn", "Warning", "Agent is one release behind."],
+    ["warn", "GPU clock throttled", "software power cap"],
     ["ok", "GPU temperature normal", "69 °C"],
     ["ok", "Memory headroom fine", "10.0 GiB free"],
   ]);

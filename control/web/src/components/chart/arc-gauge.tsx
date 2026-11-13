@@ -20,7 +20,7 @@ function arc(from: number, to: number): string {
 
 /**
  * One reading against its scale as an arc, the number in the middle. The ticks mark lines (a warning, a
- * limit); the caption under the arc says in words what each one is, so no line is only a colour. An absent reading draws no arc and says "Not reported"; a reading without a known scale
+ * limit); the captions under the arc say in words what each one is, so no line is only a colour. An absent reading draws no arc and says "Not reported"; a reading without a known scale
  * shows its number and no arc.
  */
 export function ArcGauge({
@@ -29,7 +29,7 @@ export function ArcGauge({
   unit,
   max,
   ticks = [],
-  caption,
+  captions = [],
   color,
 }: {
   title: string;
@@ -37,13 +37,13 @@ export function ArcGauge({
   unit: string;
   max: number | null;
   ticks?: readonly { value: number; tone: "warn" | "bad" | "limit" }[];
-  caption?: string;
+  captions?: readonly string[];
   color: string;
 }) {
   const shown = value === null ? "Not reported" : `${value.toLocaleString("en-US")} ${unit}`;
   const scaled = value !== null && max !== null && max > 0;
   const toDeg = (v: number) => START_DEG + SWEEP_DEG * Math.min(1, Math.max(0, v / (max ?? 1)));
-  const text = [shown, caption].filter(Boolean);
+  const text = [shown, ...captions];
   return (
     <div
       className="arc-gauge"
@@ -86,7 +86,11 @@ export function ArcGauge({
           <span>{title}</span>
         </div>
       </div>
-      {caption && <p className="arc-gauge-caption">{caption}</p>}
+      {captions.map((caption) => (
+        <p className="arc-gauge-caption" key={caption}>
+          {caption}
+        </p>
+      ))}
     </div>
   );
 }

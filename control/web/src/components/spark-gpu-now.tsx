@@ -3,6 +3,7 @@ import type { VisualFleetNode } from "../api/types";
 import { HISTORY_SECONDS, type HistoryPoint } from "../hooks/use-telemetry-history";
 import { NOT_REPORTED_TEXT, halfUp, liveSample } from "../lib/fleet";
 import { GPU_READINGS, num } from "../lib/gpu-readings";
+import { throttleReasons } from "../lib/throttle";
 import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "../lib/gpu-thresholds";
 import { ArcGauge } from "./chart/arc-gauge";
 import { Sparkline } from "./chart/sparkline";
@@ -39,6 +40,8 @@ export function SparkGpuNow({
   const clock = sample?.gpu_clock;
   const hardMax = num(node.gpu_clock_policy?.hard_max_mhz) ?? num(clock?.max_graphics_mhz);
   const profile = node.gpu_clock_desired;
+  const reasons = clock?.throttle_reasons;
+  const throttle = sample && reasons != null ? throttleReasons(reasons) : null;
   const power = sample ? POWER.now(sample) : null;
   const end = now.getTime() / 1000;
   return (
@@ -52,7 +55,7 @@ export function SparkGpuNow({
           value={read(UTILISATION)}
           unit="%"
           max={100}
-          caption={workloads(node)}
+          captions={[workloads(node)]}
           color={color}
         />
         <ArcGauge
@@ -64,7 +67,9 @@ export function SparkGpuNow({
             { value: GPU_TEMP_WARN_C, tone: "warn" },
             { value: GPU_TEMP_SERIOUS_C, tone: "bad" },
           ]}
-          caption={`warns at ${GPU_TEMP_WARN_C}\u00a0°C, serious at ${GPU_TEMP_SERIOUS_C}\u00a0°C`}
+          captions={[
+            `warns at ${GPU_TEMP_WARN_C}\u00a0°C, serious at ${GPU_TEMP_SERIOUS_C}\u00a0°C`,
+          ]}
           color={color}
         />
         <ArcGauge
@@ -73,7 +78,10 @@ export function SparkGpuNow({
           unit="MHz"
           max={hardMax}
           ticks={profile ? [{ value: Number(profile.max_mhz), tone: "limit" }] : []}
-          caption={profile ? `profile range ${profile.min_mhz}–${profile.max_mhz} MHz` : undefined}
+          captions={[
+            ...(profile ? [`profile range ${profile.min_mhz}–${profile.max_mhz} MHz`] : []),
+            ...(throttle ? [`throttle: ${throttle.words}`] : []),
+          ]}
           color={color}
         />
       </div>

@@ -159,7 +159,7 @@ test("GPU readings distinguish hardware maximum, policy and the applied command 
     "last applied 300–2200 MHz (helper receipt) · desired 300–1800 MHz",
   );
   expect(screen.getByText(/reported maximum graphics 2400/)).toHaveTextContent(
-    "policy limit 2300 MHz · throttle bits 4",
+    "policy limit 2300 MHz · throttle reasons software power cap",
   );
 });
 

@@ -97,7 +97,7 @@ function spark(
         gpu_utilization_percent: 97,
         gpu_temperature_c: 69,
         gpu_power_watts: 38.04,
-        gpu_clock: { graphics_mhz: 2200, sm_mhz: 2200 },
+        gpu_clock: { graphics_mhz: 2200, sm_mhz: 2200, throttle_reasons: 4 },
         uptime_seconds: 20 * 86400 + 21 * 3600,
         ...sample,
       },

@@ -83,7 +83,7 @@ test("a gauge is a meter with its value and caption, and an absent reading draws
       value={69}
       unit="°C"
       max={100}
-      caption="warns at 85 °C"
+      captions={["warns at 85 °C"]}
       color="red"
       ticks={[{ value: 85, tone: "warn" }]}
     />,

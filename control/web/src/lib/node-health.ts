@@ -11,6 +11,7 @@ import {
 } from "./fleet";
 import { num } from "./gpu-readings";
 import { GPU_TEMP_SERIOUS_C, GPU_TEMP_WARN_C } from "./gpu-thresholds";
+import { throttleReasons } from "./throttle";
 
 type Tone = "ok" | "warn" | "bad" | "info" | "neutral";
 const ORDER: Record<Tone, number> = { bad: 0, warn: 1, info: 2, neutral: 3, ok: 4 };
@@ -18,8 +19,8 @@ const ORDER: Record<Tone, number> = { bad: 0, warn: 1, info: 2, neutral: 3, ok: 
 /**
  * What one Spark's Health card lists, worst first: its warnings and offline reasons, the firing alerts
  * that name it, a newer recipe revision, an incomplete installation (with its id, for the reconcile
- * action), and the all-clear findings the live snapshot can prove (GPU temperature, memory headroom, no
- * alerts). A reading that is not reported adds no row; nothing is filled in.
+ * action), and the findings the live snapshot can prove (GPU temperature, whether the GPU clock is throttled and
+ * why, memory headroom, no alerts). A reading that is not reported adds no row; nothing is filled in.
  */
 export function nodeHealth(
   node: VisualFleetNode,
@@ -75,6 +76,17 @@ export function nodeHealth(
     else if (temperature >= GPU_TEMP_WARN_C)
       rows.push({ key: "gpu-heat", tone: "warn", title: "GPU temperature high", detail });
     else rows.push({ key: "gpu-heat", tone: "ok", title: "GPU temperature normal", detail });
+  }
+  const clockEvents = liveSample(node)?.gpu_clock?.throttle_reasons;
+  if (clockEvents != null) {
+    const { words, mood } = throttleReasons(clockEvents);
+    rows.push(
+      mood === "throttled"
+        ? { key: "gpu-clock", tone: "warn", title: "GPU clock throttled", detail: words }
+        : mood === "unrecognised"
+          ? { key: "gpu-clock", tone: "neutral", title: "GPU clock state unknown", detail: words }
+          : { key: "gpu-clock", tone: "ok", title: "GPU clock not throttled", detail: words },
+    );
   }
   const memory = liveSample(node) ? nodeMemory(node) : null;
   if (memory) {
