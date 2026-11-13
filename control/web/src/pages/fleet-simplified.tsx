@@ -11,6 +11,7 @@ import {
   nodeRecipeUpdates,
   nodeSecondaryName,
   nodeStatus,
+  nodeStatusTone,
   nodeVitals,
   nodeWorkloadLines,
   type NodeStatus,
@@ -29,10 +30,6 @@ import { ServingNow, servingKey } from "../components/serving-now";
 import { SparkDetail } from "../components/spark-detail";
 import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
-
-function statusTone(status: NodeStatus): "ok" | "warn" | "bad" {
-  return status === "online" ? "ok" : status === "offline" ? "bad" : "warn";
-}
 
 // Problems first when sorted ascending.
 const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
@@ -320,7 +317,7 @@ export function FleetPage({
                         {nodeSecondaryName(node) && <small>{nodeSecondaryName(node)}</small>}
                       </th>
                       <td data-label="Status">
-                        <StatusPill tone={statusTone(status)}>{status}</StatusPill>
+                        <StatusPill tone={nodeStatusTone(status)}>{status}</StatusPill>
                         {reasons.length > 0 && (
                           <small title={reasons.join("\n")}>
                             {reasons[0]}

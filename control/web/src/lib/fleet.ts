@@ -102,6 +102,21 @@ export function nodeStatus(
   return { status: reasons.length > 0 ? "needs attention" : "online", reasons };
 }
 
+/** The status pill tone for a Spark's status word. */
+export function nodeStatusTone(status: NodeStatus): "ok" | "warn" | "bad" {
+  return status === "online" ? "ok" : status === "offline" ? "bad" : "warn";
+}
+
+/** "20 d 21 h", "6 h 42 m", "5 m": the two largest units; null when the Spark did not report it. */
+export function uptimeText(seconds: number | null | undefined): string | null {
+  if (typeof seconds !== "number" || !Number.isFinite(seconds) || seconds < 0) return null;
+  const minutes = Math.floor(seconds / 60);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  if (days > 0) return `${days} d ${hours} h`;
+  return hours > 0 ? `${hours} h ${minutes % 60} m` : `${minutes} m`;
+}
+
 /** One workload's state in a word. Health only qualifies a run that is running; any other run state is shown as is. */
 function runStateWord(run: VisualFleetNode["loaded"][number]): string {
   if (run.run_state == null) return "state unknown";
