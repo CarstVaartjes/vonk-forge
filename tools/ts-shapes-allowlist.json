@@ -123,6 +123,16 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
+      "file": "control/web/src/components/chart/area-chart.tsx",
+      "type": "ChartSeries",
+      "reason": "Chart drawing input (label, colour token, plotted points) assembled in the browser from generated metric/telemetry series; never serialized as API data."
+    },
+    {
+      "file": "control/web/src/components/chart/scale.ts",
+      "type": "Point",
+      "reason": "Chart geometry point (time, value or gap) used only to draw SVG paths; built from generated series values, never sent or received."
+    },
+    {
       "file": "control/web/src/components/confirm-dialog.tsx",
       "type": "ConfirmDialogProps",
       "reason": "component props: UI-only, not API data"
@@ -178,16 +188,6 @@
       "reason": "UI-only view model derived from generated API types for one screen; not an API document"
     },
     {
-      "file": "control/web/src/lib/fleet.ts",
-      "type": "FleetSummary",
-      "reason": "UI-only view model derived from generated API types for one screen; not an API document"
-    },
-    {
-      "file": "control/web/src/lib/fleet.ts",
-      "type": "Vital",
-      "reason": "UI-only view model of one Fleet gauge derived from generated API types; not an API document"
-    },
-    {
       "file": "control/web/src/components/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
@@ -226,6 +226,21 @@
       "file": "control/web/src/hooks/use-operation-observer.ts",
       "type": "Options",
       "reason": "UI-only state or form draft; never serialized to the API"
+    },
+    {
+      "file": "control/web/src/hooks/use-telemetry-history.ts",
+      "type": "HistoryPoint",
+      "reason": "Browser-local 30-minute history buffer entry (time, reported reading or gap marker) kept for charts; values are the generated telemetry fields, never serialized."
+    },
+    {
+      "file": "control/web/src/lib/fleet.ts",
+      "type": "FleetSummary",
+      "reason": "UI-only view model derived from generated API types for one screen; not an API document"
+    },
+    {
+      "file": "control/web/src/lib/fleet.ts",
+      "type": "Vital",
+      "reason": "UI-only view model of one Fleet gauge derived from generated API types; not an API document"
     },
     {
       "file": "control/web/src/pages/activity.tsx",
