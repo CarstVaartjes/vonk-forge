@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService
+from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobUnavailableError
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_items import inventory_items, runtime_value
@@ -706,14 +706,17 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
         world.close()
 
 
-def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
+def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:
-    """The newest submission stops the run a lost job may still occupy.
+    """A lost job's effect is in doubt: the newest submission waits, then runs.
 
-    The job's effect is in doubt, so the next submission drives the run's exact
-    Stop. The selected profile then activates its member again as a new run,
-    with no operator action, and the lost job is never run again.
+    The first submit answers a retryable wait and cancels or stops nothing. The
+    platform's own owner settles the lost job, and the same-key retry is then
+    admitted on the same run: the run and the Spark's ordinal stay untouched and
+    no run-level Stop is made.
+
+    Wrong implementation: the submit stopped the whole run (new Spark ordinal).
     """
 
     monkeypatch.setattr(
@@ -726,65 +729,59 @@ def test_a_job_member_whose_run_is_stopped_after_a_lost_job_is_reactivated(
     try:
         sim = Simulation(world, seed=0, sparks_type=_AgentSparks)
         sim.round()
-        member, lost, jobs, job_id, loads = _job_in_flight_on_an_offline_spark(
+        _member, lost, jobs, _job_id, _loads = _job_in_flight_on_an_offline_spark(
             tmp_path, world, sim
         )
-        newer = submitted_artifact_job(jobs, lost, request_suffix=710)
-        assert newer.operation_id is None
 
-        current = None
+        def ordinals() -> list[tuple[str | int, ...]]:
+            with world.sessions() as session:
+                return sorted(
+                    tuple(row)
+                    for row in session.execute(
+                        select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
+                    )
+                )
+
+        before = ordinals()
+        with pytest.raises(ArtifactJobUnavailableError):
+            submitted_artifact_job(jobs, lost, request_suffix=710)
+        with world.sessions() as session:
+            draft = session.scalar(
+                select(ArtifactJob).where(
+                    ArtifactJob.request_id == "00000000-0000-4000-8000-000000000710"
+                )
+            )
+            assert draft is not None and not ajs.is_ended(draft)
+            draft_id = draft.id
+
+        admitted = None
         for _ in range(30):
             sim.round()
-            with world.sessions() as session:
-                current = session.scalar(
-                    select(RecipeRun.id).where(
-                        RecipeRun.state == "running", RecipeRun.id != lost
-                    )
+            try:
+                admitted = jobs.submit(
+                    draft_id,
+                    actor="operator",
+                    request_id="00000000-0000-4000-8000-000000000711",
                 )
-            if current is not None:
-                break
+            except ArtifactJobUnavailableError:
+                continue
+            break
 
-        assert current is not None
-        assert world.controller.profiles.get(member).assignments[0].observed_state == (
-            "Running"
-        )
+        assert admitted is not None and admitted.operation_id is not None
+        assert ordinals() == before
         with world.sessions() as session:
-            stopped = session.get(RecipeRun, lost)
-            assert stopped is not None and stopped.state == "stopped"
-            stops = {
-                stop.payload["execution_mode"]: stop.state
-                for stop in session.scalars(
-                    select(Job).where(
+            run = session.get(RecipeRun, lost)
+            assert run is not None and run.state == "running"
+            assert (
+                session.scalar(
+                    select(Job.id).where(
                         Job.kind == "recipe.stop",
                         Job.payload["owner_id"].as_string() == lost,
+                        Job.payload["execution_mode"].as_string() == "one-shot-jobs",
                     )
                 )
-            }
-            # The submission asked for the run's Stop. It is cleanup, so the
-            # profile's newer intent never supersedes it: it stopped the lost
-            # job's exact runtime itself.
-            assert stops == {"one-shot-jobs": "succeeded"}, stops
-            assert (
-                session.scalars(
-                    select(func.count()).select_from(FleetProfileApplication)
-                ).one()
-                == loads + 1
+                is None
             )
-            activations = session.scalars(
-                select(Job.payload["owner_id"].as_string()).where(
-                    Job.kind == _ACTIVATION
-                )
-            ).all()
-            assert sorted(activations) == sorted([lost, current])
-            assert (
-                session.scalars(
-                    select(func.count())
-                    .select_from(AgentOperation)
-                    .where(AgentOperation.kind == "recipe.job.run.v1")
-                ).one()
-                == 1
-            )
-        _assert_ended_and_stopped_exactly(world, jobs, job_id)
     finally:
         world.close()
 

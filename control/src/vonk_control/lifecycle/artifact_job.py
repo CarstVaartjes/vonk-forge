@@ -42,7 +42,7 @@ unknown (core rule 4), and the job ends ``cancelled`` with a residue record in
 its result evidence (``active_scope_may_remain``) that the run's Stop and the
 retention sweep read.  An unknown effect is never failed by the job's own
 timeout: the job keeps observing until its exit is receipted, its run ends, or a
-cancel or newer intent drives the exact Stop, or until the core's
+cancel drives the exact Stop, or until the core's
 ``LOST_OBSERVATION_BOUND`` unknown observations past its own deadline end it ``failed`` with its effect
 unknown (core rule 3).
 """
@@ -822,7 +822,7 @@ class ArtifactJobAdapter:
             order = self._orders.lifecycle(operation, attempt, parent, now)
         # The job's own timeout never ends an order whose effect is unknown: the
         # helper ends a job at its timeout and receipts the exit, and the order
-        # observes that receipt; a cancel or newer intent drives the exact Stop.
+        # observes that receipt; a cancel drives the exact Stop.
         if order.state is State.SUCCEEDED:
             return False
         if order.terminal and attempt is not None:

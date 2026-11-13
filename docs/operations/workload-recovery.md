@@ -82,7 +82,7 @@ fails closed when the exact accepted compiled lifecycle plan differs from the
 installed plan.
 
 One-shot jobs remain fail-closed after a lost result because the job may already
-have produced external effects. Verify those effects before submitting a new authorized run.
+have produced external effects. A new submit on the same run answers a retryable wait (503 with Retry-After) and never stops anything; the platform ends the lost job shortly after its owner's deadline (a few bounded looks) and the same-key retry is then admitted, with no operator action.
 
 A one-shot job (JobRun) belongs to its run, not to its Spark's workload intent.
 It is admitted while its run and the run's node are running and no Stop of the
