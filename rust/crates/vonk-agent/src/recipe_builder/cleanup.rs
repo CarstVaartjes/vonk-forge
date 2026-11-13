@@ -75,23 +75,11 @@ fn observe_unit<R: ProcessRunner + ?Sized>(
         String::from_utf8(output.stdout)
             .map_err(|_| format!("systemctl {query} output is unreadable"))
     };
-    let text = systemctl(
-        "list-units",
-        vec![
-            "--user".into(),
-            "list-units".into(),
-            "--all".into(),
-            "--plain".into(),
-            "--no-legend".into(),
-            "--no-pager".into(),
-            "--full".into(),
-            unit.into(),
-        ],
-    )?;
-    if text.trim().is_empty() {
+    let names = list_units(runner, &[unit], deadline).map_err(|error| error.to_string())?;
+    if names.is_empty() {
         return Ok(None);
     }
-    if text.lines().count() != 1 || text.split_whitespace().next() != Some(unit) {
+    if names != [unit] {
         return Err("systemctl list-units output is unreadable".into());
     }
     let text = systemctl(
@@ -488,6 +476,8 @@ pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
         deadline,
     )?;
     let mut live = Vec::new();
+    // One unit at a time on purpose: every query goes to the same single-
+    // threaded user manager, so fanning out would only queue there.
     for unit in list_units(
         runner,
         &["vonk-recipe-build-*", "vonk-runtime-adapter-*"],
