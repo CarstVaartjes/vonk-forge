@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
     InstallationState,
     InstallDegradedReason,
     ReservationState,
-    RunState,
 )
 
 from ..auth import CursorError
@@ -42,6 +41,7 @@ from ..observation_capture import begin_observation_capture
 from ..operation_blockers import PHASE_RETRY_CODE, read_blockers
 from ..recipe_update_notice import newest_active_revisions
 from ..reservation_owners import SPARK_PRESENCE_WINDOW
+from ..run_states import ENDED_RUN_STATES
 from ..telemetry import CPU_LOW_CLOCK_MIN_SECONDS, TelemetryRepository
 from .common import (
     _AUTHORITY_REVISION,
@@ -427,7 +427,7 @@ class FleetProjection:
             .join(RunNode, RunNode.run_id == RecipeRun.id)
             .where(
                 RunNode.node_id.in_(node_ids),
-                RecipeRun.state.not_in({RunState.STOPPED, RunState.FAILED}),
+                RecipeRun.state.not_in(ENDED_RUN_STATES),
             )
             .group_by(RecipeRun.id, RecipeRun.updated_at)
             .order_by(RecipeRun.updated_at.desc(), RecipeRun.id.desc())

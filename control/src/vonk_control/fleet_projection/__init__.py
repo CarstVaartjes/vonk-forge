@@ -107,7 +107,6 @@ from .service import RecipeRun as RecipeRun
 from .service import ReservationState as ReservationState
 from .service import ResourceReservation as ResourceReservation
 from .service import RunNode as RunNode
-from .service import RunState as RunState
 from .service import Sequence as Sequence
 from .service import Session as Session
 from .service import TelemetryRepository as TelemetryRepository
