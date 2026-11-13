@@ -205,9 +205,9 @@ const outputMedia: Record<ArtifactJobInterface, string[]> = {
   ],
 };
 
-function jobTone(state: string): "healthy" | "warning" | "danger" | "info" {
-  if (state === "succeeded") return "healthy";
-  if (state === "failed" || state === "cancelled") return "danger";
+function jobTone(state: string): "ok" | "warn" | "bad" | "info" {
+  if (state === LifecycleState.SUCCEEDED) return "ok";
+  if (state === LifecycleState.FAILED || state === LifecycleState.CANCELLED) return "bad";
   if (
     state === "running" ||
     state === "queued" ||
@@ -215,7 +215,7 @@ function jobTone(state: string): "healthy" | "warning" | "danger" | "info" {
     state === LifecycleState.OBSERVING
   )
     return "info";
-  return "warning";
+  return "warn";
 }
 
 function filename(value: string): string {
@@ -1209,7 +1209,7 @@ export function ArtifactJobWorkspace({
             Send a bounded, durable {humanizeIdentifier(adapter)} request to this running recipe.
           </p>
         </div>
-        <StatusPill tone={activeRun ? "healthy" : "warning"}>
+        <StatusPill tone={activeRun ? "ok" : "warn"}>
           {activeRun ? "Run ready for jobs" : "Start this recipe first"}
         </StatusPill>
       </header>

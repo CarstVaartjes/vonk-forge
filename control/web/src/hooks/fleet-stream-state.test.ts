@@ -294,14 +294,14 @@ test("exposes reconnect and recovery state without discarding the snapshot", () 
   expect(recovered.error).toBe("");
 });
 
-test("the header pill reads live, delayed or reconnecting from the stream state", () => {
-  const at = 1_000;
-  expect(liveStatus({ connection: "live", stale: false, lastUpdatedAt: at })).toEqual({
-    state: "live",
-    updatedAt: at,
-  });
-  expect(liveStatus({ connection: "live", stale: true, lastUpdatedAt: at })?.state).toBe("delayed");
-  expect(liveStatus({ connection: "polling", stale: false })?.state).toBe("delayed");
-  expect(liveStatus({ connection: "reconnecting", stale: false })?.state).toBe("reconnecting");
-  expect(liveStatus({ connection: "connecting", stale: false })).toBeNull();
+test("the header pill reads live, delayed, reconnecting, or the banner's word when stale", () => {
+  const stream = { stale: false, refreshError: "" };
+  expect(liveStatus({ ...stream, connection: "live" })).toBe("live");
+  expect(liveStatus({ ...stream, connection: "polling" })).toBe("delayed");
+  expect(liveStatus({ ...stream, connection: "reconnecting" })).toBe("reconnecting");
+  expect(liveStatus({ ...stream, connection: "connecting" })).toBeNull();
+  expect(liveStatus({ ...stream, stale: true, connection: "live" })).toBe("stale");
+  expect(liveStatus({ stale: true, refreshError: "boom", connection: "live" })).toBe(
+    "disconnected",
+  );
 });

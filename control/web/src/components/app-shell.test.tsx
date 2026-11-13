@@ -219,7 +219,7 @@ test("keeps administrative actions behind the account menu", async () => {
 });
 
 test("renders the reusable status component", () => {
-  render(<StatusPill tone="healthy">Ready</StatusPill>);
+  render(<StatusPill tone="ok">Ready</StatusPill>);
 
   expect(screen.getByText("Ready")).toBeVisible();
 });
@@ -251,15 +251,14 @@ test("makes shell routes visibly and keyboard disabled while navigation is locke
   expect(onNavigate).not.toHaveBeenCalled();
 });
 
-test("the header shows the live state with its shape and word, and nothing when unknown", () => {
+test("the header shows the live state as a word, and nothing when unknown", () => {
   const props = { onNavigate: () => undefined, activeRoute: "fleet" as const };
   const { rerender } = render(<AppShell {...props}>content</AppShell>);
-  expect(screen.queryByText("Live")).toBeNull();
+  expect(screen.queryByText("live")).toBeNull();
   rerender(
-    <AppShell {...props} live={{ state: "delayed", updatedAt: Date.now() - 40_000 }}>
+    <AppShell {...props} live="delayed">
       content
     </AppShell>,
   );
-  expect(screen.getByText("Delayed").closest(".status-pill")).toHaveClass("live-pill-delayed");
-  expect(screen.getByText(/updated/)).toBeVisible();
+  expect(screen.getByText("delayed")).toBeVisible();
 });
