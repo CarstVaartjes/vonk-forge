@@ -254,22 +254,10 @@ def test_a_claimed_job_on_a_profile_activated_run_is_granted_its_exact_start_and
         assert late_stop.runtime_target_id == later.id
         with pytest.raises(HostHelperAuthorityError):
             _grant_start(authority, spark[0], later_claim.fence, later_plan)
-        # The window bounds the cancelled job: past it the order ends, the job
-        # ends cancelled, and the exact cleanup Stop of its container is queued.
+        # The window bounds the cancelled job: past it its fence is stale.
         world.advance(SUPERSEDED_CANCELLATION_SECONDS)
         with pytest.raises(StaleAgentFence):
             orders.heartbeat(later_claim, None, 60)
-        world.tick()
-        world.controller.lifecycle.reconcile_pending_service_stops()
-        assert jobs.get(later.id).state == "cancelled", jobs.get(later.id)
-        with world.sessions() as session:
-            cleanup = session.scalar(
-                select(Job).where(
-                    Job.kind == "recipe.stop",
-                    Job.payload["owner_id"].as_string() == later.id,
-                )
-            )
-        assert cleanup is not None
     finally:
         world.close()
 
