@@ -1,6 +1,11 @@
 import { act, renderHook } from "@testing-library/react";
 import type { ControlApi, MetricsSeriesResponse, TelemetryPoint } from "../api/types";
-import { appendSample, HISTORY_SECONDS, useTelemetryHistory } from "./use-telemetry-history";
+import {
+  appendSample,
+  HISTORY_SECONDS,
+  seedPoints,
+  useTelemetryHistory,
+} from "./use-telemetry-history";
 
 const T0 = Date.parse("2026-11-12T12:00:00Z") / 1000;
 const sample = (seconds: number, utilization: number | null = 50): TelemetryPoint =>
@@ -33,6 +38,7 @@ test("a silence in the stream leaves a gap marker of nulls, not a line", () => {
 
 const series = (values: Array<number | null>): MetricsSeriesResponse =>
   ({
+    step_seconds: 60,
     series: [{ points: values.map((value, i) => ({ timestamp: T0 - 600 + i * 60, value })) }],
   }) as MetricsSeriesResponse;
 
@@ -56,8 +62,18 @@ test("the hour is read once, comes before the live points, and a stale stream is
   rerender({ seconds: 2, now: at(3) });
   rerender({ seconds: 12, now: at(13) });
   expect(metricsSeries).toHaveBeenCalledTimes(2);
-  expect(result.current.points.map((point) => point.utilization)).toEqual([10, 20, 50, 50]);
+  expect(result.current.points.map((point) => point.utilization)).toEqual([10, 20, null, 50, 50]);
   expect(result.current.live).toBe(true);
   rerender({ seconds: 12, now: at(60) });
   expect(result.current.live).toBe(false);
+});
+
+test("the seed leaves a gap where the Controller has a hole, and none between neighbouring steps", () => {
+  const at = (...seconds: number[]): MetricsSeriesResponse =>
+    ({
+      step_seconds: 60,
+      series: [{ points: seconds.map((s) => ({ timestamp: T0 + s, value: 1 })) }],
+    }) as MetricsSeriesResponse;
+  const points = seedPoints(at(0, 60, 400), at(0, 60, 400), []);
+  expect(points.map((point) => point.utilization)).toEqual([1, 1, null, 1]);
 });

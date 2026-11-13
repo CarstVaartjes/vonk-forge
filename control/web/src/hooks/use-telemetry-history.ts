@@ -3,7 +3,7 @@ import type {
   ControlApi,
   MetricsSeriesResponse,
   TelemetryPoint,
-  TelemetryState,
+  FleetTelemetryState,
 } from "../api/types";
 import { telemetryFreshnessAt } from "../lib/fleet";
 
@@ -40,27 +40,45 @@ function pointOf(sample: TelemetryPoint): HistoryPoint | null {
   };
 }
 
-/** Sorted, within 30 minutes of the newest point, one per bucket (the newest wins), at most 180. */
-function tidy(points: HistoryPoint[]): HistoryPoint[] {
+const isMarker = (point: HistoryPoint) =>
+  point.utilization === null &&
+  point.temperature === null &&
+  point.power === null &&
+  point.clockMhz === null;
+
+/**
+ * Sorted, within 30 minutes of the newest point, one per bucket (the newest wins), at most 180. Where
+ * two real points that end at or after `since` are more than `gapSeconds` apart, a marker point of
+ * nulls goes between them, so no line is drawn across the silence.
+ */
+function tidy(points: HistoryPoint[], gapSeconds: number, since: number): HistoryPoint[] {
   const newest = points.reduce((max, point) => Math.max(max, point.t), 0);
   const kept: HistoryPoint[] = [];
   for (const point of [...points].sort((a, b) => a.t - b.t)) {
     if (point.t < newest - HISTORY_SECONDS) continue;
     const last = kept.at(-1);
     if (last && bucket(last.t) === bucket(point.t)) kept[kept.length - 1] = point;
-    else kept.push(point);
+    else {
+      if (
+        last &&
+        point.t >= since &&
+        point.t - last.t > gapSeconds &&
+        !isMarker(last) &&
+        !isMarker(point)
+      )
+        kept.push({ t: last.t + BUCKET_SECONDS, ...EMPTY });
+      kept.push(point);
+    }
   }
   return kept.slice(-MAX_POINTS);
 }
 
-/** Add one stream sample. A long silence leaves a marker point of nulls so no line is drawn across it. */
+/** Add one stream sample; a silence since the previous one leaves a gap marker. */
 export function appendSample(points: HistoryPoint[], sample: TelemetryPoint): HistoryPoint[] {
   const next = pointOf(sample);
   const last = points.at(-1);
   if (!next || (last && next.t < last.t)) return points;
-  const gap =
-    last && next.t - last.t > GAP_SECONDS ? [{ t: last.t + BUCKET_SECONDS, ...EMPTY }] : [];
-  return tidy([...points, ...gap, next]);
+  return tidy([...points, next], GAP_SECONDS, next.t);
 }
 
 /** The Controller's last hour of the two readings it keeps, ahead of the live points. */
@@ -83,7 +101,14 @@ export function seedPoints(
   read(utilization, (point, value) => ({ ...point, utilization: value }));
   read(temperature, (point, value) => ({ ...point, temperature: value }));
   const firstLive = live[0]?.t ?? Number.POSITIVE_INFINITY;
-  return tidy([...[...byTime.values()].filter((point) => point.t < firstLive), ...live]);
+  // Seed samples come every step_seconds; a hole of more than two steps is a gap, at the seam too.
+  const gap = Math.max(GAP_SECONDS, 2 * Number(utilization.step_seconds));
+  const seed = tidy(
+    [...byTime.values()].filter((point) => point.t < firstLive),
+    gap,
+    Number.NEGATIVE_INFINITY,
+  );
+  return tidy([...seed, ...live], gap, firstLive);
 }
 
 /**
@@ -99,7 +124,7 @@ export function useTelemetryHistory({
 }: {
   api: Pick<ControlApi, "metricsSeries">;
   nodeId: string;
-  telemetry: TelemetryState | null | undefined;
+  telemetry: FleetTelemetryState | null | undefined;
   now: Date;
 }): { points: HistoryPoint[]; live: boolean } {
   const [points, setPoints] = useState<HistoryPoint[]>([]);
