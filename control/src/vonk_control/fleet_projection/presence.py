@@ -22,6 +22,7 @@ from ..models import CatalogDocumentRevision, ClusterMappingNode
 from ..recipe_operations import _run_is_one_shot
 from ..recipe_update_notice import recipe_update_notice
 from ..run_readiness import run_not_ready_for_profile
+from ..run_states import ENDED_RUN_STATES
 from ..strict_json import warn_unreadable_once
 from .common import (
     InstallationPresence,
@@ -200,7 +201,7 @@ def _loaded_presence(
             run = group[0][1]
             # A lost run still holds its claims and may still run on its
             # Sparks: it stays visible, with its reason, until it settles.
-            if run.state in {RunState.STOPPED, RunState.FAILED}:
+            if run.state in ENDED_RUN_STATES:
                 continue
             mapping = group[0][2]
             revision = group[0][4]

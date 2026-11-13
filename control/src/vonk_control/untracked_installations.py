@@ -10,7 +10,6 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     LifecycleSubject,
-    RunState,
     stored_words,
 )
 
@@ -22,6 +21,7 @@ from .models import (
     RecipeRun,
     RunNode,
 )
+from .run_states import ENDED_RUN_STATES
 
 
 def node_run_ids(node_id: str) -> Select[str]:
@@ -110,7 +110,7 @@ def untracked_runs(
             select(RecipeRun.id).where(
                 RecipeRun.id.in_(ids),
                 RecipeRun.id.in_(node_run_ids(node_id)),
-                RecipeRun.state.not_in((RunState.STOPPED, RunState.FAILED)),
+                RecipeRun.state.not_in(ENDED_RUN_STATES),
             )
         )
     ) | set(

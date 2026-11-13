@@ -88,7 +88,6 @@ from vonk_agent_protocol import (
     TERMINAL_LIFECYCLE_STATES,
     InstallationState,
     LifecycleSubject,
-    RunState,
     WaitReason,
     canonical_message,
     stored_words,
@@ -123,6 +122,7 @@ from .models import (
 )
 from .owner_liveness import builds_in_flight
 from .revision_images import revision_images
+from .run_states import ENDED_RUN_STATES
 from .stored_json import binding_for
 from .wait_contract import WaitOwnerKind
 
@@ -145,9 +145,6 @@ _BATCH = 50
 # wins and the row is retried at the next sweep.
 _LOCK_TIMEOUT_MS = 250
 _FINISHED_BUILDS = ("succeeded", "failed")
-# Terminal states are candidates only; exact current-generation absence is
-# independently required before releasing claims and discarding recovery rows.
-_DEAD_RUNS = (RunState.STOPPED, RunState.FAILED)
 # A uuid (a revision, installation or run id) or a sha256 (a source bundle).
 _TOKEN = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64}"
@@ -669,7 +666,7 @@ class CatalogRevisionCollector:
         if runs and session.scalar(
             select(
                 exists().where(
-                    RecipeRun.id.in_(runs), RecipeRun.state.not_in(_DEAD_RUNS)
+                    RecipeRun.id.in_(runs), RecipeRun.state.not_in(ENDED_RUN_STATES)
                 )
             )
         ):
@@ -748,7 +745,7 @@ class CatalogRevisionCollector:
             deleted = session.execute(
                 delete(RecipeRun).where(
                     RecipeRun.id.in_(runs),
-                    RecipeRun.state.in_(_DEAD_RUNS),
+                    RecipeRun.state.in_(ENDED_RUN_STATES),
                     RecipeRun.updated_at <= cutoff,
                 )
             )
@@ -1071,7 +1068,7 @@ def plan_tokens(
         select(RecipeInstallation.plan).where(
             RecipeInstallation.state != InstallationState.UNINSTALLED
         ),
-        select(RecipeRun.plan).where(RecipeRun.state.not_in(_DEAD_RUNS)),
+        select(RecipeRun.plan).where(RecipeRun.state.not_in(ENDED_RUN_STATES)),
         select(RecipeBuild.plan).where(builds_in_flight(now)),
     )
     found: set[str] = set()
