@@ -184,7 +184,6 @@ class InstallationRemoval(Protocol):
         self,
         installation_id: str,
         *,
-        plan_digest: str,
         actor: str,
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,

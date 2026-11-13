@@ -797,7 +797,6 @@ class FleetRemovalMixin:
                 try:
                     lifecycle.uninstall(
                         installation_id,
-                        plan_digest=plan.plan_digest,
                         actor=actor,
                         request_id=child_key,
                         unattended_guard=unused,

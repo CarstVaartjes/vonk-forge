@@ -199,10 +199,8 @@ def _remove_unused_install(sim: Simulation, step: Step) -> None:
         return
     installation_id = unused[step.other % len(unused)]
     lifecycle = sim.world.controller.lifecycle
-    plan = lifecycle.preview_uninstall(installation_id)
     lifecycle.uninstall(
         installation_id,
-        plan_digest=plan.plan_digest,
         actor="admin",
         request_id=_request_key(sim),
     )

@@ -190,7 +190,6 @@ def test_controller_routine_uninstall_payload_crosses_rust_and_back(
     preview = service.preview_uninstall(installation.owner_id)
     operation = service.uninstall(
         installation.owner_id,
-        plan_digest=preview.plan_digest,
         actor="admin",
         request_id="70000000-0000-4000-8000-000000000002",
     )

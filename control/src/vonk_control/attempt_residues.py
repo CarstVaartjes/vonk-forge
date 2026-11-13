@@ -244,7 +244,6 @@ class LeftoverRemoval(Protocol):
         self,
         installation_id: str,
         *,
-        plan_digest: str,
         actor: str,
         request_id: str,
         unattended_guard: Callable[[Session], None] | None = None,
@@ -519,7 +518,6 @@ class AttemptResidueReconciler:
 
                 self._removal.uninstall(
                     installation_id,
-                    plan_digest=plan.plan_digest,
                     actor=_LEFTOVER_ACTOR,
                     request_id=str(uuid.uuid4()),
                     unattended_guard=still_unowned,

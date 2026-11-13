@@ -354,10 +354,8 @@ class RetirementMixin:
                     workload_intent_ordinal=cleanup_ordinal,
                 )
             else:
-                plan = service.preview_uninstall(owner_id)
                 cleanup = service.uninstall(
                     owner_id,
-                    plan_digest=plan.plan_digest,
                     actor=job.actor,
                     request_id=request_id,
                     workload_intent_ordinal=cleanup_ordinal,

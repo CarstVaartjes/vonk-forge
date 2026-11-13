@@ -674,12 +674,8 @@ class ExecutorPhasesMixin:
                 )
             try:
                 with _replans_when_superseded():
-                    uninstall_plan = service._lifecycle.preview_uninstall(
-                        installation_id
-                    )
                     value = service._lifecycle.uninstall(
                         installation_id,
-                        plan_digest=uninstall_plan.plan_digest,
                         actor=actor,
                         request_id=uninstall_request_id,
                         workload_intent_ordinal=ordinal,

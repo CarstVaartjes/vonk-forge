@@ -65,10 +65,8 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     jobs.set_result_consumer(recipes.consume_agent_result)
     recipes._agent_jobs = jobs
     recipes._clock = clock
-    preview = recipes.preview_uninstall(installed.owner_id)
     owner = recipes.uninstall(
         installed.owner_id,
-        plan_digest=preview.plan_digest,
         actor="admin",
         request_id=str(uuid4()),
     )
@@ -169,7 +167,6 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     assert fresh_preview.allowed
     fresh = recipes.uninstall(
         installed.owner_id,
-        plan_digest=fresh_preview.plan_digest,
         actor="admin",
         request_id=str(uuid4()),
     )
@@ -211,7 +208,6 @@ def test_uninstall_executor_repairs_discovery_without_bypassing_cleanup_authorit
     def request_cleanup():
         return recipes.uninstall(
             installed.owner_id,
-            plan_digest=next_preview.plan_digest,
             actor="admin",
             request_id=str(uuid4()),
         )
