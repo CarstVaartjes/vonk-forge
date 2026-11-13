@@ -142,7 +142,7 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         for child in children:
             _field("Recipe", child.get("recipe_name"))
             _field("Revision", child.get("recipe_revision_id"))
-            _field("State", child.get("state"))
+            _field("Recipe state", child.get("state"))
             if child.get("operation_id") is not None:
                 _field("Child", child["operation_id"])
             _failure(child.get("failure"))
@@ -183,7 +183,7 @@ def _job(payload: Mapping[str, object]) -> None:
     for operation in _records(payload, "operations"):
         _field("Operation", operation.get("id"))
         _field("Spark", operation.get("node_id"))
-        _field("State", operation.get("state"))
+        _field("Spark state", operation.get("state"))
         _field("Progress", progress_line(operation))
         failure = _optional(operation.get("failure"), "job failure")
         if "code" in failure:
