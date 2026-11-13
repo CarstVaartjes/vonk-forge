@@ -2,7 +2,7 @@
 .spark-card header{display:flex;align-items:center;flex-wrap:wrap;gap:.6rem}
 .spark-card h3{margin:0;font-size:1.0625rem;letter-spacing:-.02em}
 .spark-card h3 a{color:inherit;text-decoration:none}.spark-card h3 a:hover{text-decoration:underline}
-.spark-key{flex:none;width:.7rem;height:.7rem;border-radius:3px}
+.spark-key{flex:none;width:.7rem;height:.7rem}
 .spark-rank{padding:.05rem .5rem;border:1px solid var(--line-strong);border-radius:var(--r-pill);color:var(--muted);font:600 .75rem/1.5 var(--mono)}
 .spark-uptime{margin-left:auto;color:var(--muted);font-size:.8125rem;white-space:nowrap}
 .spark-sub{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .75rem;margin:.3rem 0 0;color:var(--muted);font-size:.8125rem}

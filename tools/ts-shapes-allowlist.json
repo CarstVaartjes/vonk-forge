@@ -188,6 +188,16 @@
       "reason": "UI-only view model of one Fleet gauge derived from generated API types; not an API document"
     },
     {
+      "file": "control/web/src/lib/fleet.ts",
+      "type": "MemorySplit",
+      "reason": "UI-only view model of one Spark's unified memory derived from generated API types; not an API document"
+    },
+    {
+      "file": "control/web/src/lib/fleet.ts",
+      "type": "WorkloadGroup",
+      "reason": "UI-only view model of one workload and its Sparks derived from generated API types; not an API document"
+    },
+    {
       "file": "control/web/src/components/library-technical-details.tsx",
       "type": "TechnicalValue",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
@@ -236,6 +246,21 @@
       "file": "control/web/src/pages/login.tsx",
       "type": "LoginFailure",
       "reason": "UI-only view model parsed defensively from an untyped error or progress payload; not an API document"
+    },
+    {
+      "file": "control/web/src/components/chart/area-chart.tsx",
+      "type": "ChartSeries",
+      "reason": "UI-only view model: one drawn line of a chart, built from a generated metrics response; not an API document"
+    },
+    {
+      "file": "control/web/src/components/chart/scale.ts",
+      "type": "Point",
+      "reason": "UI-only view model: one chart sample (time, value) for drawing; not an API document"
+    },
+    {
+      "file": "control/web/src/hooks/use-telemetry-history.ts",
+      "type": "HistoryPoint",
+      "reason": "UI-only view model: one moment of the live telemetry history, derived from generated API types; not an API document"
     }
   ]
 }
