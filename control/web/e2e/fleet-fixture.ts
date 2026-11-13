@@ -246,6 +246,30 @@ const METRICS: { spec: Spec; latest: Record<string, number>; total?: Record<stri
     ),
     latest: { coder: 0.42 },
   },
+  {
+    spec: spec(
+      "requests_running",
+      "Requests running",
+      "count",
+      "alias",
+      "measured",
+      "engine",
+      "Requests being served now. Only engines whose metric names are verified report; others show Not reported.",
+    ),
+    latest: { coder: 3 },
+  },
+  {
+    spec: spec(
+      "requests_waiting",
+      "Requests waiting",
+      "count",
+      "alias",
+      "measured",
+      "engine",
+      "Requests queued behind the running ones. Only engines whose metric names are verified report; others show Not reported.",
+    ),
+    latest: { coder: 0 },
+  },
 ];
 
 function spec(
