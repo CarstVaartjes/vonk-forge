@@ -31,9 +31,10 @@ Protocol 4.4 adds the rows from CPU time down and the per-run engine readings be
 Every one is optional: an older agent omits them and the Controller stores NULL
 and exports nothing for them (a gap, never a zero). An invalid reading is
 dropped alone, and the optional-evidence recovery starts from the groups the
-validation error names, so many invalid readings cost a few validations. The agent collects the host readings
-(M5a) and the engine readings (M5b) in later changes; until then the Rust
-literal reports them as absent.
+validation error names, so many invalid readings cost a few validations. The monitor reads the host readings
+without privilege from `/proc` and `/sys`; a source that is missing on a Spark
+leaves only its own readings absent, and every sample reads again. The engine
+readings are collected in a later change and are absent until then.
 
 ### Engine readings
 

@@ -143,6 +143,7 @@ fn telemetry_paths(config: &AgentConfig) -> TelemetryPaths {
         uptime: PathBuf::from("/proc/uptime"),
         cpu_root: PathBuf::from("/sys/devices/system/cpu"),
         store: config.data_dir.clone(),
+        host: Default::default(),
     }
 }
 
