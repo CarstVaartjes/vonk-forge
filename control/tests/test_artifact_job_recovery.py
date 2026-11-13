@@ -11,6 +11,7 @@ from sqlalchemy import event, select
 from vonk_agent_protocol import (
     AgentResult,
     AgentResultState,
+    Disposition,
     FailureStage,
     InvalidRequestReason,
     LifecycleState,
@@ -34,6 +35,8 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.lifecycle import Effect, Reported
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
     AgentNode,
     AgentOperation,
@@ -231,7 +234,7 @@ def test_submitted_limits_are_recovered_from_the_exact_accepted_request(tmp_path
 
 def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     """Exercise consumer/store/restart/Stop authority and fresh physical admission."""
-    sessions, operations, service, queue, clock, original, claim, run_id = _issued_job(
+    sessions, operations, service, queue, clock, original, _claim, run_id = _issued_job(
         tmp_path, 1030
     )
     service._clock = clock
@@ -307,8 +310,8 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
     )
     assert restored is not None and restored.read_bytes() == content
     # The lost job's effect cannot be observed: a newer submit answers a
-    # retryable wait, keeps its draft READY and asks for the lost job's own
-    # cancellation. It never stops the run or takes a new workload ordinal.
+    # retryable wait with the owner's deadline as its hint, keeps its draft READY
+    # and cancels or stops nothing: no run Stop, no new workload ordinal.
     with sessions() as session:
         ordinals = sorted(
             tuple(row)
@@ -316,73 +319,23 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
                 select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
             )
         )
-    # Before the lost job's own window has passed it is not cancelled: the wait
-    # is bounded by that window and says so in its Retry-After.
-    with sessions.begin() as session:
-        order = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == original.operation_id
-            )
-        )
-        assert order is not None and order.recovery_deadline is not None
-        due = order.recovery_deadline
-        order.recovery_deadline = clock() + timedelta(seconds=600)
-    with pytest.raises(ArtifactJobUnavailableError) as early:
-        submitted_artifact_job(service, run_id, request_suffix=1038)
-    assert early.value.retry_after_seconds is not None
-    assert 590 <= early.value.retry_after_seconds <= 602
-    assert service.get(original.id).supported_actions == ("stop",)
-    with sessions.begin() as session:
-        order = session.scalar(
-            select(AgentOperation).where(
-                AgentOperation.parent_job_id == original.operation_id
-            )
-        )
-        assert order is not None
-        order.recovery_deadline = due
-    with pytest.raises(ArtifactJobUnavailableError):
+    with pytest.raises(ArtifactJobUnavailableError) as waiting:
         submitted_artifact_job(service, run_id, request_suffix=1040)
+    assert waiting.value.retry_after_seconds is not None
+    assert waiting.value.retry_after_seconds >= 1
+    kept = service.get(original.id)
+    assert kept.state == ajs.OBSERVING and kept.supported_actions == ("stop",)
     with sessions() as session:
         run = session.get(RecipeRun, run_id)
         assert run is not None and run.state == RunState.RUNNING
         draft = session.scalar(
             select(ArtifactJob).where(
-                ArtifactJob.run_id == run_id, ArtifactJob.id != original.id
+                ArtifactJob.request_id == "00000000-0000-4000-8000-000000001040"
             )
         )
         assert draft is not None and draft.operation_id is None
         assert not ajs.is_ended(draft)
-    # The cancellation completes within the lost job's stop budget (residue kept).
-    for _ in range(40):
-        if service.get(original.id).state in ajs.ENDED:
-            break
-        clock.advance(seconds=120)
-        restarted.reconcile_orders()
-    superseded = service.get(original.id)
-    assert superseded.state in ajs.ENDED and superseded.supported_actions == ()
-    assert (
-        superseded.result_evidence is not None
-        and superseded.result_evidence.active_scope_may_remain
-    )
-    operations.reconcile_pending_service_stops()
-    exact, payload, _grant = _issue_exact_stop_grant(
-        sessions,
-        node_id=node_id,
-        certificate_serial="serial-0",
-        grant_now=clock(),
-    )
-    assert exact.fence != claim.fence and payload.target_runtime_id == original.id
-    restarted.record_result(
-        AgentResult(
-            fence=exact.fence,
-            state=AgentResultState.SUCCEEDED,
-            result=RecipeStopResult(),
-        )
-    )
-    # The job-scoped Stop leaves the run, other jobs and the Spark ordinal alone.
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == RunState.RUNNING
+        draft_id = draft.id
         assert (
             sorted(
                 tuple(row)
@@ -392,24 +345,25 @@ def recover_unknown_job_under_new_intent(tmp_path, *, malformed: bool) -> None:
             )
             == ordinals
         )
-        assert (
-            session.scalar(
-                select(Job.id).where(
-                    Job.kind == "recipe.stop",
-                    Job.payload["execution_mode"].as_string() == "one-shot-jobs",
-                )
-            )
-            is None
+    # The core ends the lost job FAILED (effect unknown) at its owner's deadline
+    # (here settled directly: the Spark is away, so the clock alone cannot);
+    # the same-key retry is then admitted with no operator action.
+    with sessions.begin() as session:
+        lost_row = session.get(ArtifactJob, original.id)
+        assert lost_row is not None
+        ArtifactJobAdapter(session, clock=clock).settle(
+            lost_row,
+            Reported.failed(Disposition.FAIL, effect=Effect.UNKNOWN),
+            clock(),
+            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
         )
-        draft_id = draft.id
-    # The same-key retry is admitted once the lost job's receipt settles.
+    assert service.get(original.id).state == ajs.FAILED
     retry = service.submit(
         draft_id,
         actor="operator",
         request_id="00000000-0000-4000-8000-000000001041",
     )
     assert retry.operation_id is not None
-    assert claim_agent(restarted, node_id, "serial-0") is not None
 
 
 def test_unreadable_peer_result_is_lost_until_new_intent_stops_it_exactly(tmp_path):
@@ -555,7 +509,6 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
     A temporary Stop failure must retain the original account through restart,
     exact cleanup and the artifact job's full terminal retention grace.
     """
-    from datetime import timedelta
 
     from .test_artifact_jobs import MutableClock
     from .test_recipe_operations import NOW
