@@ -303,6 +303,38 @@ async fn proven_absence_stops_nothing() {
     assert_eq!(asked, ["inspect"]);
 }
 
+fn busy_start() -> HostRuntimeError {
+    HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::InstallationReconciliationBusy,
+        diagnostic: None,
+        process_logs: None,
+    }
+}
+
+#[tokio::test]
+async fn a_busy_start_with_no_container_waits_at_a_pre_launch_stage() {
+    // Wrong implementation: the busy refusal, found absent, ended the start
+    // as a hard failure the Controller does not reissue.
+    let (settled, asked) = settle(Seen::Absent, busy_start()).await;
+    let ExecutionResult::Failed(failure) = ended(settled) else {
+        panic!("a pre-launch wait is a retryable failure");
+    };
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RuntimeProjection));
+    assert_eq!(asked, ["inspect"]);
+}
+
+#[tokio::test]
+async fn a_busy_start_whose_container_runs_goes_on_and_nothing_is_stopped() {
+    // Wrong implementation: the busy refusal of a retry ended a live run.
+    let (settled, asked) = settle(Seen::Running, busy_start()).await;
+    assert!(settled.is_ok());
+    assert_eq!(asked, ["inspect"]);
+}
+
 #[tokio::test]
 async fn an_unread_inspection_waits_and_stops_nothing() {
     let (settled, asked) = settle(Seen::Unread, lost_reply()).await;
