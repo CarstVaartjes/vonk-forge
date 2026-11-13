@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type StatusTone = "neutral" | "healthy" | "warning" | "danger" | "info";
+export type StatusTone = "neutral" | "ok" | "warn" | "bad" | "info";
 
 export function StatusPill({
   children,
