@@ -219,7 +219,7 @@ test("keeps administrative actions behind the account menu", async () => {
 });
 
 test("renders the reusable status component", () => {
-  render(<StatusPill tone="healthy">Ready</StatusPill>);
+  render(<StatusPill tone="ok">Ready</StatusPill>);
 
   expect(screen.getByText("Ready")).toBeVisible();
 });

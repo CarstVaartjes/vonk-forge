@@ -1,4 +1,3 @@
-import { ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { MetricsChart } from "../components/metrics-chart";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
@@ -30,8 +29,8 @@ import { SparkDetail } from "../components/spark-detail";
 import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
 
-function statusTone(status: NodeStatus): "healthy" | "warning" | "danger" {
-  return status === "online" ? "healthy" : status === "offline" ? "danger" : "warning";
+function statusTone(status: NodeStatus): "ok" | "warn" | "bad" {
+  return status === "online" ? "ok" : status === "offline" ? "bad" : "warn";
 }
 
 // Problems first when sorted ascending.
@@ -217,9 +216,7 @@ export function FleetPage({ api }: { api: ControlApi; onBusyChange?(busy: boolea
       )}
       {fleet.snapshot && fleet.stale && (
         <div className="fleet-stale">
-          <StatusPill tone={ProfileReasonSeverity.WARNING}>
-            {fleet.refreshError ? "disconnected" : "stale"}
-          </StatusPill>
+          <StatusPill tone="warn">{fleet.refreshError ? "disconnected" : "stale"}</StatusPill>
           <ObservationNotice
             connection="reconnecting"
             lastSuccessAt={fleet.lastUpdatedAt}

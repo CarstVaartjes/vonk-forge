@@ -59,9 +59,9 @@ pre{max-height:28rem;overflow:auto;padding:1rem;background:var(--recess);border:
 /* Status: a shape and the word, never a fill. Circle = ok, diamond = warning, square = failure, triangle = information, hollow circle = unknown. */
 .status-pill{display:inline-flex;align-items:center;gap:.45rem;width:max-content;max-width:100%;color:var(--muted);font-size:.8125rem;font-weight:650;line-height:1.2}
 .status-mark{flex:0 0 auto;width:.6rem;height:.6rem;background:currentColor}
-.status-pill.status-pill-healthy{color:var(--ok)}.status-pill-healthy .status-mark{border-radius:50%;box-shadow:0 0 0 .18rem color-mix(in srgb, currentColor 22%, transparent)}
-.status-pill.status-pill-warning{color:var(--warn)}.status-pill-warning .status-mark{clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
-.status-pill.status-pill-danger{color:var(--bad)}.status-pill-danger .status-mark{border-radius:1px}
+.status-pill.status-pill-ok{color:var(--ok)}.status-pill-ok .status-mark{border-radius:50%;box-shadow:0 0 0 .18rem color-mix(in srgb, currentColor 22%, transparent)}
+.status-pill.status-pill-warn{color:var(--warn)}.status-pill-warn .status-mark{clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+.status-pill.status-pill-bad{color:var(--bad)}.status-pill-bad .status-mark{border-radius:0}
 .status-pill.status-pill-info{color:var(--info)}.status-pill-info .status-mark{clip-path:polygon(50% 0,100% 100%,0 100%)}
 .status-pill-neutral .status-mark{background:transparent;border:1.5px solid currentColor;border-radius:50%}
 code{color:var(--info)}.actions{display:flex;flex-wrap:wrap;align-items:center;gap:.65rem}
@@ -126,7 +126,7 @@ progress{width:min(36rem,100%);height:1rem;accent-color:var(--green-text)}.origi
   .mark,.status,.status-pill,.status-mark,.activity-marker,.activity-outcome-bar span{forced-color-adjust:none}
   .mark{border:1px solid CanvasText}.mark i{background:CanvasText}
   .status{background:Canvas;color:CanvasText;border:2px solid currentColor}.status-pill.status-pill-neutral{color:CanvasText}
-  .status-pill.status-pill-healthy{color:LinkText}.status-pill.status-pill-warning{color:CanvasText}.status-pill.status-pill-danger{color:Mark}.status-pill.status-pill-info{color:Highlight}
+  .status-pill.status-pill-ok{color:LinkText}.status-pill.status-pill-warn{color:CanvasText}.status-pill.status-pill-bad{color:Mark}.status-pill.status-pill-info{color:Highlight}
   .nav-link[aria-current="page"],.segmented button[aria-pressed="true"]{outline:2px solid Highlight;outline-offset:2px}
   .activity-timeline::before{background:CanvasText}
   .activity-marker{background:Highlight;border-color:Canvas;box-shadow:0 0 0 2px CanvasText}
