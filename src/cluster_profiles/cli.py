@@ -503,7 +503,7 @@ def _plain_language_document(value: object) -> object:
     return value
 
 
-def _unfinished_job_line(result: Mapping[str, object]) -> str:
+def _unfinished_job_line(result: object) -> str:
     """Say plainly that a watched job is still running when the watch ends.
 
     The per-Spark lines of a job carry their own states, so a finished Spark
@@ -511,7 +511,7 @@ def _unfinished_job_line(result: Mapping[str, object]) -> str:
     is terminal, and a timed-out watch exits non-zero.
     """
 
-    progress = result.get("progress")
+    progress = result.get("progress") if isinstance(result, Mapping) else None
     if not isinstance(progress, Mapping):
         return ""
     done, total = progress.get("completed"), progress.get("total")

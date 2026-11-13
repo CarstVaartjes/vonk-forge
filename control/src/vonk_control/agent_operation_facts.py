@@ -416,7 +416,7 @@ def job_run_bound(session: Session, operation: StoredOperation) -> datetime | No
     from .agent_jobs.retry import job_attempt_did_not_launch
 
     result = read_row_column(attempt, "result")
-    if isinstance(result, Mapping) and job_attempt_did_not_launch(result):
+    if job_attempt_did_not_launch(result):
         # The attempt reported a wait before it dispatched the job: no job is
         # running, so no job deadline holds the order open. A wait every
         # attempt repeats then ends at the stored recovery deadline.
