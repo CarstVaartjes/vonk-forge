@@ -214,7 +214,7 @@ pub(super) fn inventory_core(request: &InventoryRequest) -> InventoryRequest {
 
 pub(super) fn clamp_inventory_request(request: &mut InventoryRequest) -> Vec<AgentEvidenceCode> {
     let mut warnings = Vec::new();
-    const MAX_BYTES: u64 = vonk_agent_protocol::MAX_TELEMETRY_CAPACITY_BYTES;
+    const MAX_BYTES: u64 = 16 * 1024_u64.pow(4);
     if let Some(bytes) = &mut request.unused_model_bytes {
         *bytes = (*bytes).min(MAX_BYTES);
     }

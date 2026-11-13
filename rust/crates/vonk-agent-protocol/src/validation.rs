@@ -100,9 +100,7 @@ impl InventoryRequest {
                 .is_some_and(|names| names.len() > MAX_REPORTED_INSTALLATIONS)
             || self.installation_bytes.as_ref().is_some_and(|sizes| {
                 sizes.len() > MAX_REPORTED_INSTALLATIONS
-                    || sizes
-                        .iter()
-                        .any(|size| size.bytes > MAX_TELEMETRY_CAPACITY_BYTES)
+                    || sizes.iter().any(|size| size.bytes > 16 * 1024_u64.pow(4))
             })
             || self
                 .runs
@@ -110,7 +108,7 @@ impl InventoryRequest {
                 .is_some_and(|names| names.len() > MAX_REPORTED_RUNS)
             || self
                 .unused_model_bytes
-                .is_some_and(|bytes| bytes > MAX_TELEMETRY_CAPACITY_BYTES)
+                .is_some_and(|bytes| bytes > 16 * 1024_u64.pow(4))
             || (self.fabric_address.is_none() != self.fabric_bandwidth_mbps.is_none())
             || self
                 .fabric_bandwidth_mbps
@@ -256,7 +254,7 @@ impl DistributionObject {
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
             || !lower_hex(&self.sha256, 64)
-            || self.bytes > MAX_TELEMETRY_CAPACITY_BYTES
+            || self.bytes > 16 * 1024_u64.pow(4)
             || self.bytes == 0
                 && !(self.kind == "model"
                     && self.sha256
