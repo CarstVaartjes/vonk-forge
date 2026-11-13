@@ -883,6 +883,7 @@ async fn corrupt_unowned_lifecycle_keeps_its_disk_until_the_process_is_proven_go
             None,
             &|| Some((1024, 1024)),
             &|| {},
+            &crate::store_retention::tests::UserManager::default(),
         );
         assert!(data.path().join("runs").join(&run).is_dir());
         let socket = runtime.path().join("helper.sock");
