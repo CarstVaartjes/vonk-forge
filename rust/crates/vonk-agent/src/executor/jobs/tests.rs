@@ -669,30 +669,21 @@ fn a_definitely_refused_job_start_ends_the_job_with_its_evidence() {
 }
 
 #[test]
-fn a_helper_refusal_before_effect_ends_the_job_definite_not_uncertain() {
-    // Wrong implementation: the busy refusal was not classified as refused
-    // before effect, so the job was re-observed, found no container and ended
-    // UncertainEffect.
-    for code in [
-        HelperErrorCode::InstallationReconciliationBusy,
-        HelperErrorCode::ConcurrencyLimit,
-    ] {
-        let error = crate::host_runtime::HostRuntimeError::HelperRejected {
-            code,
-            diagnostic: None,
-            process_logs: None,
-        };
-        // Not an authority refusal: the start-reobserve and observation paths
-        // that stop or confirm on authority refusals keep their behaviour.
-        assert!(!refused_before_effect(&error));
-        let refused = refused_job_start(&error).expect("a pre-effect refusal ends the job");
-        let failure = refused.failure().expect("a failure");
-        assert_eq!(
-            failure.failure_kind,
-            Some(AgentFailureKind::TemporaryDependency)
-        );
-        assert_eq!(failure.retry_after_seconds, Some(2));
-    }
+fn a_busy_job_start_waits_at_a_pre_launch_stage_for_reissue() {
+    // Wrong implementation: the busy refusal was re-observed, found no
+    // container and ended UncertainEffect, which the Controller never reissues.
+    let error = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::InstallationReconciliationBusy,
+        diagnostic: None,
+        process_logs: None,
+    };
+    let refused = refused_job_start(&error).expect("a pre-launch refusal ends this attempt");
+    let failure = refused.failure().expect("a failure");
+    assert_eq!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+    assert_eq!(failure.stage, Some(FailureStage::RuntimeProjection));
     let possibly_effect = crate::host_runtime::HostRuntimeError::HelperRejected {
         code: HelperErrorCode::OperationFailed,
         diagnostic: None,

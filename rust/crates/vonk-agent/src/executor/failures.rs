@@ -424,9 +424,10 @@ pub(super) enum HelperRefusal {
     /// The caller or the grant was not accepted, before the helper claimed
     /// the request.
     Authority,
-    /// The helper answered before it executed the operation (busy lock, full
-    /// worker pool, unreadable frame or ledger): nothing changed, and the same
-    /// work is asked again with a fresh grant.
+    /// The helper answered before it executed the operation (unreadable
+    /// frame or ledger, or the busy installation lock a Start takes before it
+    /// does anything; a job's end-of-run cleanup reports stop-uncertain
+    /// instead of busy): nothing changed, and the work is asked again.
     BeforeEffect,
     /// The call may have changed the Spark, or the reply was lost or
     /// malformed: re-observe instead of assuming.
@@ -444,10 +445,9 @@ pub(super) fn classify_helper_code(code: HelperErrorCode) -> HelperRefusal {
         | Code::GrantUnauthorized
         | Code::GrantTimeWindow
         | Code::PeerIdentityInvalid => Refusal::Authority,
-        Code::RequestInvalid
-        | Code::RequestLedgerFailed
-        | Code::ConcurrencyLimit
-        | Code::InstallationReconciliationBusy => Refusal::BeforeEffect,
+        Code::RequestInvalid | Code::RequestLedgerFailed | Code::InstallationReconciliationBusy => {
+            Refusal::BeforeEffect
+        }
         Code::CallJoinFailed
         | Code::InspectionOutcomeInvalid
         | Code::InstallationReconciliationStorageUnavailable
@@ -512,7 +512,8 @@ pub(super) fn classify_helper_code(code: HelperErrorCode) -> HelperRefusal {
         | Code::RuntimeImageReceiptFailed
         | Code::RuntimeProcessExited
         | Code::RuntimeRunMissing
-        | Code::SystemClockInvalid => Refusal::MaybeEffect,
+        | Code::SystemClockInvalid
+        | Code::ConcurrencyLimit => Refusal::MaybeEffect,
     }
 }
 
@@ -600,19 +601,6 @@ pub(super) fn runtime_failure(
                 .kind(AgentFailureKind::UncertainEffect)
                 .retry_after(Some(2))
                 .helper(HelperErrorCode::GrantTimeWindow, None),
-        );
-    }
-    if helper_refusal(error) == Some(HelperRefusal::BeforeEffect) {
-        // Refused before any effect: nothing started, so this is no uncertain
-        // effect. The Controller issues a fresh grant and asks again.
-        return ExecutionResult::Failed(
-            Failure::new(format!(
-                "{reason}: helper refused before any effect: {}",
-                error.preflight_code()
-            ))
-            .kind(AgentFailureKind::TemporaryDependency)
-            .retry_after(Some(2))
-            .helper(runtime_helper_code(error), None),
         );
     }
     if temporary_observation_error(error) {

@@ -885,3 +885,35 @@ fn corrupt_persistent_cache_still_reaches_docker_with_fresh_run_backing() {
         .unwrap();
     assert!(mount.contains("/compile-cache-fallback/"), "{mount}");
 }
+
+/// A job whose end cannot take the installation lock (a stop or inspection
+/// holds it) is not refused as busy: the Start already ran, so the answer is
+/// the job's own failure and the container is reported as remaining.
+#[test]
+fn a_job_end_that_finds_the_installation_lock_held_is_not_busy() {
+    let mut plan = job_plan(recipe_start_plan_for_authority(1));
+    let (_temp, roots) = start_fixture(&mut plan);
+    let runner = LaunchRunner {
+        calls: Arc::default(),
+        config: String::new(),
+        earlier_job: String::new(),
+        run: RunAnswer::NoId,
+        launched: None,
+        created: Arc::default(),
+    };
+    let executor = OperationExecutor::new(roots, &[0; 32], runner, None).unwrap();
+    let identity = RuntimeEffectIdentity {
+        installation_id: plan.installation_id,
+        runtime_id: plan.run_id,
+        run_generation: plan.run_generation,
+    };
+    let _held = executor
+        .lock_installation_runtime(&plan.installation_id.to_string())
+        .unwrap();
+    let ended =
+        executor.runtime_wait_for_job(identity, plan.run_id, &plan.plan_digest, 0, Instant::now());
+    assert!(matches!(
+        ended,
+        Err(OperationError::RuntimeJobWaitFailed { .. })
+    ));
+}

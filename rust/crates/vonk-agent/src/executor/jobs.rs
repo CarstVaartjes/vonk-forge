@@ -808,8 +808,17 @@ pub(super) fn cancelled_job(
 pub(super) fn refused_job_start(
     error: &crate::host_runtime::HostRuntimeError,
 ) -> Option<ExecutionResult> {
-    if refused_without_effect(error) {
+    if refused_before_effect(error) {
         return Some(runtime_failure("job start refused before execution", error));
+    }
+    if refused_without_effect(error) {
+        // The helper answered before launching (busy installation lock): the
+        // attempt never ran the job, so the Controller issues it again.
+        return Some(temporary_preparation_failure(
+            FailureStage::RuntimeProjection,
+            "job_start",
+            &error.preflight_code(),
+        ));
     }
     match error {
         crate::host_runtime::HostRuntimeError::Controller(error)

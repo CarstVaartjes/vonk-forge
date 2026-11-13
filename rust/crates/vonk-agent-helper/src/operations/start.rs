@@ -394,6 +394,20 @@ impl<R: CommandRunner> OperationExecutor<R> {
             evidence,
             stop_uncertain: false,
         };
+        // A cleanup that cannot take the installation lock (held by a stop,
+        // an inspection or a reconciliation) leaves the container in place:
+        // that is stop-uncertain, never a busy refusal, so the agent keeps
+        // reading the job instead of treating the Start as refused.
+        let end_cleanup = |cancel_pending_start: bool| {
+            self.cleanup_runtime_after_job(identity, logical_run_id, cancel_pending_start)
+                .map_err(|error| {
+                    eprintln!(
+                        "vonk-agent-helper: job {} ended; its container remains: {error}",
+                        identity.runtime_id
+                    );
+                })
+                .is_err()
+        };
         match end {
             JobEnd::Exited(code) => {
                 let evidence = if code == 0 || cancelled {
@@ -440,9 +454,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 })
             }
             JobEnd::Vanished => {
-                self.cleanup_runtime_after_job(identity, logical_run_id, !cancelled)?;
+                let stop_uncertain = end_cleanup(!cancelled);
                 if cancelled {
-                    Ok(ended_by_helper(None))
+                    Ok(RuntimeRequestOutcome {
+                        stop_uncertain,
+                        ..ended_by_helper(None)
+                    })
                 } else {
                     Err(OperationError::RuntimeJobWaitFailed { evidence: None })
                 }
@@ -450,8 +467,11 @@ impl<R: CommandRunner> OperationExecutor<R> {
             JobEnd::Deadline => {
                 // Its tail so far is read before the stop that ends it.
                 let evidence = if cancelled { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, true)?;
-                Ok(ended_by_helper(evidence))
+                let stop_uncertain = end_cleanup(true);
+                Ok(RuntimeRequestOutcome {
+                    stop_uncertain,
+                    ..ended_by_helper(evidence)
+                })
             }
             JobEnd::Unobserved(cause) => {
                 // Never read until its deadline: it is ended, and its exit
@@ -461,9 +481,12 @@ impl<R: CommandRunner> OperationExecutor<R> {
                     identity.runtime_id
                 );
                 let evidence = if cancelled { None } else { capture(self) };
-                self.cleanup_runtime_after_job(identity, logical_run_id, true)?;
+                let stop_uncertain = end_cleanup(true);
                 if cancelled {
-                    Ok(ended_by_helper(None))
+                    Ok(RuntimeRequestOutcome {
+                        stop_uncertain,
+                        ..ended_by_helper(None)
+                    })
                 } else {
                     Err(OperationError::RuntimeJobWaitFailed { evidence })
                 }
