@@ -23,26 +23,38 @@ import { StatusPill } from "./status-pill";
 
 const NOT_REPORTED = "Not reported";
 
+/** One tile: its title and unit, how to read it from the live sample (null is not reported) and from a history point. */
+type Sample = NonNullable<ReturnType<typeof liveSample>>;
+const num = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
 const READINGS = [
-  { key: "utilization", title: "GPU", unit: "%" },
-  { key: "temperature", title: "GPU temperature", unit: "°C" },
-  { key: "power", title: "GPU power", unit: "W" },
-  { key: "clockMhz", title: "GPU clock", unit: "MHz" },
+  {
+    title: "GPU",
+    unit: "%",
+    fixedRange: true,
+    now: (s: Sample) => num(s.gpu_utilization_percent),
+    past: (p: HistoryPoint) => p.utilization,
+  },
+  {
+    title: "GPU temperature",
+    unit: "°C",
+    now: (s: Sample) => num(s.gpu_temperature_c),
+    past: (p: HistoryPoint) => p.temperature,
+  },
+  {
+    title: "GPU power",
+    unit: "W",
+    digits: 1,
+    now: (s: Sample) => num(s.gpu_power_watts == null ? null : Number(s.gpu_power_watts)),
+    past: (p: HistoryPoint) => p.power,
+  },
+  {
+    title: "GPU clock",
+    unit: "MHz",
+    now: (s: Sample) => num(s.gpu_clock?.graphics_mhz),
+    past: (p: HistoryPoint) => p.clockMhz,
+  },
 ] as const;
-
-/** Each reading of the live sample, as the Spark reported it; null is not reported. */
-function liveReadings(sample: ReturnType<typeof liveSample>) {
-  const num = (value: unknown) =>
-    typeof value === "number" && Number.isFinite(value) ? value : null;
-  const read = (value: number | null, digits = 0) =>
-    value === null ? null : digits ? value.toFixed(digits) : String(halfUp(value));
-  return {
-    utilization: read(num(sample?.gpu_utilization_percent)),
-    temperature: read(num(sample?.gpu_temperature_c)),
-    power: read(num(sample?.gpu_power_watts == null ? null : Number(sample.gpu_power_watts)), 1),
-    clockMhz: read(num(sample?.gpu_clock?.graphics_mhz)),
-  };
-}
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */
 function Traces({
@@ -65,32 +77,40 @@ function Traces({
     now,
   });
   const end = now.getTime() / 1000;
-  const values = liveReadings(liveSample(node));
+  const sample = liveSample(node);
   return (
     <div className="spark-traces">
-      {READINGS.map(({ key, title, unit }) => {
-        const value = values[key];
-        const series = points.map((point: HistoryPoint) => ({ t: point.t, v: point[key] }));
+      {READINGS.map((reading) => {
+        const value = sample ? reading.now(sample) : null;
+        const shown =
+          value === null
+            ? null
+            : "digits" in reading
+              ? value.toFixed(reading.digits)
+              : String(halfUp(value));
+        const fixed = "fixedRange" in reading;
         return (
-          <div className="spark-trace" key={key}>
+          <div className="spark-trace" key={reading.title}>
             <div className="spark-trace-head">
-              <span>{title}</span>
-              {value === null ? (
-                <span className="spark-trace-value">{NOT_REPORTED}</span>
-              ) : (
-                <span className="spark-trace-value">
-                  {value} <small>{unit}</small>
-                </span>
-              )}
+              <span>{reading.title}</span>
+              <span className="spark-trace-value">
+                {shown === null ? (
+                  NOT_REPORTED
+                ) : (
+                  <>
+                    {shown} <small>{reading.unit}</small>
+                  </>
+                )}
+              </span>
             </div>
             <Sparkline
-              points={series}
+              points={points.map((point) => ({ t: point.t, v: reading.past(point) }))}
               start={end - HISTORY_SECONDS}
               end={end}
-              min={key === "utilization" ? 0 : undefined}
-              max={key === "utilization" ? 100 : undefined}
+              min={fixed ? 0 : undefined}
+              max={fixed ? 100 : undefined}
               color={color}
-              label={`${name} ${title}, last 30 minutes`}
+              label={`${name} ${reading.title}, last 30 minutes`}
             />
           </div>
         );
