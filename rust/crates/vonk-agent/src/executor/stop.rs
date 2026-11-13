@@ -61,6 +61,7 @@ impl<R> RecipeExecutor<'_, R> {
                 result: stop_failure("workload stop remains unconfirmed", &error),
             });
         }
+        self.drop_engine_target(run_id);
         if let Err(error) = self.runtime.complete_stop(run_id) {
             return Err(StopStall::unproven(unconfirmed(
                 WaitReason::CleanupUnconfirmed,
@@ -159,6 +160,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
         {
             stop_failure("container runtime stop remains unconfirmed", &error)
         } else {
+            self.drop_engine_target(&run_id);
             if let Err(error) = self.runtime.complete_stop(&run_id) {
                 return unconfirmed(
                     WaitReason::StopMetadataUnconfirmed,
