@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from sqlalchemy.exc import OperationalError
@@ -262,19 +263,26 @@ def test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted(
 
     refusals = []
     service = _Service(routes=_Routes(), dispatch=_raiser(AssertionError))
-    service._sessions = Sessions()
-    service._stop_plan_in_session = lambda *_a, **_k: SimpleNamespace()
+    monkeypatch.setattr(service, "_sessions", Sessions(), raising=False)
+    monkeypatch.setattr(
+        service,
+        "_stop_plan_in_session",
+        lambda *_a, **_k: SimpleNamespace(),
+        raising=False,
+    )
 
     def logical(*args, **kwargs):
         if refusals:
             return _view()
         try:
-            return JobRunStopMixin._stop_logical_job_run(service, *args, **kwargs)
+            return JobRunStopMixin._stop_logical_job_run(
+                cast(Any, service), *args, **kwargs
+            )
         except RunAdmissionBusy as busy:
             refusals.append(busy)
             raise
 
-    service._stop_logical_job_run = logical
+    monkeypatch.setattr(service, "_stop_logical_job_run", logical)
     view = service.stop(
         "run-1", plan_digest="digest", actor="admin", request_id="request-1"
     )

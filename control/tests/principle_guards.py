@@ -834,6 +834,10 @@ def scan_source(
                     "test_every_non_dispatch_exit_of_stop_returns_an_undispatched_view",
                     "test_deadlocks_before_any_receipt_are_retried_then_refused_as_run_admission_busy",
                     "test_lock_timeout_before_any_receipt_is_not_retried",
+                    # Contention tests: the Stop/uninstall is refused busy or its
+                    # admission is stubbed, so no workload actually ends.
+                    "test_one_shot_deadlock_inside_the_transaction_is_retried_then_admitted",
+                    "test_retired_cleanup_that_is_busy_waits_instead_of_aborting_the_pass",
                 }
                 shadowed = {
                     n.id
