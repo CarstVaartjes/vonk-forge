@@ -258,3 +258,20 @@ test("range change aborts the old read and a late response cannot replace curren
   await waitFor(() => expect(screen.queryByText("No samples in this range")).toBeNull());
   expect(screen.getAllByRole("img").length).toBeGreaterThan(0);
 });
+
+test("a metric the catalogue does not list is not drawn, and an estimated one carries the est. tag", async () => {
+  const listed = Object.values(SPECS).filter((entry) => entry.metric !== "gpu_temperature");
+  const api = {
+    metricsCatalogue: async () => listed,
+    metricsSeries: async () => data,
+  } as unknown as ControlApi;
+  render(<MetricsChart api={api} />);
+  await screen.findByRole("region", { name: "Requests per model" });
+  expect(screen.queryByRole("region", { name: "GPU temperature" })).toBeNull();
+  expect(
+    within(screen.getByRole("region", { name: "Requests per model" })).getByText("est."),
+  ).toBeVisible();
+  expect(
+    within(screen.getByRole("region", { name: "GPU utilisation" })).queryByText("est."),
+  ).toBeNull();
+});

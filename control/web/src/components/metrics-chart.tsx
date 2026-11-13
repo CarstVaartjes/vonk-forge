@@ -1,7 +1,9 @@
 import type { LosslessNumber } from "lossless-json";
 import { useEffect, useId, useState } from "react";
 import { safeErrorText } from "../lib/error-display";
+import { useMetricCatalogue } from "../hooks/use-metric-catalogue";
 import { AreaChart, type ChartSeries } from "./chart/area-chart";
+import { EstimateTag } from "./estimate";
 
 import type {
   ControlApi,
@@ -170,26 +172,9 @@ export function MetricsChart({
   const id = useId();
   const [range, setRange] = useState<MetricRange>("6h");
   const [tiles, setTiles] = useState<Record<string, Tile | undefined>>({});
-  // What each metric is, read once from the Controller: a list, or the message of the read that failed.
-  const [catalogue, setCatalogue] = useState<MetricSpec[] | string>();
   const [retry, setRetry] = useState(0);
+  const catalogue = useMetricCatalogue(api, retry);
   const wanted: Metric[] = [...TILES, "certificate_expiry"];
-  useEffect(() => {
-    const controller = new AbortController();
-    setCatalogue(undefined);
-    api.metricsCatalogue(controller.signal).then(
-      (specs) => {
-        if (!controller.signal.aborted) setCatalogue(specs);
-      },
-      (cause) => {
-        if (!controller.signal.aborted)
-          setCatalogue(
-            safeErrorText(cause instanceof Error ? cause.message : "Metrics unavailable"),
-          );
-      },
-    );
-    return () => controller.abort();
-  }, [api, retry]);
   useEffect(() => {
     const controller = new AbortController();
     setTiles({});
@@ -247,7 +232,10 @@ export function MetricsChart({
           if (!spec) return null;
           return (
             <section key={metric} className="metric-tile card" aria-label={spec.title}>
-              <h3>{spec.title}</h3>
+              <h3>
+                {spec.title}
+                <EstimateTag basis={spec.basis} />
+              </h3>
               {typeof state === "string" ? (
                 <p role="status">Metrics unavailable: {state}</p>
               ) : state ? (
