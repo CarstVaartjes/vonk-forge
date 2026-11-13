@@ -11,7 +11,6 @@ from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
-from vonk_agent_protocol.telemetry import MAX_TELEMETRY_CAPACITY_BYTES
 from vonk_control.models import (
     AgentNode,
     Base,
@@ -32,6 +31,7 @@ BOOT_A = uuid.UUID("00000000-0000-0000-0000-000000000001")
 BOOT_B = uuid.UUID("00000000-0000-4000-8000-000000000002")
 NOW = datetime(2026, 8, 3, 12, tzinfo=UTC)
 START = NOW - timedelta(minutes=5)
+MAX_CAPACITY_BYTES = 16 * 1024**4
 
 
 class Clock:
@@ -161,12 +161,9 @@ def test_new_boot_only_newer_observation_advances_latest(
             "GPU memory free cannot exceed total",
         ),
         ({"gpu_utilization_percent": math.inf}, "GPU utilization"),
-        ({"memory_total_bytes": MAX_TELEMETRY_CAPACITY_BYTES + 1}, "memory total"),
-        ({"disk_total_bytes": MAX_TELEMETRY_CAPACITY_BYTES + 1}, "disk total"),
-        (
-            {"gpu_memory_total_bytes": MAX_TELEMETRY_CAPACITY_BYTES + 1},
-            "GPU memory total",
-        ),
+        ({"memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "memory total"),
+        ({"disk_total_bytes": MAX_CAPACITY_BYTES + 1}, "disk total"),
+        ({"gpu_memory_total_bytes": MAX_CAPACITY_BYTES + 1}, "GPU memory total"),
     ],
 )
 def test_sample_rejects_non_finite_negative_and_out_of_range_values(

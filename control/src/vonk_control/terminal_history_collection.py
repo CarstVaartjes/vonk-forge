@@ -98,6 +98,7 @@ from .models import (
     RunNode,
 )
 from .owner_liveness import builds_in_flight
+from .run_states import ENDED_RUN_STATES
 from .step_ca import CERTIFICATE_LIFETIME
 from .stored_json import binding_for, read_row_column
 
@@ -469,9 +470,7 @@ def retention_rules(*, current_worker: str | None = None) -> tuple[RetentionRule
             RecipeRun,
             RecipeRun.id,
             RecipeRun.updated_at,
-            lambda _cutoff: RecipeRun.state.in_(
-                (RunState.STOPPED.value, RunState.FAILED.value)
-            ),
+            lambda _cutoff: RecipeRun.state.in_(ENDED_RUN_STATES),
             held=(
                 _reserved(RecipeRun.id),
                 exists().where(ArtifactJob.run_id == RecipeRun.id),
@@ -939,7 +938,7 @@ def _protected_tokens(session: Session, now: datetime) -> frozenset[str] | None:
         (
             RecipeRun,
             "plan",
-            RecipeRun.state.not_in((RunState.STOPPED.value, RunState.FAILED.value)),
+            RecipeRun.state.not_in(ENDED_RUN_STATES),
         ),
         (RecipeBuild, "plan", builds_in_flight(now)),
         (
