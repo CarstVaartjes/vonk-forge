@@ -108,15 +108,13 @@ class DownloadAdmissionMixin:
                 selector=selector,
                 force=force,
                 artifact_set_sha256=set_digest,
-                plan_digest=requested_plan,
             )
             if replay is not None:
                 return replay
         preview = cache._download_preview_for_manifest(manifest)
-        if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflictInvalid(
-                ModelCacheCode.STALE_PLAN, "download preview is stale"
-            )
+        # The request is declarative: a preview that moved on since the
+        # caller's is re-planned (the operation records the current plan).
+        requested_plan = str(preview["plan_digest"])
         waiting_for = "; ".join(
             str(item)
             for item in require_sequence(preview["blockers"], "download blockers")
@@ -162,7 +160,6 @@ class DownloadAdmissionMixin:
                         selector=selector,
                         force=force,
                         artifact_set_sha256=set_digest,
-                        plan_digest=requested_plan,
                     )
                     if replay is not None:
                         return replay
@@ -245,7 +242,6 @@ class DownloadAdmissionMixin:
                             selector=selector,
                             force=force,
                             artifact_set_sha256=set_digest,
-                            plan_digest=requested_plan,
                         )
                     )
             except (
@@ -272,7 +268,6 @@ class DownloadAdmissionMixin:
                                 selector=selector,
                                 force=force,
                                 artifact_set_sha256=set_digest,
-                                plan_digest=requested_plan,
                             )
                             if replay is not None:
                                 return replay
@@ -300,7 +295,6 @@ class DownloadAdmissionMixin:
         selector: str | None,
         force: bool,
         artifact_set_sha256: str | None = None,
-        plan_digest: str | None = None,
     ) -> CacheOperationView | None:
         """Compare original intent, never a refreshed operator preview."""
         cache = cast("ModelCacheService", self)
@@ -330,7 +324,6 @@ class DownloadAdmissionMixin:
             matches.update(
                 artifact_set=getattr(payload, "artifact_set_sha256", None)
                 == artifact_set_sha256,
-                plan=existing.plan_digest == plan_digest,
             )
         else:
             matches["operator_action"] = payload.operator_action == "download-model"
