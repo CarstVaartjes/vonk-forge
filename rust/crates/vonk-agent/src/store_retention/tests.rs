@@ -108,6 +108,15 @@ impl crate::process::ProcessRunner for UserManager {
                 if !args.iter().any(|arg| arg == "--state=active") {
                     scopes.extend(self.ended.iter().cloned());
                 }
+                // systemd matches each requested glob.
+                let requested = |scope: &String| {
+                    args.iter().any(|glob| {
+                        glob.split_once('*').is_some_and(|(prefix, suffix)| {
+                            scope.starts_with(prefix) && scope.ends_with(suffix)
+                        })
+                    })
+                };
+                scopes.retain(requested);
                 words(&scopes)
             } else if pattern.contains('*') {
                 words(&self.units)
@@ -1676,15 +1685,13 @@ fn podman_scopes_no_build_owns_are_stopped_only_while_no_build_is_live() {
     // Catches the 2026-10-27 leak: an agent restart mid-build left the egress
     // proxy, its slirp4netns and one pause process per runroot running for
     // weeks, because every reaper only looked at the build's own unit names.
+    // The shared pause process stays: stopping it broke every later build
+    // with a fresh runroot (batch #2302 acceptance).
     let root = tempfile::tempdir().unwrap();
-    let scopes = names(&[
-        "libpod-32d5.scope",
-        "rootless-netns-2525.scope",
-        "podman-pause-0b6c.scope",
-    ]);
+    let scopes = names(&["libpod-32d5.scope", "rootless-netns-2525.scope"]);
     let manager = |units: &[&str], unavailable| UserManager {
         units: names(units),
-        scopes: scopes.clone(),
+        scopes: [&scopes[..], &names(&["podman-pause-0b6c.scope"])].concat(),
         ended: names(&["libpod-ended.scope"]),
         unavailable,
         ..UserManager::default()

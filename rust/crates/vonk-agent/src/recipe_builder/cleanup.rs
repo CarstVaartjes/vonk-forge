@@ -447,15 +447,14 @@ fn build_units(request: &RecipeBuildCleanupRequest) -> [String; 3] {
 
 /// Crash-only backstop for build effects that no build unit owns.
 ///
-/// Rootless Podman starts each container (`libpod-*`), its network namespace
-/// (`rootless-netns-*`) and each runroot's pause process (`podman-pause-*`) in
-/// scopes of their own beside the unit that ran it, so stopping that unit, or
-/// an agent restart that skips the in-process stop, leaves them running. In the
-/// agent's user manager only builds run Podman (loads run on Docker through the
-/// helper), so with no build unit live and no build beside the lane
-/// (`beside`, read after the units) every such scope is a leftover. The
-/// scopes are listed before liveness is read: a build that starts later never
-/// has its scopes in this list. An egress unit (`-e`) whose build is not beside
+/// Rootless Podman starts each container (`libpod-*`) and its network
+/// namespace (`rootless-netns-*`) in scopes of their own beside the unit that
+/// ran it, so stopping that unit, or an agent restart that skips the
+/// in-process stop, leaves them running. In the agent's user manager only
+/// builds run containers and networks, and only inside build units, with state
+/// in the build's own runroot (loads run on Docker through the helper). So with
+/// no build unit live and no build beside the lane (`beside`, read after the
+/// units) every such scope is a leftover. An egress unit (`-e`) whose build is not beside
 /// the lane and whose recipe unit and runtime adapter are both gone serves
 /// nothing and is stopped; its scopes follow on a later pass. Any listing that
 /// cannot be read stops nothing, and a scope already stopped or failed is not
@@ -471,7 +470,10 @@ pub fn stop_orphaned_build_effects<R: ProcessRunner + ?Sized>(
             "--state=active",
             "libpod-*.scope",
             "rootless-netns-*.scope",
-            "podman-pause-*.scope",
+            // Never `podman-pause-*`: direct Podman calls share one pause
+            // process through `/run/user/<uid>/libpod/tmp/pause.pid`, and once
+            // it is stopped every build with a fresh runroot fails to join it
+            // ("cannot re-exec process to join the existing user namespace").
         ],
         deadline,
     )?;
