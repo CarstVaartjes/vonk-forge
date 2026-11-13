@@ -1,0 +1,6 @@
+.library-fit{display:flex;flex-wrap:wrap;align-items:center;gap:.75rem 2rem;margin:1rem 0;padding:.9rem 1.25rem}
+.library-fit p{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;margin:0}
+.library-fit strong{font-size:1.0625rem}
+.library-fit span{color:var(--muted)}
+.library-fit .memory-ingot{flex:1 1 16rem;min-width:0}
+@media(max-width:42rem){.library-fit{display:grid;gap:.75rem}}
