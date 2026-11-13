@@ -31,6 +31,7 @@ test("shows the newest seven activities in the Activity page's words, newest fir
 
 test("says so when there is no activity, when it cannot be read, and when membership is unknown", async () => {
   const { unmount } = render(<ActivityPreview api={apiWith([])} nodes={nodes} now={NOW} />);
+  expect(screen.queryByText("No activity yet.")).toBeNull();
   expect(await screen.findByText("No activity yet.")).toBeInTheDocument();
   unmount();
   const failing = { operations: () => Promise.reject(new Error("down")) } as unknown as ControlApi;

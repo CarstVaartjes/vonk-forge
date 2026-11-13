@@ -21,13 +21,14 @@ export function WorkloadUnits({
   const tokens = useMetricSeries(api, "output_token_rate", "1h");
   const requests = useMetricSeries(api, "request_rate", "1h");
   const { clusters, idle } = groupByWorkload(nodes);
+  const order = new Map(nodes.map((node, index) => [node.id, index]));
   const card = (node: VisualFleetNode, rank?: number) => (
     <SparkCard
       key={node.id}
       api={api}
       node={node}
       now={now}
-      index={nodes.indexOf(node)}
+      index={order.get(node.id) ?? 0}
       rank={rank}
       onOpen={onOpen}
     />

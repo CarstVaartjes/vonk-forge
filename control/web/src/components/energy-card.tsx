@@ -3,6 +3,8 @@ import type { VisualFleetNode } from "../api/types";
 import { fleetPower } from "../lib/fleet";
 
 const NOT_REPORTED = "Not reported";
+/** What every GPU energy and power figure says about its scope. */
+export const GPU_ONLY_CAPTION = "GPU only, not the whole Spark.";
 
 /**
  * GPU energy over 24 hours. The Controller has no energy metric yet, so the figure and the 31-day and
@@ -18,7 +20,7 @@ export function EnergyCard({ nodes }: { nodes: VisualFleetNode[] }) {
         <small>last 24 hours</small>
       </header>
       <p className="stat-fig">{NOT_REPORTED}</p>
-      <p className="stat-caption">GPU only, not the whole Spark.</p>
+      <p className="stat-caption">{GPU_ONLY_CAPTION}</p>
       <dl className="stat-facts">
         <div>
           <dt>GPU power now</dt>

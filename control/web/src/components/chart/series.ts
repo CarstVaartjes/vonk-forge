@@ -1,4 +1,4 @@
-/** The Spark identity colours, in enrolment order; every chart and card gives a Spark the same one. */
+/** The Spark identity colours, in the snapshot's node order; every chart and card gives a Spark the same one. */
 export const SERIES_COLORS = [
   "var(--series-1)",
   "var(--series-2)",

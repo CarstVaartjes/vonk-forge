@@ -298,7 +298,12 @@ test("groups a two-Spark workload as one unit in rank order and leaves an idle S
   const { clusters, idle } = groupByWorkload([a, b, node({ id: "spk_c" })]);
   expect(clusters).toHaveLength(1);
   const [unit] = clusters[0]!.units;
-  expect(unit).toMatchObject({ title: "GLM 5.3 Flash", alias: "coder", state: "running" });
+  expect(unit).toMatchObject({
+    title: "GLM 5.3 Flash",
+    alias: "coder",
+    state: "running",
+    tone: "ok",
+  });
   expect(unit!.nodes.map((n) => n.id)).toEqual(["spk_b", "spk_a"]);
   expect(unit!.ranks).toEqual({ spk_a: 1, spk_b: 0 });
   expect(idle.map((n) => n.id)).toEqual(["spk_c"]);

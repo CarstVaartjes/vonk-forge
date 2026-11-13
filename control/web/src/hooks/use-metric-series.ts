@@ -4,8 +4,8 @@ import type { ControlApi, Metric, MetricRange, MetricsSeriesResponse } from "../
 const REFRESH_MS = 15_000;
 
 /**
- * One metric's series as the Controller serves it, read again every 15 seconds. A failed read keeps the
- * last good one (the next read heals it); null until the first read succeeds.
+ * One metric's series as the Controller serves it, read again every 15 seconds. null until a read
+ * succeeds and after one fails (the next read heals it); a stale series is never shown as live.
  */
 export function useMetricSeries(
   api: Pick<ControlApi, "metricsSeries">,
@@ -20,7 +20,10 @@ export function useMetricSeries(
         (response) => {
           if (!controller.signal.aborted) setData(response);
         },
-        () => undefined,
+        // A failed read is not a live reading: the figure says Not reported until a read succeeds.
+        () => {
+          if (!controller.signal.aborted) setData(null);
+        },
       );
     void read();
     const timer = setInterval(() => void read(), REFRESH_MS);

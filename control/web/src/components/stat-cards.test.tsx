@@ -12,8 +12,8 @@ const tokens = {
     hint: "Counted by the gateway; a Spark shows the models it serves.",
   },
   series: [
-    { labels: { alias: "fast" }, points: [], summary: { total: 320_000 } },
-    { labels: { alias: "coder" }, points: [], summary: { total: 1_520_000 } },
+    { labels: { alias: "fast" }, points: [], summary: { total: 320_000, coverage: 1 } },
+    { labels: { alias: "coder" }, points: [], summary: { total: 1_520_000, coverage: 1 } },
   ],
 } as unknown as MetricsSeriesResponse;
 const nodes = [
@@ -37,6 +37,19 @@ test("without a token reading the Tokens card says Not reported and draws no tab
   render(<TokensCard tokens={null} nodes={nodes} />);
   expect(screen.getByRole("region", { name: "Tokens" })).toHaveTextContent("Not reported");
   expect(screen.queryByRole("table")).toBeNull();
+});
+
+test("an empty range says No data in this range and a partial one says how much it covers", () => {
+  const empty = { ...tokens, series: [] } as unknown as MetricsSeriesResponse;
+  const { unmount } = render(<TokensCard tokens={empty} nodes={nodes} />);
+  expect(screen.getByText("No data in this range")).toBeInTheDocument();
+  unmount();
+  const partial = {
+    ...tokens,
+    series: [{ labels: { alias: "coder" }, points: [], summary: { total: 1_000, coverage: 0.5 } }],
+  } as unknown as MetricsSeriesResponse;
+  render(<TokensCard tokens={partial} nodes={nodes} />);
+  expect(screen.getByText(/Data covers 50% of this range\./)).toBeInTheDocument();
 });
 
 test("the GPU energy card is named GPU energy, says Not reported until a metric exists, and shows power now", () => {

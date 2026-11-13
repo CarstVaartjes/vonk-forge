@@ -37,9 +37,9 @@ def test_model_beside_messages_is_openai_s_request_field_not_a_contract_word() -
     assert scan.scan_source('kind = "model"\n', path=REL, words=words) == [1]
 
 
-def test_a_css_class_and_an_svg_paint_are_markup_not_contract_words() -> None:
-    # Wrong implementation: className="alias" and fill="none" blocked a component
-    # that names no contract value; a state compared by hand must still be caught.
+def test_an_svg_paint_is_markup_not_a_contract_word() -> None:
+    # Wrong implementation: fill="none" blocked an icon that names no contract
+    # value; a word spelled as a class or compared by hand must still be caught.
     source = (
         '<code className="alias" />;\n'
         '<path fill="none" stroke="none" />;\n'
@@ -49,7 +49,7 @@ def test_a_css_class_and_an_svg_paint_are_markup_not_contract_words() -> None:
         source,
         path="control/web/src/components/example.tsx",
         words=frozenset({"alias", "none"}),
-    ) == [3]
+    ) == [1, 3]
 
 
 def test_a_browser_fixture_may_spell_the_wire_document() -> None:
@@ -74,7 +74,7 @@ def test_a_docker_subcommand_is_not_a_contract_word() -> None:
         source,
         path="rust/crates/vonk-agent-helper/src/operations/example.rs",
         words=frozenset({"inspect"}),
-    ) == [3]
+    ) == [1, 3]
 
 
 def test_only_docker_subcommands_in_the_helper_are_exempt() -> None:
