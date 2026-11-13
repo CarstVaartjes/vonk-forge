@@ -3,6 +3,7 @@ import type { ControlApi, VisualFleetNode } from "../api/types";
 import { HISTORY_SECONDS, useTelemetryHistory } from "../hooks/use-telemetry-history";
 import { GPU_READINGS as READINGS } from "../lib/gpu-readings";
 import {
+  NOT_REPORTED_TEXT,
   halfUp,
   liveSample,
   nodeDisplayName,
@@ -15,11 +16,9 @@ import {
 } from "../lib/fleet";
 import { sparkPath } from "../lib/spark-route";
 import { sparkColor } from "./chart/series";
-import { Sparkline } from "./chart/sparkline";
 import { MemoryIngot } from "./memory-ingot";
 import { StatusPill } from "./status-pill";
-
-const NOT_REPORTED = "Not reported";
+import { TraceTile } from "./trace-tile";
 
 /** The four live traces of an online Spark; the readings as the Spark reported them, the last 30 minutes behind each. */
 function Traces({
@@ -53,31 +52,19 @@ function Traces({
             : "digits" in reading
               ? value.toFixed(reading.digits)
               : String(halfUp(value));
-        const fixed = "fixedRange" in reading;
         return (
-          <div className="spark-trace" key={reading.title}>
-            <div className="spark-trace-head">
-              <span>{reading.title}</span>
-              <span className="spark-trace-value">
-                {shown === null ? (
-                  NOT_REPORTED
-                ) : (
-                  <>
-                    {shown} <small>{reading.unit}</small>
-                  </>
-                )}
-              </span>
-            </div>
-            <Sparkline
-              points={points.map((point) => ({ t: point.t, v: reading.past(point) }))}
-              start={end - HISTORY_SECONDS}
-              end={end}
-              min={fixed ? 0 : undefined}
-              max={fixed ? 100 : undefined}
-              color={color}
-              label={`${name} ${reading.title}, last 30 minutes`}
-            />
-          </div>
+          <TraceTile
+            key={reading.title}
+            title={reading.title}
+            shown={shown}
+            unit={reading.unit}
+            points={points.map((point) => ({ t: point.t, v: reading.past(point) }))}
+            start={end - HISTORY_SECONDS}
+            end={end}
+            color={color}
+            label={`${name} ${reading.title}, last 30 minutes`}
+            fixed={"fixedRange" in reading}
+          />
         );
       })}
     </div>
@@ -128,7 +115,9 @@ export function SparkCard({
           </a>
         </h3>
         {rank !== undefined && <span className="spark-rank">rank {rank}</span>}
-        <span className="spark-uptime">{uptime ? `up ${uptime}` : `Uptime: ${NOT_REPORTED}`}</span>
+        <span className="spark-uptime">
+          {uptime ? `up ${uptime}` : `Uptime: ${NOT_REPORTED_TEXT}`}
+        </span>
       </header>
       <p className="spark-sub">
         <StatusPill tone={nodeStatusTone(status)}>{status}</StatusPill>

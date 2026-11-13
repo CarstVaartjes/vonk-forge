@@ -7,6 +7,7 @@ import { HealthList } from "./health-list";
 import { SparkCharts } from "./spark-charts";
 import { SparkGpuNow } from "./spark-gpu-now";
 import { SparkMemory } from "./spark-memory";
+import { SensorStrip } from "./sensor-strip";
 import { SparkServing } from "./spark-serving";
 import { SparkStorage } from "./spark-storage";
 import { StatusPill } from "./status-pill";
@@ -43,6 +44,7 @@ export function SparkOverview({
         <SparkGpuNow node={node} points={points} now={now} color={color} />
       </div>
       <SparkCharts api={api} nodeId={node.id} range={range} color={color} />
+      <SensorStrip node={node} points={points} now={now} color={color} />
       <div className="spark-cards">
         <SparkServing node={node} nodes={nodes} onNavigate={onNavigate} />
         <SparkStorage node={node} />

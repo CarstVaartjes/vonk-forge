@@ -27,3 +27,7 @@
 .spark-models{display:grid;gap:.1rem;margin:1rem 0 0;padding:0;list-style:none}.spark-models li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:.25rem 1rem;padding:.5rem 0;border-top:1px solid var(--line)}.spark-models li span:last-child{color:var(--muted)}
 .health-list{display:grid;margin:0;padding:0;list-style:none}.health-list li{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:.25rem 1rem;padding:.5rem 0;border-top:1px solid var(--line)}.health-list li:first-child{border-top:0}.health-list li>span{color:var(--muted);font-size:.8125rem}
 .spark-panel-card a{color:var(--green-text)}
+.spark-sensors{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.625rem}
+@media(max-width:60rem){.spark-sensors{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:34rem){.spark-sensors{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.spark-strip{margin-bottom:1rem}
