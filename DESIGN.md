@@ -2,61 +2,72 @@
 name: Vonk Forge Control
 description: A precision Spark workcell for inspecting live and desired local AI state.
 colors:
-  surface-base: "#090c09"
-  surface-sidebar: "#0d120d"
-  surface-panel: "#111912"
-  surface-raised: "#19231a"
-  surface-recessed: "#07110e"
-  border: "#3b4336"
-  border-strong: "#5f6854"
-  text: "#f0f3eb"
-  text-muted: "#abb5a7"
-  text-subtle: "#8d9988"
-  mint: "#7cc64b"
-  mint-strong: "#a9ec7a"
-  mint-ink: "#0b1907"
-  titanium: "#c8b996"
-  titanium-muted: "#92866d"
-  focus: "#c3f89d"
-  warning: "#f4c66b"
-  danger: "#ff919d"
-  info: "#94cfff"
+  bg: "#090a09"
+  recess: "#060706"
+  panel: "#121412"
+  panel-2: "#0f110f"
+  raised: "#1a1d19"
+  hover: "#20231e"
+  line: "#262924"
+  line-strong: "#3a3e36"
+  line-control: "#666b5f"
+  ink: "#f2efe8"
+  muted: "#aaa396"
+  faint: "#958e80"
+  green: "#76b900"
+  green-text: "#a3d93a"
+  green-ink: "#0b0d08"
+  gold: "#d9b56f"
+  gold-text: "#d9b56f"
+  ok: "#a3d93a"
+  warn: "#ffb347"
+  bad: "#ff7a6b"
+  info: "#8fc4ff"
+  model-ink: "#f2efe8"
+  mem-system: "#7f7a6e"
+  track: "#2a2e27"
+  series-1: "#6aa82e"
+  series-2: "#4a8ae6"
+  series-3: "#c4862c"
+  series-4: "#c765ac"
+  neutral-series: "#8d877a"
+  grid: "#23261f"
+  axis: "#958e80"
 typography:
   display:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "clamp(1.55rem, 3vw, 2.2rem)"
     fontWeight: 700
     lineHeight: 1
     letterSpacing: "-0.04em"
   headline:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "1.15rem"
     fontWeight: 760
     lineHeight: 1.15
     letterSpacing: "-0.035em"
   title:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "1rem"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "normal"
   body:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-    fontSize: "0.8rem"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.45
+    lineHeight: 1.5
     letterSpacing: "normal"
   label:
-    fontFamily: "ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Onest Variable, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
     fontSize: "0.7rem"
     fontWeight: 800
     lineHeight: 1.2
     letterSpacing: "0.08em"
 rounded:
-  control: "0.45rem"
-  item: "0.65rem"
-  fixture: "0.85rem"
-  panel: "1rem"
+  card: "1rem"
+  inner: "0.625rem"
+  control: "0.5rem"
   pill: "999px"
 spacing:
   compact: "0.35rem"
@@ -66,34 +77,34 @@ spacing:
   shell: "1.25rem"
 components:
   button-primary:
-    backgroundColor: "{colors.mint}"
-    textColor: "{colors.mint-ink}"
+    backgroundColor: "{colors.green}"
+    textColor: "{colors.green-ink}"
     rounded: "{rounded.control}"
     padding: "0.7rem 1rem"
   button-secondary:
     backgroundColor: "transparent"
-    textColor: "{colors.text}"
+    textColor: "{colors.ink}"
     rounded: "{rounded.control}"
     padding: "0.7rem 1rem"
   search-input:
-    backgroundColor: "{colors.surface-recessed}"
-    textColor: "{colors.text}"
+    backgroundColor: "{colors.recess}"
+    textColor: "{colors.ink}"
     rounded: "{rounded.control}"
     padding: "0.7rem"
   nav-link-active:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.mint-strong}"
-    rounded: "{rounded.item}"
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.green-text}"
+    rounded: "{rounded.inner}"
     padding: "0.65rem 0.75rem"
   status-pill-healthy:
-    backgroundColor: "{colors.surface-raised}"
-    textColor: "{colors.mint-strong}"
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.green-text}"
     rounded: "{rounded.pill}"
     padding: "0.25rem 0.55rem"
   spark-workcell:
-    backgroundColor: "{colors.surface-panel}"
-    textColor: "{colors.text}"
-    rounded: "{rounded.panel}"
+    backgroundColor: "{colors.panel}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.card}"
     padding: "1rem"
 ---
 
@@ -215,8 +226,8 @@ Controls use gently machined corners, repeated fixtures use medium curves, and c
 
 ### Chips
 
-- **Style:** Compact pill with tinted background, matching border, bold state text, and a textual label.
-- **State:** Healthy is green, attention is amber, proven failure is red, and informational/installed is blue. Never rely on the tint alone.
+- **Style:** Status is a small shape and the word, never a filled pill: filled circle with a soft ring is ok (green), diamond is warning (amber), square is failure (red), triangle is information (blue), hollow circle is neutral or unknown. Tones are named `ok`, `warn`, `bad`, `info`, `neutral`.
+- **State:** The word always repeats the meaning; the shape and colour never carry it alone.
 
 ### Cards / Containers
 

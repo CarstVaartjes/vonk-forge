@@ -1,5 +1,4 @@
 import type { VisualFleetNode, VisualFleetSnapshot } from "../api/types";
-import { ProfileReasonSeverity } from "../api/vocabulary.generated";
 import { attentionText } from "../lib/fleet";
 import { StatusPill } from "./status-pill";
 
@@ -14,10 +13,8 @@ export function AttentionItem({
   const { severity, text } = attentionText(alert, nodes);
   return (
     <li>
-      <StatusPill tone={alert.severity === "critical" ? "danger" : ProfileReasonSeverity.WARNING}>
-        {severity}
-      </StatusPill>
-      : {text}
+      <StatusPill tone={alert.severity === "critical" ? "bad" : "warn"}>{severity}</StatusPill>:{" "}
+      {text}
     </li>
   );
 }

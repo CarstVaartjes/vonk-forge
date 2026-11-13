@@ -7,10 +7,10 @@ import { StatusPill } from "./status-pill";
 import type { StatusTone } from "./status-pill";
 
 const TONE: Record<CatalogSyncStatus["state"], StatusTone> = {
-  current: "healthy",
+  current: "ok",
   syncing: "info",
-  partial: "warning",
-  failed: "danger",
+  partial: "warn",
+  failed: "bad",
 };
 
 /** Read-only: the Controller syncs the recipe library itself; this only reports the last sync. */

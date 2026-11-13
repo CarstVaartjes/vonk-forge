@@ -167,10 +167,10 @@ export function SparkDetail({
                       <StatusPill
                         tone={
                           status.status === "online"
-                            ? "healthy"
+                            ? "ok"
                             : status.status === "offline"
-                              ? "danger"
-                              : ProfileReasonSeverity.WARNING
+                              ? "bad"
+                              : "warn"
                         }
                       >
                         {status.status}
@@ -207,9 +207,7 @@ export function SparkDetail({
                         {cpu.lowClock && (
                           <>
                             {" "}
-                            <StatusPill tone={ProfileReasonSeverity.WARNING}>
-                              low under load
-                            </StatusPill>
+                            <StatusPill tone="warn">low under load</StatusPill>
                           </>
                         )}
                       </dd>
@@ -270,7 +268,7 @@ export function SparkDetail({
                   <ul className="spark-warnings" aria-label="Needs attention">
                     {status.reasons.map((reason, index) => (
                       <li key={index}>
-                        <StatusPill tone={ProfileReasonSeverity.WARNING}>
+                        <StatusPill tone="warn">
                           {status.status === "offline" ? "offline" : "attention"}
                         </StatusPill>{" "}
                         {reason}
@@ -293,10 +291,8 @@ export function SparkDetail({
                       .filter((item) => item.complete === false)
                       .map((item) => (
                         <li key={item.installation_id}>
-                          <StatusPill tone={ProfileReasonSeverity.WARNING}>
-                            {item.group_state}
-                          </StatusPill>{" "}
-                          {item.title} · {item.present_ranks?.length ?? OutcomeKind.UNKNOWN} of{" "}
+                          <StatusPill tone="warn">{item.group_state}</StatusPill> {item.title} ·{" "}
+                          {item.present_ranks?.length ?? OutcomeKind.UNKNOWN} of{" "}
                           {item.expected_rank_count ?? OutcomeKind.UNKNOWN} ranks{" "}
                           <InstallationReconcile api={api} installationId={item.installation_id} />
                         </li>
@@ -397,9 +393,9 @@ export function SparkDetail({
                           <StatusPill
                             tone={
                               entry.level === ProfileReasonSeverity.ERROR
-                                ? "danger"
+                                ? "bad"
                                 : entry.level === ProfileReasonSeverity.WARNING
-                                  ? ProfileReasonSeverity.WARNING
+                                  ? "warn"
                                   : "neutral"
                             }
                           >
