@@ -3735,6 +3735,41 @@ def test_a_result_refused_on_every_delivery_is_shown_until_one_is_accepted(
     assert shown() == ()
 
 
+def test_old_repeated_command_failures_are_not_shown(agent_system) -> None:
+    """Catches weeks-old command failures staying on the fleet attention list."""
+
+    from vonk_control.evidence_repeats import note_repeat, repeating_evidence
+    from vonk_control.recovery_policy import RECOVERY
+
+    _, services, _, clock = agent_system
+    operation = services.operations.enqueue(
+        parent(services.sessions, clock).id,
+        NODE_A,
+        "recipe.stop",
+        "a" * 64,
+        STOP_PAYLOAD,
+    )
+    with services.sessions.begin() as session:
+        for _ in range(RECOVERY.max_failures):
+            note_repeat(
+                session,
+                operation.kind,
+                NODE_A,
+                "stop_failed",
+                now=clock.now,
+                operation=operation,
+            )
+
+    def shown(later: timedelta = timedelta()) -> tuple[str, ...]:
+        with services.sessions() as session:
+            return repeating_evidence(session, [NODE_A], clock.now + later).get(
+                NODE_A, ()
+            )
+
+    assert len(shown()) == 1
+    assert shown(timedelta(days=14)) == ()
+
+
 @pytest.mark.parametrize(
     ("failure", "expected_status"),
     (

@@ -366,7 +366,12 @@ def repeating_evidence(
                     event.detail,
                     event.observation_sequence,
                 )
-    summaries.extend(grouped.values())
+    # Command history ages out of what is shown like the application records above.
+    summaries.extend(
+        item
+        for item in grouped.values()
+        if _utc(item.last_at) >= _utc(now) - _SHOWN_FOR
+    )
     shown = _upgrade_identity_waits(session, node_ids)
     for node_id, subject in sorted(unreadable):
         shown.setdefault(node_id, []).append(
