@@ -622,13 +622,7 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
                 notes.append(f"{title}: {_text(member.get('projection_issue'))}")
                 break
             if member.get("degraded_reason") is not None:
-                reason = member["degraded_reason"]
-                detail = (
-                    reason.get("detail") or reason.get("code")
-                    if isinstance(reason, Mapping)
-                    else reason
-                )
-                note = f"{title}: {_text(detail)}"
+                note = f"{title}: {_text(member['degraded_reason'])}"
                 if first.get("route_reason") is not None:
                     note += f" ({_text(first.get('route_reason'))})"
                 notes.append(note)

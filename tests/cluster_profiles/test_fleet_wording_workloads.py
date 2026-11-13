@@ -63,6 +63,12 @@ def _notes(capsys, **run):
 
 
 def test_workload_notes_follow_the_controller_verdict(capsys):
-    assert "job:" not in _notes(capsys, healthy=True)
-    degraded = {"healthy": False, "degraded_reason": {"code": "RANK_STALE"}}
-    assert "job: RANK_STALE" in _notes(capsys, **degraded)
+    healthy_job = _notes(capsys, healthy=True)
+    assert "route is" not in healthy_job and "stale rank" not in healthy_job
+    degraded = {
+        "healthy": False,
+        "group_state": "degraded",
+        "degraded_reason": "rank-stale",
+        "route_reason": "x",
+    }
+    assert "job: rank-stale (x)" in _notes(capsys, **degraded)
