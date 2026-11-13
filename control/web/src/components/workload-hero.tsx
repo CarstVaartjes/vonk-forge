@@ -44,14 +44,13 @@ export function WorkloadHero({
   reads: WorkloadReads;
   live: boolean;
 }) {
-  const hero = leadReading([reads.decode, reads.tokens, reads.requests], unit.alias);
+  const { reading: hero, pending } = leadReading(reads, unit.alias);
   const spec = hero?.data.spec;
   const latest = hero?.series.summary.latest;
   const symbol = spec ? UNITS[spec.unit].symbol : "";
   const value = latest == null ? null : Number(latest);
   const queue = queueText(reads.running, reads.waiting, unit.alias);
   // While the speed reads are out nothing is claimed; once they are in, no latest value is Not reported.
-  const pending = !hero && [reads.decode, reads.tokens, reads.requests].includes(undefined);
   return (
     <div className="workload-hero">
       <WorkloadHeader unit={unit} />

@@ -144,14 +144,15 @@ def _gateway(
     *,
     total: bool = False,
     fleet: bool = False,
+    basis: Literal["measured", "estimated"] = "estimated",
 ) -> MetricSpec:
-    """A per-model figure from the gateway's counters: always an estimate of the engine's work."""
+    """A per-model figure from the gateway: estimated (percentiles, derived speed) unless it is a count."""
     return MetricSpec(
         metric=metric,
         title=title,
         unit=unit,
         scope=MetricScope.ALIAS,
-        basis="estimated",
+        basis=basis,
         source="gateway",
         summary_total=total,
         fleet_sum=fleet,
@@ -162,6 +163,7 @@ def _gateway(
 _ENGINE_COVERAGE = (
     "Only engines whose metric names are verified report; others show Not reported."
 )
+_COUNTED_HINT = "Counted at the gateway from each request's usage; a Spark shows the models it serves."
 _TTFT_HINT = "Streaming requests only, seen at the gateway: includes network and queue. Histogram buckets are coarse, so it moves in steps."
 _LATENCY_HINT = "Whole request as the gateway saw it, queue included. Histogram buckets are coarse, so it moves in steps."
 
@@ -242,38 +244,40 @@ METRIC_SPECS: dict[Metric, MetricSpec] = {
             title="Requests per model",
             unit="per_second",
             scope=MetricScope.ALIAS,
-            basis="estimated",
+            basis="measured",
             source="gateway",
             summary_total=True,
             fleet_sum=True,
-            hint="Counted by the gateway; a Spark shows the models it serves.",
+            hint=_COUNTED_HINT,
         ),
         MetricSpec(
             metric="output_token_rate",
             title="Generated tokens per model",
             unit="tokens_per_second",
             scope=MetricScope.ALIAS,
-            basis="estimated",
+            basis="measured",
             source="gateway",
             summary_total=True,
             fleet_sum=True,
-            hint="Counted by the gateway; a Spark shows the models it serves.",
+            hint=_COUNTED_HINT,
         ),
         _gateway(
             "input_token_rate",
             "Prompt tokens per model",
             "tokens_per_second",
-            "Counted by the gateway; a Spark shows the models it serves.",
+            _COUNTED_HINT,
             total=True,
             fleet=True,
+            basis="measured",
         ),
         _gateway(
             "error_rate",
             "Failed requests per model",
             "per_second",
-            "Requests the gateway answered with an error, retries included.",
+            "Counted at the gateway: requests answered with an error, retries included.",
             total=True,
             fleet=True,
+            basis="measured",
         ),
         _gateway(
             "gateway_ttft_p50",

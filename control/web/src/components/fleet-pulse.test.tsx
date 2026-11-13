@@ -35,10 +35,10 @@ const tokens = {
     metric: "output_token_rate",
     title: "Generated tokens per model",
     unit: "tokens_per_second",
-    basis: "estimated",
+    basis: "measured",
   },
   series: [
-    { labels: {}, points: [], summary: { total: 1_840_000 } },
+    { labels: {}, points: [], summary: { latest: 41.2, total: 1_840_000 } },
     { labels: { alias: "coder" }, points: [], summary: { total: 1_000_000 } },
     { labels: { alias: "fast" }, points: [], summary: { total: 840_000 } },
   ],
@@ -57,15 +57,12 @@ const fleetSeries = (spec: Record<string, unknown>, line: Record<string, unknown
     ],
   }) as unknown as MetricsSeriesResponse;
 const power = fleetSeries({ basis: "measured", unit: "watts" }, { latest: 77 });
-const decode = fleetSeries({ basis: "measured", unit: "tokens_per_second" }, { latest: 41.2 });
 const energy = fleetSeries({ basis: "estimated", unit: "watt_hours" }, { latest: 77, total: 1500 });
-const none = { decode: null, power: null, energy: null };
+const none = { power: null, energy: null };
 const tile = (name: string) => screen.getByRole("region", { name });
 
 test("the band shows the Controller's fleet lines and totals and sums only the memory samples", () => {
-  render(
-    <FleetPulse decode={decode} power={power} energy={energy} tokens={tokens} nodes={fleet} />,
-  );
+  render(<FleetPulse power={power} energy={energy} tokens={tokens} nodes={fleet} />);
   expect(tile("GPU power")).toHaveTextContent("77.0W2 Sparks");
   expect(tile("Unified memory")).toHaveTextContent("212.0GiB of 240.0 GiB198.0 GiB in models");
   expect(
@@ -75,7 +72,7 @@ test("the band shows the Controller's fleet lines and totals and sums only the m
     "Models 198.0 GiB, System 14.0 GiB, Free 28.0 GiB of 240.0 GiB",
   );
   expect(within(tile("Tokens, 24 h")).getByText("1.84")).toBeInTheDocument();
-  expect(tile("Tokens, 24 h")).toHaveTextContent("≈1.84M generated");
+  expect(tile("Tokens, 24 h")).toHaveTextContent("1.84M generated");
   expect(tile("Output now")).toHaveTextContent("41.2tok/s");
   expect(tile("GPU energy, 24 h")).toHaveTextContent("≈1.50 kWh");
 });

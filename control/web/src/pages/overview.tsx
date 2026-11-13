@@ -166,13 +166,7 @@ export function OverviewPage({
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && nodes.length > 0 && (
-        <FleetPulse
-          decode={reads.decode}
-          power={power}
-          tokens={tokens}
-          energy={energy}
-          nodes={nodes}
-        />
+        <FleetPulse power={power} tokens={tokens} energy={energy} nodes={nodes} />
       )}
       {fleet.snapshot?.nodes.length === 0 && (
         <EmptyState
