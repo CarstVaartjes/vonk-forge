@@ -1,24 +1,11 @@
 import { MetricsChart } from "../components/metrics-chart";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { ControlApi, EnrollmentGrantResponse, VisualFleetNode } from "../api/types";
+import { useEffect, useState, type FormEvent } from "react";
+import type { ControlApi, EnrollmentGrantResponse } from "../api/types";
 import { useFleetStream } from "../hooks/use-fleet-stream";
 import { type LiveStatus, liveStatus, staleWord } from "../hooks/fleet-stream-state";
-import {
-  fleetStatusLine,
-  nodeDiskFreeBytes,
-  nodeDisplayName,
-  nodeMemory,
-  nodeRecipeUpdates,
-  nodeSecondaryName,
-  nodeStatus,
-  nodeStatusTone,
-  nodeVitals,
-  nodeWorkloadLines,
-  type NodeStatus,
-} from "../lib/fleet";
-import { Meter } from "../components/meter";
+import { fleetStatusLine, nodeDisplayName } from "../lib/fleet";
+import { SparksTable } from "../components/sparks-table";
 import { AttentionItem } from "../components/attention-item";
-import { SortHeader, useSort } from "../components/sort-header";
 import { StatusPill } from "../components/status-pill";
 import { ConfirmDialog } from "../components/confirm-dialog";
 import { EmptyState } from "../components/empty-state";
@@ -30,9 +17,6 @@ import { ServingNow, servingKey } from "../components/serving-now";
 import { SparkDetail } from "../components/spark-detail";
 import { ObservationNotice } from "../components/observation-notice";
 import { safeErrorText } from "../lib/error-display";
-
-// Problems first when sorted ascending.
-const STATUS_RANK: Record<NodeStatus, number> = { offline: 0, "needs attention": 1, online: 2 };
 
 function selectedSpark(): string | null {
   return new URLSearchParams(location.search).get("spark");
@@ -50,7 +34,6 @@ export function FleetPage({
   const live = liveStatus(fleet);
   useEffect(() => onLive?.(live), [onLive, live]);
   useEffect(() => () => onLive?.(null), [onLive]);
-  const [query, setQuery] = useState("");
   const [enrolling, setEnrolling] = useState(false);
   const [sparkName, setSparkName] = useState("");
   const [grant, setGrant] = useState<EnrollmentGrantResponse | null>(null);
@@ -87,28 +70,6 @@ export function FleetPage({
       setUpgrading(false);
     }
   }
-  const visibleNodes = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    return (fleet.snapshot?.nodes ?? []).filter(
-      (node) =>
-        !needle ||
-        `${nodeDisplayName(node)} ${nodeSecondaryName(node) ?? ""}`
-          .toLocaleLowerCase()
-          .includes(needle),
-    );
-  }, [fleet.snapshot?.nodes, query]);
-
-  const { sorted, sort, toggle } = useSort<VisualFleetNode, "name" | "status" | "memory" | "disk">(
-    visibleNodes,
-    { key: "name", descending: false },
-    {
-      name: (node) => nodeDisplayName(node).toLocaleLowerCase(),
-      status: (node) => STATUS_RANK[nodeStatus(node, fleet.now).status],
-      memory: (node) => nodeMemory(node)?.usedPercent ?? null,
-      disk: (node) => nodeDiskFreeBytes(node),
-    },
-  );
-
   async function createGrant(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const name = sparkName.trim();
@@ -243,20 +204,12 @@ export function FleetPage({
         <p className="fleet-status-line">{fleetStatusLine(fleet.snapshot, fleet.now)}</p>
       )}
       {fleet.snapshot && fleet.snapshot.nodes.length > 0 && (
-        <section className="fleet-discovery" aria-label="Find a Spark">
-          <label className="fleet-search">
-            <span>Find a Spark</span>
-            <input
-              type="search"
-              value={query}
-              placeholder="Friendly name or technical name"
-              onChange={(event) => setQuery(event.currentTarget.value)}
-            />
-          </label>
-          <span role="status">
-            Showing {visibleNodes.length} of {fleet.snapshot.nodes.length}
-          </span>
-        </section>
+        <SparksTable
+          nodes={fleet.snapshot.nodes}
+          now={fleet.now}
+          selected={spark}
+          onSelect={selectSpark}
+        />
       )}
       {fleet.loading && !fleet.snapshot && !fleet.error && (
         <SkeletonRows columns={6} label="Loading Fleet" />
@@ -276,91 +229,6 @@ export function FleetPage({
           description="A Spark is a machine that runs models for your fleet."
           action={{ label: "Enroll a Spark", onClick: () => setEnrolling(true) }}
         />
-      )}
-      {fleet.snapshot && fleet.snapshot.nodes.length > 0 && visibleNodes.length === 0 && (
-        <EmptyState title="No Sparks" description="" filtered onClearFilters={() => setQuery("")} />
-      )}
-      {visibleNodes.length > 0 && (
-        <section className="fleet-compact" aria-label="Fleet table">
-          <div className="fleet-table-scroll">
-            <table>
-              <caption className="sr-only">Fleet health, capacity, and workloads</caption>
-              <thead>
-                <tr>
-                  <SortHeader column="name" label="Spark" sort={sort} onSort={toggle} />
-                  <SortHeader column="status" label="Status" sort={sort} onSort={toggle} />
-                  <SortHeader column="memory" label="Memory used" sort={sort} onSort={toggle} />
-                  <SortHeader column="disk" label="Disk free" sort={sort} onSort={toggle} />
-                  <th scope="col">GPU</th>
-                  <th scope="col">Serving</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((node) => {
-                  const { status, reasons } = nodeStatus(node, fleet.now);
-                  const name = nodeDisplayName(node);
-                  const vitals = nodeVitals(node);
-                  const workloads = nodeWorkloadLines(node, fleet.snapshot?.nodes ?? []);
-                  return (
-                    <tr key={node.id}>
-                      <th scope="row">
-                        <a
-                          href={`?spark=${encodeURIComponent(node.id)}`}
-                          aria-current={spark === node.id ? "true" : undefined}
-                          onClick={(event) => {
-                            event.preventDefault();
-                            selectSpark(node.id);
-                          }}
-                        >
-                          <strong>{name}</strong>
-                        </a>
-                        {nodeSecondaryName(node) && <small>{nodeSecondaryName(node)}</small>}
-                      </th>
-                      <td data-label="Status">
-                        <StatusPill tone={nodeStatusTone(status)}>{status}</StatusPill>
-                        {reasons.length > 0 && (
-                          <small title={reasons.join("\n")}>
-                            {reasons[0]}
-                            {reasons.length > 1 ? ` +${reasons.length - 1} more` : ""}
-                          </small>
-                        )}
-                      </td>
-                      <td data-label="Memory used">
-                        <Meter label={`${name} memory used`} vital={vitals.memory} />
-                      </td>
-                      <td data-label="Disk free">
-                        <Meter label={`${name} disk free`} vital={vitals.disk} />
-                      </td>
-                      <td data-label="GPU">
-                        <Meter label={`${name} GPU utilisation`} vital={vitals.gpu} />
-                      </td>
-                      <td data-label="Serving">
-                        {workloads.length === 0 ? (
-                          <strong>Idle</strong>
-                        ) : (
-                          workloads.map((line) => <strong key={line}>{line}</strong>)
-                        )}
-                        <small>
-                          {node.installed.filter((item) => item.complete === true).length}
-                          {node.installed.some((item) => item.complete == null) ? " confirmed" : ""}{" "}
-                          installed
-                        </small>
-                        {node.installed.some((item) => item.complete == null) && (
-                          <small>Some installation state is unknown</small>
-                        )}
-                        {nodeRecipeUpdates(node).length > 0 && (
-                          <small>
-                            <StatusPill tone="info">update available</StatusPill>
-                          </small>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
       )}
       <MetricsChart
         api={api}
