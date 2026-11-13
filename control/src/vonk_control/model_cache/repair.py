@@ -92,13 +92,10 @@ class RepairMixin:
     ) -> CacheOperationView:
         cache = cast("ModelCacheService", self)
         digest = _optional_digest(artifact_set_sha256)
-        requested_plan = _optional_digest(plan_digest)
-        assert digest is not None and requested_plan is not None
-        preview = cache.repair_preview(digest)
-        if preview["plan_digest"] != requested_plan:
-            raise ModelCacheConflictInvalid(
-                ModelCacheCode.STALE_PLAN, "repair preview is stale"
-            )
+        assert digest is not None and _optional_digest(plan_digest) is not None
+        # The request is declarative: a preview that moved on since the
+        # caller's is re-planned (the operation records the current plan).
+        requested_plan = str(cache.repair_preview(digest)["plan_digest"])
         request_key = _request_key(request_key)
         with cache._session() as session:
             existing = session.scalar(
