@@ -33,18 +33,34 @@ for the current contract in place and records when its recipes last changed
 optional field) is published as a new minor release (for example `v2.3.0`); a breaking one
 as a new major release (`v3.0.0`) that needs a coordinated vonk-forge release.
 
-The Controller reads published documents tolerantly, ignoring fields a newer
-minor release added, and identifies each document by the `document_sha256` of
-its published JSON as recorded in the signed index. A document it still cannot
-read is skipped, listed under the sync-status `problems`, and the rest applies.
+The Controller reads the signed index only through the contract's one reader,
+`vonk_forge_contracts.catalog_reader.read_catalog`, which verifies each entry's
+`content_sha256` against its published JSON once, at ingress. An unknown value
+never breaks the catalog; only integrity edges refuse it:
 
-The index envelope (`kind`, `schema_version`, `contract_version`, `updated_at`,
-`repository`, `source_commit`, `package_contract` and `vocabulary`) is read
-through the contract's `read_catalog_index`, with the entries emptied: the
-envelope is all or nothing, while each Model and recipe entry is still read on
-its own, so one entry this Controller cannot parse never rejects the library.
-A wrong `kind`, `schema_version` or `contract_version` is `recipe_package.schema_incompatible`;
-any other envelope fault is `recipe_package.response_invalid`.
+- The envelope (`kind`, `schema_version`, `contract_version`, `updated_at`,
+  `repository`, `source_commit`, `package_contract` and `vocabulary`) is all or
+  nothing. Another `kind`, `schema_version` or contract major is
+  `recipe_package.schema_incompatible`; any other envelope fault is
+  `recipe_package.response_invalid`. A document that differs from its digest is
+  `recipe_package.digest_mismatch`. Each refuses the whole index.
+- An entry whose document, package, digests or source path this release cannot
+  read is skipped. It is listed under the sync-status `problems`
+  (`recipe_package.document_incompatible`, `index recipes entry <name> is
+  skipped: <field> is <reason>`), counts in `skipped_count`, makes the sync
+  partial and pauses retraction; the rest applies.
+- An unreadable optional block (display, API facts, qualification, prebuilt
+  image, measured memory) is dropped and the entry applies without it: a recipe
+  without its image builds from source, without API facts publishes no
+  `model_info`, and a display already stored stays shown. One note per block and
+  reason is listed under `problems` (`index recipes prebuilt_image dropped for
+  N entries (...)`); a note neither counts as skipped nor makes the sync
+  partial.
+- A word a newer minor added (a capability, status or API format) is kept by
+  the reader, but the Controller withholds the block that carries it, so no
+  unknown word is stored or served, and lists one note per word (`index catalog_entities
+  display.capabilities word '<word>' is unknown to this Controller; display
+  withheld for N entries (...)`). A Controller on the newer contract applies it.
 
 ## Development versus production
 

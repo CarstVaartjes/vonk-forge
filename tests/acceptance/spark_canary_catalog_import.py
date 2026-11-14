@@ -19,6 +19,7 @@ catalog sync view.
 from __future__ import annotations
 
 import base64
+import copy
 import dataclasses
 import hashlib
 import json
@@ -27,7 +28,7 @@ import sys
 import tempfile
 import time
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from vonk_agent_protocol import CatalogSyncCode
@@ -92,11 +93,29 @@ class FixtureReader:
         # The release reader's index parser is the only one the previous
         # release ships. Its client does no I/O until asked to list a release;
         # a private cache root keeps it away from the Controller's own cache.
+        # The producer fixture predates the release entry shape. Read it as a
+        # release publishes it: each package as ``packages/<asset>``, and the
+        # API facts (none) and qualification (not yet verified) every release
+        # entry carries.
+        released = copy.deepcopy(index)
+        for entry in released["recipes"]:
+            package = entry.get("package")
+            if isinstance(package, dict) and isinstance(package.get("path"), str):
+                package["path"] = f"packages/{PurePosixPath(package['path']).name}"
+            entry.setdefault("api", None)
+            topology = entry.get("document", {}).get("topology", {})
+            entry.setdefault(
+                "qualification",
+                {
+                    "status": "Not yet verified",
+                    "required_sparks": topology.get("node_count", 1),
+                },
+            )
         with tempfile.TemporaryDirectory() as cache_root:
             client = RecipePackageClient(cache_root=Path(cache_root))
             try:
                 snapshot, _packages = client._parse_index(
-                    json.dumps(index).encode("utf-8"),
+                    json.dumps(released).encode("utf-8"),
                     publication_commit=str(index["source_commit"]),
                 )
             finally:

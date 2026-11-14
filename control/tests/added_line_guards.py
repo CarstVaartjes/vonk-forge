@@ -756,7 +756,6 @@ def _enum_member_lines(source: str) -> set[int]:
 REHASH_INGRESS = (
     "control/src/vonk_control/catalog_entities.py",
     "control/src/vonk_control/catalog_service.py",
-    "control/src/vonk_control/catalog_sync.py",
     "control/src/vonk_control/recipe_packages/",
     "control/src/vonk_control/inventory_repository.py",
     "control/src/vonk_control/telemetry.py",
@@ -1767,10 +1766,7 @@ def check_source(
             )
         if "identity" in modes:
             ingress = path.startswith(
-                (
-                    "control/src/vonk_control/catalog_sync.py",
-                    "control/src/vonk_control/recipe_packages/",
-                )
+                "control/src/vonk_control/recipe_packages/"
             ) or path in {
                 "control/src/vonk_control/catalog_entities.py",
                 "control/src/vonk_control/catalog_service.py",

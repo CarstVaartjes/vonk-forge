@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
-from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay, document_sha256
+from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capabilities import CapabilityUnavailableError
@@ -605,8 +605,9 @@ class ManagedRecipeCatalogSyncService:
             ):
                 return False
         with self._sessions() as session:
-            for entry in snapshot.catalog_entities:
-                digest = document_sha256(entry.document)
+            for model in snapshot.catalog_entities:
+                # The catalog reader verified this digest at ingress.
+                digest = model.entry.content_sha256
                 row = session.scalar(
                     select(CatalogDocumentRevision)
                     .join(
@@ -714,9 +715,9 @@ class ManagedRecipeCatalogSyncService:
         # Catalog index entries are independent immutable documents. Import each
         # in its own transaction so one malformed model cannot hold up recipes
         # and models that are otherwise ready to apply.
-        for model_entry in snapshot.catalog_entities:
+        for model in snapshot.catalog_entities:
             try:
-                self._catalog.import_catalog_models(actor, [model_entry.document])
+                self._catalog.import_catalog_models(actor, [model.published])
             except Exception as error:  # noqa: BLE001 - isolate document failures; cancellation still propagates
                 self._record_problem_values(
                     result,
@@ -828,11 +829,11 @@ class ManagedRecipeCatalogSyncService:
         recipe_uris = {(item.publisher, item.slug): item.uri for item in snapshot.items}
         for display, error in self._catalog.apply_displays(
             [
-                entry.display
-                for entry in snapshot.catalog_entities
-                if entry.display is not None
+                model.entry.display
+                for model in snapshot.catalog_entities
+                if model.entry.display is not None
             ]
-            + [item.display for item in snapshot.items]
+            + [item.display for item in snapshot.items if item.display is not None]
         ):
             self._record_problem_values(
                 result,
@@ -860,10 +861,10 @@ class ManagedRecipeCatalogSyncService:
                 + [
                     (
                         RunSwitchReasonScopeName.MODEL,
-                        entry.identity.publisher,
-                        entry.identity.slug,
+                        model.entry.document.identity.publisher,
+                        model.entry.document.identity.slug,
                     )
-                    for entry in snapshot.catalog_entities
+                    for model in snapshot.catalog_entities
                 ]
             )
             for revision in retracted:

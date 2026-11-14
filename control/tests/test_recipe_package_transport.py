@@ -8,13 +8,14 @@ import os
 import tarfile
 import uuid
 from copy import deepcopy
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx2
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncState,
     RecipeBuildCode,
@@ -25,6 +26,7 @@ from vonk_agent_protocol import (
 from vonk_control import recipe_packages
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
+from vonk_control.catalog_revision_contract import read_recipe_projection
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog_sync_contract import (
@@ -35,7 +37,12 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import CatalogDocumentRevision, RecipeBuild
+from vonk_control.models import (
+    Base,
+    CatalogDocument,
+    CatalogDocumentRevision,
+    RecipeBuild,
+)
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
@@ -44,12 +51,11 @@ from vonk_control.recipe_packages import (
 )
 from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
 from vonk_control.recipe_release import RecipeReleaseError
-from vonk_control.source_bundles import generate_source_bundle
+from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import (
     PACKAGE_MEDIA_TYPE,
     ModelDefinition,
     RecipeDefinition,
-    RecipeDisplay,
     document_sha256,
     published_json,
 )
@@ -279,6 +285,9 @@ def _canonical_package_fixture(
             "media_type": PACKAGE_MEDIA_TYPE,
             "minimum_consumer_schema": 2,
         },
+        "release": recipe_document["release"],
+        "api": None,
+        "qualification": {"status": "Not yet verified", "required_sparks": 1},
     }
     index = index_envelope(
         catalog_entities=[
@@ -602,14 +611,90 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     """Principle 1: the envelope is read through the contract, the entries one by one."""
     index, _, package = _canonical_package_fixture()
     document = json.loads(index)
-    document["catalog_entities"][0]["document"] = {"kind": "from-a-newer-contract"}
+    newer = {"kind": "from-a-newer-contract"}
+    document["catalog_entities"][0]["document"] = newer
+    document["catalog_entities"][0]["content_sha256"] = document_sha256(newer)
     release = _release_for(_canonical(document) + b"\n", package)
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
         [problem] = snapshot.problems
-        assert problem.detail.startswith("catalog model document is invalid")
+        assert problem.detail.startswith("index catalog_entities entry")
+        assert "is skipped: document" in problem.detail
         assert snapshot.items and not snapshot.catalog_entities
+    finally:
+        client.close()
+
+
+def test_unreadable_parts_cost_only_their_entry_or_block(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """An unknown word, a malformed entry and a bad image never stop the sync."""
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
+    index["recipes"][0]["prebuilt_image"] = {
+        "reference": "ghcr.io/fixture/tiny:latest",
+        "build_key": "0" * 64,
+    }
+    index["recipes"].append({"source_path": "recipes/broken.json"})
+    release = _release_for(_canonical(index) + b"\n", package)
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 11, 14, tzinfo=UTC)
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=catalog,
+        reader=_client(release, tmp_path / "packages"),
+        clock=lambda: now,
+    )
+
+    sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
+
+    status = sync.latest()
+    assert status is not None
+    assert status.state == CatalogSyncState.PARTIAL
+    assert (status.imported_count, status.skipped_count) == (1, 1)
+    details = "\n".join(problem.detail for problem in status.problems)
+    assert "index recipes entry recipes/broken.json is skipped" in details
+    assert "recipes prebuilt_image dropped for 1 entry (fixture/tiny-recipe)" in details
+    assert "'teleportation' is unknown" in details
+    with sessions() as session:
+        rows = {
+            row.slug: row for row in session.scalars(select(CatalogDocumentRevision))
+        }
+        assert set(rows) == {"tiny-model", "tiny-recipe"}
+        assert read_recipe_projection(rows["tiny-recipe"]).prebuilt_image is None
+        # The unknown word is withheld, never stored: no display was applied.
+        model = session.get(CatalogDocument, rows["tiny-model"].document_id)
+        assert model is not None and model.display is None
+
+
+def test_a_document_that_differs_from_its_digest_refuses_the_index(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    index["recipes"][0]["document"]["release"]["version"] = "1.0.1"
+    # Signed as published: only the reader's digest check can refuse it.
+    client = _client(_release_for(_canonical(index) + b"\n", package), tmp_path)
+    try:
+        with pytest.raises(RecipePackageError) as refused:
+            client.list()
+        assert refused.value.code == RecipePackageCode.DIGEST_MISMATCH
     finally:
         client.close()
 
@@ -680,19 +765,6 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
             package_sha256="a" * 64,
             size=1,
             location=location,
-            title="",
-            description="",
-            tags=(),
-            display=RecipeDisplay.model_validate(
-                {
-                    "identity": {"publisher": "vonk-forge", "slug": slug},
-                    "title": slug,
-                    "description": slug,
-                    "tags": [],
-                }
-            ),
-            document={},
-            prebuilt_image=None,
             publication_commit=SIGNED_COMMIT,
         )
 
@@ -1038,9 +1110,10 @@ def test_context_publication_must_precede_controller_rollout(tmp_path: Path) -> 
         index, {str(require_mapping(row["package"], "package")["path"]): package}
     )
     client = release.client(tmp_path / "cache")
-    with pytest.raises(RecipePackageError) as rejected:
-        client.list()
-    assert rejected.value.code == RecipePackageCode.RESPONSE_INVALID
+    snapshot = client.list()
+    assert snapshot.items == ()
+    [problem] = snapshot.problems
+    assert "fixture/tiny-recipe is skipped: source_bundle_sha256" in problem.detail
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)

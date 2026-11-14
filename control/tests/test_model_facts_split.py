@@ -165,8 +165,8 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
     carried = variant in {"pins-only", "carry-fails-once"}
     sessions, service, reader, item = _fixture(tmp_path)
     entry = reader.snapshot.catalog_entities[0]
-    new_model = read_model(entry.document)
-    legacy_model = _legacy_model(entry.document)
+    new_model = read_model(entry.published)
+    legacy_model = _legacy_model(entry.published)
     model_key = _artifact_key(new_model)
     assert read_model(legacy_model) == new_model  # same execution document
 
@@ -174,7 +174,7 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
     pins = [
         selection["model"]
         for selection in legacy_recipe["models"]
-        if selection["model"]["slug"] == entry.document["identity"]["slug"]
+        if selection["model"]["slug"] == entry.entry.document.identity.slug
     ]
     assert pins
     for pin in pins:
@@ -185,7 +185,7 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
     legacy_recipe_digest = document_sha256(legacy_recipe)
     # The keys a 3.x Controller derived when it resolved the legacy recipe.
     model_keys = {
-        document_sha256(other.document): _artifact_key(read_model(other.document))
+        document_sha256(other.published): _artifact_key(read_model(other.published))
         for other in reader.snapshot.catalog_entities
     }
     model_keys[document_sha256(legacy_model)] = (
@@ -319,7 +319,7 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
         assert len(new_model_rows) == len(new_recipe_rows) == 1
         # No re-download: the artifact key does not move with the facts.
         assert new_model_rows[0].artifact_key == str(model_key)  # no re-download
-        assert new_model_rows[0].content_digest == document_sha256(entry.document)
+        assert new_model_rows[0].content_digest == document_sha256(entry.published)
         assert new_recipe_rows[0].content_digest == item.content_sha256
         for kind, new in (("model", new_model_rows[0]), ("recipe", new_recipe_rows[0])):
             head = session.scalar(
@@ -347,7 +347,7 @@ def test_a_stored_3x_model_projection_is_rederived_without_the_moved_facts(
     tmp_path: Path,
 ) -> None:
     sessions, _service, reader, _item = _fixture(tmp_path)
-    document = reader.snapshot.catalog_entities[0].document
+    document = reader.snapshot.catalog_entities[0].published
     new_model = read_model(document)
     legacy = _legacy_model(document)
     with sessions.begin() as session:
@@ -383,7 +383,7 @@ def test_a_stored_3x_model_projection_is_rederived_without_the_moved_facts(
 
 def test_a_write_refuses_a_model_that_still_carries_its_facts(tmp_path: Path) -> None:
     sessions, _service, reader, _item = _fixture(tmp_path)
-    document = reader.snapshot.catalog_entities[0].document
+    document = reader.snapshot.catalog_entities[0].published
     entities = CatalogEntityService(sessions, clock=lambda: NOW)
     for field in ("capabilities", "modalities", "license"):
         with pytest.raises(CatalogValidationError) as refused:
@@ -420,7 +420,7 @@ def test_a_build_policy_refresh_keeps_the_api_facts_nullable_members(
     sessions, _service, reader, item = _fixture(tmp_path)
     for entity in reader.snapshot.catalog_entities:
         entities = Entities(sessions, clock=lambda: NOW)
-        draft = create_draft(entities, entity.document, actor="test")
+        draft = create_draft(entities, entity.published, actor="test")
         entities.resolve(draft.id, actor="test")
     entities = Entities(sessions, clock=lambda: NOW)
     draft = create_draft(entities, item.document, actor="test")

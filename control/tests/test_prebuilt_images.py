@@ -68,7 +68,7 @@ from vonk_control.runtime_image_preparation import (
     FilesystemRuntimeImageStorage,
 )
 from vonk_control.source_bundles import SourceBundleStore
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition
 
 from tests.recipe_library_source import recipe_library_root
 from tests.runtime_image_fixtures import place_test_image
@@ -137,10 +137,8 @@ def _published_library(
             entity
             for entity in listed.catalog_entities
             if (
-                (
-                    model := ModelDefinition.model_validate(entity.document)
-                ).identity.publisher,
-                model.identity.slug,
+                entity.entry.document.identity.publisher,
+                entity.entry.document.identity.slug,
             )
             in selected
         ),

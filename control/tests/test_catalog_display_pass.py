@@ -12,7 +12,7 @@ import itertools
 import json
 import re
 from datetime import UTC, datetime, timedelta
-from importlib import metadata, resources
+from importlib import metadata
 from pathlib import Path
 from typing import Self
 
@@ -36,27 +36,17 @@ from vonk_control.models import (
     CatalogDocumentHead,
     CatalogDocumentRevision,
 )
-from vonk_control.recipe_packages import (
-    RecipePackageClient,
-    _entry_display,
-)
+from vonk_control.recipe_packages import RecipePackageClient
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import (
     ModelDisplay,
     RecipeDisplay,
-    read_model,
-    read_model_display,
-    read_recipe,
-    read_recipe_display,
 )
 
-from .index_envelope import index_envelope
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_package_transport import _canonical_package_fixture
 
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
-
-_EXAMPLES = resources.files("vonk_forge_contracts") / "examples"
 
 
 class World:
@@ -226,10 +216,10 @@ def test_a_bad_display_is_that_entrys_problem_and_the_rest_still_apply(
     assert snapshot.problems == ()
     assert len(snapshot.display_notes) == 1
     assert snapshot.display_notes[0].detail.startswith(
-        "catalog model display is invalid"
+        "index catalog_entities display dropped"
     )
     assert len(snapshot.catalog_entities) == 1
-    assert snapshot.catalog_entities[0].display is None
+    assert snapshot.catalog_entities[0].entry.display is None
     result = world.sync()
     assert result.skipped_count == 0
     assert len(result.problems) == 1
@@ -247,7 +237,8 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     if breakage == "foreign":
         broken["identity"]["slug"] = "another-model"
     else:
-        # A capability name outside the closed vocabulary's pattern.
+        # A capability name this contract does not know: kept by the reader,
+        # withheld by the Controller.
         broken["capabilities"] = ["Not_A_Name"]
     world.release.publish(index, world.packages)
 
@@ -255,9 +246,10 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     result = world.sync()
 
     assert first.problems == ()
-    assert len(first.display_notes) == 1
-    assert first.display_notes[0].detail.startswith("catalog model display is invalid")
-    assert first.catalog_entities[0].display is None
+    [note] = first.display_notes
+    assert note.detail.startswith("index catalog_entities display")
+    assert "fixture/tiny-model" in note.detail
+    assert first.catalog_entities[0].entry.display is None
     assert result.skipped_count == 0
     assert world.library_model().model_display is None
     assert world.documents()["model"]
@@ -304,8 +296,11 @@ def test_a_recipe_without_a_usable_display_keeps_its_text_and_stays_offered(
     snapshot = world.reader.list()
     result = world.sync()
 
-    assert len(snapshot.problems) == 1
-    assert snapshot.problems[0].detail.startswith("recipe package display is invalid")
+    # The block is dropped and noted; the recipe stays, titled as it was.
+    assert snapshot.problems == ()
+    [note] = snapshot.display_notes
+    assert note.detail.startswith("index recipes display dropped")
+    assert [item.display for item in snapshot.items] == [None]
     assert result.withdrawn_count == 0
     assert world.revisions() == before
     assert world.library_recipe().identity.title == "Tiny Recipe"
@@ -329,7 +324,7 @@ def test_a_restart_applies_the_display_of_the_persisted_snapshot(
     restarted.close()
 
 
-def test_a_persisted_snapshot_without_display_is_problems_only_until_the_next_fetch(
+def test_a_persisted_snapshot_without_display_keeps_the_text_until_the_next_fetch(
     world: World,
 ) -> None:
     world.sync()
@@ -348,9 +343,9 @@ def test_a_persisted_snapshot_without_display_is_problems_only_until_the_next_fe
     snapshot = restarted.list()
     result = world.sync(restarted)
 
-    assert snapshot.items == ()
-    assert [entry.display for entry in snapshot.catalog_entities] == [None]
-    assert len(snapshot.problems) == 1 and len(snapshot.display_notes) == 1
+    assert [item.display for item in snapshot.items] == [None]
+    assert [model.entry.display for model in snapshot.catalog_entities] == [None]
+    assert snapshot.problems == () and len(snapshot.display_notes) == 2
     assert result.withdrawn_count == 0
     assert world.revisions() == before
     assert world.documents() == texts
@@ -410,120 +405,6 @@ def test_startup_reconcile_adds_the_display_column_and_keeps_the_rows(
     assert (
         world.sessions().scalar(select(func.count()).select_from(CatalogDocument)) == 2
     )
-
-
-def _vectors(prefix: str, directory: str = "") -> list[tuple[str, dict]]:
-    root = _EXAMPLES / directory if directory else _EXAMPLES
-    return [
-        (path.name, json.loads(path.read_text(encoding="utf-8")))
-        for path in sorted(root.iterdir(), key=lambda item: item.name)
-        if path.name.startswith(prefix)
-        and path.name.endswith(".json")
-        and not path.name.endswith(".expect.json")
-    ]
-
-
-def _example(name: str) -> dict:
-    return json.loads((_EXAMPLES / name).read_text(encoding="utf-8"))
-
-
-def _document_for(vector_name: str) -> dict:
-    """The example document a display vector describes."""
-    return _example(
-        vector_name.replace("recipe-display", "recipe").replace(
-            "model-display", "model-definition"
-        )
-    )
-
-
-def _index(kind: str, document: dict, display: object) -> bytes:
-    entry = {"document": document, "display": display, "content_sha256": "0" * 64}
-    envelope = index_envelope(
-        catalog_entities=[entry] if kind == "model" else [],
-        recipes=[entry | {"package": {}}] if kind == "recipe" else [],
-    )
-    return json.dumps(envelope).encode()
-
-
-@pytest.mark.parametrize(
-    ("name", "display"), _vectors("recipe-display") + _vectors("model-display")
-)
-def test_every_valid_display_vector_passes_the_per_entry_check(
-    tmp_path: Path, name: str, display: dict
-) -> None:
-    document = _document_for(name)
-    if name.startswith("model"):
-        checked = _entry_display(
-            {"display": display}, read_model(document).identity, read_model_display
-        )
-        assert isinstance(checked, ModelDisplay)
-        client = RecipePackageClient(cache_root=tmp_path / "packages")
-        snapshot, _ = client._parse_index(
-            _index("model", document, display), publication_commit="a" * 40
-        )
-        assert snapshot.problems == ()
-        assert [entry.display for entry in snapshot.catalog_entities] == [checked]
-        client.close()
-    else:
-        checked = _entry_display(
-            {"display": display}, read_recipe(document).identity, read_recipe_display
-        )
-        assert isinstance(checked, RecipeDisplay)
-
-
-@pytest.mark.parametrize(
-    ("name", "vector"),
-    _vectors("recipe-display", "invalid") + _vectors("model-display", "invalid"),
-)
-def test_every_invalid_display_vector_is_a_per_entry_problem_with_the_named_error(
-    tmp_path: Path, name: str, vector: dict
-) -> None:
-    expected = json.loads(
-        (_EXAMPLES / "invalid" / name.replace(".json", ".expect.json")).read_text(
-            encoding="utf-8"
-        )
-    )
-    kind = "model" if name.startswith("model") else "recipe"
-    pair = "display" in vector and "document" in vector
-    display = vector["display"] if pair else vector
-    if pair:
-        document = vector["document"]
-    else:
-        # A display-only vector describes whichever document carries its identity.
-        document = _example(
-            "model-definition.json" if kind == "model" else "recipe-job.json"
-        )
-        document["identity"] = {
-            key: display["identity"][key] for key in ("publisher", "slug")
-        } | {
-            key: value
-            for key, value in document["identity"].items()
-            if key not in ("publisher", "slug")
-        }
-    identity = (read_model if kind == "model" else read_recipe)(document).identity
-    reader = read_model_display if kind == "model" else read_recipe_display
-
-    if expected.get("producer_only"):
-        # Strict for the producer; a consumer ignores what a newer minor added.
-        _entry_display({"display": display}, identity, reader)  # type: ignore[arg-type]
-        return
-    with pytest.raises(ValueError) as refused:
-        _entry_display({"display": display}, identity, reader)  # type: ignore[arg-type]
-    assert expected["error_contains"] in str(refused.value)
-
-    client = RecipePackageClient(cache_root=tmp_path / "packages")
-    snapshot, _ = client._parse_index(
-        _index(kind, document, display), publication_commit="a" * 40
-    )
-    assert snapshot.items == ()
-    # A Model survives an unreadable display (without it); a Recipe does not.
-    assert (len(snapshot.catalog_entities) == 1) == (kind == "model")
-    # A Model's unreadable display is a note; a Recipe's is a skipped document.
-    notes = snapshot.display_notes if kind == "model" else snapshot.problems
-    assert len(snapshot.problems) == (kind != "model")
-    assert len(notes) == 1
-    assert "display is invalid" in notes[0].detail
-    client.close()
 
 
 class Statements:
