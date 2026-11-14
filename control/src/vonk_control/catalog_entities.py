@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    PrebuiltImage,
     RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
@@ -41,7 +42,6 @@ from .auth import CursorCodec
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
-    PrebuiltImage,
     PublishedDocument,
     PublishedValue,
     RecipeRevisionProjection,

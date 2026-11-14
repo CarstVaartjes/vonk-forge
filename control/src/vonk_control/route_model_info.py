@@ -22,6 +22,7 @@ from vonk_forge_contracts import (
     DecisionApi,
     RecipeApi,
     RecipeDefinition,
+    UnrecognisedWord,
 )
 from vonk_forge_contracts.api import (
     ApiReasoningAlwaysOn,
@@ -307,7 +308,11 @@ def build_model_info(
                 off=reasoning.off,
                 default=reasoning.default,
             )
+            # Stored facts carry only known words (the sync reads each block
+            # without the rest); an unrecognised one is never acted on.
             if isinstance(reasoning, ApiReasoningSwitch)
+            and not isinstance(reasoning.via, UnrecognisedWord)
+            and not isinstance(reasoning.default, UnrecognisedWord)
             else None
         ),
         vonk_reasoning_effort=_vonk_reasoning_effort(effort),
@@ -321,7 +326,7 @@ def _vonk_reasoning_effort(
     effort: ApiReasoningEffort | None,
 ) -> VonkReasoningEffortLevels | VonkReasoningEffortText | None:
     """The recipe's effort block as stated, whichever kind it is."""
-    if effort is None:
+    if effort is None or isinstance(effort.via, UnrecognisedWord):
         return None
     if isinstance(effort, ApiReasoningEffortLevels):
         return VonkReasoningEffortLevels(
@@ -331,6 +336,8 @@ def _vonk_reasoning_effort(
             levels=list(effort.levels),
             default=effort.default,
         )
+    if isinstance(effort.default, UnrecognisedWord):
+        return None
     return VonkReasoningEffortText(
         kind="text", via=effort.via, key=effort.key, default=effort.default
     )

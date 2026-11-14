@@ -249,7 +249,7 @@ def test_canonical_synthetic_nested_source_path_lists_and_fetches(
         "recipes//recipe.json",
     ),
 )
-def test_candidate_package_rejects_unsafe_source_path(
+def test_candidate_package_skips_unsafe_source_path(
     tmp_path: Path, source_path: str
 ) -> None:
     index, row, package = _fixture()
@@ -259,8 +259,10 @@ def test_candidate_package_rejects_unsafe_source_path(
     client = SignedRecipeRelease(index, lambda _location: package).client(
         tmp_path / "packages"
     )
-    with pytest.raises(RecipePackageError):
-        client.list()
+    snapshot = client.list()
+    assert snapshot.items == ()
+    [problem] = snapshot.problems
+    assert "is skipped: source_path" in problem.detail
     client.close()
 
 

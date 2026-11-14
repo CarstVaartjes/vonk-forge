@@ -42,7 +42,6 @@ from vonk_control.models import (
 from vonk_control.owner_liveness import SYNC_HEARTBEAT_WINDOW
 from vonk_control.recipe_builds import RecipeBuildService
 from vonk_control.recipe_library_types import (
-    CatalogModelEntry,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibrarySnapshot,
@@ -54,10 +53,8 @@ from vonk_control.source_bundles import (
     parse_source_bundle,
 )
 from vonk_forge_contracts import (
-    ModelDefinition,
     RecipeDefinition,
     document_sha256,
-    read_model,
 )
 
 from tests.recipe_library_source import recipe_library_root
@@ -152,10 +149,8 @@ def _fixture(
             entity
             for entity in snapshot.catalog_entities
             if (
-                (
-                    model := ModelDefinition.model_validate(entity.document)
-                ).identity.publisher,
-                model.identity.slug,
+                entity.entry.document.identity.publisher,
+                entity.entry.document.identity.slug,
             )
             in selected
         ),
@@ -255,11 +250,7 @@ def test_invalid_model_document_does_not_block_other_catalog_items(
         reader.snapshot,
         catalog_entities=(
             *reader.snapshot.catalog_entities,
-            CatalogModelEntry(
-                {"invalid": True},
-                reader.snapshot.catalog_entities[0].display,
-                reader.snapshot.catalog_entities[0].identity,
-            ),
+            replace(reader.snapshot.catalog_entities[0], published={"invalid": True}),
         ),
     )
 
@@ -561,7 +552,7 @@ def test_local_revision_lookup_accepts_more_than_256_identities(tmp_path: Path) 
 
 def test_sync_imports_canonical_recipe_without_readiness_tags(tmp_path: Path) -> None:
     sessions, service, reader, item = _fixture(tmp_path)
-    replacement = replace(_item_with_document(item, deepcopy(item.document)), tags=())
+    replacement = _item_with_document(item, deepcopy(item.document))
     reader.snapshot = RecipeLibrarySnapshot(
         reader.snapshot.commit,
         (replacement,),
@@ -1148,6 +1139,10 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     models[1]["document"]["future_field"] = "added by a newer contract"
     del models[0]["document"]["files"]
     del recipes[0]["document"]["provenance"]
+    # Published as such: each entry names its own document's digest.
+    for entry in (models[0], models[1], recipes[0]):
+        entry["content_sha256"] = document_sha256(entry["document"])
+    recipes[0]["package"]["recipe_content_sha256"] = recipes[0]["content_sha256"]
     skipped_model = models[0]["document"]["identity"]
     skipped_recipe = recipes[0]["document"]["identity"]
 
@@ -1166,18 +1161,13 @@ def test_reader_skips_unreadable_index_documents_and_keeps_the_rest(
     ]
     assert len(snapshot.problems) == 2
     assert (skipped_model["publisher"], skipped_model["slug"]) not in {
-        (
-            str(read_model(entry.document).identity.publisher),
-            str(read_model(entry.document).identity.slug),
-        )
-        for entry in snapshot.catalog_entities
+        (model.entry.document.identity.publisher, model.entry.document.identity.slug)
+        for model in snapshot.catalog_entities
     }
-    recipe_problem = next(
-        problem for problem in snapshot.problems if problem.recipe_uri is not None
-    )
-    assert recipe_problem.recipe_uri == (
-        f"vonk://catalog/{skipped_recipe['publisher']}/{skipped_recipe['slug']}"
-        f"@sha256:{recipes[0]['content_sha256']}"
+    details = [problem.detail for problem in snapshot.problems]
+    assert any(
+        f"{skipped_recipe['publisher']}/{skipped_recipe['slug']} is skipped" in detail
+        for detail in details
     )
 
 
@@ -1665,7 +1655,9 @@ def test_sync_retracts_every_document_kind_absent_from_the_published_library(
 
     assert apply((original, other), "1" * 40).imported_count == 2
     # A Model an earlier library published, then dropped (no recipe uses it).
-    dropped = deepcopy(reader.snapshot.catalog_entities[0].document)
+    dropped: dict[str, object] = deepcopy(
+        dict(reader.snapshot.catalog_entities[0].published)
+    )
     _document_section(dropped, "identity")["slug"] = "dropped-upstream-model"
     catalog.import_catalog_models("test", [dropped])
     dropped_digest = document_sha256(dropped)
@@ -1679,8 +1671,7 @@ def test_sync_retracts_every_document_kind_absent_from_the_published_library(
     published |= {
         ("model", model.identity.publisher, model.identity.slug)
         for model in (
-            ModelDefinition.model_validate(entry.document)
-            for entry in reader.snapshot.catalog_entities
+            entry.entry.document for entry in reader.snapshot.catalog_entities
         )
     }
     # Exactly the published documents keep a head: nothing listed is lost.

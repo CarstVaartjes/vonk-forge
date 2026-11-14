@@ -16,8 +16,9 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_forge_contracts import PrebuiltImage
 
-from ..catalog_revision_contract import PrebuiltImage, RecipeRevisionProjection
+from ..catalog_revision_contract import RecipeRevisionProjection
 from ..disk_reservations import outstanding_disk_reservation_bytes
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import runtime_value

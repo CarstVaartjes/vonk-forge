@@ -34,11 +34,12 @@ bundle or with other bytes skips only its recipe as a
 `recipe_package.release_incomplete` problem. A
 package reader's `prepare` hook validates all packages in a candidate release
 before the managed catalog sync writes its first revision or link. An
-integrity or transport failure rejects the whole candidate. A model or recipe
-document that is intact but does not validate against this Controller's
-contract is skipped on its own and reported as a
-`recipe_package.document_incompatible` problem; the rest of the release still
-applies. When a release of a newer contract major is published than this
+integrity or transport failure rejects the whole candidate. The index is read
+through the contract's `read_catalog`: an entry it cannot read is skipped on
+its own and reported as a `recipe_package.document_incompatible` problem, and
+an unreadable optional block or an unknown word is a note
+(see [the operator guide](../operators/recipe-library.md)); the rest of the
+release still applies. When a release of a newer contract major is published than this
 Controller reads, the sync result carries one note, code
 `catalog.sync_newer_contract_published` (`contract vN is published; this
 Controller reads vM`); the release of this Controller's own major still

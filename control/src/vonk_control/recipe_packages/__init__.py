@@ -12,9 +12,8 @@ import shutil
 import tarfile
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
@@ -23,34 +22,22 @@ from pydantic import ValidationError
 from vonk_agent_protocol import RecipePackageCode
 from vonk_forge_contracts import (
     CONTRACT_MAJOR,
-    PACKAGE_MEDIA_TYPE,
     PACKAGE_SCHEMA_VERSION,
-    CatalogIndex,
-    CatalogVocabulary,
+    CatalogIndexRefused,
     ModelDefinition,
-    ModelDisplay,
-    RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
     document_sha256,
-    read_catalog_index,
+    read_catalog,
     read_model,
-    read_model_display,
     read_recipe,
-    read_recipe_api,
-    read_recipe_display,
-    require_api_of,
-    require_display_of,
 )
-from vonk_forge_contracts.model import ModelIdentity
-from vonk_forge_contracts.qualification_status import PublishedQualificationStatusView
-from vonk_forge_contracts.recipe import RecipeIdentity
+from vonk_forge_contracts.catalog_reader import CatalogSection, RefusalReason
 from vonk_forge_contracts.resolver import validate_recipe_models
 
-from ..catalog_revision_contract import read_prebuilt_image
 from ..catalog_sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import (
-    CatalogModelEntry,
+    CatalogModel,
     RecipeLibraryError,
     RecipeLibraryItem,
     RecipeLibraryRelease,
@@ -68,6 +55,7 @@ from ..recipe_release import (
     verify_release_checksums,
 )
 from ..source_bundles import SourceBundleError, generate_source_bundle
+from . import catalog_read
 from .contracts import (
     _RELEASE_LIST,
     _RELEASE_TAG,
@@ -106,10 +94,14 @@ _COPY_CHUNK = 1024 * 1024
 _ORPHAN_AGE_SECONDS = 24 * 60 * 60
 _LOGGER = logging.getLogger(__name__)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
 _REDIRECTS = {301, 302, 303, 307, 308}
 _ASSET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_PACKAGE_MEDIA_TYPES = {"application/octet-stream", PACKAGE_MEDIA_TYPE}
+# How a refused index is reported: another schema or major is incompatible.
+_REFUSAL_CODES = {
+    RefusalReason.SCHEMA_UNSUPPORTED: RecipePackageCode.SCHEMA_INCOMPATIBLE,
+    RefusalReason.DIGEST_MISMATCH: RecipePackageCode.DIGEST_MISMATCH,
+    RefusalReason.ENVELOPE_INVALID: RecipePackageCode.RESPONSE_INVALID,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -638,298 +630,99 @@ class RecipePackageClient:
                 RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index is invalid JSON",
             ) from error
-        if not isinstance(index, Mapping):
+        if not isinstance(index, dict):
             raise RecipePackageError(
                 RecipePackageCode.SCHEMA_INCOMPATIBLE,
                 "recipe package index schema is unsupported",
             )
-        # The envelope is read through the contract with its entries emptied:
-        # ``read_catalog_index`` validates the whole index, so one entry an
-        # older reader cannot parse would reject the signed library. The entries
-        # are read one by one below, where an unreadable one is skipped and
-        # reported. A wrong ``kind``, ``schema_version`` or ``contract_version``
-        # is an incompatible schema; any other envelope fault is invalid.
+        # The contract's one reader: it refuses only at an integrity edge and
+        # reports every entry or block it left out; the rest applies.
         try:
-            envelope = read_catalog_index(
-                {**index, "catalog_entities": [], "recipes": []}
-            )
-        except ValidationError as error:
-            locations = {item["loc"] for item in error.errors()}
-            incompatible = locations & {
-                ("schema_version",),
-                ("kind",),
-                ("contract_version",),
-            }
+            read = read_catalog(index)
+        except CatalogIndexRefused as error:
             raise RecipePackageError(
-                RecipePackageCode.SCHEMA_INCOMPATIBLE
-                if incompatible
-                else RecipePackageCode.RESPONSE_INVALID,
-                "recipe package index schema is unsupported"
-                if incompatible
-                else "recipe package index identity is invalid",
+                _REFUSAL_CODES[error.reason],
+                f"recipe package index is refused: {error.detail}",
             ) from error
-        version, updated_at = _library_release(envelope)
-        raw_recipes, raw_entities = index.get("recipes"), index.get("catalog_entities")
-        if (
-            envelope.repository != PACKAGE_REPOSITORY
-            or not isinstance(raw_recipes, list)
-            or not isinstance(raw_entities, list)
-        ):
+        envelope = read.index
+        if envelope.repository != PACKAGE_REPOSITORY:
             raise RecipePackageError(
                 RecipePackageCode.RESPONSE_INVALID,
                 "recipe package index identity is invalid",
             )
-        repository, commit = envelope.repository, envelope.source_commit
-        catalog_entities: list[CatalogModelEntry] = []
-        identities: set[tuple[str, str]] = set()
-        # Each model and recipe document is validated on its own: one document
-        # this Controller's contract cannot read (for example from a newer
-        # release) is skipped and reported, and the rest of the signed index
-        # still applies. Only the index envelope itself is all-or-nothing.
-        problems: list[ManagedCatalogSyncProblem] = []
-        display_notes: list[ManagedCatalogSyncProblem] = []
-        for entry in raw_entities:
-            if not isinstance(entry, Mapping) or not isinstance(
-                entry.get("document"), Mapping
-            ):
-                problems.append(
-                    _index_problem(None, "catalog model entry is invalid", entry)
-                )
-                continue
-            try:
-                model = read_model(entry["document"])
-            except (TypeError, ValueError) as error:
-                problems.append(
-                    _index_problem(
-                        None, "catalog model document is invalid", entry, error
-                    )
-                )
-                continue
-            # Display is text for people: an unreadable one (a capability name a
-            # later minor added) costs the display only, never the Model. The
-            # entry is read again on a later sync.
-            try:
-                model_display: ModelDisplay | None = _entry_display(
-                    entry, model.identity, read_model_display
-                )
-            except (TypeError, ValueError) as error:
-                model_display = None
-                display_notes.append(
-                    _index_problem(
-                        None, "catalog model display is invalid", entry, error
-                    )
-                )
-            digest = entry.get("content_sha256")
-            if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
-                problems.append(
-                    _index_problem(None, "catalog model digest is invalid", entry)
-                )
-                continue
-            identity = (model.identity.publisher, model.identity.slug)
-            if identity in identities:
-                raise RecipePackageError(
-                    RecipePackageCode.RESPONSE_INVALID,
-                    "catalog model identity is duplicated",
-                )
-            identities.add(identity)
-            catalog_entities.append(
-                CatalogModelEntry(
-                    document=dict(entry["document"]),
-                    display=model_display,
-                    identity=model.identity,
-                )
-            )
+        commit = envelope.source_commit
+        documents = catalog_read.published_documents(
+            index,
+            {
+                entry.content_sha256
+                for entry in (*envelope.catalog_entities, *envelope.recipes)
+            },
+        )
+        reader = catalog_read.report(read.problems)
+        problems = list(reader.problems)
+        models, model_notes = catalog_read.known_entries(
+            CatalogSection.MODELS, envelope.catalog_entities, reader.unknown
+        )
+        recipes, recipe_notes = catalog_read.known_entries(
+            CatalogSection.RECIPES, envelope.recipes, reader.unknown
+        )
+        catalog_entities = tuple(
+            CatalogModel(entry=entry, published=documents[entry.content_sha256])
+            for entry in models
+        )
         packages: dict[str, RecipePackageEntry] = {}
         items: list[RecipeLibraryItem] = []
-        for recipe in raw_recipes:
-            if (
-                not isinstance(recipe, Mapping)
-                or not isinstance(recipe.get("document"), Mapping)
-                or not isinstance(recipe.get("package"), Mapping)
-            ):
+        for entry in recipes:
+            identity = entry.document.identity
+            key = f"{identity.publisher}/{identity.slug}"
+            uri = _catalog_uri(identity.publisher, identity.slug, entry.content_sha256)
+            package = entry.package
+            if package.expected_bytes > MAX_PACKAGE_BYTES:
                 problems.append(
-                    _index_problem(None, "recipe package entry is invalid", recipe)
-                )
-                continue
-            try:
-                document = read_recipe(recipe["document"])
-            except (TypeError, ValueError) as error:
-                problems.append(
-                    _index_problem(
-                        _entry_uri(recipe),
-                        "recipe package recipe document is invalid",
-                        recipe,
-                        error,
+                    ManagedCatalogSyncProblem(
+                        recipe_uri=uri,
+                        code=RecipePackageCode.RESPONSE_INVALID,
+                        detail=f"recipe package of {key} exceeds its size bound",
                     )
                 )
                 continue
-            try:
-                display = _entry_display(recipe, document.identity, read_recipe_display)
-            except (TypeError, ValueError) as error:
-                problems.append(
-                    _index_problem(
-                        _entry_uri(recipe),
-                        "recipe package display is invalid",
-                        recipe,
-                        error,
-                    )
-                )
-                continue
-            package = recipe["package"]
-            package_media_type = package.get("media_type")
-            if package_media_type not in _PACKAGE_MEDIA_TYPES:
-                problems.append(
-                    _index_problem(
-                        _entry_uri(recipe),
-                        "recipe package media type is unsupported",
-                        recipe,
-                    )
-                )
-                continue
-            if package.get("recipe_content_sha256") not in {
-                None,
-                recipe.get("content_sha256"),
-            }:
-                problems.append(
-                    _index_problem(
-                        _entry_uri(recipe),
-                        "package recipe identity is inconsistent",
-                        recipe,
-                    )
-                )
-                continue
-            publisher = document.identity.publisher
-            slug = document.identity.slug
-            digest = recipe.get("content_sha256")
-            package_digest = package.get("sha256")
-            source_digest = recipe.get("source_bundle_sha256")
-            size = package.get("expected_bytes")
-            location = package.get("path")
-            source_path = recipe.get("source_path")
-            if (
-                not isinstance(digest, str)
-                or not isinstance(package_digest, str)
-                or not isinstance(source_digest, str)
-                or not isinstance(location, str)
-                or not isinstance(source_path, str)
-                or not isinstance(size, int)
-                or isinstance(size, bool)
-            ):
-                raise RecipePackageError(
-                    RecipePackageCode.RESPONSE_INVALID,
-                    "recipe package entry identity is invalid",
-                )
-            location_url = urlsplit(location)
-            if (
-                not _safe_path(source_path)
-                or not _SLUG.fullmatch(publisher)
-                or not _SLUG.fullmatch(slug)
-                or not _SHA256.fullmatch(digest)
-                or not _SHA256.fullmatch(package_digest)
-                or not _SHA256.fullmatch(source_digest)
-                or package.get("source_bundle_sha256") != source_digest
-                or not _safe_path(location)
-                or location.startswith("/")
-                or location_url.scheme
-                or location_url.netloc
-                or location_url.query
-                or location_url.fragment
-                or not 1 <= size <= MAX_PACKAGE_BYTES
-            ):
-                raise RecipePackageError(
-                    RecipePackageCode.RESPONSE_INVALID,
-                    "recipe package entry identity is invalid",
-                )
-            key = f"{publisher}/{slug}"
-            if key in packages:
-                raise RecipePackageError(
-                    RecipePackageCode.RESPONSE_INVALID,
-                    "recipe package identity is duplicated",
-                )
-            # Optional; an unreadable entry only means no prebuilt image.
-            prebuilt_image = read_prebuilt_image(recipe.get("prebuilt_image"))
-            # Informative: an unreadable status (a contract newer than this
-            # Controller's pin) is not yet verified for this entry. It is never
-            # a sync problem, so nothing waits on it; a pin bump heals it.
-            qualification = None
-            if recipe.get("qualification") is not None:
-                try:
-                    qualification = PublishedQualificationStatusView.model_validate(
-                        recipe["qualification"]
-                    )
-                except (TypeError, ValueError) as error:
-                    _LOGGER.warning(
-                        "recipe qualification status unreadable; shown as not yet "
-                        "verified: recipe=%s/%s error=%s",
-                        publisher,
-                        slug,
-                        _incompatible_detail("qualification", error),
-                    )
-            api = _entry_api(recipe, document.identity)
             packages[key] = RecipePackageEntry(
-                publisher=publisher,
-                slug=slug,
-                source_path=source_path,
-                recipe_content_sha256=digest,
-                package_sha256=package_digest,
-                size=size,
-                location=location,
-                title=display.title,
-                description=display.description,
-                tags=tuple(display.tags),
-                display=display,
-                document=dict(recipe["document"]),
-                prebuilt_image=prebuilt_image,
+                publisher=identity.publisher,
+                slug=identity.slug,
+                source_path=entry.source_path,
+                recipe_content_sha256=entry.content_sha256,
+                package_sha256=package.sha256,
+                size=package.expected_bytes,
+                location=package.path,
                 publication_commit=publication_commit,
             )
             items.append(
                 RecipeLibraryItem(
                     library_commit=commit,
-                    source_path=source_path,
-                    publisher=publisher,
-                    slug=slug,
-                    title=display.title,
-                    description=display.description,
-                    tags=tuple(display.tags),
-                    display=display,
-                    content_sha256=digest,
-                    uri=f"vonk://catalog/{publisher}/{slug}@sha256:{digest}",
-                    document=dict(recipe["document"]),
-                    package_sha256=package_digest,
-                    source_bundle_sha256=source_digest,
-                    prebuilt_image=prebuilt_image,
-                    qualification=qualification,
-                    api=api,
+                    source_path=entry.source_path,
+                    publisher=identity.publisher,
+                    slug=identity.slug,
+                    display=entry.display,
+                    content_sha256=entry.content_sha256,
+                    uri=uri,
+                    document=dict(documents[entry.content_sha256]),
+                    package_sha256=package.sha256,
+                    source_bundle_sha256=entry.source_bundle_sha256,
+                    prebuilt_image=entry.prebuilt_image,
+                    qualification=entry.qualification,
+                    api=entry.api,
                 )
             )
-        if [(item.publisher, item.slug) for item in items] != sorted(
-            (item.publisher, item.slug) for item in items
-        ):
-            raise RecipePackageError(
-                RecipePackageCode.RESPONSE_INVALID, "recipe package index is not sorted"
-            )
-        # The release's words: a vocabulary this contract cannot read costs only
-        # the words (a note), never the library; a release without one has none.
-        vocabulary: CatalogVocabulary | None = None
-        if "vocabulary" in index:
-            try:
-                vocabulary = CatalogVocabulary.model_validate(
-                    index["vocabulary"], extra="ignore"
-                )
-            except ValidationError as error:
-                display_notes.append(
-                    _index_problem(None, "catalog vocabulary is invalid", None, error)
-                )
         return RecipeLibrarySnapshot(
             commit=commit,
             items=tuple(items),
-            repository=repository,
-            version=version,
-            vocabulary=vocabulary,
-            updated_at=updated_at,
-            catalog_entities=tuple(catalog_entities),
+            repository=envelope.repository,
+            version=envelope.contract_version,
+            vocabulary=envelope.vocabulary,
+            updated_at=envelope.updated_at,
+            catalog_entities=catalog_entities,
             problems=tuple(problems),
-            display_notes=tuple(display_notes),
+            display_notes=(*reader.notes, *model_notes, *recipe_notes),
         ), packages
 
     def _promote_candidate(self) -> None:
@@ -1368,114 +1161,8 @@ class RecipePackageClient:
         return target
 
 
-def _library_release(envelope: CatalogIndex) -> tuple[str, datetime]:
-    """The library version and last recipe update, if this Controller reads them."""
-
-    major = int(envelope.contract_version.split(".")[0])
-    if major != CONTRACT_MAJOR:
-        raise RecipePackageError(
-            RecipePackageCode.SCHEMA_INCOMPATIBLE,
-            f"recipe library index is not a contract v{CONTRACT_MAJOR} release",
-        )
-    try:
-        return envelope.contract_version, datetime.fromisoformat(envelope.updated_at)
-    except ValueError as error:  # the contract's pattern admits month 13
-        raise RecipePackageError(
-            RecipePackageCode.RESPONSE_INVALID,
-            "recipe library index update time is invalid",
-        ) from error
-
-
-def _entry_uri(entry: Mapping[str, object]) -> str | None:
-    """Return the catalog URI an index entry claims, when it is well formed."""
-    document = entry.get("document")
-    identity = document.get("identity") if isinstance(document, Mapping) else None
-    digest = entry.get("content_sha256")
-    if not isinstance(identity, Mapping) or not isinstance(digest, str):
-        return None
-    publisher, slug = identity.get("publisher"), identity.get("slug")
-    if (
-        not isinstance(publisher, str)
-        or not isinstance(slug, str)
-        or not _SLUG.fullmatch(publisher)
-        or not _SLUG.fullmatch(slug)
-        or not _SHA256.fullmatch(digest)
-    ):
-        return None
+def _catalog_uri(publisher: str, slug: str, digest: str) -> str:
     return f"vonk://catalog/{publisher}/{slug}@sha256:{digest}"
-
-
-def _entry_display[D: (RecipeDisplay, ModelDisplay)](
-    entry: Mapping,
-    identity: RecipeIdentity | ModelIdentity,
-    read: Callable[..., D],
-) -> D:
-    """The display an index entry carries for exactly its own document.
-
-    Display is never hashed: it arrives inside the signed index. A missing,
-    unreadable or foreign display is a per-entry problem for the caller.
-    """
-    raw = entry.get("display")
-    if not isinstance(raw, Mapping):
-        raise TypeError("index entry carries no display")
-    display = read(raw)
-    require_display_of(display, identity)
-    return display
-
-
-def _entry_api(entry: Mapping, identity: RecipeIdentity) -> RecipeApi | None:
-    """The API facts an index entry carries for exactly its own recipe.
-
-    Read once here, from the signed index, and never checked again: absent,
-    unreadable (a union member a newer contract added) or foreign facts are
-    simply not published, so the route serves without model_info.
-    """
-    raw = entry.get("api")
-    if raw is None:
-        return None
-    try:
-        api = read_recipe_api(raw)
-        require_api_of(api, identity)
-    except (TypeError, ValueError) as error:
-        _LOGGER.warning(
-            "recipe api unreadable; its route publishes no model_info: "
-            "recipe=%s/%s error=%s",
-            identity.publisher,
-            identity.slug,
-            _incompatible_detail("api", error),
-        )
-    else:
-        return api
-    return None
-
-
-def _index_problem(
-    uri: str | None,
-    detail: str,
-    entry: object,
-    error: Exception | None = None,
-) -> ManagedCatalogSyncProblem:
-    """Describe one skipped index document without echoing untrusted values."""
-    name = ""
-    if isinstance(entry, Mapping):
-        document = entry.get("document")
-        identity = document.get("identity") if isinstance(document, Mapping) else None
-        if isinstance(identity, Mapping):
-            publisher, slug = identity.get("publisher"), identity.get("slug")
-            if (
-                isinstance(publisher, str)
-                and isinstance(slug, str)
-                and _SLUG.fullmatch(publisher)
-                and _SLUG.fullmatch(slug)
-            ):
-                name = f" {publisher}/{slug}"
-    return ManagedCatalogSyncProblem(
-        recipe_uri=uri,
-        code=RecipePackageCode.DOCUMENT_INCOMPATIBLE
-        if error is not None
-        else RecipePackageCode.RESPONSE_INVALID,
-        detail=_incompatible_detail(f"{detail}{name}", error),
-    )
 
 
 def _incompatible_detail(detail: str, error: Exception | None) -> str:
@@ -1521,11 +1208,8 @@ def _bind_release(
         skipped.add(key)
         problems.append(
             ManagedCatalogSyncProblem(
-                recipe_uri=_entry_uri(
-                    {
-                        "document": package.document,
-                        "content_sha256": package.recipe_content_sha256,
-                    }
+                recipe_uri=_catalog_uri(
+                    package.publisher, package.slug, package.recipe_content_sha256
                 ),
                 code=RecipePackageCode.RELEASE_INCOMPLETE,
                 detail=f"{reason} for {key}"[:256],
@@ -1619,7 +1303,7 @@ def load_recipe_package(
     recipe_content_sha256: str,
     library_commit: str,
     source_path: str,
-    display: RecipeDisplay,
+    display: RecipeDisplay | None,
 ) -> RecipeLibraryItem:
     try:
         archive = path.read_bytes()
@@ -1641,12 +1325,9 @@ def load_recipe_package(
         source_path=source_path,
         publisher=publisher,
         slug=slug,
-        title="",
-        description="",
-        tags=(),
         display=display,
         content_sha256=recipe_content_sha256,
-        uri=f"vonk://catalog/{publisher}/{slug}@sha256:{recipe_content_sha256}",
+        uri=_catalog_uri(publisher, slug, recipe_content_sha256),
         document={},
     )
     decoder = RecipePackageClient.__new__(RecipePackageClient)
@@ -1662,12 +1343,6 @@ def load_recipe_package(
             package_sha256=package_sha256,
             size=len(archive),
             location=str(path),
-            title="",
-            description="",
-            tags=(),
-            display=display,
-            document={},
-            prebuilt_image=None,
             publication_commit=library_commit,
         ),
         archive_path=path,

@@ -17,7 +17,7 @@ from pathlib import Path
 KIND = "constant restated from vonk_forge_contracts; import it from the contract"
 LITERAL_KIND = (
     "index kind or package media type written as a literal; "
-    "read the index through read_catalog_index and import the constant"
+    "read the index through read_catalog and import the constant"
 )
 # The published index's kind and package media type, spelled by the contract only.
 _SPELLS_LITERALS = frozenset(
