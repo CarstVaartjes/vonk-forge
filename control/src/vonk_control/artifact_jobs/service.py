@@ -22,7 +22,6 @@ from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 
 from .. import artifact_job_states as ajs
 from ..admission_locking import ConstraintReplay, admitting
-from ..agent_operation_facts import aware
 from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import InvalidValue, MissingRecord
@@ -30,7 +29,7 @@ from ..cluster_mappings import mapping_option_choices
 from ..compiled_artifact_contract import ParameterScalar
 from ..execution_plan_service import compile_job_invocation
 from ..identity_insert import insert_identity
-from ..lifecycle import CancelRequested, Effect, Outcome
+from ..lifecycle import CancelRequested, Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
@@ -472,9 +471,6 @@ class ArtifactJobService(OutputService):
 
     def submit(self, job_id: str, *, actor: str, request_id: str) -> ArtifactJobView:
         # Each pass releases its transaction before the shared bounded backoff.
-        # The draft is already durable intent. A previous job whose effect cannot
-        # be observed is never answered by stopping the run: the draft stays
-        # READY and the client retries the same key once that receipt settles.
         unavailable: UnknownOutcomeError | None = None
         for _attempt in bounded_attempts():
             try:
@@ -482,10 +478,6 @@ class ArtifactJobService(OutputService):
             except UnknownOutcomeError as error:
                 unavailable = error
         assert unavailable is not None
-        if unavailable.typed_reason == WaitReason.RUNTIME_EFFECT_UNCONFIRMED:
-            # The draft stays READY. A submit never cancels or stops anything: a
-            # lost prior job ends shortly after its owner's deadline, then admits.
-            raise unavailable
         with self._sessions.begin() as session:
             job = session.get(ArtifactJob, job_id, with_for_update=True)
             if job is None:
@@ -524,13 +516,15 @@ class ArtifactJobService(OutputService):
                     reason=WaitReason.OBSERVATION_UNAVAILABLE,
                 )
             adapter = ArtifactJobAdapter(session, clock=self._clock)
+            # A prior job that may still run never holds this submit: the
+            # helper keeps one job container per run, removing an unowned
+            # earlier one and refusing this Start while one is still owned.
             for prior in session.scalars(
                 select(ArtifactJob).where(
                     ArtifactJob.run_id == run.id,
                     ArtifactJob.id != artifact_job.id,
                 )
             ):
-                recorded = adapter.adopt(prior)
                 parent, operation, attempt = adapter.order_of(session, prior)
                 if operation is not None and operation.current_attempt == 0:
                     # New intent fences an unissued old order in this transaction.
@@ -544,29 +538,6 @@ class ArtifactJobService(OutputService):
                     if parent is not None:
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
-                    continue
-                if ajs.state_of(prior) == ajs.FAILED:
-                    continue  # a FAILED job is ended; CANCELLED ones are released by their own Stop
-                uncertain = recorded.effect is Effect.UNKNOWN or (
-                    prior.operation_id is not None
-                    and prior.result_evidence is not None
-                    and read_result_evidence(prior.result_evidence) is None
-                )
-                if uncertain:
-                    observed = adapter.observe(recorded).effect
-                    if observed not in {Effect.STOPPED, Effect.ESTABLISHED}:
-                        # The lost job ends shortly after its owner's deadline; this submit
-                        # waits (bounded) and never cancels or stops anything.
-                        deadline = recorded.recovery_deadline
-                        raise ArtifactJobUnavailableError(
-                            "artifact run effect observation is unavailable",
-                            reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
-                            retry_after_seconds=(
-                                None
-                                if deadline is None or aware(deadline) <= now
-                                else int((aware(deadline) - now).total_seconds()) + 1
-                            ),
-                        )
             installation = session.get(RecipeInstallation, run.installation_id)
             resolved = (
                 _active_recipe_revision(session, installation.recipe_revision_id)

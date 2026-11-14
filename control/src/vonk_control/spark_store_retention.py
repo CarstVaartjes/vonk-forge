@@ -9,9 +9,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
-from vonk_forge_contracts import document_sha256, read_model
+from vonk_forge_contracts import ModelDefinition
 
 from .agent_operation_facts import aware
+from .catalog_revision_contract import read_catalog_document
 from .fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     STORE_RETENTION_MAX_AGE,
@@ -84,9 +85,9 @@ def _store_retention_request(
                 raise ValueError("model reference has no content identity")
             unresolved.discard(digest)
             visited.add(digest)
-            definition = read_model(revision.document)
-            if document_sha256(revision.document) != digest:
-                raise ValueError("model reference document identity does not match")
+            # The row's digest was verified at ingress; it is read, never re-hashed.
+            definition = read_catalog_document(revision)
+            assert isinstance(definition, ModelDefinition)  # kind "model" above
             objects.update(file.sha256 for file in definition.files)
             dependencies = {item.content_sha256 for item in definition.dependencies}
             required_dependencies.update(dependencies)

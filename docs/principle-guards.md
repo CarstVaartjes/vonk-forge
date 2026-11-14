@@ -71,6 +71,18 @@ comparison uninstalled the loaded profile's idle installation 24 hours after
 every such release. Use the head revision itself or
 `content_identity.runs_identically`.
 
+A cached model set's `ModelCacheSet.model_content_sha256` is the Model that
+first requested it, not every Model it serves. A new comparison of that column
+with a Model digest (`==`, `!=`, `.in_`) on an added line outside
+`model_cache/lineage.py` is flagged (added-line mode
+`set-first-requester`, `control/tests/model_set_first_requester.py`). A release
+that re-digests a Model of the same files keeps the old first requester, so
+such a reader missed every set the new digest uses: eviction offered sets a
+profile needs and miscounted shared Spark files. Read the set's bindings
+through `model_cache.lineage` (`model_sets`, `verifies_model`,
+`stored_set_bindings`) or, for what an installation runs,
+`RecipeInstallation.model_artifact_set_sha256`.
+
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

@@ -12,6 +12,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -73,6 +74,7 @@ from vonk_control.unused_storage_collection import (
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
 from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_forge_contracts.model import ModelReference
 
 from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
@@ -304,9 +306,15 @@ def _scope(result, scope: str) -> dict[str, object]:
 
 
 def _size(
-    world: Catalog, installation_id: str, size: int, *, model: str | None = None
+    world: Catalog,
+    installation_id: str,
+    size: int,
+    *,
+    model: str | None = None,
+    model_set: str | None = None,
 ) -> None:
-    """What the installation holds on its Spark, and optionally its model."""
+    """What the installation holds on its Spark, and optionally its model and
+    the model set its plan runs."""
 
     with world.sessions.begin() as session:
         for node in session.scalars(
@@ -319,6 +327,10 @@ def _size(
             row = session.get(RecipeInstallation, installation_id)
             assert row is not None
             row.model_content_sha256 = model
+        if model_set is not None:
+            row = session.get(RecipeInstallation, installation_id)
+            assert row is not None
+            row.model_artifact_set_sha256 = model_set
 
 
 def _unattended_uninstall(world: Catalog, *, state: str, updated: datetime) -> None:
@@ -913,27 +925,43 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     assert _kept(result, "model shared with one in use") == 1
 
 
-def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> None:
-    """The model files the cache recorded for a model: file digest -> bytes."""
+def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> str:
+    """A cached model set first requested by ``model`` holding these files
+    (file digest -> bytes); its set digest, which installations record."""
 
+    set_digest = uuid.uuid4().hex + uuid.uuid4().hex
+    manifest = {
+        "schema_version": 2,
+        "source_policy": "nas-first",
+        "model_content_sha256": model,
+        "recipe_revision_sha256": None,
+        "model_definition_ref": None,
+        "model_content_digests": [model],
+        "artifacts": [
+            {
+                "key": digest[:8],
+                "id": digest[:8],
+                "path": f"{digest[:8]}.bin",
+                "kind": "file",
+                "repository": None,
+                "source": "fixture",
+                "revision": None,
+                "sha256": digest,
+                "download_bytes": size,
+                "roles": ["model"],
+                "model_content_sha256": model,
+            }
+            for digest, size in sorted(objects.items())
+        ],
+        "verified_models": [],
+    }
     with world.sessions.begin() as session:
         session.add(
             ModelCacheSet(
-                artifact_set_sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+                artifact_set_sha256=set_digest,
                 schema_version=2,
                 model_content_sha256=model,
-                manifest={
-                    "schema_version": 2,
-                    "artifacts": [
-                        {
-                            "key": digest[:8],
-                            "sha256": digest,
-                            "download_bytes": size,
-                            "model_content_sha256": model,
-                        }
-                        for digest, size in sorted(objects.items())
-                    ],
-                },
+                manifest=manifest,
                 expected_bytes=sum(objects.values()),
                 verified_bytes=sum(objects.values()),
                 state="cached",
@@ -942,6 +970,7 @@ def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> None:
                 last_accessed_at=OLD,
             )
         )
+    return set_digest
 
 
 def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
@@ -954,22 +983,22 @@ def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     m1, m2 = "1" * 64, "2" * 64
-    _model_objects(world, m1, {"a" * 64: 40 * GIB, "b" * 64: 60 * GIB})
-    _model_objects(world, m2, {"b" * 64: 60 * GIB, "c" * 64: 30 * GIB})
+    s1 = _model_objects(world, m1, {"a" * 64: 40 * GIB, "b" * 64: 60 * GIB})
+    s2 = _model_objects(world, m2, {"b" * 64: 60 * GIB, "c" * 64: 30 * GIB})
     first: list[str] = []
     second: list[str] = []
-    for model, installed, found, age in (
-        (m1, 110 * GIB, first, timedelta(days=9)),
-        (m1, 110 * GIB, first, timedelta(days=9)),
-        (m1, 110 * GIB, first, timedelta(days=9)),
-        (m1, 110 * GIB, first, timedelta(days=9)),
-        (m1, 110 * GIB, first, timedelta(days=9)),
-        (m2, 100 * GIB, second, timedelta(days=5)),
-        (m2, 100 * GIB, second, timedelta(days=5)),
-        (m2, 100 * GIB, second, timedelta(days=5)),
+    for model, model_set, installed, found, age in (
+        (m1, s1, 110 * GIB, first, timedelta(days=9)),
+        (m1, s1, 110 * GIB, first, timedelta(days=9)),
+        (m1, s1, 110 * GIB, first, timedelta(days=9)),
+        (m1, s1, 110 * GIB, first, timedelta(days=9)),
+        (m1, s1, 110 * GIB, first, timedelta(days=9)),
+        (m2, s2, 100 * GIB, second, timedelta(days=5)),
+        (m2, s2, 100 * GIB, second, timedelta(days=5)),
+        (m2, s2, 100 * GIB, second, timedelta(days=5)),
     ):
         installation, _ = world.workload(old, run="stopped", touched=NOW - age)
-        _size(world, installation, installed, model=model)
+        _size(world, installation, installed, model=model, model_set=model_set)
         found.append(installation)
     return first, second
 
@@ -1045,10 +1074,34 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     world.revision("glm", 2, head="active")
     kept, _ = world.workload(old, run="running")
     other, _ = world.workload(old, run="stopped")
-    _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB})
-    _model_objects(world, "2" * 64, {"a" * 64: 50 * GIB})
-    _size(world, kept, 50 * GIB, model="1" * 64)
-    _size(world, other, 50 * GIB, model="2" * 64)
+    first = _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB})
+    second = _model_objects(world, "2" * 64, {"a" * 64: 50 * GIB})
+    _size(world, kept, 50 * GIB, model="1" * 64, model_set=first)
+    _size(world, other, 50 * GIB, model="2" * 64, model_set=second)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _within_grace(world)
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == []
+    assert _kept(result, "shares its files with one that stays") == 1
+
+
+def test_a_redigested_model_shares_its_files_with_the_old_digest_that_stays(
+    world: Catalog,
+) -> None:
+    """Catches finding a set's files only through the Model that first requested
+    it: a release re-digested the Model (same files), so an installation of the
+    new digest runs the same set and links the files a running one of the old
+    digest holds."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    kept, _ = world.workload(old, run="running")
+    other, _ = world.workload(old, run="stopped")
+    shared = _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB})
+    _size(world, kept, 50 * GIB, model="1" * 64, model_set=shared)
+    _size(world, other, 50 * GIB, model="2" * 64, model_set=shared)
     lifecycle = FakeLifecycle(world.sessions)
 
     _within_grace(world)
@@ -2734,6 +2787,36 @@ def test_model_a_profile_points_to_is_kept(world: Catalog, cached) -> None:
     assert _set_exists(world, set_digest)
 
 
+def test_model_a_profile_points_to_under_a_new_digest_is_kept(
+    world: Catalog, cached
+) -> None:
+    """Catches keeping a cached set only for the Model that first requested it.
+
+    A release re-digests the Model (same files); the cache adopts the new
+    digest as a verified binding and the profile points to that digest.
+    """
+
+    service, set_digest = cached
+    redigested = "b" * 64
+    with world.sessions.begin() as session:
+        row = session.get(ModelCacheSet, set_digest)
+        assert row is not None
+        manifest = service._stored_manifest(row)
+        assert manifest is not None
+        reference = ModelReference(
+            kind="model", publisher="vonk-forge", slug="glm", content_sha256=redigested
+        )
+        row.manifest = replace(manifest, verified_models=(reference,)).document()
+    _head_recipe_naming(world, redigested)
+    _profile(world, "vonk-forge/glm")
+
+    result = _models(world, service).collect()
+
+    assert result.models == 0
+    assert _kept(result, "profile") == 1
+    assert _set_exists(world, set_digest)
+
+
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_model_an_installation_or_a_live_operation_uses_is_kept(
     world: Catalog, cached
@@ -3671,6 +3754,9 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
         ModelCacheService(sessions, tmp_path / "model-cache")._ensure_set(
             session, manifest
         )
+        # The installation runs that cached set: install admission records the
+        # set the plan runs, the same content key the cache stores it under.
+        installation.model_artifact_set_sha256 = manifest.digest
         node = _required(
             session.scalar(
                 select(InstallationNode).where(
