@@ -22,6 +22,7 @@ const libraryEnvelope = {
   facets: {
     usage: [],
     family: [],
+    line: [],
     version: [],
     quantization: [],
     publisher: [],

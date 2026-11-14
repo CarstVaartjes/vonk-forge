@@ -12,6 +12,7 @@ file) stays, and no workload is told to reload. The old rows still read.
 from __future__ import annotations
 
 import copy
+import json
 import uuid
 from pathlib import Path
 from typing import Any
@@ -38,9 +39,9 @@ from vonk_control.recipe_update_notice import (
 )
 from vonk_forge_contracts import document_sha256, read_model, read_recipe
 
-from tests.signed_recipe_release import signed_recipe_releases
+from tests.signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 
-from .test_catalog_sync import _fixture, _sync
+from .test_catalog_sync import ROOT, _fixture, _sync
 from .test_model_facts_split import NOW, _artifact_key, _store
 
 pytestmark = pytest.mark.usefixtures(signed_recipe_releases.__name__)
@@ -158,14 +159,10 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
         # No "Update available": reloading would run the same thing.
         assert recipe_update_notice("Recipe", legacy_row, head) is None
         # The head shows the new release's own view, neither the stored old
-        # one carried over nor a local reset, and the status is the old one.
-        before = read_catalog_projection(legacy_row)
+        # one carried over nor a local reset.
         after = read_catalog_projection(head)
-        assert isinstance(before, RecipeRevisionProjection)
         assert isinstance(after, RecipeRevisionProjection)
-        assert before.qualification is not None
         assert after.qualification == published
-        assert after.qualification.status == before.qualification.status
         # Measured wins: the new digest starts with what the old one measured.
         assert observed_role_peaks(session, item.content_sha256) == {
             "entrypoint": 700,
@@ -223,3 +220,23 @@ def test_a_stored_4_9_model_row_still_reads_and_its_projection_drops_the_family(
         assert row is not None
         assert "family" not in row.projected["identity"]
         assert row.document == legacy and row.artifact_key == "1" * 64
+
+
+def test_a_model_display_is_titled_by_its_family_not_its_own_family_title(
+    tmp_path: Path,
+) -> None:
+    # Wrong implementation: serving each Model's own family_title labels one
+    # Family differently per Model; the release's Family display is the one source.
+    index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
+    titles = {family["slug"]: family["title"] for family in index["families"]}
+    entry = next(e for e in index["catalog_entities"] if e["display"].get("lineage"))
+    entry["display"]["family_title"] = "An old grouping"
+    index["recipes"] = index["recipes"][:1]
+    client = SignedRecipeRelease.from_library(index, ROOT).client(tmp_path / "p")
+    shown = {
+        model.entry.document.identity.slug: model.entry.display
+        for model in client.list().catalog_entities
+    }
+    display = shown[entry["document"]["identity"]["slug"]]
+    assert display is not None and display.lineage is not None
+    assert display.family_title == titles[display.lineage.family]

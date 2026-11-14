@@ -99,7 +99,9 @@ def _newer_library() -> _Response:
     library = RecipeLibraryResponse(
         generated_at=datetime(2026, 11, 8, tzinfo=UTC),
         recipes=[],
-        facets=LibraryFacetValues(usage=[], family=[], version=[], quantization=[]),
+        facets=LibraryFacetValues(
+            usage=[], family=[], line=[], version=[], quantization=[]
+        ),
         next_cursor=None,
         freshness_policy=FreshnessPolicy(),
     ).model_dump(mode="json")

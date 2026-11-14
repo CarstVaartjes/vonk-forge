@@ -288,7 +288,7 @@ const projectionResources = {
   runtime_memory_bytes: null,
 };
 const projectionLocal = { controller: "cached" as const, preparation: null, running_on: [] };
-const facetValues = { family: [], quantization: [], usage: [], version: [] };
+const facetValues = { family: [], line: [], quantization: [], usage: [], version: [] };
 export const modelLibrary: ModelLibrary = {
   generated_at: libraryViewSnapshot.generated_at,
   freshness_policy: libraryViewSnapshot.freshness_policy,

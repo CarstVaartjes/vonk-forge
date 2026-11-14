@@ -8814,6 +8814,7 @@
       "required": [
         "usage",
         "family",
+        "line",
         "version",
         "quantization"
       ],
@@ -8886,16 +8887,6 @@
           ],
           "default": null,
           "title": "Fits Fleet"
-        },
-        "line": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Line",
-          "type": "array"
         },
         "model": {
           "items": {
@@ -10302,7 +10293,7 @@
       "type": "object"
     },
     "ModelLineage": {
-      "description": "Where a Model sits in the catalog: Family, then Line, then Model release.\n\n``family``, ``line`` and ``model`` are slugs a :class:`FamilyDisplay` names\n(a Line is unique within its Family, a Model within its Line).\n``generation`` and ``publisher`` are facets across Lines.",
+      "description": "Where a Model sits in the catalog: Family, then Line, then Model release.\n\n``family``, ``line`` and ``model`` are slugs a :class:`FamilyDisplay` names\n(a Line is unique within its Family, a Model within its Line); the order\nof a Line's ``models`` there is the release order. ``generation`` is a\nfacet across Lines.",
       "properties": {
         "base_model": {
           "anyOf": [
@@ -10367,17 +10358,6 @@
           "title": "Model",
           "type": "string"
         },
-        "publisher": {
-          "maxLength": 120,
-          "minLength": 1,
-          "title": "Publisher",
-          "type": "string"
-        },
-        "release_order": {
-          "pattern": "^[0-9]{3}\\.[0-9]{3}\\.[0-9]{3}/[0-9]{4}-[0-9]{2}-[0-9]{2}$",
-          "title": "Release Order",
-          "type": "string"
-        },
         "variant_kind": {
           "enum": [
             "base",
@@ -10392,9 +10372,7 @@
         "family",
         "line",
         "model",
-        "publisher",
-        "variant_kind",
-        "release_order"
+        "variant_kind"
       ],
       "title": "ModelLineage",
       "type": "object"
@@ -14425,7 +14403,7 @@
           "type": "array"
         },
         "schema_version": {
-          "const": 2,
+          "const": 3,
           "title": "Schema Version",
           "type": "integer"
         }

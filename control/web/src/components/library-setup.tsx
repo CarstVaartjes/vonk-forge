@@ -82,11 +82,10 @@ function facetOptions(
   const labels = new Map<string, string>();
   for (const record of records) {
     if (facet === "family") {
-      // A Family's own title lives in the release's display/families, which the
-      // Controller does not serve yet; a Model's family_title names its old
-      // grouping, so the chip shows the Family slug.
+      // The Controller titles each Model display by its Family (the release's
+      // display/families), so one Family has one label.
       const value = recordFamily(record);
-      if (value) labels.set(value, value);
+      if (value) labels.set(value, record.modelDisplay?.family_title || value);
     } else if (record.recipe) {
       const value = facet === "engine" ? recipeEngine(record.recipe) : recipeCreator(record.recipe);
       if (value) labels.set(value.toLocaleLowerCase(), value);

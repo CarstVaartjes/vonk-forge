@@ -36,7 +36,11 @@ from vonk_control.run_admission import (
     require_admissible,
     run_port_demand,
 )
-from vonk_forge_contracts import ModelDefinition, RecipeDefinition, document_sha256
+from vonk_forge_contracts import (
+    RecipeDefinition,
+    document_sha256,
+    read_model,
+)
 
 from .display_fixtures import legacy_model_display, model_display_denying
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
@@ -56,6 +60,7 @@ def setup(
     denied_jurisdictions=(),
     github_release_source=False,
     engine=None,
+    stored_family=False,
 ):
     engine = engine or create_engine(f"sqlite:///{tmp_path / 'run.sqlite'}")
     Base.metadata.create_all(engine)
@@ -84,7 +89,13 @@ def setup(
                 for index, item in enumerate(model_document["files"])
             ],
         }
-    model = ModelDefinition.model_validate(model_document)
+    if stored_family:
+        # The row a 4.x Controller stored: its Model still carries the family.
+        model_document["identity"]["family"] = {
+            "publisher": "vonk-forge",
+            "slug": "synthetic",
+        }
+    model = read_model(model_document)
     document["models"][0]["model"]["content_sha256"] = document_sha256(model_document)
     memory = document["topology"]["roles"][0]["resources"]["memory"]
     memory.update({"peak_bytes": peak_bytes, "reserve_bytes": system_reserve})
@@ -127,23 +138,30 @@ def setup(
         )
         session.add(model_root)
         session.flush()
-        session.add(
-            CatalogDocumentRevision(
-                document_id=model_root.id,
-                kind="model",
-                publisher=model_root.publisher,
-                slug=model_root.slug,
-                revision_number=1,
-                schema_version=2,
-                state="active",
-                document=model_document,
-                content_digest=document_sha256(model_document),
-                artifact_key="a" * 64,
-                projected={},
-                created_by="admin",
-                created_at=now,
-            )
+        model_revision = CatalogDocumentRevision(
+            document_id=model_root.id,
+            kind="model",
+            publisher=model_root.publisher,
+            slug=model_root.slug,
+            revision_number=1,
+            schema_version=2,
+            state="active",
+            document={} if stored_family else model_document,
+            content_digest=document_sha256(model_document),
+            artifact_key="a" * 64,
+            projected={},
+            created_by="admin",
+            created_at=now,
         )
+        session.add(model_revision)
+        if stored_family:
+            # A write refuses the retired shape; only an older Controller wrote it.
+            session.flush()
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == model_revision.id)
+                .values(document=model_document)
+            )
         RecipeDefinition.model_validate(document)
         recipe_document = document
         recipe = CatalogDocument(
@@ -295,6 +313,20 @@ def test_run_alias_is_not_in_the_digest_and_is_not_persisted_in_the_plan(
         assert run is not None
         assert run.alias == plan.alias
         assert "alias" not in run.plan
+
+
+def test_a_stored_model_row_carrying_its_retired_family_is_still_admitted(
+    tmp_path,
+) -> None:
+    # Wrong implementation: re-validating the stored Model document strictly
+    # sizes nothing for a 4.x row, and every start or reload is refused.
+    sessions, now, _node, installation = setup(tmp_path, stored_family=True)
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, alias="qwen", now=now)
+    assert plan.allowed is True
+    assert plan.nodes[0].required_memory_bytes == 225
 
 
 def test_a_second_single_spark_run_takes_the_other_authorised_port(tmp_path) -> None:

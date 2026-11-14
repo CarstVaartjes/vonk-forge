@@ -591,9 +591,15 @@ class RunAdmissionService:
                     reason=InvalidRequestReason.NOT_FOUND,
                 ) from error
             resolved_models = resolved_entities.model_revisions
+            # The tolerantly parsed Models, never the raw stored documents: a
+            # row an older contract wrote still carries a retired field.
+            parsed_models = resolved_entities.models
             model_documents = {
-                (item.publisher, item.slug, item.content_digest): item.document
+                (item.publisher, item.slug, item.content_digest): parsed_models[
+                    item.content_digest
+                ]
                 for item in resolved_models
+                if item.content_digest in parsed_models
             }
             model_version = resolved_models[0] if resolved_models else None
             model_display = stored_model_display(session, model_version)

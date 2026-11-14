@@ -246,7 +246,7 @@ class LibraryModelProjection(StrictModel):
     # the Model release and variant kind are in ``model_display.lineage``);
     # null for a helper Model or before the display is synced.
     family: Text128 | None
-    line: Text128 | None = None
+    line: Text128 | None
     version: Text128
     variant: Text128
     quantization: Text64
@@ -263,7 +263,7 @@ class LibraryModelProjection(StrictModel):
 class LibraryFacetValues(StrictModel):
     usage: list[Text64] = Field(max_length=64)
     family: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
-    line: list[Text128] = Field(default_factory=list, max_length=_MAX_PAGE_RECIPES)
+    line: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
     version: list[Text128] = Field(max_length=_MAX_PAGE_RECIPES)
     quantization: list[Text64] = Field(max_length=_MAX_PAGE_RECIPES)
     # Creator and alignment are optional facets: a library with none still
@@ -287,7 +287,6 @@ class LibraryFilterValues(StrictModel):
     model: list[Text256] = Field(default_factory=list, max_length=64)
     usage: list[Text64] = Field(default_factory=list, max_length=64)
     family: list[Text128] = Field(default_factory=list, max_length=64)
-    line: list[Text128] = Field(default_factory=list, max_length=64)
     version: list[Text128] = Field(default_factory=list, max_length=64)
     quantization: list[Text64] = Field(default_factory=list, max_length=64)
     publisher: list[Text128] = Field(default_factory=list, max_length=64)

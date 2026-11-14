@@ -84,7 +84,7 @@ DOCUMENT_VERSIONS: Mapping[DocumentKind, int] = {
     DocumentKind.PROFILE: 1,
     DocumentKind.PROFILE_APPLICATION: 1,
     DocumentKind.PROFILE_ENDPOINTS: 1,
-    DocumentKind.RECIPE_LIBRARY: 2,
+    DocumentKind.RECIPE_LIBRARY: 3,
     DocumentKind.RECIPE_DETAIL: 3,
     DocumentKind.ARTIFACT_JOB: 1,
     DocumentKind.ARTIFACT_DOWNLOAD: 1,

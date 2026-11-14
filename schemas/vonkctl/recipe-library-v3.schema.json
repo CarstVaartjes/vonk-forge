@@ -1501,6 +1501,7 @@
       "required": [
         "usage",
         "family",
+        "line",
         "version",
         "quantization"
       ],
@@ -1573,16 +1574,6 @@
           ],
           "default": null,
           "title": "Fits Fleet"
-        },
-        "line": {
-          "items": {
-            "maxLength": 128,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 64,
-          "title": "Line",
-          "type": "array"
         },
         "model": {
           "items": {
@@ -6647,7 +6638,7 @@
       "type": "array"
     },
     "schema_version": {
-      "const": 2,
+      "const": 3,
       "title": "Schema Version",
       "type": "integer"
     }
@@ -6660,6 +6651,6 @@
     "freshness_policy",
     "schema_version"
   ],
-  "title": "vonkctl recipe-library document (schema_version 2)",
+  "title": "vonkctl recipe-library document (schema_version 3)",
   "type": "object"
 }

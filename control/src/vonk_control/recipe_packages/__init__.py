@@ -24,6 +24,7 @@ from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     PACKAGE_SCHEMA_VERSION,
     CatalogIndexRefused,
+    CatalogModelEntry,
     ModelDefinition,
     RecipeDefinition,
     RecipeDisplay,
@@ -666,8 +667,12 @@ class RecipePackageClient:
         recipes, recipe_notes = catalog_read.known_entries(
             CatalogSection.RECIPES, envelope.recipes, reader.unknown
         )
+        family_titles = {family.slug: family.title for family in envelope.families}
         catalog_entities = tuple(
-            CatalogModel(entry=entry, published=documents[entry.content_sha256])
+            CatalogModel(
+                entry=_with_family_title(entry, family_titles),
+                published=documents[entry.content_sha256],
+            )
             for entry in models
         )
         packages: dict[str, RecipePackageEntry] = {}
@@ -1159,6 +1164,25 @@ class RecipePackageClient:
                         path.rmdir()
                 temporary.rmdir()
         return target
+
+
+def _with_family_title(
+    entry: CatalogModelEntry, family_titles: Mapping[str, str]
+) -> CatalogModelEntry:
+    """The Model's display titled by its Family from the release's ``families``.
+
+    One source for a Family's title: the index's Family display, never each
+    Model's own ``family_title``. A helper (no lineage) keeps its display.
+    """
+
+    display = entry.display
+    lineage = display.lineage if display is not None else None
+    title = family_titles.get(lineage.family) if lineage is not None else None
+    if display is None or title is None:
+        return entry
+    return entry.model_copy(
+        update={"display": display.model_copy(update={"family_title": title})}
+    )
 
 
 def _catalog_uri(publisher: str, slug: str, digest: str) -> str:
