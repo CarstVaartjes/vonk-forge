@@ -56,6 +56,7 @@ from .test_artifact_job_lifecycle import _issued_job
 from .test_artifact_jobs import (
     artifact_create_request,
     create_artifact_job,
+    finalized_artifact_job,
     running_artifact_service,
     submitted_artifact_job,
 )
@@ -678,3 +679,66 @@ def test_cancelled_job_evidence_survives_uncertain_stop_and_history_collection(
             )
             is not None
         )
+
+
+def test_a_cancel_that_never_confirmed_its_stop_does_not_hold_the_next_submit(
+    tmp_path,
+):
+    """Catches an ended job with unknown effect blocking every newer submit.
+
+    A cancelled job whose Stop budget ran out ends with its effect unknown and
+    nothing left to drive it. The newest submit on the same run is admitted.
+    """
+
+    from .test_artifact_jobs import MutableClock
+    from .test_recipe_operations import NOW
+
+    sessions, operations, _queue, service, run_id, node_id = running_artifact_service(
+        tmp_path
+    )
+    clock = MutableClock(NOW)
+    service._clock = operations._clock = clock
+    agent_jobs = AgentJobService(sessions, clock=clock)
+
+    def consume(session, operation, attempt, message):
+        service.consume_agent_result(session, operation, attempt, message)
+        operations.consume_agent_result(session, operation, attempt, message)
+
+    agent_jobs.set_result_consumer(consume)
+    operations._agent_jobs = agent_jobs
+    job = submitted_artifact_job(service, run_id, request_suffix=1200)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None and job.operation_id is not None
+    service.cancel(
+        job.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000001201",
+        reason="newer workload intent",
+    )
+    agent_jobs.record_result(
+        AgentResult(
+            fence=claim.fence,
+            state=AgentResultState.OBSERVING,
+            result=OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.JOB_STOP_UNCONFIRMED,
+                reason="job cancellation stop remains unobserved",
+                evidence=OutcomeEvidence(stage=FailureStage.JOB_CANCEL_STOP),
+            ),
+        )
+    )
+    for _ in range(10):
+        clock.advance(seconds=120)
+        agent_jobs.reconcile_orders()
+        if service.get(job.id).state == LifecycleState.CANCELLED:
+            break
+    assert service.get(job.id).state == LifecycleState.CANCELLED
+
+    draft = finalized_artifact_job(service, run_id, request_suffix=1210)
+    newer = service.submit(
+        draft.id,
+        actor="operator",
+        request_id="00000000-0000-4000-8000-000000001211",
+    )
+
+    assert newer.operation_id is not None

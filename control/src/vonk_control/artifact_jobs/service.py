@@ -545,8 +545,12 @@ class ArtifactJobService(OutputService):
                         set_parent_state(parent, ajs.CANCELLED, None, now)
                     adapter.confirm_stopped(prior, WaitReason.SCOPE_CHANGED, now)
                     continue
-                if ajs.state_of(prior) == ajs.FAILED:
-                    continue  # a FAILED job is ended; CANCELLED ones are released by their own Stop
+                if ajs.is_ended(prior):
+                    # An ended job holds nothing: nothing drives it any more,
+                    # even when it ended with its effect unknown (a lost job,
+                    # or a cancel whose Stop budget ran out). The newest
+                    # submit goes ahead.
+                    continue
                 uncertain = recorded.effect is Effect.UNKNOWN or (
                     prior.operation_id is not None
                     and prior.result_evidence is not None
