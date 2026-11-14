@@ -120,8 +120,8 @@ export type LibraryViewModel = {
   local: components["schemas"]["LibraryLocalState"];
   // Projected facets, named exactly as the CLI filter flags and the
   // /api/model/library query parameters: --usage --family --version
-  // --quantization.
-  family: string;
+  // --quantization. The family is the display lineage's (null for a helper).
+  family: string | null;
   version: string;
   quantization: string;
   usage: string[];

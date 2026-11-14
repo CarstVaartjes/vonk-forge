@@ -10,7 +10,10 @@
    },
    "dockerfile": "adapters/inkling/tonyd2wild-mtp-dual/Dockerfile",
    "network": {
-    "hosts": []
+    "hosts": [
+     "files.pythonhosted.org",
+     "pypi.org"
+    ]
    },
    "patches": []
   }
@@ -267,7 +270,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "98ab69c89490fafe0ec8603dfa529a4652ab449c65a8464a89d657904fb00377",
+    "content_sha256": "9fe715fd4ba398ecb74c29bfa80c3b7b751c08c2d8d193c6cd79cfd4fe044e28",
     "kind": "model",
     "publisher": "thinkingmachines",
     "slug": "inkling-small-nvfp4"

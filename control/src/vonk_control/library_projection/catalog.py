@@ -107,6 +107,8 @@ def _model_projection(
     local = self._local(
         revision.content_digest, kind=RunSwitchReasonScopeName.MODEL, snapshot=snapshot
     )
+    # The hierarchy is display only, never the document's identity.
+    lineage = text.model.lineage if text.model is not None else None
     return LibraryModelProjection(
         selector=self.selector(document.identity.publisher, document.identity.slug),
         identity=_model_identity(revision, document),
@@ -114,9 +116,8 @@ def _model_projection(
         if isinstance(document, ModelRevisionProjection)
         else cast(ModelRevisionProjection, read_catalog_projection(revision)),
         model_display=text.model,
-        family=self.selector(
-            document.identity.family.publisher, document.identity.family.slug
-        ),
+        family=lineage.family if lineage is not None else None,
+        line=lineage.line if lineage is not None else None,
         version=document.identity.version,
         variant=document.identity.variant,
         quantization=document.format.quantization,
@@ -332,6 +333,7 @@ def _recipe_facet_values(
     return LibraryFacetValues(
         usage=model_facets.usage,
         family=model_facets.family,
+        line=model_facets.line,
         version=model_facets.version,
         quantization=model_facets.quantization,
         publisher=sorted(

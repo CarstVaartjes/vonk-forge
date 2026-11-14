@@ -1,0 +1,61 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "readme-7b53c8f12b53-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "7b53c8f12b53ee21368f6a64b2a6834c1cf15e72b61ad69464fa366b73504b77",
+   "size_bytes": 1790
+  },
+  {
+   "id": "minimax-music3-dit-fp16-45494a2b6b69-d758bf1f61",
+   "path": "diffusion_models/minimax_music3_dit_fp16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "45494a2b6b69af115902ff28eaf54118d19067aa54da01000f3e3efce7ba0e34",
+   "size_bytes": 4914197682
+  },
+  {
+   "id": "minimax-music3-text-encoder-pruned-bf16-e81e469c92af-c0528e79a0",
+   "path": "text_encoders/minimax_music3_text_encoder_pruned_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "e81e469c92af324dc69b77e5a11179e22542a6d628f2b205c8cf6143e510d976",
+   "size_bytes": 16706629398
+  },
+  {
+   "id": "minimax-music3-dav-2a32155b769b-649ac540e9",
+   "path": "vae/minimax_music3_dav.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "2a32155b769be01445fcc2a8663b910fc9e1751e18dc1c3ec528064512d9ef0c",
+   "size_bytes": 216696128
+  }
+ ],
+ "format": {
+  "precision": "mixed",
+  "quantization": "none"
+ },
+ "identity": {
+  "model": {
+   "publisher": "minimax",
+   "slug": "minimax-music3"
+  },
+  "publisher": "comfy-org",
+  "slug": "minimax-music3-comfy-9e364ccd",
+  "variant": "FP16 DiT and pruned BF16 text encoder",
+  "version": "Music3-9e364ccd"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Comfy-Org/MiniMax-Music-3",
+  "revision": "9e364ccd290a401561091fb441ed19cd7de92550"
+ }
+}

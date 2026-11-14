@@ -82,6 +82,8 @@ function facetOptions(
   const labels = new Map<string, string>();
   for (const record of records) {
     if (facet === "family") {
+      // The Controller titles each Model display by its Family (the release's
+      // display/families), so one Family has one label.
       const value = recordFamily(record);
       if (value) labels.set(value, record.modelDisplay?.family_title || value);
     } else if (record.recipe) {

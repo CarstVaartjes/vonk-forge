@@ -156,7 +156,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "8fe3363a85722ce26fac9a1a56885ad129758123abd7e8ff781de21636ec2b77",
+    "content_sha256": "10d8b4da4cd86afc1afa36d46afb048726d05a1f0c173a8bb98d7c9018ba1748",
     "kind": "model",
     "publisher": "nvidia",
     "slug": "llama-3-1-8b-instruct-fp8-42d9515e"

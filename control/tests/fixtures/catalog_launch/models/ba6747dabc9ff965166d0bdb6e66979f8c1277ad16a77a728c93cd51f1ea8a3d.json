@@ -1,0 +1,34 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "target",
+   "path": "split_files/diffusion_models/qwen_image_edit_2511_bf16.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "ae42d927b5fac4f278b9a894554c727e619727a63622976f2d95625be4bce08c",
+   "size_bytes": 40861031560
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "bf16"
+ },
+ "identity": {
+  "model": {
+   "publisher": "qwen",
+   "slug": "qwen-image-edit"
+  },
+  "publisher": "qwen",
+  "slug": "qwen-image-edit-2511-comfyui-f68ace85",
+  "variant": "Qwen Image Edit 2511 ComfyUI revision f68ace85",
+  "version": "comfyui-f68ace85"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI",
+  "revision": "f68ace85e60b4a02a323e394253731947657b7d2"
+ }
+}

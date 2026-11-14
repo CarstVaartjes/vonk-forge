@@ -945,14 +945,25 @@
       "entrypoint",
       "worker"
      ]
+    },
+    {
+     "file_id": "chat-template-95b7033a693b-00824420d1",
+     "id": "primary-chat-template-95b7033a693b-00824420d1",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint",
+      "worker"
+     ]
     }
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "ec2b8163755981b0b332e45c4bc2d722805c434542ef5bccaa997840236ae26e",
+    "content_sha256": "bfdb5330c7109718f73fa358b9fc2f09dddbf71d21acd968a4630312d62c9f6c",
     "kind": "model",
     "publisher": "deepseek-ai",
-    "slug": "deepseek-v4-1-flash-1017-native-1bae0e10"
+    "slug": "deepseek-v4-1-flash-1017-native-08c8657f"
    }
   }
  ],
@@ -967,8 +978,8 @@
   "source_reference": "https://github.com/MiaAI-Lab/DeepSeek-v4.1-Flash-DGX-Sparks/tree/64b02dea8681fb1d8e3a659ea432a8e9e9ba3995"
  },
  "release": {
-  "released_at": "2026-10-19",
-  "version": "1.0.0"
+  "released_at": "2026-11-10",
+  "version": "1.0.1"
  },
  "runtime": {
   "arguments": [
@@ -1207,7 +1218,7 @@
     "name": "entrypoint",
     "resources": {
      "disk": {
-      "artifact_bytes": 510311045295,
+      "artifact_bytes": 510311062017,
       "image_bytes": 40000000000,
       "safety_margin_bytes": 20000000000,
       "working_bytes": 20000000000
@@ -1224,7 +1235,7 @@
     "name": "worker",
     "resources": {
      "disk": {
-      "artifact_bytes": 510311045295,
+      "artifact_bytes": 510311062017,
       "image_bytes": 40000000000,
       "safety_margin_bytes": 20000000000,
       "working_bytes": 20000000000

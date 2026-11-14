@@ -31,10 +31,7 @@ from .types import (
 
 def _selected_model_bytes(
     recipe_document: Mapping[str, object],
-    model_documents: Mapping[
-        tuple[str, str, str], ModelDefinition | Mapping[str, object]
-    ]
-    | None,
+    model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None,
     role_name: str,
 ) -> int | None:
     if not model_documents:
@@ -47,18 +44,13 @@ def _selected_model_bytes(
         selected_any = False
         for selection in recipe.models:
             reference = selection.model
-            raw_model = model_documents.get(
+            # Parsed once by the tolerant catalog reader: a stored row of an
+            # older contract (a retired field) still sizes its files.
+            model = model_documents.get(
                 (reference.publisher, reference.slug, reference.content_sha256)
             )
-            if raw_model is None:
+            if model is None:
                 return None
-            model = (
-                raw_model
-                if isinstance(raw_model, ModelDefinition)
-                else ModelDefinition.model_validate_json(
-                    json.dumps(raw_model, allow_nan=False), strict=True
-                )
-            )
             by_id = {file.id: file for file in model.files}
             selected_ids = {
                 item.file_id for item in selection.files if role_name in item.roles
@@ -77,10 +69,7 @@ def _selected_model_bytes(
 def _resource_evidence(
     recipe_document: Mapping[str, object],
     role_name: str,
-    model_documents: Mapping[
-        tuple[str, str, str], ModelDefinition | Mapping[str, object]
-    ]
-    | None,
+    model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None,
     declared_total_bytes: int,
     settings: EffectiveResourceSettings | None,
     observed_total_bytes: int | None,

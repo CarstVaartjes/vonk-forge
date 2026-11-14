@@ -679,7 +679,7 @@ def test_production_services_use_exactly_the_platform_memory_floor() -> None:
 
 
 def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
-    """Catches projections accepting malformed sizes or counting unused files."""
+    """Catches counting unused files, or sizing a Model the recipe does not pin."""
     from importlib import resources
 
     from vonk_control.resource_planning import memory_requirement
@@ -700,12 +700,11 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
     role = recipe.topology.roles[0]
     key = (reference.publisher, reference.slug, reference.content_sha256)
     stored_recipe = json.loads(recipe.model_dump_json())
-    stored_model = json.loads(model.model_dump_json())
     need = memory_requirement(
         stored_recipe,
         role.resources.memory,
         role.name,
-        {key: stored_model},
+        {key: model},
         observed_peak_bytes=None,
     )
     selected = {item.file_id for item in selection.files if role.name in item.roles}
@@ -713,16 +712,16 @@ def test_stored_canonical_models_supply_exact_selected_weight_bytes() -> None:
         item.size_bytes for item in model.files if item.id in selected
     )
     assert need.demand.allowed
-    stored_model["files"][0]["size_bytes"] = True
-    damaged = memory_requirement(
+    other = (reference.publisher, reference.slug, "0" * 64)
+    unpinned = memory_requirement(
         stored_recipe,
         role.resources.memory,
         role.name,
-        {key: stored_model},
+        {other: model},
         observed_peak_bytes=None,
     )
-    assert not damaged.demand.allowed
-    assert damaged.demand.weights_bytes is None
+    assert not unpinned.demand.allowed
+    assert unpinned.demand.weights_bytes is None
 
 
 def test_typed_effective_selection_roundtrip_keeps_bound_identity_and_knobs() -> None:

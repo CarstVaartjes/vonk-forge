@@ -1758,7 +1758,7 @@ def check_source(
                 (
                     site.line,
                     (
-                        "raw document read; use vonk_forge_contracts "
+                        "raw or strict document read; use vonk_forge_contracts "
                         "read_recipe/read_model/read_*_display"
                     ),
                 )

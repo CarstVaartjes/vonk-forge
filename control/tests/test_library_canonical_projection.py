@@ -112,10 +112,6 @@ def _insert_canonical_rows(
             assert isinstance(model, dict)
             model["publisher"] = "test"
             model["slug"] = f"model-{index:04d}"
-            family = identity["family"]
-            assert isinstance(family, dict)
-            family["publisher"] = "test"
-            family["slug"] = "family"
             canonical = ModelDefinition.model_validate(document)
             title = canonical.identity.slug
         else:

@@ -50,6 +50,7 @@ from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
     PACKAGE_MEDIA_TYPE,
     ChatApi,
     ModelDefinition,
@@ -67,6 +68,9 @@ from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
 from .signed_recipe_release import SignedRecipeRelease, signed_recipe_releases
 from .test_recipe_builds import setup
+
+# Release tags of the contract major this Controller reads, and its neighbours.
+MAJOR = CONTRACT_MAJOR
 
 
 def _canonical(value: object) -> bytes:
@@ -98,7 +102,6 @@ def _canonical_package_fixture(
             "identity": {
                 "publisher": "fixture",
                 "slug": "tiny-model",
-                "family": {"publisher": "fixture", "slug": "tiny-model"},
                 "model": {"publisher": "fixture", "slug": "tiny-model"},
                 "version": "1.0.0",
                 "variant": "default",
@@ -405,10 +408,10 @@ class _Release:
             return httpx2.Response(
                 200,
                 json=[
-                    {"tag_name": "v4.0.0", "draft": False, "assets": []},
-                    {"tag_name": "v4.9.0", "draft": True, "assets": []},
+                    {"tag_name": f"v{MAJOR}.0.0", "draft": False, "assets": []},
+                    {"tag_name": f"v{MAJOR}.9.0", "draft": True, "assets": []},
                     release,
-                    {"tag_name": "v4.0.5", "draft": False, "assets": []},
+                    {"tag_name": f"v{MAJOR}.0.5", "draft": False, "assets": []},
                 ],
             )
         if path == f"{RELEASES}/tags/{self.tag}":
@@ -452,7 +455,9 @@ def signed_releases(monkeypatch: pytest.MonkeyPatch) -> list[bytes]:
     return verified
 
 
-def _release_for(index: bytes, package: bytes, *, tag: str = "v4.1.0") -> _Release:
+def _release_for(
+    index: bytes, package: bytes, *, tag: str = f"v{MAJOR}.1.0"
+) -> _Release:
     return _Release(tag, {"catalog-index.json": index, "tiny-recipe.tar.gz": package})
 
 
@@ -486,7 +491,7 @@ def test_production_reader_downloads_one_signed_bundle(
         f"http://127.0.0.1:8083{RELEASES}?per_page=100",
         (
             "http://127.0.0.1:8085/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v4.1.0/recipe-library.tar"
+            f"v{MAJOR}.1.0/recipe-library.tar"
         ),
         (
             "http://127.0.0.1:8085/github-production-release-asset/1336002555/"
@@ -497,7 +502,7 @@ def test_production_reader_downloads_one_signed_bundle(
         row["package"], "canonical fixture package metadata"
     )
     assert snapshot.commit == SIGNED_COMMIT
-    assert snapshot.version == "4.0.0"
+    assert snapshot.version == f"{MAJOR}.0.0"
     assert snapshot.updated_at is not None
     assert snapshot.updated_at.isoformat() == "2026-09-28T12:00:00+00:00"
     assert item.package_handle is not None
@@ -511,16 +516,16 @@ def test_production_reader_can_hold_an_exact_release_tag(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
     index, _, package = _canonical_package_fixture()
-    release = _release_for(index, package, tag="v4.0.0")
-    client = _client(release, tmp_path / "packages", release="v4.0.0")
+    release = _release_for(index, package, tag=f"v{MAJOR}.0.0")
+    client = _client(release, tmp_path / "packages", release=f"v{MAJOR}.0.0")
     assert client.list().commit == SIGNED_COMMIT
     # Without a relay the reader downloads from github.com and follows only
     # the redirect to GitHub's release asset origin.
     assert release.requests == [
-        f"http://127.0.0.1{RELEASES}/tags/v4.0.0",
+        f"http://127.0.0.1{RELEASES}/tags/v{MAJOR}.0.0",
         (
             "https://github.com/CarstVaartjes/vonk-forge-recipes/releases/download/"
-            "v4.0.0/recipe-library.tar"
+            f"v{MAJOR}.0.0/recipe-library.tar"
         ),
         (
             "https://release-assets.githubusercontent.com/github-production-release-"
@@ -840,7 +845,7 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
         RecipeLibrarySnapshot(commit=SIGNED_COMMIT, items=()),
         packages,
         recipe_packages._VerifiedRelease(
-            tag="v4.1.0",
+            tag=f"v{MAJOR}.1.0",
             commit=SIGNED_COMMIT,
             assets=frozenset({"recipe-2.tar.gz", "unlisted.tar.gz"}),
             checksums={"recipe-2.tar.gz": "a" * 64},
@@ -1043,11 +1048,11 @@ def test_unchanged_release_is_noticed_cheaply_and_a_new_one_is_fetched(
     first = client.list()
     downloads = len(release.requests)
     assert client.list() == first
-    assert conditional == [None, '"v4.1.0"']
+    assert conditional == [None, f'"v{MAJOR}.1.0"']
     assert len(release.requests) == downloads + 1  # only the conditional check
 
     # A new release changes the listing: the check no longer answers 304.
-    release.tag = "v4.1.1"
+    release.tag = f"v{MAJOR}.1.1"
     client.list()
     assert len(release.requests) > downloads + 2
     client.close()
@@ -1094,7 +1099,8 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
     def transport(request: httpx2.Request) -> httpx2.Response:
         if older_only and request.url.path == RELEASES:
             return httpx2.Response(
-                200, json=[{"tag_name": "v3.2.0", "draft": False, "assets": []}]
+                200,
+                json=[{"tag_name": f"v{MAJOR - 1}.2.0", "draft": False, "assets": []}],
             )
         return release.handler(request)
 
@@ -1109,10 +1115,10 @@ def test_a_running_client_waits_visibly_for_its_major_and_adopts_it_on_the_next_
                 client.list()
             assert waiting.value.code == RecipePackageCode.UNAVAILABLE
             assert waiting.value.typed_reason == WaitReason.OBSERVATION_UNAVAILABLE
-            assert "contract v4" in waiting.value.detail
+            assert f"contract v{MAJOR}" in waiting.value.detail
         older_only = False
         snapshot = client.list()
-        assert snapshot.version == "4.0.0" and snapshot.items
+        assert snapshot.version == f"{MAJOR}.0.0" and snapshot.items
     finally:
         client.close()
 
@@ -1130,7 +1136,7 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
     index, _row, package = _canonical_package_fixture()
     release = _release_for(index, package)
     newer: list[dict[str, object]] = [
-        {"tag_name": "v5.0.0", "draft": False, "assets": []}
+        {"tag_name": f"v{MAJOR + 1}.0.0", "draft": False, "assets": []}
     ]
 
     def transport(request: httpx2.Request) -> httpx2.Response:
@@ -1153,7 +1159,11 @@ def test_a_published_newer_major_is_noted_on_every_tick_and_the_catalog_still_ap
             snapshot = client.list()
             assert snapshot.items
             notes.append([note.detail for note in snapshot.display_notes])
-        assert notes == [["contract v5 is published; this Controller reads v4"]] * 2
+        assert (
+            notes
+            == [[f"contract v{MAJOR + 1} is published; this Controller reads v{MAJOR}"]]
+            * 2
+        )
         assert not snapshot.problems
 
         newer.clear()

@@ -307,7 +307,8 @@ class LibraryProjection:
     def _facet_values(models: Sequence[LibraryModelProjection]) -> LibraryFacetValues:
         return LibraryFacetValues(
             usage=sorted({value for model in models for value in model.usage}),
-            family=sorted({model.family for model in models}),
+            family=sorted({model.family for model in models if model.family}),
+            line=sorted({model.line for model in models if model.line}),
             version=sorted({model.version for model in models}),
             quantization=sorted({model.quantization for model in models}),
             publisher=sorted({model.identity.publisher for model in models}),

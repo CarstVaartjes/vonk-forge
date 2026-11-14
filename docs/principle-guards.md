@@ -18,6 +18,15 @@ spelling either as a literal on an added Python line fails
 (`control/tests/contract_constant_copies.py`); read the index with
 `vonk_forge_contracts.catalog_reader.read_catalog` and import the constants.
 
+A stored Recipe, Model or display document has one reader each: the tolerant
+`read_recipe`, `read_model` and `read_*_display` of `vonk_forge_contracts`. An
+added line that indexes such a raw document, or validates one strictly with
+`ModelDefinition`/`RecipeDefinition` `.model_validate*` or a `TypeAdapter` of
+them, fails (added-line mode `document-reads`,
+`control/tests/document_read_boundaries.py`): the strict contract refuses a
+field that a row of an older contract still carries, so every start of such a
+revision would be refused.
+
 The contact-clock detector rejects new negative-age liveness refusals for
 Controller-stamped contacts and worker heartbeats, including local aliases and
 SQL freshness filters. Clock rollback and capture latency imply age zero;

@@ -1756,6 +1756,11 @@ _DOCUMENT_READS = (
     "slug = entry['document']['identity']['slug']\n",
     "runtime = json.loads(files['recipe.json'])['runtime']\n",
     "def f(row):\n    bound = row.document\n    return bound['models']\n",
+    "recipe = RecipeDefinition.model_validate_json(canonical_message(row.document))\n",
+    "model = ModelDefinition.model_validate(document, strict=True)\n",
+    "field = readable_or_none(TypeAdapter(RecipeDefinition))\n",
+    "recipe = contracts.RecipeDefinition.model_validate(row.document)\n",
+    "field = readable_or_none(pydantic.TypeAdapter(RecipeDefinition | None))\n",
 )
 
 

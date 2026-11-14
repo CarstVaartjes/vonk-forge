@@ -114,7 +114,13 @@ def _library(kind: str) -> dict[str, Any]:
     value = {
         "generated_at": NOW,
         kind: [],
-        "facets": {"usage": [], "family": [], "version": [], "quantization": []},
+        "facets": {
+            "usage": [],
+            "family": [],
+            "line": [],
+            "version": [],
+            "quantization": [],
+        },
         "next_cursor": None,
         "filters": {},
         "freshness_policy": {},

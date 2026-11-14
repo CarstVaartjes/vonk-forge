@@ -298,7 +298,6 @@ def test_recipe_model_identities_include_canonical_companion_dependencies() -> N
     companion_document = json.loads(json.dumps(primary_document))
     companion_document["identity"]["slug"] = "synthetic-companion"
     companion_document["identity"]["model"]["slug"] = "synthetic-companion"
-    companion_document["identity"]["family"]["slug"] = "synthetic-companion"
     companion = ModelDefinition.model_validate(companion_document)
     companion_digest = document_sha256(companion.model_dump(mode="json"))
     primary_document["dependencies"] = [

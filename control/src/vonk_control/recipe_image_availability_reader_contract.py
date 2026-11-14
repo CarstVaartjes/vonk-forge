@@ -14,7 +14,7 @@ from pydantic import (
     field_validator,
 )
 from vonk_agent_protocol import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .job_documents import AvailabilityJobPayload
 from .model_cache_contract import (
@@ -36,9 +36,9 @@ class StoredAvailabilityIdentity(BaseModel):
         str | None,
         readable_or_none(TypeAdapter(Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")])),
     ] = None
-    recipe: Annotated[
-        RecipeDefinition | None, readable_or_none(TypeAdapter(RecipeDefinition))
-    ] = None
+    # Through the tolerant reader: a field an older contract wrote never makes
+    # a stored recipe unreadable.
+    recipe: Annotated[RecipeDefinition | None, readable_or_none(read_recipe)] = None
     request: Annotated[
         RecipeAvailabilityIntent | None,
         readable_or_none(TypeAdapter(RecipeAvailabilityIntent)),

@@ -34,10 +34,7 @@ def memory_requirement(
     recipe_document: Mapping[str, object],
     memory: RecipeMemoryResources,
     role_name: str,
-    model_documents: Mapping[
-        tuple[str, str, str], ModelDefinition | Mapping[str, object]
-    ]
-    | None,
+    model_documents: Mapping[tuple[str, str, str], ModelDefinition] | None,
     *,
     observed_peak_bytes: int | None,
     settings: object | None = None,

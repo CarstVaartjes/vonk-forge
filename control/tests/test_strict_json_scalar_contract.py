@@ -235,7 +235,9 @@ def test_model_library_json_roundtrip_preserves_datetime_and_strict_tags() -> No
     snapshot = ModelLibraryResponse(
         generated_at=datetime(2026, 1, 1, tzinfo=UTC),
         models=[],
-        facets=LibraryFacetValues(usage=[], family=[], version=[], quantization=[]),
+        facets=LibraryFacetValues(
+            usage=[], family=[], line=[], version=[], quantization=[]
+        ),
         next_cursor=None,
         filters=LibraryFilterValues(),
         freshness_policy=FreshnessPolicy(),

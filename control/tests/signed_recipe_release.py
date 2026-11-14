@@ -35,8 +35,10 @@ from vonk_control.recipe_release import (
     RELEASE_LIBRARY,
     RecipeReleaseError,
 )
+from vonk_forge_contracts import CONTRACT_MAJOR
 
-RELEASE_TAG = "v4.0.0"
+# The release of the contract major this Controller reads.
+RELEASE_TAG = f"v{CONTRACT_MAJOR}.0.0"
 _SIGNATURE_KIND = "vonk-forge-test-recipe-release-signature"
 _RELEASES = f"/repos/{PACKAGE_REPOSITORY}/releases"
 _DOWNLOAD = f"/{PACKAGE_REPOSITORY}/releases/download/{RELEASE_TAG}/"

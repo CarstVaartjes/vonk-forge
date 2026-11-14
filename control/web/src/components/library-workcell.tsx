@@ -337,9 +337,9 @@ export function buildLibraryRecipeRecords(snapshot: LibraryViewSnapshot): Librar
   });
 }
 
+// The hierarchy is display only: the Family of the Model display's lineage.
 export function recordFamily(record: LibraryRecipeRecord): string {
-  const family = record.modelDocument?.identity.family;
-  return family ? `${family.publisher}/${family.slug}` : "";
+  return record.modelDisplay?.lineage?.family ?? "";
 }
 
 export function filterLibraryRecipeRecords(

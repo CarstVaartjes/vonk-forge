@@ -769,7 +769,7 @@ def _model_detail(selector: str = "qwen") -> tuple[dict[str, object], str]:
                 "content_sha256": digest,
             },
             "document": model.model_dump(mode="json"),
-            "family": f"{identity.family.publisher}/{identity.family.slug}",
+            "family": "synthetic",
             "version": identity.version,
             "variant": identity.variant,
             "quantization": model.format.quantization,
