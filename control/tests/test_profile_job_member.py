@@ -30,7 +30,7 @@ from vonk_agent_protocol import (
 from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.artifact_blob_store import ArtifactBlobStore
-from vonk_control.artifact_jobs import ArtifactJobService, ArtifactJobUnavailableError
+from vonk_control.artifact_jobs import ArtifactJobService
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_projection import FleetProjection
 from vonk_control.inventory_items import inventory_items, runtime_value
@@ -711,22 +711,18 @@ def test_a_spark_restart_mid_job_keeps_the_job_lost_and_the_member(
 # owner's bounded looks, so the retried submission needs many simulated ticks.
 @pytest.mark.slow(30)
 def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
-    tmp_path: Path, postgres_engine, monkeypatch
+    tmp_path: Path, postgres_engine
 ) -> None:
-    """A lost job's effect is in doubt: the newest submission waits, then runs.
+    """A lost job's effect is in doubt: the newest submission runs at once.
 
-    The first submit answers a retryable wait and cancels or stops nothing. The
-    platform's own owner settles the lost job, and the same-key retry is then
-    admitted on the same run: the run and the Spark's ordinal stay untouched and
-    no run-level Stop is made.
+    The helper keeps one job container per run, so the Controller holds
+    nothing for the lost job and cancels or stops nothing: the run and the
+    Spark's ordinal stay untouched and no run-level Stop is made.
 
-    Wrong implementation: the submit stopped the whole run (new Spark ordinal).
+    Wrong implementation: the submit waits on the lost job, or stops the whole
+    run (new Spark ordinal).
     """
 
-    monkeypatch.setattr(
-        "vonk_control.artifact_jobs.service.bounded_attempts",
-        lambda: iter(range(2)),
-    )
     world = build_world(
         tmp_path, postgres_engine, recipe_transform=_configure_artifact_recipe
     )
@@ -747,31 +743,9 @@ def test_a_submission_after_a_lost_job_is_admitted_without_operator_action(
                 )
 
         before = ordinals()
-        with pytest.raises(ArtifactJobUnavailableError):
-            submitted_artifact_job(jobs, lost, request_suffix=710)
-        with world.sessions() as session:
-            draft = session.scalar(
-                select(ArtifactJob).where(
-                    ArtifactJob.request_id == "00000000-0000-4000-8000-000000000710"
-                )
-            )
-            assert draft is not None and not ajs.is_ended(draft)
-            draft_id = draft.id
+        admitted = submitted_artifact_job(jobs, lost, request_suffix=710)
 
-        admitted = None
-        for _ in range(30):
-            sim.round()
-            try:
-                admitted = jobs.submit(
-                    draft_id,
-                    actor="operator",
-                    request_id="00000000-0000-4000-8000-000000000711",
-                )
-            except ArtifactJobUnavailableError:
-                continue
-            break
-
-        assert admitted is not None and admitted.operation_id is not None
+        assert admitted.operation_id is not None
         assert ordinals() == before
         with world.sessions() as session:
             run = session.get(RecipeRun, lost)
