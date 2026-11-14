@@ -49,8 +49,9 @@ build workspaces and coordination history have their existing age collectors.
 Nothing is removed while it is
 
 * an installation of the loaded profile (the selected profile's recipe selector
-  resolving to a revision that runs the same, on its Sparks: the same execution
-  key, so a metadata-only release does not unprotect it), or an image or model
+  resolving to its head on its Sparks, or to an older revision that runs
+  identically until an installation of the head covers them, so a
+  metadata-only release does not unprotect it), or an image or model
   the newest revision of every recipe a saved profile names;
 * running, or installed for a workload that has not stopped. A failed run is
   not running, but only the Spark can prove its process gone: the removal

@@ -27,6 +27,7 @@ from . import (
     raw_barriers,
     repeated_parse,
     request_path_scans,
+    retention_head_digests,
     scratch_names,
     shell_trap_waits,
     sync_io_in_async,
@@ -118,6 +119,7 @@ MODES = (
     "contract-constants",
     "web-not-reported",
     "retry-dispositions",
+    "head-digests",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2414,6 +2416,11 @@ def check_source(
         and path.startswith("control/src/")
     ):
         hits.extend((line, kind) for line, kind in sync_io_in_async.scan_source(source))
+    if python and "head-digests" in modes and retention_head_digests.in_scope(path):
+        hits.extend(
+            (line, retention_head_digests.KIND)
+            for line in retention_head_digests.scan_source(source)
+        )
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
             (line, raw_barriers.KIND) for line in raw_barriers.scan_source(source)

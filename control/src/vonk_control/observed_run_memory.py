@@ -27,6 +27,7 @@ from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.telemetry import HostResourceSample
 
+from .content_identity import runs_identically
 from .dialect_insert import dialect_insert
 from .fleet_events import FleetEventRecorder, FleetEventRepository
 from .memory_reservations import MEMORY_RESERVATION_KINDS
@@ -184,8 +185,7 @@ def carry_measured_peaks(
             )
         ).all()
     )
-    execution_key = keys.get(old_digest)
-    if execution_key is None or execution_key != keys.get(new_digest):
+    if not runs_identically(keys.get(old_digest), keys.get(new_digest)):
         return False
     rows = session.execute(
         select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(

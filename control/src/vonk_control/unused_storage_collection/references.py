@@ -12,10 +12,10 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol import InstallationState, LifecycleState, WaitReason
 
 from .. import model_cache_states
-from ..content_identity import same_execution
+from ..content_identity import catalog_reference_membership, runs_identically
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
@@ -52,6 +52,7 @@ def _installation_kept(
         return "not installed"
     revision = session.execute(
         select(
+            CatalogDocumentRevision.id,
             CatalogDocumentRevision.document_id,
             CatalogDocumentRevision.publisher,
             CatalogDocumentRevision.slug,
@@ -74,9 +75,15 @@ def _installation_kept(
     if (
         revision is not None
         and newest is not None
-        and _runs_as_head(revision.execution_key, newest)
         and _points_at(
             evidence.loaded_pointers, revision.publisher, revision.slug, nodes
+        )
+        and _head_runs_it(
+            session,
+            newest,
+            nodes,
+            is_head=revision.id == newest[0],
+            execution_key=revision.execution_key,
         )
     ):
         return "profile"
@@ -115,15 +122,46 @@ def _installation_kept(
     return None
 
 
-def _runs_as_head(execution_key: str | None, head: tuple[str, str | None]) -> bool:
-    """Whether an installation's revision runs what its recipe's head runs.
+def _head_runs_it(
+    session: Session,
+    head: tuple[str, str | None],
+    nodes: set[str],
+    *,
+    is_head: bool,
+    execution_key: str | None,
+) -> bool:
+    """Whether an installation on ``nodes`` of a revision (the head itself, or
+    one with ``execution_key``) is what its recipe's head runs there.
 
-    A release that changes only metadata moves the head to a new content digest
-    with the same execution key: the installation is still what a profile
-    following the head runs. An unknown key keeps it (fail-open).
+    An installation of the head is. One of an older revision that runs
+    identically (a release that changed only metadata) is too, until an
+    installed installation of the head covers its Sparks: a reload made it a
+    spare twin, and it goes like any unused installation. The lookup runs only
+    for such older revisions.
     """
 
-    return same_execution(execution_key, head[1]) is not False
+    if is_head:
+        return True
+    head_revision, head_key = head
+    if not runs_identically(execution_key, head_key):
+        return False
+    covered = set(
+        session.scalars(
+            select(InstallationNode.node_id)
+            .join(
+                RecipeInstallation,
+                RecipeInstallation.id == InstallationNode.installation_id,
+            )
+            .where(
+                catalog_reference_membership(
+                    RecipeInstallation.recipe_revision_id, (head_revision,)
+                ),
+                RecipeInstallation.state == InstallationState.INSTALLED,
+                InstallationNode.node_id.in_(sorted(nodes)),
+            )
+        )
+    )
+    return not nodes <= covered
 
 
 def _points_at(
@@ -155,11 +193,7 @@ def _installation_pointing(
         return ()
     revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
     newest = evidence.newest.get(revision.document_id) if revision else None
-    if (
-        revision is None
-        or newest is None
-        or not _runs_as_head(revision.execution_key, newest)
-    ):
+    if revision is None or newest is None:
         return ()
     nodes = set(
         session.scalars(
@@ -168,7 +202,16 @@ def _installation_pointing(
             )
         )
     )
-    return _points_at(pointers, revision.publisher, revision.slug, nodes)
+    pointing = _points_at(pointers, revision.publisher, revision.slug, nodes)
+    if not pointing or not _head_runs_it(
+        session,
+        newest,
+        nodes,
+        is_head=revision.id == newest[0],
+        execution_key=revision.execution_key,
+    ):
+        return ()
+    return pointing
 
 
 def _installation_last_used(session: Session, installation_id: str) -> datetime:

@@ -49,8 +49,8 @@ class _Evidence:
     #: Ids of the newest revisions a saved profile (or a load) names.
     pointed_ids: frozenset[str]
     # Head revision of each recipe document: its id and execution key. An
-    # installation is the head's when it runs the same (``same_execution``),
-    # whatever its content digest.
+    # installation of the head, or of a revision that runs identically while no
+    # installation of the head covers its Sparks, is what the head runs.
     newest: Mapping[str, tuple[str, str | None]]
     # (publisher, slug) -> Spark sets of the saved profile assignments naming it,
     # from the stored projection of which profiles name which recipes.

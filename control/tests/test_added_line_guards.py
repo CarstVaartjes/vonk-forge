@@ -2299,6 +2299,56 @@ def test_a_rendezvous_or_an_out_of_scope_barrier_passes(path: str, source: str) 
     assert not check_source(path, source, lines, modes=("barriers",))
 
 
+_RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references.py"
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # Every metadata-only release dropped the loaded profile's installation.
+        (_RETENTION_PATH, "kept = newest[3] == revision.content_digest\n"),
+        (
+            _RETENTION_PATH,
+            "if head.content_digest != revision.content_digest:\n    pass\n",
+        ),
+        (
+            "control/src/vonk_control/model_cache/fleet_removal.py",
+            "kept = revision.content_digest in head_digests\n",
+        ),
+    ],
+)
+def test_retention_deciding_the_head_by_content_digest_is_flagged(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(path, source, lines, modes=("head-digests",))
+    # Only an added line can fail the change.
+    assert not check_source(path, source, set(), modes=("head-digests",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        (_RETENTION_PATH, "kept = runs_identically(revision.execution_key, head[1])\n"),
+        (_RETENTION_PATH, "same = revision.id == head_revision\n"),
+        # A model's own digest, not a head decision.
+        (
+            "control/src/vonk_control/model_cache/fleet_removal.py",
+            "if current_head and revision.content_digest == digest:\n    pass\n",
+        ),
+        (
+            "control/src/vonk_control/recipe_update_notice.py",
+            "kept = newest.content_digest == running.content_digest\n",
+        ),
+    ],
+)
+def test_retention_using_the_head_revision_or_execution_identity_passes(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("head-digests",))
+
+
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
 
 

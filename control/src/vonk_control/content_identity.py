@@ -4,7 +4,7 @@ An image is its content: the manifest digest, the OCI archive sha256, the bytes
 and the architecture (plus the runtime interface the image declares). A model
 object is its digest. A build is reusable by ``build_input_sha256`` computed
 from the executable inputs, without the builder binary. Two recipe revisions
-run the same when their catalog execution keys are equal (``same_execution``),
+run the same when their catalog execution keys are equal (``runs_identically``),
 whatever their content digests. Everything else on a receipt, plan or row says
 who asked first and is provenance, never identity:
 the recipe, slug or revision; ``build_id``; ``distribution_publisher``,
@@ -161,19 +161,20 @@ def same_model_object(first: object, second: object) -> bool:
     return size_a is None or size_b is None or size_a == size_b
 
 
-def same_execution(first: str | None, second: str | None) -> bool | None:
-    """Whether two catalog revisions run the same thing, by their execution keys.
+def runs_identically(first: str | None, second: str | None) -> bool:
+    """Whether two revisions of one recipe run the same thing: equal, known
+    catalog execution keys, whatever their content digests.
 
-    The catalog derives a recipe revision's ``execution_key`` from what runs:
-    execution, runtime, topology, interfaces, settings and the artifact keys
-    (files and format) of its Models. A release that changes only metadata gives
-    the document a new content digest and leaves this key equal. ``None`` when
-    either key is unknown: the caller picks the safe direction (retention keeps).
+    The key covers execution, runtime, topology, interfaces, settings and the
+    artifact keys (files and format) of the recipe's Models. It does NOT cover
+    ``options``, ``validation``, provenance, release metadata or the build
+    context (source bundle) bytes. So this answers only "would keeping or
+    reloading it change what runs": retention, carrying measured peaks and the
+    update notice. It is never a plan, admission or image identity. A missing
+    key is never equal: the catalog always writes one.
     """
 
-    if first is None or second is None:
-        return None
-    return first == second
+    return first is not None and first == second
 
 
 class BuildResolution(Protocol):

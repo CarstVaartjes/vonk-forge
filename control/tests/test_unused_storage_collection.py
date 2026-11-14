@@ -608,6 +608,28 @@ def test_a_release_that_runs_the_same_keeps_the_loaded_installation(
     assert lifecycle.removed == [idle]
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_reload_onto_an_identical_head_lets_the_old_twin_go(
+    world: Catalog,
+) -> None:
+    """Catches a spare installation of an identically running older revision
+    kept for ever once a reload installed the head on the same Sparks."""
+
+    same = "e" * 64
+    installed = world.revision("glm", 1, head="active", execution_key=same)
+    twin, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    head = world.revision("glm", 2, head="active", execution_key=same)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    reloaded, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+
+    assert lifecycle.removed == [twin]
+    assert reloaded
+
+
 def test_pointed_installations_are_planned_least_recently_used_first(
     world: Catalog,
 ) -> None:

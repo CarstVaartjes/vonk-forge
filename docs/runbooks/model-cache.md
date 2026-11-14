@@ -155,10 +155,12 @@ Unused installations and runtime images expire after more than 24 hours,
 regardless of free space. The worker uses the existing reference-checked removal
 paths, and retries failed removals on later passes. Running workloads, the loaded
 profile and live operations retain their exact assets. The loaded profile keeps
-an idle installation while it runs what its recipe's head runs (the same catalog
-execution key), so a release that changes only metadata uninstalls nothing; an
-unknown key keeps it. Terminal artifact jobs and their unreferenced evidence
-also use a 24-hour grace.
+an idle installation of its recipe's head, and one of an older revision that
+runs identically (the same catalog execution key) until an installed
+installation of the head covers its Sparks: a release that changes only
+metadata uninstalls nothing, and the spare twin a reload leaves goes like any
+unused installation. Such a release shows no "Update available" either.
+Terminal artifact jobs and their unreferenced evidence also use a 24-hour grace.
 
 Spark model copies also expire after 24 hours without an installation, run or
 live operation using them. Shared files stay while any installation links or
