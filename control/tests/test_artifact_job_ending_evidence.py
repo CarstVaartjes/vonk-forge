@@ -14,6 +14,9 @@ from datetime import UTC
 
 from sqlalchemy import select
 from vonk_agent_protocol import (
+    AgentOperation as WireAgentOperation,
+)
+from vonk_agent_protocol import (
     AgentResult,
     OperationFailureCode,
     RecipeJobEnding,
@@ -25,6 +28,7 @@ from vonk_agent_protocol import (
 )
 from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
+from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import AgentOperation, AgentOperationAttempt, ArtifactJob, Job
 from vonk_control.operation_contract import OperationFailureEvidence
@@ -376,11 +380,26 @@ def test_an_observation_never_reopens_an_order_put_back_for_reissue(
 
 
 def test_a_pre_launch_wait_after_a_cancel_ends_the_job_cancelled(tmp_path) -> None:
-    # Pins the cancel race: the report proves nothing launched, so the cancel
-    # ends the order and the job cancelled at once, never failed or reissued.
+    # The report proves nothing launched, so the cancel ends the order and the
+    # job cancelled at once, with nothing left to stop: no Stop is sent for it
+    # and the next job on the run is admitted without waiting for one.
     sessions, service, agent_jobs, _clock, node_id, job = _pre_launch_wait(
         tmp_path, cancel=True
     )
     assert _order(sessions, job).state == "cancelled"
-    assert service.get(job.id).state == "cancelled"
+    cancelled = service.get(job.id)
+    assert cancelled.state == "cancelled"
+    evidence = cancelled.result_evidence
+    assert evidence is not None
+    assert evidence.active_scope_may_remain is not True
+    assert evidence.failure_kind is None
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
+    reconcile_cancelled_runtime(service._recipe_operations)
+    with sessions() as session:
+        stops = session.scalars(
+            select(Job.id).where(Job.kind == WireAgentOperation.RECIPE_STOP.value)
+        ).all()
+    assert stops == []
+    fresh = submitted_artifact_job(service, job.run_id, request_suffix=660)
+    assert fresh.state == "queued"
+    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
