@@ -35,6 +35,10 @@ _WAIT = (
 
 #: What the agent's result calls "I could not confirm the effect" (the wire word).
 WIRE_UNKNOWN = AgentResultState.OBSERVING.value
+#: The result states of a report that carries no definite end of its own: a
+#: failure, or an effect the agent could not confirm. The body is the agent's
+#: account (sanitized on arrival); only a receipt inside it is a receipt.
+FAILURE_REPORT: tuple[str, ...] = (AgentResultState.FAILED.value, WIRE_UNKNOWN)
 
 
 # -- orders ------------------------------------------------------------------

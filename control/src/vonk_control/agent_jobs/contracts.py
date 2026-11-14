@@ -41,6 +41,30 @@ ResultConsumer = Callable[
 ]
 
 
+def controller_result_consumer(
+    *,
+    artifact_jobs: ResultConsumer,
+    recipe_operations: ResultConsumer,
+    agent_upgrades: ResultConsumer | None = None,
+) -> ResultConsumer:
+    """The Controller's projection of a settled report onto its owners, in the
+    report's transaction and in this order. Production and the tests that prove
+    a report end to end wire the queue through this one chain."""
+
+    def consume(
+        session: Session,
+        operation: StoredOperation,
+        attempt: AgentOperationAttempt,
+        message: AgentResult,
+    ) -> None:
+        artifact_jobs(session, operation, attempt, message)
+        recipe_operations(session, operation, attempt, message)
+        if agent_upgrades is not None:
+            agent_upgrades(session, operation, attempt, message)
+
+    return consume
+
+
 @dataclass(frozen=True, slots=True)
 class SupersededAgentEffect:
     parent_job_id: str

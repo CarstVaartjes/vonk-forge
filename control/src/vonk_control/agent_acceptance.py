@@ -342,15 +342,14 @@ def resolve_agent_receipt(
                 and aware(attempt.lease_deadline) >= directive.deadline
             )
         elif policy == ReceiptPolicy.AGENT_RESULT:
-            from vonk_agent_protocol import AgentResultState
-
+            from . import agent_operation_states
             from .agent_jobs.evidence import sanitized_failure_report
             from .agent_jobs.stored import column_message
             from .agent_outcome import stored_report
 
             assert isinstance(body, AgentResult)
             report, _outcome = stored_report(operation.kind, body)
-            if report.state in {AgentResultState.FAILED, AgentResultState.OBSERVING}:
+            if report.state in agent_operation_states.FAILURE_REPORT:
                 report = sanitized_failure_report(operation.kind, report)
             _require(
                 column_message(attempt, "result") == canonical_message(report.result)
