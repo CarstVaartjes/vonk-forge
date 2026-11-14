@@ -41,7 +41,7 @@ CANDIDATE_ONLY = {
 
 # Module -> names a program may import. Each one exists, with the same call
 # shape, in the previous release. Adding a name means checking that release.
-# Never the Controller's data types (CatalogModelEntry, RecipeLibraryItem,
+# Never the Controller's data types (CatalogModel, RecipeLibraryItem,
 # RecipeLibrarySnapshot, RecipePackageEntry): their fields follow the release.
 # ManagedCatalogSyncRequest is built by keyword: a reviewed claim like the rest.
 ENTRY_POINTS: dict[str, frozenset[str]] = {
@@ -284,7 +284,7 @@ def test_installed_controller_programs_use_only_the_stable_surface() -> None:
 
 def test_building_a_controller_data_type_is_refused() -> None:
     program = (
-        "from vonk_control.recipe_library_types import CatalogModelEntry\n"
+        "from vonk_control.recipe_library_types import CatalogModel\n"
         "from vonk_control.recipe_packages import RecipePackageClient\n"
         "import vonk_forge_contracts\n"
         "def f():\n"
@@ -293,7 +293,7 @@ def test_building_a_controller_data_type_is_refused() -> None:
     )
 
     assert set(surface_violations(program)) == {
-        "vonk_control.recipe_library_types.CatalogModelEntry",
+        "vonk_control.recipe_library_types.CatalogModel",
         "vonk_forge_contracts",
         "vonk_control.catalog_sync._private",
         "__import__",

@@ -16,7 +16,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_forge_contracts import CONTRACT_MAJOR, document_sha256
+from vonk_forge_contracts import CONTRACT_MAJOR
 
 from ..catalog_sync_contract import ManagedCatalogSyncProblem
 from ..recipe_library_types import RecipeLibraryError, RecipeLibrarySnapshot
@@ -141,6 +141,6 @@ def _snapshot_content(value: RecipeLibrarySnapshot) -> bytes:
                 ],
                 key=lambda item: item[0],
             ),
-            sorted(document_sha256(entry.document) for entry in value.catalog_entities),
+            sorted(model.entry.content_sha256 for model in value.catalog_entities),
         )
     )

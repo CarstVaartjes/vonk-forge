@@ -27,6 +27,7 @@ from vonk_agent_protocol import (
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    PrebuiltImage,
     RecipeDefinition,
     RecipeDisplay,
 )
@@ -35,7 +36,6 @@ from vonk_forge_contracts.recipe import RecipeModelSelection, RecipeTopology
 
 from .catalog_revision_contract import (
     ModelRevisionProjection,
-    PrebuiltImage,
     RecipeRevisionProjection,
 )
 from .cursor_contract import MAX_CURSOR_LENGTH

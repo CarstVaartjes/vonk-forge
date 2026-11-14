@@ -21,6 +21,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import (
     ModelDefinition,
     ModelDisplay,
+    PrebuiltImage,
     RecipeApi,
     RecipeDefinition,
     RecipeDisplay,
@@ -46,7 +47,6 @@ from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
-    PrebuiltImage,
     RecipeRevisionProjection,
     read_catalog_document,
     read_catalog_projection,

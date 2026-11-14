@@ -44,13 +44,15 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.build_import import RecipeBuildEvidence, RecipeBuildOptions
-from vonk_forge_contracts import RecipeDefinition, read_recipe, read_recipe_display
-
-from .catalog_revision_contract import (
-    PREBUILT_REFERENCE_PATTERN,
-    BuildSecurityProjection,
+from vonk_forge_contracts import (
     PrebuiltImage,
+    RecipeDefinition,
+    read_recipe,
+    read_recipe_display,
 )
+from vonk_forge_contracts.catalog_index import PREBUILT_REFERENCE_PATTERN
+
+from .catalog_revision_contract import BuildSecurityProjection
 from .image_store_collection import GRACE
 from .lifecycle.image_availability import PrebuiltImageAdapter
 from .models import Job, RecipeBuild

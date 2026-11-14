@@ -304,7 +304,9 @@ to keep old tests or old worktrees working. The current parser and
 restore the obsolete `fleet profile` alias from a historical guide.
 
 Published Model and Recipe structures are defined by the canonical Pydantic
-package in vonk-forge-recipes. Controller APIs and Controller/Spark messages
+package in vonk-forge-recipes. The Controller reads the signed catalog index
+only through its `catalog_reader.read_catalog` and uses the contract's entry
+types; never parse index entries by hand or copy their types. Controller APIs and Controller/Spark messages
 use their authoritative nested Pydantic models. Validate persisted contract
 JSON on reads and writes; malformed data must not become empty/default state.
 Generate OpenAPI and Python/TypeScript clients from the current API. Generate

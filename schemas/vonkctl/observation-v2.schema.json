@@ -470,7 +470,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 4,
           "title": "Tool Choice",
           "type": "array"
         }
@@ -1418,7 +1417,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 6,
           "minItems": 1,
           "title": "Response Formats",
           "type": "array"
@@ -1468,7 +1466,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 9,
           "minItems": 1,
           "title": "Input Formats",
           "type": "array"
@@ -1522,7 +1519,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 6,
           "minItems": 1,
           "title": "Response Formats",
           "type": "array"
@@ -1539,7 +1535,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 2,
           "title": "Timestamp Granularities",
           "type": "array"
         }
@@ -2042,7 +2037,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 4,
           "minItems": 1,
           "title": "Endpoints",
           "type": "array"
@@ -9987,7 +9981,6 @@
             ],
             "type": "string"
           },
-          "maxItems": 6,
           "minItems": 1,
           "title": "Modalities",
           "type": "array"
@@ -12413,10 +12406,10 @@
       ]
     },
     "PrebuiltImage": {
-      "description": "One catalog-pinned prebuilt runtime image for a recipe revision.",
+      "description": "The CI-built runtime image of exactly this recipe revision.",
       "properties": {
         "build_key": {
-          "pattern": "^[0-9a-f]{64}$",
+          "pattern": "^[a-f0-9]{64}$",
           "title": "Build Key",
           "type": "string"
         },
@@ -12823,7 +12816,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Reason"
         },
         "required_sparks": {
           "minimum": 1,
@@ -12897,13 +12891,16 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Blame"
         },
         "cause_code": {
-          "$ref": "#/$defs/QualificationCauseCode"
+          "$ref": "#/$defs/QualificationCauseCode",
+          "title": "Cause Code"
         },
         "cause_summary": {
-          "$ref": "#/$defs/QualificationSummary"
+          "$ref": "#/$defs/QualificationSummary",
+          "title": "Cause Summary"
         },
         "evidence_refs": {
           "default": [],
@@ -12929,7 +12926,8 @@
           "$ref": "#/$defs/QualificationIdentity"
         },
         "outcome": {
-          "$ref": "#/$defs/QualificationOutcome"
+          "$ref": "#/$defs/QualificationOutcome",
+          "title": "Outcome"
         },
         "platform": {
           "$ref": "#/$defs/QualificationPlatform"
@@ -13116,7 +13114,8 @@
         },
         "hardware_class": {
           "$ref": "#/$defs/QualificationHardware",
-          "default": "GB10"
+          "default": "GB10",
+          "title": "Hardware Class"
         },
         "spark_count": {
           "anyOf": [
@@ -13140,7 +13139,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Topology"
         }
       },
       "title": "QualificationPlatform",

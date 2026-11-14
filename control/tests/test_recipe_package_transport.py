@@ -8,13 +8,15 @@ import os
 import tarfile
 import uuid
 from copy import deepcopy
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 
 import httpx2
 import pytest
-from sqlalchemy import select
+from sqlalchemy import create_engine, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import (
     CatalogSyncState,
     RecipeBuildCode,
@@ -35,7 +37,8 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.models import CatalogDocumentRevision, RecipeBuild
+from vonk_control.library_projection import LibraryProjection
+from vonk_control.models import Base, CatalogDocumentRevision, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
@@ -43,16 +46,22 @@ from vonk_control.recipe_packages import (
     RecipePackageError,
 )
 from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
+from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
-from vonk_control.source_bundles import generate_source_bundle
+from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import (
     PACKAGE_MEDIA_TYPE,
+    ChatApi,
     ModelDefinition,
     RecipeDefinition,
-    RecipeDisplay,
     document_sha256,
     published_json,
 )
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationStatus,
+)
+from vonk_forge_contracts.unrecognised import read_context
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
@@ -279,6 +288,9 @@ def _canonical_package_fixture(
             "media_type": PACKAGE_MEDIA_TYPE,
             "minimum_consumer_schema": 2,
         },
+        "release": recipe_document["release"],
+        "api": None,
+        "qualification": {"status": "Not yet verified", "required_sparks": 1},
     }
     index = index_envelope(
         catalog_entities=[
@@ -602,14 +614,150 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
     """Principle 1: the envelope is read through the contract, the entries one by one."""
     index, _, package = _canonical_package_fixture()
     document = json.loads(index)
-    document["catalog_entities"][0]["document"] = {"kind": "from-a-newer-contract"}
+    newer = {"kind": "from-a-newer-contract"}
+    document["catalog_entities"][0]["document"] = newer
+    document["catalog_entities"][0]["content_sha256"] = document_sha256(newer)
     release = _release_for(_canonical(document) + b"\n", package)
     client = _client(release, tmp_path / "packages")
     try:
         snapshot = client.list()
         [problem] = snapshot.problems
-        assert problem.detail.startswith("catalog model document is invalid")
+        assert problem.detail.startswith("index catalog_entities entry")
+        assert "is skipped: document" in problem.detail
         assert snapshot.items and not snapshot.catalog_entities
+    finally:
+        client.close()
+
+
+def test_unreadable_parts_cost_only_their_entry_or_block(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    """Unknown words, a malformed entry and bad blocks never stop the sync."""
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
+    recipe_entry = index["recipes"][0]
+    del recipe_entry["display"]
+    recipe_entry["prebuilt_image"] = {
+        "reference": "ghcr.io/fixture/tiny:latest",
+        "build_key": "0" * 64,
+    }
+    api = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-api-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    api["identity"] = {"publisher": "fixture", "slug": "tiny-recipe"}
+    endpoints = list(api["api"]["endpoints"])
+    api["api"]["endpoints"].append("/v1/teleport")
+    recipe_entry["api"] = api
+    recipe_entry["qualification"]["status"] = "Blessed"
+    index["recipes"].append({"source_path": "recipes/broken.json"})
+    release = _release_for(_canonical(index) + b"\n", package)
+    engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 11, 14, tzinfo=UTC)
+    cursors = TokenCodec(b"s" * 32).cursor_codec()
+    catalog = CatalogService(
+        sessions,
+        clock=lambda: now,
+        cursors=cursors,
+        source_bundles=SourceBundleStore(tmp_path / "bundles"),
+    )
+    sync = ManagedRecipeCatalogSyncService(
+        sessions,
+        catalog=catalog,
+        reader=_client(release, tmp_path / "packages"),
+        clock=lambda: now,
+    )
+
+    sync.sync(
+        ManagedCatalogSyncRequest(
+            request_key=str(uuid.uuid4()),
+            trigger=CatalogSyncTrigger.MANUAL,
+            actor="test",
+        )
+    )
+
+    status = sync.latest()
+    assert status is not None
+    assert status.state == CatalogSyncState.PARTIAL
+    assert (status.imported_count, status.skipped_count) == (1, 1)
+    details = "\n".join(problem.detail for problem in status.problems)
+    assert "index recipes entry recipes/broken.json is skipped" in details
+    assert "recipes prebuilt_image dropped for 1 entry (fixture/tiny-recipe)" in details
+    assert "recipes display dropped for 1 entry (fixture/tiny-recipe)" in details
+    for word in ("teleportation", "/v1/teleport", "Blessed"):
+        assert f"'{word}' is unknown to this Controller" in details
+    # What the Library serves: each block read without its unknown word. The
+    # recipe is titled by its identity, builds from source, keeps its API facts
+    # minus the endpoint and reads "not yet verified"; the Model keeps its
+    # known capabilities.
+    library = LibraryProjection(sessions, cursors=cursors, clock=lambda: now)
+    library.refresh_catalog(observe_storage=False)
+    (recipe,) = library.recipe_library(limit=10).recipes
+    assert recipe.identity.title == "tiny-recipe"
+    assert recipe.recipe_display is None and recipe.prebuilt_image is None
+    assert recipe.projected.api is not None
+    assert isinstance(recipe.projected.api.api, ChatApi)
+    assert list(recipe.projected.api.api.endpoints) == endpoints
+    assert recipe.qualification is not None
+    assert recipe.qualification.status == QualificationStatus.NOT_YET_VERIFIED
+    (model,) = library.models(limit=10).models
+    assert model.model_display is not None
+    assert list(model.model_display.capabilities) == [
+        "image-generation",
+        "text-generation",
+    ]
+
+
+def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:
+    record = {
+        "identity": {"content_sha256": "a" * 64, "required_sparks": 1},
+        "tested_at": "2026-11-01T10:00:00Z",
+        "platform": {"controller_version": "1.2.3", "spark_count": 1},
+    }
+    read = PublishedQualificationStatusView.model_validate(
+        {
+            "status": "Re-check: worked before",
+            "required_sparks": 1,
+            "last_pass": record
+            | {
+                "outcome": "passed",
+                "cause_code": "qualification.hardware_pass",
+                "cause_summary": "Hardware checks passed",
+            },
+            "last_failure": record
+            | {
+                "outcome": "failed",
+                "blame": "cosmic-ray",
+                "cause_code": "recipe.runtime_exit",
+                "cause_summary": "Recipe runtime exited; needs fix",
+            },
+        },
+        context=read_context(),
+    )
+
+    known = known_block(read)
+
+    assert known.last_failure is None
+    assert known.status == QualificationStatus.RECHECK
+    assert known.last_pass == read.last_pass
+
+
+def test_a_document_that_differs_from_its_digest_refuses_the_index(
+    tmp_path: Path, signed_releases: list[bytes]
+) -> None:
+    index_bytes, _, package = _canonical_package_fixture()
+    index = json.loads(index_bytes)
+    index["recipes"][0]["document"]["release"]["version"] = "1.0.1"
+    # Signed as published: only the reader's digest check can refuse it.
+    client = _client(_release_for(_canonical(index) + b"\n", package), tmp_path)
+    try:
+        with pytest.raises(RecipePackageError) as refused:
+            client.list()
+        assert refused.value.code == RecipePackageCode.DIGEST_MISMATCH
     finally:
         client.close()
 
@@ -680,19 +828,6 @@ def test_bundle_member_names_are_bounded_and_safe() -> None:
             package_sha256="a" * 64,
             size=1,
             location=location,
-            title="",
-            description="",
-            tags=(),
-            display=RecipeDisplay.model_validate(
-                {
-                    "identity": {"publisher": "vonk-forge", "slug": slug},
-                    "title": slug,
-                    "description": slug,
-                    "tags": [],
-                }
-            ),
-            document={},
-            prebuilt_image=None,
             publication_commit=SIGNED_COMMIT,
         )
 
@@ -1038,9 +1173,10 @@ def test_context_publication_must_precede_controller_rollout(tmp_path: Path) -> 
         index, {str(require_mapping(row["package"], "package")["path"]): package}
     )
     client = release.client(tmp_path / "cache")
-    with pytest.raises(RecipePackageError) as rejected:
-        client.list()
-    assert rejected.value.code == RecipePackageCode.RESPONSE_INVALID
+    snapshot = client.list()
+    assert snapshot.items == ()
+    [problem] = snapshot.problems
+    assert "fixture/tiny-recipe is skipped: source_bundle_sha256" in problem.detail
 
 
 @pytest.mark.usefixtures(signed_recipe_releases.__name__)

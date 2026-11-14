@@ -11,10 +11,12 @@ from typing import cast
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.catalog_revision_contract import PublishedDocument
 from vonk_control.models import CatalogDocumentRevision
-from vonk_control.recipe_library_types import CatalogModelEntry
+from vonk_control.recipe_library_types import CatalogModel
 from vonk_forge_contracts import (
+    CatalogModelEntry,
     ModelDisplay,
     RecipeDisplay,
+    document_sha256,
     published_json,
     read_model,
     read_model_display,
@@ -77,9 +79,17 @@ def display_of(document: Mapping[str, object]) -> RecipeDisplay | ModelDisplay:
     )
 
 
-def model_entry(document: Mapping[str, object]) -> CatalogModelEntry:
-    return CatalogModelEntry(
-        dict(document), display_of_model(document), read_model(document).identity
+def model_entry(document: Mapping[str, object]) -> CatalogModel:
+    """One index Model as the catalog reader returns it."""
+    model = read_model(document)
+    return CatalogModel(
+        entry=CatalogModelEntry(
+            source_path=f"models/{model.identity.slug}.json",
+            content_sha256=document_sha256(document),
+            document=model,
+            display=display_of_model(document),
+        ),
+        published=cast(PublishedDocument, dict(document)),
     )
 
 

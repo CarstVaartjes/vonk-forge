@@ -309,21 +309,6 @@ def test_a_retained_route_keeps_its_facts(tmp_path: Path) -> None:
     assert publisher.served_model_info().routes == {"model": (run_id, info)}
 
 
-def test_ingress_reads_the_index_entrys_facts_once_and_fails_open() -> None:
-    from vonk_control.recipe_packages import _entry_api
-
-    recipe = read_recipe(_document("recipe-options.json"))
-    api = _document("recipe-api-options.json")
-    assert _entry_api({"api": api}, recipe.identity) == read_recipe_api(api)
-    assert _entry_api({}, recipe.identity) is None
-    future = json.loads(json.dumps(api))
-    future["api"]["mode"] = "embedding"  # a union member this contract lacks
-    assert _entry_api({"api": future}, recipe.identity) is None
-    foreign = json.loads(json.dumps(api))
-    foreign["identity"]["slug"] = "someone-else"
-    assert _entry_api({"api": foreign}, recipe.identity) is None
-
-
 def _store_api(base, api_document: dict | None, *, corrupt: bool = False) -> None:
     """Record the facts beside the run's revision the way the catalog sync does."""
     from sqlalchemy import select, update
