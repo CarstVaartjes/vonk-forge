@@ -73,8 +73,8 @@ every such release. Use the head revision itself or
 
 A cached model set's `ModelCacheSet.model_content_sha256` is the Model that
 first requested it, not every Model it serves. A new comparison of that column
-with a Model digest (`==`, `!=`, `.in_`) outside `model_cache/lineage.py` and
-the classified provenance readers is flagged (added-line mode
+with a Model digest (`==`, `!=`, `.in_`) on an added line outside
+`model_cache/lineage.py` is flagged (added-line mode
 `set-first-requester`, `control/tests/model_set_first_requester.py`). A release
 that re-digests a Model of the same files keeps the old first requester, so
 such a reader missed every set the new digest uses: eviction offered sets a

@@ -452,9 +452,21 @@ class UnusedStorageCollector:
             key: {
                 digest: size
                 for value in sorted(sets)
-                for digest, size in set_objects.get(value, {}).items()
+                for digest, size in set_objects.get(value, ({}, frozenset()))[0].items()
             }
             for key, sets in group_sets.items()
+        }
+        # A group whose set serves a pointed Model (under any of its digests).
+        pointed = {
+            key
+            for key, sets in group_sets.items()
+            if key in evidence.pointed_models
+            or any(
+                not set_objects.get(value, ({}, frozenset()))[1].isdisjoint(
+                    evidence.pointed_models
+                )
+                for value in sets
+            )
         }
         # Which groups link each shared object, kept groups included: an object
         # a group that stays still links is not freed by removing the others.
@@ -462,9 +474,7 @@ class UnusedStorageCollector:
         for key in groups:
             for digest in objects.get(key, {}):
                 holders[digest].add(key)
-                if key in evidence.pointed_models or digest in (
-                    evidence.operations | evidence.pinned
-                ):
+                if key in pointed or digest in (evidence.operations | evidence.pinned):
                     # Uninstall can drop its link, but the Controller's native
                     # retention verdict still pins this object in the store.
                     holders[digest].add(f"protected:{digest}")

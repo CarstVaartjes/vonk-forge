@@ -925,9 +925,12 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     assert _kept(result, "model shared with one in use") == 1
 
 
-def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> str:
+def _model_objects(
+    world: Catalog, model: str, objects: dict[str, int], *, verified: str | None = None
+) -> str:
     """A cached model set first requested by ``model`` holding these files
-    (file digest -> bytes); its set digest, which installations record."""
+    (file digest -> bytes); its set digest, which installations record.
+    ``verified`` is a later digest of the same Model the cache adopted."""
 
     set_digest = uuid.uuid4().hex + uuid.uuid4().hex
     manifest = {
@@ -953,7 +956,16 @@ def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> str:
             }
             for digest, size in sorted(objects.items())
         ],
-        "verified_models": [],
+        "verified_models": []
+        if verified is None
+        else [
+            {
+                "kind": "model",
+                "publisher": "vonk-forge",
+                "slug": "glm",
+                "content_sha256": verified,
+            }
+        ],
     }
     with world.sessions.begin() as session:
         session.add(
@@ -973,7 +985,9 @@ def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> str:
     return set_digest
 
 
-def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
+def _hard_linked_models(
+    world: Catalog, *, m1_verified: str | None = None
+) -> tuple[list[str], list[str]]:
     """Five installations of model M1 and three of M2, which share one file.
 
     M1 = A (40) + B (60) and M2 = B (60) + C (30); each installation holds 10
@@ -983,7 +997,9 @@ def _hard_linked_models(world: Catalog) -> tuple[list[str], list[str]]:
     old = world.revision("glm", 1)
     world.revision("glm", 2, head="active")
     m1, m2 = "1" * 64, "2" * 64
-    s1 = _model_objects(world, m1, {"a" * 64: 40 * GIB, "b" * 64: 60 * GIB})
+    s1 = _model_objects(
+        world, m1, {"a" * 64: 40 * GIB, "b" * 64: 60 * GIB}, verified=m1_verified
+    )
     s2 = _model_objects(world, m2, {"b" * 64: 60 * GIB, "c" * 64: 30 * GIB})
     first: list[str] = []
     second: list[str] = []
@@ -3683,19 +3699,21 @@ def test_installation_content_references_hold_but_provenance_does_not(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
+@pytest.mark.parametrize("pointed", ["1" * 64, "9" * 64])
 def test_pressure_never_promises_profile_pinned_model_objects_as_reclaimable(
-    world: Catalog,
+    world: Catalog, pointed: str
 ) -> None:
     """An unused installation may go, but its pinned model objects stay in the
     native store: promising them makes a load wait for space that cannot arrive.
+    The profile may point to M1 under a later digest ("9"*64) of the same files.
     """
     from collections import Counter
     from dataclasses import replace
 
-    _hard_linked_models(world)
+    _hard_linked_models(world, m1_verified="9" * 64)
     with world.sessions() as session:
         evidence = replace(
-            _Evidence.read(session, world.now), pointed_models=frozenset({"1" * 64})
+            _Evidence.read(session, world.now), pointed_models=frozenset({pointed})
         )
         items = UnusedStorageCollector._spark_items(session, NODE, evidence, Counter())
     # M1's A+B stay; M2 can free only C (30) and each model's private 10.

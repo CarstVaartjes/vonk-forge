@@ -9,8 +9,7 @@ offered sets a profile needs and miscounted shared Spark files).
 
 Read the set's bindings through ``model_cache.lineage`` (``model_sets``,
 ``verifies_model``, ``stored_set_bindings``) or, for what an installation runs,
-``RecipeInstallation.model_artifact_set_sha256``. Each allowlisted file below is
-a classified existing reader that wants provenance on purpose.
+``RecipeInstallation.model_artifact_set_sha256``.
 """
 
 from __future__ import annotations
@@ -22,26 +21,10 @@ KIND = (
     "through model_cache.lineage or the installation's model_artifact_set_sha256"
 )
 _PREFIX = "control/src/vonk_control/"
-_ALLOWED = frozenset(
-    _PREFIX + name
-    for name in (
-        # The owner of the binding rule (first requester plus verified bindings)
-        # and of the retention unit (first_requested_sets).
-        "model_cache/lineage.py",
-        # Resolution reads provenance by design.
-        "model_cache/resolution.py",
-        # The retention unit: the sets first downloaded under this digest; the
-        # profile check beside it reads the bindings (verifies_model).
-        "unused_storage_collection/references.py",
-        # Live operations' manifests; the Model definitions walk after it
-        # covers every file by content.
-        "spark_store_retention.py",
-        # Library: a non-head revision with cached bytes stays listable
-        # (provenance), and local state ORs in verifies_model.
-        "library_projection/catalog.py",
-        "library_projection/local_state.py",
-    )
-)
+# The owner of the binding rule (first requester plus verified bindings) and
+# of the retention unit (first_requested_sets). Only added lines are checked,
+# so existing provenance readers elsewhere need no entry.
+_ALLOWED = frozenset({_PREFIX + "model_cache/lineage.py"})
 
 
 def in_scope(path: str) -> bool:
