@@ -9,6 +9,9 @@ cause, and its operation's failure read as unreadable.
 
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC
+
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentResult,
@@ -38,24 +41,24 @@ _REASON = "job output delivery remains unobserved"
 _CAUSE = "artifact output upload was refused: HTTP 409"
 
 
-def _receipt(job) -> dict[str, object]:
-    empty: tuple[RecipeJobFile, ...] = ()
+def _receipt(job, outputs: tuple[RecipeJobFile, ...] = ()) -> dict[str, object]:
     return RecipeJobRunResult.model_validate(
         {
             "job_id": job.id,
             "run_id": job.run_id,
             "exit_code": 0,
             "output_manifest": {
-                **recipe_job_manifest_document(empty),
-                "manifest_sha256": recipe_job_manifest_sha256(empty),
+                **recipe_job_manifest_document(outputs),
+                "manifest_sha256": recipe_job_manifest_sha256(outputs),
             },
             "evidence": {"elapsed_milliseconds": 131000, "peak_memory_bytes": None},
         }
     ).model_dump(mode="json")
 
 
-def _ended(tmp_path, report):
-    """Submit a job, let the agent report ``report(job)``, and observe it out."""
+def _wired(tmp_path):
+    """A submitted job on an agent queue wired to its result consumers as
+    production wires them (``api/production.py``)."""
 
     sessions, recipe_operations, _queue, service, run_id, node_id = (
         running_artifact_service(tmp_path)
@@ -71,10 +74,10 @@ def _ended(tmp_path, report):
     recipe_operations._agent_jobs = agent_jobs
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
     job = submitted_artifact_job(service, run_id, request_suffix=652)
-    claim = claim_agent(agent_jobs, node_id, "serial-0")
-    assert claim is not None
-    state, result = report(job)
-    clock.advance(seconds=5)
+    return sessions, service, agent_jobs, clock, node_id, job
+
+
+def _report(agent_jobs, claim, state: str, result: object) -> None:
     agent_jobs.record_result(
         AgentResult.model_validate_json(
             canonical_message(
@@ -82,6 +85,28 @@ def _ended(tmp_path, report):
             )
         )
     )
+
+
+def _order(sessions, job) -> AgentOperation:
+    with sessions() as session:
+        order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        assert order is not None
+        return order
+
+
+def _ended(tmp_path, report):
+    """Submit a job, let the agent report ``report(job)``, and observe it out."""
+
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    state, result = report(job)
+    clock.advance(seconds=5)
+    _report(agent_jobs, claim, state, result)
     for _ in range(5):
         clock.advance(seconds=120)
         agent_jobs.reconcile_orders()
@@ -180,3 +205,123 @@ def test_a_definite_failure_after_launch_ends_the_job_with_its_stage_and_cause(
     # The agent reported: no lease lapsed.
     evidence = ended.result_evidence
     assert evidence is None or evidence.failure_kind != "agent-lease-expired"
+
+
+def _reissued_after_a_pre_launch_wait(tmp_path):
+    """A job whose first attempt reported a wait before launch, claimed again."""
+
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    first = claim_agent(agent_jobs, node_id, "serial-0")
+    assert first is not None
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        first,
+        "failed",
+        {
+            "kind": "failed",
+            "code": "recipe_job_run_failed",
+            "reason": "the Spark's helper is busy",
+            "failure_kind": "temporary-dependency",
+            "evidence": {
+                "stage": "runtime-projection",
+                "diagnostic": "installation reconciliation busy",
+            },
+        },
+    )
+    waiting = service.get(job.id)
+    assert waiting.state == "backoff"
+    # It never launched: nothing of it can remain on the Spark.
+    evidence = waiting.result_evidence
+    assert evidence is None or evidence.active_scope_may_remain is not True
+    order = _order(sessions, job)
+    assert order.next_action_at is not None
+    clock.now = max(clock.now, order.next_action_at.replace(tzinfo=UTC))
+    clock.advance(seconds=1)
+    second = claim_agent(agent_jobs, node_id, "serial-0")
+    assert second is not None
+    assert _order(sessions, job).current_attempt == 2
+    agent_jobs.reconcile_orders()
+    assert service.get(job.id).state == "running"
+    return service, agent_jobs, clock, node_id, job, second
+
+
+def test_a_pre_launch_wait_reissues_the_job_and_its_success_ends_it_clean(
+    tmp_path,
+) -> None:
+    # Production 2026-11-14, job f8e83bc3: the helper was busy at the job's
+    # Start, the agent reported a wait before launch and the order was put back
+    # for reissue, but the artifact consumer read the failure report as an
+    # unreadable receipt and reopened the order as an observation. The job sat
+    # observing, unclaimable, for the whole recovery budget and ended failed.
+    service, agent_jobs, clock, node_id, job, second = (
+        _reissued_after_a_pre_launch_wait(tmp_path)
+    )
+    image = b"png"
+    digest = hashlib.sha256(image).hexdigest()
+    service.put_output(
+        job.id,
+        node_id=node_id,
+        name="output.png",
+        media_type="image/png",
+        expected_sha256=digest,
+        content=image,
+    )
+    output = RecipeJobFile(
+        name="output.png", media_type="image/png", size_bytes=len(image), sha256=digest
+    )
+    clock.advance(seconds=5)
+    _report(agent_jobs, second, "succeeded", _receipt(job, (output,)))
+    done = service.get(job.id)
+    assert done.state == "succeeded"
+    evidence = done.result_evidence
+    assert evidence is not None and evidence.exit_code == 0
+    # The first attempt's wait is no account of how the job ended.
+    assert (
+        evidence.recoverable,
+        evidence.active_scope_may_remain,
+        evidence.late_results_accepted,
+        evidence.failure_kind,
+        evidence.stage,
+        evidence.diagnostic,
+    ) == (None, None, None, None, None, None)
+
+
+def test_a_reissued_job_left_in_doubt_keeps_its_scope_in_doubt(tmp_path) -> None:
+    # Wrong implementation caught: the first attempt's "nothing launched"
+    # outlived it, so a second attempt that ran and was lost read as gone.
+    service, agent_jobs, clock, _node_id, job, second = (
+        _reissued_after_a_pre_launch_wait(tmp_path)
+    )
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        second,
+        "observing",
+        {"kind": "unknown", "wait_reason": "job-state-uncertain", "reason": "lost"},
+    )
+    lost = service.get(job.id)
+    assert lost.state == "observing"
+    assert lost.result_evidence is not None
+    assert lost.result_evidence.active_scope_may_remain is True
+
+
+def test_an_unknown_without_receipt_is_observed_once_as_the_order_decided(
+    tmp_path,
+) -> None:
+    # Wrong implementation caught: the consumer re-read the unknown report as
+    # an unreadable receipt and settled the order a second time, spending two
+    # of its bounded looks on one report and overriding its schedule.
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        claim,
+        "observing",
+        {"kind": "unknown", "wait_reason": "job-state-uncertain", "reason": "lost"},
+    )
+    order = _order(sessions, job)
+    assert (order.state, order.observe_count) == ("observing", 1)
+    assert service.get(job.id).state == "observing"

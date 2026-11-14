@@ -28,6 +28,7 @@ NEEDS_OPERATOR = LifecycleState.NEEDS_OPERATOR.value
 SUCCEEDED = LifecycleState.SUCCEEDED.value
 FAILED = LifecycleState.FAILED.value
 CANCELLED = LifecycleState.CANCELLED.value
+BACKOFF = LifecycleState.BACKOFF.value
 DRAFT = ArtifactPreparation.DRAFT.value
 READY = ArtifactPreparation.READY.value
 
@@ -37,6 +38,8 @@ LIVE: tuple[str, ...] = live_words(SUBJECT)
 ENDED: tuple[str, ...] = (SUCCEEDED, FAILED, CANCELLED)
 #: Queued or running: the job is accepting bytes and has not been cancelled by an owner.
 QUEUED_OR_RUNNING: tuple[str, ...] = (QUEUED, RUNNING)
+#: Waiting for its order's next claim: never issued, or put back for reissue.
+AWAITING_CLAIM: tuple[str, ...] = (QUEUED, BACKOFF)
 
 
 def preparation_of(job: Any) -> str | None:
