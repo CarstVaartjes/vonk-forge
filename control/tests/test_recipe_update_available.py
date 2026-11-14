@@ -63,8 +63,12 @@ def _seed(
     second_state: str = "active",
     first_release: bool = True,
     head: str | None = None,
+    runs_identically: bool = False,
 ) -> None:
-    """One Spark running the given revision of a recipe that has two revisions."""
+    """One Spark running the given revision of a recipe that has two revisions.
+
+    The second runs something else unless ``runs_identically`` (a release that
+    changed only metadata keeps the catalog execution key)."""
     with sessions.begin() as session:
         session.add(
             AgentNode(
@@ -91,6 +95,7 @@ def _seed(
             title="Update Recipe",
         )
         first = revisions[0]
+        first.execution_key = "e" * 64
         if not first_release:
             without = deepcopy(first.document)
             without.pop("release", None)
@@ -113,6 +118,7 @@ def _seed(
             state=second_state,
             document=second_document,
             content_digest=document_sha256(second_document),
+            execution_key=("e" if runs_identically else "f") * 64,
             projected={},
             created_by="admin",
             created_at=NOW,
@@ -260,6 +266,18 @@ def test_a_run_on_an_older_revision_is_flagged_without_being_restarted() -> None
 def test_a_run_on_the_newest_revision_is_not_flagged() -> None:
     sessions = _sessions()
     _seed(sessions, running=REVISION_2)
+
+    node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
+
+    assert node.loaded[0].recipe_update is None
+    assert all(w.code != "recipe.update_available" for w in node.warnings)
+
+
+def test_a_run_whose_head_runs_identically_is_not_flagged() -> None:
+    """Catches a metadata-only release nudging a reload that restarts the
+    workload to run the same thing."""
+    sessions = _sessions()
+    _seed(sessions, running=REVISION_1, runs_identically=True)
 
     node = FleetProjection(sessions, clock=lambda: NOW).read().nodes[0]
 

@@ -51,6 +51,17 @@ every retry with nothing changed (#2299). A deterministic cause ends the work
 with its evidence; a cause that clears by itself keeps waiting. An edit inside
 an older handler of that shape is flagged too.
 
+Retention under `unused_storage_collection/` and
+`model_cache/fleet_removal.py`, the update notice (`recipe_update_notice.py`)
+and the measured-peak carry (`observed_run_memory.py`) may not compare a recipe revision's
+`content_digest` with the head's (anything named `head` or `newest`) to decide
+"is this what the head runs" (added-line mode `head-digests`,
+`control/tests/retention_head_digests.py`). A release that changes only
+metadata gives the head a new digest and the same execution key, so that
+comparison uninstalled the loaded profile's idle installation 24 hours after
+every such release. Use the head revision itself or
+`content_identity.runs_identically`.
+
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

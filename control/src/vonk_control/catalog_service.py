@@ -551,16 +551,6 @@ class CatalogService:
             )
             if not head_selected:
                 self._select_imported_recipe_head(session, revision)
-            if previous_digest is not None:
-                # Measured wins: in the transaction that moves the head, so the
-                # new head never exists without the peaks its execution earned.
-                carry_measured_peaks(
-                    session,
-                    identity.publisher,
-                    identity.slug,
-                    previous_digest,
-                    revision.content_digest,
-                )
             projected = read_catalog_projection(revision).model_dump(
                 mode="json", exclude_none=False
             )
@@ -589,6 +579,18 @@ class CatalogService:
                 )
             )
             session.expire(revision, ["projected", "source_bundle_sha256"])
+            if previous_digest is not None:
+                # Measured wins: in the transaction that moves the head, so the
+                # new head never exists without the peaks its execution earned.
+                # After the source bundle is written: the bundle is part of
+                # what runs, and an unchanged one must still carry.
+                carry_measured_peaks(
+                    session,
+                    identity.publisher,
+                    identity.slug,
+                    previous_digest,
+                    revision.content_digest,
+                )
             return _view(revision)
 
     def _select_imported_recipe_head(

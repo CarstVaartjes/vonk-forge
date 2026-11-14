@@ -488,7 +488,8 @@ coordination syntax violations. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
 or defers work must consult `disposition()` or `is_definite()` first
-(`retry-dispositions`). A whole-tree policy-user
+(`retry-dispositions`). Retention never decides "is this the head" by content
+digest (`head-digests`). A whole-tree policy-user
 check requires ongoing-intent scheduling for durable recovery owners. Small fixtures
 prove that added violations fail, untouched old occurrences do not, and bounded
 waits and security ingress remain valid. Detection is a syntax check; behavior,
