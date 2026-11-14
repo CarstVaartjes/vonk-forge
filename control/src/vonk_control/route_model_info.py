@@ -308,8 +308,8 @@ def build_model_info(
                 off=reasoning.off,
                 default=reasoning.default,
             )
-            # Stored facts carry only known words (the sync withholds the
-            # rest); an unrecognised one is never acted on.
+            # Stored facts carry only known words (the sync reads each block
+            # without the rest); an unrecognised one is never acted on.
             if isinstance(reasoning, ApiReasoningSwitch)
             and not isinstance(reasoning.via, UnrecognisedWord)
             and not isinstance(reasoning.default, UnrecognisedWord)

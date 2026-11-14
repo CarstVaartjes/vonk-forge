@@ -7,9 +7,12 @@ module turns its report into the sync's own terms:
 
 - a skipped entry is a sync problem (it pauses retraction, like any skip);
 - a dropped block is a note: the entry applies without it;
-- an entry block carrying a word this Controller does not know is withheld
-  (``None``) and noted, so no unknown word reaches what the Controller stores
-  or serves. A stored display stays until a readable one arrives.
+- a word this Controller does not know is noted and read without
+  (``known_words``): left out of a list, read as a cautious neutral value, or,
+  failing both, its enclosing object is left out. A block that cannot stand
+  without it is withheld (``None``) and noted. No unknown word reaches what the
+  Controller stores or serves; a stored display stays until a readable one
+  arrives.
 """
 
 from __future__ import annotations
@@ -17,7 +20,9 @@ from __future__ import annotations
 from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
+from pydantic import BaseModel
 from vonk_agent_protocol import RecipePackageCode
+from vonk_forge_contracts import CatalogModelEntry, CatalogRecipeEntry
 from vonk_forge_contracts.catalog_reader import (
     CatalogProblem,
     CatalogSection,
@@ -29,6 +34,7 @@ from vonk_forge_contracts.catalog_reader import (
 from ..catalog_revision_contract import PublishedDocument
 from ..catalog_sync_contract import ManagedCatalogSyncProblem
 from .contracts import RecipePackageError
+from .known_words import BlockWithheld, known_block
 
 # Entries named in one note; the count names them all.
 _NAMED = 3
@@ -38,17 +44,17 @@ _NAMED = 3
 class ReaderReport:
     problems: tuple[ManagedCatalogSyncProblem, ...]
     notes: tuple[ManagedCatalogSyncProblem, ...]
-    #: The blocks to withhold, by section and ``publisher/slug``.
-    withheld: Mapping[tuple[CatalogSection, str], frozenset[str]]
+    #: The blocks carrying an unknown word, by section and ``publisher/slug``.
+    unknown: Mapping[tuple[CatalogSection, str], frozenset[str]]
 
 
 def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
-    """Map the reader's problems to sync problems, notes and withheld blocks."""
+    """Map the reader's problems to sync problems, notes and unknown-word blocks."""
 
     skipped: list[ManagedCatalogSyncProblem] = []
     dropped: dict[tuple[CatalogSection, str, str, str], list[str]] = {}
     words: list[UnrecognisedWordReport] = []
-    withheld: dict[tuple[CatalogSection, str], set[str]] = {}
+    unknown: dict[tuple[CatalogSection, str], set[str]] = {}
     for problem in problems:
         match problem:
             case SkippedEntry():
@@ -71,7 +77,7 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
                 words.append(problem)
                 block = problem.field.split(".", 1)[0]
                 for entry in problem.entries:
-                    withheld.setdefault((problem.section, entry), set()).add(block)
+                    unknown.setdefault((problem.section, entry), set()).add(block)
     notes = [
         _problem(
             f"index {section.value} {block} dropped for {_entries(entries)}: "
@@ -81,16 +87,51 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
     ] + [
         _problem(
             f"index {word.section.value} {_shown(word.field)} word "
-            f"{_shown(word.word)!r} is unknown to this Controller; "
-            f"{word.field.split('.', 1)[0]} withheld for {_entries(word.entries)}"
+            f"{_shown(word.word)!r} is unknown to this Controller; read without it "
+            f"for {_entries(word.entries)}"
         )
         for word in words
     ]
     return ReaderReport(
         problems=tuple(skipped),
         notes=tuple(notes),
-        withheld={key: frozenset(blocks) for key, blocks in withheld.items()},
+        unknown={key: frozenset(blocks) for key, blocks in unknown.items()},
     )
+
+
+def known_entries[E: (CatalogModelEntry, CatalogRecipeEntry)](
+    section: CatalogSection,
+    entries: Iterable[E],
+    unknown: Mapping[tuple[CatalogSection, str], frozenset[str]],
+) -> tuple[list[E], list[ManagedCatalogSyncProblem]]:
+    """The entries with each unknown-word block rebuilt from known words.
+
+    A block that cannot stand without its unknown words is withheld (``None``)
+    and noted once per block.
+    """
+
+    known: list[E] = []
+    withheld: dict[str, list[str]] = {}
+    for entry in entries:
+        identity = entry.document.identity
+        name = f"{identity.publisher}/{identity.slug}"
+        update: dict[str, BaseModel | None] = {}
+        for block in sorted(unknown.get((section, name), ())):
+            try:
+                update[block] = known_block(getattr(entry, block))
+            except BlockWithheld:
+                update[block] = None
+                # Noted below, once per block: never a silent absence.
+                withheld.setdefault(block, []).append(name)
+        known.append(entry.model_copy(update=update) if update else entry)
+    notes = [
+        _problem(
+            f"index {section.value} {block} withheld for {_entries(names)}: "
+            "it cannot stand without an unknown word"
+        )
+        for block, names in withheld.items()
+    ]
+    return known, notes
 
 
 def published_documents(

@@ -166,8 +166,8 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_blocks(
 
     world.sync(Earlier())  # type: ignore[arg-type]
 
-    # A status this Controller's contract cannot read (a newer catalog) is
-    # absent for that entry, never a sync problem: nothing waits on it.
+    # A status this Controller's contract cannot read (a newer catalog) reads
+    # as not yet verified, never a sync problem: nothing waits on it.
     publish({"status": "Something newer", "required_sparks": 1})
     assert world.reader.list().problems == ()
     result = world.sync_service.sync(
@@ -179,7 +179,9 @@ def test_the_signed_index_status_reaches_the_library_and_a_bad_one_never_blocks(
     )
     assert result.state == CatalogSyncState.CURRENT
     assert result.withdrawn_count == 1
-    # Not the last value kept forever: it reads as not yet verified.
+    # Not the last value kept forever, never Working: it reads as not yet verified.
     listed = world.library_recipe()
-    assert listed.qualification is None
-    assert world.projection.recipe_detail(listed.selector).qualification is None
+    detail = world.projection.recipe_detail(listed.selector)
+    for shown in (listed.qualification, detail.qualification):
+        assert shown is not None
+        assert shown.status == QualificationStatus.NOT_YET_VERIFIED

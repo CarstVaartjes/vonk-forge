@@ -96,7 +96,10 @@ class FixtureReader:
         # The producer fixture predates the release entry shape. Read it as a
         # release publishes it: each package as ``packages/<asset>``, and the
         # API facts (none) and qualification (not yet verified) every release
-        # entry carries.
+        # entry carries. Delete this once the acceptance library revision
+        # includes vonk-forge-recipes #2614, which publishes the fixture in this
+        # shape (and then read the package bytes from the fixture's
+        # ``package/`` directory by basename).
         released = copy.deepcopy(index)
         for entry in released["recipes"]:
             package = entry.get("package")

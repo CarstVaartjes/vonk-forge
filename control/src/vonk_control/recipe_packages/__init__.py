@@ -24,8 +24,6 @@ from vonk_forge_contracts import (
     CONTRACT_MAJOR,
     PACKAGE_SCHEMA_VERSION,
     CatalogIndexRefused,
-    CatalogModelEntry,
-    CatalogRecipeEntry,
     ModelDefinition,
     RecipeDefinition,
     RecipeDisplay,
@@ -662,17 +660,19 @@ class RecipePackageClient:
         )
         reader = catalog_read.report(read.problems)
         problems = list(reader.problems)
+        models, model_notes = catalog_read.known_entries(
+            CatalogSection.MODELS, envelope.catalog_entities, reader.unknown
+        )
+        recipes, recipe_notes = catalog_read.known_entries(
+            CatalogSection.RECIPES, envelope.recipes, reader.unknown
+        )
         catalog_entities = tuple(
-            CatalogModel(
-                entry=_withhold(entry, reader, CatalogSection.MODELS),
-                published=documents[entry.content_sha256],
-            )
-            for entry in envelope.catalog_entities
+            CatalogModel(entry=entry, published=documents[entry.content_sha256])
+            for entry in models
         )
         packages: dict[str, RecipePackageEntry] = {}
         items: list[RecipeLibraryItem] = []
-        for entry in envelope.recipes:
-            entry = _withhold(entry, reader, CatalogSection.RECIPES)
+        for entry in recipes:
             identity = entry.document.identity
             key = f"{identity.publisher}/{identity.slug}"
             uri = _catalog_uri(identity.publisher, identity.slug, entry.content_sha256)
@@ -722,7 +722,7 @@ class RecipePackageClient:
             updated_at=envelope.updated_at,
             catalog_entities=catalog_entities,
             problems=tuple(problems),
-            display_notes=reader.notes,
+            display_notes=(*reader.notes, *model_notes, *recipe_notes),
         ), packages
 
     def _promote_candidate(self) -> None:
@@ -1163,16 +1163,6 @@ class RecipePackageClient:
 
 def _catalog_uri(publisher: str, slug: str, digest: str) -> str:
     return f"vonk://catalog/{publisher}/{slug}@sha256:{digest}"
-
-
-def _withhold[E: (CatalogModelEntry, CatalogRecipeEntry)](
-    entry: E, reader: catalog_read.ReaderReport, section: CatalogSection
-) -> E:
-    """The entry without the blocks that carry a word this Controller lacks."""
-
-    identity = entry.document.identity
-    blocks = reader.withheld.get((section, f"{identity.publisher}/{identity.slug}"))
-    return entry.model_copy(update=dict.fromkeys(blocks)) if blocks else entry
 
 
 def _incompatible_detail(detail: str, error: Exception | None) -> str:

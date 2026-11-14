@@ -57,14 +57,29 @@ never breaks the catalog; only integrity edges refuse it:
   N entries (...)`); a note neither counts as skipped nor makes the sync
   partial.
 - A word a newer minor added (a capability, status or API format) is kept by
-  the reader, but the Controller withholds the whole block that carries it, so
-  no unknown word is stored or served, and lists one note per word
-  (`index catalog_entities display.capabilities word '<word>' is unknown to
-  this Controller; display withheld for N entries (...)`). A withheld display
-  leaves the stored one shown; a withheld API block or qualification is
-  withdrawn by the automatic sync, so that recipe publishes no `model_info` and
-  shows as not yet verified until a Controller on the newer contract is
-  deployed.
+  the reader; the Controller reads its block without it, so no unknown word is
+  stored or served, and lists one note per word (`index recipes
+  api.api.endpoints word '<word>' is unknown to this Controller; read without
+  it for N entries (...)`):
+  - a word in a list (an endpoint, format, tool choice, capability, modality,
+    qualification change or quality note) is left out; the rest of the block
+    applies, so `model_info` still lists the known endpoints;
+  - a scalar word becomes a cautious neutral value: a published status reads
+    `Not yet verified` (never Working), an unverified reason and a recorded
+    topology become none, a reasoning switch default becomes `model`, and a
+    recipe alignment becomes `unspecified`;
+  - any other scalar word leaves out its nearest optional part: an evidence
+    record with an unknown outcome, blame, cause, summary or hardware class, a
+    reasoning effort block with an unknown request placement, or an API option
+    choice;
+  - only when nothing optional encloses the word, or the block is invalid
+    without it, is the block withheld, with one more note (`index recipes api
+    withheld for N entries (...): it cannot stand without an unknown word`).
+    That is the case for an unknown reasoning-switch placement, an unknown
+    `remaining` context word in the default output tokens, and a Model display
+    whose only modality is unknown. A withheld display leaves the stored one
+    shown; a withheld API block or qualification is withdrawn by the automatic
+    sync until a Controller on the newer contract is deployed.
 
 ## Development versus production
 

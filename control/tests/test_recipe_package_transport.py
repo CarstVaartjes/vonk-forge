@@ -9,6 +9,7 @@ import tarfile
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from importlib.resources import files
 from pathlib import Path
 
 import httpx2
@@ -37,12 +38,7 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
 )
 from vonk_control.library_projection import LibraryProjection
-from vonk_control.models import (
-    Base,
-    CatalogDocument,
-    CatalogDocumentRevision,
-    RecipeBuild,
-)
+from vonk_control.models import Base, CatalogDocumentRevision, RecipeBuild
 from vonk_control.recipe_builds import RecipeBuildService, RecipeBuildUnknown
 from vonk_control.recipe_library_types import RecipeLibrarySnapshot, RecipePackageEntry
 from vonk_control.recipe_packages import (
@@ -54,11 +50,13 @@ from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import (
     PACKAGE_MEDIA_TYPE,
+    ChatApi,
     ModelDefinition,
     RecipeDefinition,
     document_sha256,
     published_json,
 )
+from vonk_forge_contracts.qualification_status import QualificationStatus
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
@@ -629,15 +627,26 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
 def test_unreadable_parts_cost_only_their_entry_or_block(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """An unknown word, a malformed entry and bad blocks never stop the sync."""
+    """Unknown words, a malformed entry and bad blocks never stop the sync."""
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
     index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
-    del index["recipes"][0]["display"]
-    index["recipes"][0]["prebuilt_image"] = {
+    recipe_entry = index["recipes"][0]
+    del recipe_entry["display"]
+    recipe_entry["prebuilt_image"] = {
         "reference": "ghcr.io/fixture/tiny:latest",
         "build_key": "0" * 64,
     }
+    api = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-api-source-build.json")
+        .read_text(encoding="utf-8")
+    )
+    api["identity"] = {"publisher": "fixture", "slug": "tiny-recipe"}
+    endpoints = list(api["api"]["endpoints"])
+    api["api"]["endpoints"].append("/v1/teleport")
+    recipe_entry["api"] = api
+    recipe_entry["qualification"]["status"] = "Blessed"
     index["recipes"].append({"source_path": "recipes/broken.json"})
     release = _release_for(_canonical(index) + b"\n", package)
     engine = create_engine(f"sqlite:///{tmp_path / 'catalog.sqlite'}")
@@ -674,19 +683,28 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     assert "index recipes entry recipes/broken.json is skipped" in details
     assert "recipes prebuilt_image dropped for 1 entry (fixture/tiny-recipe)" in details
     assert "recipes display dropped for 1 entry (fixture/tiny-recipe)" in details
-    assert "'teleportation' is unknown" in details
-    # What the Library serves: the recipe titled by its identity and built from
-    # source; the Model without the display carrying the unknown word.
+    for word in ("teleportation", "/v1/teleport", "Blessed"):
+        assert f"'{word}' is unknown to this Controller" in details
+    # What the Library serves: each block read without its unknown word. The
+    # recipe is titled by its identity, builds from source, keeps its API facts
+    # minus the endpoint and reads "not yet verified"; the Model keeps its
+    # known capabilities.
     library = LibraryProjection(sessions, cursors=cursors, clock=lambda: now)
     library.refresh_catalog(observe_storage=False)
     (recipe,) = library.recipe_library(limit=10).recipes
     assert recipe.identity.title == "tiny-recipe"
-    assert recipe.recipe_display is None and recipe.projected.prebuilt_image is None
+    assert recipe.recipe_display is None and recipe.prebuilt_image is None
+    assert recipe.projected.api is not None
+    assert isinstance(recipe.projected.api.api, ChatApi)
+    assert list(recipe.projected.api.api.endpoints) == endpoints
+    assert recipe.qualification is not None
+    assert recipe.qualification.status == QualificationStatus.NOT_YET_VERIFIED
     (model,) = library.models(limit=10).models
-    assert model.model_display is None
-    # Withheld, never stored: a stored display with the word would be unreadable.
-    with sessions() as session:
-        assert session.scalars(select(CatalogDocument.display)).all() == [None, None]
+    assert model.model_display is not None
+    assert list(model.model_display.capabilities) == [
+        "image-generation",
+        "text-generation",
+    ]
 
 
 def test_a_document_that_differs_from_its_digest_refuses_the_index(

@@ -113,8 +113,9 @@ class RecipeLibrarySnapshot:
     catalog_entities: tuple[CatalogModel, ...] = ()
     # Index entries the catalog reader skipped, each a sync problem.
     problems: tuple[ManagedCatalogSyncProblem, ...] = ()
-    # Blocks the catalog reader dropped or this Controller withholds (a word a
-    # newer minor added): the entry still applies. A note is reported but is
+    # Blocks the catalog reader dropped, words this Controller read a block
+    # without, and blocks that could not stand without one: the entry still
+    # applies. A note is reported but is
     # not a skipped entry, does not make the snapshot incomplete and does not
     # pause retraction. A display already stored stays shown until a readable
     # one arrives.

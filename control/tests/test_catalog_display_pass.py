@@ -227,7 +227,7 @@ def test_a_bad_display_is_that_entrys_problem_and_the_rest_still_apply(
     assert world.library_model().model_display is not None
 
 
-@pytest.mark.parametrize("breakage", ["foreign", "capability"])
+@pytest.mark.parametrize("breakage", ["foreign", "modality"])
 def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     world: World, breakage: str
 ) -> None:
@@ -237,18 +237,19 @@ def test_an_unreadable_model_display_costs_the_display_only_and_is_read_again(
     if breakage == "foreign":
         broken["identity"]["slug"] = "another-model"
     else:
-        # A capability name this contract does not know: kept by the reader,
-        # withheld by the Controller.
-        broken["capabilities"] = ["Not_A_Name"]
+        # The only modality is one this contract does not know: the display
+        # cannot stand without it (a Model has at least one modality).
+        broken["modalities"] = ["smell"]
     world.release.publish(index, world.packages)
 
     first = world.reader.list()
     result = world.sync()
 
     assert first.problems == ()
-    [note] = first.display_notes
-    assert note.detail.startswith("index catalog_entities display")
-    assert "fixture/tiny-model" in note.detail
+    assert first.display_notes
+    for note in first.display_notes:
+        assert note.detail.startswith("index catalog_entities display")
+        assert "fixture/tiny-model" in note.detail
     assert first.catalog_entities[0].entry.display is None
     assert result.skipped_count == 0
     assert world.library_model().model_display is None
@@ -268,7 +269,7 @@ def test_a_display_that_becomes_unreadable_leaves_the_shown_one_in_place(
 ) -> None:
     world.sync()
     index = copy.deepcopy(world.index)
-    index["catalog_entities"][0]["display"]["capabilities"] = ["Not_A_Name"]
+    index["catalog_entities"][0]["display"]["modalities"] = ["smell"]
     world.release.publish(index, world.packages)
 
     result = world.sync()
