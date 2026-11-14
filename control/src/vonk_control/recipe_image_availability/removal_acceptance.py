@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     RecipeImageCode,
 )
-from vonk_forge_contracts import document_sha256
 
 from .. import job_states
 from ..admission_locking import ConstraintReplay, admitting
@@ -475,8 +474,6 @@ def reconcile_requested_removals(
                 payload.cancellation is None
                 and requester.authority_revision == payload.recipe_revision_id
                 and requester.targets == [payload.recipe_revision_id]
-                and payload.recipe_content_sha256
-                == document_sha256(payload.recipe.model_dump(mode="json"))
                 and identity.sha256 in (payload.removal_archives or ())
                 and identity.sha256 in owner.plan.image_archives
                 and owner.plan.intent.removal_fence == fence
