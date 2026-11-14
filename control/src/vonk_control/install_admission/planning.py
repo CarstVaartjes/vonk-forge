@@ -26,7 +26,6 @@ from ..categorized_errors import (
     MissingRecord,
 )
 from ..cluster_mappings import validate_mapping_parameters
-from ..content_identity import same_model_object
 from ..disk_reservations import (
     describe_disk_charges,
     models_stored_on_node,
@@ -444,19 +443,23 @@ class InstallPlanningService:
                         "The exact built image will be imported by the ordered Run/Switch target-copy phase.",
                     )
                 )
+            # The agent's store scan in the inventory read above, under its
+            # freshness rule; unknown or stale counts as nothing held.
+            held_objects = (
+                {item.sha256: item.bytes for item in snapshot.model_objects}
+                if snapshot is not None
+                and not snapshot.stale
+                and snapshot.model_objects is not None
+                else {}
+            )
             reused_artifacts = sum(
                 size
                 for digest, size in artifact_sizes.items()
-                # The Spark's shared store already holds the model of an
-                # installation it has: a new installation links those files.
+                # A new installation links, not writes, a file the Spark's
+                # store holds: one of a model an installation there already
+                # owns (and charges), or one the agent's store scan reports.
                 if models_by_artifact.get(digest) in stored_models
-                or any(
-                    present_item.kind == "model"
-                    and same_model_object(
-                        present_item, {"sha256": digest, "size_bytes": size}
-                    )
-                    for present_item in present
-                )
+                or held_objects.get(digest) == size
             )
             reused = reused_image + reused_artifacts
             # ``image_bytes`` is the stored image's layers, what a pull moves

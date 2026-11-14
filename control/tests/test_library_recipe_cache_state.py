@@ -392,7 +392,6 @@ def test_library_cached_means_admission_and_load_planning_find_nothing_missing(
             model_content_sha256=world.model_digests[0],
             recipe_revision_id=world.recipe_revision_id,
             node_ids=(),
-            retention="retain",
             now=NOW,
         )
 

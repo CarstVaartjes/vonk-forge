@@ -38,7 +38,6 @@ def _inspection() -> ArtifactInspection:
         copied_bytes=0,
         missing_nas_bytes=0,
         missing_spark_bytes=0,
-        reclaimable_bytes=0,
         nas_coverage="complete",
         spark_coverage="complete",
         artifact_set_sha256=SET_DIGEST,

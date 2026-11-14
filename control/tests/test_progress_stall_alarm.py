@@ -334,9 +334,7 @@ def _copying_load(tmp_path: Path):
     load = _load(
         tmp_path,
         executor=executor,
-        artifacts=CompleteArtifactInspector(
-            reclaimable_bytes=30, missing_spark_bytes=1024
-        ),
+        artifacts=CompleteArtifactInspector(missing_spark_bytes=1024),
     )
 
     def report(

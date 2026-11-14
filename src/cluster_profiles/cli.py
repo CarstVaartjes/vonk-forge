@@ -503,6 +503,23 @@ def _plain_language_document(value: object) -> object:
     return value
 
 
+def _unfinished_job_line(result: object) -> str:
+    """Say plainly that a watched job is still running when the watch ends.
+
+    The per-Spark lines of a job carry their own states, so a finished Spark
+    must never read as the job's outcome: the job is done only when its state
+    is terminal, and a timed-out watch exits non-zero.
+    """
+
+    progress = result.get("progress") if isinstance(result, Mapping) else None
+    if not isinstance(progress, Mapping):
+        return ""
+    done, total = progress.get("completed"), progress.get("total")
+    if not isinstance(done, int) or not isinstance(total, int) or done >= total:
+        return ""
+    return f"\nThe job is still running: {done} / {total} done, not finished."
+
+
 def _emit(
     payload: Mapping[str, object], args: argparse.Namespace, *, error: bool = False
 ) -> None:
@@ -797,6 +814,7 @@ def _main(
         ):
             print(
                 "Observation deadline reached."
+                + _unfinished_job_line(result)
                 + f"\nReconnect: {outcome.observation.reconnect_command}",
                 file=sys.stderr,
             )

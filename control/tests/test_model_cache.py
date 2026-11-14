@@ -1418,7 +1418,6 @@ def test_canonical_dependency_closure_reaches_run_switch(
             model_content_sha256=primary_digest,
             recipe_revision_id="00000000-0000-0000-0000-000000000053",
             node_ids=("spk_" + "9" * 32,),
-            retention="retain",
             now=NOW,
         )
     # Real ModelDefinition -> cache service -> Run/Switch, including companion

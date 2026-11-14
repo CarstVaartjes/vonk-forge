@@ -26,9 +26,12 @@ class PreflightInventoryItem(StrictModel):
 
 
 class InventoryArtifactKind(StrEnum):
+    """Controller-recorded Spark artifacts. Model files are not among them:
+    whether a Spark holds one is the agent's own store scan
+    (``inventory_repository.spark_model_objects``)."""
+
     IMAGE = "image"
     IMAGE_LAYER = "image-layer"
-    MODEL = "model"
     AUXILIARY = "auxiliary"
 
 

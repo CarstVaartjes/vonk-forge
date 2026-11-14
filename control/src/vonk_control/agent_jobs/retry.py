@@ -102,11 +102,13 @@ JOB_PRE_LAUNCH_STAGES = frozenset(
 )
 
 
-def job_attempt_did_not_launch(result: WireModel) -> bool:
+def job_attempt_did_not_launch(result: object) -> bool:
     """A job run's failure report proves this attempt never ran the job: it
-    stopped at a pre-launch stage and carries no process receipt."""
+    stopped at a pre-launch stage and carries no process receipt.  The report
+    is a typed result or its stored document."""
     return (
-        not isinstance(result, RecipeJobRunResult)
+        isinstance(result, Mapping)
+        and not isinstance(result, RecipeJobRunResult)
         and result.get("stage") in JOB_PRE_LAUNCH_STAGES
     )
 

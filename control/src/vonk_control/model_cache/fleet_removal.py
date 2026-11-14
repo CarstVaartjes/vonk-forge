@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from pydantic import TypeAdapter
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -17,7 +16,6 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
     ModelCacheCode,
-    canonical_message,
 )
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.inventory import ModelStoreObject
@@ -57,6 +55,7 @@ from ..fleet_model_removal_contract import (
 from ..fleet_model_removal_contract import (
     FleetRemovalReason as R,
 )
+from ..inventory_repository import spark_model_objects
 from ..lifecycle.evidence import (
     BookkeepingReason,
     Residue,
@@ -92,8 +91,6 @@ from .views import CacheOperationView, ModelCacheRemovalScope
 
 if TYPE_CHECKING:
     from .service import ModelCacheService
-
-INVENTORY_MAX_AGE = timedelta(minutes=5)
 
 
 def _model_objects(
@@ -349,35 +346,13 @@ class FleetRemovalMixin:
             .where(AgentNode.revoked_at.is_(None))
             .order_by(AgentNode.node_id)
         ):
-            snapshot = session.scalar(
-                select(NodeInventorySnapshot)
-                .where(NodeInventorySnapshot.node_id == node_id)
-                .order_by(NodeInventorySnapshot.observed_at.desc())
-                .limit(1)
-            )
-            available = (
-                snapshot is not None
-                and snapshot.model_objects is not None
-                and aware(snapshot.received_at) >= cache._clock() - INVENTORY_MAX_AGE
-            )
-            snapshot_objects = None if snapshot is None else snapshot.model_objects
-            objects = (
-                []
-                if not available or snapshot is None
-                else read_or_rebuild(
-                    kind=NodeInventorySnapshot.__tablename__,
-                    subject=node_id,
-                    read=partial(
-                        TypeAdapter(list[ModelStoreObject]).validate_json,
-                        canonical_message(snapshot_objects),
-                        strict=True,
-                    ),
-                )
-            )
-            if isinstance(objects, Residue):
-                issues.append(_observation_issue(objects))
-                available, objects = False, []
-            elif not available:
+            held = spark_model_objects(session, node_id, now=cache._clock())
+            available = held is not None
+            objects = [
+                ModelStoreObject(sha256=digest, bytes=size)
+                for digest, size in sorted((held or {}).items())
+            ]
+            if not available:
                 issues.append(
                     _observation_issue(
                         retire_as_unknown(
@@ -813,12 +788,6 @@ class FleetRemovalMixin:
                 for target in checkpoint.effects.targets:
                     if target.node_id in checkpoint.confirmed_nodes:
                         continue
-                    snapshot = session.scalar(
-                        select(NodeInventorySnapshot)
-                        .where(NodeInventorySnapshot.node_id == target.node_id)
-                        .order_by(NodeInventorySnapshot.observed_at.desc())
-                        .limit(1)
-                    )
                     wanted = {
                         item.object.sha256
                         for item in target.objects
@@ -827,18 +796,13 @@ class FleetRemovalMixin:
                     if not wanted:
                         checkpoint.confirmed_nodes.append(target.node_id)
                         continue
-                    if (
-                        snapshot is None
-                        or snapshot.model_objects is None
-                        or aware(snapshot.received_at) <= accepted_at
-                        or aware(snapshot.received_at) < now - INVENTORY_MAX_AGE
-                    ):
+                    observed = spark_model_objects(
+                        session, target.node_id, now=now, received_after=accepted_at
+                    )
+                    if observed is None:
                         pending = f"Waiting for fresh model-store evidence from Spark {target.node_id}; next inventory resumes removal."
                         continue
-                    observed = TypeAdapter(list[ModelStoreObject]).validate_json(
-                        canonical_message(snapshot.model_objects), strict=True
-                    )
-                    if wanted & {item.sha256 for item in observed}:
+                    if wanted & observed.keys():
                         pending = f"Waiting for Spark {target.node_id} store retention to evict the reviewed objects; next inventory confirms removal."
                     else:
                         checkpoint.confirmed_nodes.append(target.node_id)

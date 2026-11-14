@@ -214,7 +214,10 @@ go would still not cover a refused request, nothing is removed.
 
 Disk admission counts what a Spark will actually write: while an installation of
 a model exists on a Spark, its shared store holds that model's files and a new
-installation links them, so a load's disk claim leaves them out. The protected reference scan keeps model objects a saved profile names even
+installation links them, so a load's disk claim leaves them out. The same holds
+for any file the agent's store scan reports (`model_objects` in its fresh
+inventory), and Run/Switch plans a target copy only for the files that scan does
+not report; a missing or stale scan counts as missing. The protected reference scan keeps model objects a saved profile names even
 when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes
