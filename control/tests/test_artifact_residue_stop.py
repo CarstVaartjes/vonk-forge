@@ -112,6 +112,8 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         )
     assert held
 
+    newer = submitted_artifact_job(artifacts, run_id, request_suffix=900)
+    assert newer.operation_id is not None
     stop_plan = operations.preview_stop(run_id)
     stop_key = str(uuid.uuid4())
     stop_id = operations.stop(
