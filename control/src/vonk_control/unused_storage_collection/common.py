@@ -320,17 +320,14 @@ def _freeable_in_order(
 
 def _model_objects(
     session: Session, set_digests: Collection[str]
-) -> dict[str, tuple[dict[str, int], frozenset[str]]]:
-    """The model files (file digest and bytes) of each model set and the
-    Models it serves, from its recorded manifest, keyed by set digest. An
-    installation links every file of the set its plan runs
-    (``RecipeInstallation.model_artifact_set_sha256``), whichever Model
-    revision named it. A set with no readable manifest is absent: the
-    installation's bytes then count as its own."""
+) -> dict[str, dict[str, int]]:
+    """The model files (file digest and bytes) of each model set, from its
+    recorded manifest, keyed by set digest. An installation links every file
+    of the set its plan runs (``RecipeInstallation.model_artifact_set_sha256``),
+    whichever Model revision named it. A set with no readable manifest is
+    absent: the installation's bytes then count as its own."""
 
-    from ..model_cache.lineage import set_bindings
-
-    found: dict[str, tuple[dict[str, int], frozenset[str]]] = {}
+    found: dict[str, dict[str, int]] = {}
     if not set_digests:
         return found
     for row in session.scalars(
@@ -340,13 +337,10 @@ def _model_objects(
     ):
         manifest = read_row_column(row, "manifest")
         if isinstance(manifest, CacheManifest):
-            found[row.artifact_set_sha256] = (
-                {
-                    artifact.sha256: artifact.download_bytes
-                    for artifact in manifest.artifacts
-                },
-                set_bindings(row.model_content_sha256, manifest.verified_models),
-            )
+            found[row.artifact_set_sha256] = {
+                artifact.sha256: artifact.download_bytes
+                for artifact in manifest.artifacts
+            }
     return found
 
 
