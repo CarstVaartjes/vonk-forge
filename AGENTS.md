@@ -208,6 +208,11 @@ or a schema-1 compatibility path to make the transition appear complete.
   `content_identity.runs_identically` (equal execution keys, source bundles,
   options and Model files), never by content digest: a metadata-only release
   must not uninstall anything (the `head-digests` added-line guard).
+  A cached model set serves its first requester and its verified bindings:
+  read them through `model_cache.lineage`, or an installation's
+  `model_artifact_set_sha256`, never by comparing
+  `ModelCacheSet.model_content_sha256` with a Model digest (the
+  `set-first-requester` added-line guard).
 - Test process death, restart, duplicate requests, cancellation, storage loss,
   and eventual recovery through the real storage and worker boundaries. Keep
   repository, deployment, and physical acceptance claims separate.

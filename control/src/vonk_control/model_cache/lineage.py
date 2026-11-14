@@ -44,6 +44,15 @@ def set_bindings(
     return frozenset(bound)
 
 
+def stored_set_bindings(row: ModelCacheSet) -> frozenset[str]:
+    """:func:`set_bindings` of a stored set; a manifest that does not read
+    binds only through its first requester."""
+
+    manifest = read_row_column(row, "manifest")
+    verified = manifest.verified_models if isinstance(manifest, CacheManifest) else ()
+    return set_bindings(row.model_content_sha256, verified)
+
+
 def verifies_model(session: Session, digests: Collection[str]) -> Exists:
     """Whether a set's manifest lists one of ``digests`` among its verified models.
 
@@ -173,11 +182,7 @@ def model_sets(
             ),
         )
     ):
-        manifest = read_row_column(row, "manifest")
-        verified = (
-            manifest.verified_models if isinstance(manifest, CacheManifest) else ()
-        )
-        bindings = set_bindings(row.model_content_sha256, verified)
+        bindings = stored_set_bindings(row)
         if bindings & wanted:
             bound[row.artifact_set_sha256] = bindings
     others = {content for bindings in bound.values() for content in bindings} - wanted

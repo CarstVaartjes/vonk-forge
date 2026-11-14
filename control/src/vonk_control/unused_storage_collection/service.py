@@ -421,6 +421,7 @@ class UnusedStorageCollector:
                 RecipeInstallation.id,
                 RecipeInstallation.state,
                 RecipeInstallation.model_content_sha256,
+                RecipeInstallation.model_artifact_set_sha256,
                 InstallationNode.installed_bytes,
             )
             .join(
@@ -433,15 +434,28 @@ class UnusedStorageCollector:
             )
         ).all()
         groups: dict[str, list[tuple[str, str, int]]] = defaultdict(list)
-        for installation_id, state, model, installed in rows:
+        group_sets: dict[str, set[str]] = defaultdict(set)
+        for installation_id, state, model, model_set, installed in rows:
             # One model's files are shared by every installation of it on a
             # Spark, so only removing all of them frees them.
-            groups[model or f"installation:{installation_id}"].append(
-                (installation_id, state, installed)
-            )
-        objects = _model_objects(
-            session, [key for key in groups if not key.startswith("installation:")]
+            key = model or f"installation:{installation_id}"
+            groups[key].append((installation_id, state, installed))
+            if model_set is not None:
+                group_sets[key].add(model_set)
+        # The files each group links: those of the model sets its installations
+        # run. Two Model revisions of the same files share one set, so their
+        # installations share its files exactly.
+        set_objects = _model_objects(
+            session, {value for sets in group_sets.values() for value in sets}
         )
+        objects: dict[str, dict[str, int]] = {
+            key: {
+                digest: size
+                for value in sorted(sets)
+                for digest, size in set_objects.get(value, {}).items()
+            }
+            for key, sets in group_sets.items()
+        }
         # Which groups link each shared object, kept groups included: an object
         # a group that stays still links is not freed by removing the others.
         holders: dict[str, set[str]] = defaultdict(set)

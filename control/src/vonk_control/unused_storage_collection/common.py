@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
+from ..model_cache_contract import CacheManifest
 from ..models import ModelCacheSet
 from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
@@ -30,6 +31,7 @@ from ..storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
+from ..stored_json import read_row_column
 
 if TYPE_CHECKING:
     from .evidence import _Item
@@ -317,37 +319,28 @@ def _freeable_in_order(
 
 
 def _model_objects(
-    session: Session, model_digests: Collection[str]
+    session: Session, set_digests: Collection[str]
 ) -> dict[str, dict[str, int]]:
-    """The model files (file digest and bytes) each model is made of, from the
-    model cache's recorded manifests. A model with no manifest is absent: all
-    of its installed bytes are then treated as the installation's own."""
+    """The model files (file digest and bytes) of each model set, from its
+    recorded manifest, keyed by set digest. An installation links every file
+    of the set its plan runs (``RecipeInstallation.model_artifact_set_sha256``),
+    whichever Model revision named it. A set with no readable manifest is
+    absent: the installation's bytes then count as its own."""
 
     found: dict[str, dict[str, int]] = {}
-    if not model_digests:
+    if not set_digests:
         return found
-    for model, manifest in session.execute(
-        select(ModelCacheSet.model_content_sha256, ModelCacheSet.manifest).where(
-            ModelCacheSet.model_content_sha256.in_(tuple(model_digests))
+    for row in session.scalars(
+        select(ModelCacheSet).where(
+            ModelCacheSet.artifact_set_sha256.in_(sorted(set_digests))
         )
     ):
-        artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
-        if model is None or not isinstance(artifacts, list):
-            continue
-        objects = found.setdefault(model, {})
-        for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                continue
-            digest, size = artifact.get("sha256"), artifact.get("download_bytes")
-            owner = artifact.get("model_content_sha256")
-            if (
-                isinstance(digest, str)
-                and isinstance(size, int)
-                and not isinstance(size, bool)
-                and size >= 0
-                and owner in (None, model)
-            ):
-                objects[digest] = size
+        manifest = read_row_column(row, "manifest")
+        if isinstance(manifest, CacheManifest):
+            found[row.artifact_set_sha256] = {
+                artifact.sha256: artifact.download_bytes
+                for artifact in manifest.artifacts
+            }
     return found
 
 

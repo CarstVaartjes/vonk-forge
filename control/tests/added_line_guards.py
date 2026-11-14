@@ -24,6 +24,7 @@ from . import (
     legacy_tolerance,
     lifecycle_sets,
     locked_io,
+    model_set_first_requester,
     raw_barriers,
     repeated_parse,
     request_path_scans,
@@ -120,6 +121,7 @@ MODES = (
     "web-not-reported",
     "retry-dispositions",
     "head-digests",
+    "set-first-requester",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -2416,6 +2418,16 @@ def check_source(
         hits.extend(
             (line, retention_head_digests.KIND)
             for line in retention_head_digests.scan_source(source)
+        )
+    if (
+        python
+        and not is_test
+        and "set-first-requester" in modes
+        and model_set_first_requester.in_scope(path)
+    ):
+        hits.extend(
+            (line, model_set_first_requester.KIND)
+            for line in model_set_first_requester.scan_source(source)
         )
     if python and "barriers" in modes and raw_barriers.in_scope(path):
         hits.extend(
