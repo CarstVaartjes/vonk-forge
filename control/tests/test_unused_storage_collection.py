@@ -920,51 +920,58 @@ def _model_objects(
 ) -> None:
     """The model files the cache recorded for a model: file digest -> bytes.
 
-    ``verified`` is a later Model digest of the same files that the cache
-    adopted as a verified binding (a release re-digested the Model).
+    The manifest holds only what the accounting reads. ``verified`` is a later
+    Model digest of the same files that the cache adopted as a verified binding
+    (a release re-digested the Model); that needs a whole, readable manifest.
     """
 
     artifacts = [
         {
             "key": digest[:8],
-            "id": digest[:8],
-            "path": f"{digest[:8]}.bin",
-            "kind": "file",
-            "repository": None,
-            "source": "fixture",
-            "revision": None,
             "sha256": digest,
             "download_bytes": size,
-            "roles": ["model"],
             "model_content_sha256": model,
         }
         for digest, size in sorted(objects.items())
     ]
+    manifest: dict[str, object] = {"schema_version": 2, "artifacts": artifacts}
+    if verified is not None:
+        manifest = {
+            **manifest,
+            "source_policy": "nas-first",
+            "model_content_sha256": model,
+            "recipe_revision_sha256": None,
+            "model_definition_ref": None,
+            "model_content_digests": [model],
+            "artifacts": [
+                {
+                    **artifact,
+                    "id": artifact["key"],
+                    "path": f"{artifact['key']}.bin",
+                    "kind": "file",
+                    "repository": None,
+                    "source": "fixture",
+                    "revision": None,
+                    "roles": ["model"],
+                }
+                for artifact in artifacts
+            ],
+            "verified_models": [
+                {
+                    "kind": "model",
+                    "publisher": "vonk-forge",
+                    "slug": "glm",
+                    "content_sha256": verified,
+                }
+            ],
+        }
     with world.sessions.begin() as session:
         session.add(
             ModelCacheSet(
                 artifact_set_sha256=uuid.uuid4().hex + uuid.uuid4().hex,
                 schema_version=2,
                 model_content_sha256=model,
-                manifest={
-                    "schema_version": 2,
-                    "source_policy": "nas-first",
-                    "model_content_sha256": model,
-                    "recipe_revision_sha256": None,
-                    "model_definition_ref": None,
-                    "model_content_digests": [model],
-                    "artifacts": artifacts,
-                    "verified_models": [
-                        {
-                            "kind": "model",
-                            "publisher": "vonk-forge",
-                            "slug": "glm",
-                            "content_sha256": verified,
-                        }
-                    ]
-                    if verified is not None
-                    else [],
-                },
+                manifest=manifest,
                 expected_bytes=sum(objects.values()),
                 verified_bytes=sum(objects.values()),
                 state="cached",
