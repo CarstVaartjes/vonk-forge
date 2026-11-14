@@ -1830,6 +1830,56 @@ def _archive_removal_service(
     return service, sessions, storage
 
 
+def test_a_newer_request_for_an_image_supersedes_its_running_removal(
+    tmp_path: Path,
+) -> None:
+    """Catches the newest request losing to an older removal of its image.
+
+    The request's recorded recipe digest is the fact: a digest of its parsed
+    recipe's dump is not the published document's digest, so re-hashing it
+    refused every supersede.
+    """
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'control.sqlite'}",
+        connect_args={"check_same_thread": False},
+    )
+    now = datetime.now(UTC)
+    recipe = _recipe("recipe-source-build.json")
+    service, sessions, storage = _archive_removal_service(
+        engine, tmp_path, [recipe], lambda: now
+    )
+    _seed_archives(sessions, storage, "revision-yield", recipe, 1)
+    published = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-source-build.json")
+        .read_text()
+    )
+    with sessions.begin() as session:
+        # The catalog stores the published document and its digest, not a dump.
+        session.execute(
+            update(CatalogDocumentRevision)
+            .where(CatalogDocumentRevision.id == "revision-yield")
+            .values(document=published, content_digest=document_sha256(published))
+        )
+    removal_id = str(uuid.uuid4())
+    remove_after_review(
+        service,
+        recipe.identity.slug,
+        actor="operator",
+        request_id=removal_id,
+        with_model=False,
+    )
+    service.advance_removals(limit=1)  # the removal holds its image's gate
+    service.start("revision-yield", actor="operator", request_id=str(uuid.uuid4()))
+
+    service.reconcile_requested_removals()
+
+    removal = service.get_operator_request(removal_id, actor="operator")
+    assert isinstance(removal, RecipeCacheRemovalStatus)
+    assert removal.state == LifecycleState.CANCELLED
+
+
 def test_postgres_recipe_removal_fence_is_committed_before_first_unlink(
     tmp_path: Path, postgres_engine, monkeypatch
 ) -> None:

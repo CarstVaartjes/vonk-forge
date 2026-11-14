@@ -31,10 +31,9 @@ from vonk_agent_protocol.wire_model import strict_json_datetime
 from vonk_forge_contracts import (
     EndpointAlias,
     RecipeDefinition,
-    document_sha256,
-    read_recipe,
 )
 
+from ..catalog_revision_contract import read_catalog_document
 from ..machine_states import (
     CertificateStateField,
     InstallationStateField,
@@ -85,12 +84,12 @@ def _canonical_recipe(revision: CatalogDocumentRevision) -> RecipeDefinition | N
         or revision.state != "active"
     ):
         return None
+    # The row's digest was verified at ingress; it is read, never re-hashed.
     try:
-        if document_sha256(revision.document) != revision.content_digest:
-            return None
-        return read_recipe(revision.document)
+        parsed = read_catalog_document(revision)
     except (TypeError, ValueError):
         return None
+    return parsed if isinstance(parsed, RecipeDefinition) else None
 
 
 NodeId = Annotated[str, StringConstraints(pattern=_NODE_PATTERN)]

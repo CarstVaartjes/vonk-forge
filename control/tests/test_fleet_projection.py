@@ -1530,7 +1530,6 @@ def test_installed_and_loaded_groups_require_every_exact_current_rank(capsys) ->
     "damage",
     (
         "document",
-        "digest",
         "candidate",
         "mapping",
         "mapping_rank",
@@ -1817,14 +1816,12 @@ def test_a_damaged_active_revision_preserves_known_presence_and_recovers(
                 .values(state="candidate")
             )
         else:
-            column = "document" if damage == "document" else "content_digest"
-            value = '{"schema_version": 2}' if damage == "document" else "0" * 64
             session.execute(
                 text(
                     "UPDATE catalog_document_revisions "
-                    f"SET {column} = :value WHERE id = :id"
+                    "SET document = :value WHERE id = :id"
                 ),
-                {"value": value, "id": revision_id},
+                {"value": '{"schema_version": 2}', "id": revision_id},
             )
         session.execute(text("PRAGMA ignore_check_constraints = OFF"))
 
