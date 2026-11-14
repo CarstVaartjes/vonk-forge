@@ -166,9 +166,11 @@ def same_model_object(first: object, second: object) -> bool:
 @dataclass(frozen=True, slots=True)
 class RecipeExecution:
     """A stored recipe revision as ``runs_identically`` reads it: its catalog
-    execution key, its content digest and its published document."""
+    execution key, its source bundle, its content digest and its published
+    document."""
 
     execution_key: str | None
+    source_bundle_sha256: str | None
     digest: str
     document: object
 
@@ -179,20 +181,28 @@ def runs_identically(first: RecipeExecution, second: RecipeExecution) -> bool:
 
     The catalog ``execution_key`` covers execution, runtime, topology,
     interfaces, settings and the artifact keys (files and format) of the
-    recipe's Models. What it leaves out but still runs is compared here: the
-    ``options`` (their choices' values, defaults, arguments and environment are
-    merged into the runtime by ``with_option_choices``) and each Model
-    selection's files (ids, roles, mounts). Option labels and help, provenance,
-    release metadata and ``validation`` (qualification inputs) do not change
-    what runs and are left out. Neither are the build context (source bundle)
-    bytes, so this answers only "would keeping or reloading it change what
-    runs": retention, carrying measured peaks and the update notice. It is
-    never a plan, admission or image identity. A missing key is never
-    identical (the catalog always writes one), and neither is a damaged stored
-    document; documents are read only when the keys match.
+    recipe's Models. What it leaves out but still runs is compared here:
+
+    * the source bundle (the build context the image is built from: Dockerfiles,
+      entrypoint scripts); a revision without one equals only another without;
+    * the ``options`` (their choices' values, defaults, arguments and
+      environment are merged into the runtime by ``with_option_choices``);
+    * each Model selection's files (ids, roles, mounts).
+
+    Option labels and help, provenance, release metadata and ``validation``
+    (qualification inputs) do not change what runs and are left out. This
+    answers only "would keeping or reloading it change what runs": retention,
+    carrying measured peaks and the update notice. It is never a plan,
+    admission or image identity. A missing key is never identical (the catalog
+    always writes one), and neither is a damaged stored document; documents are
+    read only when the keys and bundles match.
     """
 
-    if first.execution_key is None or first.execution_key != second.execution_key:
+    if (
+        first.execution_key is None
+        or first.execution_key != second.execution_key
+        or first.source_bundle_sha256 != second.source_bundle_sha256
+    ):
         return False
     chosen = _chosen_runtime(first)
     return chosen is not None and chosen == _chosen_runtime(second)

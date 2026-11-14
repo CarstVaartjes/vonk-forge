@@ -93,8 +93,10 @@ def _store(
     projected: dict,
     artifact_key: str,
     execution_key: str = "2" * 64,
+    source_bundle_sha256: str | None = None,
 ) -> str:
-    """Insert an active revision exactly as a 3.x Controller wrote it."""
+    """Insert an active revision exactly as a 3.x Controller wrote it (with the
+    source bundle its import recorded)."""
     root = CatalogDocument(
         kind=document["kind"],
         publisher=document["identity"]["publisher"],
@@ -118,6 +120,7 @@ def _store(
         content_digest=document_sha256(document),
         artifact_key=artifact_key,
         execution_key=execution_key,
+        source_bundle_sha256=source_bundle_sha256,
         projected={},
         created_by="admin",
         created_at=NOW,
@@ -222,6 +225,7 @@ def test_a_4_0_sync_over_stored_3x_rows_adds_heads_keeps_keys_and_carries_peaks(
             projected={},
             artifact_key=recipe_artifact_key,
             execution_key=recipe_execution_key,
+            source_bundle_sha256=item.source_bundle_sha256,
         )
         session.add_all(
             [

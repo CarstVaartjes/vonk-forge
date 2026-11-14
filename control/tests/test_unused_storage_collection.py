@@ -625,20 +625,42 @@ def test_a_reload_onto_an_identical_head_lets_the_old_twin_go(
     head = world.revision("glm", 2, head="active", execution_key=same)
     lifecycle = FakeLifecycle(world.sessions)
 
-    reloaded, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
+    world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
     _collector(world, lifecycle, free=TOTAL // 2).collect()
 
     assert lifecycle.removed == [twin]
-    assert reloaded
+
+
+def _flip_option_default(document: dict[str, Any]) -> None:
+    for choice in document["options"][0]["choices"]:
+        choice["default"] = not choice.get("default", False)
+
+
+def _move_model_mount(document: dict[str, Any]) -> None:
+    document["models"][0]["files"][0]["mount"]["target"] = "/weights"
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_a_release_that_changes_only_options_is_an_update_that_runs_differently(
+@pytest.mark.parametrize(
+    ("change", "bundles"),
+    [
+        # Options are merged into the runtime by ``with_option_choices``.
+        (_flip_option_default, (None, None)),
+        # A Model selection's files say where the weights are mounted.
+        (_move_model_mount, (None, None)),
+        # The image is built from the build context (Dockerfiles, run.py).
+        (None, ("1" * 64, "2" * 64)),
+    ],
+    ids=["options", "model-files", "build-context"],
+)
+def test_a_release_that_changes_what_runs_outside_the_key_is_an_update(
     world: Catalog,
+    change: Callable[[dict[str, Any]], None] | None,
+    bundles: tuple[str | None, str | None],
 ) -> None:
-    """Catches options (merged into the runtime by ``with_option_choices``)
-    being treated as metadata: the release must offer the reload, and the old
-    idle installation is no longer what the head runs."""
+    """Catches a runtime change the execution key does not cover being treated
+    as metadata: the release must offer the reload, and the old idle
+    installation is no longer what the head runs."""
 
     same = "e" * 64
     first = json.loads(
@@ -647,15 +669,27 @@ def test_a_release_that_changes_only_options_is_an_update_that_runs_differently(
         .read_text()
     )
     second = copy.deepcopy(first)
-    for choice in second["options"][0]["choices"]:
-        choice["default"] = not choice.get("default", False)
+    if change is not None:
+        change(second)
     installed = world.revision(
-        "glm", 1, head="active", execution_key=same, document=first
+        "glm",
+        1,
+        head="active",
+        execution_key=same,
+        document=first,
+        source_bundle_sha256=bundles[0],
     )
     idle, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
     _profile(world, "vonk-forge/glm")
     _application(world, {}, state="succeeded", selected=True)
-    head = world.revision("glm", 2, head="active", execution_key=same, document=second)
+    head = world.revision(
+        "glm",
+        2,
+        head="active",
+        execution_key=same,
+        document=second,
+        source_bundle_sha256=bundles[1],
+    )
     lifecycle = FakeLifecycle(world.sessions)
 
     _collector(world, lifecycle, free=TOTAL // 2).collect()
