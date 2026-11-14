@@ -15,7 +15,11 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import InstallationState, LifecycleState, WaitReason
 
 from .. import model_cache_states
-from ..content_identity import catalog_reference_membership, runs_identically
+from ..content_identity import (
+    RecipeExecution,
+    catalog_reference_membership,
+    runs_identically,
+)
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
@@ -56,7 +60,6 @@ def _installation_kept(
             CatalogDocumentRevision.document_id,
             CatalogDocumentRevision.publisher,
             CatalogDocumentRevision.slug,
-            CatalogDocumentRevision.execution_key,
         ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
     ).one_or_none()
     # A profile follows the catalog head of its recipe. A revision
@@ -79,11 +82,7 @@ def _installation_kept(
             evidence.loaded_pointers, revision.publisher, revision.slug, nodes
         )
         and _head_runs_it(
-            session,
-            newest,
-            nodes,
-            is_head=revision.id == newest[0],
-            execution_key=revision.execution_key,
+            session, revision.id, newest, nodes, is_head=revision.id == newest
         )
     ):
         return "profile"
@@ -124,26 +123,37 @@ def _installation_kept(
 
 def _head_runs_it(
     session: Session,
-    head: tuple[str, str | None],
+    revision: str,
+    head: str,
     nodes: set[str],
     *,
     is_head: bool,
-    execution_key: str | None,
 ) -> bool:
-    """Whether an installation on ``nodes`` of a revision (the head itself, or
-    one with ``execution_key``) is what its recipe's head runs there.
+    """Whether an installation on ``nodes`` of ``revision`` is what its recipe's
+    ``head`` revision runs there.
 
     An installation of the head is. One of an older revision that runs
     identically (a release that changed only metadata) is too, until an
     installed installation of the head covers its Sparks: a reload made it a
-    spare twin, and it goes like any unused installation. The lookup runs only
-    for such older revisions.
+    spare twin, and it goes like any unused installation. Both documents are
+    read only for such older revisions.
     """
 
     if is_head:
         return True
-    head_revision, head_key = head
-    if not runs_identically(execution_key, head_key):
+    executions = {
+        row.id: RecipeExecution(row.execution_key, row.content_digest, row.document)
+        for row in session.execute(
+            select(
+                CatalogDocumentRevision.id,
+                CatalogDocumentRevision.content_digest,
+                CatalogDocumentRevision.execution_key,
+                CatalogDocumentRevision.document,
+            ).where(CatalogDocumentRevision.id.in_((revision, head)))
+        )
+    }
+    installed, current = executions.get(revision), executions.get(head)
+    if installed is None or current is None or not runs_identically(installed, current):
         return False
     covered = set(
         session.scalars(
@@ -154,7 +164,7 @@ def _head_runs_it(
             )
             .where(
                 catalog_reference_membership(
-                    RecipeInstallation.recipe_revision_id, (head_revision,)
+                    RecipeInstallation.recipe_revision_id, (head,)
                 ),
                 RecipeInstallation.state == InstallationState.INSTALLED,
                 InstallationNode.node_id.in_(sorted(nodes)),
@@ -204,11 +214,7 @@ def _installation_pointing(
     )
     pointing = _points_at(pointers, revision.publisher, revision.slug, nodes)
     if not pointing or not _head_runs_it(
-        session,
-        newest,
-        nodes,
-        is_head=revision.id == newest[0],
-        execution_key=revision.execution_key,
+        session, revision.id, newest, nodes, is_head=revision.id == newest
     ):
         return ()
     return pointing

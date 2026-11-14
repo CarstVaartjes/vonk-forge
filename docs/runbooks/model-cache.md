@@ -156,10 +156,11 @@ regardless of free space. The worker uses the existing reference-checked removal
 paths, and retries failed removals on later passes. Running workloads, the loaded
 profile and live operations retain their exact assets. The loaded profile keeps
 an idle installation of its recipe's head, and one of an older revision that
-runs identically (the same catalog execution key) until an installed
-installation of the head covers its Sparks: a release that changes only
-metadata uninstalls nothing, and the spare twin a reload leaves goes like any
-unused installation. Such a release shows no "Update available" either.
+runs identically (the same catalog execution key, options and Model files)
+until an installed installation of the head covers its Sparks: a release that
+changes only metadata uninstalls nothing, and the spare twin a reload leaves
+goes like any unused installation. Such a release shows no "Update available"
+either; one that changes options does.
 Terminal artifact jobs and their unreferenced evidence also use a 24-hour grace.
 
 Spark model copies also expire after 24 hours without an installation, run or

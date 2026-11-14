@@ -29,6 +29,8 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vonk_forge_contracts import RecipeDefinition
+
 if TYPE_CHECKING:
     from .model_cache_contract import CacheResolution
 
@@ -161,20 +163,82 @@ def same_model_object(first: object, second: object) -> bool:
     return size_a is None or size_b is None or size_a == size_b
 
 
-def runs_identically(first: str | None, second: str | None) -> bool:
-    """Whether two revisions of one recipe run the same thing: equal, known
-    catalog execution keys, whatever their content digests.
+@dataclass(frozen=True, slots=True)
+class RecipeExecution:
+    """A stored recipe revision as ``runs_identically`` reads it: its catalog
+    execution key, its content digest and its published document."""
 
-    The key covers execution, runtime, topology, interfaces, settings and the
-    artifact keys (files and format) of the recipe's Models. It does NOT cover
-    ``options``, ``validation``, provenance, release metadata or the build
-    context (source bundle) bytes. So this answers only "would keeping or
-    reloading it change what runs": retention, carrying measured peaks and the
-    update notice. It is never a plan, admission or image identity. A missing
-    key is never equal: the catalog always writes one.
+    execution_key: str | None
+    digest: str
+    document: object
+
+
+def runs_identically(first: RecipeExecution, second: RecipeExecution) -> bool:
+    """Whether two revisions of one recipe run the same thing, whatever their
+    content digests.
+
+    The catalog ``execution_key`` covers execution, runtime, topology,
+    interfaces, settings and the artifact keys (files and format) of the
+    recipe's Models. What it leaves out but still runs is compared here: the
+    ``options`` (their choices' values, defaults, arguments and environment are
+    merged into the runtime by ``with_option_choices``) and each Model
+    selection's files (ids, roles, mounts). Option labels and help, provenance,
+    release metadata and ``validation`` (qualification inputs) do not change
+    what runs and are left out. Neither are the build context (source bundle)
+    bytes, so this answers only "would keeping or reloading it change what
+    runs": retention, carrying measured peaks and the update notice. It is
+    never a plan, admission or image identity. A missing key is never
+    identical (the catalog always writes one), and neither is a damaged stored
+    document; documents are read only when the keys match.
     """
 
-    return first is not None and first == second
+    if first.execution_key is None or first.execution_key != second.execution_key:
+        return False
+    chosen = _chosen_runtime(first)
+    return chosen is not None and chosen == _chosen_runtime(second)
+
+
+def _chosen_runtime(execution: RecipeExecution) -> object | None:
+    """The parts of a recipe outside its execution key that change what runs;
+    ``None`` when its stored document is damaged (retired as unknown)."""
+    from functools import partial
+
+    from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+
+    from .catalog_revision_contract import cached_catalog_document
+    from .lifecycle.evidence import Residue, read_or_rebuild
+    from .models import CatalogDocumentRevision
+
+    recipe = read_or_rebuild(
+        kind=CatalogDocumentRevision.__tablename__,
+        subject=execution.digest,
+        read=partial(
+            cached_catalog_document,
+            RunSwitchReasonScopeName.RECIPE,
+            execution.digest,
+            execution.document,
+        ),
+    )
+    if isinstance(recipe, Residue) or not isinstance(recipe, RecipeDefinition):
+        return None
+    return (
+        [
+            (
+                option.name,
+                [
+                    choice.model_dump(
+                        mode="json", include={"value", "default", "args", "env"}
+                    )
+                    for choice in option.choices
+                ],
+            )
+            for option in recipe.options
+        ],
+        [
+            (selection.id, [item.model_dump(mode="json") for item in selection.files])
+            for selection in recipe.models
+        ],
+    )
 
 
 class BuildResolution(Protocol):

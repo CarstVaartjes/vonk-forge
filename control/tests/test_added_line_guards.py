@@ -2329,7 +2329,7 @@ def test_retention_deciding_the_head_by_content_digest_is_flagged(
 @pytest.mark.parametrize(
     ("path", "source"),
     [
-        (_RETENTION_PATH, "kept = runs_identically(revision.execution_key, head[1])\n"),
+        (_RETENTION_PATH, "kept = runs_identically(installed, current)\n"),
         (_RETENTION_PATH, "same = revision.id == head_revision\n"),
         # A model's own digest, not a head decision.
         (

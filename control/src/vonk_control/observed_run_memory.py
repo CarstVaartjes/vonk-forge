@@ -27,7 +27,7 @@ from vonk_agent_protocol import ReservationState
 from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_agent_protocol.telemetry import HostResourceSample
 
-from .content_identity import runs_identically
+from .content_identity import RecipeExecution, runs_identically
 from .dialect_insert import dialect_insert
 from .fleet_events import FleetEventRecorder, FleetEventRepository
 from .memory_reservations import MEMORY_RESERVATION_KINDS
@@ -160,11 +160,11 @@ def carry_measured_peaks(
 ) -> bool:
     """Carry measured peaks from a recipe's old digest to its new one.
 
-    Only when both revisions of ``publisher/slug`` have the same execution key:
-    the catalog derives it from everything that runs (the execution document
-    and the artifact keys of the pinned Models), so revisions that differ only
-    in their Model pins, over unchanged model bytes, share it. The execution is
-    then the same and what was measured holds. The rows are copied (the old
+    Only when both revisions of ``publisher/slug`` run identically
+    (``content_identity.runs_identically``: the same execution key, options and
+    Model files), so revisions that differ only in metadata or their Model
+    pins, over unchanged model bytes, qualify. The execution is then the same
+    and what was measured holds. The rows are copied (the old
     digest keeps serving its running workloads), a row already on the new
     digest keeps the higher value, and a repeat changes nothing. Returns
     whether peaks were carried.
@@ -172,20 +172,23 @@ def carry_measured_peaks(
 
     if old_digest == new_digest:
         return False
-    keys = dict(
-        session.execute(
+    executions = {
+        digest: RecipeExecution(execution_key, digest, document)
+        for digest, execution_key, document in session.execute(
             select(
                 CatalogDocumentRevision.content_digest,
                 CatalogDocumentRevision.execution_key,
+                CatalogDocumentRevision.document,
             ).where(
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,
                 CatalogDocumentRevision.publisher == publisher,
                 CatalogDocumentRevision.slug == slug,
                 CatalogDocumentRevision.content_digest.in_([old_digest, new_digest]),
             )
-        ).all()
-    )
-    if not runs_identically(keys.get(old_digest), keys.get(new_digest)):
+        )
+    }
+    old, new = executions.get(old_digest), executions.get(new_digest)
+    if old is None or new is None or not runs_identically(old, new):
         return False
     rows = session.execute(
         select(MeasuredRolePeak.role, MeasuredRolePeak.peak_bytes).where(
