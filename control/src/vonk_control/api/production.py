@@ -557,7 +557,6 @@ def production_app(settings: Settings | None = None) -> FastAPI:
                 reconcile=lambda: reconcile_library_observations(
                     visual_library, gateway_keys
                 ),
-                refresh_library=visual_library.refresh_catalog,
             )
         )
         route_task = asyncio.create_task(

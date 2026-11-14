@@ -381,38 +381,18 @@ class ManagedRecipeCatalogSyncService:
         failures: int = 0,
         *,
         reconcile: Callable[[], object] | None = None,
-        refresh_library: Callable[[], object] | None = None,
     ) -> _AutomaticSyncStep:
         """One automatic observation, shared by cadence and due-row redrive.
 
-        ``refresh_library`` runs right after a sync run no step has observed yet
-        (this step's own sync, or a manual one since the last step), so what it
-        applied (documents, displays) is served at once instead of after the
-        next step's ``reconcile``.
+        ``reconcile`` (the library refresh, the gateway-key observation) runs
+        after the observation, not before it.
         """
         errors: list[Exception] = []
-        if reconcile is not None:
-            try:
-                reconciled = reconcile()
-                if isinstance(reconciled, UnknownError):
-                    errors.append(
-                        CatalogSyncUnsettled(
-                            reconciled.reason,
-                            "default gateway key observation unavailable",
-                        )
-                    )
-            except Exception as error:  # noqa: BLE001 - independent recovery path
-                errors.append(error)
         observed_id = None
         catalog_failed = True
         try:
             observation = self.automatic()
             observed_id = observation.id
-            if refresh_library is not None and self._unobserved(observation.id):
-                try:
-                    refresh_library()
-                except Exception as error:  # noqa: BLE001 - the next step refreshes again
-                    errors.append(error)
             catalog_failed = observation.state != CatalogSyncState.CURRENT
             if catalog_failed:
                 errors.append(
@@ -427,6 +407,20 @@ class ManagedRecipeCatalogSyncService:
                 )
         except Exception as error:  # noqa: BLE001 - retain automatic observation intent
             errors.append(error)
+        # After the observation, so what a sync just applied (documents,
+        # displays) is served at once; it runs whether or not the sync failed.
+        if reconcile is not None:
+            try:
+                reconciled = reconcile()
+                if isinstance(reconciled, UnknownError):
+                    errors.append(
+                        CatalogSyncUnsettled(
+                            reconciled.reason,
+                            "default gateway key observation unavailable",
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001 - independent recovery path
+                errors.append(error)
         failures = failures + 1 if errors else 0
         delay = catalog_sync_retry_delay(failures, interval_seconds)
         try:
@@ -536,12 +530,6 @@ class ManagedRecipeCatalogSyncService:
                     else CatalogSyncCode.REFRESH_SCHEDULED,
                     detail=run.error_detail if failed else None,
                 )
-
-    def _unobserved(self, run_id: str) -> bool:
-        """No automatic step has recorded its wait on this run yet: it is new."""
-        with self._sessions() as session:
-            run = session.get(RecipeLibrarySyncRun, run_id)
-            return run is not None and run.wait_evidence is None
 
     def automatic(self) -> CatalogSyncView:
         try:
@@ -1120,7 +1108,6 @@ async def run_automatic_sync(
     interval_seconds: int,
     settle_seconds: float = 10.0,
     reconcile: Callable[[], object] | None = None,
-    refresh_library: Callable[[], object] | None = None,
 ) -> None:
     """Retry recoverable library observations until ``stop`` is set.
 
@@ -1159,7 +1146,6 @@ async def run_automatic_sync(
             interval_seconds,
             failures,
             reconcile=reconcile,
-            refresh_library=refresh_library,
         )
         failures, delay = step.failures, step.delay_seconds
         try:

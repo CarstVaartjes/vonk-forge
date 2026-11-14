@@ -23,7 +23,7 @@ def test_a_sync_that_adds_a_display_field_is_served_without_another_step(
     world.index["catalog_entities"][0]["display"].pop("lineage")
     world.release.publish(world.index, world.packages)
     refresh = world.projection.refresh_catalog
-    world.sync_service.advance_automatic(60, refresh_library=refresh)
+    world.sync_service.advance_automatic(60, reconcile=refresh)
     (model,) = world.projection.models(limit=10).models
     assert model.model_display is not None and model.model_display.lineage is None
 
@@ -39,7 +39,7 @@ def test_a_sync_that_adds_a_display_field_is_served_without_another_step(
             }
         }
     )
-    world.sync_service.advance_automatic(60, refresh_library=refresh)
+    world.sync_service.advance_automatic(60, reconcile=refresh)
 
     (model,) = world.projection.models(limit=10).models
     assert (model.family, model.line) == ("tiny", "tiny")
