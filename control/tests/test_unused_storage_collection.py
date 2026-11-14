@@ -3772,6 +3772,9 @@ def test_shared_file_does_not_pin_an_unrelated_installation(
         ModelCacheService(sessions, tmp_path / "model-cache")._ensure_set(
             session, manifest
         )
+        # The installation runs that cached set: install admission records the
+        # set the plan runs, the same content key the cache stores it under.
+        installation.model_artifact_set_sha256 = manifest.digest
         node = _required(
             session.scalar(
                 select(InstallationNode).where(
