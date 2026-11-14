@@ -162,8 +162,7 @@ test("family and engine chips carry counts that respect the other filters and to
     { ...EMPTY_LIBRARY_WORKCELL_FILTERS, engine, family },
     "",
   ).filter((record) => record.recipe).length;
-  const title = withRecipe.modelDisplay!.family_title;
-  fireEvent.click(families.getByRole("button", { name: `${title}: ${familyCount}` }));
+  fireEvent.click(families.getByRole("button", { name: `${family}: ${familyCount}` }));
   expect(onFiltersChange).toHaveBeenLastCalledWith({
     ...EMPTY_LIBRARY_WORKCELL_FILTERS,
     engine,

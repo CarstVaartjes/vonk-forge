@@ -3,9 +3,10 @@
 A 4.x Controller stored the 4.9 release's rows (Model documents carrying the
 family, recipes pinning those digests). The first 5.0 sync over them adds one
 head revision per Model and recipe with the same execution, so nothing runs
-differently: the published status does not move, the measured peaks carry to
-the new recipe digest, the artifact key (and with it every cached file) stays,
-and no workload is told to reload. The old rows still read.
+differently: the head shows the 5.0 release's own published view (whose status
+the recipes side proved equal to the 4.9 one, in R1's index diff), the measured
+peaks carry to the new recipe digest, the artifact key (and with it every cached
+file) stays, and no workload is told to reload. The old rows still read.
 """
 
 from __future__ import annotations
@@ -98,11 +99,15 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
             "artifact_key": artifact_key,
         }
     )
-    # The status the 4.9 release published for the old digest: the recipes
-    # side carried its evidence, so the 5.0 release publishes the same one.
+    # The 4.9 release published the same status for the old digest, its proof
+    # naming the old digest; the 5.0 release names the new one.
     published = item.qualification
     assert published is not None
-    legacy_projection = {"qualification": published.model_dump(mode="json")}
+    legacy_view = published.model_dump(mode="json")
+    for side in ("last_pass", "last_failure"):
+        if legacy_view.get(side):
+            legacy_view[side]["identity"]["content_sha256"] = legacy_digest
+    legacy_projection = {"qualification": legacy_view}
 
     with sessions.begin() as session:
         legacy_model_id = _store(
@@ -152,12 +157,14 @@ def test_a_5_0_sync_over_stored_4_9_rows_moves_no_status_carries_peaks_and_offer
         )
         # No "Update available": reloading would run the same thing.
         assert recipe_update_notice("Recipe", legacy_row, head) is None
-        # The published status did not move with the digest.
+        # The head shows the new release's own view, neither the stored old
+        # one carried over nor a local reset, and the status is the old one.
         before = read_catalog_projection(legacy_row)
         after = read_catalog_projection(head)
         assert isinstance(before, RecipeRevisionProjection)
         assert isinstance(after, RecipeRevisionProjection)
-        assert before.qualification is not None and after.qualification is not None
+        assert before.qualification is not None
+        assert after.qualification == published
         assert after.qualification.status == before.qualification.status
         # Measured wins: the new digest starts with what the old one measured.
         assert observed_role_peaks(session, item.content_sha256) == {
