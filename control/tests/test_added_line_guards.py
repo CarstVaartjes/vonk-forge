@@ -2315,6 +2315,14 @@ _RETENTION_PATH = "control/src/vonk_control/unused_storage_collection/references
             "control/src/vonk_control/model_cache/fleet_removal.py",
             "kept = revision.content_digest in head_digests\n",
         ),
+        (
+            "control/src/vonk_control/recipe_update_notice.py",
+            "same = newest.content_digest == running.content_digest\n",
+        ),
+        (
+            "control/src/vonk_control/observed_run_memory.py",
+            "same = head.content_digest == old.content_digest\n",
+        ),
     ],
 )
 def test_retention_deciding_the_head_by_content_digest_is_flagged(
@@ -2337,7 +2345,7 @@ def test_retention_deciding_the_head_by_content_digest_is_flagged(
             "if current_head and revision.content_digest == digest:\n    pass\n",
         ),
         (
-            "control/src/vonk_control/recipe_update_notice.py",
+            "control/src/vonk_control/recipes.py",
             "kept = newest.content_digest == running.content_digest\n",
         ),
     ],

@@ -142,12 +142,18 @@ def _head_runs_it(
     if is_head:
         return True
     executions = {
-        row.id: RecipeExecution(row.execution_key, row.content_digest, row.document)
+        row.id: RecipeExecution(
+            row.execution_key,
+            row.source_bundle_sha256,
+            row.content_digest,
+            row.document,
+        )
         for row in session.execute(
             select(
                 CatalogDocumentRevision.id,
                 CatalogDocumentRevision.content_digest,
                 CatalogDocumentRevision.execution_key,
+                CatalogDocumentRevision.source_bundle_sha256,
                 CatalogDocumentRevision.document,
             ).where(CatalogDocumentRevision.id.in_((revision, head)))
         )

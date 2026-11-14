@@ -17,12 +17,19 @@ KIND = (
     "use the head revision or content_identity.runs_identically"
 )
 _SCOPE = "control/src/vonk_control/unused_storage_collection/"
-_FLEET_REMOVAL = "control/src/vonk_control/model_cache/fleet_removal.py"
+# Every other reader of "does the head run what this runs".
+_FILES = frozenset(
+    {
+        "control/src/vonk_control/model_cache/fleet_removal.py",
+        "control/src/vonk_control/recipe_update_notice.py",
+        "control/src/vonk_control/observed_run_memory.py",
+    }
+)
 _HEAD_WORDS = ("head", "newest")
 
 
 def in_scope(path: str) -> bool:
-    return (path.startswith(_SCOPE) and path.endswith(".py")) or path == _FLEET_REMOVAL
+    return (path.startswith(_SCOPE) and path.endswith(".py")) or path in _FILES
 
 
 def _names(node: ast.AST) -> set[str]:

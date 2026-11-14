@@ -161,8 +161,8 @@ def carry_measured_peaks(
     """Carry measured peaks from a recipe's old digest to its new one.
 
     Only when both revisions of ``publisher/slug`` run identically
-    (``content_identity.runs_identically``: the same execution key, options and
-    Model files), so revisions that differ only in metadata or their Model
+    (``content_identity.runs_identically``: the same execution key, source
+    bundle, options and Model files), so revisions that differ only in metadata or their Model
     pins, over unchanged model bytes, qualify. The execution is then the same
     and what was measured holds. The rows are copied (the old
     digest keeps serving its running workloads), a row already on the new
@@ -173,11 +173,12 @@ def carry_measured_peaks(
     if old_digest == new_digest:
         return False
     executions = {
-        digest: RecipeExecution(execution_key, digest, document)
-        for digest, execution_key, document in session.execute(
+        digest: RecipeExecution(execution_key, bundle, digest, document)
+        for digest, execution_key, bundle, document in session.execute(
             select(
                 CatalogDocumentRevision.content_digest,
                 CatalogDocumentRevision.execution_key,
+                CatalogDocumentRevision.source_bundle_sha256,
                 CatalogDocumentRevision.document,
             ).where(
                 CatalogDocumentRevision.kind == RunSwitchReasonScopeName.RECIPE,

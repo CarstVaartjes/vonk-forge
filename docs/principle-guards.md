@@ -52,7 +52,8 @@ with its evidence; a cause that clears by itself keeps waiting. An edit inside
 an older handler of that shape is flagged too.
 
 Retention under `unused_storage_collection/` and
-`model_cache/fleet_removal.py` may not compare a recipe revision's
+`model_cache/fleet_removal.py`, the update notice (`recipe_update_notice.py`)
+and the measured-peak carry (`observed_run_memory.py`) may not compare a recipe revision's
 `content_digest` with the head's (anything named `head` or `newest`) to decide
 "is this what the head runs" (added-line mode `head-digests`,
 `control/tests/retention_head_digests.py`). A release that changes only
