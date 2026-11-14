@@ -85,11 +85,11 @@ DOCUMENT_VERSIONS: Mapping[DocumentKind, int] = {
     DocumentKind.PROFILE_APPLICATION: 1,
     DocumentKind.PROFILE_ENDPOINTS: 1,
     DocumentKind.RECIPE_LIBRARY: 2,
-    DocumentKind.RECIPE_DETAIL: 2,
+    DocumentKind.RECIPE_DETAIL: 3,
     DocumentKind.ARTIFACT_JOB: 1,
     DocumentKind.ARTIFACT_DOWNLOAD: 1,
-    DocumentKind.OBSERVATION: 2,
-    DocumentKind.ERROR: 2,
+    DocumentKind.OBSERVATION: 3,
+    DocumentKind.ERROR: 3,
 }
 
 _PROFILE_APPLICATION_ACTIONS = frozenset({_Word.LOAD, _Word.PROGRESS, _Word.CANCEL})

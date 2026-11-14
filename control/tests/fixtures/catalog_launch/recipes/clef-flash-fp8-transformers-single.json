@@ -215,7 +215,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "b02b5f123234109c78e4a3f8291ff62d3eccee1b5b062cd4e4bddb95f29cab86",
+    "content_sha256": "7dcb3b89f977dc155f948767c958e13b3563ee1b62044f1de48f247e96e9cd5f",
     "kind": "model",
     "publisher": "cloudflare",
     "slug": "clef-flash-bf16-fb4417d3"

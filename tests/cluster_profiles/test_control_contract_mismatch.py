@@ -38,6 +38,7 @@ from vonk_control.platform_observation import (
 )
 
 from cluster_profiles import cli
+from cluster_profiles.cli_json_contract import DOCUMENT_VERSIONS, DocumentKind
 from cluster_profiles.control_client import (
     ControlClient,
     ControlContractMismatch,
@@ -50,7 +51,8 @@ from control.tests.observation_transfer_peer import ObservationHTTPPeer
 SHIPPED = "a" * 64
 SERVED = "e" * 64
 ERROR_SCHEMA = (
-    Path(__file__).resolve().parents[2] / "schemas/vonkctl/error-v2.schema.json"
+    Path(__file__).resolve().parents[2]
+    / f"schemas/vonkctl/error-v{DOCUMENT_VERSIONS[DocumentKind.ERROR]}.schema.json"
 )
 
 type Answer = _Response | ObservationHTTPPeer

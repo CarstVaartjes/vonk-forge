@@ -1,0 +1,61 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-11ad7efa2497-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "11ad7efa24975ee4b0c3c3a38ed18737f0658a5f75a0a96787b576a78a023361",
+   "size_bytes": 1519
+  },
+  {
+   "id": "readme-7aadc16361d4-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "7aadc16361d4c5280865d0b5163fbf77aeb3e3af439eacbf05e0a316c159c375",
+   "size_bytes": 7400
+  },
+  {
+   "id": "grpo-1400-f4e4706a11cf-0a004da47f",
+   "path": "experiments/articulation_xl_quantization_256_token_4/grpo_1400.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "f4e4706a11cfb520cdde65156a0358545e4fbf8f36237aca01ea5e79d5cb5692",
+   "size_bytes": 1131603979
+  },
+  {
+   "id": "last-4843f49e58af-3417e359c3",
+   "path": "experiments/skin_vae_2_10_32768/last.ckpt",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "4843f49e58afff88345806b94ca82e6cc9d8def6e7432e2853c677b154de0ed4",
+   "size_bytes": 487311745
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "model": {
+   "publisher": "vast-ai",
+   "slug": "skintokens"
+  },
+  "publisher": "vast-ai",
+  "slug": "skintokens",
+  "variant": "SkinTokens / TokenRig",
+  "version": "SkinTokens / TokenRig"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/VAST-AI/SkinTokens",
+  "revision": "79736cad0fd84de384d5eede659b4ebd24effe33"
+ }
+}

@@ -74,7 +74,11 @@ def _legacy_model() -> dict:
     """The Model document as contracts 2.x published it, display inside."""
     document = _example("model-definition.json")
     identity = document["identity"]
-    identity["family"]["title"] = "Synthetic"
+    identity["family"] = {
+        "publisher": "vonk-forge",
+        "slug": "synthetic",
+        "title": "Synthetic",
+    }
     identity["model"]["title"] = "Synthetic Tiny"
     document["metadata"] = {"description": "A small model.", "tags": ["synthetic"]}
     document["capabilities"] = ["text-generation"]

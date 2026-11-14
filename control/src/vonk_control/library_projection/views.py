@@ -55,6 +55,7 @@ def models(
     cursor: str | None = None,
     usage: Sequence[str] = (),
     family: Sequence[str] = (),
+    line: Sequence[str] = (),
     version: Sequence[str] = (),
     quantization: Sequence[str] = (),
     publisher: Sequence[str] = (),
@@ -126,7 +127,8 @@ def models(
         item
         for item in entries
         if self._matches_any(item.usage, usage)
-        and self._matches_any([item.family], family)
+        and self._matches_any([item.family] if item.family else [], family)
+        and self._matches_any([item.line] if item.line else [], line)
         and self._matches_any([item.version], version)
         and self._matches_any([item.quantization], quantization)
         and self._matches_any([item.identity.publisher], publisher)
@@ -153,6 +155,7 @@ def models(
             {
                 "usage": list(usage),
                 "family": list(family),
+                "line": list(line),
                 "version": list(version),
                 "quantization": list(quantization),
                 "publisher": list(publisher),
@@ -209,6 +212,7 @@ def models(
         filters=LibraryFilterValues(
             usage=list(usage),
             family=list(family),
+            line=list(line),
             version=list(version),
             quantization=list(quantization),
             publisher=list(publisher),

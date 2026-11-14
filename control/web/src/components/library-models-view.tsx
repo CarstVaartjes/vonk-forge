@@ -170,7 +170,11 @@ export function LibraryModelsView({
             onChange={(event) => updateFilters({ family: event.target.value })}
           >
             <option value="">All families</option>
-            {[...new Set(models.map((model) => model.family).filter(Boolean))]
+            {[
+              ...new Set(
+                models.map((model) => model.family).filter((value): value is string => !!value),
+              ),
+            ]
               .sort()
               .map((value) => (
                 <option key={value} value={value}>

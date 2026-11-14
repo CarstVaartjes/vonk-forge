@@ -1,0 +1,43 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "bf16-head-source-shard",
+   "path": "model-00001-of-00141.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "29c537abddf4fc94689defddbdd03694b287385c620072a7805d63a3dcd7d5b6",
+   "size_bytes": 5363940952
+  },
+  {
+   "id": "license",
+   "path": "LICENSE",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "96e1622099fc9d6b70c9760f007d99e66d7497eec636b63c60fe208401e9170c",
+   "size_bytes": 4263
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "model": {
+   "publisher": "zai-org",
+   "slug": "glm-5-3"
+  },
+  "publisher": "zai-org",
+  "slug": "glm-5-3-bf16-head-source-aca966e4",
+  "variant": "Original BF16 output-head source shard",
+  "version": "5.3"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/zai-org/GLM-5.3",
+  "revision": "aca966e4e02791568aa6a4ced368624b3d897f42"
+ }
+}

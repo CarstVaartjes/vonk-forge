@@ -75,10 +75,6 @@ def _insert_synthetic_corpus(
         identity["publisher"] = "test"
         identity["slug"] = slug
         if kind == "model":
-            family = identity["family"]
-            assert isinstance(family, dict)
-            family["publisher"] = "test"
-            family["slug"] = "family"
             model = identity["model"]
             assert isinstance(model, dict)
             model["publisher"] = "test"

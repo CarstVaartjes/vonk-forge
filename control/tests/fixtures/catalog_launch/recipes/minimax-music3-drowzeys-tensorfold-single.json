@@ -135,7 +135,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "c59292c9870f45594210bfeff0540fba7806b5605b2a181cade3f7b77a9a7024",
+    "content_sha256": "049460f7a16b6f3ed0e4cef05dbd0df3641357e10cd8c25b3b162f01a1ca7535",
     "kind": "model",
     "publisher": "comfy-org",
     "slug": "minimax-music3-comfy-9e364ccd"

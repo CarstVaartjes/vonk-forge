@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from vonk_control import settings as settings_module
 from vonk_control.settings import Settings, SettingsError
+from vonk_forge_contracts import CONTRACT_MAJOR
 
 _ENVIRONMENT = (
     "VONK_DEPLOYMENT_MODE",
@@ -138,11 +139,11 @@ def test_invalid_operator_choices_fall_back_to_safe_defaults(
     secrets_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VONK_INSTALL_CHANNEL", "dev")
-    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", "v4.1.0")
+    monkeypatch.setenv("VONK_RECIPE_LIBRARY_RELEASE", f"v{CONTRACT_MAJOR}.1.0")
     settings = Settings.from_env_and_secrets()
     assert (settings.install_channel, settings.recipe_library_release) == (
         "dev",
-        "v4.1.0",
+        f"v{CONTRACT_MAJOR}.1.0",
     )
 
     monkeypatch.setenv("VONK_INSTALL_CHANNEL", "preview")

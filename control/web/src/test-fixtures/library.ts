@@ -86,11 +86,12 @@ function modelDocument(index: number): ModelDefinition {
     version: `catalog-${index + 1}`,
     variant: `schema2-${index + 1}`,
     model: { ...document.identity.model, publisher, slug },
-    family: { ...document.identity.family, publisher, slug: slug.split("-")[0]! },
   };
+  const seed = modelDisplays.get(actualModelDocumentSeed.identity.slug)!;
   modelDisplays.set(slug, {
-    ...modelDisplays.get(actualModelDocumentSeed.identity.slug)!,
+    ...seed,
     identity: { publisher, slug },
+    lineage: { ...seed.lineage!, family: slug.split("-")[0]!, model: slug },
     family_title: title,
     model_title: title,
     description: `${title} canonical ModelDefinition from the Controller catalog corpus.`,
@@ -103,7 +104,7 @@ function model(index: number, recipes: LibraryViewRecipe[]): ModelSeed {
   const actual = index >= 2 && index <= 6 ? actualLtxModels[index - 2]!.model : undefined;
   const local = { controller: "not_cached" as const, running_on: [], preparation: null };
   const facets = {
-    family: `${document.identity.family.publisher}/${document.identity.family.slug}`,
+    family: modelDisplayOf(document)?.lineage?.family ?? null,
     version: document.identity.version,
     quantization: document.format.quantization,
   };
@@ -307,7 +308,8 @@ export const modelLibrary: ModelLibrary = {
         download_bytes: entry.model_bytes,
         installed_bytes: entry.model_bytes,
       },
-      family: entry.model_document.identity.family.slug,
+      family: entry.model_display?.lineage?.family ?? null,
+      line: entry.model_display?.lineage?.line ?? null,
       version: entry.model_document.identity.version,
       variant: entry.model_document.identity.variant,
       quantization: entry.model_document.format.quantization ?? "none",

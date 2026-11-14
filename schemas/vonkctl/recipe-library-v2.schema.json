@@ -1439,6 +1439,16 @@
           "title": "Family",
           "type": "array"
         },
+        "line": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 512,
+          "title": "Line",
+          "type": "array"
+        },
         "publisher": {
           "items": {
             "maxLength": 128,
@@ -1563,6 +1573,16 @@
           ],
           "default": null,
           "title": "Fits Fleet"
+        },
+        "line": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Line",
+          "type": "array"
         },
         "model": {
           "items": {
@@ -3145,7 +3165,8 @@
       "enum": [
         "Model output differed from the expected answer",
         "Carried from the identical document before the display split",
-        "Carried from the identical execution document before the Model facts split"
+        "Carried from the identical execution document before the Model facts split",
+        "Carried from the identical execution document"
       ],
       "title": "QualificationQualityNote",
       "type": "string"

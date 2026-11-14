@@ -1,0 +1,268 @@
+{
+ "execution": {
+  "build": {
+   "base_image": {
+    "digest": "2eaf346843c93ae617a718818f4a804e2c46c0d97a85392212ec5b310ee57962",
+    "repository": "nvcr.io/nvidia/cuda"
+   },
+   "context": {
+    "path": "adapters/media/comfyui-core"
+   },
+   "dockerfile": "adapters/media/comfyui-core/Dockerfile",
+   "network": {
+    "hosts": [
+     "codeload.github.com",
+     "download.pytorch.org",
+     "download-r2.pytorch.org",
+     "pypi.org",
+     "pypi.nvidia.com",
+     "files.pythonhosted.org",
+     "archive.ubuntu.com",
+     "security.ubuntu.com",
+     "ports.ubuntu.com"
+    ]
+   },
+   "patches": []
+  }
+ },
+ "identity": {
+  "publisher": "vonk-forge",
+  "slug": "qwen-image-edit-2511-comfyui-single"
+ },
+ "interfaces": [
+  {
+   "adapter": "image-job",
+   "input": {
+    "max_bytes": 33570816,
+    "media_types": [
+     "image/jpeg",
+     "image/png",
+     "image/webp",
+     "text/plain"
+    ],
+    "required": true,
+    "slots": [
+     {
+      "description": "UTF-8 instructions describing the requested image edit.",
+      "extensions": [
+       ".txt"
+      ],
+      "id": "prompt",
+      "label": "Prompt",
+      "max_file_bytes": 16384,
+      "max_files": 1,
+      "max_total_bytes": 16384,
+      "media_types": [
+       "text/plain"
+      ],
+      "min_files": 1
+     },
+     {
+      "description": "One or two source images to edit or combine.",
+      "extensions": [
+       ".jpg",
+       ".jpeg",
+       ".png",
+       ".webp"
+      ],
+      "id": "image",
+      "label": "Reference images",
+      "max_file_bytes": 16777216,
+      "max_files": 2,
+      "max_total_bytes": 33554432,
+      "media_types": [
+       "image/jpeg",
+       "image/png",
+       "image/webp"
+      ],
+      "min_files": 1
+     }
+    ]
+   },
+   "output": {
+    "max_total_bytes": 16777216,
+    "slots": [
+     {
+      "description": "Single edited PNG image.",
+      "extensions": [
+       ".png"
+      ],
+      "id": "image",
+      "label": "Edited image",
+      "max_file_bytes": 16777216,
+      "max_files": 1,
+      "max_total_bytes": 16777216,
+      "media_types": [
+       "image/png"
+      ],
+      "min_files": 1
+     }
+    ]
+   }
+  }
+ ],
+ "kind": "recipe",
+ "models": [
+  {
+   "files": [
+    {
+     "file_id": "target",
+     "id": "primary-target",
+     "mount": {
+      "target": "/models/target"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "primary",
+   "model": {
+    "content_sha256": "ba6747dabc9ff965166d0bdb6e66979f8c1277ad16a77a728c93cd51f1ea8a3d",
+    "kind": "model",
+    "publisher": "qwen",
+    "slug": "qwen-image-edit-2511-comfyui-f68ace85"
+   }
+  },
+  {
+   "files": [
+    {
+     "file_id": "text-encoder",
+     "id": "dependency-qwen-image-2512-comfyui-1f12b17b-text-encoder",
+     "mount": {
+      "target": "/models/text-encoder"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    },
+    {
+     "file_id": "vae",
+     "id": "dependency-qwen-image-2512-comfyui-1f12b17b-vae",
+     "mount": {
+      "target": "/models/vae"
+     },
+     "roles": [
+      "entrypoint"
+     ]
+    }
+   ],
+   "id": "dependency-qwen-image-2512-comfyui-1f12b17b",
+   "model": {
+    "content_sha256": "3dd1c90ac96f5e67550c8ecb31f8eb9f9889bff4491d180684b3ad2a5cbd7046",
+    "kind": "model",
+    "publisher": "qwen",
+    "slug": "qwen-image-2512-comfyui-1f12b17b"
+   }
+  }
+ ],
+ "provenance": {
+  "attribution": [
+   "Qwen",
+   "Comfy-Org"
+  ],
+  "source_reference": "https://huggingface.co/Comfy-Org/Qwen-Image-Edit_ComfyUI/tree/f68ace85e60b4a02a323e394253731947657b7d2"
+ },
+ "release": {
+  "released_at": "2026-10-16",
+  "version": "1.1.4"
+ },
+ "runtime": {
+  "arguments": [
+   {
+    "name": "workflow",
+    "setting": null,
+    "value": "/opt/vonk/source/workflows/qwen-image-edit-2511-bf16.json"
+   },
+   {
+    "name": "workflow-sha256",
+    "setting": null,
+    "value": "6290d110adcac4a6a934972946bd10936b2814b6b54a3e23ad0f615129a65291"
+   },
+   {
+    "name": "output-mime",
+    "setting": null,
+    "value": "image/png"
+   },
+   {
+    "name": "seed",
+    "setting": null,
+    "value": 0
+   }
+  ],
+  "engine": "comfyui",
+  "entrypoint": [
+   "/opt/vonk/bin/comfyui-job"
+  ],
+  "environment": [
+   {
+    "name": "HF_HUB_OFFLINE",
+    "value": "1"
+   }
+  ],
+  "lifecycle": {
+   "stop_timeout_seconds": 120
+  }
+ },
+ "settings": {
+  "concurrency": null,
+  "kind": "job",
+  "knobs": {}
+ },
+ "topology": {
+  "name": "solo",
+  "node_count": 1,
+  "parallelism": {
+   "backend": "local",
+   "data": 1,
+   "pipeline": 1,
+   "tensor": 1
+  },
+  "roles": [
+   {
+    "count": 1,
+    "endpoint_owner": true,
+    "name": "entrypoint",
+    "resources": {
+     "disk": {
+      "artifact_bytes": 50499508486,
+      "image_bytes": 5000000000,
+      "safety_margin_bytes": 12000000000,
+      "working_bytes": 68000000000
+     },
+     "memory": {
+      "peak_bytes": 118000000000,
+      "reserve_bytes": 8000000000
+     }
+    }
+   }
+  ],
+  "start_order": [
+   "entrypoint"
+  ]
+ },
+ "validation": {
+  "serving": {
+   "checks": [
+    {
+     "assertions": [
+      "inference.completed",
+      "artifact.output"
+     ],
+     "kind": "image-job.output",
+     "name": "job-output",
+     "request": {
+      "fixture": "qualification/fixtures/tiny.png",
+      "input_slots": {
+       "image": "qualification/fixtures/tiny.png",
+       "prompt": "qualification/fixtures/prompt.txt"
+      },
+      "output_slot": "image",
+      "transport": "job"
+     }
+    }
+   ],
+   "interface": "image-job"
+  }
+ }
+}

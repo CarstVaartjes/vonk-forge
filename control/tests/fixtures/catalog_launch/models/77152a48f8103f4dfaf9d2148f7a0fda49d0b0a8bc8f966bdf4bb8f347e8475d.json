@@ -1,0 +1,304 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-caf3ca02d5e8-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "caf3ca02d5e883f643e939cbed54f94237f94c171797f0dfea5e25c7e33315b3",
+   "size_bytes": 1580
+  },
+  {
+   "id": "readme-97e453b0fa6b-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "97e453b0fa6b9b132adcf226ae648b5943a35c11c498e3140701560569568073",
+   "size_bytes": 3199
+  },
+  {
+   "id": "preprocessor-config-ec1f371074fb-ace603b1da",
+   "path": "feature_extractor/preprocessor_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "ec1f371074fb4867ea1c654e00bc5ea99d706f409aaebf8dc614d67c0735aff8",
+   "size_bytes": 394
+  },
+  {
+   "id": "guider-config-8cc58a8bb048-5a4bb9dfdb",
+   "path": "guider/guider_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "8cc58a8bb048d0628d265dc4b7dbeed7dae7b9b2d60dbc63dab70c673d8e3300",
+   "size_bytes": 224
+  },
+  {
+   "id": "config-78bbe4544c7d-7408b0e2c4",
+   "path": "image_encoder/config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "78bbe4544c7dcfeec58e7e3de3c70e91c48b8a773f6eb0d207a37d854d107e74",
+   "size_bytes": 413
+  },
+  {
+   "id": "model-d769e3a32a6a-239d514024",
+   "path": "image_encoder/model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "d769e3a32a6a9bac72d4d93b989e44491f71b50f02bfa14cd9187758d4a68ff1",
+   "size_bytes": 856506120
+  },
+  {
+   "id": "model-index-42d59fd7ad89-ee03ace9a3",
+   "path": "model_index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "42d59fd7ad898c137391c7c88f8c3d114b636f216e3051d8b02e2c2ac3a32a29",
+   "size_bytes": 894
+  },
+  {
+   "id": "scheduler-config-8ec387d5fa43-67ecb3dc37",
+   "path": "scheduler/scheduler_config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "8ec387d5fa43c84d22c9531ce117b78a3d7086a37e78809f64648423fa94b53a",
+   "size_bytes": 487
+  },
+  {
+   "id": "config-40161074f1da-bcfd37e83e",
+   "path": "text_encoder/config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "40161074f1da8fda74e15083138fde85992ffa8fc1395e335e98421d708b1c28",
+   "size_bytes": 1471
+  },
+  {
+   "id": "model-00001-of-00003-a1b9f95e60d6-02972f2ff9",
+   "path": "text_encoder/model-00001-of-00003.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "a1b9f95e60d6844963933dc20c11cf712d902441ef50d0926e5f2b3521a2f01d",
+   "size_bytes": 4877660152
+  },
+  {
+   "id": "model-00002-of-00003-ab32a0fe73ed-6ecf8bd4b9",
+   "path": "text_encoder/model-00002-of-00003.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "ab32a0fe73edfa4af4eb0c7f17633c44704335d80755f9230200cf16fea42b7e",
+   "size_bytes": 4932750280
+  },
+  {
+   "id": "model-00003-of-00003-fe26b2e0da51-ab0456bfcf",
+   "path": "text_encoder/model-00003-of-00003.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "fe26b2e0da51f3c6522b46056b26603f0642f866a60eacec09ebe66a025cb7ee",
+   "size_bytes": 4330864528
+  },
+  {
+   "id": "model-safetensors-index-3374ab25b322-5fc12c01f9",
+   "path": "text_encoder/model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "3374ab25b3226ec4416e0f036c157d577b36329a2c45ba710f8843547ef8ba00",
+   "size_bytes": 25702
+  },
+  {
+   "id": "config-d9ced170e0c3-576e8524c7",
+   "path": "text_encoder_2/config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d9ced170e0c38d68a3149712177a3b1c6e8724c828ce67c0ee2c89cc31df37c1",
+   "size_bytes": 783
+  },
+  {
+   "id": "model-f0a1043fa206-91d4db77fb",
+   "path": "text_encoder_2/model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "f0a1043fa206aa16927e24ebf25ed122500a2066b5535bcab1047e976b847919",
+   "size_bytes": 438643328
+  },
+  {
+   "id": "added-tokens-58b54bbe36fc-67aa73d88f",
+   "path": "tokenizer/added_tokens.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "58b54bbe36fc752f79a24a271ef66a0a0830054b4dfad94bde757d851968060b",
+   "size_bytes": 605
+  },
+  {
+   "id": "chat-template-a0bc6f6fc7a2-875b211b57",
+   "path": "tokenizer/chat_template.jinja",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "a0bc6f6fc7a29a80017a433e8f03a1cc1236e838a944a2d034295a60c4f2fddb",
+   "size_bytes": 1017
+  },
+  {
+   "id": "merges-8831e4f1a044-ebbb0f71ea",
+   "path": "tokenizer/merges.txt",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+   "size_bytes": 1671853
+  },
+  {
+   "id": "special-tokens-map-76862e765266-9a6c011314",
+   "path": "tokenizer/special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+   "size_bytes": 613
+  },
+  {
+   "id": "tokenizer-9c5ae00e602b-b87c178459",
+   "path": "tokenizer/tokenizer.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "9c5ae00e602b8860cbd784ba82a8aa14e8feecec692e7076590d014d7b7fdafa",
+   "size_bytes": 11421896
+  },
+  {
+   "id": "tokenizer-config-11d20a741a0e-47a6faaf45",
+   "path": "tokenizer/tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "11d20a741a0eda1e7482d29b5d17553328922ed9e7391ec6f44d390215390f3d",
+   "size_bytes": 4713
+  },
+  {
+   "id": "vocab-ca10d7e9fb3e-8c35116cc3",
+   "path": "tokenizer/vocab.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+   "size_bytes": 2776833
+  },
+  {
+   "id": "added-tokens-6dbf3df426e1-c992a97bfb",
+   "path": "tokenizer_2/added_tokens.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "6dbf3df426e1c529b1823b2a9b10b6cd72fab3b375b6d55cbf7608e89f081151",
+   "size_bytes": 29726
+  },
+  {
+   "id": "special-tokens-map-f9ff8c543ce7-d9a3373af2",
+   "path": "tokenizer_2/special_tokens_map.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "f9ff8c543ce73b2dbab7c3ef1df6690bd08be19b049f1c7e1ff92a39217e3b7b",
+   "size_bytes": 25910
+  },
+  {
+   "id": "tokenizer-config-56adeaeff12e-25c5334061",
+   "path": "tokenizer_2/tokenizer_config.json",
+   "roles": [
+    "tokenizer"
+   ],
+   "sha256": "56adeaeff12e5819883501744cfc1bea3b6daa1f72d870c5558f0e4794c24c0f",
+   "size_bytes": 247408
+  },
+  {
+   "id": "config-d36328fcc924-98e965502a",
+   "path": "transformer/config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "d36328fcc924a8d55315754a12c4108e868c758e539a61dcdd1e79f97df15997",
+   "size_bytes": 611
+  },
+  {
+   "id": "diffusion-pytorch-model-00001-of-00002-a3ce050556ba-f940099643",
+   "path": "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "a3ce050556ba8e01b182382d438e60018599dc752f0c80c5c121ac1687c24717",
+   "size_bytes": 9999371152
+  },
+  {
+   "id": "diffusion-pytorch-model-00002-of-00002-374683b899a8-48c20e2a08",
+   "path": "transformer/diffusion_pytorch_model-00002-of-00002.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "374683b899a8087a6c4b0a6da09710f3b13b4f642d1e334ef7d0f5927dd901f6",
+   "size_bytes": 6663503104
+  },
+  {
+   "id": "diffusion-pytorch-model-safetensors-ind-6b4af7af91fa-322b43acad",
+   "path": "transformer/diffusion_pytorch_model.safetensors.index.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "6b4af7af91fa22dfa18d1e13783c8dce34467eca7dbc7334d5f1bf6318005b55",
+   "size_bytes": 187634
+  },
+  {
+   "id": "config-903c63784f93-101abd63da",
+   "path": "vae/config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "903c63784f93d274435b78629e1fc46460c547bafc3462415eab4f1bd4a13cd1",
+   "size_bytes": 612
+  },
+  {
+   "id": "diffusion-pytorch-model-89dcb55c5fc9-86e9ee3b4f",
+   "path": "vae/diffusion_pytorch_model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "89dcb55c5fc9f854a23e03dbac7512208d3576547b145f27b18ba0f2ab26a009",
+   "size_bytes": 2521294918
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "model": {
+   "publisher": "tencent",
+   "slug": "hunyuan-video-15"
+  },
+  "publisher": "tencent",
+  "slug": "hunyuan-video-15-i2v-step-distilled",
+  "variant": "HunyuanVideo 1.5 I2V 480p step-distilled",
+  "version": "HunyuanVideo 1.5 I2V 480p step-distilled"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_i2v_step_distilled",
+  "revision": "854c04a4c8a53d990b418c7478f0802c0fc8c726"
+ }
+}
