@@ -289,38 +289,26 @@ def _model_kept(
     reference = evidence.reference
     if reference.pointers is None:
         return "profiles unreadable"
-    first_requested = ModelCacheSet.model_content_sha256 == digest
     sets = session.execute(
         select(
             ModelCacheSet.artifact_set_sha256,
             ModelCacheSet.recipe_revision_sha256,
-        ).where(first_requested)
+            # A set serves every Model it is bound to, not only the one that
+            # first requested it: a re-digested Model of the same files (a
+            # catalog release) is adopted as a verified binding, and a profile
+            # points to that digest.
+            verifies_model(session, reference.pointed_models).label("serves_pointed"),
+        ).where(ModelCacheSet.model_content_sha256 == digest)
     ).all()
-    if (
-        digest in reference.pointed_models
-        or any(recipe in reference.pointed_digests for _s, recipe in sets)
-        # A set serves every Model it is bound to, not only the one that first
-        # requested it: a re-digested Model of the same files (a catalog
-        # release) is adopted as a verified binding, and a profile points to
-        # that digest.
-        or (
-            reference.pointed_models
-            and session.scalar(
-                select(ModelCacheSet.artifact_set_sha256)
-                .where(
-                    first_requested,
-                    verifies_model(session, reference.pointed_models),
-                )
-                .limit(1)
-            )
-            is not None
-        )
+    if digest in reference.pointed_models or any(
+        recipe in reference.pointed_digests or serves_pointed
+        for _s, recipe, serves_pointed in sets
     ):
         return "profile"
     # Model and set digests only, as for an installation: a file shared with a
     # used successor does not keep a superseded revision. The removal scope's
     # delete_objects keeps the shared bytes and only unique bytes count as free.
-    names = {digest} | {set_digest for set_digest, _r in sets}
+    names = {digest} | {set_digest for set_digest, *_ in sets}
     if not evidence.live.isdisjoint(names):
         return "live operation"
     if not reference.application_references_readable:
