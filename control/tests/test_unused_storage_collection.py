@@ -3683,23 +3683,28 @@ def test_installation_content_references_hold_but_provenance_does_not(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-def test_pressure_never_promises_profile_pinned_model_objects_as_reclaimable(
+def test_pressure_promises_profile_pointed_spark_objects_but_not_live_ones(
     world: Catalog,
 ) -> None:
-    """An unused installation may go, but its pinned model objects stay in the
-    native store: promising them makes a load wait for space that cannot arrive.
-    """
+    """Saved profiles pin the NAS cache, not Spark copies (the agent frees
+    them); only a live operation keeps a model's objects on the Spark."""
     from collections import Counter
     from dataclasses import replace
 
     _hard_linked_models(world)
-    with world.sessions() as session:
-        evidence = replace(
-            _Evidence.read(session, world.now), pointed_models=frozenset({"1" * 64})
-        )
-        items = UnusedStorageCollector._spark_items(session, NODE, evidence, Counter())
-    # M1's A+B stay; M2 can free only C (30) and each model's private 10.
-    assert sum(item.freeable for item in items) == 50 * GIB
+
+    def freeable(**changes: frozenset[str]) -> int:
+        with world.sessions() as session:
+            evidence = replace(_Evidence.read(session, world.now), **changes)
+            items = UnusedStorageCollector._spark_items(
+                session, NODE, evidence, Counter()
+            )
+        return sum(item.freeable for item in items)
+
+    # Pointed or pinned by a profile: everything is still freeable.
+    assert freeable(pointed_models=frozenset({"1" * 64})) == 150 * GIB
+    # Live work on M1 keeps its installations; M2 frees only C (30) and its own 10.
+    assert freeable(operations=frozenset({"1" * 64})) == 40 * GIB
 
 
 def test_shared_file_does_not_pin_an_unrelated_installation(

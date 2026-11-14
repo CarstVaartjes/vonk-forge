@@ -460,13 +460,12 @@ class UnusedStorageCollector:
         # a group that stays still links is not freed by removing the others.
         holders: dict[str, set[str]] = defaultdict(set)
         for key in groups:
+            # Live work is the only thing the agent is told to keep: saved
+            # profiles pin the NAS cache, not these disposable copies.
+            live = not evidence.operations.isdisjoint({key, *group_sets[key]})
             for digest in objects.get(key, {}):
                 holders[digest].add(key)
-                if key in evidence.pointed_models or digest in (
-                    evidence.operations | evidence.pinned
-                ):
-                    # Uninstall can drop its link, but the Controller's native
-                    # retention verdict still pins this object in the store.
+                if live or digest in evidence.operations:
                     holders[digest].add(f"protected:{digest}")
         candidates: list[_Item] = []
         for key, members in sorted(groups.items()):
