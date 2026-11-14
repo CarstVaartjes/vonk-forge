@@ -146,24 +146,29 @@ def _bound_documents(nodes: list[ast.AST]) -> set[str]:
     return bound
 
 
+def _named(node: ast.AST) -> str | None:
+    """The name of ``Name`` or the last part of a dotted ``Attribute``."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def _strict_contract_read(node: ast.Call) -> str | None:
-    """``<Contract>.model_validate*(...)`` or ``TypeAdapter(<Contract>)``."""
+    """``[module.]<Contract>.model_validate*(...)``, or a ``[pydantic.]TypeAdapter``
+    whose type names a contract anywhere (``| None``, ``list[...]``,
+    ``Annotated[...]``)."""
     func = node.func
-    if (
-        isinstance(func, ast.Attribute)
-        and func.attr.startswith("model_validate")
-        and isinstance(func.value, ast.Name)
-        and func.value.id in DOCUMENT_CONTRACTS
-    ):
-        return f"{func.value.id}.{func.attr}"
-    if (
-        isinstance(func, ast.Name)
-        and func.id == "TypeAdapter"
-        and node.args
-        and isinstance(node.args[0], ast.Name)
-        and node.args[0].id in DOCUMENT_CONTRACTS
-    ):
-        return f"TypeAdapter({node.args[0].id})"
+    if isinstance(func, ast.Attribute) and func.attr.startswith("model_validate"):
+        receiver = _named(func.value)
+        if receiver in DOCUMENT_CONTRACTS:
+            return f"{receiver}.{func.attr}"
+    if _named(func) == "TypeAdapter" and node.args:
+        for child in ast.walk(node.args[0]):
+            contract = _named(child)
+            if contract in DOCUMENT_CONTRACTS:
+                return f"TypeAdapter({contract})"
     return None
 
 

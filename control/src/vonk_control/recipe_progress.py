@@ -24,7 +24,7 @@ from vonk_agent_protocol import (
     RecipeUninstallPayload,
     canonical_message,
 )
-from vonk_forge_contracts import RecipeDefinition, read_model
+from vonk_forge_contracts import RecipeDefinition, read_model, read_recipe
 
 from .distributed_lifecycle import (
     DistributedLifecycleError,
@@ -191,10 +191,10 @@ def _lower_hex_digest(value: object) -> bool:
 def _catalog_recipe(document: object) -> RecipeDefinition | None:
     if isinstance(document, RecipeDefinition):
         return document
+    if not isinstance(document, Mapping):
+        return None
     try:
-        return RecipeDefinition.model_validate_json(
-            canonical_message(document), extra="ignore"
-        )
+        return read_recipe(document)
     except (TypeError, ValueError):
         return None
 

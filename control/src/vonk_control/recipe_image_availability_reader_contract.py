@@ -29,15 +29,15 @@ from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import read_stored_document
 
 
-def _stored_recipe(value: object) -> object:
+def _stored_recipe(value: object) -> RecipeDefinition | None:
     """A stored recipe through the tolerant reader: a field an older contract
-    wrote never makes it unreadable."""
-    return read_recipe(value) if isinstance(value, Mapping) else value
-
-
-_STORED_RECIPE = TypeAdapter(
-    Annotated[RecipeDefinition, BeforeValidator(_stored_recipe)]
-)
+    wrote never makes it unreadable; an unreadable one is absent."""
+    if isinstance(value, RecipeDefinition) or not isinstance(value, Mapping):
+        return value if isinstance(value, RecipeDefinition) else None
+    try:
+        return read_recipe(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class StoredAvailabilityIdentity(BaseModel):
@@ -49,7 +49,7 @@ class StoredAvailabilityIdentity(BaseModel):
         str | None,
         readable_or_none(TypeAdapter(Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")])),
     ] = None
-    recipe: Annotated[RecipeDefinition | None, readable_or_none(_STORED_RECIPE)] = None
+    recipe: Annotated[RecipeDefinition | None, BeforeValidator(_stored_recipe)] = None
     request: Annotated[
         RecipeAvailabilityIntent | None,
         readable_or_none(TypeAdapter(RecipeAvailabilityIntent)),
