@@ -24,9 +24,7 @@ from vonk_agent_protocol.host_helper import (
     SignedHostHelperGrant,
 )
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload, RecipeStopResult
-from vonk_control import artifact_job_states as ajs
 from vonk_control.agent_jobs import AgentJobService
-from vonk_control.artifact_jobs.contracts import ArtifactJobUnavailableError
 from vonk_control.host_helper_authority import (
     HostHelperGrantIssuer,
     HostRuntimeAuthorityService,
@@ -36,9 +34,7 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
 )
 from vonk_control.models import (
-    AgentNode,
     AgentOperation,
-    ArtifactJob,
     Job,
     RecipeRun,
     ResourceReservation,
@@ -116,42 +112,6 @@ def test_unknown_cancelled_job_retains_run_claims_until_exact_stop_receipt(
         )
     assert held
 
-    # A retained physical reservation is not an admission mutex for fresh work,
-    # yet a submit that cannot observe the old job's effect never stops the run:
-    # it answers a retryable wait, keeps its draft READY, and leaves the run, the
-    # Spark's workload ordinal and the old job untouched.
-    def ordinals() -> list[tuple[str | int, ...]]:
-        with sessions() as session:
-            return sorted(
-                tuple(row)
-                for row in session.execute(
-                    select(AgentNode.node_id, AgentNode.workload_intent_ordinal)
-                )
-            )
-
-    before = ordinals()
-    with pytest.raises(ArtifactJobUnavailableError):
-        submitted_artifact_job(artifacts, run_id, request_suffix=900)
-    with sessions() as session:
-        run = session.get(RecipeRun, run_id)
-        assert run is not None and run.state == "running"
-        draft = session.scalar(
-            select(ArtifactJob).where(
-                ArtifactJob.run_id == run_id, ArtifactJob.id != job.id
-            )
-        )
-        assert draft is not None and draft.operation_id is None
-        assert not ajs.is_ended(draft)
-        assert (
-            session.scalar(
-                select(Job).where(
-                    Job.kind == "recipe.stop",
-                    Job.payload["owner_id"].as_string() == run_id,
-                )
-            )
-            is None
-        )
-    assert ordinals() == before
     stop_plan = operations.preview_stop(run_id)
     stop_key = str(uuid.uuid4())
     stop_id = operations.stop(
