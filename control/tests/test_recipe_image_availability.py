@@ -118,6 +118,16 @@ def _recipe(name: str) -> RecipeDefinition:
     return RecipeDefinition.model_validate(raw)
 
 
+def _published(recipe: RecipeDefinition) -> dict[str, Any]:
+    """The document as the catalog publishes and stores it: only what was set.
+
+    Its digest is the one ingress verifies. A full ``model_dump()`` adds the
+    defaults the published document leaves out and hashes differently.
+    """
+
+    return recipe.model_dump(mode="json", exclude_unset=True)
+
+
 def _download_preview(*, artifact_set_sha256: str, plan_digest: str, new_bytes: int):
     return ModelCacheDownloadPreviewResponse(
         artifact_set_sha256=artifact_set_sha256,
@@ -170,7 +180,7 @@ def _availability_payload(revision_id: str) -> AvailabilityJobPayload:
         kind="recipe.image.availability.v2",
         request=RecipeRevisionIntent(recipe_revision_id=revision_id),
         recipe_revision_id=revision_id,
-        recipe_content_sha256=document_sha256(recipe.model_dump(mode="json")),
+        recipe_content_sha256=document_sha256(_published(recipe)),
         recipe=recipe,
         runtime=AvailabilityRuntime.model_validate(_runtime()),
         force_rebuild=False,
@@ -187,7 +197,7 @@ def _typed_availability_payload(
     revision_id = str(observations["recipe_revision_id"])
     base = _availability_payload(revision_id).model_dump(mode="json")
     base["recipe"] = recipe.model_dump(mode="json")
-    base["recipe_content_sha256"] = document_sha256(recipe.model_dump(mode="json"))
+    base["recipe_content_sha256"] = document_sha256(_published(recipe))
     runtime = base["runtime"] | observations.get("runtime", {})
     return serialize_json_value(
         AvailabilityJobPayload.model_validate_json(
@@ -456,8 +466,8 @@ def _add_revision(
         revision_number=1,
         schema_version=2,
         state="active",
-        document=recipe.model_dump(mode="json"),
-        content_digest=document_sha256(recipe.model_dump(mode="json")),
+        document=_published(recipe),
+        content_digest=document_sha256(_published(recipe)),
         artifact_key="b" * 64,
         execution_key="a" * 64,
         source_bundle_sha256="b" * 64,
@@ -702,7 +712,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
     assert service._resolve_recipe_selector(old_id) == old_id
     assert (
         service._resolve_recipe_selector(
-            document_sha256(old_recipe.model_dump(mode="json"))
+            document_sha256(_published(old_recipe))
         )
         == old_id
     )
@@ -1802,7 +1812,7 @@ def _removal_owner(
 
 
 def _renamed(recipe: RecipeDefinition, slug: str) -> RecipeDefinition:
-    document = recipe.model_dump(mode="json")
+    document = _published(recipe)
     document["identity"]["slug"] = slug
     return RecipeDefinition.model_validate(document)
 
@@ -1836,8 +1846,8 @@ def test_a_newer_request_for_an_image_supersedes_its_running_removal(
     """Catches the newest request losing to an older removal of its image.
 
     The request's recorded recipe digest is the fact: a digest of its parsed
-    recipe's dump is not the published document's digest, so re-hashing it
-    refused every supersede.
+    recipe's full dump is not the published document's digest, so re-hashing
+    it refused every supersede.
     """
 
     engine = create_engine(
@@ -1850,18 +1860,6 @@ def test_a_newer_request_for_an_image_supersedes_its_running_removal(
         engine, tmp_path, [recipe], lambda: now
     )
     _seed_archives(sessions, storage, "revision-yield", recipe, 1)
-    published = json.loads(
-        files("vonk_forge_contracts")
-        .joinpath("examples", "recipe-source-build.json")
-        .read_text()
-    )
-    with sessions.begin() as session:
-        # The catalog stores the published document and its digest, not a dump.
-        session.execute(
-            update(CatalogDocumentRevision)
-            .where(CatalogDocumentRevision.id == "revision-yield")
-            .values(document=published, content_digest=document_sha256(published))
-        )
     removal_id = str(uuid.uuid4())
     remove_after_review(
         service,
