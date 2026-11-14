@@ -890,7 +890,8 @@ class ArtifactJobAdapter:
         """What is known of the job's effect, from the order and its receipt.
 
         The order's own row says ``stopped`` for any cancelled order, but only an
-        attempt that receipted its cancel proves the job stopped: a cancel that
+        attempt that receipted its cancel proves the job stopped, and only one
+        that reported a stop before launch proves it never ran: a cancel that
         ended after its stop budget leaves the effect unknown.
         """
 
@@ -900,7 +901,17 @@ class ArtifactJobAdapter:
             return Effect.NONE
         if order.state is State.CANCELLED:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
-            return Effect.STOPPED if receipt is Effect.STOPPED else Effect.UNKNOWN
+            if receipt is Effect.STOPPED:
+                return Effect.STOPPED
+            # imported here: agent_jobs reads this package's lifecycle.
+            from ..agent_jobs.retry import job_attempt_did_not_launch
+
+            # An attempt that reported it stopped before launch left nothing
+            # for the cancel to stop (a damaged report proves nothing).
+            report = None if attempt is None else read_row_column(attempt, "result")
+            if job_attempt_did_not_launch(report):
+                return Effect.NONE
+            return Effect.UNKNOWN
         if order.state is State.FAILED:
             # Failure ends request ownership; it proves no stopped physical
             # scope. Only the attempt's own receipt (the job's exit) does.
