@@ -585,15 +585,15 @@ class RunAdmissionService:
                 )
             try:
                 resolved_entities = resolve_recipe_entities(session, revision.document)
-            except RecipeRuntimeSpecError as error:
+                # The tolerantly parsed Models, never the raw stored documents:
+                # a row an older contract wrote still carries a retired field.
+                parsed_models = resolved_entities.models
+            except (TypeError, ValueError) as error:  # RecipeRuntimeSpecError too
                 raise InvalidValue(
                     "exact recipe dependencies are unavailable",
                     reason=InvalidRequestReason.NOT_FOUND,
                 ) from error
             resolved_models = resolved_entities.model_revisions
-            # The tolerantly parsed Models, never the raw stored documents: a
-            # row an older contract wrote still carries a retired field.
-            parsed_models = resolved_entities.models
             model_documents = {
                 (item.publisher, item.slug, item.content_digest): parsed_models[
                     item.content_digest

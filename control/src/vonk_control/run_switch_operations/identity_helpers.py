@@ -8,10 +8,8 @@ from typing import (
     TypeGuard,
 )
 
-from vonk_agent_protocol import (
-    WaitReason,
-    canonical_message,
-)
+from vonk_agent_protocol import WaitReason
+from vonk_forge_contracts import read_recipe
 from vonk_forge_contracts.recipe import RecipeDefinition
 
 from ..cluster_mappings import (
@@ -54,14 +52,14 @@ def _is_oci_digest(value: object) -> TypeGuard[str]:
 
 
 def _recipe_definition(document: object) -> RecipeDefinition | None:
+    """The stored recipe through the tolerant reader: a field an older contract
+    wrote never makes it unreadable."""
+    if isinstance(document, RecipeDefinition):
+        return document
+    if not isinstance(document, Mapping):
+        return None
     try:
-        return (
-            document
-            if isinstance(document, RecipeDefinition)
-            else RecipeDefinition.model_validate_json(
-                canonical_message(document), strict=True
-            )
-        )
+        return read_recipe(document)
     except (TypeError, ValueError):
         return None
 

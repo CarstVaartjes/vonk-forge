@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -14,7 +16,7 @@ from pydantic import (
     field_validator,
 )
 from vonk_agent_protocol import OperationProgress
-from vonk_forge_contracts import RecipeDefinition
+from vonk_forge_contracts import RecipeDefinition, read_recipe
 
 from .job_documents import AvailabilityJobPayload
 from .model_cache_contract import (
@@ -27,6 +29,17 @@ from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import read_stored_document
 
 
+def _stored_recipe(value: object) -> object:
+    """A stored recipe through the tolerant reader: a field an older contract
+    wrote never makes it unreadable."""
+    return read_recipe(value) if isinstance(value, Mapping) else value
+
+
+_STORED_RECIPE = TypeAdapter(
+    Annotated[RecipeDefinition, BeforeValidator(_stored_recipe)]
+)
+
+
 class StoredAvailabilityIdentity(BaseModel):
     """Readable immutable identity, independent of damaged optional bookkeeping."""
 
@@ -36,9 +49,7 @@ class StoredAvailabilityIdentity(BaseModel):
         str | None,
         readable_or_none(TypeAdapter(Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")])),
     ] = None
-    recipe: Annotated[
-        RecipeDefinition | None, readable_or_none(TypeAdapter(RecipeDefinition))
-    ] = None
+    recipe: Annotated[RecipeDefinition | None, readable_or_none(_STORED_RECIPE)] = None
     request: Annotated[
         RecipeAvailabilityIntent | None,
         readable_or_none(TypeAdapter(RecipeAvailabilityIntent)),

@@ -2,8 +2,12 @@
 
 ``vonk_forge_contracts`` (``read_recipe``, ``read_model``, ``read_recipe_display``,
 ``read_model_display``) owns the shape of these documents. Indexing the raw dict
-re-derives that shape by hand and drifts from the contract. Counterpart of
-``tools/check-document-reads`` in vonk-forge-recipes. No allowances or counts.
+re-derives that shape by hand and drifts from the contract. Validating a stored
+document with ``ModelDefinition``/``RecipeDefinition`` ``.model_validate*`` or a
+``TypeAdapter`` of them is the same class: the strict contract refuses a field a
+row of an older contract still carries, so only the tolerant ``read_*`` readers
+read stored documents. Counterpart of ``tools/check-document-reads`` in
+vonk-forge-recipes. No allowances or counts.
 """
 
 from __future__ import annotations
@@ -54,6 +58,8 @@ DOCUMENT_NAMES = frozenset(
 )
 DOCUMENT_KEY = "document"
 PACKAGE_MEMBER = "recipe.json"
+# Document contracts whose strict validation is not a stored-document reader.
+DOCUMENT_CONTRACTS = frozenset({"ModelDefinition", "RecipeDefinition"})
 
 
 @dataclass(frozen=True)
@@ -140,6 +146,27 @@ def _bound_documents(nodes: list[ast.AST]) -> set[str]:
     return bound
 
 
+def _strict_contract_read(node: ast.Call) -> str | None:
+    """``<Contract>.model_validate*(...)`` or ``TypeAdapter(<Contract>)``."""
+    func = node.func
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr.startswith("model_validate")
+        and isinstance(func.value, ast.Name)
+        and func.value.id in DOCUMENT_CONTRACTS
+    ):
+        return f"{func.value.id}.{func.attr}"
+    if (
+        isinstance(func, ast.Name)
+        and func.id == "TypeAdapter"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id in DOCUMENT_CONTRACTS
+    ):
+        return f"TypeAdapter({node.args[0].id})"
+    return None
+
+
 def scan_source(source: str, *, path: str) -> list[Site]:
     tree = ast.parse(source)
     scopes: list[tuple[str, ast.AST]] = [("<module>", tree)]
@@ -153,6 +180,10 @@ def scan_source(source: str, *, path: str) -> list[Site]:
         nodes = list(_scope_nodes(scope))
         bound = _bound_documents(nodes)
         for node in nodes:
+            strict = _strict_contract_read(node) if isinstance(node, ast.Call) else None
+            if isinstance(node, ast.Call) and strict is not None:
+                sites.add(Site(path=path, function=name, key=strict, line=node.lineno))
+                continue
             access = _access(node)
             if access is None or not isinstance(node, ast.Subscript | ast.Call):
                 continue
