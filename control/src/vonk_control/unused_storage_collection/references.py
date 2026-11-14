@@ -12,9 +12,14 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
-from vonk_agent_protocol import LifecycleState, WaitReason
+from vonk_agent_protocol import InstallationState, LifecycleState, WaitReason
 
 from .. import model_cache_states
+from ..content_identity import (
+    RecipeExecution,
+    catalog_reference_membership,
+    runs_identically,
+)
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
@@ -51,10 +56,10 @@ def _installation_kept(
         return "not installed"
     revision = session.execute(
         select(
+            CatalogDocumentRevision.id,
             CatalogDocumentRevision.document_id,
             CatalogDocumentRevision.publisher,
             CatalogDocumentRevision.slug,
-            CatalogDocumentRevision.content_digest,
         ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
     ).one_or_none()
     # A profile follows the catalog head of its recipe. A revision
@@ -73,9 +78,11 @@ def _installation_kept(
     if (
         revision is not None
         and newest is not None
-        and newest[3] == revision.content_digest
         and _points_at(
             evidence.loaded_pointers, revision.publisher, revision.slug, nodes
+        )
+        and _head_runs_it(
+            session, revision.id, newest, nodes, is_head=revision.id == newest
         )
     ):
         return "profile"
@@ -114,6 +121,59 @@ def _installation_kept(
     return None
 
 
+def _head_runs_it(
+    session: Session,
+    revision: str,
+    head: str,
+    nodes: set[str],
+    *,
+    is_head: bool,
+) -> bool:
+    """Whether an installation on ``nodes`` of ``revision`` is what its recipe's
+    ``head`` revision runs there.
+
+    An installation of the head is. One of an older revision that runs
+    identically (a release that changed only metadata) is too, until an
+    installed installation of the head covers its Sparks: a reload made it a
+    spare twin, and it goes like any unused installation. Both documents are
+    read only for such older revisions.
+    """
+
+    if is_head:
+        return True
+    executions = {
+        row.id: RecipeExecution(row.execution_key, row.content_digest, row.document)
+        for row in session.execute(
+            select(
+                CatalogDocumentRevision.id,
+                CatalogDocumentRevision.content_digest,
+                CatalogDocumentRevision.execution_key,
+                CatalogDocumentRevision.document,
+            ).where(CatalogDocumentRevision.id.in_((revision, head)))
+        )
+    }
+    installed, current = executions.get(revision), executions.get(head)
+    if installed is None or current is None or not runs_identically(installed, current):
+        return False
+    covered = set(
+        session.scalars(
+            select(InstallationNode.node_id)
+            .join(
+                RecipeInstallation,
+                RecipeInstallation.id == InstallationNode.installation_id,
+            )
+            .where(
+                catalog_reference_membership(
+                    RecipeInstallation.recipe_revision_id, (head,)
+                ),
+                RecipeInstallation.state == InstallationState.INSTALLED,
+                InstallationNode.node_id.in_(sorted(nodes)),
+            )
+        )
+    )
+    return not nodes <= covered
+
+
 def _points_at(
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]],
     publisher: str,
@@ -135,15 +195,15 @@ def _installation_pointing(
     evidence: _Evidence,
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None,
 ) -> tuple[str, ...]:
-    """The saved profiles that point at this installation (newest revision of
-    their recipe, on its Sparks); empty when none or when unreadable."""
+    """The saved profiles that point at this installation (it runs what the head
+    of their recipe runs, on its Sparks); empty when none or when unreadable."""
 
     installation = session.get(RecipeInstallation, installation_id)
     if installation is None or pointers is None:
         return ()
     revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
     newest = evidence.newest.get(revision.document_id) if revision else None
-    if revision is None or newest is None or newest[3] != revision.content_digest:
+    if revision is None or newest is None:
         return ()
     nodes = set(
         session.scalars(
@@ -152,7 +212,12 @@ def _installation_pointing(
             )
         )
     )
-    return _points_at(pointers, revision.publisher, revision.slug, nodes)
+    pointing = _points_at(pointers, revision.publisher, revision.slug, nodes)
+    if not pointing or not _head_runs_it(
+        session, revision.id, newest, nodes, is_head=revision.id == newest
+    ):
+        return ()
+    return pointing
 
 
 def _installation_last_used(session: Session, installation_id: str) -> datetime:

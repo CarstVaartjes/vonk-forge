@@ -17,6 +17,7 @@ from vonk_agent_protocol import ProjectionCode
 from vonk_forge_contracts import read_recipe
 
 from .catalog_queries import active_head_revision
+from .content_identity import RecipeExecution, runs_identically
 from .models import CatalogDocumentRevision
 from .strict_json import StrictJSONModel
 
@@ -90,9 +91,25 @@ def recipe_update_notice(
     running: CatalogDocumentRevision,
     newest: CatalogDocumentRevision | None,
 ) -> RecipeUpdateNotice | None:
-    """The notice when `running` is not the catalog head, else None."""
+    """The notice when `running` is not the catalog head, else None.
 
-    if newest is None or newest.id == running.id:
+    A head that runs identically (a release that changed only metadata) is no
+    update: reloading would restart the workload to run the same thing. A
+    release that changes its options or anything else that runs still is.
+    """
+
+    if (
+        newest is None
+        or newest.id == running.id
+        or runs_identically(
+            RecipeExecution(
+                running.execution_key, running.content_digest, running.document
+            ),
+            RecipeExecution(
+                newest.execution_key, newest.content_digest, newest.document
+            ),
+        )
+    ):
         return None
     running_version, running_date = _release(running.document)
     newest_version, newest_date = _release(newest.document)

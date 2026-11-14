@@ -204,6 +204,10 @@ or a schema-1 compatibility path to make the transition appear complete.
 - Garbage collection must coordinate with authoritative references and active
   work. An unavailable database or failed scan does not prove an object unused.
   Artifact discovery cannot recreate users, grants, profiles, or authorization.
+  Retention decides "is this what the head runs" by the head revision or
+  `content_identity.runs_identically` (equal execution keys, options and Model
+  files), never by content digest: a metadata-only release must not uninstall
+  anything (the `head-digests` added-line guard).
 - Test process death, restart, duplicate requests, cancellation, storage loss,
   and eventual recovery through the real storage and worker boundaries. Keep
   repository, deployment, and physical acceptance claims separate.

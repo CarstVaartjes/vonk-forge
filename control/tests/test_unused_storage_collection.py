@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from importlib import resources
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -55,6 +56,7 @@ from vonk_control.models import (
     RunNode,
 )
 from vonk_control.recipe_operations import RecipeOperationConflict
+from vonk_control.recipe_update_notice import recipe_update_notice
 from vonk_control.runtime_image_preparation import FilesystemRuntimeImageStorage
 from vonk_control.storage_demands import (
     NAS_MODELS,
@@ -582,6 +584,88 @@ def test_a_reverted_recipe_keeps_the_head_installation_the_loaded_profile_runs(
     assert loaded not in lifecycle.removed
     assert stale in lifecycle.removed
     assert _kept(result, "profile") == 1
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_release_that_runs_the_same_keeps_the_loaded_installation(
+    world: Catalog,
+) -> None:
+    """Catches a metadata-only release (new content digest, same execution key)
+    costing the loaded profile's idle installation its protection."""
+
+    same = "e" * 64
+    installed = world.revision("glm", 1, head="active", execution_key=same)
+    idle, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    world.revision("glm", 2, head="active", execution_key=same)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+    assert lifecycle.removed == []
+
+    # A release that runs something else: nothing references it any more.
+    world.revision("glm", 3, head="active")
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+    assert lifecycle.removed == [idle]
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_reload_onto_an_identical_head_lets_the_old_twin_go(
+    world: Catalog,
+) -> None:
+    """Catches a spare installation of an identically running older revision
+    kept for ever once a reload installed the head on the same Sparks."""
+
+    same = "e" * 64
+    installed = world.revision("glm", 1, head="active", execution_key=same)
+    twin, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    head = world.revision("glm", 2, head="active", execution_key=same)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    reloaded, _ = world.workload(head, run="stopped", touched=NOW - timedelta(days=40))
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+
+    assert lifecycle.removed == [twin]
+    assert reloaded
+
+
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_release_that_changes_only_options_is_an_update_that_runs_differently(
+    world: Catalog,
+) -> None:
+    """Catches options (merged into the runtime by ``with_option_choices``)
+    being treated as metadata: the release must offer the reload, and the old
+    idle installation is no longer what the head runs."""
+
+    same = "e" * 64
+    first = json.loads(
+        resources.files("vonk_forge_contracts")
+        .joinpath("examples", "recipe-options.json")
+        .read_text()
+    )
+    second = copy.deepcopy(first)
+    for choice in second["options"][0]["choices"]:
+        choice["default"] = not choice.get("default", False)
+    installed = world.revision(
+        "glm", 1, head="active", execution_key=same, document=first
+    )
+    idle, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    head = world.revision("glm", 2, head="active", execution_key=same, document=second)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+
+    assert lifecycle.removed == [idle]
+    with world.sessions() as session:
+        running = session.get(CatalogDocumentRevision, installed)
+        newest = session.get(CatalogDocumentRevision, head)
+        assert running is not None and newest is not None
+        assert recipe_update_notice("GLM", running, newest) is not None
 
 
 def test_pointed_installations_are_planned_least_recently_used_first(
