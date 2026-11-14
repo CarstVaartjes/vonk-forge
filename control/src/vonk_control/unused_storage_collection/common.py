@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
@@ -23,6 +23,7 @@ from vonk_agent_protocol import (
 
 from .. import job_states
 from ..fleet_profile_contract import FleetProfileAssignmentInput
+from ..model_cache_contract import CacheManifest
 from ..models import ModelCacheSet
 from ..recipe_action_plans import StopPlan, UninstallPlan
 from ..storage_demands import (
@@ -30,6 +31,7 @@ from ..storage_demands import (
     STORAGE_EVICTION_TIMED_OUT,
     STORAGE_INSUFFICIENT,
 )
+from ..stored_json import read_row_column
 
 if TYPE_CHECKING:
     from .evidence import _Item
@@ -317,47 +319,28 @@ def _freeable_in_order(
 
 
 def _model_objects(
-    session: Session, model_digests: Collection[str]
+    session: Session, set_digests: Collection[str]
 ) -> dict[str, dict[str, int]]:
-    """The model files (file digest and bytes) each model is made of, from the
-    model cache's recorded manifests. A set serves every Model bound to it,
-    its first requester and the verified bindings adopted since (a re-digested
-    Model of the same files). A model with no manifest is absent: all of its
-    installed bytes are then treated as the installation's own."""
-
-    from ..model_cache.lineage import stored_set_bindings, verifies_model
+    """The model files (file digest and bytes) of each model set, from its
+    recorded manifest, keyed by set digest. An installation links every file
+    of the set its plan runs (``RecipeInstallation.model_artifact_set_sha256``),
+    whichever Model revision named it. A set with no readable manifest is
+    absent: the installation's bytes then count as its own."""
 
     found: dict[str, dict[str, int]] = {}
-    wanted = set(model_digests)
-    if not wanted:
+    if not set_digests:
         return found
     for row in session.scalars(
         select(ModelCacheSet).where(
-            or_(
-                ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
-                verifies_model(session, wanted),
-            )
+            ModelCacheSet.artifact_set_sha256.in_(sorted(set_digests))
         )
     ):
-        manifest, first = row.manifest, row.model_content_sha256
-        artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
-        if first is None or not isinstance(artifacts, list):
-            continue
-        for model in stored_set_bindings(row) & wanted:
-            objects = found.setdefault(model, {})
-            for artifact in artifacts:
-                if not isinstance(artifact, dict):
-                    continue
-                digest, size = artifact.get("sha256"), artifact.get("download_bytes")
-                owner = artifact.get("model_content_sha256")
-                if (
-                    isinstance(digest, str)
-                    and isinstance(size, int)
-                    and not isinstance(size, bool)
-                    and size >= 0
-                    and owner in (None, first)
-                ):
-                    objects[digest] = size
+        manifest = read_row_column(row, "manifest")
+        if isinstance(manifest, CacheManifest):
+            found[row.artifact_set_sha256] = {
+                artifact.sha256: artifact.download_bytes
+                for artifact in manifest.artifacts
+            }
     return found
 
 

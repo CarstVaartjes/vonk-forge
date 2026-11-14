@@ -2362,6 +2362,47 @@ def test_retention_using_the_head_revision_or_execution_identity_passes(
     assert not check_source(path, source, lines, modes=("head-digests",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "rows = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == digest)\n",
+        "rows = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256.in_(models))\n",
+    ],
+)
+def test_a_set_matched_by_its_first_requester_is_flagged(source: str) -> None:
+    path = "control/src/vonk_control/unused_storage_collection/common.py"
+    lines = set(range(1, source.count("\n") + 1))
+    assert check_source(path, source, lines, modes=("set-first-requester",))
+    # Only an added line can fail the change.
+    assert not check_source(path, source, set(), modes=("set-first-requester",))
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        # The owner of the binding rule.
+        (
+            "control/src/vonk_control/model_cache/lineage.py",
+            "q = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == d)\n",
+        ),
+        # By the installation's set, and a presence check, pass anywhere.
+        (
+            "control/src/vonk_control/unused_storage_collection/common.py",
+            "q = select(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256.in_(s))\n",
+        ),
+        (
+            "control/src/vonk_control/unused_storage_collection/common.py",
+            "q = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256.is_not(None))\n",
+        ),
+    ],
+)
+def test_a_set_read_by_its_bindings_or_installation_passes(
+    path: str, source: str
+) -> None:
+    lines = set(range(1, source.count("\n") + 1))
+    assert not check_source(path, source, lines, modes=("set-first-requester",))
+
+
 _ALIAS_PATH = "control/src/vonk_control/recipe_routes/candidate.py"
 
 
