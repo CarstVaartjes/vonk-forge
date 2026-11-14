@@ -3,8 +3,10 @@
 An image is its content: the manifest digest, the OCI archive sha256, the bytes
 and the architecture (plus the runtime interface the image declares). A model
 object is its digest. A build is reusable by ``build_input_sha256`` computed
-from the executable inputs, without the builder binary. Everything else on a
-receipt, plan or row says who asked first and is provenance, never identity:
+from the executable inputs, without the builder binary. Two recipe revisions
+run the same when their catalog execution keys are equal (``same_execution``),
+whatever their content digests. Everything else on a receipt, plan or row says
+who asked first and is provenance, never identity:
 the recipe, slug or revision; ``build_id``; ``distribution_publisher``,
 ``distribution_slug`` and ``distribution_content_sha256``; the runtime adapter
 of the asker. Comparing provenance refuses an identical image the first time a
@@ -157,6 +159,21 @@ def same_model_object(first: object, second: object) -> bool:
     size_a = _read(first, _MODEL_BYTES_NAMES)
     size_b = _read(second, _MODEL_BYTES_NAMES)
     return size_a is None or size_b is None or size_a == size_b
+
+
+def same_execution(first: str | None, second: str | None) -> bool | None:
+    """Whether two catalog revisions run the same thing, by their execution keys.
+
+    The catalog derives a recipe revision's ``execution_key`` from what runs:
+    execution, runtime, topology, interfaces, settings and the artifact keys
+    (files and format) of its Models. A release that changes only metadata gives
+    the document a new content digest and leaves this key equal. ``None`` when
+    either key is unknown: the caller picks the safe direction (retention keeps).
+    """
+
+    if first is None or second is None:
+        return None
+    return first == second
 
 
 class BuildResolution(Protocol):

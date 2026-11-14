@@ -584,6 +584,30 @@ def test_a_reverted_recipe_keeps_the_head_installation_the_loaded_profile_runs(
     assert _kept(result, "profile") == 1
 
 
+@pytest.mark.usefixtures("damaged_json_rows")
+def test_a_release_that_runs_the_same_keeps_the_loaded_installation(
+    world: Catalog,
+) -> None:
+    """Catches a metadata-only release (new content digest, same execution key)
+    costing the loaded profile's idle installation its protection."""
+
+    same = "e" * 64
+    installed = world.revision("glm", 1, head="active", execution_key=same)
+    idle, _ = world.workload(installed, run="stopped", touched=NOW - timedelta(days=40))
+    _profile(world, "vonk-forge/glm")
+    _application(world, {}, state="succeeded", selected=True)
+    world.revision("glm", 2, head="active", execution_key=same)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+    assert lifecycle.removed == []
+
+    # A release that runs something else: nothing references it any more.
+    world.revision("glm", 3, head="active")
+    _collector(world, lifecycle, free=TOTAL // 2).collect()
+    assert lifecycle.removed == [idle]
+
+
 def test_pointed_installations_are_planned_least_recently_used_first(
     world: Catalog,
 ) -> None:

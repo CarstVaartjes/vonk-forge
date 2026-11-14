@@ -109,8 +109,12 @@ class Catalog:
         document: object | None = None,
         projected: object | None = None,
         source_bundle_sha256: str | None = None,
+        execution_key: str | None = None,
     ) -> str:
-        """Add revision ``number`` of a document; ``head`` is "active" or "candidate"."""
+        """Add revision ``number`` of a document; ``head`` is "active" or "candidate".
+
+        Every revision gets its own execution key unless ``execution_key`` names
+        one (as the catalog writes it, never empty)."""
 
         revision_id = str(uuid.uuid4())
         if document is None:
@@ -183,6 +187,8 @@ class Catalog:
                     content_digest=_digest(f"{slug}/{number}"),
                     projected=projected,
                     source_bundle_sha256=source_bundle_sha256,
+                    execution_key=execution_key
+                    or _digest(f"execution/{kind}/{slug}/{number}"),
                     created_by="test",
                     created_at=created,
                 )

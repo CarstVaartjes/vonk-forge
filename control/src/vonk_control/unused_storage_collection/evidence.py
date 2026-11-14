@@ -26,11 +26,7 @@ from ..models import (
 )
 from ..owner_liveness import builds_in_flight
 from ..revision_images import revision_archives
-from .references import (
-    _applied_revision_ids,
-    _profile_pointers,
-    _utc,
-)
+from .references import _applied_revision_ids, _profile_pointers
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,9 +48,10 @@ class _Evidence:
     pointed_models: frozenset[str]
     #: Ids of the newest revisions a saved profile (or a load) names.
     pointed_ids: frozenset[str]
-    # Newest active recipe revision of each document: id, creation time, number
-    # and content digest (what an installation is compared on).
-    newest: Mapping[str, tuple[str, datetime, int, str]]
+    # Head revision of each recipe document: its id and execution key. An
+    # installation is the head's when it runs the same (``same_execution``),
+    # whatever its content digest.
+    newest: Mapping[str, tuple[str, str | None]]
     # (publisher, slug) -> Spark sets of the saved profile assignments naming it,
     # from the stored projection of which profiles name which recipes.
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None
@@ -93,16 +90,14 @@ class _Evidence:
                 )
             )
 
-        newest: dict[str, tuple[str, datetime, int, str]] = {
-            document_id: (revision_id, _utc(created), number, digest)
-            for revision_id, document_id, number, created, digest in session.execute(
+        newest: dict[str, tuple[str, str | None]] = {
+            document_id: (revision_id, execution_key)
+            for revision_id, document_id, execution_key in session.execute(
                 among(
                     select(
                         CatalogDocumentRevision.id,
                         CatalogDocumentRevision.document_id,
-                        CatalogDocumentRevision.revision_number,
-                        CatalogDocumentRevision.created_at,
-                        CatalogDocumentRevision.content_digest,
+                        CatalogDocumentRevision.execution_key,
                     ).where(
                         CatalogDocumentRevision.kind == "recipe",
                         CatalogDocumentRevision.state == "active",

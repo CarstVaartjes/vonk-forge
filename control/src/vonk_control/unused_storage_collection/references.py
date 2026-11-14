@@ -15,6 +15,7 @@ from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, WaitReason
 
 from .. import model_cache_states
+from ..content_identity import same_execution
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
 from ..models import (
     AgentNode,
@@ -54,7 +55,7 @@ def _installation_kept(
             CatalogDocumentRevision.document_id,
             CatalogDocumentRevision.publisher,
             CatalogDocumentRevision.slug,
-            CatalogDocumentRevision.content_digest,
+            CatalogDocumentRevision.execution_key,
         ).where(CatalogDocumentRevision.id == installation.recipe_revision_id)
     ).one_or_none()
     # A profile follows the catalog head of its recipe. A revision
@@ -73,7 +74,7 @@ def _installation_kept(
     if (
         revision is not None
         and newest is not None
-        and newest[3] == revision.content_digest
+        and _runs_as_head(revision.execution_key, newest)
         and _points_at(
             evidence.loaded_pointers, revision.publisher, revision.slug, nodes
         )
@@ -114,6 +115,17 @@ def _installation_kept(
     return None
 
 
+def _runs_as_head(execution_key: str | None, head: tuple[str, str | None]) -> bool:
+    """Whether an installation's revision runs what its recipe's head runs.
+
+    A release that changes only metadata moves the head to a new content digest
+    with the same execution key: the installation is still what a profile
+    following the head runs. An unknown key keeps it (fail-open).
+    """
+
+    return same_execution(execution_key, head[1]) is not False
+
+
 def _points_at(
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]],
     publisher: str,
@@ -135,15 +147,19 @@ def _installation_pointing(
     evidence: _Evidence,
     pointers: Mapping[tuple[str, str], tuple[tuple[str, frozenset[str]], ...]] | None,
 ) -> tuple[str, ...]:
-    """The saved profiles that point at this installation (newest revision of
-    their recipe, on its Sparks); empty when none or when unreadable."""
+    """The saved profiles that point at this installation (it runs what the head
+    of their recipe runs, on its Sparks); empty when none or when unreadable."""
 
     installation = session.get(RecipeInstallation, installation_id)
     if installation is None or pointers is None:
         return ()
     revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
     newest = evidence.newest.get(revision.document_id) if revision else None
-    if revision is None or newest is None or newest[3] != revision.content_digest:
+    if (
+        revision is None
+        or newest is None
+        or not _runs_as_head(revision.execution_key, newest)
+    ):
         return ()
     nodes = set(
         session.scalars(
