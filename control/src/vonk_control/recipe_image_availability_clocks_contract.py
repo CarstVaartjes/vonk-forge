@@ -6,7 +6,10 @@ They neither authorize effects nor replace the full job payload contract.
 
 from __future__ import annotations
 
-from typing import Annotated
+import json
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Annotated, Any
 
 from pydantic import (
     AwareDatetime,
@@ -20,13 +23,32 @@ from pydantic import (
 from vonk_agent_protocol import canonical_message
 
 
-def readable_or_none[T](adapter: TypeAdapter[T]) -> BeforeValidator:
+@dataclass(frozen=True)
+class _Reader[T]:
+    """A plain reader (a contract's tolerant ``read_*``) where an adapter fits."""
+
+    reader: Callable[[Any], T]
+
+    def validate_python(self, value: object) -> T:
+        return self.reader(value)
+
+    def validate_json(self, text: str | bytes) -> T:
+        return self.reader(json.loads(text))
+
+
+def readable_or_none[T](
+    adapter: TypeAdapter[T] | Callable[[Any], T],
+) -> BeforeValidator:
+    source: TypeAdapter[T] | _Reader[T] = (
+        adapter if isinstance(adapter, TypeAdapter) else _Reader(adapter)
+    )
+
     def read(value: object) -> object:
         try:
-            return adapter.validate_python(value)
+            return source.validate_python(value)
         except (TypeError, ValueError):
             try:
-                return adapter.validate_json(canonical_message(value))
+                return source.validate_json(canonical_message(value))
             except (TypeError, ValueError):
                 return None
 

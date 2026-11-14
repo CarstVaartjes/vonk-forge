@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from typing import Annotated
 
 from pydantic import (
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -29,17 +27,6 @@ from .recipe_lifecycle_contract import RecipeOperationCancellationResult
 from .strict_json import read_stored_document
 
 
-def _stored_recipe(value: object) -> RecipeDefinition | None:
-    """A stored recipe through the tolerant reader: a field an older contract
-    wrote never makes it unreadable; an unreadable one is absent."""
-    if isinstance(value, RecipeDefinition) or not isinstance(value, Mapping):
-        return value if isinstance(value, RecipeDefinition) else None
-    try:
-        return read_recipe(value)
-    except (TypeError, ValueError):
-        return None
-
-
 class StoredAvailabilityIdentity(BaseModel):
     """Readable immutable identity, independent of damaged optional bookkeeping."""
 
@@ -49,7 +36,9 @@ class StoredAvailabilityIdentity(BaseModel):
         str | None,
         readable_or_none(TypeAdapter(Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")])),
     ] = None
-    recipe: Annotated[RecipeDefinition | None, BeforeValidator(_stored_recipe)] = None
+    # Through the tolerant reader: a field an older contract wrote never makes
+    # a stored recipe unreadable.
+    recipe: Annotated[RecipeDefinition | None, readable_or_none(read_recipe)] = None
     request: Annotated[
         RecipeAvailabilityIntent | None,
         readable_or_none(TypeAdapter(RecipeAvailabilityIntent)),
