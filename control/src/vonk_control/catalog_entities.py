@@ -694,12 +694,17 @@ class CatalogEntityService:
         session.add_all(bindings)
 
 
-# Display moved out of the documents in contracts 3.0, and a Model's declared
-# facts (capabilities, modalities, license) in 4.0. The readers ignore these
-# keys (one tolerant reader serves stored older rows), so every write refuses
-# them here instead: an older shape is never written. A Model document may
-# carry no field that only its display declares.
-_RETIRED_DISPLAY_PATHS = (("metadata",), ("identity", "*", "title"))
+# Display moved out of the documents in contracts 3.0, a Model's declared
+# facts (capabilities, modalities, license) in 4.0, and its family in 5.0 (the
+# display ``lineage``). The readers ignore these keys (one tolerant reader
+# serves stored older rows), so every write refuses them here instead: an older
+# shape is never written. A Model document may carry no field that only its
+# display declares.
+_RETIRED_DISPLAY_PATHS = (
+    ("metadata",),
+    ("identity", "*", "title"),
+    ("identity", "family"),
+)
 _MODEL_DISPLAY_ONLY_FIELDS = frozenset(ModelDisplay.model_fields) - frozenset(
     ModelDefinition.model_fields
 )

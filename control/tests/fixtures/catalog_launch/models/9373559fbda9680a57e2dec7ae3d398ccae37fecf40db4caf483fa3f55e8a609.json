@@ -1,0 +1,70 @@
+{
+ "dependencies": [],
+ "files": [
+  {
+   "id": "metadata-8e63f02a5caa-618cd5b83d",
+   "path": ".gitattributes",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "8e63f02a5caa4dbc92838d44dddcfa2c1b76f355503fcbeaa3d6512f7fe132ef",
+   "size_bytes": 1581
+  },
+  {
+   "id": "readme-7efb99f8f0f5-b335630551",
+   "path": "README.md",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "7efb99f8f0f50f51e50890923b154768607fb4bcd9e67a39d1d42871d7902e39",
+   "size_bytes": 4876
+  },
+  {
+   "id": "dflash2-figure-6d8dcc9a9472-e520c8f797",
+   "path": "assets/dflash2-figure.png",
+   "roles": [
+    "metadata"
+   ],
+   "sha256": "6d8dcc9a9472bddb644c881fe83050b5343d09bf5ffb0912e5598e55fe671e99",
+   "size_bytes": 286889
+  },
+  {
+   "id": "config-f59e1da17d41-587cb980af",
+   "path": "config.json",
+   "roles": [
+    "configuration"
+   ],
+   "sha256": "f59e1da17d41d24a1aba588aecee1607788adb34a03805f2c883add8ca954e9b",
+   "size_bytes": 1308
+  },
+  {
+   "id": "model-3105f14043be-9d75c1098f",
+   "path": "model.safetensors",
+   "roles": [
+    "weights"
+   ],
+   "sha256": "3105f14043bef642baa49a7d533fdf0b8b2895737ec84b6305601da662656161",
+   "size_bytes": 4918859112
+  }
+ ],
+ "format": {
+  "precision": "bf16",
+  "quantization": "none"
+ },
+ "identity": {
+  "model": {
+   "publisher": "incoai",
+   "slug": "glm-5-3-dflash2"
+  },
+  "publisher": "incoai",
+  "slug": "glm-5-3-dflash2-425aa615",
+  "variant": "425aa615",
+  "version": "425aa615"
+ },
+ "kind": "model",
+ "requires_token": false,
+ "source": {
+  "repository": "https://huggingface.co/incoai/GLM-5.3-DFlash2",
+  "revision": "425aa615ce320caac34400208b30808c8f14f76c"
+ }
+}

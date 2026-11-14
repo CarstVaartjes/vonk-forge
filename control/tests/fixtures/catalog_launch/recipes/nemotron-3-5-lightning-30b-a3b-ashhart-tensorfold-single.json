@@ -181,7 +181,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "85502608e4cde1f1edb5e408e29890f0d4b772b5b16cd40c5c6e4095adfc54a5",
+    "content_sha256": "ca8e571e5c15aa65433c39aea069dd685715b1059c0e426110a2b4fe0af5f284",
     "kind": "model",
     "publisher": "vontra",
     "slug": "nemotron-3-5-lightning-30b-a3b-mlx-4bit-mtp-8bbcb5b6"
@@ -253,11 +253,11 @@
    "Vontra",
    "NVIDIA Corporation"
   ],
-  "source_reference": "https://github.com/ashhart/TensorFold/tree/6ec5fa4cb233f3606acbdad5bec433f0f8758f96"
+  "source_reference": "https://github.com/ashhart/TensorFold/tree/93a2e93ecebff8aa52b88e58c5dd222516e69c5f"
  },
  "release": {
-  "released_at": "2026-11-05",
-  "version": "1.2.3"
+  "released_at": "2026-11-11",
+  "version": "1.2.7"
  },
  "runtime": {
   "arguments": [
@@ -327,7 +327,7 @@
       "working_bytes": 8000000000
      },
      "memory": {
-      "peak_bytes": 45000000000,
+      "peak_bytes": 68500000000,
       "reserve_bytes": 13100000000
      }
     }

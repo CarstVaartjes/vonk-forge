@@ -355,7 +355,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "8bce5d8e373bfa4da4c9cb07d153126ae39e4b662548383d7c1bc25c69b2da80",
+    "content_sha256": "8b2c48ddd7fc3fec3058a39a048e9902e8f4212f745c14e58f8a085621f9b731",
     "kind": "model",
     "publisher": "stepfun-ai",
     "slug": "step-3-7-flash-nvfp4-42755324"

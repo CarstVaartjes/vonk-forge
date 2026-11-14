@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from vonk_control.recipe_packages import PACKAGE_REPOSITORY
 from vonk_forge_contracts import (
+    CONTRACT_MAJOR,
     INDEX_KIND,
     INDEX_SCHEMA_VERSION,
     PACKAGE_MEDIA_TYPE,
@@ -17,7 +18,7 @@ from vonk_forge_contracts import (
 
 def index_envelope(
     *,
-    contract_version: str = "4.0.0",
+    contract_version: str = f"{CONTRACT_MAJOR}.0.0",
     updated_at: str = "2026-09-28T12:00:00Z",
     source_commit: str = "a" * 40,
     catalog_entities: list[object] | None = None,

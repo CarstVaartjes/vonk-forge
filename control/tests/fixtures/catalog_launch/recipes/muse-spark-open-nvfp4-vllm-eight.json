@@ -1587,7 +1587,7 @@
    ],
    "id": "primary",
    "model": {
-    "content_sha256": "e64f599fd96d1a476801ef18fe6ada4b9f3125ea34881a48c82228be45b1c1df",
+    "content_sha256": "e31a866a9a7951b0ad56b86c4ee7ed2b034339b5f76c4730188c725f8804f423",
     "kind": "model",
     "publisher": "unsloth",
     "slug": "muse-spark-open-816b-a42b-nvfp4-fc6908f5"
