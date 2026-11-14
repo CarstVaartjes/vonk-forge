@@ -675,7 +675,7 @@ class AgentJobService:
                 raise AgentResultRefused(
                     str(error), reason=InvalidRequestReason.MALFORMED
                 ) from error
-            if state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
+            if state in agent_operation_states.FAILURE_REPORT:
                 message = sanitized_failure_report(operation.kind, message)
             if (
                 state == "succeeded"

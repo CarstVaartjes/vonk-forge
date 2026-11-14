@@ -24,8 +24,9 @@ from vonk_agent_protocol import (
     recipe_job_manifest_sha256,
 )
 from vonk_control import operation_api
-from vonk_control.agent_jobs import AgentJobService
-from vonk_control.models import AgentOperation, AgentOperationAttempt
+from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
+from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
+from vonk_control.models import AgentOperation, AgentOperationAttempt, ArtifactJob, Job
 from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.operation_item_contract import agent_receipt_for
 
@@ -66,11 +67,12 @@ def _wired(tmp_path):
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
 
-    def consume(session, operation, attempt, message) -> None:
-        service.consume_agent_result(session, operation, attempt, message)
-        recipe_operations.consume_agent_result(session, operation, attempt, message)
-
-    agent_jobs.set_result_consumer(consume)
+    agent_jobs.set_result_consumer(
+        controller_result_consumer(
+            artifact_jobs=service.consume_agent_result,
+            recipe_operations=recipe_operations.consume_agent_result,
+        )
+    )
     recipe_operations._agent_jobs = agent_jobs
     assert claim_agent(agent_jobs, node_id, "serial-0") is None
     job = submitted_artifact_job(service, run_id, request_suffix=652)
@@ -207,12 +209,19 @@ def test_a_definite_failure_after_launch_ends_the_job_with_its_stage_and_cause(
     assert evidence is None or evidence.failure_kind != "agent-lease-expired"
 
 
-def _reissued_after_a_pre_launch_wait(tmp_path):
-    """A job whose first attempt reported a wait before launch, claimed again."""
+def _pre_launch_wait(tmp_path, *, cancel: bool = False):
+    """A job whose first attempt reported a wait before launch."""
 
     sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
     first = claim_agent(agent_jobs, node_id, "serial-0")
     assert first is not None
+    if cancel:
+        service.cancel(
+            job.id,
+            actor="operator",
+            request_id="00000000-0000-4000-8000-000000000653",
+            reason="newer workload intent",
+        )
     clock.advance(seconds=5)
     _report(
         agent_jobs,
@@ -229,6 +238,13 @@ def _reissued_after_a_pre_launch_wait(tmp_path):
             },
         },
     )
+    return sessions, service, agent_jobs, clock, node_id, job
+
+
+def _reissued_after_a_pre_launch_wait(tmp_path):
+    """A job whose first attempt reported a wait before launch, claimed again."""
+
+    sessions, service, agent_jobs, clock, node_id, job = _pre_launch_wait(tmp_path)
     waiting = service.get(job.id)
     assert waiting.state == "backoff"
     # It never launched: nothing of it can remain on the Spark.
@@ -325,3 +341,46 @@ def test_an_unknown_without_receipt_is_observed_once_as_the_order_decided(
     order = _order(sessions, job)
     assert (order.state, order.observe_count) == ("observing", 1)
     assert service.get(job.id).state == "observing"
+
+
+def test_an_observation_never_reopens_an_order_put_back_for_reissue(
+    tmp_path,
+) -> None:
+    # Wrong implementation caught: any later unreadable signal for the job (an
+    # input the Spark could not fetch, a malformed report) reopened the
+    # scheduled reissue as an observation and parked the job unclaimable.
+    sessions, service, agent_jobs, clock, node_id, job = _pre_launch_wait(tmp_path)
+    with sessions.begin() as session:
+        artifact_job = session.get(ArtifactJob, job.id)
+        operation = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        parent = session.get(Job, job.operation_id)
+        assert artifact_job and operation and parent
+        service._observe_result(
+            ArtifactJobAdapter(session, clock=clock),
+            operation,
+            parent,
+            artifact_job,
+            clock(),
+        )
+    order = _order(sessions, job)
+    assert (order.state, order.observe_count) == ("backoff", 0)
+    assert order.next_action_at is not None
+    clock.now = max(clock.now, order.next_action_at.replace(tzinfo=UTC))
+    clock.advance(seconds=1)
+    assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+    assert _order(sessions, job).current_attempt == 2
+
+
+def test_a_pre_launch_wait_after_a_cancel_ends_the_job_cancelled(tmp_path) -> None:
+    # Pins the cancel race: the report proves nothing launched, so the cancel
+    # ends the order and the job cancelled at once, never failed or reissued.
+    sessions, service, agent_jobs, _clock, node_id, job = _pre_launch_wait(
+        tmp_path, cancel=True
+    )
+    assert _order(sessions, job).state == "cancelled"
+    assert service.get(job.id).state == "cancelled"
+    assert claim_agent(agent_jobs, node_id, "serial-0") is None

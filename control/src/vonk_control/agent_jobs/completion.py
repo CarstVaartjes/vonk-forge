@@ -114,18 +114,21 @@ def _report_event(
         # A dependency or resource wait keeps the order and spends no retry; a
         # cancel the parent asked for ends it here.
         verdict = result_disposition(operation.kind, state, result)
+        effect = (
+            Effect.NONE
+            if result.get("helper_error_code")
+            == HelperErrorCode.GRANT_TIME_WINDOW.value
+            or operation.kind == AgentOperation.RECIPE_JOB_RUN.value
+            and job_attempt_did_not_launch(result)
+            and verdict is Disposition.WAIT
+            else None
+        )
         return Reported.failed(
-            verdict if requested is None else Disposition.FAIL,
+            # A report that proves no effect lets the core end a cancelled
+            # order cancelled, as nothing is left to stop.
+            verdict if requested is None or effect is Effect.NONE else Disposition.FAIL,
             fence=fence,
-            effect=(
-                Effect.NONE
-                if result.get("helper_error_code")
-                == HelperErrorCode.GRANT_TIME_WINDOW.value
-                or operation.kind == AgentOperation.RECIPE_JOB_RUN.value
-                and job_attempt_did_not_launch(result)
-                and verdict is Disposition.WAIT
-                else None
-            ),
+            effect=effect,
             retry_after=due,
             reason=reason,
         )

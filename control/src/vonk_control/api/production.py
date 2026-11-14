@@ -15,6 +15,7 @@ from vonk_agent_protocol import UnknownError, UnknownOutcomeError
 
 import vonk_control
 
+from ..agent_jobs import controller_result_consumer
 from ..agent_services import build_agent_services
 from ..artifact_blob_store import ArtifactBlobStore
 from ..artifact_jobs import ArtifactJobService
@@ -428,12 +429,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         release_api_url=AGENT_RELEASE_API_URL,
     )
 
-    def consume_agent_result(session, operation, attempt, message) -> None:
-        artifact_jobs.consume_agent_result(session, operation, attempt, message)
-        recipe_operations.consume_agent_result(session, operation, attempt, message)
-        agent_upgrades.consume_agent_result(session, operation, attempt, message)
-
-    agent_services.operations.set_result_consumer(consume_agent_result)
+    agent_services.operations.set_result_consumer(
+        controller_result_consumer(
+            artifact_jobs=artifact_jobs.consume_agent_result,
+            recipe_operations=recipe_operations.consume_agent_result,
+            agent_upgrades=agent_upgrades.consume_agent_result,
+        )
+    )
     run_switch_operations.wake_on_child_end()
 
     def refresh_metrics() -> None:

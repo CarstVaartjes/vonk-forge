@@ -32,6 +32,7 @@ from .contracts import StaleAgentFence as StaleAgentFence
 from .contracts import StaleAgentLease as StaleAgentLease
 from .contracts import StaleAgentRequest as StaleAgentRequest
 from .contracts import SupersededAgentEffect as SupersededAgentEffect
+from .contracts import controller_result_consumer as controller_result_consumer
 from .contracts import fencing_intent as fencing_intent
 from .evidence import (
     _exact_service_stop_receipt_covers_start as _exact_service_stop_receipt_covers_start,
