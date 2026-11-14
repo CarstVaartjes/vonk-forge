@@ -711,9 +711,7 @@ def test_logical_recipe_selectors_follow_the_head_without_losing_exact_revisions
         assert started.recipe_revision_id == current_id
     assert service._resolve_recipe_selector(old_id) == old_id
     assert (
-        service._resolve_recipe_selector(
-            document_sha256(_published(old_recipe))
-        )
+        service._resolve_recipe_selector(document_sha256(_published(old_recipe)))
         == old_id
     )
     other = recipe.model_copy(
