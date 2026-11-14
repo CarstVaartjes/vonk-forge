@@ -26,7 +26,6 @@ from vonk_agent_protocol import (
 from vonk_control import recipe_packages
 from vonk_control.auth import TokenCodec
 from vonk_control.bounded_json import require_mapping
-from vonk_control.catalog_revision_contract import read_recipe_projection
 from vonk_control.catalog_service import CatalogService
 from vonk_control.catalog_sync import ManagedRecipeCatalogSyncService
 from vonk_control.catalog_sync_contract import (
@@ -37,6 +36,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
+from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
     CatalogDocument,
@@ -629,10 +629,11 @@ def test_one_entry_the_contract_cannot_read_never_rejects_the_envelope(
 def test_unreadable_parts_cost_only_their_entry_or_block(
     tmp_path: Path, signed_releases: list[bytes]
 ) -> None:
-    """An unknown word, a malformed entry and a bad image never stop the sync."""
+    """An unknown word, a malformed entry and bad blocks never stop the sync."""
     index_bytes, _, package = _canonical_package_fixture()
     index = json.loads(index_bytes)
     index["catalog_entities"][0]["display"]["capabilities"].append("teleportation")
+    del index["recipes"][0]["display"]
     index["recipes"][0]["prebuilt_image"] = {
         "reference": "ghcr.io/fixture/tiny:latest",
         "build_key": "0" * 64,
@@ -643,10 +644,11 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     now = datetime(2026, 11, 14, tzinfo=UTC)
+    cursors = TokenCodec(b"s" * 32).cursor_codec()
     catalog = CatalogService(
         sessions,
         clock=lambda: now,
-        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        cursors=cursors,
         source_bundles=SourceBundleStore(tmp_path / "bundles"),
     )
     sync = ManagedRecipeCatalogSyncService(
@@ -671,16 +673,20 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
     details = "\n".join(problem.detail for problem in status.problems)
     assert "index recipes entry recipes/broken.json is skipped" in details
     assert "recipes prebuilt_image dropped for 1 entry (fixture/tiny-recipe)" in details
+    assert "recipes display dropped for 1 entry (fixture/tiny-recipe)" in details
     assert "'teleportation' is unknown" in details
+    # What the Library serves: the recipe titled by its identity and built from
+    # source; the Model without the display carrying the unknown word.
+    library = LibraryProjection(sessions, cursors=cursors, clock=lambda: now)
+    library.refresh_catalog(observe_storage=False)
+    (recipe,) = library.recipe_library(limit=10).recipes
+    assert recipe.identity.title == "tiny-recipe"
+    assert recipe.recipe_display is None and recipe.projected.prebuilt_image is None
+    (model,) = library.models(limit=10).models
+    assert model.model_display is None
+    # Withheld, never stored: a stored display with the word would be unreadable.
     with sessions() as session:
-        rows = {
-            row.slug: row for row in session.scalars(select(CatalogDocumentRevision))
-        }
-        assert set(rows) == {"tiny-model", "tiny-recipe"}
-        assert read_recipe_projection(rows["tiny-recipe"]).prebuilt_image is None
-        # The unknown word is withheld, never stored: no display was applied.
-        model = session.get(CatalogDocument, rows["tiny-model"].document_id)
-        assert model is not None and model.display is None
+        assert session.scalars(select(CatalogDocument.display)).all() == [None, None]
 
 
 def test_a_document_that_differs_from_its_digest_refuses_the_index(

@@ -57,10 +57,14 @@ never breaks the catalog; only integrity edges refuse it:
   N entries (...)`); a note neither counts as skipped nor makes the sync
   partial.
 - A word a newer minor added (a capability, status or API format) is kept by
-  the reader, but the Controller withholds the block that carries it, so no
-  unknown word is stored or served, and lists one note per word (`index catalog_entities
-  display.capabilities word '<word>' is unknown to this Controller; display
-  withheld for N entries (...)`). A Controller on the newer contract applies it.
+  the reader, but the Controller withholds the whole block that carries it, so
+  no unknown word is stored or served, and lists one note per word
+  (`index catalog_entities display.capabilities word '<word>' is unknown to
+  this Controller; display withheld for N entries (...)`). A withheld display
+  leaves the stored one shown; a withheld API block or qualification is
+  withdrawn by the automatic sync, so that recipe publishes no `model_info` and
+  shows as not yet verified until a Controller on the newer contract is
+  deployed.
 
 ## Development versus production
 

@@ -14,7 +14,7 @@ module turns its report into the sync's own terms:
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 
 from vonk_agent_protocol import RecipePackageCode
@@ -93,12 +93,14 @@ def report(problems: Iterable[CatalogProblem]) -> ReaderReport:
     )
 
 
-def published_documents(index: PublishedDocument) -> dict[str, PublishedDocument]:
-    """Each entry's document exactly as published, by the digest it claims.
+def published_documents(
+    index: PublishedDocument, kept: Collection[str]
+) -> dict[str, PublishedDocument]:
+    """The kept entries' documents exactly as published, by their digest.
 
-    The reader verified every kept entry's digest against this same mapping,
-    so the claim names these bytes. Two entries claiming one digest with
-    different documents is an integrity fault of the signed index.
+    The reader verified each kept entry's digest against this same mapping, so
+    the claim names these bytes. A skipped entry claiming a kept digest with
+    another document is an integrity fault of the signed index.
     """
 
     documents: dict[str, PublishedDocument] = {}
@@ -108,7 +110,11 @@ def published_documents(index: PublishedDocument) -> dict[str, PublishedDocument
             if not isinstance(entry, dict):
                 continue
             digest, document = entry.get("content_sha256"), entry.get("document")
-            if not isinstance(digest, str) or not isinstance(document, dict):
+            if (
+                not isinstance(digest, str)
+                or digest not in kept
+                or not isinstance(document, dict)
+            ):
                 continue
             if documents.setdefault(digest, document) != document:
                 raise RecipePackageError(

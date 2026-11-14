@@ -653,7 +653,13 @@ class RecipePackageClient:
                 "recipe package index identity is invalid",
             )
         commit = envelope.source_commit
-        documents = catalog_read.published_documents(index)
+        documents = catalog_read.published_documents(
+            index,
+            {
+                entry.content_sha256
+                for entry in (*envelope.catalog_entities, *envelope.recipes)
+            },
+        )
         reader = catalog_read.report(read.problems)
         problems = list(reader.problems)
         catalog_entities = tuple(
