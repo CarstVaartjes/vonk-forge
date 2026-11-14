@@ -382,20 +382,12 @@ class ManagedRecipeCatalogSyncService:
         *,
         reconcile: Callable[[], object] | None = None,
     ) -> _AutomaticSyncStep:
-        """One automatic observation, shared by cadence and due-row redrive."""
+        """One automatic observation, shared by cadence and due-row redrive.
+
+        ``reconcile`` (the library refresh, the gateway-key observation) runs
+        after the observation, not before it.
+        """
         errors: list[Exception] = []
-        if reconcile is not None:
-            try:
-                reconciled = reconcile()
-                if isinstance(reconciled, UnknownError):
-                    errors.append(
-                        CatalogSyncUnsettled(
-                            reconciled.reason,
-                            "default gateway key observation unavailable",
-                        )
-                    )
-            except Exception as error:  # noqa: BLE001 - independent recovery path
-                errors.append(error)
         observed_id = None
         catalog_failed = True
         try:
@@ -415,6 +407,20 @@ class ManagedRecipeCatalogSyncService:
                 )
         except Exception as error:  # noqa: BLE001 - retain automatic observation intent
             errors.append(error)
+        # After the observation, so what a sync just applied (documents,
+        # displays) is served at once; it runs whether or not the sync failed.
+        if reconcile is not None:
+            try:
+                reconciled = reconcile()
+                if isinstance(reconciled, UnknownError):
+                    errors.append(
+                        CatalogSyncUnsettled(
+                            reconciled.reason,
+                            "default gateway key observation unavailable",
+                        )
+                    )
+            except Exception as error:  # noqa: BLE001 - independent recovery path
+                errors.append(error)
         failures = failures + 1 if errors else 0
         delay = catalog_sync_retry_delay(failures, interval_seconds)
         try:
