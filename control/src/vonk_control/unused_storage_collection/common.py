@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
@@ -320,34 +320,44 @@ def _model_objects(
     session: Session, model_digests: Collection[str]
 ) -> dict[str, dict[str, int]]:
     """The model files (file digest and bytes) each model is made of, from the
-    model cache's recorded manifests. A model with no manifest is absent: all
-    of its installed bytes are then treated as the installation's own."""
+    model cache's recorded manifests. A set serves every Model bound to it,
+    its first requester and the verified bindings adopted since (a re-digested
+    Model of the same files). A model with no manifest is absent: all of its
+    installed bytes are then treated as the installation's own."""
+
+    from ..model_cache.lineage import stored_set_bindings, verifies_model
 
     found: dict[str, dict[str, int]] = {}
-    if not model_digests:
+    wanted = set(model_digests)
+    if not wanted:
         return found
-    for model, manifest in session.execute(
-        select(ModelCacheSet.model_content_sha256, ModelCacheSet.manifest).where(
-            ModelCacheSet.model_content_sha256.in_(tuple(model_digests))
+    for row in session.scalars(
+        select(ModelCacheSet).where(
+            or_(
+                ModelCacheSet.model_content_sha256.in_(tuple(wanted)),
+                verifies_model(session, wanted),
+            )
         )
     ):
+        manifest, first = row.manifest, row.model_content_sha256
         artifacts = manifest.get("artifacts") if isinstance(manifest, dict) else None
-        if model is None or not isinstance(artifacts, list):
+        if first is None or not isinstance(artifacts, list):
             continue
-        objects = found.setdefault(model, {})
-        for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                continue
-            digest, size = artifact.get("sha256"), artifact.get("download_bytes")
-            owner = artifact.get("model_content_sha256")
-            if (
-                isinstance(digest, str)
-                and isinstance(size, int)
-                and not isinstance(size, bool)
-                and size >= 0
-                and owner in (None, model)
-            ):
-                objects[digest] = size
+        for model in stored_set_bindings(row) & wanted:
+            objects = found.setdefault(model, {})
+            for artifact in artifacts:
+                if not isinstance(artifact, dict):
+                    continue
+                digest, size = artifact.get("sha256"), artifact.get("download_bytes")
+                owner = artifact.get("model_content_sha256")
+                if (
+                    isinstance(digest, str)
+                    and isinstance(size, int)
+                    and not isinstance(size, bool)
+                    and size >= 0
+                    and owner in (None, first)
+                ):
+                    objects[digest] = size
     return found
 
 

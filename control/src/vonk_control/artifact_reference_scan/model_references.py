@@ -18,7 +18,7 @@ from ..artifact_lifecycle import (
 )
 from ..content_identity import recipe_model_digests, recipes_bound_to
 from ..machine_states import DISTRIBUTION_HELD, RUN_LIVE
-from ..model_cache_contract import CacheManifest, ModelCacheSetState
+from ..model_cache_contract import ModelCacheSetState
 from ..models import (
     ArtifactDistributionAssignment,
     FleetProfile,
@@ -30,7 +30,6 @@ from ..models import (
     RecipeRun,
 )
 from ..reference_facts import profiles_naming
-from ..stored_json import read_row_column
 from .intents import (
     _profile_plan,
     _run_switch_kinds,
@@ -325,14 +324,10 @@ def model_set_reference_reasons(
 def _served_contents(session: Session, sets: Iterable[ModelCacheSet]) -> frozenset[str]:
     """Every catalog model content these sets serve, with the lineage of each."""
 
-    from ..model_cache.lineage import lineage_contents, set_bindings
+    from ..model_cache.lineage import lineage_contents, stored_set_bindings
 
     served: set[str] = set()
     for row in sets:
-        manifest = read_row_column(row, "manifest")
-        verified = (
-            manifest.verified_models if isinstance(manifest, CacheManifest) else ()
-        )
-        for content in set_bindings(row.model_content_sha256, verified):
+        for content in stored_set_bindings(row):
             served |= lineage_contents(session, content)
     return frozenset(served)

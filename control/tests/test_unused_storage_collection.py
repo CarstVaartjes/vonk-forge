@@ -12,6 +12,7 @@ import threading
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from importlib import resources
 from pathlib import Path
@@ -73,6 +74,7 @@ from vonk_control.unused_storage_collection import (
 )
 from vonk_control.unused_storage_collection import pressure as unused_storage_pressure
 from vonk_control.unused_storage_collection.evidence import _Evidence
+from vonk_forge_contracts.model import ModelReference
 
 from .removal_settle import advance_until_ended, release_ended_gates
 from .runtime_image_fixtures import place_test_image
@@ -913,9 +915,31 @@ def test_installations_of_one_model_go_together_or_not_at_all(world: Catalog) ->
     assert _kept(result, "model shared with one in use") == 1
 
 
-def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> None:
-    """The model files the cache recorded for a model: file digest -> bytes."""
+def _model_objects(
+    world: Catalog, model: str, objects: dict[str, int], *, verified: str | None = None
+) -> None:
+    """The model files the cache recorded for a model: file digest -> bytes.
 
+    ``verified`` is a later Model digest of the same files that the cache
+    adopted as a verified binding (a release re-digested the Model).
+    """
+
+    artifacts = [
+        {
+            "key": digest[:8],
+            "id": digest[:8],
+            "path": f"{digest[:8]}.bin",
+            "kind": "file",
+            "repository": None,
+            "source": "fixture",
+            "revision": None,
+            "sha256": digest,
+            "download_bytes": size,
+            "roles": ["model"],
+            "model_content_sha256": model,
+        }
+        for digest, size in sorted(objects.items())
+    ]
     with world.sessions.begin() as session:
         session.add(
             ModelCacheSet(
@@ -924,15 +948,22 @@ def _model_objects(world: Catalog, model: str, objects: dict[str, int]) -> None:
                 model_content_sha256=model,
                 manifest={
                     "schema_version": 2,
-                    "artifacts": [
+                    "source_policy": "nas-first",
+                    "model_content_sha256": model,
+                    "recipe_revision_sha256": None,
+                    "model_definition_ref": None,
+                    "model_content_digests": [model],
+                    "artifacts": artifacts,
+                    "verified_models": [
                         {
-                            "key": digest[:8],
-                            "sha256": digest,
-                            "download_bytes": size,
-                            "model_content_sha256": model,
+                            "kind": "model",
+                            "publisher": "vonk-forge",
+                            "slug": "glm",
+                            "content_sha256": verified,
                         }
-                        for digest, size in sorted(objects.items())
-                    ],
+                    ]
+                    if verified is not None
+                    else [],
                 },
                 expected_bytes=sum(objects.values()),
                 verified_bytes=sum(objects.values()),
@@ -1047,6 +1078,29 @@ def test_a_model_that_only_shares_files_with_one_that_stays_is_not_offered(
     other, _ = world.workload(old, run="stopped")
     _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB})
     _model_objects(world, "2" * 64, {"a" * 64: 50 * GIB})
+    _size(world, kept, 50 * GIB, model="1" * 64)
+    _size(world, other, 50 * GIB, model="2" * 64)
+    lifecycle = FakeLifecycle(world.sessions)
+
+    _within_grace(world)
+    result = _collector(world, lifecycle).collect()
+
+    assert lifecycle.removed == []
+    assert _kept(result, "shares its files with one that stays") == 1
+
+
+def test_a_redigested_model_shares_its_files_with_the_old_digest_that_stays(
+    world: Catalog,
+) -> None:
+    """Catches finding a set's files only through the Model that first requested
+    it: a release re-digested the Model (same files), so an installation of the
+    new digest links the files a running one of the old digest holds."""
+
+    old = world.revision("glm", 1)
+    world.revision("glm", 2, head="active")
+    kept, _ = world.workload(old, run="running")
+    other, _ = world.workload(old, run="stopped")
+    _model_objects(world, "1" * 64, {"a" * 64: 50 * GIB}, verified="2" * 64)
     _size(world, kept, 50 * GIB, model="1" * 64)
     _size(world, other, 50 * GIB, model="2" * 64)
     lifecycle = FakeLifecycle(world.sessions)
@@ -2725,6 +2779,36 @@ def test_model_a_profile_loads_is_kept_and_a_merely_offered_one_is_not(
 def test_model_a_profile_points_to_is_kept(world: Catalog, cached) -> None:
     service, set_digest = cached
     _head_recipe_naming(world, A_MODEL)
+    _profile(world, "vonk-forge/glm")
+
+    result = _models(world, service).collect()
+
+    assert result.models == 0
+    assert _kept(result, "profile") == 1
+    assert _set_exists(world, set_digest)
+
+
+def test_model_a_profile_points_to_under_a_new_digest_is_kept(
+    world: Catalog, cached
+) -> None:
+    """Catches keeping a cached set only for the Model that first requested it.
+
+    A release re-digests the Model (same files); the cache adopts the new
+    digest as a verified binding and the profile points to that digest.
+    """
+
+    service, set_digest = cached
+    redigested = "b" * 64
+    with world.sessions.begin() as session:
+        row = session.get(ModelCacheSet, set_digest)
+        assert row is not None
+        manifest = service._stored_manifest(row)
+        assert manifest is not None
+        reference = ModelReference(
+            kind="model", publisher="vonk-forge", slug="glm", content_sha256=redigested
+        )
+        row.manifest = replace(manifest, verified_models=(reference,)).document()
+    _head_recipe_naming(world, redigested)
     _profile(world, "vonk-forge/glm")
 
     result = _models(world, service).collect()
