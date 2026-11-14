@@ -46,6 +46,7 @@ from vonk_control.recipe_packages import (
     RecipePackageError,
 )
 from vonk_control.recipe_packages.contracts import RecipePackageUnsettled
+from vonk_control.recipe_packages.known_words import known_block
 from vonk_control.recipe_release import RecipeReleaseError
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import (
@@ -56,7 +57,11 @@ from vonk_forge_contracts import (
     document_sha256,
     published_json,
 )
-from vonk_forge_contracts.qualification_status import QualificationStatus
+from vonk_forge_contracts.qualification_status import (
+    PublishedQualificationStatusView,
+    QualificationStatus,
+)
+from vonk_forge_contracts.unrecognised import read_context
 
 from .display_fixtures import display_of_model, display_of_recipe
 from .index_envelope import index_envelope
@@ -705,6 +710,40 @@ def test_unreadable_parts_cost_only_their_entry_or_block(
         "image-generation",
         "text-generation",
     ]
+
+
+def test_an_unknown_blame_leaves_out_only_its_evidence_record() -> None:
+    record = {
+        "identity": {"content_sha256": "a" * 64, "required_sparks": 1},
+        "tested_at": "2026-11-01T10:00:00Z",
+        "platform": {"controller_version": "1.2.3", "spark_count": 1},
+    }
+    read = PublishedQualificationStatusView.model_validate(
+        {
+            "status": "Re-check: worked before",
+            "required_sparks": 1,
+            "last_pass": record
+            | {
+                "outcome": "passed",
+                "cause_code": "qualification.hardware_pass",
+                "cause_summary": "Hardware checks passed",
+            },
+            "last_failure": record
+            | {
+                "outcome": "failed",
+                "blame": "cosmic-ray",
+                "cause_code": "recipe.runtime_exit",
+                "cause_summary": "Recipe runtime exited; needs fix",
+            },
+        },
+        context=read_context(),
+    )
+
+    known = known_block(read)
+
+    assert known.last_failure is None
+    assert known.status == QualificationStatus.RECHECK
+    assert known.last_pass == read.last_pass
 
 
 def test_a_document_that_differs_from_its_digest_refuses_the_index(
