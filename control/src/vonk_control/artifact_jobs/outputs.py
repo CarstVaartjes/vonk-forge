@@ -414,33 +414,14 @@ class ArtifactJobService(InputService):
         now = self._clock()
         adapter = ArtifactJobAdapter(session, clock=self._clock)
         if (
-            state == AgentResultState.FAILED
+            isinstance(state, str)
+            and state in {AgentResultState.FAILED, AgentResultState.OBSERVING}
             and isinstance(raw_result, AgentFailureResult)
-            and result_disposition(operation.kind, state, raw_result)
-            in {Disposition.FAIL, Disposition.SECURITY}
         ):
-            # A definite failure without a process receipt ends the job failed
-            # with the agent's own words, as it ends the order: refused before
-            # the job's container started (an input or the Start grant), the
-            # exited job's outputs broke their contract on the agent, or the
-            # agent ended the job at its bound after it ran. A readable report
-            # is never turned back into an observation.
-            refused = raw_result.failure_kind in {
-                AgentFailureKind.INVALID_CONTRACT,
-                AgentFailureKind.INVALID_AUTHORITY,
-            }
-            account, ending = agent_ending(raw_result)
-            adapter.settle(
-                artifact_job,
-                Reported.failed(
-                    Disposition.FAIL, effect=Effect.NONE if refused else None
-                ),
-                now,
-                reason=account,
-                # The agent reported: whatever doubt remains, no lease lapsed.
-                evidence=ending
-                if refused
-                else ending.merged(ArtifactJobResultEvidence(failure_kind=None)),
+            # A failure or unknown report without a process receipt is the
+            # agent's readable account, never a receipt to parse.
+            _consume_failure_report(
+                adapter, operation, artifact_job, state, raw_result, now
             )
             return
         try:
@@ -576,6 +557,51 @@ class ArtifactJobService(InputService):
             ),
             output_manifest_sha256=result.output_manifest_sha256,
         )
+
+
+def _consume_failure_report(
+    adapter: ArtifactJobAdapter,
+    operation: AgentOperation,
+    artifact_job: ArtifactJob,
+    state: str,
+    failure: AgentFailureResult,
+    now: datetime,
+) -> None:
+    """Apply an agent's failure or unknown report to its job, by its one
+    disposition: a FAIL or SECURITY ends the job; a WAIT or OBSERVE was
+    already decided by the order, which the job mirrors."""
+
+    if result_disposition(operation.kind, state, failure) not in {
+        Disposition.FAIL,
+        Disposition.SECURITY,
+    }:
+        # A wait or an observation: the order decided what this report
+        # does (reissue the job, or observe its effect) and the job only
+        # mirrors that; deciding again would park a reissued job as an
+        # observation or spend a second look.
+        adapter.project(artifact_job, now)
+        return
+    # A definite failure without a process receipt ends the job failed
+    # with the agent's own words, as it ends the order: refused before
+    # the job's container started (an input or the Start grant), the
+    # exited job's outputs broke their contract on the agent, or the
+    # agent ended the job at its bound after it ran. A readable report
+    # is never turned back into an observation.
+    refused = failure.failure_kind in {
+        AgentFailureKind.INVALID_CONTRACT,
+        AgentFailureKind.INVALID_AUTHORITY,
+    }
+    account, ending = agent_ending(failure)
+    adapter.settle(
+        artifact_job,
+        Reported.failed(Disposition.FAIL, effect=Effect.NONE if refused else None),
+        now,
+        reason=account,
+        # The agent reported: whatever doubt remains, no lease lapsed.
+        evidence=ending
+        if refused
+        else ending.merged(ArtifactJobResultEvidence(failure_kind=None)),
+    )
 
 
 def _output_breach(

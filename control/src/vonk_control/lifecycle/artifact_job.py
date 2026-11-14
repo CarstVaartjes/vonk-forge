@@ -120,6 +120,16 @@ TERMINAL_STATES = frozenset(ajs.ENDED)
 LIVE_STATES = frozenset(ajs.LIVE)
 _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
+#: The evidence that says how a job that did not succeed ended, or why its
+#: effect is in doubt; a success clears it.
+_ENDING_DOUBT = (
+    "failure_kind",
+    "recoverable",
+    "active_scope_may_remain",
+    "late_results_accepted",
+    "stage",
+    "diagnostic",
+)
 
 
 def _agent_report(
@@ -608,6 +618,11 @@ class ArtifactJobAdapter:
         merged = (
             read_result_evidence(job.result_evidence) or ArtifactJobResultEvidence()
         )
+        if target == ajs.SUCCEEDED:
+            # A success is how the job ended: the doubt or the cause an earlier
+            # attempt or report recorded (a wait before launch, an unconfirmed
+            # delivery) no longer describes it.
+            merged = merged.model_copy(update=dict.fromkeys(_ENDING_DOUBT))
         if given is not None:
             merged = merged.merged(given)
         if agent_reported and merged.failure_kind == "agent-lease-expired":
@@ -876,7 +891,9 @@ class ArtifactJobAdapter:
         ended after its stop budget leaves the effect unknown.
         """
 
-        if order.attempt == 0:
+        if order.attempt == 0 or order.state is State.BACKOFF:
+            # The core puts an irreversible order back for reissue only when
+            # its attempt proved it left no effect (it never launched).
             return Effect.NONE
         if order.state is State.CANCELLED:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
@@ -938,7 +955,9 @@ class ArtifactJobAdapter:
                                 {*aos.PARKED, "cancelled", "failed"}
                             )
                             & (ArtifactJob.state != StoredOperation.state),
-                            (ArtifactJob.state == ajs.QUEUED)
+                            # A job waiting for a claim whose order a Spark
+                            # claimed (again, after a reissue).
+                            ArtifactJob.state.in_(ajs.AWAITING_CLAIM)
                             & (StoredOperation.state == "running"),
                         ),
                     )
