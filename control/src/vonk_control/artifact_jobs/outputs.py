@@ -415,7 +415,7 @@ class ArtifactJobService(InputService):
         adapter = ArtifactJobAdapter(session, clock=self._clock)
         if (
             isinstance(state, str)
-            and state in {AgentResultState.FAILED, AgentResultState.OBSERVING}
+            and state in agent_operation_states.FAILURE_REPORT
             and isinstance(raw_result, AgentFailureResult)
         ):
             # A failure or unknown report without a process receipt is the

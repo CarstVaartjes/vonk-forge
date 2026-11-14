@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     InvalidRequestReason,
-    LifecycleState,
     ProjectionCode,
     RecipeJobFile,
     RecipeJobInputFile,
@@ -31,7 +30,7 @@ from ..artifact_job_evidence import ArtifactJobResultEvidence, read_result_evide
 from ..categorized_errors import InvalidValue, MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
 from ..lifecycle import Effect, Outcome, Reported
-from ..lifecycle.agent_operation import AgentOperationAdapter
+from ..lifecycle.agent_operation import AgentOperationAdapter, retry_scheduled
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import (
     BookkeepingReason,
@@ -160,7 +159,7 @@ class ArtifactJobService:
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
         accepting = ajs.state_of(job) in ajs.QUEUED_OR_RUNNING or (
-            ajs.state_of(job) == LifecycleState.BACKOFF and order == aos.RUNNING
+            ajs.state_of(job) == ajs.BACKOFF and order == aos.RUNNING
         )
         if not accepting or order not in {
             aos.QUEUED,
@@ -478,6 +477,11 @@ class ArtifactJobService:
         The original submission time bounds the order's observation. Repeated
         malformed reports cannot reset that clock or its observation count.
         """
+        if retry_scheduled(operation) is not None:
+            # The order is put back for reissue: its attempt proved no effect,
+            # so there is nothing to observe. Nothing reopens a reissue.
+            adapter.project(artifact_job, now)
+            return
         orders = AgentOperationAdapter(adapter.session)
         if operation.state != aos.OBSERVING:
             orders.reopen(operation, now)

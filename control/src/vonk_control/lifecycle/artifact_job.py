@@ -62,7 +62,6 @@ from vonk_agent_protocol import (
     AgentFailureResult,
     FailureCode,
     InvalidRequestReason,
-    LifecycleState,
     RecipeJobRunResult,
     RunDegradedReason,
     WaitOwnerKind,
@@ -313,7 +312,13 @@ class ArtifactJobAdapter:
             state = State.RUNNING
         elif stored == ajs.OBSERVING:
             state = State.OBSERVING
-        elif stored == LifecycleState.BACKOFF.value:
+        elif (
+            stored in ajs.AWAITING_CLAIM
+            and order is not None
+            and order.state is State.RUNNING
+        ):
+            state = State.RUNNING  # the Spark claims its own order (again)
+        elif stored == ajs.BACKOFF:
             state = State.BACKOFF
         elif stored == WAITING:
             state = State.NEEDS_OPERATOR
@@ -323,8 +328,6 @@ class ArtifactJobAdapter:
             state = State.FAILED
         elif stored == "cancelled":
             state = State.CANCELLED
-        elif stored == "queued" and order is not None and order.state is State.RUNNING:
-            state = State.RUNNING  # the Spark claims its own order
         else:  # preparing (no state), queued, or a word this adapter does not know
             state = State.QUEUED
         attempts = 0 if operation is None else operation.current_attempt
@@ -460,7 +463,7 @@ class ArtifactJobAdapter:
         """The state, operator actions and cancel request an API reader sees for a job.
 
         The state is the stored one, read through the order: a claimed ``queued``
-        job is ``running`` (the Spark claims its own order), and a legacy
+        or ``backoff`` job is ``running`` (the Spark claims its own order), and a legacy
         ``waiting-for-operator`` job whose cancel was already requested is
         ``cancelling`` (it completes by itself; nobody has to act).  Actions are
         derived by :meth:`actions`, never stored.
@@ -470,7 +473,7 @@ class ArtifactJobAdapter:
             parent, operation, attempt = self.order_of(session, job)
             row = self.lifecycle(job, parent, operation, attempt, self.now())
         state = ajs.state_of(job)
-        if state == ajs.QUEUED and row.state is State.RUNNING:
+        if state in ajs.AWAITING_CLAIM and row.state is State.RUNNING:
             state = ajs.RUNNING
         elif state == WAITING:
             # A retained label is an unknown observation, never an operator gate.
@@ -579,7 +582,7 @@ class ArtifactJobAdapter:
             case State.NEEDS_OPERATOR | State.OBSERVING:
                 return ajs.OBSERVING
             case State.BACKOFF:
-                return LifecycleState.BACKOFF.value
+                return ajs.BACKOFF
         return ajs.RUNNING
 
     @staticmethod
@@ -893,7 +896,7 @@ class ArtifactJobAdapter:
 
         if order.attempt == 0 or order.state is State.BACKOFF:
             # The core puts an irreversible order back for reissue only when
-            # its attempt proved it left no effect (it never launched).
+            # its attempt proved it left no effect: no live scope remains.
             return Effect.NONE
         if order.state is State.CANCELLED:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)

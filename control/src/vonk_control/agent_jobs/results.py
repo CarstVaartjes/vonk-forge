@@ -213,7 +213,7 @@ def record_late_result(
         validate_result_for_operation(
             operation.kind, message.result, state=message.state
         )
-        if message.state in {"failed", agent_operation_states.WIRE_UNKNOWN}:
+        if message.state in agent_operation_states.FAILURE_REPORT:
             message = sanitized_failure_report(operation.kind, message)
         evidence = _document(message.result)
         if agent_operation_states.attempt_wire_state(
