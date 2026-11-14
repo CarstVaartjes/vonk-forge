@@ -62,7 +62,6 @@ from vonk_agent_protocol import (
     AgentFailureResult,
     FailureCode,
     InvalidRequestReason,
-    LifecycleState,
     RecipeJobRunResult,
     RunDegradedReason,
     WaitOwnerKind,
@@ -120,6 +119,16 @@ TERMINAL_STATES = frozenset(ajs.ENDED)
 LIVE_STATES = frozenset(ajs.LIVE)
 _MAX_REASON = 512
 _RECEIPT_STATES = {"cancelled": Effect.STOPPED, "succeeded": Effect.ESTABLISHED}
+#: The evidence that says how a job that did not succeed ended, or why its
+#: effect is in doubt; a success clears it.
+_ENDING_DOUBT = (
+    "failure_kind",
+    "recoverable",
+    "active_scope_may_remain",
+    "late_results_accepted",
+    "stage",
+    "diagnostic",
+)
 
 
 def _agent_report(
@@ -303,7 +312,13 @@ class ArtifactJobAdapter:
             state = State.RUNNING
         elif stored == ajs.OBSERVING:
             state = State.OBSERVING
-        elif stored == LifecycleState.BACKOFF.value:
+        elif (
+            stored in ajs.AWAITING_CLAIM
+            and order is not None
+            and order.state is State.RUNNING
+        ):
+            state = State.RUNNING  # the Spark claims its own order (again)
+        elif stored == ajs.BACKOFF:
             state = State.BACKOFF
         elif stored == WAITING:
             state = State.NEEDS_OPERATOR
@@ -313,8 +328,6 @@ class ArtifactJobAdapter:
             state = State.FAILED
         elif stored == "cancelled":
             state = State.CANCELLED
-        elif stored == "queued" and order is not None and order.state is State.RUNNING:
-            state = State.RUNNING  # the Spark claims its own order
         else:  # preparing (no state), queued, or a word this adapter does not know
             state = State.QUEUED
         attempts = 0 if operation is None else operation.current_attempt
@@ -450,7 +463,7 @@ class ArtifactJobAdapter:
         """The state, operator actions and cancel request an API reader sees for a job.
 
         The state is the stored one, read through the order: a claimed ``queued``
-        job is ``running`` (the Spark claims its own order), and a legacy
+        or ``backoff`` job is ``running`` (the Spark claims its own order), and a legacy
         ``waiting-for-operator`` job whose cancel was already requested is
         ``cancelling`` (it completes by itself; nobody has to act).  Actions are
         derived by :meth:`actions`, never stored.
@@ -460,7 +473,7 @@ class ArtifactJobAdapter:
             parent, operation, attempt = self.order_of(session, job)
             row = self.lifecycle(job, parent, operation, attempt, self.now())
         state = ajs.state_of(job)
-        if state == ajs.QUEUED and row.state is State.RUNNING:
+        if state in ajs.AWAITING_CLAIM and row.state is State.RUNNING:
             state = ajs.RUNNING
         elif state == WAITING:
             # A retained label is an unknown observation, never an operator gate.
@@ -569,7 +582,7 @@ class ArtifactJobAdapter:
             case State.NEEDS_OPERATOR | State.OBSERVING:
                 return ajs.OBSERVING
             case State.BACKOFF:
-                return LifecycleState.BACKOFF.value
+                return ajs.BACKOFF
         return ajs.RUNNING
 
     @staticmethod
@@ -608,6 +621,11 @@ class ArtifactJobAdapter:
         merged = (
             read_result_evidence(job.result_evidence) or ArtifactJobResultEvidence()
         )
+        if target == ajs.SUCCEEDED:
+            # A success is how the job ended: the doubt or the cause an earlier
+            # attempt or report recorded (a wait before launch, an unconfirmed
+            # delivery) no longer describes it.
+            merged = merged.model_copy(update=dict.fromkeys(_ENDING_DOUBT))
         if given is not None:
             merged = merged.merged(given)
         if agent_reported and merged.failure_kind == "agent-lease-expired":
@@ -872,15 +890,28 @@ class ArtifactJobAdapter:
         """What is known of the job's effect, from the order and its receipt.
 
         The order's own row says ``stopped`` for any cancelled order, but only an
-        attempt that receipted its cancel proves the job stopped: a cancel that
+        attempt that receipted its cancel proves the job stopped, and only one
+        that reported a stop before launch proves it never ran: a cancel that
         ended after its stop budget leaves the effect unknown.
         """
 
-        if order.attempt == 0:
+        if order.attempt == 0 or order.state is State.BACKOFF:
+            # The core puts an irreversible order back for reissue only when
+            # its attempt proved it left no effect: no live scope remains.
             return Effect.NONE
         if order.state is State.CANCELLED:
             receipt = None if attempt is None else _RECEIPT_STATES.get(attempt.state)
-            return Effect.STOPPED if receipt is Effect.STOPPED else Effect.UNKNOWN
+            if receipt is Effect.STOPPED:
+                return Effect.STOPPED
+            # imported here: agent_jobs reads this package's lifecycle.
+            from ..agent_jobs.retry import job_attempt_did_not_launch
+
+            # An attempt that reported it stopped before launch left nothing
+            # for the cancel to stop (a damaged report proves nothing).
+            report = None if attempt is None else read_row_column(attempt, "result")
+            if job_attempt_did_not_launch(report):
+                return Effect.NONE
+            return Effect.UNKNOWN
         if order.state is State.FAILED:
             # Failure ends request ownership; it proves no stopped physical
             # scope. Only the attempt's own receipt (the job's exit) does.
@@ -938,7 +969,9 @@ class ArtifactJobAdapter:
                                 {*aos.PARKED, "cancelled", "failed"}
                             )
                             & (ArtifactJob.state != StoredOperation.state),
-                            (ArtifactJob.state == ajs.QUEUED)
+                            # A job waiting for a claim whose order a Spark
+                            # claimed (again, after a reissue).
+                            ArtifactJob.state.in_(ajs.AWAITING_CLAIM)
                             & (StoredOperation.state == "running"),
                         ),
                     )
