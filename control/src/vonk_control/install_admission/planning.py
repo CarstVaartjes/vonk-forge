@@ -27,7 +27,7 @@ from ..categorized_errors import (
 from ..cluster_mappings import validate_mapping_parameters
 from ..disk_reservations import (
     describe_disk_charges,
-    models_stored_on_node,
+    model_sets_stored_on_node,
     outstanding_disk_charges,
 )
 from ..gpu_health import gpu_health_reason
@@ -338,11 +338,9 @@ class InstallPlanningService:
                 )
                 compiled_artifacts = ()
             artifact_sizes: dict[str, int] = {}
-            models_by_artifact: dict[str, object] = {}
             for artifact in compiled_artifacts:
                 digest = artifact.sha256
                 size = artifact.size_bytes
-                models_by_artifact[digest] = artifact.model.content_sha256
                 previous = artifact_sizes.setdefault(digest, size)
                 if previous != size:
                     blockers.append(
@@ -402,7 +400,7 @@ class InstallPlanningService:
             with (
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
-                stored_models = models_stored_on_node(session, mapping_node.node_id)
+                stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
@@ -445,15 +443,21 @@ class InstallPlanningService:
                 and snapshot.model_objects is not None
                 else {}
             )
+            # A new installation links, not writes, a file the Spark's store
+            # holds: every file of the set an installation there already runs
+            # (and charges), or one the agent's store scan reports.
+            set_stored = (
+                compiled_plan is not None
+                and compiled_plan.identity.model_artifact_set_sha256 in stored_sets
+            )
             reused_artifacts = sum(
                 size
                 for digest, size in artifact_sizes.items()
-                # A new installation links, not writes, a file the Spark's
-                # store holds: one of a model an installation there already
-                # owns (and charges), or one the agent's store scan reports.
-                if models_by_artifact.get(digest) in stored_models
-                or held_objects.get(digest) == size
+                if set_stored or held_objects.get(digest) == size
             )
+            # Unused files this install keeps: only scan-reported ones. A held
+            # set's files are linked by its installation, so never unused.
+            reused_unused = 0 if set_stored else reused_artifacts
             reused = reused_image + reused_artifacts
             # ``image_bytes`` is the stored image's layers, what a pull moves
             # (less when the Spark already holds shared layers). Docker keeps
@@ -475,7 +479,7 @@ class InstallPlanningService:
                 spark_free_bytes(
                     snapshot.disk_free_bytes,
                     snapshot.unused_model_bytes,
-                    reused_model_bytes=reused_artifacts,
+                    reused_model_bytes=reused_unused,
                 )
                 if snapshot
                 else None

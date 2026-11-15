@@ -146,6 +146,11 @@ class StopPlanningMixin:
                     session, now=now, maximum_age_seconds=service._inventory_max_age
                 ),
                 excluded_run_ids=(run.id,),
+                artifact_set_sha256=(
+                    installation.model_artifact_set_sha256
+                    if installation is not None
+                    else None
+                ),
             )
             inspection = service._inspect_artifacts(
                 session,

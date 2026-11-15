@@ -137,6 +137,7 @@ class CleanupPlanningMixin:
                         )
                     )
                 ),
+                artifact_set_sha256=installation.model_artifact_set_sha256,
             )
             inspection = service._inspect_artifacts(
                 session,
