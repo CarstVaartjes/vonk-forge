@@ -483,7 +483,7 @@ The guards reject new handwritten contract literals, untyped mapping annotations
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
 imperative remedy text, anti-principle
-test assertions, short wall-clock limits on test work, and the existing
+test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
 coordination syntax violations. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
@@ -577,6 +577,20 @@ otherwise have to reason about by hand:
   real marker set, the real CLI parser, the real runner. A stub that replaces
   the very thing under review cannot catch a fault in it — a stubbed
   `QualificationRunner` hid a dead `apply()` path for exactly that reason.
+- **Decide on data, not on prints.** A vonkctl test asserts the exit status,
+  the requests sent, a typed result or the `--json` document (the
+  `vonkctl_json` fixture in `tests/cluster_profiles/conftest.py`), which is the
+  public client contract. A renderer decision is a small pure view function
+  in `cluster_profiles/cli_render` returning an enum, dataclass or typed value,
+  tested on data; the renderer only prints it. Human wording is owned by the shared vectors in
+  `tests/fixtures` that the web renders too, and one module,
+  `tests/cluster_profiles/test_cli_wording.py`, compares vonkctl's text with
+  them. A secret or terminal control in any output is a leak, not wording, and
+  a line shown twice is a duplication fault: absence, count and emptiness
+  checks on captured stdout/stderr stay valid, new ones included. The
+  `printed-output` added-line guard refuses only a new positive wording
+  assertion on captured output (a string literal `in` `.out`, `.err` or
+  `.getvalue()`) anywhere else in `tests/cluster_profiles`.
 - **Keep the fast tier fast and hermetic.** A host-dependent test belongs in the
   lane tier, which the collection-time marker applies automatically, rather than
   being skipped or made conditional. The fast tier should stay under a couple of

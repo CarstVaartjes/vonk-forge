@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import random
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,3 +30,33 @@ def deterministic_observation_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
     """
 
     monkeypatch.setattr(common, "random", random.Random(0))
+
+
+VonkctlJson = Callable[..., tuple[int, dict[str, Any]]]
+
+
+@pytest.fixture
+def vonkctl_json(capsys: pytest.CaptureFixture[str]) -> VonkctlJson:
+    """Run ``vonkctl --json ARGV`` and return its exit status and document.
+
+    The ``--json`` document is the public client contract, so a command test
+    decides on it (with the status and the requests sent), never on printed
+    text; ``tests/cluster_profiles/test_cli_wording.py`` owns the wording.
+    """
+
+    def run(
+        *argv: str,
+        control_client: object | None = None,
+        request_id_factory: Callable[[], str] | None = None,
+        root: Path | None = None,
+    ) -> tuple[int, dict[str, Any]]:
+        capsys.readouterr()
+        status = cli.main(
+            ("--json", *argv),
+            root=root,
+            control_client=control_client,
+            request_id_factory=request_id_factory,
+        )
+        return status, json.loads(capsys.readouterr().out)
+
+    return run
