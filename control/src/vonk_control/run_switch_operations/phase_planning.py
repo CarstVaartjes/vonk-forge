@@ -60,7 +60,7 @@ if TYPE_CHECKING:
 
 
 def targets_hold_model_and_image(
-    inspection: ArtifactInspection,
+    inspection: ArtifactInspection | ArtifactStorageImpact,
     runtime_storage: RuntimeImageStorageImpact | None,
 ) -> bool:
     """Whether every target Spark's own store scan holds the model and image.
@@ -68,6 +68,8 @@ def targets_hold_model_and_image(
     The NAS copy feeds only target-copy, which sends model files to a Spark
     lacking the model or the image. When every target holds both, a set the
     NAS evicted is not fetched again. Unknown coverage counts as lacking.
+    Planning reads the inspection; Library readiness reads the same bytes
+    from the plan's storage impact.
     """
 
     return (

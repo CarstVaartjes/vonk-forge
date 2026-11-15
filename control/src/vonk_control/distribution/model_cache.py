@@ -62,7 +62,6 @@ class ModelCacheObjectSource:
     # the literal-dispatch edge used by the retry proof.
     _service: ModelCacheService
     _manifests: dict[str, tuple[DistributionObject, ...]]
-    _receipts: dict[str, tuple[VerifiedModelObject, ...]]
     _paths: dict[str, tuple[str, str, object]]
     _open_object: Callable[[str, int], OpenedObject]
 
@@ -75,7 +74,6 @@ class ModelCacheObjectSource:
         self._metadata_guard = Lock()
         self._paths = {}
         self._manifests = dict(manifests)
-        self._receipts: dict[str, tuple[VerifiedModelObject, ...]] = {}
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         if hasattr(self, "_service"):
@@ -96,28 +94,22 @@ class ModelCacheObjectSource:
         adapter._service = cast("ModelCacheService", service)
         adapter._metadata_guard = Lock()
         adapter._manifests = {}
-        adapter._receipts = {}
         adapter._paths = {}
         return adapter
 
     def _load_manifest(self, digest: str) -> tuple[DistributionObject, ...]:
-        objects, receipts, paths = self._describe(digest)
+        objects, paths = self._describe(digest)
         # Stage every descriptor before making authorization visible. The guard
         # protects only process-local metadata; cache/SQL/file IO occurs outside.
         with self._metadata_guard:
             self._paths.update(paths)
             self._manifests[digest] = objects
-            if len(receipts) == len(objects):
-                self._receipts[digest] = receipts
-            else:
-                self._receipts.pop(digest, None)
         return objects
 
     def _describe(
         self, digest: str
     ) -> tuple[
         tuple[DistributionObject, ...],
-        tuple[VerifiedModelObject, ...],
         dict[str, tuple[str, str, object]],
     ]:
         try:
@@ -145,7 +137,6 @@ class ModelCacheObjectSource:
                 "NAS cache manifest is unavailable",
             ) from error
         objects = []
-        receipts = []
         paths = {}
         for descriptor in descriptors:
             try:
@@ -158,24 +149,12 @@ class ModelCacheObjectSource:
                 path = descriptor["file"]
                 objects.append(item)
                 paths[item.sha256] = (digest, item.name, path)
-                file_id = descriptor.get("file_id")
-                model_content_sha256 = descriptor.get("model_content_sha256")
-                roles = descriptor.get("roles")
-                if isinstance(file_id, str) and isinstance(model_content_sha256, str):
-                    receipts.append(
-                        model_file_receipt(
-                            model_content_sha256=model_content_sha256,
-                            file_id=file_id,
-                            item=item,
-                            roles=list(roles) if isinstance(roles, list) else [],
-                        )
-                    )
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionUnknown(
                     DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                     "NAS cache manifest is malformed",
                 ) from error
-        return tuple(objects), tuple(receipts), paths
+        return tuple(objects), paths
 
     def _open_cache_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         with self._metadata_guard:
@@ -243,32 +222,3 @@ class ModelCacheObjectSource:
         return (
             cached if cached is not None else self._load_manifest(artifact_set_sha256)
         )
-
-    def verified_model_objects_for_set(
-        self, artifact_set_sha256: str
-    ) -> tuple[VerifiedModelObject, ...]:
-        """Return receipts keyed by canonical model identity and file ID."""
-        digest = artifact_set_sha256
-        with self._metadata_guard:
-            cached_receipts = self._receipts.get(digest)
-        if cached_receipts is None:
-            if hasattr(self, "_service"):
-                objects, receipts, paths = self._describe(digest)
-                if len(receipts) == len(objects):
-                    with self._metadata_guard:
-                        self._paths.update(paths)
-                        self._manifests[digest] = objects
-                        self._receipts[digest] = receipts
-            else:
-                raise DistributionUnknown(
-                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                    "NAS cache manifest lacks canonical model-file identity",
-                )
-        with self._metadata_guard:
-            receipts = self._receipts.get(digest)
-        if receipts is None:
-            raise DistributionUnknown(
-                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                "NAS cache manifest lacks canonical model-file identity",
-            )
-        return receipts

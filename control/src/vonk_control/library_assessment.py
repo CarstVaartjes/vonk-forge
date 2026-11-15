@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations
+from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,7 @@ from .model_cache import ModelCacheService
 from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
+from .run_switch_operations.phase_planning import targets_hold_model_and_image
 
 
 def _reason(code: str, detail: str) -> RunSwitchReason:
@@ -45,6 +47,10 @@ def unassessed(clock: Callable[[], datetime], detail: str) -> RecipeReadiness:
 
 
 ASSESSMENT_BUDGET_SECONDS = 5.0
+# The check states, as the contract names them.
+READY, _BLOCKED, _UNAVAILABLE = get_args(
+    RecipeReadinessCheck.model_fields["state"].annotation
+)
 
 
 class LibraryAssessment:
@@ -246,6 +252,18 @@ class LibraryAssessment:
         cache: RecipeReadinessCheck,
         image_digest: str | None,
     ) -> RecipeReadinessCheck:
+        preparation = plan.preparation
+        # The planner's rule: a load whose target Sparks hold the model and
+        # image downloads no model, so the NAS model copy does not decide and
+        # the placement's fit stands in for the cache check. The Controller
+        # image copy still decides, because compile reads it.
+        nas_free = (
+            preparation is not None
+            and preparation.runtime_image.controller.missing_bytes == 0
+            and targets_hold_model_and_image(plan.storage, plan.runtime_storage)
+        )
+        if nas_free:
+            cache = fit
         if cache.state == "blocked":
             return cache
         if fit.state == "blocked":
@@ -254,10 +272,10 @@ class LibraryAssessment:
             return cache if cache.state == "unavailable" else fit
         if not plan.allowed:
             return RecipeReadinessCheck(state="blocked", reasons=plan.blockers)
-        if (
+        if not nas_free and (
             plan.image_digest != image_digest
-            or plan.preparation is None
-            or not plan.preparation.controller_ready
+            or preparation is None
+            or not preparation.controller_ready
         ):
             return unavailable(
                 "The placement and NAS cache owners do not yet attest the same complete artifact set."
@@ -334,11 +352,9 @@ class LibraryAssessment:
                 unknown = ready
             if best is None or fit.state == "ready" and best[1].state != "ready":
                 best = (plan, fit, ready)
-            if (
-                ready.state == "ready"
-                or fit.state == "ready"
-                and cache.state != "ready"
-            ):
+            # A later group whose Sparks hold the model can be ready while
+            # the NAS lacks it, so only a ready group ends the search.
+            if ready.state == READY:
                 best = (plan, fit, ready)
                 break
         if best is None:

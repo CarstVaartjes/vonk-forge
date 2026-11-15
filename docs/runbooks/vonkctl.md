@@ -439,8 +439,10 @@ fleet-fit state.
 Recipe reads distinguish current fleet fit, exact NAS assets, and readiness.
 `--fits-fleet` requires a complete placement that fits fresh current capacity;
 it does not assume that existing workloads will stop. `--ready` also requires
-the exact model files, companion dependencies, and authorized image archive on
-the NAS, plus an admissible run plan. Spark copies may still need preparation.
+an admissible run plan that downloads no model: the exact model files and
+companion dependencies are on the NAS or already on every Spark of that
+placement, and the authorized runtime image needs no preparation. Spark copies
+may still need preparation.
 These observations do not authorize a load or prove physical model quality.
 
 The Controller uses its existing placement planner and cache owners for these
