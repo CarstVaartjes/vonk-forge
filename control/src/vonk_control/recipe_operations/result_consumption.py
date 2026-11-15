@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    AgentFailureResult,
     HelperErrorCode,
     InstallationNodeState,
     InstallationState,
@@ -26,6 +26,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
 from .. import agent_operation_states
 from ..admission_locking import (
@@ -85,12 +86,13 @@ if TYPE_CHECKING:
 
 
 def _demote_ranks_naming_the_lost_image(
-    session: Session, job: Job, node_id: str, now: datetime
+    session: Session, job: Job, node_id: str, now: datetime, dispatched_at: datetime
 ) -> None:
     """A Start found its runtime image gone from its Spark (removed under an
     installed rank): every installed rank there that names that image is
     demoted, so the next plan copies the image again and installs afresh
-    instead of repeating the same Start."""
+    instead of repeating the same Start. A rank changed after the Start was
+    dispatched may have been installed after its inspect, so it stays."""
 
     run_id = _parent_identity(job, "owner_id")
     run = None if run_id is None else session.get(RecipeRun, run_id)
@@ -108,7 +110,7 @@ def _demote_ranks_naming_the_lost_image(
             )
         ),
         observed_at=now,
-        before=now,
+        before=dispatched_at,
     )
 
 
@@ -228,12 +230,12 @@ class ResultConsumptionMixin:
         result = getattr(message, "result", None)
         if (
             job.kind == WireAgentOperation.RECIPE_START.value
-            and isinstance(result, Mapping)
-            and result.get("helper_error_code")
+            and isinstance(result, AgentFailureResult)
+            and result.helper_error_code
             == HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
         ):
             _demote_ranks_naming_the_lost_image(
-                session, job, operation.node_id, service._clock()
+                session, job, operation.node_id, service._clock(), operation.created_at
             )
         if (
             state == LifecycleState.CANCELLED.value

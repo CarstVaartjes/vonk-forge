@@ -374,7 +374,6 @@ class ActionPlansMixin:
             dependent_recipe_ids_by_node = service._model_dependents_on_nodes(
                 session,
                 model_content_sha256,
-                installation.model_artifact_set_sha256,
                 node_ids,
                 exclude_installation_ids={installation.id, *also_removing},
                 lock=lock,
@@ -441,7 +440,6 @@ class ActionPlansMixin:
         self,
         session: Session,
         model_content_sha256: str,
-        model_artifact_set_sha256: str | None,
         node_ids: set[str],
         *,
         exclude_installation_ids: Collection[str],
@@ -451,9 +449,7 @@ class ActionPlansMixin:
 
         Only installations with a live rank on these nodes can keep the model
         there, so the read starts from those nodes: what other Sparks hold never
-        costs anything here (audit A6). An installation that runs the same model
-        set needs its files whatever Model digest it was made for (a release
-        re-digests a Model over the same files).
+        costs anything here (audit A6).
         """
         dependent_recipe_ids: dict[str, set[str]] = {
             node_id: set() for node_id in node_ids
@@ -465,7 +461,6 @@ class ActionPlansMixin:
                 RecipeInstallation.id,
                 RecipeInstallation.recipe_revision_id,
                 RecipeInstallation.model_content_sha256,
-                RecipeInstallation.model_artifact_set_sha256,
                 InstallationNode.node_id,
             )
             .join(
@@ -486,23 +481,17 @@ class ActionPlansMixin:
         if lock:
             statement = statement.with_for_update(of=RecipeInstallation)
         memberships: dict[str, set[str]] = {}
-        candidates: dict[str, tuple[str, str | None, str | None]] = {}
-        for installation_id, revision_id, model, model_set, node_id in session.execute(
-            statement
-        ):
+        candidates: dict[str, tuple[str, str | None]] = {}
+        for installation_id, revision_id, model, node_id in session.execute(statement):
             memberships.setdefault(installation_id, set()).add(node_id)
-            candidates[installation_id] = (revision_id, model, model_set)
+            candidates[installation_id] = (revision_id, model)
         # One recipe revision's needs are read once, however many of the
         # installations on these nodes use it.
         needs = {
             revision_id: _recipe_needs(session, revision_id)
             for revision_id in sorted({item[0] for item in candidates.values()})
         }
-        for installation_id, (
-            revision_id,
-            installed_model,
-            installed_set,
-        ) in candidates.items():
+        for installation_id, (revision_id, installed_model) in candidates.items():
             recipe_id, needed = needs[revision_id]
             # What this installation needs is known from its recipe revision and
             # from the model its own row records.  Whatever cannot be proven
@@ -511,10 +500,6 @@ class ActionPlansMixin:
                 needed is None
                 or model_content_sha256 in needed
                 or installed_model == model_content_sha256
-                or (
-                    model_artifact_set_sha256 is not None
-                    and installed_set == model_artifact_set_sha256
-                )
             ):
                 for node_id in memberships[installation_id]:
                     dependent_recipe_ids[node_id].add(recipe_id)
