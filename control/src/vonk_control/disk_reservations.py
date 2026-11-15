@@ -67,6 +67,32 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
     )
 
 
+def runtime_images_named_on_node(session: Session, node_id: str) -> frozenset[str]:
+    """Runtime images (manifest digests) an installed rank on the Spark names.
+
+    The Spark's helper never removes an image whose installation plan is on the
+    host, so an installed rank's image is held; another installation of it
+    pulls nothing new. Any other image is charged: a rank not installed (planned,
+    failed, uninstalled or demoted) may have no plan there, and an image no plan
+    names may already be pruned. The same rank test as Run/Switch's installation
+    reuse.
+    """
+
+    return frozenset(
+        session.scalars(
+            select(RecipeInstallation.image_digest)
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .where(
+                InstallationNode.node_id == node_id,
+                InstallationNode.state == InstallationNodeState.INSTALLED,
+            )
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class DiskCharge:
     """What one owner's claim still adds to a Spark's committed disk."""

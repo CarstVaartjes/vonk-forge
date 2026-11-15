@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -402,20 +403,16 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
         )
 
 
-@pytest.mark.parametrize("with_receipt", [False, True])
-def test_artifact_move_preserves_runtime_items_and_restarts_after_interruption(
+def test_retired_image_receipts_leave_the_runtime_items_readable(
     postgres_engine: Engine,
-    monkeypatch: MonkeyPatch,
-    with_receipt: bool,
 ) -> None:
-    """Catches lost availability on a restart and clobbering another inventory item."""
+    """Catches an upgrade that turns every Spark's runtime identity unreadable
+    (a stored items row still naming retired receipts) or adopts a receipt."""
     from datetime import UTC, datetime
 
-    from sqlalchemy import event, inspect, text
+    from sqlalchemy import inspect, text
     from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol import ModelFileState
     from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.db import node_facts
     from vonk_control.inventory_items import inventory_items, record_runtime
     from vonk_control.models import AgentNode, Base
 
@@ -437,51 +434,35 @@ def test_artifact_move_preserves_runtime_items_and_restarts_after_interruption(
             "preserved.internal",
             at,
         )
+    receipt = {
+        "kind": "image",
+        "digest": "e" * 64,
+        "source": "oci-layout:receipt",
+        "size_bytes": 123,
+        "state": "verified",
+        "ref_count": 0,
+        "verified_at": at.isoformat(),
+        "updated_at": at.isoformat(),
+    }
     with postgres_engine.begin() as connection:
-        connection.exec_driver_sql("""CREATE TABLE node_artifacts (
-            id varchar(36) PRIMARY KEY, node_id varchar(36), kind varchar(24),
-            digest varchar(64), source text, size_bytes bigint, state varchar(24),
-            ref_count integer, verified_at timestamptz, updated_at timestamptz)""")
-        if with_receipt:
-            connection.execute(
-                text("""INSERT INTO node_artifacts VALUES
-                ('receipt', 'artifact-owner', 'image', :digest, 'oci-layout:receipt',
-                 123, :state, 0, :at, :at)"""),
-                {
-                    "digest": "e" * 64,
-                    "state": ModelFileState.VERIFIED.value,
-                    "at": at,
-                },
-            )
-    original = node_facts.move_artifact_facts
-
-    def interrupted(connection: Connection) -> None:
-        def stop(_conn, _cursor, statement, _parameters, _context, _many):
-            if statement == "DROP TABLE node_artifacts":
-                raise InterruptedError("Controller stopped before receipt retirement")
-
-        event.listen(connection, "before_cursor_execute", stop)
-        try:
-            original(connection)
-        finally:
-            event.remove(connection, "before_cursor_execute", stop)
+        connection.execute(
+            text(
+                "UPDATE node_inventory_snapshots SET agent_items = CAST("
+                "CAST(agent_items AS jsonb) || jsonb_build_object("
+                "'artifacts', jsonb_build_array(CAST(:receipt AS jsonb))) AS json)"
+                " WHERE node_id = 'artifact-owner'"
+            ),
+            {"receipt": json.dumps(receipt)},
+        )
+        connection.exec_driver_sql("CREATE TABLE node_artifacts (id varchar(36))")
 
     url = postgres_engine.url.render_as_string(hide_password=False)
-    with monkeypatch.context() as interruption:
-        interruption.setattr(node_facts, "move_artifact_facts", interrupted)
-        with pytest.raises(InterruptedError):
-            initialize_database(url)
-    with sessions() as session:
-        assert inventory_items(session.get(AgentNode, "artifact-owner")).artifacts == []
     initialize_database(url)
     initialize_database(url)
     with sessions() as session:
         items = inventory_items(session.get(AgentNode, "artifact-owner"))
         assert items.hostname == "preserved.internal"
         assert items.preflight_fingerprint == "d" * 64
-        assert [item.digest for item in items.artifacts] == (
-            ["e" * 64] if with_receipt else []
-        )
     with postgres_engine.connect() as connection:
         assert "node_artifacts" not in inspect(connection).get_table_names()
 
@@ -521,7 +502,6 @@ def test_authenticated_claim_rebuilds_damaged_inventory_without_blessing_old_fac
         recovered = inventory_items(session.get(AgentNode, NODE_A))
         assert recovered.runtime_identity is not None
         assert recovered.hostname == "spark-recovered"
-        assert recovered.artifacts == []
         assert recovered.preflights == []
 
 

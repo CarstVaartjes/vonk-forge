@@ -170,7 +170,11 @@ through `inventory_repository.spark_model_objects`, install admission from the
 inventory snapshot it already loaded. Copy planning and disk admission count an
 unknown or stale scan as missing (the copy reuses what the agent already
 holds); fleet model removal waits for a fresh scan instead.
-Controller-written inventory items carry no model kind. Contact,
+A Spark holds a runtime image while an installed rank there names it (the
+helper keeps an image whose installation plan is on the host): Run/Switch and
+install admission read `disk_reservations.runtime_images_named_on_node`, and
+any other image is charged. The Controller records no image or model-file availability receipts
+of its own. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
 child row's foreign-key KEY SHARE never blocks. The recipe intent check reads the

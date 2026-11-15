@@ -32,7 +32,6 @@ from vonk_control.availability_production import build_recipe_image_availability
 from vonk_control.bounded_json import require_integer
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.install_admission import InstallAdmissionService
-from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -2260,28 +2259,6 @@ def test_source_check_returns_the_structured_pre_dispatch_policy_report(
     assert report.passed is True
     assert report.findings == ()
     assert report.source_bundle_sha256
-
-
-def test_success_does_not_claim_isolated_build_image_is_installed(
-    tmp_path: Path,
-) -> None:
-    sessions, bundles, now, node_id, revision = setup(tmp_path)
-    service = RecipeBuildService(sessions, bundles=bundles)
-    plan = service.plan(revision.id, node_id, now=now)
-
-    completed = service.record_success(
-        plan.build_id,
-        build_input_sha256=plan.build_input_sha256,
-        image_digest="sha256:" + "b" * 64,
-        oci_layout_sha256="c" * 64,
-        image_bytes=500,
-        now=now,
-    )
-
-    assert completed.image_digest == "sha256:" + "b" * 64
-    with sessions() as session:
-        artifact = next(iter(inventory_artifacts(session, node_id)), None)
-        assert artifact is None
 
 
 def test_build_result_refreshes_upload_evidence_after_a_retried_attempt(

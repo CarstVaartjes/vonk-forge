@@ -29,6 +29,7 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
+from vonk_control.install_admission.identity import _primary_model_sha256
 from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfileApplication,
@@ -70,6 +71,7 @@ from vonk_control.unused_storage_collection import (
 
 from cluster_profiles.control_client import validate_control_document
 
+from .runtime_image_fixtures import copy_as_another_recipe
 from .test_recipe_operations import installed_recipe, setup_services, started_recipe
 from .test_run_switch_operations import (
     MODEL_ARTIFACT,
@@ -1358,34 +1360,14 @@ def _another_recipe(sessions, installation_id: str) -> None:
     model before this load holds it: no profile names it and the load cannot
     reuse it."""
 
-    from vonk_control.models import CatalogDocument
-
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installation_id)
         assert installation is not None
-        revision = session.get(CatalogDocumentRevision, installation.recipe_revision_id)
-        document = session.get(CatalogDocument, revision.document_id)
-        assert revision is not None and document is not None
-        other = CatalogDocument(
-            **{
-                column.name: getattr(document, column.name)
-                for column in CatalogDocument.__table__.columns
-            }
+        copy = copy_as_another_recipe(
+            session, installation.recipe_revision_id, model_content_sha256="e" * 64
         )
-        other.id, other.slug = str(uuid4()), "earlier-model"
-        session.add(other)
-        session.flush()
-        copy = CatalogDocumentRevision(
-            **{
-                column.name: getattr(revision, column.name)
-                for column in CatalogDocumentRevision.__table__.columns
-            }
-        )
-        copy.id, copy.document_id, copy.slug = str(uuid4()), other.id, other.slug
-        session.add(copy)
-        session.flush()
         installation.recipe_revision_id = copy.id
-        installation.model_content_sha256 = "e" * 64
+        installation.model_content_sha256 = _primary_model_sha256(copy.document)
         installation.model_artifact_set_sha256 = "e" * 64
         plan = parse_stored_installation_plan(installation.plan)
         installation.image_digest = "sha256:" + "e" * 64

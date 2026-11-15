@@ -51,7 +51,6 @@ from vonk_control.distribution import (
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.install_admission import InstallAdmissionService
 from vonk_control.inventory_items import (
-    inventory_artifacts,
     inventory_items,
     runtime_value,
 )
@@ -1844,75 +1843,6 @@ def test_a_superseded_attempts_late_result_cannot_overwrite_a_newer_attempt(
     assert stored.state == "running" and stored.current_attempt == 2
     assert current_attempt is not None
     assert current_attempt.state == "running" and current_attempt.result is None
-
-
-def test_a_finished_distribution_records_the_pulled_image_on_the_spark(
-    service,
-) -> None:
-    """The success that ends a pull is what makes the next plan skip it."""
-
-    jobs, sessions, clock = service
-    source = MemoryObjectSource()
-    model_digest = source.put(b"weights")
-    address = "7" * 64
-    image_bytes = 4096
-    with sessions.begin() as session:
-        session.add(
-            RecipeBuild(
-                id=str(uuid.uuid4()),
-                recipe_revision_id=str(uuid.uuid4()),
-                builder_node_id=NODE_A,
-                source_bundle_sha256="c" * 64,
-                build_input_sha256="e" * 64,
-                state="succeeded",
-                policy_report={},
-                plan={},
-                image_digest=f"sha256:{address}",
-                oci_layout_sha256=address,
-                image_bytes=image_bytes,
-                created_at=clock.now,
-                updated_at=clock.now,
-            )
-        )
-    assignment = NodeDistributionAssignment.parse(
-        {
-            "assignment_id": str(uuid.uuid4()),
-            "plan_digest": COMMIT,
-            "generation": 1,
-            "node_id": NODE_A,
-            "expires_at": (clock.now + timedelta(hours=1)).isoformat(),
-            "model_artifact_set_sha256": "b" * 64,
-            "objects": [
-                {"name": "weights", "sha256": model_digest, "bytes": 7, "kind": "model"}
-            ],
-            "oci_image_digest": f"sha256:{address}",
-            "oci_image_config_digest": "sha256:" + "9" * 64,
-            "oci_archive_sha256": address,
-        }
-    )
-    source.register_artifact_set(
-        assignment.model_artifact_set_sha256, assignment.objects
-    )
-    source.register_runtime_image(assignment.oci_image_digest, address)
-    DistributionService(source, clock=clock, sessions=sessions).register(assignment)
-    jobs.enqueue(
-        parent(sessions, clock).id,
-        NODE_A,
-        ProtocolAgentOperation.ARTIFACT_DISTRIBUTION.value,
-        COMMIT,
-        distribution_payload(),
-    )
-    claim = claim_agent(jobs, NODE_A, "serial-a")
-    assert claim is not None
-
-    jobs.succeed(claim, {"downloaded_bytes": 7})
-
-    with sessions() as session:
-        stored = inventory_artifacts(session, NODE_A)
-    # Exactly the record admission and Run/Switch read as "image present".
-    assert [
-        (item.kind, item.digest, item.size_bytes, item.state) for item in stored
-    ] == [("image", address, image_bytes, "verified")]
 
 
 @pytest.mark.parametrize(

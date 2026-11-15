@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 
 from vonk_agent_protocol import canonical_message
 from vonk_control.oci_image_store import OCI_MANIFEST
@@ -117,3 +118,138 @@ def install_another_image(installation, *, digest: str = "sha256:" + "e" * 64) -
         compiled["runtime_image"]["image_digest"] = digest
     installation.plan = plan
     installation.image_digest = digest
+
+
+def install_image_of_replaced_source(
+    session, installation, *, digest: str = "sha256:" + "e" * 64
+) -> None:
+    """Make an installation run an image built from a source bundle its revision
+    has since replaced, so a load of the revision needs a new build.
+
+    Its installed ranks keep that image on their Sparks; it is simply not the
+    image this revision builds now.
+    """
+    from vonk_control.models import RecipeBuild
+
+    install_another_image(installation, digest=digest)
+    current = session.get(RecipeBuild, installation.recipe_build_id)
+    assert current is not None
+    previous = RecipeBuild(
+        recipe_revision_id=current.recipe_revision_id,
+        builder_node_id=current.builder_node_id,
+        source_bundle_sha256="f" * 64,
+        build_input_sha256="f" * 64,
+        state="succeeded",
+        policy_report=current.policy_report,
+        plan=current.plan,
+        image_digest=digest,
+        oci_layout_sha256=digest.removeprefix("sha256:"),
+        image_bytes=current.image_bytes or 30,
+        # Built before the current row, so the current row stays the newest.
+        created_at=current.created_at - timedelta(days=1),
+        updated_at=current.created_at - timedelta(days=1),
+    )
+    session.add(previous)
+    session.flush()
+    installation.recipe_build_id = previous.id
+
+
+def copy_as_another_recipe(session, revision_id: str, *, model_content_sha256=None):
+    """Copy a recipe revision as another recipe (`earlier-model`): the same
+    document, so the same image, under another identity, optionally pinning
+    another primary model. No profile of the original recipe names it and no
+    load of it reuses its installations. Returns the copied revision."""
+    import copy as copying
+    from uuid import uuid4
+
+    from vonk_control.models import CatalogDocument, CatalogDocumentRevision
+
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    assert revision is not None
+    document = session.get(CatalogDocument, revision.document_id)
+    assert document is not None
+    other = CatalogDocument(
+        **{
+            column.name: getattr(document, column.name)
+            for column in CatalogDocument.__table__.columns
+        }
+    )
+    other.id, other.slug = str(uuid4()), "earlier-model"
+    session.add(other)
+    session.flush()
+    copy = CatalogDocumentRevision(
+        **{
+            column.name: getattr(revision, column.name)
+            for column in CatalogDocumentRevision.__table__.columns
+        }
+    )
+    copy.id, copy.document_id, copy.slug = str(uuid4()), other.id, other.slug
+    if model_content_sha256 is not None:
+        document = copying.deepcopy(copy.document)
+        models = document["models"]
+        assert isinstance(models, list) and isinstance(models[0], dict)
+        models[0]["model"] = {
+            **models[0]["model"],
+            "content_sha256": model_content_sha256,
+        }
+        copy.document = document
+    session.add(copy)
+    session.flush()
+    return copy
+
+
+def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
+    """Another recipe that builds the same image is installed on the Sparks, so
+    its installed ranks keep that image there. No profile of this recipe names
+    it and no load of this recipe reuses it."""
+    from sqlalchemy import select
+    from vonk_control.install_admission.identity import _primary_model_sha256
+    from vonk_control.models import (
+        ClusterMapping,
+        InstallationNode,
+        RecipeBuild,
+        RecipeInstallation,
+    )
+    from vonk_control.strict_json import serialize_json_value
+
+    with sessions() as session:
+        build = session.scalar(select(RecipeBuild))
+        mapping = session.scalar(select(ClusterMapping))
+        assert build is not None and mapping is not None
+        mapping_id = mapping.id
+    install_plan = lifecycle.preview_install(mapping_id, build.id)
+    stored_plan = install_plan.stored_plan()
+    with sessions.begin() as session:
+        other = copy_as_another_recipe(session, build.recipe_revision_id)
+        stored = serialize_json_value(stored_plan)
+        assert isinstance(stored, dict)
+        installation = RecipeInstallation(
+            recipe_revision_id=other.id,
+            model_content_sha256=_primary_model_sha256(other.document),
+            model_artifact_set_sha256=stored_plan.model_artifact_set_sha256,
+            mapping_id=mapping_id,
+            mapping_generation=install_plan.mapping_generation,
+            recipe_build_id=build.id,
+            image_digest=build.image_digest,
+            plan_digest=install_plan.plan_digest,
+            plan={**stored, "recipe_revision_id": other.id},
+            state="installed",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(installation)
+        session.flush()
+        for placed in install_plan.nodes:
+            session.add(
+                InstallationNode(
+                    installation_id=installation.id,
+                    node_id=placed.node_id,
+                    rank=placed.rank,
+                    role=placed.role,
+                    state="installed",
+                    required_bytes=0,
+                    installed_bytes=0,
+                    updated_at=now,
+                )
+            )

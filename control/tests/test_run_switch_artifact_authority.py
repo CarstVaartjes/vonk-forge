@@ -16,6 +16,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
 )
 
+from .runtime_image_fixtures import hold_image_through_another_recipe
 from .test_recipe_operations import NOW, installed_recipe
 from .test_run_switch_operations import (
     ModelCacheManifestProvider,
@@ -178,6 +179,8 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
         installed_recipe(
             lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
         )
+    else:
+        hold_image_through_another_recipe(lifecycle, sessions, now=NOW)
     request = _request(sessions, nodes[0])
     manifest = ModelCacheManifestProvider().resolve_artifact_set(
         model_content_sha256=request.model_content_sha256

@@ -44,6 +44,7 @@ from vonk_control.stored_json import write_guard_mode
 
 from .lock_wait_support import backend_pid, lock_waits_behind
 from .runtime_identity_support import claim_agent
+from .runtime_image_fixtures import hold_image_through_another_recipe
 from .test_fleet_profile_api import _client, _headers
 from .test_profile_child_progress_projection import (
     _drive_install,
@@ -65,6 +66,8 @@ def faulty_install(tmp_path, postgres_engine, monkeypatch):
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(
         tmp_path, nodes=2, engine=postgres_engine
     )
+    # Zero transfer: another recipe's installed ranks already hold the image.
+    hold_image_through_another_recipe(lifecycle, sessions, now=lifecycle._clock())
     clock = [lifecycle._clock()]
     lifecycle._clock = lambda: clock[0]
     jobs = AgentJobService(sessions, clock=lambda: clock[0])

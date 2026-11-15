@@ -214,9 +214,10 @@ class RunPlanningMixin:
             )
             # An installed installation that already runs the needed image on
             # every target Spark starts as it is: a build row or a NAS archive
-            # is provenance, not identity, so neither is consulted.  Model or
-            # image bytes missing on a Spark need the transfer phases and the
-            # image's NAS copy, so that load keeps the full resolution.
+            # is provenance, not identity, so neither is consulted. Its
+            # installed ranks name the image, so every target holds it. Model
+            # bytes missing on a Spark need the transfer phases, so that load
+            # keeps the full resolution.
             installed_plan = (
                 parse_stored_installation_plan(installation.plan)
                 if installation is not None
@@ -251,9 +252,6 @@ class RunPlanningMixin:
                         image_installed=True,
                     )
                 )
-                if runtime_storage.missing_image_distribution_bytes not in (None, 0):
-                    # A Spark lacks the image: heal through the full path.
-                    installed_image = None
             reuse_installed = installed_image is not None
             if not reuse_installed:
                 build = service._matching_build(

@@ -17,7 +17,6 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
-from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import InventoryRepository
 from vonk_control.memory_reservations import memory_reservations
 from vonk_control.models import (
@@ -46,7 +45,7 @@ from vonk_control.run_switch_operations import RunSwitchOperationConflict
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 
 from .preflight_fixtures import record_passing_preflight
-from .runtime_image_fixtures import install_another_image
+from .runtime_image_fixtures import install_image_of_replaced_source
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_profile_port_claims import _load, _ready_profile
@@ -61,7 +60,6 @@ def _accepted_build_profile(
     accept_profile=True,
     initially_installed=False,
     installation_is_other_image=True,
-    image_lost_on_sparks=False,
 ):
     if initially_installed:
         sessions, profiles, planner, profile, api, headers, nodes, _ = _ready_profile(
@@ -148,19 +146,11 @@ def _accepted_build_profile(
         assert preview.allowed
     if installation_is_other_image:
         # An installation that runs the needed image starts without any build,
-        # so a build only follows when the installation is another image.
+        # so a build only follows when the installation is another image: one
+        # its revision no longer builds (its installed ranks still hold it).
         with sessions.begin() as session:
             for installation in session.scalars(select(RecipeInstallation)):
-                install_another_image(installation)
-    if image_lost_on_sparks:
-        with sessions.begin() as session:
-            for node in session.scalars(select(AgentNode)):
-                items = inventory_items(node)
-                record_items(
-                    node,
-                    items.model_copy(update={"artifacts": []}),
-                    profiles._clock(),
-                )
+                install_image_of_replaced_source(session, installation)
     application_id = _load(profile, api, headers)[0] if accept_profile else None
     # Cache loss occurs after acceptance. The already selected, typed build
     # receipt is still the same identity; only its executable work is pending.

@@ -35,7 +35,6 @@ from ..agent_operation_facts import aware as _aware
 from ..agent_outcome import stored_report
 from ..auth import AgentSource
 from ..categorized_errors import InvalidType, InvalidValue
-from ..distribution import record_distributed_runtime_image
 from ..lifecycle import (
     Reconciler,
     Reported,
@@ -699,12 +698,6 @@ class AgentJobService:
                 final_progress = validate_progress_update(retained, final_progress)
                 attempt.progress = progress_document(
                     sample_progress(retained, final_progress, _aware(now))
-                )
-                record_distributed_runtime_image(
-                    session,
-                    node_id=operation.node_id,
-                    plan_digest=operation.authority_revision,
-                    now=now,
                 )
             adapter = AgentOperationAdapter(
                 session, resume_candidates=operator_resume_candidates_in_session
