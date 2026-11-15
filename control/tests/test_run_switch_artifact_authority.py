@@ -4,7 +4,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import ModelCacheBlockerCode, RunSwitchCode, canonical_message
+from vonk_agent_protocol import (
+    LibraryAssessmentCode,
+    ModelCacheBlockerCode,
+    RunSwitchCode,
+    canonical_message,
+)
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
@@ -12,7 +17,10 @@ from vonk_control.inventory_repository import (
     NodeInventoryReport,
     spark_model_objects,
 )
+from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library_contract import RecipeReadinessCheck
 from vonk_control.models import RecipeBuild
+from vonk_control.run_switch_contract import RunSwitchReason
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
     RunSwitchOperationService,
@@ -220,6 +228,23 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
     ]
     assert bool(nas_blocked) is not held
     assert plan.allowed is held, [reason.code for reason in plan.blockers]
+    # Library readiness follows the same rule: a NAS lacking the model does
+    # not make a load whose Sparks hold it read "needs download".
+    nas_lacks = RecipeReadinessCheck(
+        state="blocked",
+        reasons=[
+            RunSwitchReason(
+                code=LibraryAssessmentCode.CACHE_MISSING,
+                detail="The NAS lacks the model.",
+                severity="blocker",
+                scope="operation",
+            )
+        ],
+    )
+    readiness = LibraryAssessment._ready(
+        plan, LibraryAssessment._fit(plan), nas_lacks, None
+    )
+    assert (readiness.state == "ready") is held, readiness
 
 
 def test_each_asked_spark_holds_only_the_images_its_installed_ranks_name(

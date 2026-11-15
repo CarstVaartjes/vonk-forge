@@ -295,7 +295,7 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         "--ready",
         action="store_true",
         default=None,
-        help="Require exact usable NAS assets and an admissible placement",
+        help="Require an admissible placement that needs no model download",
     )
     recipe_library.add_argument(
         "--fits-fleet",

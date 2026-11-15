@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations
+from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -22,6 +23,8 @@ from .model_cache import ModelCacheService
 from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
+from .run_switch_operations.artifact_inspection import missing_spark_bytes_by_node
+from .run_switch_operations.phase_planning import targets_hold_model_and_image
 
 
 def _reason(code: str, detail: str) -> RunSwitchReason:
@@ -45,6 +48,10 @@ def unassessed(clock: Callable[[], datetime], detail: str) -> RecipeReadiness:
 
 
 ASSESSMENT_BUDGET_SECONDS = 5.0
+# The check states, as the contract names them.
+READY, _BLOCKED, _UNAVAILABLE = get_args(
+    RecipeReadinessCheck.model_fields["state"].annotation
+)
 
 
 class LibraryAssessment:
@@ -246,6 +253,18 @@ class LibraryAssessment:
         cache: RecipeReadinessCheck,
         image_digest: str | None,
     ) -> RecipeReadinessCheck:
+        preparation = plan.preparation
+        # The planner's rule: a load whose target Sparks hold the model and
+        # image downloads no model, so the NAS model copy does not decide and
+        # the placement's fit stands in for the cache check. The Controller
+        # image copy still decides, because compile reads it.
+        nas_free = (
+            preparation is not None
+            and preparation.runtime_image.controller.missing_bytes == 0
+            and targets_hold_model_and_image(plan.storage, plan.runtime_storage)
+        )
+        if nas_free:
+            cache = fit
         if cache.state == "blocked":
             return cache
         if fit.state == "blocked":
@@ -254,15 +273,43 @@ class LibraryAssessment:
             return cache if cache.state == "unavailable" else fit
         if not plan.allowed:
             return RecipeReadinessCheck(state="blocked", reasons=plan.blockers)
-        if (
+        if not nas_free and (
             plan.image_digest != image_digest
-            or plan.preparation is None
-            or not plan.preparation.controller_ready
+            or preparation is None
+            or not preparation.controller_ready
         ):
             return unavailable(
                 "The placement and NAS cache owners do not yet attest the same complete artifact set."
             )
         return RecipeReadinessCheck(state="ready")
+
+    def _groups_holding_first(
+        self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], now: datetime
+    ) -> list[tuple[tuple[str, ...], int | None]]:
+        """Candidate groups with the model bytes their Sparks lack, least first.
+
+        The bytes are None when the ordering read failed."""
+
+        groups = list(combinations(nodes, recipe.node_count))
+        try:
+            manifest = self._model_cache.resolve_artifact_set(
+                recipe_revision_id=recipe.identity.recipe_revision_id
+            )
+            with self._sessions() as session:
+                missing = missing_spark_bytes_by_node(session, manifest, nodes, now=now)
+        except (
+            SQLAlchemyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            KeyError,
+        ):
+            return [(group, None) for group in groups]
+        ordered: list[tuple[tuple[str, ...], int | None]] = [
+            (group, sum(missing[node] for node in group)) for group in groups
+        ]
+        return sorted(ordered, key=lambda entry: entry[1] or 0)
 
     def _assess(
         self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], deadline: float
@@ -291,7 +338,13 @@ class LibraryAssessment:
         unknown: RecipeReadinessCheck | None = None
         fit_unknown: RecipeReadinessCheck | None = None
         any_fit = False
-        for group in combinations(nodes, recipe.node_count):
+        if cache.state == READY:
+            candidates: list[tuple[tuple[str, ...], int | None]] = [
+                (group, None) for group in combinations(nodes, recipe.node_count)
+            ]
+        else:
+            candidates = self._groups_holding_first(recipe, nodes, observed)
+        for group, missing_bytes in candidates:
             if time.monotonic() >= deadline:
                 unknown = unavailable(
                     f"Assessment exceeded its {self._budget:g}-second read budget; narrow the library filters and retry."
@@ -327,17 +380,23 @@ class LibraryAssessment:
                 )
                 fit_unknown = unknown
                 continue
-            any_fit |= fit.state == "ready"
+            any_fit |= fit.state == READY
             if fit.state == "unavailable":
                 fit_unknown = fit
             if ready.state == "unavailable":
                 unknown = ready
-            if best is None or fit.state == "ready" and best[1].state != "ready":
+            if best is None or fit.state == READY and best[1].state != READY:
                 best = (plan, fit, ready)
-            if (
-                ready.state == "ready"
-                or fit.state == "ready"
-                and cache.state != "ready"
+            # A ready group ends the search. Otherwise, with a cache that is
+            # not ready, groups are ordered by missing model bytes: once a
+            # fitting group lacks some, no later group can hold all of it.
+            if ready.state == READY or (
+                fit.state == READY
+                and (
+                    cache.state == READY
+                    or missing_bytes is not None
+                    and missing_bytes > 0
+                )
             ):
                 best = (plan, fit, ready)
                 break
@@ -349,12 +408,12 @@ class LibraryAssessment:
                 observed_at=observed,
                 cache=cache,
                 fleet_fit=missing,
-                readiness=cache if cache.state == "blocked" else missing,
+                readiness=missing,
             )
         plan, fit, ready = best
         if not any_fit and fit_unknown is not None:
             fit = fit_unknown
-        if ready.state != "ready" and unknown is not None and cache.state != "blocked":
+        if ready.state != READY and unknown is not None:
             ready = unknown
         return RecipeReadiness(
             observed_at=observed,

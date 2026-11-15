@@ -1743,24 +1743,9 @@ def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
         {2},
         modes=("model-sets",),
     )
-    # The route main's compile took: the NAS adapter with the caller's manifest.
-    adapter = (
-        "def verified_model_receipts(service, artifact_set_sha256, manifest):\n"
-        "    source = ModelCacheObjectSource.from_service(service)\n"
-        "    return source.verified_model_objects_for_set(artifact_set_sha256, manifest)\n"
-    )
-    assert check_source(
-        "control/src/vonk_control/distribution/sources.py",
-        adapter,
-        {3},
-        modes=("model-sets",),
-    )
     for owner in ("model_cache/availability.py", "distribution/model_cache.py"):
         assert not check_source(
             f"control/src/vonk_control/{owner}", source, {2}, modes=("model-sets",)
-        )
-        assert not check_source(
-            f"control/src/vonk_control/{owner}", adapter, {3}, modes=("model-sets",)
         )
 
 

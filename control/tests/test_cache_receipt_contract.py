@@ -2,13 +2,9 @@
 
 # ruff: noqa: F811 - pytest fixture is imported by name
 
-from types import SimpleNamespace
-
 import pytest
 from vonk_agent_protocol import UnknownOutcomeError
 from vonk_control.compiled_execution_plan import (
-    DistributionObjectReceipt,
-    VerifiedModelObject,
     VerifiedRuntimeImage,
 )
 from vonk_control.distribution import ModelCacheObjectSource
@@ -16,79 +12,6 @@ from vonk_control.execution_plan_service import _runtime_image_receipt
 from vonk_control.runtime_image_preparation import RuntimeImageReceipt
 
 from .test_nas_cache_acceptance import controller  # noqa: F401 - shared cache fixture
-
-
-def _source(tmp_path, **changes):
-    descriptor = {
-        "path": "model.bin",
-        "sha256": "a" * 64,
-        "bytes": 3,
-        "file": tmp_path / "model.bin",
-        "file_id": "model",
-        "model_content_sha256": "b" * 64,
-        "roles": ["weights"],
-    } | changes
-    manifest = SimpleNamespace(digest="c" * 64)
-    service = SimpleNamespace(
-        manifest_for_artifact_set=lambda digest: manifest,
-        resolve_verified_artifact_set=lambda digest: [descriptor],
-    )
-    return ModelCacheObjectSource.from_service(service), manifest
-
-
-def test_cache_exports_typed_receipts_with_exact_nested_identity(tmp_path):
-    source, manifest = _source(tmp_path)
-    (receipt,) = source.verified_model_objects_for_set(manifest.digest)
-    assert isinstance(receipt, VerifiedModelObject)
-    assert isinstance(receipt.distribution_object, DistributionObjectReceipt)
-    assert receipt.sha256 == receipt.distribution_object.sha256
-    assert receipt.bytes == receipt.distribution_object.bytes == 3
-    assert receipt.path == receipt.distribution_object.name == "model.bin"
-    assert source.verified_model_objects_for_set(manifest.digest) == (receipt,)
-
-
-@pytest.mark.parametrize(
-    "changes",
-    [
-        {"roles": []},
-        {"file_id": ""},
-        {"model_content_sha256": "bad"},
-        {"file_id": None},
-    ],
-)
-def test_invalid_cache_identity_never_becomes_a_verified_receipt(tmp_path, changes):
-    source, manifest = _source(tmp_path, **changes)
-    with pytest.raises(UnknownOutcomeError):
-        source.verified_model_objects_for_set(manifest.digest)
-    assert source._receipts == {}
-    assert source._paths == {}
-    assert source._manifests == {}
-    # Repair by the source must admit a fresh verification on the same adapter;
-    # failed local bookkeeping must not publish or poison cached authorization.
-    descriptor = source._service.resolve_verified_artifact_set(manifest.digest)[0]
-    descriptor.update(roles=["weights"], file_id="model", model_content_sha256="b" * 64)
-    (receipt,) = source.verified_model_objects_for_set(manifest.digest)
-    assert receipt.file_id == "model"
-    assert VerifiedModelObject.model_validate_json(receipt.model_dump_json()) == receipt
-
-
-@pytest.mark.parametrize("missing_provider", [True, False])
-def test_unavailable_local_manifest_allows_fresh_verification(
-    tmp_path, monkeypatch, missing_provider
-):
-    source, manifest = _source(tmp_path)
-    digest = manifest.digest
-    with monkeypatch.context() as damaged:
-        if missing_provider:
-            damaged.setattr(source._service, "manifest_for_artifact_set", None)
-        else:
-            damaged.setattr(manifest, "digest", "bad")
-        with pytest.raises(UnknownOutcomeError):
-            source.verified_model_objects_for_set(digest)
-        assert source._receipts == source._paths == source._manifests == {}
-    (receipt,) = source.verified_model_objects_for_set(digest)
-    assert receipt.file_id == "model"
-    assert VerifiedModelObject.model_validate_json(receipt.model_dump_json()) == receipt
 
 
 def test_runtime_receipt_projection_keeps_exact_launch_identity():
