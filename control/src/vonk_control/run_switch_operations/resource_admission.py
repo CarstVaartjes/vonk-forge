@@ -15,6 +15,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition
 
+from ..model_cache.lineage import model_sets
 from ..models import (
     CatalogDocumentRevision,
 )
@@ -52,6 +53,13 @@ from .planning_helpers import (
 
 if TYPE_CHECKING:
     from .service import RunSwitchOperationService
+
+
+def _sets_bound_to(session: Session, model_content_sha256: str) -> tuple[str, ...]:
+    """The cached model sets bound to a Model, read from the database only."""
+
+    bound = model_sets(session, (model_content_sha256,))
+    return (*bound.owned, *bound.shared)
 
 
 class ResourceAdmissionMixin:
@@ -108,9 +116,12 @@ class ResourceAdmissionMixin:
             artifact_bytes=reviewed.preparation.model.artifact_set_bytes
             if reviewed.preparation is not None
             else None,
-            artifact_set_sha256=reviewed.preparation.model.artifact_set_sha256
+            artifact_sets=(reviewed.preparation.model.artifact_set_sha256,)
             if reviewed.preparation is not None
-            else None,
+            # A review made before any build has no preparation; the sets
+            # bound to the requested Model (first requester or a verified
+            # binding, so a re-digested Model too) name what it runs.
+            else _sets_bound_to(session, request.model_content_sha256),
             excluded_profile_application_ids=excluded_profile_application_ids,
             kept_run_ids=kept_run_ids,
         )
@@ -157,7 +168,7 @@ class ResourceAdmissionMixin:
         model_documents: Mapping[tuple[str, str, str], ModelDefinition],
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
-        artifact_set_sha256: str | None = None,
+        artifact_sets: Collection[str] = (),
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: Collection[str] = (),
@@ -196,7 +207,7 @@ class ResourceAdmissionMixin:
             revision_digest=revision.content_digest,
             image_bytes=image_bytes,
             artifact_bytes=artifact_bytes,
-            artifact_set_sha256=artifact_set_sha256,
+            artifact_sets=artifact_sets,
             excluded_profile_application_ids=excluded_profile_application_ids,
             planned_ports=planned_ports,
         )
@@ -225,7 +236,7 @@ class ResourceAdmissionMixin:
                 revision_digest=revision.content_digest,
                 image_bytes=image_bytes,
                 artifact_bytes=artifact_bytes,
-                artifact_set_sha256=artifact_set_sha256,
+                artifact_sets=artifact_sets,
                 excluded_profile_application_ids=excluded_profile_application_ids,
                 planned_ports=planned_ports,
             )

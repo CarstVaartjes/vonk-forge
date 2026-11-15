@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -27,11 +27,14 @@ from vonk_control.fleet_profiles import (
     RunSwitchFleetProfileAdapter,
     build_production_fleet_profile_service,
 )
+from vonk_control.model_cache.lineage import catalog_model_files
 from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfileApplication,
     InstallationNode,
     Job,
+    ModelCacheSet,
+    ModelCacheSetArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -500,6 +503,120 @@ def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
     assert warm.disk_required_bytes is not None
     # The fixture's model files are 1 KiB, and nothing else changes.
     assert cold.disk_required_bytes - warm.disk_required_bytes == 1024
+
+
+def _cache_set_redigested(
+    sessions, set_digest: str, old_model: str, new_model: str, now: datetime
+) -> None:
+    """The NAS cache row of a set first requested by ``old_model``; a release
+    re-digested the Model over the same files and the cache adopted
+    ``new_model`` as a verified binding."""
+
+    with sessions() as session:
+        files = sorted(catalog_model_files(session, (new_model,)) or ())
+    assert files
+    artifacts = [
+        {
+            "key": digest[:8],
+            "id": digest[:8],
+            "path": f"{digest[:8]}.bin",
+            "kind": "file",
+            "repository": None,
+            "source": "fixture",
+            "revision": None,
+            "sha256": digest,
+            "download_bytes": 1,
+            "roles": ["model"],
+            "model_content_sha256": old_model,
+        }
+        for digest in files
+    ]
+    manifest = {
+        "schema_version": 2,
+        "source_policy": "nas-first",
+        "model_content_sha256": old_model,
+        "recipe_revision_sha256": None,
+        "model_definition_ref": None,
+        "model_content_digests": [old_model],
+        "artifacts": artifacts,
+        "verified_models": [
+            {
+                "kind": "model",
+                "publisher": "vonk-forge",
+                "slug": "fixture",
+                "content_sha256": new_model,
+            }
+        ],
+    }
+    with sessions.begin() as session:
+        session.add(
+            ModelCacheSet(
+                artifact_set_sha256=set_digest,
+                schema_version=2,
+                model_content_sha256=old_model,
+                manifest=manifest,
+                expected_bytes=len(files),
+                verified_bytes=len(files),
+                state="cached",
+                created_at=now,
+                updated_at=now,
+                last_accessed_at=now,
+            )
+        )
+        session.flush()
+        session.add_all(
+            ModelCacheSetArtifact(
+                artifact_set_sha256=set_digest,
+                artifact_key=item["key"],
+                artifact_sha256=item["sha256"],
+                path=item["path"],
+            )
+            for item in artifacts
+        )
+
+
+def test_a_recheck_without_preparation_credits_a_set_held_under_an_old_digest(
+    tmp_path: Path,
+) -> None:
+    """A review made before any build carries no preparation; its profile
+    recheck still leaves out the files of a set the Spark already runs, also
+    when that installation and the cached set name them under an older Model
+    digest: catches a recheck that charges (and waits for eviction of) bytes
+    the review left out."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    _service, planner = _profile_service(sessions, lifecycle)
+    request = _request(sessions, nodes[0])
+    reviewed = planner.preview(request, actor="admin").assessment()
+    reviewed = reviewed.model_copy(update={"preparation": None})
+    with sessions() as session:
+        cold = planner.recheck_resources_in_session(session, request, reviewed)
+
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    old_model = "e" * 64
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installed.owner_id)
+        assert installation is not None
+        set_digest = installation.model_artifact_set_sha256
+        assert set_digest is not None
+        installation.model_content_sha256 = old_model
+    _cache_set_redigested(
+        sessions,
+        set_digest,
+        old_model,
+        request.model_content_sha256,
+        lifecycle._clock(),
+    )
+    with sessions() as session:
+        warm = planner.recheck_resources_in_session(session, request, reviewed)
+
+    cold_disk = cold.fit_current.nodes[0].disk_required_bytes
+    warm_disk = warm.fit_current.nodes[0].disk_required_bytes
+    assert cold_disk is not None and warm_disk is not None
+    # The fixture's model files are 1 KiB, and nothing else changes.
+    assert cold_disk - warm_disk == 1024
 
 
 def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(

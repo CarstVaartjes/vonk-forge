@@ -223,7 +223,9 @@ Disk admission counts what a Spark will actually write: while an installation of
 a model set exists on a Spark, its shared store holds that set's files and a new
 installation of the same set links them, so a load's disk claim leaves them out.
 The match is by set, not Model digest: a Model re-digested over the same files
-runs the same set. The same holds
+runs the same set. A profile's resource recheck of a review made before any
+build (no preparation yet) names the sets bound to the requested Model through
+`model_cache.lineage.model_sets`, a database-only read. The same holds
 for any file the agent's store scan reports (`model_objects` in its fresh
 inventory), and Run/Switch plans a target copy only for the files that scan does
 not report; a missing or stale scan counts as missing. The protected reference scan keeps model objects a saved profile names even

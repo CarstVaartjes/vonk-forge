@@ -106,7 +106,7 @@ class ResourceFitMixin:
         serving: bool = True,
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
-        artifact_set_sha256: str | None = None,
+        artifact_sets: Collection[str] = (),
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
@@ -471,11 +471,9 @@ class ResourceFitMixin:
                     )
                     # An unstated payload size leaves the envelope incomplete.
                     if image_size is not None and artifact_size is not None:
-                        if (
-                            artifact_set_sha256 is not None
-                            and artifact_set_sha256
-                            in model_sets_stored_on_node(session, item.node_id)
-                        ):
+                        if artifact_sets and not model_sets_stored_on_node(
+                            session, item.node_id
+                        ).isdisjoint(artifact_sets):
                             # The Spark's shared store already holds the model
                             # set (an installation running it exists there), so
                             # the install links those files and writes none.
