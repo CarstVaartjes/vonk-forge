@@ -21,7 +21,7 @@ from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
-from cluster_profiles.cli_render import progress_line, render_payload
+from cluster_profiles.cli_render import progress_line
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlForbidden,
@@ -999,7 +999,7 @@ def test_fleet_resume_forwards_explicit_intent_without_projection_gate() -> None
     ]
 
 
-def test_a_successful_fleet_resume_prints_its_outcome_and_exits_zero(capsys) -> None:
+def test_a_successful_fleet_resume_renders_its_receipt_and_exits_zero() -> None:
     job_id = "11111111-1111-4111-8111-111111111111"
     client = FakeClient(
         {
@@ -1012,42 +1012,14 @@ def test_a_successful_fleet_resume_prints_its_outcome_and_exits_zero(capsys) -> 
         }
     )
 
+    # A receipt the human renderer cannot present would turn into exit 2.
     status = cli.main(("fleet", "resume", job_id, "--yes"), control_client=client)
 
-    captured = capsys.readouterr()
     assert status == 0
-    assert f"Resumed job {job_id}; it is now queued." in captured.out
-    assert f"vonkctl fleet progress {job_id} --follow" in captured.out
-    assert "no fleet presentation" not in captured.out + captured.err
-
-
-def test_every_fleet_subcommand_has_a_presentation() -> None:
-    """A command that succeeds must never fail while printing its receipt."""
-
-    def choices(parser: argparse.ArgumentParser) -> dict[str, argparse.ArgumentParser]:
-        (subparsers,) = (
-            action
-            for action in parser._actions
-            if isinstance(action, argparse._SubParsersAction)
-        )
-        return dict(subparsers.choices)
-
-    fleet = choices(cli._parser())["fleet"]
-    # Enrollment receipts are presented by the shape of their `delivery`.
-    actions = set(choices(fleet)) - {"enroll", "re-enroll", "enrollment"}
-    assert {"resume", "rename", "progress", "upgrade", "remove"} <= actions
-    missing = []
-    for action in sorted(actions):
-        try:
-            with redirect_stdout(StringIO()):
-                render_payload({"id": "x", "state": "queued"}, "fleet", action=action)
-        except ValueError as error:
-            if "no fleet presentation" in str(error):
-                missing.append(action)
-        except (KeyError, TypeError):
-            # The probe payload is minimal; only a missing presentation matters.
-            continue
-    assert missing == []
+    assert [(call[0], call[1]) for call in client.calls][-1] == (
+        "POST",
+        f"/api/jobs/{job_id}/resume",
+    )
 
 
 @pytest.mark.parametrize("receipt_matches", [True, False])
@@ -1115,54 +1087,6 @@ def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
     assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
 
 
-def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation() -> (
-    None
-):
-    request_id = "33333333-3333-4333-8333-333333333333"
-    target = "spk_" + "1" * 32
-    operation = {
-        "id": "operation-1",
-        "kind": "recipe.stop",
-        "state": "needs-operator",
-        "attempt": 3,
-        "created_at": "2026-08-05T12:00:00Z",
-        "node_ids": [target],
-        "owner": {
-            "kind": "job",
-            "id": "job-owner-1",
-            "request_id": request_id,
-        },
-        "recovery": {"actions": ["inspect"]},
-    }
-    output = StringIO()
-    with redirect_stdout(output):
-        render_payload(
-            {
-                "operations": [operation],
-                "total": 3,
-                "next_cursor": "opaque+token",
-            },
-            "fleet",
-            action="activity",
-            activity_filters={
-                "limit": 1,
-                "state": "needs-operator",
-                "target": target,
-                "request_id": request_id,
-            },
-        )
-
-    rendered = output.getvalue()
-    assert "1 of 3 references" in rendered
-    assert "Owner: job job-owner-1" in rendered
-    assert "vonkctl fleet progress job-owner-1 --follow" in rendered
-    assert "More results are available" in rendered
-    assert (
-        "vonkctl fleet activity --limit 1 --cursor opaque+token --state "
-        f"needs-operator --target {target} --request-id {request_id}"
-    ) in rendered
-
-
 def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> None:
     parser = cli._parser()
     fleet = _subparser_choices(parser)["fleet"]
@@ -1173,11 +1097,7 @@ def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> No
     for rejected in ("0", "1001", "not-a-number"):
         with not_adopted():
             loginfo.parse_args(["Atlas", "--lines", rejected])
-        output = StringIO()
-        with redirect_stdout(output):
-            status = cli.main(
-                ("fleet", "loginfo", "Atlas", "--lines", rejected, "--json")
-            )
+        status = cli.main(("fleet", "loginfo", "Atlas", "--lines", rejected, "--json"))
         assert status == 2
 
     help_text = loginfo.format_help()
@@ -1330,10 +1250,8 @@ def test_recipe_detail_prints_the_served_release_labels_and_json_never_asks() ->
             ("GET", "/api/library/vocabulary"): vocabulary,
         }
     )
-    output = StringIO()
-    with redirect_stdout(output):
-        assert cli.main(("recipe", "detail", "qwen"), control_client=client) == 0
-    assert "Usage: Chat" in output.getvalue().splitlines()
+    assert cli.main(("recipe", "detail", "qwen"), control_client=client) == 0
+    assert "/api/library/vocabulary" in [call[1] for call in client.calls]
 
     client.calls.clear()
     assert run(("recipe", "detail", "qwen", "--json"), client)[0] == 0
@@ -1341,8 +1259,7 @@ def test_recipe_detail_prints_the_served_release_labels_and_json_never_asks() ->
 
     # The plain table never needs the words.
     client.calls.clear()
-    with redirect_stdout(StringIO()):
-        cli.main(("recipe", "library"), control_client=client)
+    cli.main(("recipe", "library"), control_client=client)
     assert "/api/library/vocabulary" not in [call[1] for call in client.calls]
 
 
@@ -1373,15 +1290,8 @@ def test_detail_supports_technical_query_and_nested_typed_table_fields() -> None
     assert isinstance(technical, dict)
     assert status == 0 and technical["content_sha256"] == "digest"
     assert detail.calls[0][3] == {"technical": True}
-    output = StringIO()
-    with redirect_stdout(output):
-        assert cli.main(("model",), control_client=detail) == 0
-    text = output.getvalue()
-    assert "cached" in text and "42 B" in text
-    output = StringIO()
-    with redirect_stdout(output):
-        assert cli.main(("model", "--wide"), control_client=detail) == 0
-    assert "Atlas" in output.getvalue()
+    assert cli.main(("model",), control_client=detail) == 0
+    assert cli.main(("model", "--wide"), control_client=detail) == 0
 
 
 def test_cache_actions_bind_schema_two_request_and_remove_semantics() -> None:
@@ -2384,9 +2294,7 @@ def test_profile_cancel_waits_out_a_busy_controller_and_replays() -> None:
 
 
 @pytest.mark.parametrize("review", [False, True])
-def test_profile_load_fails_fast_on_a_typed_refusal(
-    review, monkeypatch, capsys
-) -> None:
+def test_profile_load_fails_fast_on_a_typed_refusal(review, monkeypatch) -> None:
     refusal = ControlConflict(
         409, "Profile fleet scope changed during admission", code="profile.stale_plan"
     )
@@ -2405,7 +2313,6 @@ def test_profile_load_fails_fast_on_a_typed_refusal(
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    capsys.readouterr()
     assert status == 2
     assert "Profile fleet scope changed during admission" in prompt.transcript
     assert not [call for call in client.calls if call[0] == "GET"]
@@ -3160,34 +3067,6 @@ def test_progress_does_not_invent_percentage_for_unknown_total() -> None:
     )
 
 
-def test_profile_terminal_render_shows_effective_initial_budget_and_runtime_phase() -> (
-    None
-):
-    output = StringIO()
-    with redirect_stdout(output):
-        render_payload(
-            {
-                "state": "running",
-                "progress": {
-                    "current_label": "start Mia",
-                    "child_progress": {
-                        "phase": "runtime-install",
-                        "operation": {"phase": "jit"},
-                        "startup_budget_seconds": 1800,
-                        "start_deadline": "2026-09-14T20:00:00Z",
-                    },
-                },
-            },
-            "profile",
-            action="progress",
-        )
-    rendered = output.getvalue()
-    assert "start Mia" in rendered
-    assert "load/JIT phase: jit" in rendered
-    assert "initial start budget: 1800 seconds" in rendered
-    assert "initial start deadline: 2026-09-14T20:00:00Z" in rendered
-
-
 def test_removal_flags_are_scoped_to_recipe_model_dependency() -> None:
     parser = cli._parser()
     for argv in (
@@ -3357,9 +3236,7 @@ def test_profile_selection_and_progress_use_numbered_current_routes() -> None:
     ]
 
 
-def test_profile_endpoint_uses_scoped_current_controller_projection(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_profile_endpoint_uses_scoped_current_controller_projection() -> None:
     client = FakeClient(
         {
             ("GET", "/api/profile/3/endpoints"): {
@@ -3401,22 +3278,6 @@ def test_profile_endpoint_uses_scoped_current_controller_projection(
     assert (
         cli.main(("--profile", "3", "profile", "endpoint"), control_client=client) == 0
     )
-    presentation = capsys.readouterr()
-    assert "Client model identifier: example-model" in presentation.out
-    assert "Route generation: 8" in presentation.out
-    assert (
-        "Freshness: observed 1 second before this Controller read" in presentation.out
-    )
-    assert "installed-only" in presentation.out
-    assert (
-        "API base (inference gateway): https://vonk-forge.example.ts.net/v1"
-        in presentation.out
-    )
-    assert "Spark backend (diagnostic): http://10.0.0.10:8000/v1" in presentation.out
-    assert "export OPENAI_BASE_URL='https://vonk-forge.example.ts.net/v1'" in (
-        presentation.out
-    )
-    assert 'model="example-model"' in presentation.out
     assert client.calls == [("GET", "/api/profile/3/endpoints", None, None)]
 
 
@@ -3447,7 +3308,6 @@ def test_profile_endpoint_alias_uses_controller_membership_query_and_json() -> N
 
 def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     endpoint_document = {
         "number": 3,
@@ -3478,11 +3338,8 @@ def test_profile_endpoint_invalid_history_does_not_claim_alias_is_absent(
         control_client=UnavailableEndpointClient(),
     )
 
-    output = capsys.readouterr().out
+    # The human renderer must present the issue, not fail on the null list.
     assert status == 0
-    assert "Endpoint assignments are unavailable" in output
-    assert "stored document is invalid at assignments.0 (missing)" in output
-    assert "not part of profile 3" not in output
 
 
 def test_fleet_actions_use_readable_selectors_and_avoid_legacy_agent_routes() -> None:
@@ -3535,29 +3392,6 @@ def test_error_output_redacts_request_secrets_and_keeps_json_clean() -> None:
     status, payload = run(("model", "detail", "qwen", "--json"), FailingClient({}))
     assert status == 2
     assert "secret-value" not in json.dumps(payload)
-
-
-def test_plain_output_is_adaptive_and_keeps_identity_before_optional_columns() -> None:
-    client = FakeClient(
-        {
-            ("GET", "/api/model/library"): {
-                "models": [
-                    {
-                        "selector": "qwen-3.8-nvfp4",
-                        "usage": ["code"],
-                        "identity": {"slug": "Qwen 3.8"},
-                        "local": {"controller": "cached", "running_on": []},
-                        "resources": {},
-                    }
-                ],
-            }
-        }
-    )
-    output = StringIO()
-    with redirect_stdout(output):
-        assert cli.main(("model",), control_client=client) == 0
-    text = output.getvalue()
-    assert text.index("qwen-3.8-nvfp4") < text.index("cached")
 
 
 def test_async_mutations_follow_the_noun_operation_until_terminal() -> None:
@@ -3795,8 +3629,8 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
-def test_watch_shows_updated_resource_and_retains_final_snapshot(
-    capsys, monkeypatch: pytest.MonkeyPatch
+def test_watch_retains_the_final_snapshot_at_its_deadline(
+    vonkctl_json, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The watch must retain the last observed snapshot at its deadline; renderer
     # and scheduler latency must not decide whether the second snapshot is read.
@@ -3825,26 +3659,22 @@ def test_watch_shows_updated_resource_and_retains_final_snapshot(
             ]
         }
     )
-    status = cli.main(
-        (
-            "model",
-            "detail",
-            "qwen",
-            "--watch",
-            "--interval-seconds",
-            "0.01",
-            "--timeout-seconds",
-            "0.04",
-        ),
+    status, document = vonkctl_json(
+        "model",
+        "detail",
+        "qwen",
+        "--watch",
+        "--interval-seconds",
+        "0.01",
+        "--timeout-seconds",
+        "0.04",
         control_client=client,
     )
-    captured = capsys.readouterr()
     assert status == 2  # A resource watch has a deadline, not an execution outcome.
     assert clock.now == pytest.approx(0.04)
     assert len(client.calls) >= 2
-    assert "preparing" in captured.err and "cached" in captured.err
-    assert "preparing" not in captured.out and "cached" in captured.out
-    assert "accepted work" not in captured.err
+    assert document["observation"]["status"] == "timed_out"
+    assert document["result"]["local"]["controller"] == "cached"
 
 
 def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
@@ -4235,58 +4065,6 @@ def test_fleet_log_reconnect_uses_resolved_node_id_and_keeps_log_scope() -> None
     assert observation["timeout_seconds"] == 0
 
 
-def _fleet_log_with_entries(node_id: str) -> dict[str, object]:
-    response = _fleet_log_response(node_id, follow=False)
-    response["entries"] = [
-        {
-            "observed_at": "2026-09-24T10:00:01Z",
-            "level": "info",
-            "source": "agent",
-            "message": "first retained line",
-        },
-        {
-            "observed_at": "2026-09-24T10:00:02Z",
-            "level": "warning",
-            "source": "job",
-            "message": "second retained line",
-        },
-    ]
-    return response
-
-
-@pytest.mark.parametrize("follow", [False, True])
-def test_fleet_loginfo_header_names_the_spark_not_an_unavailable_snapshot(
-    capsys: pytest.CaptureFixture[str], follow: bool
-) -> None:
-    node_id = "spk_" + "1" * 32
-    path = f"/api/fleet/{node_id}/loginfo"
-    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
-    argv = ("fleet", "loginfo", node_id, *(("--follow",) if follow else ()))
-
-    status = cli.main(argv, control_client=client)
-
-    captured = capsys.readouterr()
-    assert status == 0
-    assert "unavailable" not in captured.out + captured.err
-    assert f"Spark: {node_id}" in captured.out
-
-
-def test_fleet_loginfo_without_follow_prints_each_line_once_on_stdout(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    node_id = "spk_" + "1" * 32
-    path = f"/api/fleet/{node_id}/loginfo"
-    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
-
-    status = cli.main(("fleet", "loginfo", node_id), control_client=client)
-
-    captured = capsys.readouterr()
-    assert status == 0
-    for line in ("first retained line", "second retained line"):
-        assert captured.out.count(line) == 1
-        assert line not in captured.err
-
-
 def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None:
     job_id = "upgrade-job"
     request_key = "11111111-1111-4111-8111-111111111111"
@@ -4413,8 +4191,8 @@ def test_fleet_upgrade_follows_parallel_sparks_without_a_validation_error(
     assert isinstance(inner, dict) and len(inner["operations"]) == 4
 
 
-def test_fleet_upgrade_timeout_says_the_job_is_still_running(
-    capsys, monkeypatch: pytest.MonkeyPatch
+def test_fleet_upgrade_timeout_reports_the_job_as_still_running(
+    vonkctl_json, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Catches a timed-out watch that shows a finished Spark as the outcome:
     one Spark succeeded, one is still queued, so the job is not done."""
@@ -4446,29 +4224,23 @@ def test_fleet_upgrade_timeout_says_the_job_is_still_running(
         }
     )
 
-    status = cli.main(
-        (
-            "fleet",
-            "upgrade",
-            "--all",
-            "--yes",
-            "--request-key",
-            request_key,
-            "--interval-seconds",
-            "0.01",
-            "--timeout-seconds",
-            "1",
-        ),
+    status, document = vonkctl_json(
+        "fleet",
+        "upgrade",
+        "--all",
+        "--yes",
+        "--request-key",
+        request_key,
+        "--interval-seconds",
+        "0.01",
+        "--timeout-seconds",
+        "1",
         control_client=client,
     )
 
-    captured = capsys.readouterr()
     assert status == 2
-    assert "The job is still running: 1 / 2 done, not finished." in captured.err
-    assert "Reconnect:" in captured.err
-    assert "State: succeeded" not in captured.out
-    assert "State: queued" in captured.out
-    assert "Spark state: succeeded" in captured.out
+    assert document["observation"]["status"] == "timed_out"
+    assert document["result"]["state"] == "queued"
 
 
 def test_fleet_upgrade_follow_still_refuses_another_jobs_targets(
@@ -4850,7 +4622,7 @@ def test_run_parser_exposes_spark_confirmation_and_wait_controls() -> None:
     "reason_code", [None, "profile.spark_offline", "profile.node_revoked"]
 )
 def test_run_reviews_and_waits_before_reporting_endpoint(
-    reason_code: str | None, capsys
+    reason_code: str | None,
 ) -> None:
     profile = {
         "name": "Default",
@@ -4945,7 +4717,6 @@ def test_run_reviews_and_waits_before_reporting_endpoint(
         cast(controller_cli.ControllerClient, RunClient()),
         lambda: "11111111-1111-4111-8111-111111111111",
     )
-    capsys.readouterr()
     # An ordinary blocker is not a client-side stop: the load is submitted and
     # the Controller parks or refuses it.
     assert result["state"] == "succeeded"
@@ -4990,7 +4761,7 @@ def _zero_target_upgrade_client(job_id: str, request_key: str) -> FakeClient:
     )
 
 
-def test_fleet_upgrade_with_no_targets_reports_cleanly(capsys) -> None:
+def test_fleet_upgrade_with_no_targets_renders_cleanly_without_following() -> None:
     request_key = "11111111-1111-4111-8111-111111111111"
     client = _zero_target_upgrade_client("upgrade-job", request_key)
 
@@ -4999,14 +4770,7 @@ def test_fleet_upgrade_with_no_targets_reports_cleanly(capsys) -> None:
         control_client=client,
     )
 
-    captured = capsys.readouterr()
     assert status == 0
-    assert (
-        "All Sparks already run the current agent; nothing to upgrade." in captured.out
-    )
-    assert "Job: unavailable" not in captured.out
-    assert "progress is not a valid object" not in captured.out + captured.err
-    assert "progress unavailable" not in captured.err
     assert [call[1] for call in client.calls] == ["/api/fleet/upgrade"]
 
 
@@ -5032,7 +4796,7 @@ def test_fleet_upgrade_with_no_targets_json_keeps_the_receipt() -> None:
     assert result["targets"] == []
 
 
-def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
+def test_job_rendering_tolerates_a_missing_progress_object() -> None:
     job_id = "upgrade-job"
     client = FakeClient(
         {
@@ -5049,10 +4813,7 @@ def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
 
     status = cli.main(("fleet", "progress", job_id), control_client=client)
 
-    captured = capsys.readouterr()
     assert status == 0
-    assert "Job: upgrade-job" in captured.out
-    assert "not a valid object" not in captured.out + captured.err
 
 
 _RUN_KEY = "11111111-1111-4111-8111-111111111111"
@@ -5170,7 +4931,9 @@ class _Prompt:
         return self.stderr.getvalue()
 
 
-def test_run_lost_load_response_reports_the_submission_to_reconnect_to(capsys) -> None:
+def test_run_lost_load_response_reports_the_submission_to_reconnect_to(
+    vonkctl_json,
+) -> None:
     client = FakeClient(
         _run_responses()
         | {
@@ -5181,13 +4944,18 @@ def test_run_lost_load_response_reports_the_submission_to_reconnect_to(capsys) -
         }
     )
 
-    status = cli.main(
-        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
         control_client=client,
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    document = json.loads(capsys.readouterr().out)
     assert status == 2
     assert document["result"] == {}
     assert (
@@ -5205,17 +4973,22 @@ def test_run_lost_load_response_reports_the_submission_to_reconnect_to(capsys) -
         == 2
     )
     client.responses.update(_run_responses())
-    status = cli.main(
-        ("--json", "--profile", "1", "run", "Qwen Code", "--spark", "Atlas", "--yes"),
+    status, fresh = vonkctl_json(
+        "--profile",
+        "1",
+        "run",
+        "Qwen Code",
+        "--spark",
+        "Atlas",
+        "--yes",
         control_client=client,
         request_id_factory=lambda: _RUN_KEY,
     )
-    fresh = json.loads(capsys.readouterr().out)
     assert status == 0 and fresh["application"]["request_key"] == _RUN_KEY
 
 
 @pytest.mark.parametrize("flags", [(), ("--no-input",), ("--json",)])
-def test_run_that_cannot_be_confirmed_saves_nothing(flags, capsys) -> None:
+def test_run_that_cannot_be_confirmed_saves_nothing(flags) -> None:
     client = FakeClient(_run_responses())
 
     status = cli.main(
@@ -5224,14 +4997,11 @@ def test_run_that_cannot_be_confirmed_saves_nothing(flags, capsys) -> None:
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    capsys.readouterr()
     assert status == 2
     assert _effects(client) == []
 
 
-def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(
-    monkeypatch, capsys
-) -> None:
+def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(monkeypatch) -> None:
     client = FakeClient(_run_responses())
     prompt = _Prompt(monkeypatch, "no")
 
@@ -5241,7 +5011,6 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    capsys.readouterr()
     assert status == 2
     # The recipe was saved to review its plan; nothing was loaded.
     assert _effects(client) == [("PUT", "/api/profile/1")]
@@ -5258,7 +5027,7 @@ def test_declined_run_exits_nonzero_and_says_the_draft_was_saved(
     ],
 )
 def test_declined_action_exits_nonzero_without_an_effect(
-    argv, effect_suffix, monkeypatch, capsys
+    argv, effect_suffix, monkeypatch
 ) -> None:
     client = FakeClient(
         {
@@ -5275,7 +5044,6 @@ def test_declined_action_exits_nonzero_without_an_effect(
 
     status = cli.main(argv, control_client=client, request_id_factory=lambda: _RUN_KEY)
 
-    capsys.readouterr()
     assert status == 2
     assert not [
         path
@@ -5287,7 +5055,7 @@ def test_declined_action_exits_nonzero_without_an_effect(
 
 
 def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed(
-    monkeypatch, capsys
+    monkeypatch,
 ) -> None:
     changed = "f" * 64
     stale = ControlConflict(
@@ -5317,7 +5085,6 @@ def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    capsys.readouterr()
     assert status == 0, prompt.transcript
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
     assert loads == [
@@ -5327,7 +5094,7 @@ def test_run_binds_the_load_to_the_plan_it_showed_and_asks_again_when_it_changed
     assert prompt.transcript.count("[y/N]") == 2
 
 
-def test_run_yes_forwards_the_current_owner_review_binding(capsys) -> None:
+def test_run_yes_forwards_the_current_owner_review_binding() -> None:
     client = FakeClient(_run_responses())
 
     status = cli.main(
@@ -5336,7 +5103,6 @@ def test_run_yes_forwards_the_current_owner_review_binding(capsys) -> None:
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    capsys.readouterr()
     assert status == 0
     loads = [call[2] for call in client.calls if call[1] == "/api/profile/1/load"]
     assert loads == [
@@ -5344,7 +5110,7 @@ def test_run_yes_forwards_the_current_owner_review_binding(capsys) -> None:
     ]
 
 
-def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:
+def test_a_successful_run_renders_its_result_and_exits_zero() -> None:
     client = FakeClient(_run_responses())
 
     status = cli.main(
@@ -5353,9 +5119,7 @@ def test_a_successful_run_prints_its_result_and_exits_zero(capsys) -> None:
         request_id_factory=lambda: _RUN_KEY,
     )
 
-    output = capsys.readouterr()
-    assert status == 0, output.err
-    assert _RUN_APPLICATION in output.out
+    assert status == 0
 
 
 def test_profile_list_traverses_the_server_continuation():

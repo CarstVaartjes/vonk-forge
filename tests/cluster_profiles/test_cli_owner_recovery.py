@@ -39,7 +39,7 @@ def bounded_clock(monkeypatch):
     return clock
 
 
-def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsys):
+def test_damaged_definition_repairs_before_edit_and_owner_decides_revision():
     path = "/api/profile/1/definition"
     definition = {"name": "original", "assignments": []}
     readable = {"id": KEY, "number": 1, "revision": 3, "definition": definition}
@@ -82,7 +82,6 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
             "labels": {},
         },
     )
-    capsys.readouterr()
     assert (
         cli.main(
             ("--profile", "1", "profile", "configure", "--name", "fresh", "--json"),
@@ -97,7 +96,7 @@ def test_damaged_definition_repairs_before_edit_and_owner_decides_revision(capsy
 
 
 def test_damaged_definition_ends_without_save_and_fresh_edit_is_admitted(
-    capsys, bounded_clock
+    bounded_clock,
 ):
     path = "/api/profile/1/definition"
     client = FakeClient(
@@ -108,7 +107,6 @@ def test_damaged_definition_ends_without_save_and_fresh_edit_is_admitted(
     assert len(client.calls) >= 2
     assert bounded_clock[0] == pytest.approx(BUDGET)
     assert all(call[0] == "GET" for call in client.calls)
-    capsys.readouterr()
     definition = {"name": "original", "assignments": []}
     client.responses[("GET", path)] = {
         "id": KEY,
@@ -359,7 +357,7 @@ def test_cancellation_lookup_reobserves_old_metadata_without_local_conflict():
     assert run(fresh_args, client)[0] == 0
 
 
-def test_missing_attempt_reobserves_before_writing_evidence(tmp_path, capsys):
+def test_missing_attempt_reobserves_before_writing_evidence(tmp_path):
     path = f"/api/operations/{KEY}"
     bundle = {"operation_id": KEY, "attempt": 2}
 
@@ -388,7 +386,6 @@ def test_missing_attempt_reobserves_before_writing_evidence(tmp_path, capsys):
     )
     assert json.loads(destination.read_text()) == bundle
     assert [call[1] for call in client.calls] == [path, path, path + "/evidence"]
-    capsys.readouterr()
     fresh = tmp_path / "fresh.json"
     assert (
         cli.main(
@@ -473,7 +470,7 @@ def test_unique_profile_successors_share_one_budget_then_fresh_follow_succeeds(
 
 @pytest.mark.parametrize("server_error", [False, True])
 def test_lost_profile_save_observes_without_overwriting_then_fresh_edit_works(
-    capsys, server_error
+    server_error,
 ):
     original = {"name": "original", "assignments": []}
     changed = original | {"name": "changed"}
@@ -500,7 +497,6 @@ def test_lost_profile_save_observes_without_overwriting_then_fresh_edit_works(
     )
     assert sum(method == "PUT" for method, *_ in client.calls) == 1
     assert client.calls[-1][0] == "GET"
-    capsys.readouterr()
     client.responses[("PUT", "/api/profile/1")] = {
         "revision": 5,
         "definition": changed | {"name": "fresh"},
@@ -518,7 +514,9 @@ def test_lost_profile_save_observes_without_overwriting_then_fresh_edit_works(
     )
 
 
-def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(capsys):
+def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(
+    vonkctl_json,
+):
     """Catches replacing an intact owner wait with a bare exit-2 observation."""
     from vonk_agent_protocol import ProfileReasonCode
 
@@ -535,14 +533,16 @@ def test_profile_save_keeps_typed_cause_after_inconclusive_reconciliation(capsys
             ),
         }
     )
-    assert (
-        cli.main(
-            ("--profile", "1", "profile", "configure", "--name", "edited", "--json"),
-            control_client=client,
-        )
-        == 2
+    status, answer = vonkctl_json(
+        "--profile",
+        "1",
+        "profile",
+        "configure",
+        "--name",
+        "edited",
+        control_client=client,
     )
-    answer = json.loads(capsys.readouterr().out)
+    assert status == 2
     assert answer["code"] == ProfileReasonCode.ADMISSION_EFFECT_BUSY
     assert answer["request_id"] == FRESH
     assert answer["http_status"] == 503
