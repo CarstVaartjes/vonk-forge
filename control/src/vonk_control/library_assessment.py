@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations
+from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -47,6 +48,10 @@ def unassessed(clock: Callable[[], datetime], detail: str) -> RecipeReadiness:
 
 
 ASSESSMENT_BUDGET_SECONDS = 5.0
+# The check states, as the contract names them.
+READY, _BLOCKED, _UNAVAILABLE = get_args(
+    RecipeReadinessCheck.model_fields["state"].annotation
+)
 
 
 class LibraryAssessment:
@@ -280,8 +285,10 @@ class LibraryAssessment:
 
     def _groups_holding_first(
         self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], now: datetime
-    ) -> list[tuple[str, ...]]:
-        """Candidate groups, those whose Sparks lack the least of the model first."""
+    ) -> list[tuple[tuple[str, ...], int | None]]:
+        """Candidate groups with the model bytes their Sparks lack, least first.
+
+        The bytes are None when the ordering read failed."""
 
         groups = list(combinations(nodes, recipe.node_count))
         try:
@@ -298,8 +305,11 @@ class LibraryAssessment:
             ValueError,
             KeyError,
         ):
-            return groups
-        return sorted(groups, key=lambda group: sum(missing[node] for node in group))
+            return [(group, None) for group in groups]
+        ordered: list[tuple[tuple[str, ...], int | None]] = [
+            (group, sum(missing[node] for node in group)) for group in groups
+        ]
+        return sorted(ordered, key=lambda entry: entry[1] or 0)
 
     def _assess(
         self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], deadline: float
@@ -328,8 +338,13 @@ class LibraryAssessment:
         unknown: RecipeReadinessCheck | None = None
         fit_unknown: RecipeReadinessCheck | None = None
         any_fit = False
-        stopped = False
-        for group in self._groups_holding_first(recipe, nodes, observed):
+        if cache.state == READY:
+            candidates: list[tuple[tuple[str, ...], int | None]] = [
+                (group, None) for group in combinations(nodes, recipe.node_count)
+            ]
+        else:
+            candidates = self._groups_holding_first(recipe, nodes, observed)
+        for group, missing_bytes in candidates:
             if time.monotonic() >= deadline:
                 unknown = unavailable(
                     f"Assessment exceeded its {self._budget:g}-second read budget; narrow the library filters and retry."
@@ -365,22 +380,25 @@ class LibraryAssessment:
                 )
                 fit_unknown = unknown
                 continue
-            any_fit |= fit.state == "ready"
+            any_fit |= fit.state == READY
             if fit.state == "unavailable":
                 fit_unknown = fit
             if ready.state == "unavailable":
                 unknown = ready
-            if best is None or fit.state == "ready" and best[1].state != "ready":
+            if best is None or fit.state == READY and best[1].state != READY:
                 best = (plan, fit, ready)
-            # Groups whose Sparks hold the model come first, so the first
-            # fitting group is the best one and ends the search.
-            if (
-                ready.state == "ready"
-                or fit.state == "ready"
-                and cache.state != "ready"
+            # A ready group ends the search. Otherwise, with a cache that is
+            # not ready, groups are ordered by missing model bytes: once a
+            # fitting group lacks some, no later group can hold all of it.
+            if ready.state == READY or (
+                fit.state == READY
+                and (
+                    cache.state == READY
+                    or missing_bytes is not None
+                    and missing_bytes > 0
+                )
             ):
                 best = (plan, fit, ready)
-                stopped = True
                 break
         if best is None:
             missing = unknown or unavailable(
@@ -395,7 +413,7 @@ class LibraryAssessment:
         plan, fit, ready = best
         if not any_fit and fit_unknown is not None:
             fit = fit_unknown
-        if not stopped and unknown is not None:
+        if ready.state != READY and unknown is not None:
             ready = unknown
         return RecipeReadiness(
             observed_at=observed,
