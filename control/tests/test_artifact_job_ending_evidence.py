@@ -445,7 +445,7 @@ def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
                 AgentOperationAttempt.operation_id == _order(sessions, job).id
             )
         )
-        assert attempt is not None
+        assert attempt is not None and attempt.result is not None
         reason_code = attempt.result.get("helper_error_code")
         assert reason_code == "runtime_image_missing"
         run = session.get(RecipeRun, job.run_id)
