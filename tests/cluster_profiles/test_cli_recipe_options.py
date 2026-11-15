@@ -74,7 +74,7 @@ def _saved(client: Fake) -> dict:
     return client.saved
 
 
-def _add(client, *extra, capsys=None):
+def _add(client, *extra):
     return cli.main(
         (
             "--profile",
@@ -91,7 +91,7 @@ def _add(client, *extra, capsys=None):
     )
 
 
-def test_option_flag_is_saved_and_others_default(capsys):
+def test_option_flag_is_saved_and_others_default():
     client = Fake()
     assert _add(client, "--option", "verification=adaptive-k", "--no-input") == 0
     [assignment] = _saved(client)["assignments"]
@@ -103,7 +103,7 @@ def test_option_flag_is_saved_and_others_default(capsys):
     )
 
 
-def test_unknown_value_is_refused_with_the_choices(capsys):
+def test_unknown_value_is_refused_with_the_choices():
     client = Fake()
     client.reject_options = True
     assert _add(client, "--option", "verification=nope") != 0
@@ -119,7 +119,7 @@ def test_unknown_value_is_refused_with_the_choices(capsys):
     }
 
 
-def test_a_profile_document_the_contract_rejects_names_the_field(capsys):
+def test_a_profile_document_the_contract_rejects_names_the_field():
     """The reviewed service alias of a recipe can be mixed case; the contract's
     endpoint alias cannot. The refusal must say which field and rule, not only
     that the document does not match."""
@@ -127,19 +127,18 @@ def test_a_profile_document_the_contract_rejects_names_the_field(capsys):
     client = Fake()
     assert _add(client, "--as", "Qwen3-Coder-Next-FP8", "--no-input") != 0
     assert client.saved is None
-    capsys.readouterr()
     assert all(method != "PUT" for method, _, _ in client.calls)
     assert _add(client, "--as", "qwen3-coder-next-fp8", "--no-input") == 0
 
 
-def test_no_input_without_options_is_not_an_error_and_sends_no_choice(capsys):
+def test_no_input_without_options_is_not_an_error_and_sends_no_choice():
     client = Fake()
     assert _add(client, "--no-input") == 0
     # The Controller fills every default when the profile is saved.
     assert not _saved(client)["assignments"][0].get("option_choices")
 
 
-def test_interactive_prompt_accepts_default_with_enter(monkeypatch, capsys):
+def test_interactive_prompt_accepts_default_with_enter(monkeypatch):
     class Tty(io.StringIO):
         def isatty(self):
             return True
@@ -159,7 +158,7 @@ def test_interactive_prompt_accepts_default_with_enter(monkeypatch, capsys):
     }
 
 
-def test_configure_changes_choices_and_keeps_the_rest(capsys):
+def test_configure_changes_choices_and_keeps_the_rest():
     client = Fake(
         [
             {
@@ -193,45 +192,7 @@ def test_configure_changes_choices_and_keeps_the_rest(capsys):
     }
 
 
-def test_profile_show_lists_chosen_values(capsys):
-    from cluster_profiles import cli_render
-
-    cli_render.render_payload(
-        {
-            "number": 1,
-            "name": "P",
-            "definition": {
-                "assignments": [
-                    {
-                        "recipe_selector": SELECTOR,
-                        "spark_ids": [NODE],
-                        "option_choices": {"verification": "adaptive-k"},
-                    }
-                ]
-            },
-            "assignments": [],
-        },
-        "profile",
-    )
-    assert "verification" in capsys.readouterr().out
-
-
-def test_recipe_detail_lists_options_and_marks_the_default(capsys):
-    from cluster_profiles import cli_render
-
-    item = {
-        "selector": SELECTOR,
-        "identity": {"publisher": "vonk-forge", "slug": "glm", "title": "GLM"},
-        "local": {},
-        "resources": {},
-        "projected": {"options": OPTIONS},
-    }
-    cli_render._library_item(item, "recipe", detail=True)
-    out = capsys.readouterr().out
-    assert "adaptive-k" in out and "(default)" in out
-
-
-def test_definition_import_round_trips_option_choices(tmp_path, capsys):
+def test_definition_import_round_trips_option_choices(tmp_path):
     client = Fake()
     source = tmp_path / "d.json"
     definition = {
@@ -265,35 +226,3 @@ def test_definition_import_round_trips_option_choices(tmp_path, capsys):
     assert _saved(client)["assignments"][0]["option_choices"] == {
         "verification": "adaptive-k"
     }
-
-
-def _library_output(resources, capsys):
-    from cluster_profiles import cli_render
-
-    item = {
-        "selector": SELECTOR,
-        "identity": {"publisher": "vonk-forge", "slug": "glm", "title": "GLM"},
-        "local": {},
-        "resources": resources,
-    }
-    cli_render._library_item(item, "recipe", detail=True)
-    return capsys.readouterr().out
-
-
-def test_recipe_detail_shows_load_peak_and_minimum_swap(capsys):
-    out = _library_output(
-        {
-            "memory_bytes": 100 << 30,
-            "load_peak_bytes": 110 << 30,
-            "minimum_swap_bytes": 16 << 30,
-        },
-        capsys,
-    )
-    assert "Load peak" in out and "110.0 GiB" in out
-    assert "Minimum swap" in out and "16.0 GiB" in out
-
-
-def test_recipe_detail_omits_load_peak_and_swap_when_not_declared(capsys):
-    out = _library_output({"memory_bytes": 100 << 30}, capsys)
-    assert "Memory" in out
-    assert "Load peak" not in out and "Minimum swap" not in out

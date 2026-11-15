@@ -31,6 +31,15 @@ class _Alarm(StrEnum):
     STALLED = "progress.stalled"
 
 
+def stalls(blockers: object) -> list[object]:
+    """The details of the Controller's stall alarms among an application's blockers."""
+    return [
+        blocker.get("detail")
+        for blocker in (blockers if isinstance(blockers, list) else [])
+        if isinstance(blocker, Mapping) and blocker.get("code") == _Alarm.STALLED
+    ]
+
+
 def _run_result(payload: Mapping[str, object]) -> None:
     """A finished run is its recipe, its application, and where it is served."""
 
@@ -49,11 +58,9 @@ def _run_result(payload: Mapping[str, object]) -> None:
 def _application(payload: Mapping[str, object]) -> None:
     _field("Application", payload.get("id"))
     _field("State", payload.get("state"))
-    blockers = payload.get("blockers")
-    for blocker in blockers if isinstance(blockers, list) else []:
-        if isinstance(blocker, Mapping) and blocker.get("code") == _Alarm.STALLED:
-            # Informative: the Controller cancels nothing; it clears on progress.
-            _field("STALLED", blocker.get("detail"))
+    for detail in stalls(payload.get("blockers")):
+        # Informative: the Controller cancels nothing; it clears on progress.
+        _field("STALLED", detail)
     if payload.get("status_reason") is not None:
         _field("Reason", payload["status_reason"])
     if payload.get("reason_code") is not None:

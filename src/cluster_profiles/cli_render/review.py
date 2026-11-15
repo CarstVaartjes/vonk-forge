@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import StrEnum
 
 from ..generated_control.models.fleet_profile_gpu_clock_effect import (
     FleetProfileGpuClockEffect,
@@ -21,14 +22,28 @@ from .common import (
 from .library import _option_choices
 
 
+class ReviewVerdict(StrEnum):
+    READY = "Ready for review"
+    READY_AFTER_PREPARATION = "Ready after preparation"
+    BLOCKED = "Blocked"
+
+
+def review_verdict(allowed: object, waits_for_preparation: object) -> ReviewVerdict:
+    """Allowed, waiting only for preparation, or blocked; never "allowed" by default."""
+    if allowed is True:
+        return ReviewVerdict.READY
+    if waits_for_preparation is True:
+        return ReviewVerdict.READY_AFTER_PREPARATION
+    return ReviewVerdict.BLOCKED
+
+
 def _preview(payload: Mapping[str, object]) -> None:
-    if payload.get("allowed") is True:
-        print("Ready for review")
-    elif payload.get("waits_for_preparation") is True:
-        print("Ready after preparation")
+    verdict = review_verdict(
+        payload.get("allowed"), payload.get("waits_for_preparation")
+    )
+    print(verdict)
+    if verdict is ReviewVerdict.READY_AFTER_PREPARATION:
         print("The Controller prepares what is listed below, then continues.")
-    else:
-        print("Blocked")
     _field("Profile", payload.get("profile_name"))
     _field("Revision", payload.get("profile_revision"))
     _field("Plan digest", payload.get("plan_digest"))

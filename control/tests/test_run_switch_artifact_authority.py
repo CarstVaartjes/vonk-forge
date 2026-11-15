@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol import ModelCacheBlockerCode, RunSwitchCode, canonical_message
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
@@ -150,3 +150,68 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
             assert spark_model_objects(session, nodes[0], now=NOW)
             stale = NOW + INVENTORY_MAX_AGE + timedelta(seconds=1)
             assert spark_model_objects(session, nodes[0], now=stale) is None
+
+
+class _FullNas(ModelCacheManifestProvider):
+    """A NAS that lacks the set and has no room to download it again."""
+
+    def download_preview(self, **kwargs):
+        return super().download_preview(**kwargs) | {
+            "blockers": [ModelCacheBlockerCode.INSUFFICIENT_RESERVED_STORAGE.value]
+        }
+
+
+@pytest.mark.parametrize(
+    ("scan", "installed"), [("held", True), ("held", False), ("empty", False)]
+)
+def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
+    tmp_path, scan: str, installed: bool
+) -> None:
+    """The NAS copy feeds only the copy to a Spark. A re-apply whose Sparks all
+    hold the model's files plans no Hugging Face download after the NAS
+    evicted it, with or without the installation still in place, and a NAS
+    too full to take it back does not block it. A Spark lacking the files
+    still needs the download, so the full NAS blocks that load."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    if installed:
+        installed_recipe(
+            lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+        )
+    request = _request(sessions, nodes[0])
+    manifest = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    held = scan == "held"
+    _report_store(
+        sessions,
+        nodes[0],
+        [
+            {"sha256": spec.sha256, "bytes": spec.expected_bytes}
+            for spec in manifest.artifacts
+        ]
+        if held
+        else [],
+    )
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=_FullNas(missing_nas_bytes=manifest.expected_bytes),
+        build_archive_available=lambda _digest, _size: True,
+        memory_floor_bytes=50,
+    )
+
+    plan = service.preview(request, actor="admin")
+
+    assert plan.storage.missing_nas_bytes == manifest.expected_bytes
+    downloads = [phase for phase in plan.phases if phase.subphase == "model-download"]
+    assert bool(downloads) is not held
+    nas_blocked = [
+        reason.code
+        for reason in plan.blockers
+        if reason.code == RunSwitchCode.NAS_DOWNLOAD_BLOCKED
+    ]
+    assert bool(nas_blocked) is not held
+    assert plan.allowed is held, [reason.code for reason in plan.blockers]

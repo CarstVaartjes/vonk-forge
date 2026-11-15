@@ -122,6 +122,7 @@ MODES = (
     "retry-dispositions",
     "head-digests",
     "set-first-requester",
+    "printed-output",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -191,6 +192,67 @@ WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<"""
 WEB_NOT_REPORTED_KIND = (
     "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
 )
+# A vonkctl test decides on data (status, requests, a typed result, the --json
+# document); a positive string literal found in captured stdout/stderr is
+# wording, which only the shared vectors and their one test own. Absence, count
+# and emptiness checks on captured output (a secret never printed, a line shown
+# once) are leak and duplication checks and stay allowed.
+CAPTURED_TEXT = re.compile(r"\.(?:out|err)\b|\.getvalue\(\)|readouterr\(\)")
+PRINTED_OUTPUT_SCOPE = "tests/cluster_profiles/test_"
+PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_wording.py"
+PRINTED_OUTPUT_KIND = (
+    "vonkctl test asserts wording in printed output; assert the status, the "
+    "requests, a typed result, a view function or the --json document "
+    "(vonkctl_json), and put wording in test_cli_wording.py over a shared vector"
+)
+
+
+def _captured(expr: ast.expr, names: set[str]) -> bool:
+    """Captured stdout/stderr text, directly or through a stored name; never JSON."""
+    if any(
+        isinstance(call, ast.Call) and ast.unparse(call.func) == "json.loads"
+        for call in ast.walk(expr)
+    ):
+        return False
+    return bool(CAPTURED_TEXT.search(ast.unparse(expr))) or any(
+        isinstance(name, ast.Name) and name.id in names for name in ast.walk(expr)
+    )
+
+
+def printed_wording_lines(source: str) -> list[int]:
+    """Lines of `assert "<literal>" in <captured stdout/stderr>` assertions."""
+    lines: list[int] = []
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        # Names a function binds to captured text: `out = capsys.readouterr().out`.
+        names: set[str] = set()
+        for assign in ast.walk(function):
+            if isinstance(assign, ast.Assign) and _captured(assign.value, set()):
+                names.update(
+                    target.id
+                    for node in assign.targets
+                    for target in ast.walk(node)
+                    if isinstance(target, ast.Name)
+                )
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Assert):
+                continue
+            if any(
+                isinstance(compare, ast.Compare)
+                and isinstance(compare.left, ast.Constant | ast.JoinedStr)
+                and (
+                    isinstance(compare.left, ast.JoinedStr)
+                    or isinstance(compare.left.value, str)
+                )
+                and any(isinstance(op, ast.In) for op in compare.ops)
+                and any(_captured(item, names) for item in compare.comparators)
+                for compare in ast.walk(node.test)
+            ):
+                lines.extend(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return sorted(set(lines))
+
+
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
@@ -1197,6 +1259,9 @@ _ANONYMOUS_SEND_MODULES = frozenset(
 
 
 _MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
+
+# The one reader outside the model cache that may require NAS coverage.
+NAS_COVERAGE_READER = "control/src/vonk_control/distribution/model_cache.py"
 
 
 def _targets_membership_rows(node: ast.AST) -> bool:
@@ -2277,6 +2342,26 @@ def check_source(
     if (
         python
         and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/")
+        and not path.startswith("control/src/vonk_control/model_cache/")
+        and path != NAS_COVERAGE_READER
+    ):
+        # NAS coverage is read only where NAS bytes are read: the distribution
+        # adapter. A planner or compiler that required it downloaded a model
+        # every target Spark already held, after the NAS evicted it (#2337).
+        hits.extend(
+            (line, "NAS coverage required outside the copy that reads NAS bytes")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set"
+                r"|verified_model_objects_for_set)\b",
+                text,
+            )
+        )
+    if (
+        python
+        and not is_test
         and "item-counts" in modes
         and path.startswith(("control/src/", "agent_protocol/src/"))
     ):
@@ -2458,6 +2543,15 @@ def check_source(
             for number, text in enumerate(source.splitlines(), 1)
             if not text.lstrip().startswith(("*", "/*", "//"))
             and WEB_NOT_REPORTED.search(text)
+        )
+    if (
+        python
+        and "printed-output" in modes
+        and path.startswith(PRINTED_OUTPUT_SCOPE)
+        and path != PRINTED_OUTPUT_WORDING
+    ):
+        hits.extend(
+            (number, PRINTED_OUTPUT_KIND) for number in printed_wording_lines(source)
         )
     if python and "contract-constants" in modes:
         hits.extend(

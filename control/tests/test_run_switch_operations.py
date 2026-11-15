@@ -1855,15 +1855,8 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
     assert hashlib.sha256(expected_archive).hexdigest() == layout_digest
     place_test_image(controller_storage, layout_digest, len(expected_archive))
 
-    class ColdModelCache(_CanonicalModelCache):
-        ready = False
-
-        def verified_model_objects_for_set(self, artifact_set_sha256):
-            if not self.ready:
-                raise RuntimeError("model bytes are not verified yet")
-            return super().verified_model_objects_for_set(artifact_set_sha256)
-
-    model_cache = ColdModelCache()
+    # Compilation needs the model's identity, not its NAS copy.
+    model_cache = _CanonicalModelCache()
 
     class _BuildArchiveTransport:
         def pull_and_export(
@@ -1952,7 +1945,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
             identity = phase.subphase or phase.kind
             self.events.append(identity)
             if phase.subphase == "model-download":
-                model_cache.ready = True
                 return _fixture_execution(
                     plan,
                     phase,

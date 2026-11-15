@@ -1,16 +1,7 @@
-"""`vonkctl metrics` prints the catalogue's words and the shared number wording."""
+"""`vonkctl metrics`: the series request, the Spark names it adds, and sparklines."""
 
-import json
-from pathlib import Path
+from cluster_profiles.cli_render.metrics import sparkline
 
-import pytest
-
-from cluster_profiles import cli
-from cluster_profiles.cli_render.metrics import NO_DATA, metric_value_text, sparkline
-
-_WORDING = json.loads(
-    (Path(__file__).parents[1] / "fixtures" / "metrics-wording.json").read_text()
-)["cases"]
 NODE = "spk_" + "1" * 32
 
 
@@ -83,16 +74,6 @@ def _series(labels, values, **summary):
     }
 
 
-def _run(argv, client, capsys):
-    status = cli.main(argv, control_client=client, request_id_factory=lambda: "r" * 8)
-    return status, capsys.readouterr().out
-
-
-@pytest.mark.parametrize("case", _WORDING, ids=lambda c: f"{c['unit']}-{c['value']}")
-def test_values_read_as_the_shared_wording(case):
-    assert metric_value_text(case["unit"], case["value"]) == case["text"]
-
-
 def test_sparkline_marks_gaps_and_flat_series():
     assert sparkline([1, 2, 3, 4, 5, 6, 7, 8]) == "▁▂▃▄▅▆▇█"
     assert sparkline([5] * 8) == "▄" * 8
@@ -100,13 +81,7 @@ def test_sparkline_marks_gaps_and_flat_series():
     assert sparkline([]) == ""
 
 
-def test_list_prints_the_catalogue(capsys):
-    status, out = _run(("metrics",), _Client(_spec(), {}), capsys)
-    assert status == 0
-    assert "GPU temperature" in out and "celsius" in out and "measured" in out
-
-
-def test_show_names_the_spark_and_marks_estimates(capsys):
+def test_show_reads_the_series_then_names_its_sparks_once(vonkctl_json):
     series = _document(
         _spec(basis="estimated"),
         [
@@ -117,7 +92,9 @@ def test_show_names_the_spark_and_marks_estimates(capsys):
         ],
     )
     client = _Client(_spec(), series)
-    status, out = _run(("metrics", "show", "gpu_temperature"), client, capsys)
+    status, document = vonkctl_json(
+        "metrics", "show", "gpu_temperature", control_client=client
+    )
     assert status == 0
     assert client.calls[0] == (
         "GET",
@@ -125,17 +102,18 @@ def test_show_names_the_spark_and_marks_estimates(capsys):
         {"metric": "gpu_temperature", "range": "24h"},
     )
     assert [call[1] for call in client.calls].count("/api/fleet") == 1
-    assert "GPU temperature, last 24 hours (estimate)" in out
-    assert "Alpha" in out and "60 °C" in out and "(estimate)" in out
-    assert NO_DATA in out
+    assert document["names"] == {NODE: "Alpha"}
 
 
-def test_show_json_passes_the_controller_document_through(capsys):
-    series = _document(_spec(), [], "1h")
-    status, out = _run(
-        ("metrics", "show", "gpu_temperature", "--range", "1h", "--json"),
-        _Client(_spec(), series),
-        capsys,
+def test_show_of_an_empty_series_reads_no_roster_and_is_no_contract_document(
+    vonkctl_json,
+):
+    client = _Client(_spec(), _document(_spec(), [], "1h"))
+    status, document = vonkctl_json(
+        "metrics", "show", "gpu_temperature", "--range", "1h", control_client=client
     )
     assert status == 0
-    assert json.loads(out)["series"] == [] and "schema_version" not in json.loads(out)
+    assert client.calls == [
+        ("GET", "/api/metrics/series", {"metric": "gpu_temperature", "range": "1h"})
+    ]
+    assert document["names"] == {} and "schema_version" not in document

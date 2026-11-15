@@ -182,26 +182,23 @@ def _prepared_successor(tmp_path, *, change="runtime"):
     class ModelReceipts:
         def resolve_artifact_set(self, **kwargs):
             assert kwargs["recipe_revision_sha256"] == successor.content_digest
-            return SimpleNamespace(digest="f" * 64)
-
-        def verified_model_objects_for_set(self, _digest):
-            return tuple(
-                {
-                    "model_content_sha256": model_digest,
-                    "file_id": file.id,
-                    "path": file.path,
-                    "sha256": file.sha256,
-                    "bytes": file.size_bytes,
-                    "roles": file.roles,
-                    "distribution_object": {
-                        "name": file.path,
-                        "sha256": file.sha256,
-                        "bytes": file.size_bytes,
-                        "kind": "model",
-                    },
-                }
-                for file in model.files
+            return SimpleNamespace(
+                digest="f" * 64,
+                artifacts=tuple(
+                    SimpleNamespace(
+                        artifact_id=file.id,
+                        path=file.path,
+                        sha256=file.sha256,
+                        expected_bytes=file.size_bytes,
+                        roles=tuple(file.roles),
+                        model_content_sha256=model_digest,
+                    )
+                    for file in model.files
+                ),
             )
+
+        def adopt_covered_set(self, _manifest) -> None:
+            return None
 
     compiler = ControllerExecutionPlanService(
         ModelReceipts(), runtime_image_resolver=stored_runtime_image_resolver(storage)

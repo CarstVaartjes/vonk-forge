@@ -1,6 +1,5 @@
 """Profile review consent crosses real terminal and noninteractive boundaries."""
 
-import json
 import os
 import select
 
@@ -89,7 +88,7 @@ class Client:
         }
 
 
-def test_yes_loads_without_a_preview_round_trip(capsys):
+def test_yes_loads_without_a_preview_round_trip():
     client = Client(include_receipt_digest=False)
     assert (
         cli.main(
@@ -108,7 +107,6 @@ def test_yes_loads_without_a_preview_round_trip(capsys):
         )
         == 0
     )
-    capsys.readouterr()
     assert [path for _, path, _ in client.calls] == ["/api/profile/2/load"]
 
 
@@ -120,34 +118,25 @@ def test_yes_loads_without_a_preview_round_trip(capsys):
         ("--json",),
     ],
 )
-def test_noninteractive_load_cannot_approve_an_unseen_or_invalid_plan(options, capsys):
+def test_noninteractive_load_cannot_approve_an_unseen_or_invalid_plan(options):
     client = Client()
     assert (
         cli.main(("--profile", "2", "profile", "load", *options), control_client=client)
         == 2
     )
     assert client.calls == []
-    capsys.readouterr()
 
 
-def test_json_review_returns_one_blocked_review_without_load(capsys):
+def test_json_review_returns_one_blocked_review_without_load(vonkctl_json):
     client = Client(blocked=True)
-    assert (
-        cli.main(
-            ("--profile", "2", "profile", "load", "--review", "--json"),
-            control_client=client,
-        )
-        == 2
+    status, _ = vonkctl_json(
+        "--profile", "2", "profile", "load", "--review", control_client=client
     )
-    output = capsys.readouterr()
-    assert json.loads(output.out)["allowed"] is False
-    assert output.err == ""
+    assert status == 2
     assert client.calls == [("POST", "/api/profile/2/preview", None)]
 
 
-def test_interactive_blocked_preview_can_be_confirmed_and_submitted(
-    monkeypatch, capsys
-):
+def test_interactive_blocked_preview_can_be_confirmed_and_submitted(monkeypatch):
     import sys
 
     master, slave = os.openpty()
@@ -167,9 +156,7 @@ def test_interactive_blocked_preview_can_be_confirmed_and_submitted(
             transcript = bytearray()
             while select.select([master], [], [], 0)[0]:
                 transcript.extend(os.read(master, 65536))
-        output = capsys.readouterr()
         assert code == 0
-        assert output.out
         assert "Missing exact model archive" in transcript.decode()
         assert "[y/N]" in transcript.decode()
         assert [path for _, path, _ in client.calls] == [
@@ -185,7 +172,7 @@ def test_interactive_blocked_preview_can_be_confirmed_and_submitted(
     "answer,expected",
     [("no", 2), ("yes", 0), (None, 2)],
 )
-def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch, capsys):
+def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch):
     import sys
 
     master, slave = os.openpty()
@@ -221,15 +208,12 @@ def test_terminal_reviews_and_confirms_once(answer, expected, monkeypatch, capsy
             + (["/api/profile/2/load"] if answer == "yes" else [])
         )
         assert generated_keys == ([KEY] if answer == "yes" else [])
-        result = capsys.readouterr().out
-        if code == 0:
-            assert APPLICATION in result
     finally:
         os.close(master)
         os.close(slave)
 
 
-def test_interactive_load_still_shows_current_effect_review(monkeypatch, capsys):
+def test_interactive_load_still_shows_current_effect_review(monkeypatch):
     import sys
 
     master, slave = os.openpty()
@@ -264,13 +248,12 @@ def test_interactive_load_still_shows_current_effect_review(monkeypatch, capsys)
         ]
         text = transcript.decode()
         assert DIGEST in text
-        assert APPLICATION in capsys.readouterr().out
     finally:
         os.close(master)
         os.close(slave)
 
 
-def test_interactive_load_uses_latest_preview(monkeypatch, capsys):
+def test_interactive_load_uses_latest_preview(monkeypatch):
     import sys
 
     current_digest = "d" * 64
@@ -306,13 +289,12 @@ def test_interactive_load_uses_latest_preview(monkeypatch, capsys):
         ]
         text = transcript.decode()
         assert text.count("[y/N]") == 1
-        assert APPLICATION in capsys.readouterr().out
     finally:
         os.close(master)
         os.close(slave)
 
 
-def test_changed_image_plan_can_be_loaded_without_repeating_review(monkeypatch, capsys):
+def test_changed_image_plan_can_be_loaded_without_repeating_review(monkeypatch):
     import sys
 
     current_digest = "d" * 64
@@ -365,14 +347,15 @@ def test_changed_image_plan_can_be_loaded_without_repeating_review(monkeypatch, 
         assert "[y/N]" in text
         assert sum(path.endswith("/preview") for _, path, _ in client.calls) == 1
         assert sum(path.endswith("/load") for _, path, _ in client.calls) == 1
-        assert APPLICATION in capsys.readouterr().out
     finally:
         os.close(master)
         os.close(slave)
 
 
 @pytest.mark.parametrize("binding", ["request_key", "application"])
-def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, capsys):
+def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(
+    binding, vonkctl_json
+):
     receipt: dict[str, object] = {
         "id": APPLICATION,
         "state": "queued",
@@ -401,21 +384,16 @@ def test_unbound_load_receipt_is_only_looked_up_and_never_replayed(binding, caps
             raise AssertionError(f"unexpected remote effect {method} {path}")
 
     client = LostAnswerClient()
-    status = cli.main(
-        (
-            "--profile",
-            "2",
-            "profile",
-            "load",
-            "--yes",
-            "--json",
-        ),
+    status, document = vonkctl_json(
+        "--profile",
+        "2",
+        "profile",
+        "load",
+        "--yes",
         control_client=client,
         request_id_factory=lambda: KEY,
     )
 
-    output = capsys.readouterr()
-    document = json.loads(output.out)
     assert status == 2
     assert document["request_key"] == KEY
     assert document["submission"]["acceptance"] == "unknown"

@@ -62,15 +62,55 @@ def _locks(payload: Mapping[str, object]) -> None:
         )
 
 
+def unknown_membership(operations: object, total: object, issue: object) -> str | None:
+    """Why a page's operations are unknown, when the Controller could not read them.
+
+    Unknown is not empty: the page then shows the cause, never "0 of 0" or
+    "no activity".
+    """
+    if operations is None and total is None and isinstance(issue, str):
+        return issue
+    return None
+
+
+def activity_continuation(
+    cursor: object,
+    *,
+    limit: object = 20,
+    state: object = None,
+    target: object = None,
+    request_id: object = None,
+) -> list[str] | None:
+    """The next page's command with every filter of this one, for a readable cursor."""
+    if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
+        return None
+    command = [
+        "vonkctl",
+        "fleet",
+        "activity",
+        "--limit",
+        str(limit),
+        "--cursor",
+        cursor,
+    ]
+    for flag, value in (
+        ("--state", state),
+        ("--target", target),
+        ("--request-id", request_id),
+    ):
+        if isinstance(value, str) and value:
+            command.extend((flag, value))
+    return command
+
+
 def _activity(
     payload: Mapping[str, object], filters: Mapping[str, object] | None
 ) -> None:
-    if (
-        payload.get("operations") is None
-        and payload.get("total") is None
-        and isinstance(payload.get("projection_issue"), str)
-    ):
-        _field("Activity observation", payload["projection_issue"])
+    issue = unknown_membership(
+        payload.get("operations"), payload.get("total"), payload.get("projection_issue")
+    )
+    if issue is not None:
+        _field("Activity observation", issue)
         return
     operations = _records(payload, "operations")
     total = payload.get("total")
@@ -169,20 +209,16 @@ def _activity(
     if cursor is None:
         _field("More results", "no")
         return
-    if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
+    query_filters = filters or {}
+    command = activity_continuation(
+        cursor,
+        limit=query_filters.get("limit", 20),
+        state=query_filters.get("state"),
+        target=query_filters.get("target"),
+        request_id=query_filters.get("request_id"),
+    )
+    if command is None:
         _field("More results", ENDPOINT_UNAVAILABLE)
         return
-    command = ["vonkctl", "fleet", "activity"]
-    query_filters = filters or {}
-    limit = query_filters.get("limit", 20)
-    command.extend(("--limit", str(limit), "--cursor", cursor))
-    for key, flag in (
-        ("state", "--state"),
-        ("target", "--target"),
-        ("request_id", "--request-id"),
-    ):
-        value = query_filters.get(key)
-        if isinstance(value, str) and value:
-            command.extend((flag, value))
     print("More results are available. Continue with:")
     print(shlex.join(command))

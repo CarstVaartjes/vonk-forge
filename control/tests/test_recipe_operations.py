@@ -350,27 +350,22 @@ class _CanonicalModelCache:
     file_sha256 = "c" * 64
 
     def resolve_artifact_set(self, **_kwargs):
-        return type("Manifest", (), {"digest": self.artifact_set_sha256})()
-
-    def verified_model_objects_for_set(self, artifact_set_sha256):
-        if artifact_set_sha256 != self.artifact_set_sha256:
-            raise ValueError("unknown artifact set")
-        return (
-            {
-                "model_content_sha256": _synthetic_model_content_sha256(),
-                "file_id": "weights",
-                "path": "model.safetensors",
-                "sha256": self.file_sha256,
-                "bytes": 1024,
-                "roles": ["weights"],
-                "distribution_object": {
-                    "name": "model.safetensors",
-                    "sha256": self.file_sha256,
-                    "bytes": 1024,
-                    "kind": "model",
-                },
-            },
+        return SimpleNamespace(
+            digest=self.artifact_set_sha256,
+            artifacts=(
+                SimpleNamespace(
+                    artifact_id="weights",
+                    path="model.safetensors",
+                    sha256=self.file_sha256,
+                    expected_bytes=1024,
+                    roles=("weights",),
+                    model_content_sha256=_synthetic_model_content_sha256(),
+                ),
+            ),
         )
+
+    def adopt_covered_set(self, manifest) -> None:
+        assert manifest.digest == self.artifact_set_sha256
 
 
 def _placement(payload: object) -> dict[str, Any]:
