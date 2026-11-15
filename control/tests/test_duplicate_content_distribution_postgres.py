@@ -208,6 +208,8 @@ def test_a_grant_registers_after_the_nas_evicted_its_set(
         session.execute(
             delete(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256 == set_digest)
         )
+    # A restarted process holds no copy of the evicted set either.
+    model_source._manifests.clear()
     assignment = _assignment(identity, image, set_digest, objects)
 
     distribution.register(assignment)
