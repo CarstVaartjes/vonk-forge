@@ -12,7 +12,6 @@ from typing import cast as _typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    InstallationNodeState,
     InstallationState,
     LifecycleState,
     ObservedAssignmentState,
@@ -23,6 +22,7 @@ from vonk_forge_contracts import RecipeDefinition
 from ..cluster_mappings import mapping_option_choices
 from ..content_identity import catalog_reference_membership
 from ..fleet_profile_contract import FleetProfileAssignment, FleetProfileAssignmentState
+from ..machine_states import rank_installed
 from ..models import (
     STOPPABLE_RUN_STATES,
     AgentNode,
@@ -348,10 +348,7 @@ class FleetProfileService:
             and len(install_members) == len(expected)
             and {(node.node_id, node.rank, node.role) for node in install_members}
             == {(node.node_id, node.rank, node.role) for node in assignment.nodes}
-            and all(
-                node.state == InstallationNodeState.INSTALLED
-                for node in install_members
-            )
+            and all(rank_installed(node.state) for node in install_members)
             and (
                 installation_matches_runtime_image(
                     installation,

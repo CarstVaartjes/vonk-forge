@@ -100,7 +100,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchAssessment,
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
-    RunSwitchCleanupResult,
     RunSwitchCleanupVerifyResult,
     RunSwitchContainerBuildResult,
     RunSwitchDistributionChildResult,
@@ -5018,64 +5017,6 @@ def test_start_phase_adopts_the_child_it_already_queued(tmp_path: Path) -> None:
     with sessions() as session:
         starts = tuple(session.scalars(select(Job).where(Job.kind == "recipe.start")))
     assert len(starts) == 1
-
-
-def test_cleanup_adapter_retries_when_executor_reports_nas_eviction(
-    tmp_path: Path,
-) -> None:
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle,
-        mapping_id,
-        build_id,
-        nodes,
-        request_id=str(uuid.uuid4()),
-    )
-    artifact_executor = RecordingArtifactExecutor()
-    service = _service(
-        sessions,
-        lifecycle._clock(),
-        lifecycle,
-        artifact_executor,
-        artifacts=CompleteArtifactInspector(),
-    )
-    request = _request(sessions, nodes[0], retention="reclaim-unreferenced")
-    plan = service.preview(request, actor="admin")
-    assert "cleanup" in [phase.kind for phase in plan.phases]
-
-    class NasEvictingExecutor(RecordingArtifactExecutor):
-        def execute(self, plan, phase, **kwargs):
-            if phase.kind == "cleanup":
-                return PhaseExecution(
-                    result=RunSwitchCleanupResult.model_construct(
-                        phase="cleanup",
-                        scope="nas",
-                        reclaimed_bytes=30,
-                        protected_referenced_bytes=0,
-                        nas_evicted=True,
-                    )
-                )
-            return super().execute(plan, phase, **kwargs)
-
-    bad_service = _service(
-        sessions,
-        lifecycle._clock(),
-        lifecycle,
-        NasEvictingExecutor(),
-        artifacts=CompleteArtifactInspector(),
-    )
-    bad_plan = bad_service.preview(request, actor="admin")
-    operation = bad_service.apply(
-        RunSwitchApplyRequest(
-            **request.model_dump(),
-            plan_digest=bad_plan.plan_digest,
-            request_key=str(uuid.uuid4()),
-        ),
-        actor="admin",
-    )
-    assert bad_service.tick() is True
-    retried = bad_service.get(operation.operation_id)
-    assert retried.state in {"running", LifecycleState.OBSERVING}
 
 
 def test_invocation_metadata_does_not_change_plan_digest(tmp_path: Path) -> None:

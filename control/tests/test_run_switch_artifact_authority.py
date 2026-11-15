@@ -5,12 +5,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from vonk_agent_protocol import ModelCacheBlockerCode, RunSwitchCode, canonical_message
+from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
 )
+from vonk_control.models import RecipeBuild
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
     RunSwitchOperationService,
@@ -218,3 +220,21 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
     ]
     assert bool(nas_blocked) is not held
     assert plan.allowed is held, [reason.code for reason in plan.blockers]
+
+
+def test_each_asked_spark_holds_only_the_images_its_installed_ranks_name(
+    tmp_path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        named = runtime_images_named_on_nodes(session, [*nodes, "spark-without-ranks"])
+
+    assert named == {
+        **{node_id: frozenset({build.image_digest}) for node_id in nodes},
+        "spark-without-ranks": frozenset(),
+    }

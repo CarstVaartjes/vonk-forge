@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationBytes,
@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 
+from .machine_states import rank_installed
 from .models import InstallationNode, RecipeInstallation
 
 
@@ -57,17 +58,41 @@ def reconcile_missing_installations(
 ) -> int:
     """A complete, fresh listing makes missing installed ranks re-installable.
 
-    Unknown or truncated listings prove nothing. Never overwrite a newer install
-    receipt or an in-flight install, and never release running workload claims.
-    Busy rows wait for the next inventory rather than blocking its acceptance.
+    Unknown or truncated listings prove nothing.
     """
     if reported is None or len(reported) >= MAX_REPORTED_INSTALLATIONS:
         return 0
+    return demote_installed_ranks(
+        session,
+        node_id,
+        InstallationNode.installation_id.not_in(tuple(reported)),
+        observed_at=observed_at,
+        before=before,
+    )
+
+
+def demote_installed_ranks(
+    session: Session,
+    node_id: str,
+    which: ColumnElement[bool],
+    *,
+    observed_at: datetime,
+    before: datetime,
+) -> int:
+    """The Spark lost what these installed ranks need: install them again.
+
+    ``which`` selects the ranks on ``node_id``. Each becomes planned with no
+    bytes and its installation partial, so the next plan installs it afresh
+    (and copies whatever the Spark no longer holds). Only rows last changed at
+    or before ``before`` move, so a receipt newer than the evidence stays; an
+    in-flight install and running workload claims are never touched. Busy rows
+    wait for the next evidence rather than blocking it.
+    """
     candidates = select(InstallationNode.installation_id).where(
         InstallationNode.node_id == node_id,
-        InstallationNode.state == InstallationNodeState.INSTALLED,
+        rank_installed(InstallationNode.state),
         InstallationNode.updated_at <= before,
-        InstallationNode.installation_id.not_in(tuple(reported)),
+        which,
     )
     installations = tuple(
         session.scalars(
@@ -92,7 +117,7 @@ def reconcile_missing_installations(
         .where(
             InstallationNode.installation_id.in_(tuple(owners)),
             InstallationNode.node_id == node_id,
-            InstallationNode.state == InstallationNodeState.INSTALLED,
+            rank_installed(InstallationNode.state),
             InstallationNode.updated_at <= before,
         )
         .order_by(InstallationNode.id)

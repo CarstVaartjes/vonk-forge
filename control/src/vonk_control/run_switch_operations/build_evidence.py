@@ -9,7 +9,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
-from ..disk_reservations import runtime_images_named_on_node
+from ..disk_reservations import runtime_images_named_on_nodes
 from ..inventory_items import inventory_items
 from ..models import (
     AgentNode,
@@ -187,14 +187,15 @@ class BuildEvidenceMixin:
         runtime_reused = 0
         runtime_missing = 0
         runtime_missing_by_node: dict[str, int] = {}
-        runtime_reclaimable = 0
         if image_bytes is not None and isinstance(image_digest, str):
+            named_images = runtime_images_named_on_nodes(
+                session, [node.node_id for node in group.nodes]
+            )
             for node in group.nodes:
                 # Held while an installation on the Spark names it: the
                 # helper never prunes such an image. Any other may be pruned.
-                if image_digest in runtime_images_named_on_node(session, node.node_id):
+                if image_digest in named_images[node.node_id]:
                     runtime_reused += image_bytes
-                    runtime_reclaimable += image_bytes
                 else:
                     runtime_missing += image_bytes
                     runtime_missing_by_node[node.node_id] = image_bytes
@@ -242,7 +243,6 @@ class BuildEvidenceMixin:
                 else "unknown"
             ),
             spark_coverage=runtime_coverage,
-            reclaimable_bytes=runtime_reclaimable,
         )
         state = "missing" if candidate is None else str(candidate.state)
         detail: str | None = None

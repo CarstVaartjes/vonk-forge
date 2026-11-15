@@ -498,14 +498,12 @@ def reconcile_schema(connection: Connection) -> None:
         move_repeated_evidence,
         move_resource_facts,
         move_runtime_facts,
-        retire_artifact_facts,
     )
 
     # Contact first: the runtime move reads the contact clock from its owner,
     # and repeated evidence adopts contact summaries onto contact rows.
     move_contact_facts(connection)
     move_runtime_facts(connection)
-    retire_artifact_facts(connection)
     move_repeated_evidence(connection)
     move_resource_facts(connection)
 

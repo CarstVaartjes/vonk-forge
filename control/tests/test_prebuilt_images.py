@@ -472,7 +472,6 @@ def test_off_target_build_runs_once_before_an_early_memory_stop() -> None:
         stops=[stop],
         inspection=inspection,
         runtime_storage=None,
-        retention="retain-cached",
         blockers=[],
         stop_before_transfer=False,
         stop_before_prepare=True,

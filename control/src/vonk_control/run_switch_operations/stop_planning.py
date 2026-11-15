@@ -289,7 +289,6 @@ class StopPlanningMixin:
                 inspection=inspection,
                 partial_stop=profile_stop_scope is not None,
                 runtime_storage=runtime_storage,
-                retention="retain-cached",
                 blockers=blockers,
                 stop_before_transfer=False,
                 stop_before_prepare=False,

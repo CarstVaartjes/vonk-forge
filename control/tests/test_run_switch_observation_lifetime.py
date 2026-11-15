@@ -6,7 +6,6 @@ from datetime import timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
-import httpx2
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
@@ -22,7 +21,6 @@ from vonk_control.models import (
 from vonk_control.preparation_contract import RuntimeImageIdentity
 from vonk_control.run_switch_contract import (
     RunSwitchApplyRequest,
-    RunSwitchCleanupResult,
     RunSwitchPhase,
     RunSwitchRuntimeImageResult,
     RunSwitchTargetTransferEvidenceResult,
@@ -54,9 +52,6 @@ from .test_run_switch_operations import (
     "fault",
     [
         "transfer-bytes",
-        "nas-eviction",
-        "unplanned-cleanup",
-        "cleanup-response-loss",
         "verify-image",
         "prepare-image",
         "verify-archive",
@@ -80,23 +75,13 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
     class FaultyObservation(RecordingArtifactExecutor):
         damaged = True
 
-        def __init__(self):
-            super().__init__()
-            self.cleanup_requests: list[str] = []
-
         def execute(self, plan, phase, **kwargs):
-            if phase.kind == ProfileChildPhase.CLEANUP:
-                self.cleanup_requests.append(kwargs["request_key"])
             if self.damaged and phase.kind == (
                 ProfileChildPhase.TRANSFER
                 if fault == "transfer-bytes"
                 else ProfileChildPhase.VERIFY
-                if fault.startswith(("verify-", "profile-", "prepare-"))
-                else ProfileChildPhase.CLEANUP
             ):
                 self.calls.append(phase.kind)
-                if fault == "cleanup-response-loss":
-                    raise httpx2.ReadError("cleanup response unavailable")
                 if fault == "transfer-bytes":
                     receipt = RunSwitchTargetTransferEvidenceResult(
                         phase=ProfileChildPhase.TRANSFER.value,
@@ -153,7 +138,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                     )
                     _require_profile_runtime_image(expected, observed)
                     return super().execute(plan, phase, **kwargs)
-                elif fault.startswith("verify-"):
+                else:
                     execution = super().execute(plan, phase, **kwargs)
                     field = (
                         "verified_image_digest"
@@ -165,15 +150,6 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
                     )
                     assert execution.result is not None
                     receipt = execution.result.model_copy(update={field: changed})
-                else:
-                    receipt = RunSwitchCleanupResult(
-                        phase=ProfileChildPhase.CLEANUP.value,
-                        scope="spark-local",
-                        # More than the plan allowed to reclaim.
-                        reclaimed_bytes=10**9 if fault == "unplanned-cleanup" else 0,
-                        protected_referenced_bytes=0,
-                        nas_evicted=fault == "nas-eviction",
-                    )
                 return PhaseExecution(result=receipt)
             return super().execute(plan, phase, **kwargs)
 
@@ -220,17 +196,6 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
     assert not service.tick()
     assert len(executor.calls) == calls
     service = restart()
-    if fault == "cleanup-response-loss":
-        # A post-dispatch exception reconnects with the accepted cleanup key,
-        # including across a restart; it cannot restart the plan or generation.
-        now[0] = due
-        assert service.tick()
-        held = service.get(operation.operation_id)
-        assert held.result is not None and held.next_attempt_at is not None
-        due = held.next_attempt_at
-        assert len(executor.cleanup_requests) >= 2
-        assert len(set(executor.cleanup_requests)) == 1
-        calls = len(executor.calls)
     if repair:
         executor.damaged = False
         now[0] = due
@@ -241,8 +206,6 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
             ProfileChildPhase.TRANSFER
             if fault == "transfer-bytes"
             else ProfileChildPhase.VERIFY
-            if fault.startswith(("verify-", "profile-", "prepare-"))
-            else ProfileChildPhase.CLEANUP
         )
         for _ in range(10):
             resumed = service.get(operation.operation_id)

@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.compiled_execution_plan import CompiledExecutionPlan
 
+from ..machine_states import rank_installed
 from ..models import (
     STOPPABLE_RUN_STATES,
     AgentNode,
@@ -227,9 +228,7 @@ class ExecutorVerificationMixin:
             )
             verified = (
                 installation.state == InstallationState.INSTALLED
-                and all(
-                    node.state == InstallationNodeState.INSTALLED for node in members
-                )
+                and all(rank_installed(node.state) for node in members)
                 and not active_runs
                 and not unwithdrawn_routes
             )

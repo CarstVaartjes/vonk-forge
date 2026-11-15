@@ -7,8 +7,10 @@ and reports their observations, so a Spark that is down stops reporting them; on
 that serves nothing sends a complete empty report every round, as the agent does.
 Faults are per Spark: down (no inventory, no answers), late (answers held for
 some rounds), duplicate (every answer delivered twice), failing (its next
-answers are retryable failures: the orders wait and are answered again) and
-short of disk (inventory reports almost no free space). A test may model a
+answers are retryable failures: the orders wait and are answered again), short
+of disk (inventory reports almost no free space) and image removed (its runtime
+image was deleted by hand: every Start finds it gone, as the agent reports it,
+until an install puts it back). A test may model a
 Spark's memory: it then reports free memory less what its runs hold.
 
 A result that is lost in transit is the same, to the Controller, as a late one:
@@ -22,12 +24,21 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from sqlalchemy import select
-from vonk_agent_protocol import AgentFailureKind, canonical_message
+from vonk_agent_protocol import (
+    AgentFailureKind,
+    HelperErrorCode,
+    OutcomeEvidence,
+    OutcomeKind,
+    OutcomeUnknown,
+    WaitReason,
+    canonical_message,
+    outcome_body,
+)
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.lifecycle import Reported
+from vonk_control.lifecycle import Outcome, Reported
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models import (
@@ -82,6 +93,10 @@ class Spark:
     fail_next: bool = False
     #: Its inventory reports stop; it still answers orders and serves.
     inventory_silent: bool = False
+    #: Its runtime image was removed by hand; an install puts it back.
+    image_removed: bool = False
+    #: Starts that found the image gone.
+    image_missing_starts: int = 0
     serving: set[str] = field(default_factory=set)
     memory: Memory | None = None
 
@@ -97,7 +112,7 @@ class Spark:
     def clear(self) -> None:
         self.down_steps = self.late_rounds = 0
         self.duplicate_steps = self.pressure_steps = 0
-        self.fail_next = self.inventory_silent = False
+        self.fail_next = self.inventory_silent = self.image_removed = False
 
 
 @dataclass(frozen=True)
@@ -255,6 +270,10 @@ class Sparks:
             if failed:
                 self._wait(order)
                 continue
+            if spark.image_removed and order.kind == "recipe.start":
+                self._image_missing(order)
+                spark.image_missing_starts += 1
+                continue
             evidence = self._evidence(order)
             for _delivery in range(2 if spark.duplicate_steps else 1):
                 try:
@@ -292,6 +311,42 @@ class Sparks:
                 self.world.clock(),
             )
 
+    def _image_missing(self, order: Order) -> None:
+        """The agent's answer to a Start whose image is gone: the helper found
+        no image, so the effect is unconfirmed and names the helper's code. It
+        is settled and then projected, in one transaction, as the queue does."""
+
+        reason = "container runtime could not start the workload"
+        result = outcome_body(
+            OutcomeUnknown(
+                kind=OutcomeKind.UNKNOWN,
+                wait_reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
+                reason=reason,
+                evidence=OutcomeEvidence(
+                    helper_error_code=HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
+                ),
+            )
+        )
+        with self.world.sessions.begin() as session:
+            operation = session.get(
+                AgentOperation, order.operation_id, with_for_update=True
+            )
+            if operation is None:
+                return
+            AgentOperationAdapter(session).settle(
+                operation,
+                None,
+                session.get(Job, order.job_id),
+                Reported(Outcome.UNKNOWN, reason=reason),
+                self.world.clock(),
+            )
+            self.world.controller.lifecycle.consume_agent_result(
+                session,
+                operation,
+                None,
+                SimpleNamespace(state="observing", result=result),
+            )
+
     @staticmethod
     def _evidence(order: Order) -> dict[str, object]:
         if order.kind == "recipe.install":
@@ -301,6 +356,9 @@ class Sparks:
         return {}
 
     def _apply_effect(self, spark: Spark, order: Order) -> None:
+        if order.kind == "recipe.install":
+            # An install runs only after its plan copied the image there.
+            spark.image_removed = False
         run_id = order.payload.get("run_id")
         if not isinstance(run_id, str):
             return

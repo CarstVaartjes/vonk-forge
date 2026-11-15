@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -401,70 +400,6 @@ def test_partial_runtime_evidence_waits_for_claim_then_retires_columns(
             inventory_items(session.get(AgentNode, "partial")).hostname
             == "reported.internal"
         )
-
-
-def test_retired_image_receipts_leave_the_runtime_items_readable(
-    postgres_engine: Engine,
-) -> None:
-    """Catches an upgrade that turns every Spark's runtime identity unreadable
-    (a stored items row still naming retired receipts) or adopts a receipt."""
-    from datetime import UTC, datetime
-
-    from sqlalchemy import inspect, text
-    from sqlalchemy.orm import sessionmaker
-    from vonk_agent_protocol.claims import AgentRuntimeIdentity
-    from vonk_control.inventory_items import inventory_items, record_runtime
-    from vonk_control.models import AgentNode, Base
-
-    Base.metadata.create_all(postgres_engine)
-    sessions = sessionmaker(postgres_engine)
-    at = datetime(2026, 10, 22, 12, tzinfo=UTC)
-    with sessions.begin() as session:
-        node = AgentNode(node_id="artifact-owner", state=NodeIdentityState.ACTIVE)
-        session.add(node)
-        record_runtime(
-            node,
-            AgentRuntimeIdentity(
-                architecture="linux-arm64",
-                semantic_version="1.2.3",
-                build_digest="sha256:" + "b" * 64,
-                binary_digest="c" * 64,
-            ),
-            "d" * 64,
-            "preserved.internal",
-            at,
-        )
-    receipt = {
-        "kind": "image",
-        "digest": "e" * 64,
-        "source": "oci-layout:receipt",
-        "size_bytes": 123,
-        "state": "verified",
-        "ref_count": 0,
-        "verified_at": at.isoformat(),
-        "updated_at": at.isoformat(),
-    }
-    with postgres_engine.begin() as connection:
-        connection.execute(
-            text(
-                "UPDATE node_inventory_snapshots SET agent_items = CAST("
-                "CAST(agent_items AS jsonb) || jsonb_build_object("
-                "'artifacts', jsonb_build_array(CAST(:receipt AS jsonb))) AS json)"
-                " WHERE node_id = 'artifact-owner'"
-            ),
-            {"receipt": json.dumps(receipt)},
-        )
-        connection.exec_driver_sql("CREATE TABLE node_artifacts (id varchar(36))")
-
-    url = postgres_engine.url.render_as_string(hide_password=False)
-    initialize_database(url)
-    initialize_database(url)
-    with sessions() as session:
-        items = inventory_items(session.get(AgentNode, "artifact-owner"))
-        assert items.hostname == "preserved.internal"
-        assert items.preflight_fingerprint == "d" * 64
-    with postgres_engine.connect() as connection:
-        assert "node_artifacts" not in inspect(connection).get_table_names()
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
