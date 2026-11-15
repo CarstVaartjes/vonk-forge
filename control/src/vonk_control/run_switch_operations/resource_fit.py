@@ -106,7 +106,8 @@ class ResourceFitMixin:
         serving: bool = True,
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
-        artifact_sets: Collection[str] = (),
+        artifact_set_sha256: str | None = None,
+        missing_artifact_bytes_by_node: Mapping[str, int] | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
@@ -471,13 +472,23 @@ class ResourceFitMixin:
                     )
                     # An unstated payload size leaves the envelope incomplete.
                     if image_size is not None and artifact_size is not None:
-                        if artifact_sets and not model_sets_stored_on_node(
-                            session, item.node_id
-                        ).isdisjoint(artifact_sets):
+                        if (
+                            artifact_set_sha256 is not None
+                            and artifact_set_sha256
+                            in model_sets_stored_on_node(session, item.node_id)
+                        ):
                             # The Spark's shared store already holds the model
                             # set (an installation running it exists there), so
                             # the install links those files and writes none.
                             artifact_size = 0
+                        elif (
+                            missing_artifact_bytes_by_node is not None
+                            and item.node_id in missing_artifact_bytes_by_node
+                        ):
+                            # Otherwise it writes only the files the agent's
+                            # store scan does not report (install admission's
+                            # rule); no scan charges the whole set.
+                            artifact_size = missing_artifact_bytes_by_node[item.node_id]
                         disk_need = installation_disk_requirement(
                             disk,
                             required_download_bytes=image_size + artifact_size,
