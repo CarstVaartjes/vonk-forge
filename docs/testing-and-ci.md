@@ -583,8 +583,11 @@ otherwise have to reason about by hand:
   public client contract. Human wording is owned by the shared vectors in
   `tests/fixtures` that the web renders too, and one module,
   `tests/cluster_profiles/test_cli_wording.py`, compares vonkctl's text with
-  them. The `printed-output` added-line guard refuses `capsys`, `capfd` and
-  redirected stdout/stderr anywhere else in `tests/cluster_profiles`.
+  them. A secret or terminal control in any output is a leak, not wording;
+  those checks keep their existing stream assertions, and a new one asserts the
+  `--json` document and the requests sent. The `printed-output` added-line guard
+  refuses newly added `capsys`, `capfd` and redirected stdout/stderr anywhere
+  else in `tests/cluster_profiles`.
 - **Keep the fast tier fast and hermetic.** A host-dependent test belongs in the
   lane tier, which the collection-time marker applies automatically, rather than
   being skipped or made conditional. The fast tier should stay under a couple of

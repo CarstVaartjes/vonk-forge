@@ -91,9 +91,10 @@ exact text: the page's DOM text and the string `vonkctl` prints. Missing values 
 On the vonkctl side every shared vector is compared in one module,
 `tests/cluster_profiles/test_cli_wording.py`. Every other vonkctl test decides on
 data: the exit status, the requests sent, a typed result or the `--json` document
-(the `vonkctl_json` fixture). Wording that no vector owns is not tested; the
-`printed-output` added-line guard refuses captured stdout/stderr in the rest of
-`tests/cluster_profiles`.
+(the `vonkctl_json` fixture). Wording that no vector owns is not tested. A
+secret or terminal control in any output is a leak, not wording: those checks keep
+their existing stdout/stderr assertions. The `printed-output` added-line guard refuses
+newly added captured stdout/stderr in the rest of `tests/cluster_profiles`.
 In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet.ts`; a component never
 types the words (the `web-not-reported` added-line guard enforces it). Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
