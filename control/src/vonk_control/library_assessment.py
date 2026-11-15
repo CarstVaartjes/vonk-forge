@@ -7,7 +7,6 @@ import time
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from itertools import combinations
-from typing import get_args
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +22,7 @@ from .model_cache import ModelCacheService
 from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
+from .run_switch_operations.artifact_inspection import missing_spark_bytes_by_node
 from .run_switch_operations.phase_planning import targets_hold_model_and_image
 
 
@@ -47,10 +47,6 @@ def unassessed(clock: Callable[[], datetime], detail: str) -> RecipeReadiness:
 
 
 ASSESSMENT_BUDGET_SECONDS = 5.0
-# The check states, as the contract names them.
-READY, _BLOCKED, _UNAVAILABLE = get_args(
-    RecipeReadinessCheck.model_fields["state"].annotation
-)
 
 
 class LibraryAssessment:
@@ -282,6 +278,29 @@ class LibraryAssessment:
             )
         return RecipeReadinessCheck(state="ready")
 
+    def _groups_holding_first(
+        self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], now: datetime
+    ) -> list[tuple[str, ...]]:
+        """Candidate groups, those whose Sparks lack the least of the model first."""
+
+        groups = list(combinations(nodes, recipe.node_count))
+        try:
+            manifest = self._model_cache.resolve_artifact_set(
+                recipe_revision_id=recipe.identity.recipe_revision_id
+            )
+            with self._sessions() as session:
+                missing = missing_spark_bytes_by_node(session, manifest, nodes, now=now)
+        except (
+            SQLAlchemyError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            KeyError,
+        ):
+            return groups
+        return sorted(groups, key=lambda group: sum(missing[node] for node in group))
+
     def _assess(
         self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], deadline: float
     ) -> RecipeReadiness:
@@ -309,7 +328,8 @@ class LibraryAssessment:
         unknown: RecipeReadinessCheck | None = None
         fit_unknown: RecipeReadinessCheck | None = None
         any_fit = False
-        for group in combinations(nodes, recipe.node_count):
+        stopped = False
+        for group in self._groups_holding_first(recipe, nodes, observed):
             if time.monotonic() >= deadline:
                 unknown = unavailable(
                     f"Assessment exceeded its {self._budget:g}-second read budget; narrow the library filters and retry."
@@ -352,10 +372,15 @@ class LibraryAssessment:
                 unknown = ready
             if best is None or fit.state == "ready" and best[1].state != "ready":
                 best = (plan, fit, ready)
-            # A later group whose Sparks hold the model can be ready while
-            # the NAS lacks it, so only a ready group ends the search.
-            if ready.state == READY:
+            # Groups whose Sparks hold the model come first, so the first
+            # fitting group is the best one and ends the search.
+            if (
+                ready.state == "ready"
+                or fit.state == "ready"
+                and cache.state != "ready"
+            ):
                 best = (plan, fit, ready)
+                stopped = True
                 break
         if best is None:
             missing = unknown or unavailable(
@@ -365,12 +390,12 @@ class LibraryAssessment:
                 observed_at=observed,
                 cache=cache,
                 fleet_fit=missing,
-                readiness=cache if cache.state == "blocked" else missing,
+                readiness=missing,
             )
         plan, fit, ready = best
         if not any_fit and fit_unknown is not None:
             fit = fit_unknown
-        if ready.state != "ready" and unknown is not None and cache.state != "blocked":
+        if not stopped and unknown is not None:
             ready = unknown
         return RecipeReadiness(
             observed_at=observed,

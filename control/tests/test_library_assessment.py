@@ -368,7 +368,7 @@ def test_a_later_spark_holding_what_the_nas_evicted_is_ready(
 ):
     """A load whose Sparks hold the model and image downloads no model, so the
     Library calls it ready although the NAS lacks the model, and keeps
-    searching past an earlier fitting Spark that holds neither."""
+    ordering the Spark that holds the set ahead of an earlier-sorted one."""
 
     projection, sessions, cache, service, _, _, _, _, nodes, _ = assessed_library
     _add_fitting_spark(sessions, "spk_" + "0" * 32)
@@ -446,6 +446,8 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessment = projection.recipe_library(assess=True).recipes[0].assessment
     assert assessment is not None
     assert assessment.fleet_fit.state == "unavailable"
+    # A search cut off by the deadline is unknown, never "needs download".
+    assert assessment.readiness.state == "unavailable"
 
 
 def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_library):
