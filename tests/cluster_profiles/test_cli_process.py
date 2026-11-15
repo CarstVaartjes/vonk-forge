@@ -180,11 +180,12 @@ def test_broken_output_pipe_does_not_cancel_work_or_write_again(monkeypatch) -> 
     assert client.calls == [("POST", "/api/model/model-1/download")]
 
 
-def test_no_input_does_not_require_terminal_or_change_json(vonkctl_json) -> None:
+def test_no_input_does_not_require_terminal_or_change_json(capsys) -> None:
     client = Observations({"nodes": []})
-    status, document = vonkctl_json("fleet", "--no-input", control_client=client)
-    assert status == 0
-    assert document == {"nodes": [], "schema_version": 1}
+    assert cli.main(("fleet", "--no-input", "--json"), control_client=client) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"nodes": [], "schema_version": 1}
+    assert not captured.err
 
 
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
