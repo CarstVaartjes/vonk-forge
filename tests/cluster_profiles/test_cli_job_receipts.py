@@ -1,7 +1,5 @@
 """The resume client reconnects to its exact accepted operator decision."""
 
-import json
-
 from vonk_agent_protocol import LifecycleState, OperatorActionName
 
 from cluster_profiles import cli
@@ -46,16 +44,14 @@ class LostResumeClient:
         }
 
 
-def test_resume_lost_response_reads_exact_receipt_before_current_job(capsys):
+def test_resume_lost_response_reads_exact_receipt_before_current_job(vonkctl_json):
     """Catches silently downgrading an unknown mutation to an unrelated job read."""
     client = LostResumeClient()
-    result = cli.main(
-        ["fleet", "resume", JOB, "--yes", "--request-key", KEY, "--json"],
-        control_client=client,
+    result, document = vonkctl_json(
+        "fleet", "resume", JOB, "--yes", "--request-key", KEY, control_client=client
     )
-    captured = capsys.readouterr()
-    assert result == 0, captured.err
-    assert json.loads(captured.out)["id"] == JOB
+    assert result == 0, document
+    assert document["id"] == JOB
     assert [(method, path) for method, path, *_ in client.calls] == [
         ("POST", f"/api/jobs/{JOB}/resume"),
         ("GET", f"/api/jobs/{JOB}/requests/{KEY}"),
@@ -63,13 +59,12 @@ def test_resume_lost_response_reads_exact_receipt_before_current_job(capsys):
     ]
 
 
-def test_resume_does_not_adopt_a_retirement_receipt(capsys):
+def test_resume_does_not_adopt_a_retirement_receipt():
     """Catches treating the same key's other accepted action as a resumed job."""
     client = LostResumeClient(OperatorActionName.RETIRE)
     result = cli.main(
         ["fleet", "resume", JOB, "--yes", "--request-key", KEY, "--json"],
         control_client=client,
     )
-    capsys.readouterr()
     assert result != 0
     assert not any(path == f"/api/jobs/{JOB}" for _method, path, *_ in client.calls)

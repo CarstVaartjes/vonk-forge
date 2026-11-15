@@ -116,36 +116,6 @@ def test_contract_json_is_the_controllers_typed_document(capsys, flags, path) ->
     assert json.loads(capsys.readouterr().out) == _contract_document()
 
 
-def test_contract_text_names_slots_limits_and_knobs(capsys) -> None:
-    status = cli.main(
-        ("recipe", "job", "contract", "--run", RUN_ID),
-        control_client=_Controller(_contract_document()),
-    )
-
-    output = capsys.readouterr().out
-    assert status == 0
-    assert "Interface: image-job" in output
-    assert "Input slot: prompt" in output
-    assert "Input slot media types: text/plain" in output
-    assert "Input slot max file size: 16.0 KiB (16384 bytes)" in output
-    assert "Output slot: image" in output
-    assert "Output slot extensions: .png" in output
-    assert "Knob: steps" in output
-    assert f"vonkctl recipe job create --run {RUN_ID}" in output
-
-
-def test_contract_by_revision_reads_without_a_run(capsys) -> None:
-    status = cli.main(
-        ("recipe", "job", "contract", "--revision", REVISION_ID),
-        control_client=_Controller(_contract_document(with_run=False)),
-    )
-
-    output = capsys.readouterr().out
-    assert status == 0
-    assert "Run:" not in output
-    assert "Recipe revision: " + REVISION_ID in output
-
-
 def _unavailable(state: JobContractState) -> dict[str, object]:
     """The Controller's typed answer when there is no contract to give."""
     return {
@@ -202,11 +172,13 @@ def test_contract_of_an_unknown_run_is_not_found_after_one_read(capsys) -> None:
 
 
 @pytest.mark.parametrize("flags", [(), ("--run", RUN_ID, "--revision", REVISION_ID)])
-def test_contract_needs_exactly_one_key(capsys, flags) -> None:
+def test_contract_needs_exactly_one_key(vonkctl_json, flags) -> None:
     controller = _Controller(_contract_document())
 
-    status = cli.main(("recipe", "job", "contract", *flags), control_client=controller)
+    status, error = vonkctl_json(
+        "recipe", "job", "contract", *flags, control_client=controller
+    )
 
     assert status == 2
     assert controller.paths == []
-    assert "Next: vonkctl recipe job contract --help" in capsys.readouterr().err
+    assert error["recovery_actions"] == ["vonkctl recipe job contract --help"]

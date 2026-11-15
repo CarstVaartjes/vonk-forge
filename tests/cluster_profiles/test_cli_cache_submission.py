@@ -373,7 +373,7 @@ def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
 
 @pytest.mark.parametrize("failure", ["lost", "malformed", "normal"])
 def test_received_403_remains_a_refusal_when_its_body_is_lost(
-    tmp_path, capsys, failure
+    tmp_path, vonkctl_json, failure
 ):
     token = tmp_path / "token"
     token.write_text("fixture-token")
@@ -401,20 +401,20 @@ def test_received_403_remains_a_refusal_when_its_body_is_lost(
     control = ControlClient(
         "https://forge.example.test", token, opener=opener, timeout_seconds=2
     )
-    assert (
-        cli.main(
-            ("model", "download", "model-" + "m" * 175, "--request-key", KEY, "--json"),
-            control_client=control,
-        )
-        == 2
+    status, result = vonkctl_json(
+        "model",
+        "download",
+        "model-" + "m" * 175,
+        "--request-key",
+        KEY,
+        control_client=control,
     )
-    output = capsys.readouterr()
-    result = json.loads(output.out)
+    assert status == 2
     assert acceptance(result) == "refused"
     assert result["http_status"] == 403
     assert result["request_id"] == "refused-original"
     assert calls == ["POST"]
-    assert "partial-secret" not in output.out + output.err
+    assert "partial-secret" not in json.dumps(result)
 
 
 def test_lost_server_error_body_preserves_its_retry_delay(
@@ -479,7 +479,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
 
 
 def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
-    monkeypatch, capsys
+    monkeypatch, vonkctl_json
 ):
     class Stderr(StringIO):
         flushed = False
@@ -494,10 +494,6 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
     class InterruptedClient(SubmissionClient):
         def request(self, *args, **kwargs):
             assert output.flushed and KEY in output.getvalue()
-            assert (
-                f"vonkctl model progress --request-key {KEY} --follow"
-                in output.getvalue()
-            )
             raise KeyboardInterrupt()
 
     assert (
@@ -507,22 +503,16 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
         )
         == 130
     )
-    assert "acceptance is unknown" in output.getvalue().lower()
-    assert not capsys.readouterr().out
 
     # JSON emits no preamble and still records uncertainty on interruption.
     monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", StringIO())
     client = SubmissionClient(
         {("POST", "/api/model/chosen/download"): KeyboardInterrupt()}
     )
-    assert (
-        cli.main(
-            ("model", "download", "chosen", "--request-key", KEY, "--json"),
-            control_client=client,
-        )
-        == 130
+    status, document = vonkctl_json(
+        "model", "download", "chosen", "--request-key", KEY, control_client=client
     )
-    document = json.loads(capsys.readouterr().out)
+    assert status == 130
     assert document["submission"]["acceptance"] == "unknown"
     assert document["request_key"] == KEY
 

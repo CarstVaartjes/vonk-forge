@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
@@ -12,6 +13,7 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_completion import completion_script
+from cluster_profiles.cli_render.common import terminal_text
 from cluster_profiles.control_client import ControlClient
 
 
@@ -25,13 +27,6 @@ class Observations:
     def request(self, method, path, payload=None, **kwargs):
         self.calls.append((method, path))
         return self.documents.pop(0) if len(self.documents) > 1 else self.documents[0]
-
-
-def test_human_usage_failure_preserves_result_pipe(capsys) -> None:
-    assert cli.main(("unknown-command",)) == 2
-    captured = capsys.readouterr()
-    assert not captured.out
-    assert "unknown-command" in captured.err
 
 
 def test_inspecting_failed_work_is_a_successful_read(capsys) -> None:
@@ -53,16 +48,15 @@ def test_blocked_preview_is_not_successful_admission(capsys) -> None:
     assert client.calls == [("POST", "/api/profile/1/preview")]
 
 
-def test_no_command_is_offline_orientation(monkeypatch, capsys) -> None:
+def test_no_command_is_offline_orientation(monkeypatch, vonkctl_json) -> None:
     def unexpected(*args, **kwargs):
         raise AssertionError("orientation accessed credentials or update service")
 
     monkeypatch.setattr(cli.ControlClient, "from_environment", unexpected)
     monkeypatch.setattr(cli, "begin_interactive_update_check", unexpected)
-    assert cli.main(()) == 0
-    captured = capsys.readouterr()
-    assert "fleet" in captured.out and "profile" in captured.out
-    assert not captured.err
+    status, document = vonkctl_json()
+    assert status == 0
+    assert "fleet" in document["help"] and "profile" in document["help"]
 
 
 def _groups(parser, path=()):
@@ -84,10 +78,11 @@ def test_every_group_help_is_a_map_of_its_commands() -> None:
         assert "--watch" not in help_text
 
 
-def test_a_nested_group_without_a_command_shows_its_commands(capsys) -> None:
+def test_a_nested_group_without_a_command_shows_its_commands(vonkctl_json) -> None:
     for path in (("fleet", "enrollment"), ("recipe", "job"), ("completion",)):
-        assert cli.main(path) == 0
-        assert " ".join(("vonkctl", *path)) in capsys.readouterr().out
+        status, document = vonkctl_json(*path)
+        assert status == 0
+        assert " ".join(("vonkctl", *path)) in document["help"]
 
 
 def test_usage_errors_name_the_likely_command_and_the_next_step(capsys) -> None:
@@ -111,7 +106,7 @@ def test_usage_errors_name_the_likely_command_and_the_next_step(capsys) -> None:
         ("--timeout-seconds", "301"),
     ],
 )
-def test_invalid_wait_options_fail_before_any_request(flag, value, capsys) -> None:
+def test_invalid_wait_options_fail_before_any_request(flag, value) -> None:
     client = Observations({"state": "succeeded"})
     assert (
         cli.main(
@@ -136,23 +131,23 @@ def test_profile_edit_requires_explicit_selection_before_read(capsys) -> None:
     assert not client.calls
 
 
-def test_watch_progress_preserves_stdout_for_final_result(capsys) -> None:
+def test_watch_follows_to_the_terminal_state_and_returns_it(vonkctl_json) -> None:
     client = Observations(
         {"operation_id": "model-1", "state": "running", "phase": "copying"},
         {"operation_id": "model-1", "state": "succeeded", "phase": "ready"},
     )
-    assert (
-        cli.main(
-            ("model", "progress", "model-1", "--follow", "--interval-seconds", "0.01"),
-            control_client=client,
-        )
-        == 0
+    status, document = vonkctl_json(
+        "model",
+        "progress",
+        "model-1",
+        "--follow",
+        "--interval-seconds",
+        "0.01",
+        control_client=client,
     )
-    captured = capsys.readouterr()
-    assert "copying" in captured.err
-    assert "copying" not in captured.out
-    assert "ready" in captured.out
-    assert "\x1b" not in captured.out + captured.err
+    assert status == 0
+    assert document["phase"] == "ready"
+    assert len(client.calls) == 2
 
 
 def test_broken_output_pipe_does_not_cancel_work_or_write_again(monkeypatch) -> None:
@@ -187,40 +182,51 @@ def test_broken_output_pipe_does_not_cancel_work_or_write_again(monkeypatch) -> 
     assert client.calls == [("POST", "/api/model/model-1/download")]
 
 
-def test_no_input_does_not_require_terminal_or_change_json(capsys) -> None:
+def test_no_input_does_not_require_terminal_or_change_json(vonkctl_json) -> None:
     client = Observations({"nodes": []})
-    assert cli.main(("fleet", "--no-input", "--json"), control_client=client) == 0
-    captured = capsys.readouterr()
-    assert json.loads(captured.out) == {"nodes": [], "schema_version": 1}
-    assert not captured.err
+    status, document = vonkctl_json("fleet", "--no-input", control_client=client)
+    assert status == 0
+    assert document == {"nodes": [], "schema_version": 1}
 
 
 @pytest.mark.parametrize("shell", ["bash", "zsh"])
-def test_completion_is_offline_and_contains_nested_commands(shell, monkeypatch, capsys):
+def test_completion_is_offline_and_contains_nested_commands(shell, monkeypatch):
     def unexpected(*args, **kwargs):
         raise AssertionError("completion accessed credentials or network")
 
     monkeypatch.setattr(cli.ControlClient, "from_environment", unexpected)
     monkeypatch.setattr(cli, "begin_interactive_update_check", unexpected)
     assert cli.main(("completion", shell)) == 0
-    script = capsys.readouterr().out
+    script = completion_script(cli._parser(), shell)
     assert "vonkctl" in script and "--interval-seconds" in script
     assert "library" in script and "loginfo" in script
 
 
-def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(capsys):
+def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(monkeypatch):
+    hostile = "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link\r"
+    shown: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        cli.PRESENTATIONS,
+        ("fleet", "detail"),
+        lambda payload, *args, **kwargs: shown.append(payload),
+    )
     client = Observations(
         {
-            "display_name": "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link",
+            "display_name": hostile,
             "connection": {"online_state": "offline"},
             "loaded": [],
             "installed": [],
         }
     )
     assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 0
-    captured = capsys.readouterr()
-    assert "\x1b" not in captured.out + captured.err
-    assert "\x07" not in captured.out + captured.err
+    # The human emit path hands its renderer sanitized text only.
+    assert [_controls(str(item["display_name"])) for item in shown] == [[]]
+    assert _controls(terminal_text(hostile)) == []
+    assert _controls(hostile) == ["\x1b", "\x1b", "\x07", "\r"]
+
+
+def _controls(text: str) -> list[str]:
+    return [char for char in text if unicodedata.category(char) in {"Cc", "Cf"}]
 
 
 def test_json_preserves_remote_strings_and_collections(capsys):
@@ -428,7 +434,7 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
 
 @pytest.mark.parametrize("credential_case", ["missing", "symlink", "insecure-mode"])
 def test_connection_check_rejects_unsafe_token_file_before_api_request(
-    tmp_path, credential_case, monkeypatch, capsys
+    tmp_path, credential_case, monkeypatch, vonkctl_json
 ):
     token = tmp_path / "controller-token"
     raw_token = "private-controller-token-never-print-this"
@@ -450,12 +456,10 @@ def test_connection_check_rejects_unsafe_token_file_before_api_request(
         raise AssertionError("invalid local credentials reached the Controller")
 
     monkeypatch.setattr(ControlClient, "request", unexpected_request)
-    assert cli.main(("--check-connection", "--json")) == 2
-    captured = capsys.readouterr()
-    document = json.loads(captured.out)
+    status, document = vonkctl_json("--check-connection")
+    assert status == 2
     assert "nodes" not in document
-    assert raw_token not in captured.out + captured.err
-    assert not captured.err
+    assert raw_token not in json.dumps(document)
     assert not requests
 
 

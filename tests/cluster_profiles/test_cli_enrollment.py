@@ -97,19 +97,45 @@ def run(client, destination, *extra, identity=IDENTITY):
     )
 
 
-@pytest.mark.parametrize("flags", [(), ("--json",)])
-def test_grant_is_delivered_privately_and_never_printed(tmp_path, capsys, flags):
+def run_json(vonkctl_json, client, destination, *extra, identity=IDENTITY):
+    return vonkctl_json(
+        "fleet",
+        "enroll",
+        "Atlas",
+        "--output",
+        str(destination),
+        *extra,
+        control_client=client,
+        request_id_factory=lambda: identity,
+    )
+
+
+@pytest.mark.parametrize("human", [True, False])
+def test_grant_is_delivered_privately_and_never_printed(
+    tmp_path, monkeypatch, vonkctl_json, human
+):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
-    assert run(client, destination, *flags) == 0
+    shown: list[dict[str, object]] = []
+    # The human path prints only what it hands its renderer.
+    monkeypatch.setitem(
+        cli.PRESENTATIONS,
+        ("fleet", "enroll"),
+        lambda payload, *args, **kwargs: shown.append(payload),
+    )
+    if human:
+        assert run(client, destination) == 0
+        document = shown[0]
+    else:
+        status, document = run_json(vonkctl_json, client, destination)
+        assert status == 0
     assert json.loads(destination.read_text()) == GRANT
-    captured = capsys.readouterr()
-    assert TOKEN not in captured.out + captured.err
-    assert str(destination) in captured.out
+    assert TOKEN not in json.dumps(document)
+    assert str(destination) in json.dumps(document)
     assert len(client.calls) == 1
 
 
-def test_existing_or_linked_output_never_issues_a_grant(tmp_path, capsys):
+def test_existing_or_linked_output_never_issues_a_grant(tmp_path):
     destination = tmp_path / "existing.json"
     destination.write_text("keep")
     link = tmp_path / "linked.json"
@@ -122,7 +148,7 @@ def test_existing_or_linked_output_never_issues_a_grant(tmp_path, capsys):
 
 
 def test_private_reservation_failure_closes_descriptor_before_issuance(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch
 ):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
@@ -136,7 +162,6 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
     try:
         assert run(client, destination, "--json") == 2
         assert client.calls == []
-        capsys.readouterr()
         assert not destination.exists()
         with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             os.fstat(descriptors[0])
@@ -154,22 +179,21 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
 
 
 def test_lost_response_reports_original_identity_without_minting_another_grant(
-    tmp_path, capsys
+    tmp_path, vonkctl_json
 ):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination, lost=True)
-    assert run(client, destination, "--json") == 2
-    captured = capsys.readouterr()
-    result = json.loads(captured.out)
+    status, result = run_json(vonkctl_json, client, destination)
+    assert status == 2
     assert result["id"] == IDENTITY
     assert result["grant_status"]["state"] == "pending"
-    assert TOKEN not in captured.out + captured.err
+    assert TOKEN not in json.dumps(result)
     assert [method for method, _, _ in client.calls] == ["POST", "GET"]
 
 
 @pytest.mark.parametrize("failure_point", ["file_sync", "directory_sync", "interrupt"])
 def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
-    tmp_path, capsys, monkeypatch, failure_point
+    tmp_path, vonkctl_json, monkeypatch, failure_point
 ):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
@@ -197,13 +221,10 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
 
     monkeypatch.setattr(PrivateOutput, "write", fail_secret_write)
     monkeypatch.setattr(os, "fsync", fail_sync)
-    assert run(client, destination, "--json") == (
-        130 if failure_point == "interrupt" else 2
-    )
-    captured = capsys.readouterr()
-    result = json.loads(captured.out)
+    status, result = run_json(vonkctl_json, client, destination)
+    assert status == (130 if failure_point == "interrupt" else 2)
     assert result["grant_status"]["state"] == "revoked"
-    assert TOKEN not in captured.out + captured.err + destination.read_text()
+    assert TOKEN not in json.dumps(result) + destination.read_text()
     assert [method for method, _, _ in client.calls] == ["POST", "GET", "POST"]
 
     monkeypatch.setattr(os, "fsync", real_fsync)
@@ -218,7 +239,7 @@ def test_failed_private_delivery_reconciles_and_revokes_only_the_issued_grant(
 
 @pytest.mark.parametrize("failure_point", ["file_sync", "directory_sync"])
 def test_transient_private_delivery_sync_recovers_without_reissuing(
-    tmp_path, capsys, monkeypatch, failure_point
+    tmp_path, vonkctl_json, monkeypatch, failure_point
 ):
     """Catches abandoning an issued grant after one recoverable local sync fault."""
     destination = tmp_path / "grant.json"
@@ -234,9 +255,9 @@ def test_transient_private_delivery_sync_recovers_without_reissuing(
         real_fsync(descriptor)
 
     monkeypatch.setattr(os, "fsync", fail_once)
-    assert run(client, destination, "--json") == 0
-    captured = capsys.readouterr()
-    assert TOKEN not in captured.out + captured.err
+    status, document = run_json(vonkctl_json, client, destination)
+    assert status == 0
+    assert TOKEN not in json.dumps(document)
     assert json.loads(destination.read_text())["token"] == TOKEN
     assert [method for method, _, _ in client.calls] == ["POST"]
 
@@ -258,7 +279,9 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     assert json.loads(fresh.read_text()) == GRANT
 
 
-def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, capsys):
+def test_reenrollment_requires_consent_and_pins_the_resolved_node(
+    tmp_path, vonkctl_json
+):
     node_id = "spk_" + "a" * 32
     destination = tmp_path / "replacement.json"
 
@@ -281,25 +304,22 @@ def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, caps
             }
 
     client = ReenrollmentClient()
-    args = ("fleet", "re-enroll", "Atlas", "--output", str(destination), "--json")
-    assert (
-        cli.main(args, control_client=client, request_id_factory=lambda: IDENTITY) == 2
+    args = ("fleet", "re-enroll", "Atlas", "--output", str(destination))
+    status, _ = vonkctl_json(
+        *args, control_client=client, request_id_factory=lambda: IDENTITY
     )
+    assert status == 2
     assert not destination.exists()
     assert client.calls == [("GET", "/api/fleet/Atlas")]
-    capsys.readouterr()
-    assert (
-        cli.main(
-            (*args, "--yes"), control_client=client, request_id_factory=lambda: IDENTITY
-        )
-        == 0
+    status, result = vonkctl_json(
+        *args, "--yes", control_client=client, request_id_factory=lambda: IDENTITY
     )
-    result = json.loads(capsys.readouterr().out)
+    assert status == 0
     assert result["node_id"] == node_id
     assert json.loads(destination.read_text())["purpose"] == "re-enroll"
 
 
-def test_absent_destination_fails_before_issuance(tmp_path, capsys):
+def test_absent_destination_fails_before_issuance(tmp_path):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
     assert cli.main(("fleet", "enroll", "Atlas", "--json"), control_client=client) == 2
@@ -307,7 +327,9 @@ def test_absent_destination_fails_before_issuance(tmp_path, capsys):
     assert not destination.exists()
 
 
-def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, capsys):
+def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(
+    tmp_path, vonkctl_json
+):
     destination = tmp_path / "grant.json"
 
     class DeniedClient(EnrollmentClient):
@@ -316,12 +338,11 @@ def test_denied_enrollment_is_not_retried_or_reclassified_as_pending(tmp_path, c
             raise ControlForbidden(403, "permission denied " + TOKEN)
 
     client = DeniedClient(destination)
-    assert run(client, destination, "--json") == 2
-    captured = capsys.readouterr()
-    result = json.loads(captured.out)
+    status, result = run_json(vonkctl_json, client, destination)
+    assert status == 2
     assert result["reconciliation"] == "issuance denied"
     assert result["cause"] == "ControlForbidden"
-    assert TOKEN not in captured.out + captured.err
+    assert TOKEN not in json.dumps(result)
     assert [method for method, _, _ in client.calls] == ["POST"]
 
 

@@ -236,7 +236,7 @@ def _profile_preview_response():
 
 def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    vonkctl_json,
 ) -> None:
     preview = _profile_preview_response()
     observed: list[urllib.request.Request] = []
@@ -248,12 +248,11 @@ def test_cli_profile_preview_uses_the_real_bodyless_request_contract(
     client = ControlClient(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
-    status = cli.main(
-        ("--profile", "7", "profile", "load", "--review", "--json"),
-        control_client=client,
+    status, document = vonkctl_json(
+        "--profile", "7", "profile", "load", "--review", control_client=client
     )
-    assert status == 0, capsys.readouterr().out
-    assert json.loads(capsys.readouterr().out)["allowed"] is True
+    assert status == 0, document
+    assert document["allowed"] is True
     assert len(observed) == 1
     assert observed[0].get_method() == "POST"
     assert observed[0].full_url == "https://forge.example.test/api/profile/7/preview"
@@ -1426,7 +1425,7 @@ def test_damaged_cached_response_schema_is_discarded_before_adoption(
 )
 @pytest.mark.parametrize("fault_count", [1, 3])
 def test_preview_recovery_uses_canonical_transport_before_any_load(
-    tmp_path, capsys, binding, fault_count
+    tmp_path, binding, fault_count
 ):
     from vonk_agent_protocol.lifecycle_vocabulary import LifecycleState
     from vonk_control.fleet_profile_contract import (
@@ -1507,7 +1506,6 @@ def test_preview_recovery_uses_canonical_transport_before_any_load(
     assert result["id"] == application.id
     payload = json.loads(calls[-1].data)
     assert payload == ({"request_key": key, "review": {"effects_digest": "a" * 64}})
-    capsys.readouterr()
 
 
 @pytest.mark.parametrize("exhaust_budget", [False, True])
