@@ -152,3 +152,86 @@ def install_image_of_replaced_source(
     session.add(previous)
     session.flush()
     installation.recipe_build_id = previous.id
+
+
+def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
+    """Another recipe that builds the same image is installed on the Sparks, so
+    its installed ranks keep that image there. No profile of this recipe names
+    it and no load of this recipe reuses it (the `earlier-model` recipe, as in
+    `test_profile_installed_execution._another_recipe`)."""
+    from uuid import uuid4
+
+    from sqlalchemy import select
+    from vonk_control.models import (
+        CatalogDocument,
+        CatalogDocumentRevision,
+        CatalogRecipeModelReference,
+        ClusterMapping,
+        InstallationNode,
+        RecipeBuild,
+        RecipeInstallation,
+    )
+    from vonk_control.strict_json import serialize_json_value
+
+    with sessions() as session:
+        build = session.scalar(select(RecipeBuild))
+        mapping = session.scalar(select(ClusterMapping))
+        model = session.scalar(select(CatalogRecipeModelReference.model_content_digest))
+        assert build is not None and mapping is not None and model is not None
+        mapping_id = mapping.id
+    install_plan = lifecycle.preview_install(mapping_id, build.id)
+    with sessions.begin() as session:
+        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
+        assert revision is not None
+        document = session.get(CatalogDocument, revision.document_id)
+        assert document is not None
+        other = CatalogDocument(
+            **{
+                column.name: getattr(document, column.name)
+                for column in CatalogDocument.__table__.columns
+            }
+        )
+        other.id, other.slug = str(uuid4()), "earlier-model"
+        session.add(other)
+        session.flush()
+        other_revision = CatalogDocumentRevision(
+            **{
+                column.name: getattr(revision, column.name)
+                for column in CatalogDocumentRevision.__table__.columns
+            }
+        )
+        other_revision.id = str(uuid4())
+        other_revision.document_id, other_revision.slug = other.id, other.slug
+        session.add(other_revision)
+        session.flush()
+        stored = serialize_json_value(install_plan.stored_plan())
+        assert isinstance(stored, dict)
+        installation = RecipeInstallation(
+            recipe_revision_id=other_revision.id,
+            model_content_sha256=model,
+            mapping_id=mapping_id,
+            mapping_generation=install_plan.mapping_generation,
+            recipe_build_id=build.id,
+            image_digest=build.image_digest,
+            plan_digest=install_plan.plan_digest,
+            plan={**stored, "recipe_revision_id": other_revision.id},
+            state="installed",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(installation)
+        session.flush()
+        for placed in install_plan.nodes:
+            session.add(
+                InstallationNode(
+                    installation_id=installation.id,
+                    node_id=placed.node_id,
+                    rank=placed.rank,
+                    role=placed.role,
+                    state="installed",
+                    required_bytes=0,
+                    installed_bytes=0,
+                    updated_at=now,
+                )
+            )

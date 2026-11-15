@@ -153,7 +153,7 @@ from .runtime_identity_support import (
     set_inventory_fingerprint,
     set_inventory_identity,
 )
-from .runtime_image_fixtures import place_test_image
+from .runtime_image_fixtures import install_image_of_replaced_source, place_test_image
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .display_fixtures import reword
@@ -8186,12 +8186,18 @@ def test_plan_reuses_inventory_when_a_new_sample_lands_between_read_points(
         snapshot.capabilities = [*snapshot.capabilities, "recipe.build.v1"]
         if during_builder:
             _reopen_build_attempt(build, now=NOW)
-            # An installation of the requested Model starts without any build;
-            # the builder's inventory is read only when the running one is
-            # another Model's.
+            # An installation of the needed image starts without any build; the
+            # builder's inventory is read only when the running one was built
+            # from a source bundle this revision has since replaced.
+            # The revision records the bundle its build was imported with.
+            session.execute(
+                update(CatalogDocumentRevision)
+                .where(CatalogDocumentRevision.id == build.recipe_revision_id)
+                .values(source_bundle_sha256=build.source_bundle_sha256)
+            )
             installation = session.get(RecipeInstallation, installed.owner_id)
             assert installation is not None
-            installation.model_content_sha256 = "e" * 64
+            install_image_of_replaced_source(session, installation)
 
     service = _service(
         sessions,

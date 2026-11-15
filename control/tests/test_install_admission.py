@@ -2,6 +2,7 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -1168,12 +1169,35 @@ def test_damaged_install_identity_does_not_block_fresh_admission(tmp_path) -> No
 
 
 def _name_image_on(sessions, node, mapping, now) -> str:
-    """Another Model's installation on the Spark names the build's image, so the
-    helper keeps it there."""
+    """Another recipe that builds the same image is installed on the Spark, so
+    its installed rank keeps that image there."""
 
     with sessions.begin() as session:
+        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
+        assert revision is not None
+        document = session.get(CatalogDocument, revision.document_id)
+        assert document is not None
+        other = CatalogDocument(
+            **{
+                column.name: getattr(document, column.name)
+                for column in CatalogDocument.__table__.columns
+            }
+        )
+        other.id, other.slug = str(uuid4()), "earlier-model"
+        session.add(other)
+        session.flush()
+        other_revision = CatalogDocumentRevision(
+            **{
+                column.name: getattr(revision, column.name)
+                for column in CatalogDocumentRevision.__table__.columns
+            }
+        )
+        other_revision.id = str(uuid4())
+        other_revision.document_id, other_revision.slug = other.id, other.slug
+        session.add(other_revision)
+        session.flush()
         installation = RecipeInstallation(
-            recipe_revision_id=RECIPE_REVISION_ID,
+            recipe_revision_id=other_revision.id,
             model_content_sha256="e" * 64,
             mapping_id=mapping,
             mapping_generation=1,
