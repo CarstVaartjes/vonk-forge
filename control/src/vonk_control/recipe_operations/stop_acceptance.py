@@ -43,7 +43,6 @@ from ..recipe_action_plans import (
     StopPlan,
 )
 from ..stored_json import read_row_column
-from ..strict_json import read_stored_model
 from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .interfaces import new_recipe_job
 
@@ -94,12 +93,9 @@ class StopAcceptanceMixin:
                     reason=InvalidRequestReason.SUPERSEDED,
                 )
             try:
-                candidate_root = read_stored_model(
-                    RunSwitchJobPayload,
-                    canonical_message(read_row_column(candidate, "payload")),
-                    strict=True,
-                    from_json=True,
-                )
+                candidate_root = read_row_column(candidate, "payload")
+                if not isinstance(candidate_root, RunSwitchJobPayload):
+                    raise TypeError("payload is unreadable")
                 candidate_progress = RunSwitchOperationResult.model_validate_json(
                     canonical_message(read_row_column(candidate, "result")), strict=True
                 )
@@ -145,12 +141,9 @@ class StopAcceptanceMixin:
         if parent is None:
             raise RecipeRetryLater("accepted profile Stop child is unavailable")
         try:
-            root = read_stored_model(
-                RunSwitchJobPayload,
-                canonical_message(read_row_column(parent, "payload")),
-                strict=True,
-                from_json=True,
-            )
+            root = read_row_column(parent, "payload")
+            if not isinstance(root, RunSwitchJobPayload):
+                raise TypeError("payload is unreadable")
             # Immutable payload progress is the acceptance snapshot. The
             # current phase and retry identity belong to the canonical result.
             progress = RunSwitchOperationResult.model_validate_json(
