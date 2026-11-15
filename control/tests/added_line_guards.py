@@ -2292,7 +2292,8 @@ def check_source(
             (line, "NAS coverage required outside the copy that reads NAS bytes")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(
-                r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set)\b",
+                r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set"
+                r"|verified_model_objects_for_set)\b",
                 text,
             )
         )
