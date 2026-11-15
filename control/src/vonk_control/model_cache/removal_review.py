@@ -27,6 +27,7 @@ from ..cache_removal_review import (
     seal_cache_removal_review,
 )
 from ..categorized_errors import InvalidValue
+from ..content_identity import recipes_bound_to
 from ..lifecycle.evidence import Residue
 from ..model_cache_contract import ModelCacheRemovalPayload, ModelCacheSetState
 from ..models import (
@@ -36,12 +37,14 @@ from ..models import (
     ModelCacheSet,
     ModelCacheSetArtifact,
 )
+from ..unused_storage_collection.evidence import _Evidence
 from .artifacts import _unique_artifacts
 from .catalog_helpers import _recipe_model_content_digests
 from .errors import (
     ModelCacheRemovalOwnerInvalid,
     ModelCacheStorageInvalid,
 )
+from .fleet_removal import model_reference
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
@@ -325,9 +328,31 @@ class RemovalReviewMixin:
             )
             # The sets the Library shows for this model, not only those first
             # downloaded under its current content digest.
-            selected_sets = model_sets(session, lineage_contents(session, digest)).owned
+            contents = lineage_contents(session, digest)
+            selected_sets = model_sets(session, contents).owned
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
+            # The same "referenced" rule as the fleet review, by Model identity:
+            # a profile can name a Model whose bytes this Model does not own.
+            reference = model_reference(
+                session,
+                contents,
+                selected_sets,
+                _Evidence.read(
+                    session,
+                    cache._clock(),
+                    recipes=recipes_bound_to(session, contents),
+                ),
+            )
+            if reference is not None:
+                blockers.append(
+                    CacheRemovalBlocker(
+                        code=ModelCacheCode.REMOVAL_REFERENCED,
+                        detail=reference,
+                        retryable=False,
+                        recovery_actions=["resolve_reference"],
+                    )
+                )
             try:
                 with session.begin_nested():
                     scope = cache._model_removal_scope_for_sets(session, selected_sets)

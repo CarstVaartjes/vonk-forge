@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from functools import partial
 from typing import TYPE_CHECKING, cast
@@ -62,6 +63,7 @@ from ..lifecycle.evidence import (
     read_or_rebuild,
     retire_as_unknown,
 )
+from ..machine_states import RUN_LIVE
 from ..model_cache_contract import CacheManifest, CacheOperationKind
 from ..models import (
     AgentNode,
@@ -74,6 +76,7 @@ from ..models import (
     ModelCacheSetArtifact,
     NodeInventorySnapshot,
     RecipeInstallation,
+    RecipeRun,
 )
 from ..recipe_execution_contract import parse_stored_installation_plan
 from ..recipe_operations.errors import RecipeRequestInvalid
@@ -187,6 +190,45 @@ def _model_objects(
     return target_objects, shared, catalog_files
 
 
+def model_reference(
+    session: Session,
+    contents: Collection[str],
+    sets: Collection[str],
+    evidence: _Evidence,
+) -> str | None:
+    """Why a saved profile or live work keeps this Model; ``None`` when nothing does.
+
+    The one "referenced" rule of both removal reviews. A Model is named by its
+    identity only: its lineage ``contents`` and its own cached ``sets``. A file
+    it shares with another Model never makes it referenced (a tokenizer shared
+    with a loaded Model kept an unused one, #2354); removal keeps shared files
+    per object instead.
+    """
+
+    names = {*contents, *sets}
+    if names & evidence.pointed_models:
+        return "A saved or loaded profile names this model."
+    if names & evidence.operations:
+        return "A live operation names this model."
+    running = session.scalar(
+        select(RecipeRun.id)
+        .join(RecipeInstallation, RecipeInstallation.id == RecipeRun.installation_id)
+        .where(
+            RecipeRun.state.in_(RUN_LIVE),
+            or_(
+                RecipeInstallation.model_artifact_set_sha256.in_(sorted(sets)),
+                RecipeInstallation.id.in_(
+                    sorted(installations_using_models(session, contents))
+                ),
+            ),
+        )
+        .limit(1)
+    )
+    if running is not None:
+        return "A running workload uses this model."
+    return None
+
+
 def _observation_issue(
     residue: Residue, *, note: str = ""
 ) -> FleetRemovalObservationIssue:
@@ -241,7 +283,6 @@ class FleetRemovalMixin:
         # revision of it.
         contents = lineage_contents(session, digest)
         sets, kept_sets = model_sets(session, contents, files=catalog_files)
-        names = target_objects | contents | set(sets)
         # An installation uses the model when its recorded model set is one of
         # the model's sets (a reused set never names the model in the other
         # columns) or its model columns name it.
@@ -269,10 +310,9 @@ class FleetRemovalMixin:
             | _installation_recipes(session, using),
         )
         readable = evidence.application_references_readable
-        protected = bool(
-            names & (evidence.operations | evidence.pointed_models | evidence.pinned)
-        )
-        keep_detail = (
+        reference = model_reference(session, contents, sets, evidence)
+        protected = reference is not None
+        keep_detail = reference or (
             "A saved or loaded profile, live operation or pin names this model."
         )
         if not readable or issues:

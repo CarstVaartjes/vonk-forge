@@ -32,11 +32,16 @@ from vonk_control.models import (
 from vonk_control.operation_contract import AvailabilityOperationFailure
 from vonk_control.spark_store_retention import store_retention_request
 from vonk_control.strict_json import read_stored_model
+from vonk_forge_contracts import document_sha256
 
 from .display_fixtures import reworded
 from .test_catalog_revision_collection import NODE, Catalog
 from .test_model_cache import _artifact, _download
-from .test_model_removal_reference_lifecycle import _one_model, _register_model
+from .test_model_removal_reference_lifecycle import (
+    _one_model,
+    _register_model,
+    _removal_service,
+)
 from .test_model_removal_worker_postgres import _prepare_removal_target
 from .test_recipe_operations import (
     NOW,
@@ -538,6 +543,10 @@ def test_profile_or_running_workload_retains_model_and_installation(
             review.fleet.targets[0].installations[0].disposition
             == FleetRemovalDisposition.RETAIN
         )
+        # The plain review answers "referenced" by the same rule (#2354: it
+        # said "Saved references: none" for a model a saved profile assigns).
+        plain = cache.review_model_removal(digest)
+        assert ModelCacheCode.REMOVAL_REFERENCED in {b.code for b in plain.blockers}
         accepted = cache.remove_fleet_model_selector(
             digest,
             actor="admin",
@@ -558,6 +567,61 @@ def test_profile_or_running_workload_retains_model_and_installation(
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()
+
+
+def test_a_file_shared_with_a_model_in_use_never_keeps_an_unused_model(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """Catches "referenced" decided by file digest (#2354): an unused model whose
+    tokenizer a live operation of another model also names was kept on the NAS
+    as referenced, while the plain review called it unused and removed it."""
+    service, sessions = _removal_service(postgres_engine, tmp_path)
+    try:
+        model = _one_model(tmp_path, "unused", b"own weights")
+        selector = _register_model(sessions, model)
+        digest = document_sha256(model.model_dump(mode="json"))
+        other = "b" * 64
+        sources = {}
+        for owner in (digest, other):
+            sources[owner] = tmp_path / f"source-{owner[:8]}"
+            sources[owner].mkdir()
+
+        def files(owner: str, weights: bytes) -> list[dict[str, object]]:
+            return [
+                _artifact(sources[owner], weights, model_content_sha256=owner),
+                _artifact(
+                    sources[owner],
+                    b"shared tokenizer",
+                    artifact_id="tokenizer",
+                    path="tokenizer.json",
+                    model_content_sha256=owner,
+                ),
+            ]
+
+        cached = _download(
+            service,
+            files(digest, b"own weights"),
+            model_content_sha256=digest,
+            request_key=str(uuid4()),
+        )
+        assert cached.state == LifecycleState.SUCCEEDED, cached.last_error
+        # Another model's download is live and names the same tokenizer file.
+        live = _download(
+            service,
+            files(other, b"other weights"),
+            model_content_sha256=other,
+            request_key=str(uuid4()),
+            interrupt_after_bytes=1,
+        )
+        assert live.state not in {LifecycleState.SUCCEEDED, LifecycleState.FAILED}
+
+        review = service.review_fleet_model_removal(selector)
+        assert review.fleet is not None
+        assert review.fleet.nas_remove, review.fleet.nas_detail
+        assert not review.blockers
+        assert not service.review_model_removal(selector).blockers
+    finally:
+        service.close()
 
 
 def test_profile_added_after_review_replans_without_fencing_or_deleting(
