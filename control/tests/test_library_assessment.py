@@ -446,34 +446,6 @@ def test_a_failing_group_does_not_turn_a_holder_search_blocked(
     assert assessment.readiness.state in {"unavailable", "ready"}
 
 
-def test_the_search_goes_past_a_holder_that_lacks_the_image(
-    assessed_library, monkeypatch
-):
-    projection, sessions, cache, service, _, _, _, _, nodes, _ = assessed_library
-    second = "spk_" + "f" * 32
-    _add_fitting_spark(sessions, second)
-    _hold_model(sessions, cache, projection, nodes[0])
-    _hold_model(sessions, cache, projection, second)
-    inspect = service.inspect_candidate
-
-    def image_held_on_second(revision_id, group, **kwargs):
-        plan = inspect(revision_id, group, **kwargs)
-        if tuple(group) != (second,):
-            return plan
-        held = plan.runtime_storage.model_copy(
-            update={"missing_image_distribution_bytes": 0}
-        )
-        return plan.model_copy(update={"runtime_storage": held})
-
-    monkeypatch.setattr(service, "inspect_candidate", image_held_on_second)
-
-    assessment = projection.recipe_library(assess=True).recipes[0].assessment
-
-    assert assessment is not None and assessment.group is not None
-    assert assessment.readiness.state == "ready", assessment.readiness
-    assert [node.node_id for node in assessment.group.nodes] == [second]
-
-
 def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessed_library, monkeypatch
 ):

@@ -82,6 +82,35 @@ def test_active_grant_content_cannot_be_substituted():
     )
 
 
+def test_a_live_grant_renews_whatever_paths_name_its_objects():
+    """A grant registered before the deploy named the NAS manifest's paths;
+    the same content named by the compiled plan renews it, never conflicts."""
+    source = MemoryObjectSource()
+    archive = source.put(b"oci archive")
+    assignment = _assignment(
+        "spk_" + "a" * 32, source.put(b"model payload"), source.put(b"config!"), archive
+    )
+    source.register_runtime_image(assignment.oci_image_digest, archive)
+    service = DistributionService(source)
+    service.register(assignment)
+    renamed = assignment.model_copy(
+        update={
+            "assignment_id": str(uuid4()),
+            "objects": tuple(
+                item.model_copy(update={"name": f"plan/{item.name}"})
+                for item in reversed(assignment.objects)
+            ),
+        }
+    )
+
+    service.register(renamed)
+
+    assert (
+        service.authorize(node_id=renamed.node_id, plan_digest=renamed.plan_digest)
+        == renamed
+    )
+
+
 def test_identical_runtime_content_does_not_depend_on_build_provenance():
     """A second build of the same immutable content is the same image identity."""
     first, second = str(uuid4()), str(uuid4())
@@ -173,7 +202,8 @@ def test_local_distribution_identity_miss_does_not_poison_a_new_request(damage):
     else:
         source.damaged = True
     with pytest.raises(Exception) as _ending:
-        if damage == "opened-identity":
+        # A grant needs no NAS manifest; serving its model object reads it.
+        if damage in {"opened-identity", "model-manifest"}:
             service.open_object(
                 node_id=assignment.node_id,
                 plan_digest=assignment.plan_digest,

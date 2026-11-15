@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from vonk_agent_protocol import DistributionAssignment, DistributionObject
+from vonk_control.distribution.types import plan_objects
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
 
@@ -43,34 +44,17 @@ def test_two_paths_with_one_digest_agree_across_totals() -> None:
         model_content_digests=("a" * 64,),
         artifacts=specs,
     )
-    objects = tuple(
-        DistributionObject(
-            name=item.path, sha256=item.sha256, bytes=item.expected_bytes, kind="model"
-        )
-        for item in specs
-    )
-    source = SimpleNamespace(objects_for_set=lambda _digest: objects)
-    identity = DistributionIdentity(
-        None,  # type: ignore[arg-type]
-        None,  # type: ignore[arg-type]
-        SimpleNamespace(source=source),  # type: ignore[arg-type]
-        clock=None,
-    )
-    plan = SimpleNamespace(
-        preparation=SimpleNamespace(
-            model=SimpleNamespace(
-                artifact_set_sha256=manifest.digest,
-                artifact_set_bytes=manifest.expected_bytes,
+    compiled = SimpleNamespace(
+        artifacts=[
+            SimpleNamespace(
+                path=item.path, sha256=item.sha256, size_bytes=item.expected_bytes
             )
-        ),
-        storage=SimpleNamespace(artifact_set_sha256="c" * 64, artifact_set_bytes=1),
+            for item in specs
+        ]
     )
-    placed, _digest, total = identity._model_objects(
-        plan,  # type: ignore[arg-type]
-        SimpleNamespace(phase_results=[]),  # type: ignore[arg-type]
-    )
-    assert len(placed) == 3  # every path is still placed
-    assert total == manifest.expected_bytes == len(WEIGHTS) + len(TOKENIZER)
+    sent = plan_objects(compiled)  # type: ignore[arg-type]
+    assert [item.name for item in sent] == ["model.bin", "tokenizer.json"]
+    assert sum(item.bytes for item in sent) == manifest.expected_bytes
 
 
 def test_assignment_carries_each_digest_once() -> None:

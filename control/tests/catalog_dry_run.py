@@ -38,6 +38,7 @@ from vonk_control.catalog_sync_contract import (
     reviewed_catalog_content,
 )
 from vonk_control.distribution.model_cache import ModelCacheObjectSource
+from vonk_control.distribution.types import plan_objects
 from vonk_control.distribution_assignment import NodeDistributionAssignment
 from vonk_control.distribution_executor.identity import DistributionIdentity
 from vonk_control.distribution_executor.receipts import RuntimeImagePull
@@ -49,7 +50,7 @@ from vonk_control.models import (
     ClusterMappingNode,
     RecipeBuild,
 )
-from vonk_control.run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
+from vonk_control.run_switch_contract import RunSwitchPlan
 from vonk_control.runtime_image_preparation.contracts import RuntimeImageReceipt
 from vonk_control.source_bundles import SourceBundleStore
 from vonk_forge_contracts import read_recipe
@@ -195,10 +196,15 @@ class CatalogDryRun:
         )
 
     def transfer(self, digest: str) -> Transfer:
-        plan = self._plan(self.manifest(digest))
-        progress = cast("RunSwitchOperationResult", SimpleNamespace(phase_results=[]))
-        objects, set_digest, total = self._identity._model_objects(plan, progress)
-        return Transfer(objects, set_digest, total)
+        """What target-copy sends: the objects each Spark's compiled plan names."""
+
+        plan = next(iter(self.plans(digest).values()))
+        objects = plan_objects(plan)
+        return Transfer(
+            objects,
+            plan.identity.model_artifact_set_sha256,
+            sum(item.bytes for item in objects),
+        )
 
     def assignments(self, digest: str) -> list[NodeDistributionAssignment]:
         """The assignment each Spark of the topology receives."""

@@ -58,7 +58,7 @@ from ..run_switch_observation_contract import (
 from ..strict_json import read_stored_model
 from .constants import _active_recipe_revision
 from .identity_helpers import _primary_model_digest
-from .phase_planning import targets_hold_model_and_image
+from .phase_planning import targets_hold_model
 from .planning_helpers import (
     PlanInventory,
     _as_reason,
@@ -502,7 +502,7 @@ class RunPlanningMixin:
                         )
             stop_before_prepare = resource_fits.stop_before_prepare
             stop_before_transfer = resource_fits.stop_before_transfer
-            if targets_hold_model_and_image(inspection, runtime_storage):
+            if targets_hold_model(inspection):
                 # No download is planned, so whether the NAS could take one
                 # neither blocks this load nor is announced to it.
                 blockers[:] = [r for r in blockers if r.code not in _NAS_DOWNLOAD]

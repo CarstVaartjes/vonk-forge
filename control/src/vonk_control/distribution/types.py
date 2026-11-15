@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from vonk_agent_protocol import (
+    CompiledExecutionPlan,
     DistributionObject,
     SecurityRefusalError,
     SecurityRefusalReason,
@@ -111,26 +112,18 @@ def same_content(
     }
 
 
-def content_difference(
-    assigned: tuple[DistributionObject, ...],
-    declared: tuple[DistributionObject, ...],
-    *,
-    limit: int = 2,
-) -> str:
-    """Name the content only one side carries, bounded to fit a refusal's detail."""
+def plan_objects(plan: CompiledExecutionPlan) -> tuple[DistributionObject, ...]:
+    """The model objects an accepted compiled plan names, each digest once.
 
-    def side(items: tuple[DistributionObject, ...]) -> dict[tuple[str, int], str]:
-        return {(item.sha256, item.bytes): item.name for item in content_objects(items)}
-
-    def listed(only: dict[tuple[str, int], str]) -> str:
-        named = sorted(f"{name[-40:]}@{sha[:12]}" for (sha, _), name in only.items())
-        more = len(named) - limit
-        return ", ".join(named[:limit]) + (f" (+{more} more)" if more > 0 else "")
-
-    ours, theirs = side(assigned), side(declared)
-    only_ours = {key: name for key, name in ours.items() if key not in theirs}
-    only_theirs = {key: name for key, name in theirs.items() if key not in ours}
-    return (
-        f"only in the assignment: [{listed(only_ours)}]; "
-        f"only in the stored manifest: [{listed(only_theirs)}]"
+    Compilation binds the plan to its model set's receipts and covers exactly
+    that set, so a grant built from it needs no NAS copy. A node fetches only
+    the objects it lacks; serving one still reads the NAS set.
+    """
+    return content_objects(
+        tuple(
+            DistributionObject(
+                name=item.path, sha256=item.sha256, bytes=item.size_bytes, kind="model"
+            )
+            for item in plan.artifacts
+        )
     )

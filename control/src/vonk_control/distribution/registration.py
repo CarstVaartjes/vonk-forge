@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC
-from typing import TYPE_CHECKING, NoReturn, cast
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionAssignmentState,
     DistributionCode,
-    DistributionObject,
 )
 
 from ..admission_locking import admitting
@@ -35,36 +33,7 @@ from .types import (
     DistributionError,
     DistributionIntegrityError,
     DistributionUnknown,
-    content_difference,
 )
-
-
-def _refuse_model_set(
-    service: DistributionService, assignment: NodeDistributionAssignment
-) -> NoReturn:
-    """Refuse an assignment whose model objects the stored manifest disowns.
-
-    The verifier already re-read the stored manifest, and the manifest of a
-    set digest is immutable: a mismatch is the same on every attempt, so it
-    ends the load naming both sides instead of being observed again.  Only a
-    manifest that cannot be read stays an unknown.
-    """
-    source = getattr(service.source, "model_source", service.source)
-    getter = getattr(source, "objects_for_set", None)
-    if not callable(getter):
-        raise DistributionUnknown(
-            DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-            "assignment model objects do not match a verified cache manifest",
-        )
-    declared = cast(Callable[[str], tuple[DistributionObject, ...]], getter)(
-        assignment.model_artifact_set_sha256
-    )
-    raise DistributionError(
-        DistributionCode.MODEL_SET_MISMATCH,
-        "assignment model objects differ from stored manifest "
-        f"{assignment.model_artifact_set_sha256[:12]}: "
-        + content_difference(assignment.objects, declared),
-    )
 
 
 class RegistrationMixin:
@@ -81,11 +50,8 @@ class RegistrationMixin:
     def register(self, assignment: NodeDistributionAssignment) -> None:
         service = cast("DistributionService", self)
         assignment = NodeDistributionAssignment.parse(assignment.to_mapping())
-        verifier = getattr(service.source, "verify_artifact_set", None)
-        if verifier is None or not verifier(
-            assignment.model_artifact_set_sha256, assignment.objects
-        ):
-            _refuse_model_set(service, assignment)
+        # Its model objects come from the accepted compiled plan, not a NAS
+        # copy: serving one checks them against the stored NAS set first.
         image_verifier = getattr(service.source, "verify_runtime_image", None)
         image_verified = image_verifier is not None and image_verifier(
             assignment.oci_image_digest, assignment.oci_archive_sha256

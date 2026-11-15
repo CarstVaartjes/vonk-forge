@@ -24,7 +24,7 @@ from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
 from .run_switch_operations.artifact_inspection import missing_spark_bytes_by_node
-from .run_switch_operations.phase_planning import targets_hold_model_and_image
+from .run_switch_operations.phase_planning import targets_hold_model
 
 
 def _reason(code: str, detail: str) -> RunSwitchReason:
@@ -254,14 +254,14 @@ class LibraryAssessment:
         image_digest: str | None,
     ) -> RecipeReadinessCheck:
         preparation = plan.preparation
-        # The planner's rule: a load whose target Sparks hold the model and
-        # image downloads no model, so the NAS model copy does not decide and
+        # The planner's rule: a load whose target Sparks hold the model
+        # files downloads no model, so the NAS model copy does not decide and
         # the placement's fit stands in for the cache check. The Controller
         # image copy still decides, because compile reads it.
         nas_free = (
             preparation is not None
             and preparation.runtime_image.controller.missing_bytes == 0
-            and targets_hold_model_and_image(plan.storage, plan.runtime_storage)
+            and targets_hold_model(plan.storage)
         )
         if nas_free:
             cache = fit
