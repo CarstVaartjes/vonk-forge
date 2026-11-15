@@ -33,7 +33,7 @@ from ..disk_reservations import (
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
-from ..inventory_repository import InventoryRepository
+from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
     AgentNode,
@@ -172,12 +172,17 @@ class InstallPlanningService:
                 )
                 for node in nodes
             }
-            inventory_by_node = self._inventory.latest_many(
-                [mapping_node.node_id for mapping_node in mapping_nodes],
-                now=now,
-                maximum_age=self._inventory_max_age,
-                _session=session,
-            )
+            inventory_by_node: dict[str, InventorySnapshotView | None] = {}
+            for mapping_node in mapping_nodes:
+                try:
+                    inventory_by_node[mapping_node.node_id] = self._inventory.latest(
+                        mapping_node.node_id,
+                        now=now,
+                        maximum_age=self._inventory_max_age,
+                        _session=session,
+                    )
+                except KeyError:
+                    inventory_by_node[mapping_node.node_id] = None
             known_inventory = {
                 node_id: inventory
                 for node_id, inventory in inventory_by_node.items()
