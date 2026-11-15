@@ -18,7 +18,6 @@ from .optional_evidence import (
     fail_open_on_optional_evidence,
 )
 from .reason_codes import AgentEvidenceCode
-from .runtime_images import RuntimeImageObservation
 from .store_cleanup import StoreRetentionFailure
 from .swap import SwapObservation
 from .telemetry import MAX_TELEMETRY_CAPACITY_BYTES
@@ -162,9 +161,6 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
             AgentEvidenceCode.INVENTORY_MODEL_OBJECTS_DROPPED, (("model_objects",),)
         ),
         EvidenceGroup(
-            AgentEvidenceCode.INVENTORY_RUNTIME_IMAGES_DROPPED, (("runtime_images",),)
-        ),
-        EvidenceGroup(
             AgentEvidenceCode.INVENTORY_FABRIC_DROPPED,
             (("fabric_address",), ("fabric_bandwidth_mbps",)),
         ),
@@ -219,10 +215,6 @@ class InventoryRequest(OptionalEvidenceModel, WireModel):
     # None: the agent predates this evidence or could not read every plan.
     unused_model_bytes: int | None = Field(default=None, ge=0, le=16 * 1024**4)
     model_objects: list[ModelStoreObject] | None = None
-    # The runtime images Docker holds, from the root helper. None: the agent
-    # predates this evidence or the helper could not list them (unknown); the
-    # Controller then charges an install for its image.
-    runtime_images: RuntimeImageObservation | None = None
     nvidia_driver_version: RuntimeVersion
     container_runtime_version: RuntimeVersion
 

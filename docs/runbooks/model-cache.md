@@ -230,9 +230,9 @@ not report; a missing or stale scan counts as missing. A linked file is never al
 counted as free space the agent could reclaim. A profile's resource recheck
 applies the same rule: it uses the review's per-Spark missing bytes, or, before
 any build, compares the set the recipe resolves to with the store scan. The
-runtime image follows the same rule: it is reused only when the Spark's fresh
-inventory lists it among the images Docker holds (`runtime_images`, the root
-helper's Docker listing), so an image the helper pruned is charged again. The protected reference scan keeps model objects a saved profile names even
+runtime image is reused only while an installation on the Spark names it (the
+helper never prunes such an image); any other image is charged, so one the
+helper pruned after its last installation went is charged again. The protected reference scan keeps model objects a saved profile names even
 when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes

@@ -29,6 +29,7 @@ from ..disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,
     outstanding_disk_charges,
+    runtime_images_named_on_node,
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
@@ -401,6 +402,9 @@ class InstallPlanningService:
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
                 stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
+                named_images = runtime_images_named_on_node(
+                    session, mapping_node.node_id
+                )
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
@@ -411,15 +415,11 @@ class InstallPlanningService:
                 )
                 reserved = sum(charge.amount_bytes for charge in charges)
                 holders = describe_disk_charges(session, charges)
-            # The Spark's own Docker listing in the inventory read above, under
-            # its freshness rule; unknown or stale counts as not held.
+            # An image an installation on the Spark names is held (the helper
+            # never prunes it); any other is charged, as it may be pruned.
             reused_image = (
                 image_bytes
-                if image_bytes is not None
-                and snapshot is not None
-                and not snapshot.stale
-                and snapshot.runtime_images is not None
-                and image_digest in snapshot.runtime_images.images
+                if image_bytes is not None and image_digest in named_images
                 else 0
             )
             if reused_image == 0:

@@ -65,7 +65,6 @@ pub(super) fn valid_inventory() -> vonk_agent_protocol::InventoryRequest {
         installations: None,
         unused_model_bytes: None,
         model_objects: None,
-        runtime_images: None,
         runs: None,
         installation_bytes: None,
         nvidia_driver_version: "580.1".to_owned(),

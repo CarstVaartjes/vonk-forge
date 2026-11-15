@@ -291,8 +291,6 @@ CASES: list[
             "unused_model_bytes": _INVENTORY | {"unused_model_bytes": -1},
             "model_objects": _INVENTORY
             | {"model_objects": [{"sha256": "invalid", "bytes": 1}]},
-            "runtime_images": _INVENTORY
-            | {"runtime_images": {"images": ["sha256:" + "a" * 64] * 2}},
         },
     ),
     (

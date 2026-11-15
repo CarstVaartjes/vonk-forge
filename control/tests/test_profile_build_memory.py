@@ -46,7 +46,6 @@ from vonk_control.source_bundles import SourceBundleStore, generate_source_bundl
 
 from .preflight_fixtures import record_passing_preflight
 from .runtime_image_fixtures import install_another_image
-from .runtime_image_support import clear_runtime_images
 from .test_profile_capacity_admission import _capacity_profile
 from .test_profile_installed_execution import _profile_service
 from .test_profile_port_claims import _load, _ready_profile
@@ -61,7 +60,6 @@ def _accepted_build_profile(
     accept_profile=True,
     initially_installed=False,
     installation_is_other_image=True,
-    image_lost_on_sparks=False,
 ):
     if initially_installed:
         sessions, profiles, planner, profile, api, headers, nodes, _ = _ready_profile(
@@ -152,9 +150,6 @@ def _accepted_build_profile(
         with sessions.begin() as session:
             for installation in session.scalars(select(RecipeInstallation)):
                 install_another_image(installation)
-    if image_lost_on_sparks:
-        with sessions.begin() as session:
-            clear_runtime_images(session)
     application_id = _load(profile, api, headers)[0] if accept_profile else None
     # Cache loss occurs after acceptance. The already selected, typed build
     # receipt is still the same identity; only its executable work is pending.

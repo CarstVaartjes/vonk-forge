@@ -418,7 +418,6 @@ def _inventory(
             exclude={
                 "observed_at",
                 "model_objects",
-                "runtime_images",
                 "installations",
                 "runs",
                 "installation_bytes",

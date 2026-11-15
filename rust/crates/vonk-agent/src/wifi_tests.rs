@@ -70,7 +70,6 @@ fn signed_signal_fractional_rates_and_extended_rate_survive_agent_output() {
         installations: None,
         unused_model_bytes: None,
         model_objects: None,
-        runtime_images: None,
         runs: None,
         installation_bytes: None,
     };

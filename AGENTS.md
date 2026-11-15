@@ -170,12 +170,10 @@ through `inventory_repository.spark_model_objects`, install admission from the
 inventory snapshot it already loaded. Copy planning and disk admission count an
 unknown or stale scan as missing (the copy reuses what the agent already
 holds); fleet model removal waits for a fresh scan instead.
-Whether Docker on a Spark holds a runtime image likewise has one source, the
-root helper's Docker listing the agent reports
-(`node_inventory_snapshots.runtime_images`): Run/Switch reads it through
-`inventory_repository.spark_runtime_images`, install admission from its loaded
-snapshot, and an unknown or stale listing charges the image (the pull reuses
-what Docker holds). The Controller records no image or model-file availability
+A Spark holds a runtime image while an installation there names it (the
+helper never prunes such an image): Run/Switch and install admission read
+`disk_reservations.runtime_images_named_on_node`, and any other image is
+charged. The Controller records no image or model-file availability receipts
 of its own. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a

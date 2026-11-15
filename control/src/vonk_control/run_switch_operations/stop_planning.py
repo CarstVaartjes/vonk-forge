@@ -177,7 +177,6 @@ class StopPlanningMixin:
                     build_candidate,
                     original_group,
                     require_available=False,
-                    now=now,
                 )
             )
             stop_digest = service._stop_digest(

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
@@ -11,8 +9,8 @@ from vonk_agent_protocol import (
     RunSwitchCode,
 )
 
+from ..disk_reservations import runtime_images_named_on_node
 from ..inventory_items import inventory_items
-from ..inventory_repository import spark_runtime_images
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -52,7 +50,6 @@ class BuildEvidenceMixin:
         defer_source_build: bool = False,
         expected_image: RuntimeImageIdentity | None = None,
         image_installed: bool = False,
-        now: datetime,
     ) -> tuple[
         RunSwitchBuildEvidence,
         RuntimeImageStorageImpact,
@@ -193,9 +190,9 @@ class BuildEvidenceMixin:
         runtime_reclaimable = 0
         if image_bytes is not None and isinstance(image_digest, str):
             for node in group.nodes:
-                # The Spark's own Docker listing; unknown or stale is not held.
-                held = spark_runtime_images(session, node.node_id, now=now)
-                if held is not None and image_digest in held:
+                # Held while an installation on the Spark names it: the
+                # helper never prunes such an image. Any other may be pruned.
+                if image_digest in runtime_images_named_on_node(session, node.node_id):
                     runtime_reused += image_bytes
                     runtime_reclaimable += image_bytes
                 else:

@@ -30,6 +30,13 @@ from .recipe_execution_contract import (
 )
 from .reservation_owners import reservation_owner
 
+# Installations whose directory, plan and links are on the Spark.
+_INSTALLATIONS_ON_NODE = (
+    InstallationState.INSTALLED,
+    InstallationState.INSTALLING,
+    InstallationState.PARTIAL,
+)
+
 
 def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
     """Model sets some installation on the Spark runs.
@@ -53,17 +60,34 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
             )
             .where(
                 InstallationNode.node_id == node_id,
-                RecipeInstallation.state.in_(
-                    (
-                        InstallationState.INSTALLED,
-                        InstallationState.INSTALLING,
-                        InstallationState.PARTIAL,
-                    )
-                ),
+                RecipeInstallation.state.in_(_INSTALLATIONS_ON_NODE),
                 RecipeInstallation.model_artifact_set_sha256.is_not(None),
             )
         )
         if digest is not None
+    )
+
+
+def runtime_images_named_on_node(session: Session, node_id: str) -> frozenset[str]:
+    """Runtime images (manifest digests) some installation on the Spark names.
+
+    The Spark's helper never removes an image an installation there names, so
+    such an image is held; another installation of it pulls nothing new. Any
+    other image is charged: one no installation names may already be pruned.
+    """
+
+    return frozenset(
+        session.scalars(
+            select(RecipeInstallation.image_digest)
+            .join(
+                InstallationNode,
+                InstallationNode.installation_id == RecipeInstallation.id,
+            )
+            .where(
+                InstallationNode.node_id == node_id,
+                RecipeInstallation.state.in_(_INSTALLATIONS_ON_NODE),
+            )
+        )
     )
 
 

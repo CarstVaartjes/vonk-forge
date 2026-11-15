@@ -34,7 +34,6 @@ from vonk_agent_protocol.inventory import (
 from vonk_agent_protocol.job_inputs import RecipeJobInputManifest
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunResult
 from vonk_agent_protocol.route_activation import ActivationMarker
-from vonk_agent_protocol.runtime_images import RuntimeImageObservation
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightRequest
 from vonk_agent_protocol.source_bundles import SourceBundleManifest
 from vonk_agent_protocol.telemetry import HostResourceSample
@@ -160,12 +159,6 @@ bind(
     nullable=True,
 )
 bind("node_inventory_snapshots", "model_objects", list[ModelStoreObject], nullable=True)
-bind(
-    "node_inventory_snapshots",
-    "runtime_images",
-    RuntimeImageObservation,
-    nullable=True,
-)
 bind("node_inventory_snapshots", "host_settings", HostSettings, nullable=True)
 bind("node_telemetry_samples", "gpu_clock", GpuClockObservation, nullable=True)
 bind("model_cache_sets", "protected_reasons", list[CacheReferenceReason])

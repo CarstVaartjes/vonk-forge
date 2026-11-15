@@ -53,7 +53,6 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import remove_test_image
-from .runtime_image_support import clear_runtime_images
 from .test_fleet_profile_recovery_current import _failed_profile
 from .test_fleet_profiles import NOW, _node_id
 from .test_recipe_operations import setup_services
@@ -489,8 +488,6 @@ class _ColdInspector(CompleteArtifactInspector):
 
 def test_run_switch_cache_miss_retries_after_storage_recovers(tmp_path: Path) -> None:
     sessions, lifecycle, _queue, _mapping, _build, nodes = setup_services(tmp_path)
-    with sessions.begin() as session:
-        clear_runtime_images(session)
     executor = _MissingRuntimeImage()
     service = RunSwitchOperationService(
         sessions,

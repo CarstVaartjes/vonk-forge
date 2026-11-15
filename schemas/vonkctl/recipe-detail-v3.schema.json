@@ -25,7 +25,6 @@
         "agent_evidence.inventory_installation_bytes_dropped",
         "agent_evidence.inventory_unused_model_bytes_dropped",
         "agent_evidence.inventory_model_objects_dropped",
-        "agent_evidence.inventory_runtime_images_dropped",
         "agent_evidence.inventory_nas_route_dropped",
         "agent_evidence.inventory_network_dropped",
         "agent_evidence.inventory_network_interface_dropped",

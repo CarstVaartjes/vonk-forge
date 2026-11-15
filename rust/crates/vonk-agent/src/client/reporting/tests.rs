@@ -32,7 +32,6 @@ fn out_of_contract_inventory_is_clamped_instead_of_refused() {
         installations: None,
         unused_model_bytes: None,
         model_objects: None,
-        runtime_images: None,
         runs: None,
         installation_bytes: None,
         nvidia_driver_version: "580.1\u{e9}".to_owned(),

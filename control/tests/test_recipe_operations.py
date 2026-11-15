@@ -152,7 +152,6 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .runtime_image_fixtures import place_test_image
-from .runtime_image_support import report_runtime_images
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
@@ -741,8 +740,6 @@ def setup_services(
         session.flush()
         build.plan = {**build.plan, "build_id": build.id}
         build_id = build.id
-        for node_id in node_ids:
-            report_runtime_images(session, node_id, "sha256:" + "1" * 64)
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):

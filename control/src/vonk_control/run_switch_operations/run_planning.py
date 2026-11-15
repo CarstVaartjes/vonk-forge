@@ -249,7 +249,6 @@ class RunPlanningMixin:
                         expected_image=installed_image,
                         require_available=False,
                         image_installed=True,
-                        now=now,
                     )
                 )
                 if runtime_storage.missing_image_distribution_bytes not in (None, 0):
@@ -303,7 +302,6 @@ class RunPlanningMixin:
                         group,
                         defer_source_build=defer_source_build,
                         expected_image=expected_image,
-                        now=now,
                     )
                 )
             blockers.extend(build_blockers)

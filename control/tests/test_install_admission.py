@@ -50,7 +50,6 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_fingerprint,
 )
-from .runtime_image_support import clear_runtime_images
 from .stored_documents_support import valid_policy_report
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -371,7 +370,6 @@ def setup(
     denied_jurisdictions=(),
     disk_estimates=(30, 70),
     model_objects=None,
-    runtime_images=("sha256:" + "1" * 64,),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -428,7 +426,6 @@ def setup(
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
                     "model_objects": model_objects,
-                    "runtime_images": {"images": list(runtime_images)},
                 }
             )
         )
@@ -464,7 +461,8 @@ def setup(
 
 
 def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(tmp_path, free=100)
+    sessions, now, node, mapping, build = setup(tmp_path, free=100)
+    _name_image_on(sessions, node, mapping, now)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     assert plan.allowed is True
@@ -600,7 +598,7 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
     tmp_path, free: int, allowed: bool
 ) -> None:
     sessions, now, _node, mapping, build = setup(
-        tmp_path, free=free, disk_estimates=(1, 1), runtime_images=()
+        tmp_path, free=free, disk_estimates=(1, 1)
     )
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
@@ -611,10 +609,11 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(
+    sessions, now, node, mapping, build = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
     )
+    _name_image_on(sessions, node, mapping, now)
 
     unconfigured = _service(
         sessions, inventory_max_age=300, disk_floor_bytes=10
@@ -650,9 +649,10 @@ def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> Non
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(
+    sessions, now, node, mapping, build = setup(
         tmp_path, free=80, model_objects=[{"sha256": "3" * 64, "bytes": 70}]
     )
+    _name_image_on(sessions, node, mapping, now)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -761,7 +761,6 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
-        clear_runtime_images(session)
         session.add(
             ResourceReservation(
                 node_id=node,
@@ -852,7 +851,6 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
-                    "runtime_images": _HELD_IMAGE,
                 }
             )
         )
@@ -997,12 +995,7 @@ def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
         node.endpoint_owner = False
 
 
-_HELD_IMAGE = {"images": ["sha256:" + "1" * 64]}
-
-
-def _record_inventory(
-    sessions, node_id, at, *, free=200, runtime_images=_HELD_IMAGE
-) -> None:
+def _record_inventory(sessions, node_id, at, *, free=200) -> None:
     """Keep reporting the same authenticated capacity at a later observation."""
 
     InventoryRepository(sessions, clock=lambda: at).record(
@@ -1027,7 +1020,6 @@ def _record_inventory(
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
-                    "runtime_images": runtime_images,
                 }
             )
         )
@@ -1175,21 +1167,55 @@ def test_damaged_install_identity_does_not_block_fresh_admission(tmp_path) -> No
         )
 
 
+def _name_image_on(sessions, node, mapping, now) -> str:
+    """Another Model's installation on the Spark names the build's image, so the
+    helper keeps it there."""
+
+    with sessions.begin() as session:
+        installation = RecipeInstallation(
+            recipe_revision_id=RECIPE_REVISION_ID,
+            model_content_sha256="e" * 64,
+            mapping_id=mapping,
+            mapping_generation=1,
+            image_digest="sha256:" + "1" * 64,
+            plan_digest="d" * 64,
+            plan={},
+            state="installed",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(installation)
+        session.flush()
+        session.add(
+            InstallationNode(
+                installation_id=installation.id,
+                node_id=node,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=0,
+                installed_bytes=0,
+                updated_at=now,
+            )
+        )
+        return installation.id
+
+
 def test_a_pruned_runtime_image_is_charged_again(tmp_path) -> None:
-    """The Spark's newest image report decides reuse. Catches presence read
-    from a distribution receipt that never expires: once the Spark no longer
-    reports the image, admission charges its bytes again."""
+    """An image is reused only while an installation on the Spark names it (the
+    helper never prunes such an image). Catches presence read from a receipt
+    that never expires: once the last installation naming it is gone, the
+    helper may prune it, so admission charges its bytes again."""
 
     sessions, now, node, mapping, build = setup(tmp_path)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    installation_id = _name_image_on(sessions, node, mapping, now)
     assert service.plan_install(mapping, build, now=now).nodes[0].reused_bytes == 30
 
-    pruned_at = now + timedelta(seconds=1)
-    _record_inventory(sessions, node, pruned_at, runtime_images={"images": []})
-    pruned = service.plan_install(mapping, build, now=pruned_at).nodes[0]
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, installation_id)
+        assert installation is not None
+        installation.state = "uninstalled"
+    pruned = service.plan_install(mapping, build, now=now).nodes[0]
     assert (pruned.reused_bytes, pruned.required_download_bytes) == (0, 100)
-
-    unknown_at = now + timedelta(seconds=2)
-    _record_inventory(sessions, node, unknown_at, runtime_images=None)
-    unknown = service.plan_install(mapping, build, now=unknown_at).nodes[0]
-    assert (unknown.reused_bytes, unknown.required_download_bytes) == (0, 100)
