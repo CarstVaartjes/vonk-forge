@@ -4,8 +4,8 @@ Every other test decides on data: the exit status, the requests sent, a typed
 result, or the ``--json`` document. Human wording is owned by the shared
 vectors in ``tests/fixtures`` that the Controller web renders too, so each case
 here renders a vector's input and compares the exact text vonkctl prints. The
-``printed-output`` added-line guard keeps captured output out of every other
-test in ``tests/cluster_profiles``.
+``printed-output`` added-line guard keeps wording assertions on captured output
+out of every other test in ``tests/cluster_profiles``.
 """
 
 import json

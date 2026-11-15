@@ -193,19 +193,45 @@ WEB_NOT_REPORTED_KIND = (
     "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
 )
 # A vonkctl test decides on data (status, requests, a typed result, the --json
-# document); captured stdout/stderr text is wording, which only the shared
-# vectors and their one test own. The conftest `vonkctl_json` fixture runs a
-# command and returns its --json document.
-PRINTED_OUTPUT = re.compile(
-    r"\b(?:capsys|capfd|readouterr|redirect_stdout|redirect_stderr)\b"
-)
+# document); a positive string literal found in captured stdout/stderr is
+# wording, which only the shared vectors and their one test own. Absence, count
+# and emptiness checks on captured output (a secret never printed, a line shown
+# once) are leak and duplication checks and stay allowed.
+CAPTURED_TEXT = re.compile(r"\.(?:out|err)\b|\.getvalue\(\)|readouterr\(\)")
 PRINTED_OUTPUT_SCOPE = "tests/cluster_profiles/test_"
 PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_wording.py"
 PRINTED_OUTPUT_KIND = (
-    "vonkctl test reads printed output; assert the status, the requests, a typed "
-    "result or the --json document (vonkctl_json), and put wording in "
-    "test_cli_wording.py over a shared vector"
+    "vonkctl test asserts wording in printed output; assert the status, the "
+    "requests, a typed result, a view function or the --json document "
+    "(vonkctl_json), and put wording in test_cli_wording.py over a shared vector"
 )
+
+
+def printed_wording_lines(source: str) -> list[int]:
+    """Lines of `assert "<literal>" in <captured stdout/stderr>` assertions."""
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Assert):
+            continue
+        for compare in ast.walk(node.test):
+            if (
+                isinstance(compare, ast.Compare)
+                and isinstance(compare.left, ast.Constant | ast.JoinedStr)
+                and (
+                    isinstance(compare.left, ast.JoinedStr)
+                    or isinstance(compare.left.value, str)
+                )
+                and any(isinstance(op, ast.In) for op in compare.ops)
+                and any(
+                    CAPTURED_TEXT.search(ast.unparse(item))
+                    for item in compare.comparators
+                )
+            ):
+                lines.extend(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+                break
+    return lines
+
+
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
 # Authority and byte-verification owners; not arbitrary operation modules.
@@ -2481,9 +2507,7 @@ def check_source(
         and path != PRINTED_OUTPUT_WORDING
     ):
         hits.extend(
-            (number, PRINTED_OUTPUT_KIND)
-            for number, text in enumerate(source.splitlines(), 1)
-            if not text.lstrip().startswith("#") and PRINTED_OUTPUT.search(text)
+            (number, PRINTED_OUTPUT_KIND) for number in printed_wording_lines(source)
         )
     if python and "contract-constants" in modes:
         hits.extend(
