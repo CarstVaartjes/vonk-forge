@@ -465,11 +465,13 @@ def test_live_agent_progress_reaches_recipe_switch_and_profile(
     _follow_saved_due(sessions, service, application.id, clock)
     assert planner.tick()
     switch = planner.get(switch_id)
-    # The native install's 48 measured bytes are separate from this accepted
-    # zero-byte distribution; observing them must not corrupt its journal.
+    # The native install's 48 measured bytes are separate from this completed
+    # distribution (the image, which no installation holds on these Sparks
+    # yet); observing them must not corrupt its journal.
     assert switch.result is not None
-    assert switch.result.completed_bytes == 0
-    assert switch.result.total_bytes == 0
+    copied = plan.runtime_storage.missing_image_distribution_bytes
+    assert copied
+    assert switch.result.completed_bytes == switch.result.total_bytes == copied
     assert switch.result.total_bytes_known
     assert switch.progress is not None and switch.progress.operation is not None
     assert switch.progress.operation.completed_bytes == 48
