@@ -248,7 +248,11 @@ def test_profile_stop_accepts_a_parent_stored_with_a_retired_plan_field(
                 root = session.scalar(select(Job).where(Job.kind == _ROOT))
                 assert root is not None
                 payload = copy.deepcopy(root.payload)
-                payload["plan"]["runtime_storage"]["reclaimable_bytes"] = 0
+                plan = payload["plan"]
+                assert isinstance(plan, dict)
+                storage = plan["runtime_storage"]
+                assert isinstance(storage, dict)
+                storage["reclaimable_bytes"] = 0
                 # Raw SQL: the write guard rightly refuses the retired key, but
                 # rows written before the retirement still carry it.
                 session.execute(
