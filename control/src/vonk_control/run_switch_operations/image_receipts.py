@@ -31,6 +31,14 @@ from .errors import RunSwitchRetryLater
 from .identity_helpers import _is_hex_digest, _is_oci_digest, _node_missing_bytes
 
 
+def _planned_model_download_bytes(plan: RunSwitchPlan) -> int | None:
+    """The NAS download the plan makes: none when it has no download phase."""
+
+    if not any(phase.subphase == "model-download" for phase in plan.phases):
+        return 0
+    return plan.storage.missing_nas_bytes
+
+
 def _planned_transfer_bytes(
     plan: RunSwitchPlan,
 ) -> tuple[int | None, dict[str, int | None]]:
@@ -44,7 +52,7 @@ def _planned_transfer_bytes(
     node_ids = list(_plan_target_node_ids(plan))
     if plan.action == "stop":
         return 0, {node_id: 0 for node_id in node_ids}
-    model_download_bytes = plan.storage.missing_nas_bytes
+    model_download_bytes = _planned_model_download_bytes(plan)
     model_bytes = plan.storage.missing_spark_bytes
     image_bytes = plan.runtime_storage.missing_image_distribution_bytes
     target_bytes = (
@@ -92,7 +100,7 @@ def _planned_transfer_parts(
 ) -> tuple[int | None, int | None, int | None]:
     """Return Controller model download, target copy, and aggregate bytes."""
 
-    model_download = plan.storage.missing_nas_bytes
+    model_download = _planned_model_download_bytes(plan)
     model_copy = plan.storage.missing_spark_bytes
     image_copy = plan.runtime_storage.missing_image_distribution_bytes
     target_copy = (

@@ -28,6 +28,28 @@ from .types import (
 )
 
 
+def model_file_receipt(
+    *,
+    model_content_sha256: str,
+    file_id: str,
+    item: DistributionObject,
+    roles: list[str],
+) -> VerifiedModelObject:
+    """One model file's receipt: its model, file identity and content digest."""
+
+    return VerifiedModelObject(
+        model_content_sha256=model_content_sha256,
+        file_id=file_id,
+        path=item.name,
+        sha256=item.sha256,
+        bytes=item.bytes,
+        roles=roles,
+        distribution_object=DistributionObjectReceipt(
+            name=item.name, sha256=item.sha256, bytes=item.bytes, kind="model"
+        ),
+    )
+
+
 class ModelCacheObjectSource:
     """Narrow adapter for the NAS model-cache verified-object service.
 
@@ -147,19 +169,11 @@ class ModelCacheObjectSource:
                 roles = descriptor.get("roles")
                 if isinstance(file_id, str) and isinstance(model_content_sha256, str):
                     receipts.append(
-                        VerifiedModelObject(
+                        model_file_receipt(
                             model_content_sha256=model_content_sha256,
                             file_id=file_id,
-                            path=item.name,
-                            sha256=item.sha256,
-                            bytes=item.bytes,
+                            item=item,
                             roles=list(roles) if isinstance(roles, list) else [],
-                            distribution_object=DistributionObjectReceipt(
-                                name=item.name,
-                                sha256=item.sha256,
-                                bytes=item.bytes,
-                                kind="model",
-                            ),
                         )
                     )
             except (KeyError, TypeError, ValueError) as error:

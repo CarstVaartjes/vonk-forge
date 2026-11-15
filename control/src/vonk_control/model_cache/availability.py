@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -172,6 +173,23 @@ class AvailabilityMixin:
                 recovery="reverify",
             )
         return path, spec.expected_bytes, spec.sha256
+
+    def adopt_covered_set(self, manifest: ArtifactSetManifest) -> None:
+        """Record a resolved set whose every object the NAS already holds.
+
+        A copy to a Spark reads a set by its digest, so a new set over bytes
+        other sets cached is recorded before that copy. A set the NAS lacks is
+        left alone: no refusal and no download, because only a copy to a Spark
+        that lacks the files needs the NAS bytes, and that copy checks them.
+        """
+        cache = cast("ModelCacheService", self)
+        with suppress(ModelCacheNotFound):
+            cache._manifest_for_set(manifest.digest)
+            return
+        if cache._managed_cached_objects(manifest) == frozenset(
+            spec.sha256 for spec in manifest.artifacts
+        ):
+            cache.adopt_verified_set(manifest)
 
     def adopt_verified_set(self, manifest: ArtifactSetManifest) -> None:
         """Record a set whose every object is already verified in storage.

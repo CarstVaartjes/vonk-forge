@@ -6,6 +6,7 @@ import hashlib
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, cast
 
 from vonk_agent_protocol import (
     DistributionCode,
@@ -15,7 +16,7 @@ from vonk_agent_protocol import (
 
 from ..bounded_retry import bounded_attempts
 from ..compiled_execution_plan import VerifiedModelObject
-from .model_cache import ModelCacheObjectSource
+from .model_cache import model_file_receipt
 from .types import (
     DistributionError,
     DistributionUnknown,
@@ -24,14 +25,49 @@ from .types import (
     same_content,
 )
 
+if TYPE_CHECKING:
+    from ..model_cache import ModelCacheService
+    from ..model_cache.artifacts import ArtifactSetManifest
+
 
 def verified_model_receipts(
-    service: object, artifact_set_sha256: str, manifest: object
+    service: object, artifact_set_sha256: str, manifest: ArtifactSetManifest
 ) -> tuple[VerifiedModelObject, ...]:
-    """Resolve canonical file receipts through the typed NAS adapter boundary."""
+    """Describe a resolved model set for compilation, without its NAS copy.
 
-    source: ModelCacheObjectSource = ModelCacheObjectSource.from_service(service)
-    return source.verified_model_objects_for_set(artifact_set_sha256, manifest)
+    A receipt names a model's files by content digest, and the resolved
+    manifest is that identity. The NAS copy is read only when target-copy
+    sends files to a Spark that lacks them, and that read checks NAS coverage
+    itself; so a set every target Spark holds compiles after NAS eviction.
+    """
+
+    if manifest.digest != artifact_set_sha256:
+        raise DistributionUnknown(
+            DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+            "resolved manifest names another artifact set",
+        )
+    receipts = []
+    for spec in manifest.artifacts:
+        if spec.model_content_sha256 is None:
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "resolved manifest lacks canonical model-file identity",
+            )
+        receipts.append(
+            model_file_receipt(
+                model_content_sha256=spec.model_content_sha256,
+                file_id=spec.artifact_id,
+                item=DistributionObject(
+                    name=spec.path,
+                    sha256=spec.sha256,
+                    bytes=spec.expected_bytes,
+                    kind="model",
+                ),
+                roles=list(spec.roles),
+            )
+        )
+    cast("ModelCacheService", service).adopt_covered_set(manifest)
+    return tuple(receipts)
 
 
 class CompositeObjectSource:

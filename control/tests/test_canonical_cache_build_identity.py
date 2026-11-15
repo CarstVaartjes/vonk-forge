@@ -464,19 +464,17 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     assert "model-not-cached" not in status.blockers
 
     # Compilation asks for exactly that: capture what it binds.
-    bound: list[tuple[VerifiedModelObject, ...]] = []
-    original = ModelCacheObjectSource.verified_model_objects_for_set
+    from vonk_control import execution_plan_service
 
-    def capture(self, digest, manifest=None):
-        result = original(self, digest, manifest)
+    bound: list[tuple[VerifiedModelObject, ...]] = []
+    original = execution_plan_service.verified_model_receipts
+
+    def capture(cache, digest, manifest):
+        result = original(cache, digest, manifest)
         bound.append(result)
         return result
 
-    monkeypatch.setattr(
-        ModelCacheObjectSource,
-        "verified_model_objects_for_set",
-        capture,
-    )
+    monkeypatch.setattr(execution_plan_service, "verified_model_receipts", capture)
     with sessions() as session:
         revision = session.get(CatalogDocumentRevision, second_recipe.id)
         assert revision is not None
