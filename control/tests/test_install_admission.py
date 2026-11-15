@@ -681,9 +681,11 @@ def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
 def test_a_model_the_spark_already_stores_through_an_installation_is_not_counted_again(
     tmp_path,
 ) -> None:
-    """With hard links an installation of a model the Spark holds writes none of
-    its files: counting them again refuses (and, with eviction, needlessly
-    removes things for) an install that fits."""
+    """With hard links an installation of a model set the Spark holds writes none
+    of its files: counting them again refuses (and, with eviction, needlessly
+    removes things for) an install that fits. The installation names the set's
+    files under an older Model digest (a release re-digested the Model over the
+    same files), which must not matter."""
 
     sessions, now, node, mapping, build = setup(tmp_path, free=40)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
@@ -691,10 +693,12 @@ def test_a_model_the_spark_already_stores_through_an_installation_is_not_counted
     assert cold.allowed is False
 
     with sessions.begin() as session:
-        model = session.scalar(select(CatalogRecipeModelReference.model_content_digest))
         installation = RecipeInstallation(
             recipe_revision_id=RECIPE_REVISION_ID,
-            model_content_sha256=model,
+            model_content_sha256="e" * 64,
+            model_artifact_set_sha256=cold.compiled_plan_by_node[
+                node
+            ].identity.model_artifact_set_sha256,
             mapping_id=mapping,
             mapping_generation=1,
             image_digest="sha256:" + "1" * 64,

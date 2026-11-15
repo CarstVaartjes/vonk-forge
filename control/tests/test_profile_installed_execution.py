@@ -470,12 +470,15 @@ def test_installed_profile_still_refuses_insufficient_disk(tmp_path: Path) -> No
     }
 
 
+@pytest.mark.parametrize("re_digested", [False, True])
 def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
-    tmp_path: Path,
+    tmp_path: Path, re_digested: bool
 ) -> None:
     """The review's disk claim leaves out the model files an installation of the
-    same model already put in the Spark's shared store (a new installation links
-    them): catches a load refused, or eviction triggered, for bytes never written."""
+    same set already put in the Spark's shared store (a new installation links
+    them): catches a load refused, or eviction triggered, for bytes never written,
+    also when that installation names the set's files under an older Model
+    digest (a release re-digested the Model; the files are the same)."""
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     _service, planner = _profile_service(sessions, lifecycle)
@@ -483,7 +486,15 @@ def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
     cold = planner.preview(request, actor="admin").fit.nodes[0]
     assert cold.disk_required_bytes is not None
 
-    installed_recipe(lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4()))
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    if re_digested:
+        with sessions.begin() as session:
+            installation = session.get(RecipeInstallation, installed.owner_id)
+            assert installation is not None
+            assert installation.model_artifact_set_sha256 is not None
+            installation.model_content_sha256 = "e" * 64
     warm = planner.preview(request, actor="admin").fit.nodes[0]
 
     assert warm.disk_required_bytes is not None

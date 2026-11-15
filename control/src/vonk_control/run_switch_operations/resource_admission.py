@@ -108,6 +108,9 @@ class ResourceAdmissionMixin:
             artifact_bytes=reviewed.preparation.model.artifact_set_bytes
             if reviewed.preparation is not None
             else None,
+            artifact_set_sha256=reviewed.preparation.model.artifact_set_sha256
+            if reviewed.preparation is not None
+            else None,
             excluded_profile_application_ids=excluded_profile_application_ids,
             kept_run_ids=kept_run_ids,
         )
@@ -154,6 +157,7 @@ class ResourceAdmissionMixin:
         model_documents: Mapping[tuple[str, str, str], ModelDefinition],
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
+        artifact_set_sha256: str | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: Collection[str] = (),
@@ -192,6 +196,7 @@ class ResourceAdmissionMixin:
             revision_digest=revision.content_digest,
             image_bytes=image_bytes,
             artifact_bytes=artifact_bytes,
+            artifact_set_sha256=artifact_set_sha256,
             excluded_profile_application_ids=excluded_profile_application_ids,
             planned_ports=planned_ports,
         )
@@ -220,6 +225,7 @@ class ResourceAdmissionMixin:
                 revision_digest=revision.content_digest,
                 image_bytes=image_bytes,
                 artifact_bytes=artifact_bytes,
+                artifact_set_sha256=artifact_set_sha256,
                 excluded_profile_application_ids=excluded_profile_application_ids,
                 planned_ports=planned_ports,
             )

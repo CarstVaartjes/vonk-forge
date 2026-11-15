@@ -22,7 +22,7 @@ from vonk_forge_contracts import ModelDefinition
 from ..attempt_residues import unowned_never_installed
 from ..disk_reservations import (
     describe_disk_charges,
-    models_stored_on_node,
+    model_sets_stored_on_node,
     outstanding_disk_charges,
 )
 from ..gpu_health import gpu_health_reason
@@ -76,7 +76,6 @@ from ..run_switch_contract import (
 )
 from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
-from .build_helpers import _recipe_model_digests
 from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,
@@ -107,6 +106,7 @@ class ResourceFitMixin:
         serving: bool = True,
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
+        artifact_set_sha256: str | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
@@ -139,7 +139,6 @@ class ResourceFitMixin:
         except RecipeRuntimeSpecError:
             roles = ()
         role_by_name = {role.name: role for role in roles}
-        recipe_models = _recipe_model_digests(revision)
         observed_peaks = (
             observed_role_peaks(session, revision.content_digest) if revision else {}
         )
@@ -472,11 +471,13 @@ class ResourceFitMixin:
                     )
                     # An unstated payload size leaves the envelope incomplete.
                     if image_size is not None and artifact_size is not None:
-                        if recipe_models and recipe_models <= models_stored_on_node(
-                            session, item.node_id
+                        if (
+                            artifact_set_sha256 is not None
+                            and artifact_set_sha256
+                            in model_sets_stored_on_node(session, item.node_id)
                         ):
-                            # The Spark's shared store already holds every model of
-                            # the recipe (an installation of it exists there), so
+                            # The Spark's shared store already holds the model
+                            # set (an installation running it exists there), so
                             # the install links those files and writes none.
                             artifact_size = 0
                         disk_need = installation_disk_requirement(
