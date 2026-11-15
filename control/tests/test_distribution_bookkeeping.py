@@ -142,34 +142,6 @@ def test_corrupt_local_object_is_a_miss_then_recovered():
         assert stream.read() == b"payload"
 
 
-def test_missing_canonical_file_receipt_is_unknown_then_recovers():
-    """Missing internal identity evidence is bookkeeping, never a security verdict."""
-    from vonk_control.compiled_execution_plan import (
-        DistributionObjectReceipt,
-        VerifiedModelObject,
-    )
-
-    item = DistributionObject(name="weights", sha256="a" * 64, bytes=7, kind="model")
-    source = ModelCacheObjectSource(
-        lambda *_: pytest.fail("no object effect"), {"b" * 64: (item,)}
-    )
-    with pytest.raises(Exception) as _ending:
-        source.verified_model_objects_for_set("b" * 64)
-    receipt = VerifiedModelObject(
-        model_content_sha256="c" * 64,
-        file_id="weights",
-        path="weights",
-        sha256=item.sha256,
-        bytes=item.bytes,
-        roles=["weights"],
-        distribution_object=DistributionObjectReceipt(
-            name=item.name, sha256=item.sha256, bytes=item.bytes, kind=item.kind
-        ),
-    )
-    source._receipts["b" * 64] = (receipt,)
-    assert source.verified_model_objects_for_set("b" * 64) == (receipt,)
-
-
 @pytest.mark.parametrize(
     "damage", ["model-manifest", "runtime-image", "opened-identity"]
 )

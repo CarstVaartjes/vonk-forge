@@ -1474,28 +1474,6 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     }
     assert {item["file_id"] for item in descriptors} == {"weights", "tokenizer"}
     assert {item["model_content_sha256"] for item in descriptors} == {model_a}
-    model_source = ModelCacheObjectSource.from_service(service)
-    receipts = model_source.verified_model_objects_for_set(
-        first.artifact_set_sha256 or ""
-    )
-    assert {
-        (
-            item.model_content_sha256,
-            item.file_id,
-            item.path,
-            tuple(item.roles),
-        )
-        for item in receipts
-    } == {
-        (model_a, "weights", "weights.bin", ("model",)),
-        (model_a, "tokenizer", "tokenizer.json", ("auxiliary",)),
-    }
-    assert all(
-        item.distribution_object.sha256 == item.sha256
-        and item.distribution_object.bytes == item.bytes
-        and item.distribution_object.name == item.path
-        for item in receipts
-    )
     assert (
         service.read_verified_artifact(
             first.artifact_set_sha256 or "",
@@ -1588,10 +1566,12 @@ def test_upstream_revision_downloads_only_new_files_and_reuses_the_rest(
     assert second.state == "succeeded", second.last_error
     entry = service.get_entry(second.artifact_set_sha256 or "")
     assert entry["coverage"] == "complete"
-    receipts = ModelCacheObjectSource.from_service(
-        service
-    ).verified_model_objects_for_set(second.artifact_set_sha256 or "")
-    assert {(item.model_content_sha256, item.file_id) for item in receipts} == {
+    descriptors = service.resolve_verified_artifact_set(
+        second.artifact_set_sha256 or ""
+    )
+    assert {
+        (item["model_content_sha256"], item["file_id"]) for item in descriptors
+    } == {
         (updated, "weights"),
         (updated, "config"),
         (updated, "tokenizer"),
@@ -1940,6 +1920,40 @@ def test_operation_transfer_progress_counts_only_missing_objects(
     operation = service.get_operation(operation.id)
     assert operation.progress["downloaded_bytes"] == len(b"new object")
     assert operation.progress["expected_bytes"] == len(b"new object")
+
+
+def test_preview_hashes_the_set_identity_once_whatever_the_file_count(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production 2026-11-15: a preview re-hashed the whole manifest once per
+    missing file, so a many-file model cost seconds and every Library
+    assessment ran out of its read budget. The work must not grow with files."""
+    service, _sessions = cache
+    model = "8" * 64
+    shards = [f"shard {index}".encode() for index in range(40)]
+    files = [
+        _artifact(
+            tmp_path,
+            shard,
+            artifact_id=f"shard-{index}",
+            path=f"shard-{index}.bin",
+            model_content_sha256=model,
+        )
+        for index, shard in enumerate(shards)
+    ]
+    hashed = 0
+    identity = ArtifactSetManifest.identity
+
+    def counted(self: ArtifactSetManifest):
+        nonlocal hashed
+        hashed += 1
+        return identity(self)
+
+    monkeypatch.setattr(ArtifactSetManifest, "identity", counted)
+    preview = service.download_preview(model_content_sha256=model, artifacts=files)
+    assert preview["artifact_count"] == len(files)
+    assert preview["new_bytes"] == sum(len(shard) for shard in shards)
+    assert hashed <= 2
 
 
 def test_download_mutation_is_queued_until_the_controller_worker_runs(

@@ -90,8 +90,7 @@ digest empty, so the load review charged the whole model again. Ask by the set
 instead (`disk_reservations.model_sets_stored_on_node`).
 
 NAS coverage is required only where NAS bytes are read. A new call of
-`_require_managed_cache_coverage`, `resolve_verified_artifact_set` or
-`verified_model_objects_for_set` on an added
+`_require_managed_cache_coverage` or `resolve_verified_artifact_set` on an added
 line outside `model_cache/` and `distribution/model_cache.py` is flagged
 (added-line mode `model-sets`). A planner or compiler that required it
 downloaded a model every target Spark already held, after the NAS evicted it
