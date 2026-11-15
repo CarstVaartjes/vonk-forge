@@ -33,6 +33,7 @@ from ..run_switch_contract import (
 from ..strict_json import (
     read_stored_model,
 )
+from .artifact_inspection import missing_spark_bytes_by_node
 from .build_helpers import _refreshed_freshness
 from .constants import (
     _MEMORY_CAPACITY_REFUSALS,
@@ -56,14 +57,51 @@ if TYPE_CHECKING:
     from .service import RunSwitchOperationService
 
 
-def _recipe_set(session: Session, recipe_revision_id: str) -> str | None:
-    """The exact model set a recipe revision resolves to; unknown when the cache
-    refuses it (the fit then charges the whole set)."""
+def _reviewed_model(
+    session: Session,
+    reviewed: RunSwitchAssessment,
+    recipe_revision_id: str,
+    node_ids: Sequence[str],
+    *,
+    now: datetime,
+) -> tuple[int | None, str | None, Mapping[str, int] | None]:
+    """The model set a recheck fits (bytes, digest, bytes missing per Spark).
 
+    The review's preparation names them. A review made before any build has
+    none: the set the recipe resolves to is the one it will run, and the
+    agents' store scans say which of its files each Spark lacks, as the
+    review's inspection does. A set the cache refuses is unknown, and the fit
+    then charges the recipe's whole envelope.
+    """
+
+    if reviewed.preparation is not None:
+        model = reviewed.preparation.model
+        return (
+            model.artifact_set_bytes,
+            model.artifact_set_sha256,
+            {
+                target.node_id: target.missing_bytes
+                for target in model.targets
+                if target.missing_bytes is not None
+            },
+        )
     try:
-        return resolve_recipe_set(session, recipe_revision_id).digest
+        manifest = resolve_recipe_set(session, recipe_revision_id)
     except ModelCacheError:
-        return None
+        return None, None, None
+    return (
+        manifest.expected_bytes,
+        manifest.digest,
+        missing_spark_bytes_by_node(
+            session,
+            {
+                artifact.sha256: artifact.expected_bytes
+                for artifact in manifest.artifacts
+            },
+            node_ids,
+            now=now,
+        ),
+    )
 
 
 class ResourceAdmissionMixin:
@@ -102,6 +140,13 @@ class ResourceAdmissionMixin:
             for reason in resolution.reasons
         )
         now = _now(service._clock)
+        artifact_bytes, artifact_set_sha256, missing_by_node = _reviewed_model(
+            session,
+            reviewed,
+            revision.id,
+            tuple(node.node_id for node in request.spark_group.nodes),
+            now=now,
+        )
         resources = service._resource_fits(
             session,
             revision,
@@ -117,14 +162,9 @@ class ResourceAdmissionMixin:
             image_bytes=reviewed.preparation.runtime_image.image_bytes
             if reviewed.preparation is not None
             else None,
-            artifact_bytes=reviewed.preparation.model.artifact_set_bytes
-            if reviewed.preparation is not None
-            else None,
-            artifact_set_sha256=reviewed.preparation.model.artifact_set_sha256
-            if reviewed.preparation is not None
-            # A review made before any build has no preparation; the set the
-            # recipe resolves to is the one it will run.
-            else _recipe_set(session, revision.id),
+            artifact_bytes=artifact_bytes,
+            artifact_set_sha256=artifact_set_sha256,
+            missing_artifact_bytes_by_node=missing_by_node,
             excluded_profile_application_ids=excluded_profile_application_ids,
             kept_run_ids=kept_run_ids,
         )

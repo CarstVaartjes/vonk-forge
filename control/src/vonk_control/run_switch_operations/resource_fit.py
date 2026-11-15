@@ -461,6 +461,9 @@ class ResourceFitMixin:
                             else:
                                 node_blockers.append(projected)
                 disk_need = None
+                # Model bytes this load links from the Spark's store rather
+                # than writes; the agent never removes them as unused.
+                reused_model_bytes = 0
                 try:
                     image_size = (
                         image_bytes if image_bytes is not None else disk.image_bytes
@@ -472,6 +475,7 @@ class ResourceFitMixin:
                     )
                     # An unstated payload size leaves the envelope incomplete.
                     if image_size is not None and artifact_size is not None:
+                        set_bytes = artifact_size
                         if (
                             artifact_set_sha256 is not None
                             and artifact_set_sha256
@@ -489,6 +493,7 @@ class ResourceFitMixin:
                             # store scan does not report (install admission's
                             # rule); no scan charges the whole set.
                             artifact_size = missing_artifact_bytes_by_node[item.node_id]
+                        reused_model_bytes = max(0, set_bytes - artifact_size)
                         disk_need = installation_disk_requirement(
                             disk,
                             required_download_bytes=image_size + artifact_size,
@@ -531,7 +536,9 @@ class ResourceFitMixin:
                         )
                     disk_free = (
                         spark_free_bytes(
-                            snapshot.disk_free_bytes, snapshot.unused_model_bytes
+                            snapshot.disk_free_bytes,
+                            snapshot.unused_model_bytes,
+                            reused_model_bytes=reused_model_bytes,
                         )
                         if snapshot is not None
                         else None

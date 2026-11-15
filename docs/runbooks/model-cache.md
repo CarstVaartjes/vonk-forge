@@ -226,10 +226,10 @@ The match is by set, not Model digest: a Model re-digested over the same files
 runs the same set. The same holds
 for any file the agent's store scan reports (`model_objects` in its fresh
 inventory), and Run/Switch plans a target copy only for the files that scan does
-not report; a missing or stale scan counts as missing. A profile's resource
-recheck re-reads only the installations: it credits the exact set the review
-named (or, before any build, the set the recipe resolves to), never single
-files. The protected reference scan keeps model objects a saved profile names even
+not report; a missing or stale scan counts as missing. A linked file is never also
+counted as free space the agent could reclaim. A profile's resource recheck
+applies the same rule: it uses the review's per-Spark missing bytes, or, before
+any build, compares the set the recipe resolves to with the store scan. The protected reference scan keeps model objects a saved profile names even
 when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes

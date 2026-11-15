@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -509,6 +510,19 @@ def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
     assert cold.disk_required_bytes - warm.disk_required_bytes == 1024
 
 
+def _inspecting_planner(sessions, lifecycle, model_cache=None):
+    """A planner whose review inspects the model set against the store scan."""
+
+    return RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lifecycle._clock,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=model_cache or ModelCacheManifestProvider(missing_nas_bytes=0),
+        memory_floor_bytes=0,
+    )
+
+
 def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
     tmp_path: Path,
 ) -> None:
@@ -516,17 +530,11 @@ def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
     Spark's installation may run another set than the load. A new installation
     still links every file the agent's store scan reports: catches a review that
     charges (and waits for eviction of) the whole model when the Spark holds all
-    but a file of it."""
+    but a file of it, or that also counts a linked file the scan reports unused
+    as free space."""
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
-    planner = RunSwitchOperationService(
-        sessions,
-        lifecycle=lifecycle,
-        clock=lifecycle._clock,
-        artifact_phase_executor=RecordingArtifactExecutor(),
-        model_cache=ModelCacheManifestProvider(missing_nas_bytes=0),
-        memory_floor_bytes=0,
-    )
+    planner = _inspecting_planner(sessions, lifecycle)
     request = _request(sessions, nodes[0])
     cold = planner.preview(request, actor="admin")
 
@@ -542,6 +550,8 @@ def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
         snapshot = session.scalar(select(NodeInventorySnapshot))
         assert snapshot is not None
         snapshot.model_objects = [ModelStoreObject(sha256=MODEL_ARTIFACT, bytes=1024)]
+        snapshot.unused_model_bytes = 1024
+        free = snapshot.disk_free_bytes
     warm = planner.preview(request, actor="admin")
 
     cold_disk = cold.fit.nodes[0].disk_required_bytes
@@ -549,6 +559,8 @@ def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
     assert cold_disk is not None and warm_disk is not None
     # The manifest's one model file is 1 KiB, and nothing else changes.
     assert cold_disk - warm_disk == 1024
+    # The load links that file, so the agent never frees it.
+    assert warm.fit.nodes[0].disk_free_bytes == free
 
 
 @pytest.mark.parametrize("resolves_to_held", [True, False])
@@ -565,7 +577,10 @@ def test_a_recheck_without_preparation_credits_only_the_set_its_recipe_resolves_
     _service, planner = _profile_service(sessions, lifecycle)
     request = _request(sessions, nodes[0])
     # The fixture catalog does not resolve; the recipe's set is the input here.
-    recipe_set = SimpleNamespace(digest="a" * 64)
+    weights = SimpleNamespace(sha256=MODEL_ARTIFACT, expected_bytes=1024)
+    recipe_set = SimpleNamespace(
+        digest="a" * 64, expected_bytes=1024, artifacts=(weights,)
+    )
     monkeypatch.setattr(
         resource_admission, "resolve_recipe_set", lambda _session, _id: recipe_set
     )
@@ -607,6 +622,69 @@ def test_a_recheck_without_preparation_credits_only_the_set_its_recipe_resolves_
     assert cold_disk is not None and warm_disk is not None
     # The fixture's model files are 1 KiB, and nothing else changes.
     assert cold_disk - warm_disk == (1024 if resolves_to_held else 0)
+
+
+@pytest.mark.parametrize("prepared", [True, False])
+def test_a_recheck_charges_only_the_files_another_set_of_the_model_lacks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prepared: bool
+) -> None:
+    """The profile recheck applies the review's per-file rule, with or without
+    a preparation: when the Spark runs another set of the same Model, it charges
+    only the file that set lacks. Catches a recheck that charges the whole set
+    and parks (or fails) a load the review admitted."""
+
+    sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
+    request = _request(sessions, nodes[0])
+    weights_only = ModelCacheManifestProvider().resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    (weights,) = weights_only.artifacts
+    config = replace(
+        weights,
+        key="primary:config",
+        artifact_id="config",
+        path="config.json",
+        source=weights.source.replace("weights.safetensors", "config.json"),
+        sha256="d" * 64,
+        expected_bytes=8,
+        roles=("config",),
+    )
+    manifest = replace(weights_only, artifacts=(weights, config))
+    cache = ModelCacheManifestProvider(missing_nas_bytes=0)
+    monkeypatch.setattr(cache, "resolve_artifact_set", lambda **_kwargs: manifest)
+    # The fixture catalog does not resolve; the recheck reads the same set.
+    monkeypatch.setattr(
+        resource_admission, "resolve_recipe_set", lambda _session, _id: manifest
+    )
+    planner = _inspecting_planner(sessions, lifecycle, cache)
+    installed = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    with sessions() as session:
+        installation = session.get(RecipeInstallation, installed.owner_id)
+        assert installation is not None
+        assert installation.model_artifact_set_sha256 != manifest.digest
+
+    def recheck() -> int:
+        reviewed = planner.preview(request, actor="admin").assessment()
+        assert reviewed.preparation is not None
+        if not prepared:
+            reviewed = reviewed.model_copy(update={"preparation": None})
+        with sessions() as session:
+            fit = planner.recheck_resources_in_session(session, request, reviewed)
+        required = fit.fit_current.nodes[0].disk_required_bytes
+        assert required is not None
+        return required
+
+    cold = recheck()
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        # The other set shares the weights, not this set's config file.
+        snapshot.model_objects = [ModelStoreObject(sha256=MODEL_ARTIFACT, bytes=1024)]
+    warm = recheck()
+
+    assert cold - warm == 1024
 
 
 def test_a_load_waiting_for_disk_names_it_and_resumes_when_space_appears(

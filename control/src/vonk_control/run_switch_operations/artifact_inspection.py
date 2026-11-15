@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -24,6 +25,30 @@ from ..run_switch_contract import (
 )
 from .interfaces import ArtifactInspection
 from .planning_helpers import _as_reason, _inspection_unavailable
+
+
+def missing_spark_bytes_by_node(
+    session: Session,
+    expected_by_digest: Mapping[str, int],
+    node_ids: Iterable[str],
+    *,
+    now: datetime,
+) -> dict[str, int]:
+    """Bytes of a model set each Spark's store does not hold.
+
+    From the agent's own store scan; unknown counts as missing, and the copy it
+    then plans reuses what the Spark already holds.
+    """
+
+    missing: dict[str, int] = {}
+    for node_id in node_ids:
+        held = spark_model_objects(session, node_id, now=now) or {}
+        missing[node_id] = sum(
+            size
+            for digest, size in expected_by_digest.items()
+            if held.get(digest) != size
+        )
+    return missing
 
 
 class DatabaseRunSwitchArtifactInspector:
@@ -155,20 +180,11 @@ class DatabaseRunSwitchArtifactInspector:
             )
             for detail in (() if preview is None else preview.blockers)
         ]
-        reused = 0
-        missing_spark = 0
-        missing_by_node: dict[str, int] = {}
-        for node_id in node_ids:
-            # The agent's own store scan; unknown counts as missing, and the
-            # copy it then plans reuses what the Spark already holds.
-            held = spark_model_objects(session, node_id, now=now) or {}
-            missing_by_node[node_id] = 0
-            for digest, size in expected_by_digest.items():
-                if held.get(digest) == size:
-                    reused += size
-                else:
-                    missing_spark += size
-                    missing_by_node[node_id] += size
+        missing_by_node = missing_spark_bytes_by_node(
+            session, expected_by_digest, node_ids, now=now
+        )
+        missing_spark = sum(missing_by_node.values())
+        reused = sum(expected_by_digest.values()) * len(node_ids) - missing_spark
         if missing_nas_bytes:
             warnings.append(
                 _as_reason(
