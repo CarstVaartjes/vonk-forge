@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
+from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 
 from .. import model_cache_states
 from ..admission_locking import ConstraintReplay, admitting
@@ -44,7 +45,7 @@ from .errors import (
     ModelCacheRemovalOwnerInvalid,
     ModelCacheStorageInvalid,
 )
-from .fleet_removal import model_reference
+from .fleet_removal import model_installations, model_reference
 from .lineage import first_requested_sets, lineage_contents, model_sets
 from .persistence import _operation_removal
 from .source_helpers import _model_selector, _request_key
@@ -313,12 +314,16 @@ class RemovalReviewMixin:
 
     def review_model_removal(self, selector: str) -> CacheRemovalReview:
         """Return the current owner-derived model removal impact without writes."""
-        return self._review_model_removal(selector)[0]
+        return self._review_model_removal(selector, model_references=True)[0]
 
     def _review_model_removal(
-        self, selector: str
+        self, selector: str, *, model_references: bool = False
     ) -> tuple[CacheRemovalReview, ModelCacheRemovalScope]:
-        """The review and the scope it was derived from."""
+        """The review and the scope it was derived from.
+
+        ``model_references`` adds the Model-level "referenced" verdict; the
+        fleet review states its own (one evidence read per review).
+        """
         cache = cast("ModelCacheService", self)
 
         normalized_selector = _model_selector(selector).casefold()
@@ -329,30 +334,47 @@ class RemovalReviewMixin:
             # The sets the Library shows for this model, not only those first
             # downloaded under its current content digest.
             contents = lineage_contents(session, digest)
-            selected_sets = model_sets(session, contents).owned
+            owned, shared_sets = model_sets(session, contents)
+            selected_sets = owned
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
-            # The same "referenced" rule as the fleet review, by Model identity:
-            # a profile can name a Model whose bytes this Model does not own.
-            reference = model_reference(
-                session,
-                contents,
-                selected_sets,
-                _Evidence.read(
+            if model_references:
+                # The fleet review's "referenced" rule, by Model identity: a
+                # profile can name a Model whose bytes it does not own.
+                reference = model_reference(
                     session,
-                    cache._clock(),
-                    recipes=recipes_bound_to(session, contents),
-                ),
-            )
-            if reference is not None:
-                blockers.append(
-                    CacheRemovalBlocker(
-                        code=ModelCacheCode.REMOVAL_REFERENCED,
-                        detail=reference,
-                        retryable=False,
-                        recovery_actions=["resolve_reference"],
-                    )
+                    contents,
+                    owned,
+                    [row.id for row in model_installations(session, contents, owned)],
+                    _Evidence.read(
+                        session,
+                        cache._clock(),
+                        recipes=recipes_bound_to(session, contents),
+                    ),
                 )
+                if reference is not None:
+                    blockers.append(
+                        CacheRemovalBlocker(
+                            code=ModelCacheCode.REMOVAL_REFERENCED,
+                            detail=reference.detail,
+                            retryable=False,
+                            recovery_actions=["resolve_reference"],
+                        )
+                    )
+                    findings.extend(
+                        CacheRemovalFinding(
+                            classification="saved-reference",
+                            asset_kind="model-set",
+                            asset_sha256=set_digest,
+                            owner_kind=WaitOwnerKind.FLEET_PROFILE,
+                            owner_id=profile,
+                            state="saved",
+                            detail="a saved profile names this model",
+                            reason=reference.detail,
+                        )
+                        for set_digest in (*owned, *shared_sets)
+                        for profile in reference.profiles
+                    )
             try:
                 with session.begin_nested():
                     scope = cache._model_removal_scope_for_sets(session, selected_sets)

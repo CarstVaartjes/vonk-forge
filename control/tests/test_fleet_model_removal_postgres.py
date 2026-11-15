@@ -545,10 +545,6 @@ def test_profile_or_running_workload_retains_model_and_installation(
             review.fleet.targets[0].installations[0].disposition
             == FleetRemovalDisposition.RETAIN
         )
-        # The plain review answers "referenced" by the same rule (#2354: it
-        # said "Saved references: none" for a model a saved profile assigns).
-        plain = cache.review_model_removal(digest)
-        assert ModelCacheCode.REMOVAL_REFERENCED in {b.code for b in plain.blockers}
         accepted = cache.remove_fleet_model_selector(
             digest,
             actor="admin",
@@ -566,6 +562,25 @@ def test_profile_or_running_workload_retains_model_and_installation(
                 )
                 is None
             )
+        # The plain review answers "referenced" by the same rule, with or without
+        # a NAS copy, and names the profile (#2354: "Saved references: none"
+        # for a model a profile assigns).
+        referenced = ModelCacheCode.REMOVAL_REFERENCED
+        assert referenced in {
+            b.code for b in cache.review_model_removal(digest).blockers
+        }
+        source = tmp_path / "nas-copy"
+        source.mkdir()
+        _download(
+            cache,
+            [_artifact(source, b"weights", model_content_sha256=digest)],
+            model_content_sha256=digest,
+            request_key=str(uuid4()),
+        )
+        plain = cache.review_model_removal(digest)
+        assert referenced in {b.code for b in plain.blockers}
+        if saved_profile:
+            assert "Coding" in {item.owner_id for item in plain.references}
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()
