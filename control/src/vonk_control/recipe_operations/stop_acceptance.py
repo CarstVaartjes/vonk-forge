@@ -96,9 +96,9 @@ class StopAcceptanceMixin:
                 candidate_root = read_row_column(candidate, "payload")
                 if not isinstance(candidate_root, RunSwitchJobPayload):
                     raise TypeError("payload is unreadable")
-                candidate_progress = RunSwitchOperationResult.model_validate_json(
-                    canonical_message(read_row_column(candidate, "result")), strict=True
-                )
+                candidate_progress = read_row_column(candidate, "result")
+                if not isinstance(candidate_progress, RunSwitchOperationResult):
+                    raise TypeError("result is unreadable")
             except (TypeError, ValueError) as error:
                 raise RecipeRequestInvalid(
                     "accepted profile Stop authority is unreadable",
@@ -146,9 +146,9 @@ class StopAcceptanceMixin:
                 raise TypeError("payload is unreadable")
             # Immutable payload progress is the acceptance snapshot. The
             # current phase and retry identity belong to the canonical result.
-            progress = RunSwitchOperationResult.model_validate_json(
-                canonical_message(read_row_column(parent, "result")), strict=True
-            )
+            progress = read_row_column(parent, "result")
+            if not isinstance(progress, RunSwitchOperationResult):
+                raise TypeError("result is unreadable")
             phase_index = progress.phase_index
             item_index = progress.item_index
             if (
