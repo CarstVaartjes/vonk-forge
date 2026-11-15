@@ -39,7 +39,6 @@ from ..run_switch_contract import (
     RunSwitchPhaseKind,
     RunSwitchPlan,
     RunSwitchReason,
-    RunSwitchRetention,
     RunSwitchSubphase,
     RuntimeImageStorageImpact,
     SparkGroup,
@@ -129,9 +128,7 @@ class PhasePlanningMixin:
         return inspection
 
     @staticmethod
-    def _storage(
-        inspection: ArtifactInspection, *, retention: RunSwitchRetention
-    ) -> ArtifactStorageImpact:
+    def _storage(inspection: ArtifactInspection) -> ArtifactStorageImpact:
         return ArtifactStorageImpact(
             artifact_set_sha256=inspection.artifact_set_sha256,
             artifact_set_bytes=inspection.artifact_set_bytes,
@@ -147,7 +144,6 @@ class PhasePlanningMixin:
             ),
             nas_coverage=inspection.nas_coverage,
             spark_coverage=inspection.spark_coverage,
-            retention=retention,
         )
 
     def _phases(

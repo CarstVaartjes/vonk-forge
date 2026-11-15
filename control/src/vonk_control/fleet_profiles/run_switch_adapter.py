@@ -453,7 +453,6 @@ class RunSwitchFleetProfileAdapter(
             spark_group=group,
             alias=alias,
             action=action,
-            retention="retain-cached",
             option_choices=dict(assignment.option_choices),
             gpu_clock=assignment.gpu_clock,
             plan_digest=None,

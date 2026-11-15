@@ -330,7 +330,7 @@ class CleanupPlanningMixin:
                 cleanup_disposition=cleanup_disposition,
                 cleanup_mode=cleanup_mode,
             )
-            storage = service._storage(inspection, retention="retain-cached")
+            storage = service._storage(inspection)
             preparation = service._preparation(
                 revision=revision,
                 group=group,
@@ -372,7 +372,6 @@ class CleanupPlanningMixin:
                     "preparation": preparation,
                     "conflicts": [],
                     "stops": [],
-                    "reclaimed_bytes": 0,
                     "phases": phases,
                     "allowed": not blockers,
                     "blockers": blockers,

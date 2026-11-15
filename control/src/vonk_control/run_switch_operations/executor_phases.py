@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..cluster_mappings import (
     ClusterMappingPlan,
@@ -120,7 +121,7 @@ class ExecutorPhasesMixin:
         progress: RunSwitchOperationResult,
     ) -> PhaseExecution:
         service = typing_cast("RecipeLifecyclePhaseExecutor", self)
-        if phase.kind in {"transfer", "verify", "cleanup"}:
+        if phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}:
             if service._artifact_executor is None:
                 raise RunSwitchRetryLater(
                     f"run-switch.{phase.kind}-executor-unavailable"

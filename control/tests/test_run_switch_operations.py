@@ -112,7 +112,6 @@ from vonk_control.run_switch_contract import (
     RunSwitchPreviewRequest,
     RunSwitchProfileStopScope,
     RunSwitchReason,
-    RunSwitchRetention,
     RunSwitchRuntimeInstallResult,
     RunSwitchStartResult,
     RunSwitchTargetTransferEvidenceResult,
@@ -394,8 +393,6 @@ def _fixture_execution(plan, phase, *, result=None, **kwargs) -> PhaseExecution:
     """Publish canonical evidence from a synthetic successful phase producer."""
     if isinstance(result, dict):
         result = dict(result)
-        if phase.kind == "cleanup":
-            result.setdefault("nas_evicted", False)
         if result == {"phase": phase.kind}:
             if phase.kind == "prepare":
                 result = {"prepared": True}
@@ -509,16 +506,6 @@ class RecordingArtifactExecutor:
                     "verified_build_id": getattr(plan, "recipe_build_id", None),
                     "verified_image_digest": image_digest,
                     "verified_oci_layout_sha256": archive_sha256,
-                },
-            )
-        if phase.kind == "cleanup":
-            return _fixture_execution(
-                plan,
-                phase,
-                result={
-                    "scope": "spark-local",
-                    "reclaimed_bytes": 0,
-                    "protected_referenced_bytes": 0,
                 },
             )
         if phase.subphase == "runtime-image":
@@ -824,7 +811,6 @@ def _request(
     node_id: str,
     *,
     action: Literal["run", "switch"] = "run",
-    retention: RunSwitchRetention = "retain-cached",
 ):
     with sessions() as session:
         revision = session.scalar(
@@ -851,7 +837,6 @@ def _request(
         ),
         alias="qwen",
         action=action,
-        retention=retention,
     )
 
 
@@ -3202,7 +3187,6 @@ def test_editorial_successor_reuses_an_identity_matched_build(tmp_path: Path) ->
             ),
             alias="qwen",
             action="run",
-            retention="retain-cached",
         ),
         actor="admin",
     )

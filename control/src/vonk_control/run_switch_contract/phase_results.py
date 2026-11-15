@@ -182,19 +182,6 @@ class RunSwitchVerifyResult(ArtifactVerificationResult):
     subphase: Literal["target-copy"]
 
 
-class RunSwitchCleanupResult(_RunSwitchPhaseBase):
-    phase: Literal["cleanup"]
-    subphase: RunSwitchSubphase | None = None
-    scope: Literal["spark-local"]
-    reclaimed_bytes: int = Field(ge=0)
-    protected_referenced_bytes: int = Field(default=0, ge=0)
-    # Receipts stored before cleanup became bytes; new ones leave these empty and
-    # nothing reads them (delete once in-flight work has turned over).
-    reclaimed_digests: list[Digest] = Field(default_factory=list)
-    protected_digests: list[Digest] = Field(default_factory=list)
-    nas_evicted: bool
-
-
 class RunSwitchRuntimePlanResult(_RunSwitchPhaseBase):
     phase: Literal["prepare"]
     subphase: Literal["runtime-plan"]
@@ -334,7 +321,6 @@ RunSwitchPhaseResult = (
     | RunSwitchCachedTransferResult
     | RunSwitchTargetTransferEvidenceResult
     | RunSwitchVerifyResult
-    | RunSwitchCleanupResult
     | RunSwitchRuntimePlanResult
     | RunSwitchPreparedResult
     | RunSwitchRuntimeInstallResult

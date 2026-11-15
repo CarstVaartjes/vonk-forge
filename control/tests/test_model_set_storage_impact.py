@@ -13,6 +13,7 @@ from vonk_control.run_switch_operations import DatabaseRunSwitchArtifactInspecto
 from vonk_control.run_switch_operations.interfaces import ArtifactInspection
 from vonk_control.run_switch_operations.phase_planning import PhasePlanningMixin
 from vonk_control.run_switch_operations.planning_helpers import _run_switch_payload
+from vonk_control.strict_json import read_stored_model
 
 from .test_recipe_operations import setup_services
 from .test_run_switch_operations import (
@@ -47,7 +48,7 @@ def _inspection() -> ArtifactInspection:
 
 
 def test_a_model_of_hundreds_of_files_plans_as_one_set() -> None:
-    impact = PhasePlanningMixin._storage(_inspection(), retention="retain-cached")
+    impact = PhasePlanningMixin._storage(_inspection())
     assert impact.artifact_set_sha256 == SET_DIGEST
     assert impact.artifact_set_bytes == FILES
     assert ArtifactStorageImpact.model_validate(impact.model_dump(mode="json"))
@@ -55,11 +56,19 @@ def test_a_model_of_hundreds_of_files_plans_as_one_set() -> None:
 
 def test_a_new_plan_carries_the_set_not_its_files() -> None:
     """The retired lists stay readable for stored jobs; a new plan leaves them empty."""
-    impact = PhasePlanningMixin._storage(_inspection(), retention="retain-cached")
-    assert impact.artifact_digests == []
-    # An old stored plan with hundreds of file digests still validates (no cap).
-    old = {**impact.model_dump(mode="json"), "artifact_digests": _digests()}
-    assert len(ArtifactStorageImpact.model_validate(old).artifact_digests) == FILES
+    impact = PhasePlanningMixin._storage(_inspection())
+    assert "artifact_digests" not in impact.model_dump(mode="json")
+    # A stored plan with the retired fields (file lists, cleanup bytes, retention)
+    # still reads: the tolerant stored reader drops them.
+    old = {
+        **impact.model_dump(mode="json"),
+        "artifact_digests": _digests(),
+        "reclaimable_digests": [],
+        "reclaimable_bytes": 0,
+        "reclaimed_bytes": 0,
+        "retention": "retain-cached",
+    }
+    assert read_stored_model(ArtifactStorageImpact, old) == impact
     assert RunSwitchCachedTransferResult.model_fields[
         "verified_digests"
     ].default_factory
@@ -124,3 +133,33 @@ def test_a_many_file_model_plans_persists_and_reads_back_through_the_real_path(
         stored = _run_switch_payload(job)
     assert stored is not None
     assert stored.plan.storage.artifact_set_sha256 == plan.storage.artifact_set_sha256
+
+
+def test_a_set_of_more_than_a_thousand_files_is_a_valid_manifest() -> None:
+    """The manifest byte limit bounds a set; a file count never did the right thing."""
+    from vonk_control.model_cache import ArtifactSetManifest, ArtifactSpec
+    from vonk_control.model_cache.artifacts import _validate_manifest
+
+    model = "e" * 64
+    manifest = ArtifactSetManifest(
+        model_content_sha256=model,
+        recipe_revision_sha256=None,
+        model_content_digests=(model,),
+        artifacts=tuple(
+            ArtifactSpec(
+                key=f"primary:shard-{index}",
+                artifact_id=f"shard-{index}",
+                path=f"shard-{index:05d}.safetensors",
+                kind="huggingface",
+                repository="vonk-forge/primary",
+                source=f"https://huggingface.co/vonk-forge/primary/resolve/main/s{index}",
+                revision="0" * 40,
+                sha256=f"{index + 1:064x}",
+                expected_bytes=1,
+                roles=("weights",),
+                model_content_sha256=model,
+            )
+            for index in range(1100)
+        ),
+    )
+    _validate_manifest(manifest)

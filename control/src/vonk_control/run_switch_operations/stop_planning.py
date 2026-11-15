@@ -293,7 +293,7 @@ class StopPlanningMixin:
                 stop_before_transfer=False,
                 stop_before_prepare=False,
             )
-            storage = service._storage(inspection, retention="retain-cached")
+            storage = service._storage(inspection)
             preparation = (
                 None
                 if profile_stop_scope is not None
@@ -347,7 +347,6 @@ class StopPlanningMixin:
                     "preparation": preparation,
                     "conflicts": [],
                     "stops": stops,
-                    "reclaimed_bytes": 0,
                     "phases": phases,
                     "allowed": not blockers,
                     "blockers": blockers,

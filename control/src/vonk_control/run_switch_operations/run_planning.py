@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     RunAdmissionCode,
     RunSwitchCode,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..categorized_errors import (
     MissingRecord,
@@ -539,7 +540,7 @@ class RunPlanningMixin:
                 not service._custom_phase_executor
                 and service._artifact_phase_executor is None
                 and any(
-                    phase.kind in {"transfer", "verify", "cleanup"}
+                    phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
                     or (phase.kind == "prepare" and phase.subphase == "runtime-image")
                     for phase in phases
                 )
@@ -547,7 +548,7 @@ class RunPlanningMixin:
                 blockers.append(
                     _as_reason(
                         RunSwitchCode.ARTIFACT_PHASE_EXECUTOR_UNAVAILABLE,
-                        "Artifact transfer, verification, Spark-local cleanup, or Controller image preparation requires an injected cache boundary.",
+                        "Artifact transfer, verification, or Controller image preparation requires an injected cache boundary.",
                         scope="artifact",
                         node_ids=node_ids,
                     )
@@ -599,7 +600,7 @@ class RunPlanningMixin:
                 now=now,
                 reasons=[*blockers, *warnings],
             )
-            storage = service._storage(inspection, retention=request.retention)
+            storage = service._storage(inspection)
             plan_data = read_stored_model(
                 RunSwitchPlan,
                 {
@@ -635,7 +636,6 @@ class RunPlanningMixin:
                     "preparation": preparation,
                     "conflicts": conflicts,
                     "stops": stops,
-                    "reclaimed_bytes": 0,
                     "phases": phases,
                     "allowed": not blockers,
                     "blockers": blockers,

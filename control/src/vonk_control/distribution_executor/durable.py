@@ -35,7 +35,6 @@ from ..run_switch_contract import (
     ArtifactVerificationEvidence,
     RunSwitchCachedTransferResult,
     RunSwitchChildProgress,
-    RunSwitchCleanupResult,
     RunSwitchDistributionChildResult,
     RunSwitchDistributionEndedResult,
     RunSwitchMemberReceipt,
@@ -72,18 +71,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             ProfileChildPhase.TRANSFER.value,
             ProfileChildPhase.VERIFY.value,
         }:
-            return PhaseExecution(
-                result=_phase_receipt(
-                    RunSwitchCleanupResult(
-                        phase=ProfileChildPhase.CLEANUP.value,
-                        subphase=phase.subphase,
-                        scope="spark-local",
-                        reclaimed_bytes=0,
-                        nas_evicted=False,
-                    ),
-                    phase=phase,
-                )
-            )
+            raise RuntimeError(f"unexpected {phase.kind} phase")
         if item_index != 0:
             raise RuntimeError(f"unexpected {phase.kind} item index {item_index}")
         if phase.kind == ProfileChildPhase.VERIFY.value:

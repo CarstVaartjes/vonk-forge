@@ -147,7 +147,6 @@ class RunSwitchPlan(RunSwitchAssessment):
     runtime_storage: RuntimeImageStorageImpact
     build: RunSwitchBuildEvidence
     conflicts: list[RunSwitchReason] = Field(max_length=128)
-    reclaimed_bytes: int = Field(ge=0)
     phases: list[RunSwitchPhase] = Field(min_length=1, max_length=16)
     invocation: InvocationMetadata
     plan_digest: Digest

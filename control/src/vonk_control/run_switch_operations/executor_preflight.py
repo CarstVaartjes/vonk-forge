@@ -74,7 +74,6 @@ class ExecutorPreflightMixin:
             phase.kind
             in {
                 ProfileChildPhase.STOP,
-                ProfileChildPhase.CLEANUP,
                 ProfileChildPhase.UNINSTALL,
                 ProfileReportedPhase.FINAL_VERIFY,
                 ProfileChildPhase.VERIFY,

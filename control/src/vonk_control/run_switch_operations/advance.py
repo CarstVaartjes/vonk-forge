@@ -712,7 +712,6 @@ class AdvanceMixin:
                     if (
                         disposition(kind) is Disposition.WAIT or foreign_cancel
                     ) and plan.phases[phase_index].kind not in {
-                        ProfileChildPhase.CLEANUP,
                         ProfileChildPhase.STOP,
                         ProfileChildPhase.UNINSTALL,
                         ProfileChildPhase.START,
@@ -822,7 +821,7 @@ class AdvanceMixin:
                             job,
                             error,
                             now,
-                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                            reissue=True,
                         )
                         return True
                     progress.phase_results = results
@@ -843,8 +842,12 @@ class AdvanceMixin:
                     if not any(same_image(item, receipt) for item in results):
                         results.append(_phase_result(receipt, phase=phase))
                         progress.phase_results = results
-                if phase.kind in {"transfer", "verify", "cleanup"} or (
-                    phase.kind == "prepare" and phase.subphase == "runtime-image"
+                if phase.kind in {
+                    ProfileChildPhase.TRANSFER,
+                    ProfileChildPhase.VERIFY,
+                } or (
+                    phase.kind == ProfileChildPhase.PREPARE
+                    and phase.subphase == "runtime-image"
                 ):
                     try:
                         _validate_artifact_execution(
@@ -860,14 +863,15 @@ class AdvanceMixin:
                             job,
                             error,
                             now,
-                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                            reissue=True,
                         )
                         return True
                 if (
                     child_receipts is None
                     and child_result is not None
                     and (
-                        phase.kind in {"transfer", "verify", "cleanup"}
+                        phase.kind
+                        in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
                         or phase.subphase == "runtime-image"
                     )
                 ):
@@ -880,7 +884,7 @@ class AdvanceMixin:
                             job,
                             error,
                             now,
-                            reissue=phase.kind != ProfileChildPhase.CLEANUP,
+                            reissue=True,
                         )
                         return True
                     progress.phase_results = [

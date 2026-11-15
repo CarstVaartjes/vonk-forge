@@ -67,7 +67,6 @@ from .phase_results import ArtifactVerificationResult as ArtifactVerificationRes
 from .phase_results import (
     RunSwitchCachedTransferResult as RunSwitchCachedTransferResult,
 )
-from .phase_results import RunSwitchCleanupResult as RunSwitchCleanupResult
 from .phase_results import RunSwitchCleanupVerifyResult as RunSwitchCleanupVerifyResult
 from .phase_results import (
     RunSwitchContainerBuildResult as RunSwitchContainerBuildResult,
@@ -145,7 +144,6 @@ from .vocabulary import RunSwitchPlacementAction as RunSwitchPlacementAction
 from .vocabulary import RunSwitchProgressState as RunSwitchProgressState
 from .vocabulary import RunSwitchReasonScope as RunSwitchReasonScope
 from .vocabulary import RunSwitchReasonSeverity as RunSwitchReasonSeverity
-from .vocabulary import RunSwitchRetention as RunSwitchRetention
 from .vocabulary import RunSwitchSubphase as RunSwitchSubphase
 
 __all__ = [
@@ -168,7 +166,6 @@ __all__ = [
     "RunSwitchChangeEffect",
     "RunSwitchCleanupApplyRequest",
     "RunSwitchCleanupPreviewRequest",
-    "RunSwitchCleanupResult",
     "RunSwitchContainerBuildResult",
     "RunSwitchContainerBuildState",
     "RunSwitchCoverage",
@@ -196,7 +193,6 @@ __all__ = [
     "RunSwitchReasonSeverity",
     "RunSwitchReconciliationAuthority",
     "RunSwitchReconciliationTarget",
-    "RunSwitchRetention",
     "RunSwitchRetryRequest",
     "RunSwitchRuntimeImageReferenceIntent",
     "RunSwitchRuntimeImageResult",
