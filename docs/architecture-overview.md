@@ -718,7 +718,7 @@ own store scan holds the files, a model the NAS evicted is not downloaded
 again, and a NAS without room for it does not block the load. A Spark that
 lacks only the image still gets it: its grant names the objects of the accepted
 compiled plan, not the NAS set, and the agent skips the objects it holds.
-Serving a model object still checks it against the stored NAS set.
+Serving a model object still checks it against the stored NAS set. Library readiness follows the same rule through the same predicate.
 
 Applying a ready, digest-bound profile fans exact model and recipe-image
 preparation out to the target Sparks in parallel. Each target skips an asset it

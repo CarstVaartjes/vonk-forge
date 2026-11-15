@@ -49,6 +49,7 @@ from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
 from .test_model_cache import _write_object_receipt
 from .test_recipe_operations import NOW, setup_services
+from .test_run_switch_artifact_authority import _report_store
 from .test_run_switch_operations import RecordingArtifactExecutor
 
 
@@ -300,21 +301,16 @@ def test_ready_uses_actual_nas_files_and_does_not_require_spark_copies(
     assert missing.readiness.state == "blocked"
 
 
-def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
-    projection, sessions, *_ = assessed_library
-    later = "spk_" + "f" * 32
+def _add_fitting_spark(sessions, node_id: str) -> None:
+    """Enroll one more active Spark with fresh, ample capacity."""
+
     with sessions.begin() as session:
-        capabilities = (
-            "runtime.vonk.v1",
-            "recipe.image.pull.v1",
-            "recipe.operations.v1",
-        )
         session.add(
             AgentNode(
-                node_id=later,
+                node_id=node_id,
                 state="active",
                 inventory_snapshot=inventory_items_fixture(
-                    later,
+                    node_id,
                     observed_at=None,
                     identity=AgentRuntimeIdentity.model_validate(
                         {**PACKAGED_RUNTIME_IDENTITY, "architecture": "linux-arm64"}
@@ -322,15 +318,11 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
                 ),
             )
         )
-        snapshot = session.scalar(select(NodeInventorySnapshot))
-        assert snapshot is not None
-        snapshot.host_memory_free_bytes = 0
-        snapshot.gpu_memory_free_bytes = 0
     InventoryRepository(sessions, clock=lambda: NOW).record(
         NodeInventoryReport.model_validate_json(
             canonical_message(
                 {
-                    "node_id": later,
+                    "node_id": node_id,
                     "observed_at": NOW,
                     "disk_total_bytes": 10_000,
                     "disk_free_bytes": 8_000,
@@ -340,7 +332,11 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
                     "gpu_memory_free_bytes": 8_000,
                     "gpu_count": 1,
                     "artifact_store_read_only": False,
-                    "capabilities": capabilities,
+                    "capabilities": (
+                        "runtime.vonk.v1",
+                        "recipe.image.pull.v1",
+                        "recipe.operations.v1",
+                    ),
                     "memory_pool": "shared",
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
@@ -349,11 +345,133 @@ def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
             )
         )
     )
+
+
+def test_fit_search_continues_after_an_ineligible_first_group(assessed_library):
+    projection, sessions, *_ = assessed_library
+    later = "spk_" + "f" * 32
+    with sessions.begin() as session:
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.host_memory_free_bytes = 0
+        snapshot.gpu_memory_free_bytes = 0
+    _add_fitting_spark(sessions, later)
     rows = projection.recipe_library(fits_fleet=True).recipes
     assert len(rows) == 1
     assessment = rows[0].assessment
     assert assessment is not None and assessment.group is not None
     assert [node.node_id for node in assessment.group.nodes] == [later]
+
+
+def test_a_later_spark_holding_what_the_nas_evicted_is_ready(
+    assessed_library, monkeypatch
+):
+    """A load whose Sparks hold the model and image downloads no model, so the
+    Library calls it ready although the NAS lacks the model, and keeps
+    ordering the Spark that holds the set ahead of an earlier-sorted one."""
+
+    projection, sessions, cache, service, _, _, _, _, nodes, _ = assessed_library
+    _add_fitting_spark(sessions, "spk_" + "0" * 32)
+    recipe = projection.recipe_library(assess=False).recipes[0]
+    manifest = cache.resolve_artifact_set(
+        recipe_revision_id=recipe.identity.recipe_revision_id
+    )
+    _report_store(
+        sessions,
+        nodes[0],
+        [
+            {"sha256": spec.sha256, "bytes": spec.expected_bytes}
+            for spec in manifest.artifacts
+        ],
+    )
+    inspect = service.inspect_candidate
+
+    def image_held_on_holder(revision_id, group, **kwargs):
+        plan = inspect(revision_id, group, **kwargs)
+        if tuple(group) != (nodes[0],):
+            return plan
+        # The holder's installed workload names the image there.
+        held = plan.runtime_storage.model_copy(
+            update={"missing_image_distribution_bytes": 0}
+        )
+        return plan.model_copy(update={"runtime_storage": held})
+
+    monkeypatch.setattr(service, "inspect_candidate", image_held_on_holder)
+
+    assessment = projection.recipe_library(assess=True).recipes[0].assessment
+
+    assert assessment is not None and assessment.group is not None
+    assert assessment.cache.state == "blocked"
+    assert assessment.fleet_fit.state == "ready"
+    assert assessment.readiness.state == "ready", assessment.readiness
+    assert [node.node_id for node in assessment.group.nodes] == [nodes[0]]
+    assert len(projection.recipe_library(ready=True).recipes) == 1
+
+
+def _hold_model(sessions, cache, projection, node_id: str) -> None:
+    recipe = projection.recipe_library(assess=False).recipes[0]
+    manifest = cache.resolve_artifact_set(
+        recipe_revision_id=recipe.identity.recipe_revision_id
+    )
+    _report_store(
+        sessions,
+        node_id,
+        [
+            {"sha256": spec.sha256, "bytes": spec.expected_bytes}
+            for spec in manifest.artifacts
+        ],
+    )
+
+
+def test_a_failing_group_does_not_turn_a_holder_search_blocked(
+    assessed_library, monkeypatch
+):
+    projection, sessions, cache, service, _, _, _, _, nodes, _ = assessed_library
+    failing, fitting = "spk_" + "0" * 32, "spk_" + "f" * 32
+    _add_fitting_spark(sessions, failing)
+    _add_fitting_spark(sessions, fitting)
+    _hold_model(sessions, cache, projection, nodes[0])
+    inspect = service.inspect_candidate
+
+    def fail_one(revision_id, group, **kwargs):
+        if tuple(group) == (failing,):
+            raise RuntimeError("read failed")
+        return inspect(revision_id, group, **kwargs)
+
+    monkeypatch.setattr(service, "inspect_candidate", fail_one)
+
+    assessment = projection.recipe_library(assess=True).recipes[0].assessment
+
+    assert assessment is not None
+    assert assessment.readiness.state in {"unavailable", "ready"}
+
+
+def test_the_search_goes_past_a_holder_that_lacks_the_image(
+    assessed_library, monkeypatch
+):
+    projection, sessions, cache, service, _, _, _, _, nodes, _ = assessed_library
+    second = "spk_" + "f" * 32
+    _add_fitting_spark(sessions, second)
+    _hold_model(sessions, cache, projection, nodes[0])
+    _hold_model(sessions, cache, projection, second)
+    inspect = service.inspect_candidate
+
+    def image_held_on_second(revision_id, group, **kwargs):
+        plan = inspect(revision_id, group, **kwargs)
+        if tuple(group) != (second,):
+            return plan
+        held = plan.runtime_storage.model_copy(
+            update={"missing_image_distribution_bytes": 0}
+        )
+        return plan.model_copy(update={"runtime_storage": held})
+
+    monkeypatch.setattr(service, "inspect_candidate", image_held_on_second)
+
+    assessment = projection.recipe_library(assess=True).recipes[0].assessment
+
+    assert assessment is not None and assessment.group is not None
+    assert assessment.readiness.state == "ready", assessment.readiness
+    assert [node.node_id for node in assessment.group.nodes] == [second]
 
 
 def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
@@ -394,6 +512,8 @@ def test_late_assessment_is_discarded_and_selector_scan_does_not_assess(
     assessment = projection.recipe_library(assess=True).recipes[0].assessment
     assert assessment is not None
     assert assessment.fleet_fit.state == "unavailable"
+    # A search cut off by the deadline is unknown, never "needs download".
+    assert assessment.readiness.state == "unavailable"
 
 
 def test_fleet_filter_assesses_later_candidates_before_pagination(assessed_library):

@@ -28,7 +28,10 @@ from vonk_control.run_switch_contract import (
     RunSwitchCleanupApplyRequest,
     RunSwitchCleanupPreviewRequest,
 )
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 
+from .lifecycle_simulation.simulation import Simulation
+from .lifecycle_simulation.world import SOLO, World, build_world
 from .node_contacts import contact_row
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -401,3 +404,52 @@ def test_postgres_cache_loss_reinstalls_through_normal_prepared_installation(
         assert row is not None and row.state == InstallationState.INSTALLED
         assert rank is not None and rank.state == InstallationNodeState.INSTALLED
         assert rank.installed_bytes == 120
+
+
+def _load(world: World, profile_id: str) -> str:
+    return world.controller.profiles.apply(
+        profile_id, request_key=str(uuid.uuid4()), actor="admin"
+    ).id
+
+
+@pytest.mark.slow(30)
+def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
+    tmp_path: Path, postgres_engine
+) -> None:
+    # Wrong implementation: the rank stays installed after a Start found its
+    # image gone, so the next load reuses it, copies no image and starts the
+    # missing image again; it never serves.
+    world = build_world(tmp_path, postgres_engine)
+    try:
+        sim = Simulation(world, seed=0)
+        spark = world.nodes[0]
+        solo, _number = world.create_profile("Solo", [world.assignment(SOLO, (spark,))])
+        idle, _number = world.create_profile("Idle", [])
+        assert sim.settle(_load(world, solo)) == "succeeded"
+        assert sim.settle(_load(world, idle)) == "succeeded"
+        removed = sim.sparks.by_node[spark]
+        removed.image_removed = True  # docker rmi under the installed rank
+        _load(world, solo)
+        for _ in range(5):
+            if removed.image_missing_starts:
+                break
+            sim.round()
+        assert removed.image_missing_starts
+
+        assert sim.settle(_load(world, solo)) == "succeeded"
+
+        assert removed.serving
+        with world.sessions() as session:
+            healing = session.scalar(
+                select(Job)
+                .where(Job.kind == "recipe.run-switch.v2")
+                .order_by(Job.created_at.desc())
+                .limit(1)
+            )
+            assert healing is not None
+            plan = _stored_job_plan(healing)
+        assert plan is not None
+        by_node = plan.runtime_storage.missing_image_distribution_bytes_by_node
+        assert by_node is not None and by_node[spark] > 0
+    finally:
+        world.close()

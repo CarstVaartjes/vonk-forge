@@ -9,13 +9,13 @@ from datetime import UTC, datetime
 from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    InstallationNodeState,
     InstallationState,
     ReservationState,
 )
 
 from .content_identity import same_image
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .machine_states import rank_installed
 from .models import (
     InstallationNode,
     RecipeBuild,
@@ -67,30 +67,35 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
     )
 
 
-def runtime_images_named_on_node(session: Session, node_id: str) -> frozenset[str]:
-    """Runtime images (manifest digests) an installed rank on the Spark names.
+def runtime_images_named_on_nodes(
+    session: Session, node_ids: Collection[str]
+) -> dict[str, frozenset[str]]:
+    """Runtime images (manifest digests) an installed rank names, per Spark.
 
     The Spark's helper never removes an image whose installation plan is on the
     host, so an installed rank's image is held; another installation of it
     pulls nothing new. Any other image is charged: a rank not installed (planned,
     failed, uninstalled or demoted) may have no plan there, and an image no plan
     names may already be pruned. The same rank test as Run/Switch's installation
-    reuse.
+    reuse. One query for all Sparks; each asked-for Spark is present.
     """
 
-    return frozenset(
-        session.scalars(
-            select(RecipeInstallation.image_digest)
-            .join(
-                InstallationNode,
-                InstallationNode.installation_id == RecipeInstallation.id,
-            )
-            .where(
-                InstallationNode.node_id == node_id,
-                InstallationNode.state == InstallationNodeState.INSTALLED,
-            )
+    named: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    if not named:
+        return {}
+    for node_id, image_digest in session.execute(
+        select(InstallationNode.node_id, RecipeInstallation.image_digest)
+        .join(
+            RecipeInstallation,
+            RecipeInstallation.id == InstallationNode.installation_id,
         )
-    )
+        .where(
+            InstallationNode.node_id.in_(sorted(named)),
+            rank_installed(InstallationNode.state),
+        )
+    ):
+        named[node_id].add(image_digest)
+    return {node_id: frozenset(digests) for node_id, digests in named.items()}
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,7 +223,7 @@ def outstanding_disk_charges(
             and installation is not None
             and installation.state == InstallationState.INSTALLED
             and node is not None
-            and node.state == InstallationNodeState.INSTALLED
+            and rank_installed(node.state)
             and _aware(inventory_observed_at)
             > _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
             and reservation.plan_digest == installation.plan_digest

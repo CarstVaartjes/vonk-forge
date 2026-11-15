@@ -4,13 +4,23 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from vonk_agent_protocol import ModelCacheBlockerCode, RunSwitchCode, canonical_message
+from vonk_agent_protocol import (
+    LibraryAssessmentCode,
+    ModelCacheBlockerCode,
+    RunSwitchCode,
+    canonical_message,
+)
+from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
 )
+from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library_contract import RecipeReadinessCheck
+from vonk_control.models import RecipeBuild
+from vonk_control.run_switch_contract import RunSwitchReason
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
     RunSwitchOperationService,
@@ -227,3 +237,38 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
     if image == "missing":
         # The image still travels to the Spark that holds only the files.
         assert any(phase.subphase == "target-copy" for phase in plan.phases)
+    # Library readiness follows the same rule: a NAS lacking the model does
+    # not make a load whose Sparks hold it read "needs download".
+    nas_lacks = RecipeReadinessCheck(
+        state="blocked",
+        reasons=[
+            RunSwitchReason(
+                code=LibraryAssessmentCode.CACHE_MISSING,
+                detail="The NAS lacks the model.",
+                severity="blocker",
+                scope="operation",
+            )
+        ],
+    )
+    readiness = LibraryAssessment._ready(
+        plan, LibraryAssessment._fit(plan), nas_lacks, None
+    )
+    assert (readiness.state == "ready") is held, readiness
+
+
+def test_each_asked_spark_holds_only_the_images_its_installed_ranks_name(
+    tmp_path,
+) -> None:
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    with sessions() as session:
+        build = session.get(RecipeBuild, build_id)
+        assert build is not None
+        named = runtime_images_named_on_nodes(session, [*nodes, "spark-without-ranks"])
+
+    assert named == {
+        **{node_id: frozenset({build.image_digest}) for node_id in nodes},
+        "spark-without-ranks": frozenset(),
+    }

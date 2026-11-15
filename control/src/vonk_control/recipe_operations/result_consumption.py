@@ -9,8 +9,9 @@ from typing import cast as typing_cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    AgentFailureResult,
+    HelperErrorCode,
     InstallationNodeState,
     InstallationState,
     LifecycleState,
@@ -25,12 +26,14 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol import AgentOperation as WireAgentOperation
 
 from .. import agent_operation_states
 from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..installed_bytes import demote_installed_ranks
 from ..job_documents import (
     RecipeBuildCleanupParent,
 )
@@ -80,6 +83,34 @@ from .results import _RANK_FAILED, _node_result, _unproven_evidence
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
+
+
+def _demote_ranks_naming_the_lost_image(
+    session: Session, job: Job, node_id: str, now: datetime
+) -> None:
+    """A Start found its runtime image gone from its Spark (removed under an
+    installed rank): every installed rank there that names that image is
+    demoted, so the next plan copies the image again and installs afresh
+    instead of repeating the same Start."""
+
+    run_id = _parent_identity(job, "owner_id")
+    run = None if run_id is None else session.get(RecipeRun, run_id)
+    installation = (
+        None if run is None else session.get(RecipeInstallation, run.installation_id)
+    )
+    if installation is None:
+        return
+    demote_installed_ranks(
+        session,
+        node_id,
+        InstallationNode.installation_id.in_(
+            select(RecipeInstallation.id).where(
+                RecipeInstallation.image_digest == installation.image_digest
+            )
+        ),
+        observed_at=now,
+        before=now,
+    )
 
 
 class ResultConsumptionMixin:
@@ -196,6 +227,15 @@ class ResultConsumptionMixin:
             return
         state = getattr(message, "state", None)
         result = getattr(message, "result", None)
+        if (
+            job.kind == WireAgentOperation.RECIPE_START.value
+            and isinstance(result, AgentFailureResult)
+            and result.helper_error_code
+            == HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
+        ):
+            _demote_ranks_naming_the_lost_image(
+                session, job, operation.node_id, service._clock()
+            )
         if (
             state == LifecycleState.CANCELLED.value
             and job.kind in _WORKLOAD_INTENT_KINDS

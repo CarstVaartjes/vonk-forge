@@ -119,6 +119,7 @@ MODES = (
     "fixture-closures",
     "contract-constants",
     "web-not-reported",
+    "rank-installed",
     "retry-dispositions",
     "head-digests",
     "set-first-requester",
@@ -189,6 +190,11 @@ TABLE_LOCK_OWNERS = frozenset(
 # The words for a reading nobody reported are one constant, NOT_REPORTED_TEXT in
 # control/web/src/lib/fleet.ts (a .ts file); a component never types them.
 WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<""")
+# Whether a rank is installed is one shared predicate, machine_states.rank_installed.
+RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
+RANK_INSTALLED_KIND = (
+    "rank INSTALLED test spelled inline; use machine_states.rank_installed"
+)
 WEB_NOT_REPORTED_KIND = (
     "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
 )
@@ -2533,6 +2539,18 @@ def check_source(
                 if is_test
                 else (rust_test_lines(source) if path.endswith(".rs") else set()),
             )
+        )
+    if (
+        python
+        and not is_test
+        and "rank-installed" in modes
+        and path.startswith("control/src/")
+        and path != "control/src/vonk_control/machine_states.py"
+    ):
+        hits.extend(
+            (number, RANK_INSTALLED_KIND)
+            for number, text in enumerate(source.splitlines(), 1)
+            if RANK_INSTALLED_COPY.search(text)
         )
     if (
         "web-not-reported" in modes

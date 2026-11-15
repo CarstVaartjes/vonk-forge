@@ -4293,6 +4293,88 @@ def test_uninstall_keeps_model_when_another_installed_recipe_uses_it(
     assert final_dependent.model_impact.retained_node_ids == ()
 
 
+def test_uninstall_keeps_model_files_another_installation_runs_under_a_new_digest(
+    tmp_path: Path,
+) -> None:
+    """A release re-digested the Model over the same files, and a newer recipe's
+    installation runs that set under the new digest. Catches dependents read by
+    Model digest alone: the old installation's uninstall planned the files'
+    cleanup on a Spark whose other installation still runs them."""
+
+    sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    old = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    newer = installed_recipe(
+        service, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    redigested = "b" * 64
+    with sessions.begin() as session:
+        installation = _required(session.get(RecipeInstallation, newer.owner_id))
+        assert installation.model_artifact_set_sha256 is not None
+        recipe = _required(
+            session.get(CatalogDocumentRevision, installation.recipe_revision_id)
+        )
+        current = RecipeDefinition.model_validate(recipe.document)
+        model = _required(
+            session.scalar(
+                select(CatalogDocumentRevision).where(
+                    CatalogDocumentRevision.kind == "model",
+                    CatalogDocumentRevision.content_digest
+                    == current.models[0].model.content_sha256,
+                )
+            )
+        )
+        document = current.model_dump(mode="json")
+        document["models"][0]["model"]["content_sha256"] = redigested
+        document = RecipeDefinition.model_validate(document).model_dump(mode="json")
+        for kind, source, content, digest in (
+            ("model", model, model.document, redigested),
+            ("recipe", recipe, document, document_sha256(document)),
+        ):
+            revision = CatalogDocumentRevision(
+                id=str(uuid.uuid4()),
+                document_id=source.document_id,
+                kind=kind,
+                publisher=source.publisher,
+                slug=source.slug,
+                revision_number=source.revision_number + 1,
+                schema_version=source.schema_version,
+                state="active",
+                document=content,
+                content_digest=digest,
+                projected={},
+                created_by="admin",
+                created_at=NOW,
+            )
+            session.add(revision)
+        session.flush()
+        installation.recipe_revision_id = revision.id
+        installation.model_content_sha256 = redigested
+
+    operation = service.uninstall(
+        old.owner_id, actor="admin", request_id=str(uuid.uuid4())
+    )
+    service.record_node_result(operation.id, nodes[0], succeeded=True, evidence={})
+
+    with sessions() as session:
+        child = _required(
+            session.scalar(
+                select(AgentOperation).where(
+                    AgentOperation.parent_job_id == operation.id
+                )
+            )
+        )
+        assert child.payload["cleanup_model_content_sha256"] is None
+    # The newer recipe still loads from the files its Spark kept.
+    run = service.preview_run(newer.owner_id, "kept")
+    assert run.allowed, run.nodes
+    started = service.start(
+        run, plan_digest=run.plan_digest, actor="admin", request_id=str(uuid.uuid4())
+    )
+    assert started.state in {"queued", "running"}
+
+
 def test_installations_removed_together_do_not_keep_each_others_model_files(
     tmp_path: Path,
 ) -> None:

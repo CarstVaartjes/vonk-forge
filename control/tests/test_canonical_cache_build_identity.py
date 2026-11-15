@@ -371,7 +371,6 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     """
 
     from vonk_control.distribution import (
-        ModelCacheObjectSource,
         verified_model_receipts,
     )
     from vonk_control.execution_plan_service import (
@@ -447,10 +446,9 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
 
     if cached_by == "earlier-revision-set":
         # The stored row speaks for revision 1 only.
-        stored = ModelCacheObjectSource.from_service(service)
         assert {
-            item.model_content_sha256
-            for item in stored.verified_model_objects_for_set(first.digest)
+            item["model_content_sha256"]
+            for item in service.resolve_verified_artifact_set(first.digest)
         } == {first_digest}
     # Revision 2 gets the same verified objects under its own identity.
     receipts = verified_model_receipts(service, second.digest, second)

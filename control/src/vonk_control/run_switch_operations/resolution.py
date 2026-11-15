@@ -11,7 +11,6 @@ from typing import cast as typing_cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    InstallationNodeState,
     InstallationState,
     LifecycleState,
     RunSwitchCode,
@@ -26,6 +25,7 @@ from ..cluster_mappings import (
     mapping_option_choices,
 )
 from ..content_identity import same_image
+from ..machine_states import rank_installed
 from ..models import (
     CatalogDocumentRevision,
     ClusterMapping,
@@ -303,7 +303,7 @@ class ResolutionMixin:
                         InstallationNode.installation_id == installation.id
                     )
                 )
-                if node.state == InstallationNodeState.INSTALLED
+                if rank_installed(node.state)
             }
             if installed == desired:
                 return installation

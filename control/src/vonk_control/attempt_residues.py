@@ -78,7 +78,7 @@ from .agent_operation_facts import aware as _aware
 from .covered_installation_claims import release_covered_installation_claims
 from .installation_transitions import end_orphaned_installation
 from .logging import log_event
-from .machine_states import DISTRIBUTION_HELD
+from .machine_states import DISTRIBUTION_HELD, rank_installed
 from .models import (
     ArtifactDistributionAssignment,
     CatalogDocumentRevision,
@@ -273,7 +273,7 @@ def incomplete_installation_ids(session: Session) -> tuple[str, ...]:
             found.append(installation.id)
             continue
         if any(
-            node.state != InstallationNodeState.INSTALLED
+            not rank_installed(node.state)
             or (
                 node.required_payload_bytes is not None
                 and node.installed_bytes < node.required_payload_bytes

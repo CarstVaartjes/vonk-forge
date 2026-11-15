@@ -72,7 +72,6 @@ from .common import telemetry_point as telemetry_point
 from .nodes import RECIPE_UPDATE_AVAILABLE as RECIPE_UPDATE_AVAILABLE
 from .nodes import nas_route_notice as nas_route_notice
 from .nodes import sustained_low_cpu_clock as sustained_low_cpu_clock
-from .presence import InstallationNodeState as InstallationNodeState
 from .presence import RouteState as RouteState
 from .presence import mapping_option_choices as mapping_option_choices
 from .presence import read_state as read_state
