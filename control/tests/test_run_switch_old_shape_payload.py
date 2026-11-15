@@ -19,6 +19,7 @@ from vonk_control.run_switch_operations import RunSwitchOperationService
 from vonk_control.run_switch_operations.observation_helpers import (
     _start_child_request_key,
 )
+from vonk_control.strict_json import read_stored_model
 
 from .test_recipe_operations import installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -132,10 +133,10 @@ def test_old_shape_job_with_a_starting_run_continues_to_success(tmp_path) -> Non
             {"id": operation.operation_id},
         ).scalar_one()
     document = json.loads(stored) if isinstance(stored, str) else stored
-    parent_payload = RunSwitchJobPayload.model_validate_json(
-        canonical_message(document), strict=True
+    parent_payload = read_stored_model(
+        RunSwitchJobPayload, canonical_message(document), strict=True, from_json=True
     )
-    assert len(parent_payload.plan.storage.artifact_digests) == len(FILE_DIGESTS)
+    assert parent_payload.plan.plan_digest == document["plan"]["plan_digest"]
 
     for _ in range(8):
         if service.get(operation.operation_id).state not in {"queued", "running"}:

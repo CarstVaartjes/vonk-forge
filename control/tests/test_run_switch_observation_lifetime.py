@@ -162,7 +162,7 @@ def test_artifact_observation_repairs_or_ends_and_admits_fresh(tmp_path, fault, 
         return service
 
     service = restart()
-    request = _request(sessions, nodes[0], retention="reclaim-unreferenced")
+    request = _request(sessions, nodes[0])
 
     def fresh():
         return service.apply(
@@ -381,7 +381,7 @@ def test_transfer_that_keeps_copying_outlives_the_recovery_window(tmp_path, copy
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
     service = _service(sessions, now[0], lifecycle, executor, artifacts=inspector)
     service._clock = lambda: now[0]
-    request = _request(sessions, nodes[0], retention="reclaim-unreferenced")
+    request = _request(sessions, nodes[0])
     operation = service.apply(
         RunSwitchApplyRequest.model_validate_json(
             canonical_message(

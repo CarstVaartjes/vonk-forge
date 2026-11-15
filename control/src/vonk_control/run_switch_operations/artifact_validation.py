@@ -140,28 +140,6 @@ def _validate_artifact_execution(
                 RunSwitchCode.RUNTIME_BUILD_VERIFICATION_MISMATCH,
                 reason=WaitReason.SCOPE_CHANGED,
             )
-    elif phase.kind == "cleanup":
-        if evidence.scope != "spark-local":
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_SCOPE_INVALID, reason=WaitReason.SCOPE_CHANGED
-            )
-        if evidence.nas_evicted is True:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_SCOPE_INVALID,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        reclaimed = evidence.reclaimed_bytes
-        if type(reclaimed) is not int or reclaimed < 0:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_RECLAIM_EVIDENCE_INVALID,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
-        protected_bytes = evidence.protected_referenced_bytes
-        if type(protected_bytes) is not int or protected_bytes < 0:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
-                reason=WaitReason.OBSERVATION_UNAVAILABLE,
-            )
     elif phase.kind == "transfer":
         copied = evidence.copied_bytes
         if copied is not None and (type(copied) is not int or copied < 0):

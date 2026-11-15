@@ -32,7 +32,6 @@ from .vocabulary import (
     RunSwitchPhaseKind,
     RunSwitchReasonScope,
     RunSwitchReasonSeverity,
-    RunSwitchRetention,
     RunSwitchSubphase,
 )
 
@@ -150,17 +149,9 @@ class ArtifactStorageImpact(StrictModel):
     missing_spark_bytes: int | None = Field(default=None, ge=0)
     # Per-node evidence behind ``missing_spark_bytes`` (a SUM over targets).
     missing_spark_bytes_by_node: dict[str, Annotated[int, Field(ge=0)]] | None = None
-    reclaimable_bytes: int = Field(default=0, ge=0)
-    reclaimed_bytes: int = Field(default=0, ge=0)
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
-    retention: RunSwitchRetention
     running_coverage: RunSwitchCoverage = "unknown"
-    # Kept for jobs stored before the plan became set + bytes; new plans leave it
-    # empty and nothing reads it (delete once in-flight work has turned over).
-    artifact_digests: list[Digest] = Field(default_factory=list)
-    # Stored before cleanup became bytes; new plans leave it empty, nothing reads it.
-    reclaimable_digests: list[Digest] = Field(default_factory=list)
 
 
 class BuildSourceEvidence(StrictModel):
@@ -202,8 +193,6 @@ class RuntimeImageStorageImpact(StrictModel):
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
     running_coverage: RunSwitchCoverage = "unknown"
-    # Stored before cleanup became bytes; new plans leave it empty, nothing reads it.
-    reclaimable_digests: list[Digest] = Field(default_factory=list)
 
 
 class RunSwitchBuildEvidence(StrictModel):

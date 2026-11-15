@@ -20,17 +20,6 @@ class RunSwitchCode(WireEnum):
     ARTIFACT_VERIFICATION_RESULT_INVALID = (
         "run-switch.artifact-verification-result-invalid"
     )
-    CLEANUP_RECLAIM_EVIDENCE_INVALID = "run-switch.cleanup-reclaim-evidence-invalid"
-    CLEANUP_RECLAIMED_BYTES_EXCEED_PLAN = (
-        "run-switch.cleanup-reclaimed-bytes-exceed-plan"
-    )
-    CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID = (
-        "run-switch.cleanup-reference-protection-evidence-invalid"
-    )
-    CLEANUP_REFERENCE_PROTECTION_OVERLAP = (
-        "run-switch.cleanup-reference-protection-overlap"
-    )
-    CLEANUP_SCOPE_INVALID = "run-switch.cleanup-scope-invalid"
     CONTAINER_BUILD_EVIDENCE_INVALID = "run-switch.container-build-evidence-invalid"
     CONTAINER_BUILD_EXECUTOR_UNAVAILABLE = (
         "run-switch.container-build-executor-unavailable"

@@ -181,7 +181,7 @@ class PhaseDispatchMixin:
                 fail(
                     f"{code}: {error_detail(error)}",
                     failure_code=code,
-                    replan=not definite and phase.kind != ProfileChildPhase.CLEANUP,
+                    replan=not definite,
                     definite=getattr(error, "definite", False) or definite,
                     cause=error,
                 )
@@ -325,8 +325,7 @@ class PhaseDispatchMixin:
                 fail(
                     str(error),
                     failure_code=code,
-                    replan=phase.kind
-                    not in {ProfileChildPhase.FINAL_VERIFY, ProfileChildPhase.CLEANUP},
+                    replan=phase.kind != ProfileChildPhase.FINAL_VERIFY,
                     definite=error.definite,
                     cause=error,
                 )
@@ -408,14 +407,14 @@ class PhaseDispatchMixin:
         ):
             fail(
                 run_switch_code(f"{phase.kind}-waiting-without-child"),
-                replan=phase.kind != ProfileChildPhase.CLEANUP,
+                replan=True,
             )
             return True
         if (
             execution.operation_id is None
             and execution.result is not None
             and (
-                phase.kind in {"transfer", "verify", "cleanup"}
+                phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
                 or (phase.kind == "prepare" and phase.subphase == "runtime-image")
             )
         ):
@@ -427,12 +426,12 @@ class PhaseDispatchMixin:
                 # Completed work whose receipt does not validate is not proof
                 # that the work failed: its effect is unknown.  Entering the
                 # same idempotent phase again observes it (a transfer or verify
-                # re-reads the bytes; a cleanup re-reads the reclaim evidence),
+                # re-reads the bytes),
                 # and a re-plan drops stale evidence.  Never terminal.
                 fail(
                     str(error),
                     failure_code=error_code(error),
-                    replan=phase.kind != ProfileChildPhase.CLEANUP,
+                    replan=True,
                     definite=error.definite,
                 )
                 return True

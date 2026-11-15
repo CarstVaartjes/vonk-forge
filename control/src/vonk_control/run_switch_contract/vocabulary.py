@@ -27,7 +27,6 @@ RunSwitchPlacementAction = Literal["install", "run", "switch"]
 
 RunSwitchAction = Literal[RunSwitchPlacementAction, "stop", "cleanup"]
 
-RunSwitchRetention = Literal["retain-cached", "reclaim-unreferenced"]
 
 RunSwitchReasonSeverity = Literal["blocker", "warning", "info"]
 
@@ -63,7 +62,6 @@ RunSwitchPhaseKind = Literal[
     "transfer",
     "verify",
     "prepare",
-    "cleanup",
     "stop",
     "start",
     "uninstall",
