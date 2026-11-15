@@ -88,6 +88,12 @@ changes the other in the same PR. Each screen has one fixture,
 `tests/fixtures/fleet-wording-*.json`, and both clients render it and compare the
 exact text: the page's DOM text and the string `vonkctl` prints. Missing values read
 "Not reported" on both sides, and .5 rounds up on both.
+On the vonkctl side every shared vector is compared in one module,
+`tests/cluster_profiles/test_cli_wording.py`. Every other vonkctl test decides on
+data: the exit status, the requests sent, a typed result or the `--json` document
+(the `vonkctl_json` fixture). Wording that no vector owns is not tested; the
+`printed-output` added-line guard refuses captured stdout/stderr in the rest of
+`tests/cluster_profiles`.
 In the web the text is the one `NOT_REPORTED_TEXT` in `control/web/src/lib/fleet.ts`; a component never
 types the words (the `web-not-reported` added-line guard enforces it). Fleet totals (power, tokens, energy, decode speed) are the Controller's fleet line or total of
 the metric series, never a sum made in the browser.
@@ -392,8 +398,8 @@ library|detail` render them from there. Never type one in a client; a name the
 release does not list shows as the name, and a missing value is `Not reported`
 in both clients. Any change to this wording updates
 `tests/fixtures/library-vocabulary-wording.json`, which the web test
-(`library-vocabulary.test.tsx`) and the vonkctl test
-(`test_library_vocabulary_wording.py`) both compare exactly.
+(`library-vocabulary.test.tsx`) and the vonkctl wording test
+(`test_cli_wording.py`) both compare exactly.
 
 ## Deployment and fleet safety
 

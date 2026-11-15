@@ -122,6 +122,7 @@ MODES = (
     "retry-dispositions",
     "head-digests",
     "set-first-requester",
+    "printed-output",
 )
 # An agent-facing 422 tells the Spark these exact bytes can never be accepted
 # and drops them (the observation outbox discards on it). Only a verdict on
@@ -190,6 +191,20 @@ TABLE_LOCK_OWNERS = frozenset(
 WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<""")
 WEB_NOT_REPORTED_KIND = (
     "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
+)
+# A vonkctl test decides on data (status, requests, a typed result, the --json
+# document); captured stdout/stderr text is wording, which only the shared
+# vectors and their one test own. The conftest `vonkctl_json` fixture runs a
+# command and returns its --json document.
+PRINTED_OUTPUT = re.compile(
+    r"\b(?:capsys|capfd|readouterr|redirect_stdout|redirect_stderr)\b"
+)
+PRINTED_OUTPUT_SCOPE = "tests/cluster_profiles/test_"
+PRINTED_OUTPUT_WORDING = "tests/cluster_profiles/test_cli_wording.py"
+PRINTED_OUTPUT_KIND = (
+    "vonkctl test reads printed output; assert the status, the requests, a typed "
+    "result or the --json document (vonkctl_json), and put wording in "
+    "test_cli_wording.py over a shared vector"
 )
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"
 AGENT_REQUEST_BUILDERS = frozenset({"HostRuntimeRequest", "stop_payload_from_job_run"})
@@ -2458,6 +2473,17 @@ def check_source(
             for number, text in enumerate(source.splitlines(), 1)
             if not text.lstrip().startswith(("*", "/*", "//"))
             and WEB_NOT_REPORTED.search(text)
+        )
+    if (
+        python
+        and "printed-output" in modes
+        and path.startswith(PRINTED_OUTPUT_SCOPE)
+        and path != PRINTED_OUTPUT_WORDING
+    ):
+        hits.extend(
+            (number, PRINTED_OUTPUT_KIND)
+            for number, text in enumerate(source.splitlines(), 1)
+            if not text.lstrip().startswith("#") and PRINTED_OUTPUT.search(text)
         )
     if python and "contract-constants" in modes:
         hits.extend(

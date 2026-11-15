@@ -1,16 +1,10 @@
 """`vonkctl metrics` prints the catalogue's words and the shared number wording."""
 
 import json
-from pathlib import Path
-
-import pytest
 
 from cluster_profiles import cli
-from cluster_profiles.cli_render.metrics import NO_DATA, metric_value_text, sparkline
+from cluster_profiles.cli_render.metrics import NO_DATA, sparkline
 
-_WORDING = json.loads(
-    (Path(__file__).parents[1] / "fixtures" / "metrics-wording.json").read_text()
-)["cases"]
 NODE = "spk_" + "1" * 32
 
 
@@ -86,11 +80,6 @@ def _series(labels, values, **summary):
 def _run(argv, client, capsys):
     status = cli.main(argv, control_client=client, request_id_factory=lambda: "r" * 8)
     return status, capsys.readouterr().out
-
-
-@pytest.mark.parametrize("case", _WORDING, ids=lambda c: f"{c['unit']}-{c['value']}")
-def test_values_read_as_the_shared_wording(case):
-    assert metric_value_text(case["unit"], case["value"]) == case["text"]
 
 
 def test_sparkline_marks_gaps_and_flat_series():

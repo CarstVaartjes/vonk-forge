@@ -198,15 +198,7 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_fleet_wording_attention.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
         "tests/cluster_profiles/test_cli_metrics.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
-        "tests/cluster_profiles/test_fleet_wording_throttle.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
@@ -218,8 +210,8 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_library_vocabulary_wording.py",
-        "vonkctl prints the served release vocabulary exactly as the shared wording fixture says; no whole-tree scan.",
+        "tests/cluster_profiles/test_cli_wording.py",
+        "vonkctl prints the shared wording vectors exactly as the web renders them; no whole-tree scan.",
     ),
     (
         "tests/cluster_profiles/test_cli_render.py",
@@ -234,23 +226,11 @@ SCOPED: tuple[tuple[str, str], ...] = (
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_fleet_wording_status.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
         "tests/cluster_profiles/test_cli_selection.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (
-        "tests/cluster_profiles/test_fleet_wording_workloads.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
         "tests/cluster_profiles/test_cli_states.py",
-        "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
-    ),
-    (
-        "tests/cluster_profiles/test_fleet_wording_vitals.py",
         "CLI consumer behavior and packaged contracts; no whole-tree product scan.",
     ),
     (

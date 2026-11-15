@@ -3,14 +3,10 @@ import os
 from contextlib import redirect_stdout
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
-from library_route_fixtures import _library_detail, _recipe_projection
-from library_route_fixtures import _recipe as _recipe_document
 
 from cluster_profiles.cli_render import progress_line, render_payload
-from cluster_profiles.cli_render.profile import _profile_endpoints
 
 
 @pytest.mark.parametrize("width", [60, 80, 120])
@@ -1045,7 +1041,6 @@ def test_unreadable_operation_membership_is_rendered_as_unknown(action, capsys):
 def test_every_controller_command_has_a_registered_presentation() -> None:
     import argparse
     import re
-    from pathlib import Path
 
     import cluster_profiles
     from cluster_profiles.cli_presentations import PRESENTATIONS
@@ -1192,7 +1187,6 @@ def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
 
 def test_library_list_shared_vector_renders_without_documents(capsys):
     """The list renderer and sweep consume the producer's same projected vector."""
-    import json
     from pathlib import Path
 
     from cluster_profiles.generated_control.models.recipe_library_response import (
@@ -1214,7 +1208,6 @@ def test_library_list_shared_vector_renders_without_documents(capsys):
 
 def test_library_shared_vector_shows_why_a_preparation_waits(capsys):
     """The producer's waiting preparation renders its blocker and next check."""
-    import json
     from pathlib import Path
 
     from cluster_profiles.cli_render import _library_item
@@ -1319,119 +1312,3 @@ def test_model_listing_explains_measured_unique_bytes_and_retained_owner(capsys)
     assert "12 B" in output and "3 B" in output and "9 B" in output
     assert "Previous revision retained because installation owner-1" in output
     assert "2 B unique" in output
-
-
-_RECIPE_LINKS_FIXTURE = json.loads(
-    (Path(__file__).parents[1] / "fixtures" / "recipe-links.json").read_text()
-)
-
-
-@pytest.mark.parametrize(
-    "case", _RECIPE_LINKS_FIXTURE["cases"], ids=lambda case: case["name"]
-)
-def test_recipe_detail_prints_the_links_the_dashboard_shows(case, capsys):
-    # The web test renders the same fixture, so the two clients cannot drift.
-    corpus = json.loads(
-        (
-            Path(__file__).parents[2]
-            / "control/web/src/test-fixtures/library-corpus.json"
-        ).read_text()
-    )
-    display = next(iter(corpus["seedDisplays"]["models"].values()))
-    document = cast(dict[str, Any], _recipe_document(case["slug"]))
-    document["identity"]["publisher"] = case["publisher"]
-    document["provenance"]["source_reference"] = case["source_reference"]
-    models = cast(dict[str, Any], _library_detail(document)["detail"])[
-        "model_documents"
-    ][:1]
-    models = [
-        {**models[0], "model_display": {**display, **item}} for item in case["models"]
-    ]
-    render_payload(
-        {
-            **_recipe_projection(f"{case['publisher']}/{case['slug']}", "Tiny"),
-            "document": document,
-            "model_documents": models,
-        },
-        "recipe",
-        action="detail",
-    )
-
-    printed = capsys.readouterr().out.splitlines()
-    assert [line for line in printed if line in case["lines"]] == case["lines"]
-
-
-_VERSION_LINE_FIXTURE = json.loads(
-    (Path(__file__).parents[1] / "fixtures" / "version-line.json").read_text()
-)
-
-
-@pytest.mark.parametrize(
-    "case", _VERSION_LINE_FIXTURE["cases"], ids=lambda case: case["name"]
-)
-def test_version_lines_print_the_text_the_dashboard_shows(case, capsys):
-    # The web test renders the same fixture, so the two clients cannot drift.
-    render_payload(
-        {
-            "observed_at": "2026-11-12T08:00:00Z",
-            "api": {
-                "source_sha": case["platform"]["source_sha"],
-                "control_contract_sha256": "b" * 64,
-            },
-            "workers": None,
-            "worker_issue": "worker-observation-unavailable",
-        },
-        "platform",
-    )
-    render_payload(
-        case["sync"] or {"state": "never-run"}, "recipe", action="sync-status"
-    )
-    printed = capsys.readouterr().out.splitlines()
-    for line in case["lines"]:
-        assert line in printed
-
-
-_SERVING_NOW_FIXTURE = json.loads(
-    (Path(__file__).parents[1] / "fixtures" / "serving-now.json").read_text()
-)
-
-
-@pytest.mark.parametrize(
-    "case", _SERVING_NOW_FIXTURE["cases"], ids=lambda case: case["name"]
-)
-def test_profile_endpoint_prints_the_serving_lines_the_dashboard_shows(case, capsys):
-    # The web test renders the same fixture, so the two clients cannot drift.
-    assignments = [
-        {
-            "assignment_id": f"33333333-3333-4333-8333-{index:012d}",
-            "desired_state": "running",
-            **item,
-            "endpoint": {
-                "alias": item["alias"],
-                "api_base": "https://vonk-forge.example.ts.net/v1",
-                "backend_api_base": "http://10.0.0.10:8000/v1",
-                "generation": 8,
-                "node_id": "spk_" + "a" * 32,
-                "observed_at": "2026-09-23T12:59:30Z",
-                "plan_digest": "a" * 64,
-            }
-            if item["state"] == "published"
-            else None,
-        }
-        for index, item in enumerate(case["assignments"])
-    ]
-    _profile_endpoints(
-        {
-            "number": 3,
-            "profile_id": "11111111-1111-4111-8111-111111111111",
-            "application_id": "22222222-2222-4222-8222-222222222222",
-            "application_state": "succeeded",
-            "observed_at": "2026-09-23T12:59:31Z",
-            "assignments": assignments,
-        }
-    )
-
-    printed = capsys.readouterr().out.splitlines()
-    start = printed.index(_SERVING_NOW_FIXTURE["heading"])
-    assert printed[start + 1 : start + 1 + len(case["lines"])] == case["lines"]
-    assert printed[start + 1 + len(case["lines"])] == ""
