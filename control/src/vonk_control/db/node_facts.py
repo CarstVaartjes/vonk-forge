@@ -229,43 +229,6 @@ def move_runtime_facts(connection: Connection) -> None:
     connection.execute(text("ALTER TABLE agent_node_profiles DROP COLUMN hostname"))
 
 
-def retire_artifact_facts(connection: Connection) -> None:
-    """Retire Controller-recorded image receipts, never adopting them.
-
-    A receipt said a Spark held an image long after it was pruned; presence
-    now derives from the installed ranks that name the image on that Spark
-    (``disk_reservations.runtime_images_named_on_node``). The items rows lose
-    their ``artifacts`` key so they stay readable, and the old receipt table
-    goes, in startup's one transaction; a later start finds nothing to do.
-    """
-    from sqlalchemy import JSON, column, select, table, update
-
-    from ..inventory_items_contract import InventorySnapshotKind
-
-    if "node_artifacts" in inspect(connection).get_table_names():
-        connection.execute(text("DROP TABLE node_artifacts"))
-    # Raw JSON: the typed reader refuses the retired key it must remove.
-    snapshots = table(
-        "node_inventory_snapshots",
-        column("id"),
-        column("kind"),
-        column("agent_items", JSON),
-    )
-    rows = connection.execute(
-        select(snapshots.c.id, snapshots.c.agent_items).where(
-            snapshots.c.kind == InventorySnapshotKind.ITEMS.value
-        )
-    ).all()
-    for row_id, items in rows:
-        if isinstance(items, dict) and "artifacts" in items:
-            kept = {name: value for name, value in items.items() if name != "artifacts"}
-            connection.execute(
-                update(snapshots)
-                .where(snapshots.c.id == row_id)
-                .values(agent_items=kept)
-            )
-
-
 def move_repeated_evidence(connection: Connection) -> None:
     """Adopt each summary by its classified owner; never turn commands into contact."""
     from sqlalchemy import select, update

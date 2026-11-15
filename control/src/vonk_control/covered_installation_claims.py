@@ -7,12 +7,12 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    InstallationNodeState,
     InstallationState,
     ReservationState,
 )
 
 from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .machine_states import rank_installed
 from .models import (
     STOPPABLE_RUN_STATES,
     InstallationNode,
@@ -57,7 +57,7 @@ def release_covered_installation_claims(
             ResourceReservation.kind == "disk",
             ResourceReservation.state == ReservationState.ACTIVE,
             RecipeInstallation.state == InstallationState.INSTALLED,
-            InstallationNode.state == InstallationNodeState.INSTALLED,
+            rank_installed(InstallationNode.state),
         )
     ).all()
     for reservation, installation, node in rows:

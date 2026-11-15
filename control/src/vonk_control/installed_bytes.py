@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 
+from .machine_states import rank_installed
 from .models import InstallationNode, RecipeInstallation
 
 
@@ -65,7 +66,7 @@ def reconcile_missing_installations(
         return 0
     candidates = select(InstallationNode.installation_id).where(
         InstallationNode.node_id == node_id,
-        InstallationNode.state == InstallationNodeState.INSTALLED,
+        rank_installed(InstallationNode.state),
         InstallationNode.updated_at <= before,
         InstallationNode.installation_id.not_in(tuple(reported)),
     )
@@ -92,7 +93,7 @@ def reconcile_missing_installations(
         .where(
             InstallationNode.installation_id.in_(tuple(owners)),
             InstallationNode.node_id == node_id,
-            InstallationNode.state == InstallationNodeState.INSTALLED,
+            rank_installed(InstallationNode.state),
             InstallationNode.updated_at <= before,
         )
         .order_by(InstallationNode.id)

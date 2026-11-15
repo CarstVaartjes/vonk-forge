@@ -29,7 +29,7 @@ from ..disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,
     outstanding_disk_charges,
-    runtime_images_named_on_node,
+    runtime_images_named_on_nodes,
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
@@ -198,6 +198,9 @@ class InstallPlanningService:
                 ) from error
             models = resolved_entities.model_revisions
             model_display = stored_model_display(session, models[0] if models else None)
+            named_images_by_node = runtime_images_named_on_nodes(
+                session, [mapping_node.node_id for mapping_node in mapping_nodes]
+            )
             compiled_plan_error: str | None = None
             compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed
@@ -402,9 +405,6 @@ class InstallPlanningService:
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
                 stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
-                named_images = runtime_images_named_on_node(
-                    session, mapping_node.node_id
-                )
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
@@ -419,7 +419,8 @@ class InstallPlanningService:
             # never prunes it); any other is charged, as it may be pruned.
             reused_image = (
                 image_bytes
-                if image_bytes is not None and image_digest in named_images
+                if image_bytes is not None
+                and image_digest in named_images_by_node[mapping_node.node_id]
                 else 0
             )
             if reused_image == 0:

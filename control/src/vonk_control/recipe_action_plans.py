@@ -17,6 +17,8 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
+from .machine_states import rank_installed
+
 SharedCachePolicy = Literal["retain-shared-download-cache"]
 
 
@@ -367,8 +369,7 @@ def uninstall_plan(
         and bool(ordered_nodes)
         and immutable_membership_exact
         and all(
-            node.state == InstallationNodeState.INSTALLED
-            and node.installed_bytes is not None
+            rank_installed(node.state) and node.installed_bytes is not None
             for node in ordered_nodes
         )
     )

@@ -202,7 +202,6 @@ class RuntimeImageStorageImpact(StrictModel):
     nas_coverage: RunSwitchCoverage
     spark_coverage: RunSwitchCoverage
     running_coverage: RunSwitchCoverage = "unknown"
-    reclaimable_bytes: int = Field(default=0, ge=0)
     # Stored before cleanup became bytes; new plans leave it empty, nothing reads it.
     reclaimable_digests: list[Digest] = Field(default_factory=list)
 

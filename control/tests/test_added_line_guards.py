@@ -4205,3 +4205,21 @@ def test_an_edit_inside_an_old_broad_parking_handler_is_flagged() -> None:
     assert check_source(_RETRY_PATH, source, {4}, modes=("retry-dispositions",))
     # An added line outside the old handler leaves it alone.
     assert not check_source(_RETRY_PATH, source, {2}, modes=("retry-dispositions",))
+
+
+def test_an_inline_rank_installed_test_is_flagged() -> None:
+    path = "control/src/vonk_control/other.py"
+    for source in (
+        "ok = node.state == InstallationNodeState.INSTALLED\n",
+        "q = q.where(InstallationNode.state != InstallationNodeState.INSTALLED)\n",
+    ):
+        assert check_source(path, source, {1}, modes=("rank-installed",))
+    assert not check_source(
+        path, "ok = rank_installed(node.state)\n", {1}, modes=("rank-installed",)
+    )
+    assert not check_source(
+        "control/src/vonk_control/machine_states.py",
+        "installed = state == InstallationNodeState.INSTALLED\n",
+        {1},
+        modes=("rank-installed",),
+    )
