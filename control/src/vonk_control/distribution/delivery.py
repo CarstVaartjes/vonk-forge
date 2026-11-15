@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from datetime import UTC, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, cast
@@ -46,7 +45,7 @@ from .types import (
     DistributionRefused,
     DistributionUnknown,
     OpenedObject,
-    content_objects,
+    plan_objects,
 )
 
 
@@ -137,26 +136,8 @@ class DeliveryMixin:
                     retained = service._from_row(row)
         if accepted is None:
             return
-        # The managed cache owns object names and membership; the accepted
-        # plan binds the complete manifest and exact image content identity.
-        source = getattr(service.source, "model_source", service.source)
-        getter = getattr(source, "objects_for_set", None)
-        if not callable(getter):
-            raise DistributionUnknown(
-                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                "accepted model manifest is not currently observable",
-            )
-        objects = cast(Callable[[str], tuple[DistributionObject, ...]], getter)(
-            accepted.identity.model_artifact_set_sha256
-        )
-        delivered = {item.sha256: item.bytes for item in objects}
-        if any(
-            delivered.get(item.sha256) != item.size_bytes for item in accepted.artifacts
-        ):
-            raise DistributionUnknown(
-                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                "accepted model objects are not currently observable",
-            )
+        # The accepted plan names the exact model objects and image; a node
+        # that holds the objects needs only the image, so no NAS copy is read.
         image = accepted.runtime_image
         assignment = NodeDistributionAssignment(
             assignment_id=str(uuid4()),
@@ -165,7 +146,7 @@ class DeliveryMixin:
             node_id=node_id,
             expires_at=now + timedelta(hours=1),
             model_artifact_set_sha256=accepted.identity.model_artifact_set_sha256,
-            objects=content_objects(objects),
+            objects=plan_objects(accepted),
             oci_image_digest=image.image_digest,
             oci_image_config_digest=image.local_image_config_id,
             oci_archive_sha256=image.oci_layout_sha256,

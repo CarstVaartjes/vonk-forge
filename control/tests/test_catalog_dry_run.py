@@ -169,8 +169,8 @@ def test_plan_and_transfer_bytes_agree(slug: str, dry_run: CatalogDryRun) -> Non
     transfer = dry_run.transfer(_digest(slug))
     assert transfer.artifact_set_sha256 == manifest.digest
     assert transfer.total_bytes == manifest.expected_bytes
-    assert {item.name for item in transfer.objects} == {
-        spec.path for spec in manifest.artifacts
+    assert {(item.sha256, item.bytes) for item in transfer.objects} == {
+        (spec.sha256, spec.expected_bytes) for spec in manifest.artifacts
     }
 
 

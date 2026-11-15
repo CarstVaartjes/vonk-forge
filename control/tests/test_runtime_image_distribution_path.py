@@ -39,15 +39,6 @@ from .test_runtime_image_preparation import (
 )
 
 
-class _ModelObjectSource(MemoryObjectSource):
-    """Memory source that also answers the exact model-set lookup."""
-
-    def objects_for_set(
-        self, artifact_set_sha256: str
-    ) -> tuple[DistributionObject, ...]:
-        return self.artifact_manifests[artifact_set_sha256]
-
-
 def test_built_image_receipt_flows_from_prepare_to_target_verify(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -61,8 +52,7 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     model = DistributionObject(
         name="weights.bin", sha256="b" * 64, bytes=7, kind="model"
     )
-    source = _ModelObjectSource()
-    source.register_artifact_set(model_set_digest, (model,))
+    source = MemoryObjectSource()
     # This fixture source owns no Controller image cache, so it declares the
     # prepared archive exactly as MemoryObjectSource intends. The real
     # path reads the receipt in the cache root instead.
@@ -124,6 +114,12 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     # The memory source has no image layout to read the config id from.
     monkeypatch.setattr(
         executor, "_stored_config_digest", lambda _address, _bytes: "sha256:" + "d" * 64
+    )
+    # The model objects come from the persisted compiled plan, tested below.
+    monkeypatch.setattr(
+        executor,
+        "_model_objects",
+        lambda _plan, _progress: ((model,), model_set_digest, model.bytes),
     )
     phase = RunSwitchPhase(
         index=0,
@@ -266,3 +262,125 @@ def test_archive_gate_requires_the_image_in_managed_storage(tmp_path: Path) -> N
     (tmp_path / "image-cache" / "oci" / "blobs" / "sha256" / ARCHIVE_DIGEST).unlink()
     with pytest.raises(Exception) as _ending:
         executor._archive(**call)
+
+
+def test_target_copy_to_a_spark_holding_the_model_needs_no_nas_copy(
+    tmp_path: Path,
+) -> None:
+    """After the NAS evicted a model, a Spark that holds its files but lacks
+    the image still gets its copy: the grant names the files the persisted
+    plan compiled (the agent keeps those it holds) and the image."""
+    from vonk_control.distribution import CompositeObjectSource
+    from vonk_control.distribution.model_cache import ModelCacheObjectSource
+    from vonk_control.distribution_executor.receipts import RuntimeImagePull
+    from vonk_control.model_cache import ModelCacheService
+    from vonk_control.models import AgentNode, Job, RecipeInstallation
+    from vonk_control.recipe_execution_contract import parse_stored_installation_plan
+
+    from .test_recipe_operations import NOW, installed_recipe, setup_services
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    install = installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
+    )
+    with sessions.begin() as session:
+        installation = session.get(RecipeInstallation, install.owner_id)
+        assert installation is not None
+        compiled = parse_stored_installation_plan(installation.plan)
+        for node_id in nodes:
+            node = session.get(AgentNode, node_id)
+            assert node is not None
+            node.workload_intent_ordinal = 1
+    spec = compiled.compiled_execution_plans[nodes[0]]
+    image = RuntimeImagePull(
+        image_digest=spec.runtime_image.image_digest,
+        config_digest=spec.runtime_image.local_image_config_id,
+        address=spec.runtime_image.oci_layout_sha256,
+    )
+    images = MemoryObjectSource()
+    images.register_runtime_image(image.image_digest, image.address)
+    # The NAS no longer holds the set: eviction deleted its row and files.
+    nas = ModelCacheService(
+        sessions, tmp_path / "nas", free_fraction=0, fixture_sources=True
+    )
+    executor = DurableDistributionPhaseExecutor(
+        sessions,
+        AgentJobService(sessions, clock=lambda: NOW),
+        DistributionService(
+            CompositeObjectSource(ModelCacheObjectSource.from_service(nas), images),
+            sessions=sessions,
+            clock=lambda: NOW,
+        ),
+        clock=lambda: NOW,
+    )
+    executor._archive = lambda **_kwargs: image
+    model_bytes = sum(
+        {item.sha256: item.size_bytes for item in spec.artifacts}.values()
+    )
+    pending = [
+        SimpleNamespace(
+            node_id=node_id,
+            state="pending",
+            verified_sha256=None,
+            imported_image_digest=None,
+            verified_at=None,
+        )
+        for node_id in nodes
+    ]
+    plan = RunSwitchPlan.model_construct(
+        preparation=SimpleNamespace(
+            model=SimpleNamespace(
+                artifact_set_sha256=spec.identity.model_artifact_set_sha256,
+                artifact_set_bytes=model_bytes,
+                targets=pending,
+            ),
+            runtime_image=SimpleNamespace(
+                image_digest=image.image_digest,
+                oci_layout_sha256=image.address,
+                image_bytes=spec.runtime_image.image_bytes,
+                build_id=None,
+                targets=pending,
+            ),
+        ),
+        installation_id=installation.id,
+        image_digest=image.image_digest,
+        build=SimpleNamespace(
+            oci_layout_sha256=image.address,
+            image_bytes=spec.runtime_image.image_bytes,
+            build_input_sha256=None,
+        ),
+        recipe_build_id=None,
+        generated_at=NOW,
+        plan_digest="c" * 64,
+        mapping=None,
+    )
+
+    copy = executor.execute(
+        plan,
+        RunSwitchPhase(
+            index=0,
+            kind="transfer",
+            subphase="target-copy",
+            state="planned",
+            node_ids=list(nodes),
+            detail="transfer phase",
+        ),
+        item_index=0,
+        actor="operator",
+        request_key="00000000-0000-4000-8000-000000000001",
+        progress=RunSwitchOperationResult.model_validate_json(
+            canonical_message({"workload_intent_ordinal": 1})
+        ),
+    )
+
+    assert copy.operation_id is not None
+    with sessions() as session:
+        child = session.get(Job, copy.operation_id)
+        assert child is not None
+        assignments = child.payload["assignments"]
+        assert isinstance(assignments, dict)
+        (granted,) = assignments.values()
+    assert granted["oci_image_digest"] == image.image_digest
+    assert {(item["sha256"], item["bytes"]) for item in granted["objects"]} == {
+        (item.sha256, item.size_bytes) for item in spec.artifacts
+    }

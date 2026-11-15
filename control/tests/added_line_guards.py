@@ -2349,13 +2349,15 @@ def check_source(
     ):
         # NAS coverage is read only where NAS bytes are read: the distribution
         # adapter. A planner or compiler that required it downloaded a model
-        # every target Spark already held, after the NAS evicted it (#2337).
+        # every target Spark already held, after the NAS evicted it (#2337);
+        # a grant built from the NAS set parked an image-only copy. Grants
+        # name the accepted compiled plan's objects (``plan_objects``).
         hits.extend(
             (line, "NAS coverage required outside the copy that reads NAS bytes")
             for line, text in enumerate(source.splitlines(), 1)
             if re.search(
                 r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set"
-                r"|verified_model_objects_for_set)\b",
+                r"|objects_for_set|verified_model_objects_for_set)\b",
                 text,
             )
         )

@@ -163,23 +163,29 @@ class _FullNas(ModelCacheManifestProvider):
 
 
 @pytest.mark.parametrize(
-    ("scan", "installed"), [("held", True), ("held", False), ("empty", False)]
+    ("scan", "image"),
+    [
+        ("held", "installed"),
+        ("held", "other-recipe"),
+        ("held", "missing"),
+        ("empty", "other-recipe"),
+    ],
 )
 def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
-    tmp_path, scan: str, installed: bool
+    tmp_path, scan: str, image: str
 ) -> None:
-    """The NAS copy feeds only the copy to a Spark. A re-apply whose Sparks all
-    hold the model's files plans no Hugging Face download after the NAS
-    evicted it, with or without the installation still in place, and a NAS
-    too full to take it back does not block it. A Spark lacking the files
-    still needs the download, so the full NAS blocks that load."""
+    """The NAS copy feeds only the copy of model files to a Spark. A load whose
+    Sparks all hold the model's files plans no Hugging Face download after the
+    NAS evicted it, whether the Spark holds the image or still needs it copied,
+    and a NAS too full to take it back does not block it. A Spark lacking the
+    files still needs the download, so the full NAS blocks that load."""
 
     sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    if installed:
+    if image == "installed":
         installed_recipe(
             lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
         )
-    else:
+    elif image == "other-recipe":
         hold_image_through_another_recipe(lifecycle, sessions, now=NOW)
     request = _request(sessions, nodes[0])
     manifest = ModelCacheManifestProvider().resolve_artifact_set(
@@ -218,3 +224,6 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
     ]
     assert bool(nas_blocked) is not held
     assert plan.allowed is held, [reason.code for reason in plan.blockers]
+    if image == "missing":
+        # The image still travels to the Spark that holds only the files.
+        assert any(phase.subphase == "target-copy" for phase in plan.phases)

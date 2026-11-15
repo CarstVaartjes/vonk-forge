@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from collections.abc import Callable
 from datetime import UTC, timedelta
 from typing import Any
 
@@ -20,9 +19,11 @@ from vonk_agent_protocol.agent_words import ProfileEffectState
 from ..agent_jobs import AgentJobService
 from ..content_identity import ImageContent, same_image
 from ..distribution import DistributionService
-from ..distribution.types import content_objects
+from ..distribution.types import content_objects, plan_objects
 from ..distribution_assignment import NodeDistributionAssignment
+from ..models import RecipeInstallation
 from ..oci_image_store import StoreUnknown
+from ..recipe_execution_contract import parse_stored_installation_plan
 from ..run_switch_contract import (
     RunSwitchMemberState,
     RunSwitchOperationResult,
@@ -59,39 +60,50 @@ class DistributionIdentity:
         plan: RunSwitchPlan,
         progress: RunSwitchOperationResult,
     ) -> tuple[tuple[DistributionObject, ...], str, int]:
-        preparation = plan.preparation
-        model_set_digest = (
-            preparation.model.artifact_set_sha256 if preparation is not None else None
+        """The model objects the persisted compiled plan names, without a NAS copy.
+
+        A node keeps the objects it holds, so a Spark holding the model's files
+        is sent only the image even after the NAS evicted the set.
+        """
+        prepared = next(
+            (
+                receipt
+                for receipt in reversed(progress.phase_results)
+                if isinstance(receipt, RunSwitchRuntimePlanResult)
+            ),
+            None,
         )
+        installation_id = (
+            plan.installation_id if prepared is None else prepared.installation_id
+        )
+        install_plan_digest = None if prepared is None else prepared.install_plan_digest
+        with self._sessions() as session:
+            installation = (
+                None
+                if installation_id is None
+                else session.get(RecipeInstallation, installation_id)
+            )
+            stored = (
+                None
+                if installation is None
+                else parse_stored_installation_plan(installation.plan)
+            )
+        if stored is None or install_plan_digest not in (None, stored.plan_digest):
+            raise RuntimeError("the persisted compiled plan is unavailable")
+        model_set_digest = stored.model_artifact_set_sha256
+        preparation = plan.preparation
+        if model_set_digest is None or (
+            preparation is not None
+            and preparation.model.artifact_set_sha256 not in (None, model_set_digest)
+        ):
+            raise RuntimeError("the compiled plan names another model set")
+        objects = plan_objects(next(iter(stored.compiled_execution_plans.values())))
+        actual_bytes = sum(item.bytes for item in objects)
         model_set_bytes = (
             preparation.model.artifact_set_bytes if preparation is not None else None
         )
-        if model_set_digest is None:
-            for receipt in reversed(progress.phase_results):
-                if (
-                    isinstance(receipt, RunSwitchRuntimePlanResult)
-                    and receipt.model_artifact_set_sha256 is not None
-                ):
-                    model_set_digest = receipt.model_artifact_set_sha256
-                    model_set_bytes = receipt.model_artifact_set_bytes
-                    break
-        if not isinstance(model_set_digest, str):
-            raise TypeError("exact model preparation identity is unavailable")
-        source = getattr(
-            self._distribution.source, "model_source", self._distribution.source
-        )
-        getter = getattr(source, "objects_for_set", None)
-        if not isinstance(getter, Callable):
-            raise TypeError("verified model cache manifest provider is unavailable")
-        objects = tuple(getter(model_set_digest))
-        if not objects or any(item.kind != "model" for item in objects):
-            raise RuntimeError("verified model cache manifest is incomplete")
-        # Content identity: identical content at several paths counts once.
-        actual_bytes = sum({item.sha256: item.bytes for item in objects}.values())
         if model_set_bytes is not None and actual_bytes != model_set_bytes:
-            raise RuntimeError(
-                "verified model cache byte total does not match the plan"
-            )
+            raise RuntimeError("compiled model byte total does not match the plan")
         return objects, model_set_digest, actual_bytes
 
     @staticmethod

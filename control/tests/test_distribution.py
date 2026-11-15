@@ -296,30 +296,38 @@ def test_separate_api_process_serves_worker_registered_model_files(
 
 
 def test_distribution_binds_opaque_cache_and_image_identities(agent_system) -> None:
+    """A grant names the image; its model objects are served only while the
+    stored NAS set under the grant's own digest carries them."""
     _client, _services, _tokens, clock = agent_system
     source = MemoryObjectSource()
+    model = source.put(b"model payload")
     assignment = _assignment(
-        NODE_A,
-        source.put(b"model payload"),
-        source.put(b"config!"),
-        source.put(b"oci archive"),
-    )
-    source.register_artifact_set("c" * 64, assignment.objects)
-    source.register_runtime_image(
-        assignment.oci_image_digest, assignment.oci_archive_sha256
+        NODE_A, model, source.put(b"config!"), source.put(b"oci archive")
     )
     service = DistributionService(source, clock=clock)
     with pytest.raises(DistributionError):
         service.register(assignment)
 
-    source.register_artifact_set(
-        assignment.model_artifact_set_sha256, assignment.objects
+    source.register_runtime_image(
+        assignment.oci_image_digest, assignment.oci_archive_sha256
     )
     service.register(assignment)
     assert (
         service.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
         == assignment
     )
+    source.register_artifact_set("c" * 64, assignment.objects)
+    with pytest.raises(DistributionUnknown):
+        service.open_object(
+            node_id=NODE_A, plan_digest=assignment.plan_digest, digest=model
+        )
+    source.register_artifact_set(
+        assignment.model_artifact_set_sha256, assignment.objects
+    )
+    _, _, opened = service.open_object(
+        node_id=NODE_A, plan_digest=assignment.plan_digest, digest=model
+    )
+    opened.stream.close()
 
 
 def test_model_cache_adapter_consumes_service_manifest_identity(tmp_path) -> None:

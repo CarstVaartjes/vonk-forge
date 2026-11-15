@@ -1549,6 +1549,23 @@ def test_production_composite_uncached_cache_then_two_target_distribution(
     copy_phase = _phase(
         kind="transfer", subphase="target-copy", index=1, node_ids=list(nodes)
     )
+    # The grant names the files the persisted compiled plan names (its own
+    # read is proven in test_runtime_image_distribution_path); the NAS serves them.
+    planned = tuple(
+        DistributionObject(
+            name=item["path"],
+            sha256=item["sha256"],
+            bytes=item["download_bytes"],
+            kind="model",
+        )
+        for item in artifacts
+    )
+
+    def planned_objects(plan, progress):
+        del plan, progress
+        return planned, artifact_set, sum(item.bytes for item in planned)
+
+    executor._model_objects = planned_objects
     with services.sessions.begin() as session:
         for node_id in nodes:
             node = session.get(AgentNode, node_id)

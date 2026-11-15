@@ -8,6 +8,7 @@ import pytest
 from vonk_agent_protocol import AgentOperation as ProtocolAgentOperation
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
+    DistributionCode,
     DistributionObject,
     ExecuteContainerRuntimeRequestOperation,
     canonical_message,
@@ -18,11 +19,6 @@ from vonk_control.host_helper_authority import HostHelperAuthorityError
 from vonk_control.models import AgentOperation
 
 from .test_host_helper_authority import NOW, runtime_service
-
-
-class RequestObjectSource(MemoryObjectSource):
-    def objects_for_set(self, digest: str) -> tuple[DistributionObject, ...]:
-        return self.artifact_manifests[digest]
 
 
 @pytest.mark.parametrize(
@@ -76,7 +72,7 @@ def test_execution_request_creates_delivery_without_an_earlier_distribution(
         assert operation is not None
         payload = column_value(operation, "payload")
         assert isinstance(payload, RecipeStartPayload | RecipeJobRunRequest)
-    source = RequestObjectSource({})
+    source = MemoryObjectSource({})
     content = b"exact request model"
     digest = source.put(content)
     spec = payload.compiled_execution_plan.model_copy(
@@ -97,7 +93,10 @@ def test_execution_request_creates_delivery_without_an_earlier_distribution(
         stored.payload_digest = hashlib.sha256(canonical_message(payload)).hexdigest()
     objects = (
         DistributionObject(
-            name="weights/model.bin", sha256=digest, bytes=len(content), kind="model"
+            name=spec.artifacts[0].path,
+            sha256=digest,
+            bytes=len(content),
+            kind="model",
         ),
     )
     source.register_artifact_set(spec.identity.model_artifact_set_sha256, objects)
@@ -137,3 +136,59 @@ def test_execution_request_creates_delivery_without_an_earlier_distribution(
         ).assignment_id
         == grant.assignment_id
     )
+
+
+def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
+    tmp_path,
+) -> None:
+    """A Spark that holds the model's files still needs its grant to pull the
+    image. The accepted plan names the files, so the grant needs no NAS copy;
+    the files themselves stay unreadable while the NAS lacks them."""
+    from vonk_control.distribution import CompositeObjectSource
+    from vonk_control.distribution.model_cache import ModelCacheObjectSource
+    from vonk_control.distribution.types import DistributionError
+    from vonk_control.model_cache import ModelCacheService
+
+    authority = runtime_service(operation_kind=ProtocolAgentOperation.RECIPE_START)
+    with authority._sessions() as session:
+        operation = session.get(AgentOperation, "30000000-0000-4000-8000-000000000003")
+        assert operation is not None
+        payload = column_value(operation, "payload")
+    spec = payload.compiled_execution_plan
+    # The NAS no longer holds the set: eviction deleted its row and files.
+    nas = ModelCacheService(
+        authority._sessions, tmp_path / "nas", free_fraction=0, fixture_sources=True
+    )
+    images = MemoryObjectSource()
+    images.register_runtime_image(
+        spec.runtime_image.image_digest, spec.runtime_image.oci_layout_sha256
+    )
+    delivery = DistributionService(
+        CompositeObjectSource(ModelCacheObjectSource.from_service(nas), images),
+        sessions=authority._sessions,
+        clock=lambda: NOW,
+    )
+
+    delivery.prepare_request_delivery(
+        node_id=operation.node_id, plan_digest=payload.plan_digest
+    )
+
+    grant = delivery.authorize(
+        node_id=operation.node_id, plan_digest=payload.plan_digest
+    )
+    assert grant.oci_image_digest == spec.runtime_image.image_digest
+    assert {(item.sha256, item.bytes) for item in grant.objects} == {
+        (item.sha256, item.size_bytes) for item in spec.artifacts
+    }
+    with pytest.raises(DistributionError) as unread:
+        delivery.open_object(
+            node_id=operation.node_id,
+            plan_digest=payload.plan_digest,
+            digest=spec.artifacts[0].sha256,
+        )
+    assert unread.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
+    with pytest.raises(DistributionError) as foreign:
+        delivery.open_object(
+            node_id=operation.node_id, plan_digest=payload.plan_digest, digest="f" * 64
+        )
+    assert foreign.value.code == DistributionCode.UNASSIGNED

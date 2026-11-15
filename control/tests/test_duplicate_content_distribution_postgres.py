@@ -2,9 +2,8 @@
 
 The HunyuanOCR DFlash set holds ``tokenizer.json`` and ``dflash/tokenizer.json``
 (and two chat templates) with one digest each.  The assignment carries each
-digest once; registration and serving decide against the stored manifest by
-content, and a real mismatch ends with both sides named instead of an
-observe-again retry.
+digest once; serving decides against the stored manifest by content, so a
+grant the stored manifest disowns serves no model object.
 """
 
 from __future__ import annotations
@@ -16,19 +15,14 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import (
-    DistributionCode,
-    DistributionObject,
-    UnknownOutcomeError,
-)
+from vonk_agent_protocol import DistributionObject
 from vonk_control.distribution import (
     CompositeObjectSource,
-    DistributionError,
     DistributionService,
+    DistributionUnknown,
     ModelCacheObjectSource,
 )
 from vonk_control.distribution_executor.identity import DistributionIdentity
-from vonk_control.failure_classification import error_detail, is_definite
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import AgentNode, Base
 
@@ -150,13 +144,22 @@ def test_a_stale_process_copy_of_the_manifest_does_not_decide(
     stored = model_source.objects_for_set(set_digest)
     # This process's copy has lost a file; the stored manifest still has it.
     model_source._manifests[set_digest] = stored[:1]
+    assignment = _assignment(identity, image, set_digest, stored)
+    distribution.register(assignment)
 
-    distribution.register(_assignment(identity, image, set_digest, stored))
-
+    assert (
+        _read_object(
+            distribution,
+            node_id=NODE_A,
+            plan_digest=assignment.plan_digest,
+            digest=hashlib.sha256(WEIGHTS).hexdigest(),
+        )
+        == WEIGHTS
+    )
     assert model_source.objects_for_set(set_digest) == stored
 
 
-def test_a_set_the_stored_manifest_disowns_ends_naming_both_sides(
+def test_a_grant_the_stored_manifest_disowns_serves_no_model_object(
     postgres_engine, tmp_path: Path
 ) -> None:
     set_digest, model_source, distribution, identity, image = _world(
@@ -172,16 +175,12 @@ def test_a_set_the_stored_manifest_disowns_ends_naming_both_sides(
         foreign,
     )
     assignment = _assignment(identity, image, set_digest, without_weights)
+    distribution.register(assignment)
 
-    for _attempt in range(2):
-        with pytest.raises(DistributionError) as refused:
-            distribution.register(assignment)
-        error = refused.value
-        # Not an unknown to observe again: the same input fails the same way.
-        assert not isinstance(error, UnknownOutcomeError)
-        assert is_definite(error)
-        assert error.code == DistributionCode.MODEL_SET_MISMATCH
-        # The recorded evidence names both sides.
-        recorded = error_detail(error)
-        assert "foreign.bin@ffffffffffff" in recorded
-        assert "model.safetensors@" in recorded
+    with pytest.raises(DistributionUnknown):
+        _read_object(
+            distribution,
+            node_id=NODE_A,
+            plan_digest=assignment.plan_digest,
+            digest=hashlib.sha256(TOKENIZER).hexdigest(),
+        )
