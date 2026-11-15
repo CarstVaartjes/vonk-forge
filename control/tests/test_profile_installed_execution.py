@@ -34,7 +34,6 @@ from vonk_control.models import (
     FleetProfileApplication,
     InstallationNode,
     Job,
-    ModelCacheSet,
     NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
@@ -486,7 +485,8 @@ def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
     same set already put in the Spark's shared store (a new installation links
     them): catches a load refused, or eviction triggered, for bytes never written,
     also when that installation names the set's files under an older Model
-    digest (a release re-digested the Model; the files are the same)."""
+    digest (a release re-digested the Model; the files are the same), or when
+    other models' reclaimable bytes are netted against those linked files."""
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     _service, planner = _profile_service(sessions, lifecycle)
@@ -497,17 +497,24 @@ def test_a_model_the_spark_already_stores_is_not_reserved_again_by_a_load(
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
-    if re_digested:
-        with sessions.begin() as session:
+    with sessions.begin() as session:
+        if re_digested:
             installation = session.get(RecipeInstallation, installed.owner_id)
             assert installation is not None
             assert installation.model_artifact_set_sha256 is not None
             installation.model_content_sha256 = "e" * 64
+        # Other models' files the agent may reclaim; the held set's files are
+        # linked, so they are never among them.
+        snapshot = session.scalar(select(NodeInventorySnapshot))
+        assert snapshot is not None
+        snapshot.unused_model_bytes = 512
+        free = snapshot.disk_free_bytes
     warm = planner.preview(request, actor="admin").fit.nodes[0]
 
     assert warm.disk_required_bytes is not None
     # The fixture's model files are 1 KiB, and nothing else changes.
     assert cold.disk_required_bytes - warm.disk_required_bytes == 1024
+    assert warm.disk_free_bytes == free + 512
 
 
 def _inspecting_planner(sessions, lifecycle, model_cache=None):
@@ -563,15 +570,13 @@ def test_a_review_credits_the_files_a_spark_holds_for_another_set_of_the_model(
     assert warm.fit.nodes[0].disk_free_bytes == free
 
 
-@pytest.mark.parametrize("resolves_to_held", [True, False])
-def test_a_recheck_without_preparation_credits_only_the_set_its_recipe_resolves_to(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resolves_to_held: bool
+def test_a_recheck_without_preparation_credits_the_set_its_recipe_resolves_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A review made before any build carries no preparation; its profile
     recheck leaves out the set the recipe resolves to when the Spark runs it,
-    also under an older Model digest, and nothing for another set of the same
-    Model the cache holds: catches a recheck that charges what the review left
-    out, or credits files the load will still write."""
+    also under an older Model digest: catches a recheck that charges what the
+    review left out."""
 
     sessions, lifecycle, _, mapping_id, build_id, nodes = setup_services(tmp_path)
     _service, planner = _profile_service(sessions, lifecycle)
@@ -592,28 +597,12 @@ def test_a_recheck_without_preparation_credits_only_the_set_its_recipe_resolves_
     installed = installed_recipe(
         lifecycle, mapping_id, build_id, nodes, request_id=str(uuid4())
     )
-    now = lifecycle._clock()
     with sessions.begin() as session:
         installation = session.get(RecipeInstallation, installed.owner_id)
         assert installation is not None
-        held = installation.model_artifact_set_sha256
-        assert held is not None
+        assert installation.model_artifact_set_sha256 is not None
+        recipe_set.digest = installation.model_artifact_set_sha256
         installation.model_content_sha256 = "e" * 64
-        # The cache binds the held set to the requested Model as well.
-        session.add(
-            ModelCacheSet(
-                artifact_set_sha256=held,
-                model_content_sha256=request.model_content_sha256,
-                manifest={},
-                expected_bytes=1024,
-                state="cached",
-                created_at=now,
-                updated_at=now,
-                last_accessed_at=now,
-            )
-        )
-    if resolves_to_held:
-        recipe_set.digest = held
     with sessions() as session:
         warm = planner.recheck_resources_in_session(session, request, reviewed)
 
@@ -621,7 +610,7 @@ def test_a_recheck_without_preparation_credits_only_the_set_its_recipe_resolves_
     warm_disk = warm.fit_current.nodes[0].disk_required_bytes
     assert cold_disk is not None and warm_disk is not None
     # The fixture's model files are 1 KiB, and nothing else changes.
-    assert cold_disk - warm_disk == (1024 if resolves_to_held else 0)
+    assert cold_disk - warm_disk == 1024
 
 
 @pytest.mark.parametrize("prepared", [True, False])

@@ -462,6 +462,9 @@ class InstallPlanningService:
                 for digest, size in artifact_sizes.items()
                 if set_stored or held_objects.get(digest) == size
             )
+            # Unused files this install keeps: only scan-reported ones. A held
+            # set's files are linked by its installation, so never unused.
+            reused_unused = 0 if set_stored else reused_artifacts
             reused = reused_image + reused_artifacts
             # ``image_bytes`` is the stored image's layers, what a pull moves
             # (less when the Spark already holds shared layers). Docker keeps
@@ -483,7 +486,7 @@ class InstallPlanningService:
                 spark_free_bytes(
                     snapshot.disk_free_bytes,
                     snapshot.unused_model_bytes,
-                    reused_model_bytes=reused_artifacts,
+                    reused_model_bytes=reused_unused,
                 )
                 if snapshot
                 else None

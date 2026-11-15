@@ -30,6 +30,7 @@ from vonk_control.models import (
     ClusterMapping,
     ClusterMappingNode,
     InstallationNode,
+    NodeInventorySnapshot,
     RecipeBuild,
     RecipeInstallation,
     ResourceReservation,
@@ -728,6 +729,16 @@ def test_a_model_the_spark_already_stores_through_an_installation_is_not_counted
     assert warm.allowed is True
     assert warm.nodes[0].reused_bytes == 100
     assert warm.nodes[0].required_bytes == 20
+
+    # The held set's files are linked, never unused: other models' unused
+    # bytes stay free space the agent can reclaim (25 + 15 leaves the floor).
+    with sessions.begin() as session:
+        session.execute(
+            update(NodeInventorySnapshot).values(
+                disk_free_bytes=25, unused_model_bytes=15
+            )
+        )
+    assert service.plan_install(mapping, build, now=now).allowed is True
 
 
 def test_accepted_plan_persists_mapping_build_and_disk_reservation(tmp_path) -> None:

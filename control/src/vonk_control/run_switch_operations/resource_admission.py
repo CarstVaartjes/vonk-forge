@@ -92,15 +92,7 @@ def _reviewed_model(
     return (
         manifest.expected_bytes,
         manifest.digest,
-        missing_spark_bytes_by_node(
-            session,
-            {
-                artifact.sha256: artifact.expected_bytes
-                for artifact in manifest.artifacts
-            },
-            node_ids,
-            now=now,
-        ),
+        missing_spark_bytes_by_node(session, manifest, node_ids, now=now),
     )
 
 
@@ -119,7 +111,11 @@ class ResourceAdmissionMixin:
         The caller fences inventory/reservation writers and validates the exact
         reviewed stop set before this call. Cache, build and capability-provider
         work remains outside this transaction. Preparation evidence here stays
-        the reviewed snapshot; this method makes no new availability claim.
+        the reviewed snapshot and this method makes no new availability claim.
+        The disk fit charges model bytes by the review's rule: the reviewed
+        per-Spark missing bytes, or, for a review made before any build, the
+        set the recipe resolves to against the agents' store scans, both read
+        in this session.
         """
         service = typing_cast("RunSwitchOperationService", self)
         revision = _active_recipe_revision(session, request.recipe_revision_id)

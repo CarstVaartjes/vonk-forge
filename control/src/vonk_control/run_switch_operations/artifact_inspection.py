@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -19,6 +19,7 @@ from vonk_agent_protocol.state_machines import PlacementInstallState
 from ..categorized_errors import BookkeepingUnknown
 from ..inventory_repository import spark_model_objects
 from ..model_cache import ModelCacheService
+from ..model_cache.artifacts import ArtifactSetManifest
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
 from ..run_switch_contract import (
     RunSwitchReason,
@@ -29,7 +30,7 @@ from .planning_helpers import _as_reason, _inspection_unavailable
 
 def missing_spark_bytes_by_node(
     session: Session,
-    expected_by_digest: Mapping[str, int],
+    manifest: ArtifactSetManifest,
     node_ids: Iterable[str],
     *,
     now: datetime,
@@ -40,6 +41,9 @@ def missing_spark_bytes_by_node(
     then plans reuses what the Spark already holds.
     """
 
+    expected_by_digest = {
+        artifact.sha256: artifact.expected_bytes for artifact in manifest.artifacts
+    }
     missing: dict[str, int] = {}
     for node_id in node_ids:
         held = spark_model_objects(session, node_id, now=now) or {}
@@ -181,7 +185,7 @@ class DatabaseRunSwitchArtifactInspector:
             for detail in (() if preview is None else preview.blockers)
         ]
         missing_by_node = missing_spark_bytes_by_node(
-            session, expected_by_digest, node_ids, now=now
+            session, manifest, node_ids, now=now
         )
         missing_spark = sum(missing_by_node.values())
         reused = sum(expected_by_digest.values()) * len(node_ids) - missing_spark

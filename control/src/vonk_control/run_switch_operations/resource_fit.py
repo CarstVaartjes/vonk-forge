@@ -493,7 +493,10 @@ class ResourceFitMixin:
                             # store scan does not report (install admission's
                             # rule); no scan charges the whole set.
                             artifact_size = missing_artifact_bytes_by_node[item.node_id]
-                        reused_model_bytes = max(0, set_bytes - artifact_size)
+                            # Those scan-reported files may be unused ones the
+                            # agent could reclaim; this load keeps them. A held
+                            # set's files are linked, so never counted unused.
+                            reused_model_bytes = max(0, set_bytes - artifact_size)
                         disk_need = installation_disk_requirement(
                             disk,
                             required_download_bytes=image_size + artifact_size,
