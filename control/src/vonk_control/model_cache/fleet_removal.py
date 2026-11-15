@@ -6,10 +6,10 @@ import uuid
 from collections.abc import Collection
 from datetime import datetime
 from functools import partial
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     Disposition,
@@ -192,18 +192,23 @@ def _model_objects(
 
 
 def model_installations(
-    session: Session, contents: Collection[str], sets: Collection[str]
+    session: Session,
+    contents: Collection[str],
+    sets: Collection[str],
+    *,
+    ids_only: bool = False,
 ) -> tuple[RecipeInstallation, ...]:
     """The installations (not uninstalled) that use this Model.
 
     An installation uses the model when its recorded model set is one of the
     model's sets (a reused set never names the model in the other columns) or
-    its model columns name it.
+    its model columns name it. ``ids_only`` loads only their ids.
     """
 
     return tuple(
         session.scalars(
             select(RecipeInstallation)
+            .options(*((load_only(RecipeInstallation.id),) if ids_only else ()))
             .where(
                 RecipeInstallation.state != InstallationState.UNINSTALLED,
                 or_(
@@ -218,20 +223,13 @@ def model_installations(
     )
 
 
-class ModelReference(NamedTuple):
-    """Why a Model is referenced, and the saved profiles that name it."""
-
-    detail: str
-    profiles: tuple[str, ...] = ()
-
-
 def model_reference(
     session: Session,
     contents: Collection[str],
     sets: Collection[str],
     installations: Collection[str],
     evidence: _Evidence,
-) -> ModelReference | None:
+) -> str | None:
     """Why a saved profile or live work keeps this Model; ``None`` when nothing does.
 
     The only Model-level test of "referenced", for both removal reviews. A
@@ -271,13 +269,10 @@ def model_reference(
             )
         )
         if profiles:
-            return ModelReference(
-                "Saved profiles naming this model: " + ", ".join(profiles) + ".",
-                profiles,
-            )
-        return ModelReference("A loaded profile names this model.")
+            return "Saved profiles naming this model: " + ", ".join(profiles) + "."
+        return "A loaded profile names this model."
     if names & evidence.operations:
-        return ModelReference("A live operation names this model.")
+        return "A live operation names this model."
     running = session.scalar(
         select(RecipeRun.id)
         .where(
@@ -287,7 +282,7 @@ def model_reference(
         .limit(1)
     )
     if running is not None:
-        return ModelReference("A running workload uses this model.")
+        return "A running workload uses this model."
     return None
 
 
@@ -359,10 +354,8 @@ class FleetRemovalMixin:
             session, contents, sets, [row.id for row in using], evidence
         )
         protected = reference is not None
-        keep_detail = (
-            reference.detail
-            if reference is not None
-            else "A saved or loaded profile, live operation or pin names this model."
+        keep_detail = reference or (
+            "A saved or loaded profile, live operation or pin names this model."
         )
         if not readable or issues:
             protected = True

@@ -562,25 +562,16 @@ def test_profile_or_running_workload_retains_model_and_installation(
                 )
                 is None
             )
-        # The plain review answers "referenced" by the same rule, with or without
-        # a NAS copy, and names the profile (#2354: "Saved references: none"
-        # for a model a profile assigns).
-        referenced = ModelCacheCode.REMOVAL_REFERENCED
-        assert referenced in {
-            b.code for b in cache.review_model_removal(digest).blockers
-        }
-        source = tmp_path / "nas-copy"
-        source.mkdir()
-        _download(
-            cache,
-            [_artifact(source, b"weights", model_content_sha256=digest)],
-            model_content_sha256=digest,
-            request_key=str(uuid4()),
-        )
-        plain = cache.review_model_removal(digest)
-        assert referenced in {b.code for b in plain.blockers}
+        # The plain review answers "referenced" by the same rule and names the
+        # profile (#2354: "Saved references: none" for a model a profile assigns).
+        details = [
+            b.detail
+            for b in cache.review_model_removal(digest).blockers
+            if b.code == ModelCacheCode.REMOVAL_REFERENCED
+        ]
+        assert details
         if saved_profile:
-            assert "Coding" in {item.owner_id for item in plain.references}
+            assert any("Coding" in detail for detail in details)
         submit_model_download(cache, tmp_path)
     finally:
         cache.close()

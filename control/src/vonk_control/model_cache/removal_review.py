@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import ArtifactLifecycleCode, ModelCacheCode
-from vonk_agent_protocol.lifecycle_vocabulary import WaitOwnerKind
 
 from .. import model_cache_states
 from ..admission_locking import ConstraintReplay, admitting
@@ -334,8 +333,7 @@ class RemovalReviewMixin:
             # The sets the Library shows for this model, not only those first
             # downloaded under its current content digest.
             contents = lineage_contents(session, digest)
-            owned, shared_sets = model_sets(session, contents)
-            selected_sets = owned
+            selected_sets = model_sets(session, contents).owned
             findings: list[CacheRemovalFinding] = []
             blockers: list[CacheRemovalBlocker] = []
             if model_references:
@@ -344,8 +342,13 @@ class RemovalReviewMixin:
                 reference = model_reference(
                     session,
                     contents,
-                    owned,
-                    [row.id for row in model_installations(session, contents, owned)],
+                    selected_sets,
+                    [
+                        row.id
+                        for row in model_installations(
+                            session, contents, selected_sets, ids_only=True
+                        )
+                    ],
                     _Evidence.read(
                         session,
                         cache._clock(),
@@ -356,24 +359,10 @@ class RemovalReviewMixin:
                     blockers.append(
                         CacheRemovalBlocker(
                             code=ModelCacheCode.REMOVAL_REFERENCED,
-                            detail=reference.detail,
+                            detail=reference,
                             retryable=False,
                             recovery_actions=["resolve_reference"],
                         )
-                    )
-                    findings.extend(
-                        CacheRemovalFinding(
-                            classification="saved-reference",
-                            asset_kind="model-set",
-                            asset_sha256=set_digest,
-                            owner_kind=WaitOwnerKind.FLEET_PROFILE,
-                            owner_id=profile,
-                            state="saved",
-                            detail="a saved profile names this model",
-                            reason=reference.detail,
-                        )
-                        for set_digest in (*owned, *shared_sets)
-                        for profile in reference.profiles
                     )
             try:
                 with session.begin_nested():
