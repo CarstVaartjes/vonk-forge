@@ -189,10 +189,12 @@ pub(super) fn temporary_observation_error(error: &crate::host_runtime::HostRunti
             )
         }
         // A dead container is a successful observation: the helper inspected it
-        // and found it exited. Retrying would only meet the same corpse.
+        // and found it exited. Retrying would only meet the same corpse. A
+        // missing image is one too: Docker answered without it.
         HostRuntimeError::HelperRejected { code, .. } => !matches!(
             code,
             HelperErrorCode::RuntimeProcessExited
+                | HelperErrorCode::RuntimeImageMissing
                 | HelperErrorCode::GrantInvalid
                 | HelperErrorCode::GrantNodeMismatch
                 | HelperErrorCode::GrantUnauthorized
@@ -509,6 +511,7 @@ pub(super) fn classify_helper_code(code: HelperErrorCode) -> HelperRefusal {
         | Code::RuntimeImageIdentityInvalid
         | Code::RuntimeImageInspectFailed
         | Code::RuntimeImageLoadFailed
+        | Code::RuntimeImageMissing
         | Code::RuntimeImageReceiptFailed
         | Code::RuntimeProcessExited
         | Code::RuntimeRunMissing

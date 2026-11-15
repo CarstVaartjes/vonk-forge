@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol import (
     AgentResult,
+    InstallationNodeState,
     OperationFailureCode,
     RecipeJobEnding,
     RecipeJobFile,
@@ -30,7 +31,14 @@ from vonk_control import operation_api
 from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
-from vonk_control.models import AgentOperation, AgentOperationAttempt, ArtifactJob, Job
+from vonk_control.models import (
+    AgentOperation,
+    AgentOperationAttempt,
+    ArtifactJob,
+    InstallationNode,
+    Job,
+    RecipeRun,
+)
 from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.operation_item_contract import agent_receipt_for
 
@@ -403,3 +411,50 @@ def test_a_pre_launch_wait_after_a_cancel_ends_the_job_cancelled(tmp_path) -> No
     fresh = submitted_artifact_job(service, job.run_id, request_suffix=660)
     assert fresh.state == "queued"
     assert claim_agent(agent_jobs, node_id, "serial-0") is not None
+
+
+def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
+    tmp_path,
+) -> None:
+    # Wrong implementation caught: the helper's code reached the Controller
+    # only as text, so the rank whose image the Spark lost stayed installed
+    # and the run's next activation launched the missing image again.
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        claim,
+        "failed",
+        {
+            "kind": "failed",
+            "code": "recipe_job_run_failed",
+            "reason": "job ended without an observed exit",
+            "failure_kind": "uncertain-effect",
+            "evidence": {
+                "stage": "runtime-adapter",
+                "helper_error_code": "runtime_image_missing",
+            },
+        },
+    )
+    assert service.get(job.id).state == "failed"
+    with sessions() as session:
+        attempt = session.scalar(
+            select(AgentOperationAttempt).where(
+                AgentOperationAttempt.operation_id == _order(sessions, job).id
+            )
+        )
+        assert attempt is not None
+        reason_code = attempt.result.get("helper_error_code")
+        assert reason_code == "runtime_image_missing"
+        run = session.get(RecipeRun, job.run_id)
+        assert run is not None
+        rank = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == run.installation_id,
+                InstallationNode.node_id == node_id,
+            )
+        )
+        assert rank is not None
+        assert rank.state == InstallationNodeState.PLANNED

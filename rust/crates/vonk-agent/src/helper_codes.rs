@@ -34,6 +34,7 @@ fn is_runtime_rejection(code: Code) -> bool {
             | Code::OperationIo
             | Code::RuntimeImageLoadFailed
             | Code::RuntimeImageInspectFailed
+            | Code::RuntimeImageMissing
             | Code::RuntimeImageReceiptFailed
             | Code::RuntimeProcessExited
             | Code::RuntimeRunMissing

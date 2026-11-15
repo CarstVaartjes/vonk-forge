@@ -138,6 +138,7 @@ pub(super) fn helper_finding_code(code: HelperErrorCode) -> RuntimePreflightFind
         HelperErrorCode::RuntimeImageInspectFailed => {
             Finding::PreflightFindingHelperRuntimeImageInspectFailed
         }
+        HelperErrorCode::RuntimeImageMissing => Finding::PreflightFindingHelperRuntimeImageMissing,
         HelperErrorCode::RuntimeImageReceiptFailed => {
             Finding::PreflightFindingHelperRuntimeImageReceiptFailed
         }

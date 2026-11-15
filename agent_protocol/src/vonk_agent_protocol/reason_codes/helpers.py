@@ -27,6 +27,7 @@ class HelperOperationCode(WireEnum):
     RUNTIME_IMAGE_IDENTITY_INVALID = "helper.runtime_image_identity_invalid"
     RUNTIME_IMAGE_INSPECT_FAILED = "helper.runtime_image_inspect_failed"
     RUNTIME_IMAGE_LOAD_FAILED = "helper.runtime_image_load_failed"
+    RUNTIME_IMAGE_MISSING = "helper.runtime_image_missing"
     RUNTIME_IMAGE_RECEIPT_FAILED = "helper.runtime_image_receipt_failed"
     RUNTIME_INVOCATION_LIMIT_EXCEEDED = "helper.runtime_invocation_limit_exceeded"
     RUNTIME_INVOCATION_LIMITS_UNAVAILABLE = (
@@ -138,6 +139,7 @@ class HelperErrorCode(WireEnum):
     RUNTIME_IMAGE_IDENTITY_INVALID = "runtime_image_identity_invalid"
     RUNTIME_IMAGE_INSPECT_FAILED = "runtime_image_inspect_failed"
     RUNTIME_IMAGE_LOAD_FAILED = "runtime_image_load_failed"
+    RUNTIME_IMAGE_MISSING = "runtime_image_missing"
     RUNTIME_IMAGE_RECEIPT_FAILED = "runtime_image_receipt_failed"
     RUNTIME_PROCESS_EXITED = "runtime_process_exited"
     RUNTIME_RUN_MISSING = "runtime_run_missing"

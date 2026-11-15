@@ -10,7 +10,7 @@ some rounds), duplicate (every answer delivered twice), failing (its next
 answers are retryable failures: the orders wait and are answered again), short
 of disk (inventory reports almost no free space) and image removed (its runtime
 image was deleted by hand: every Start finds it gone, as the agent reports it,
-until an install puts it back). A test may model a
+until an install puts it back; an old agent reports it as unknown). A test may model a
 Spark's memory: it then reports free memory less what its runs hold.
 
 A result that is lost in transit is the same, to the Controller, as a late one:
@@ -26,14 +26,18 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentFailureKind,
+    AgentResultState,
+    FailureCode,
     HelperErrorCode,
     OutcomeEvidence,
+    OutcomeFailed,
     OutcomeKind,
     OutcomeUnknown,
     WaitReason,
     canonical_message,
     outcome_body,
 )
+from vonk_control.agent_jobs.retry import result_disposition
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -97,6 +101,8 @@ class Spark:
     image_removed: bool = False
     #: Starts that found the image gone.
     image_missing_starts: int = 0
+    #: It runs an agent from before the helper proved an image absent.
+    old_agent: bool = False
     serving: set[str] = field(default_factory=set)
     memory: Memory | None = None
 
@@ -271,7 +277,7 @@ class Sparks:
                 self._wait(order)
                 continue
             if spark.image_removed and order.kind == "recipe.start":
-                self._image_missing(order)
+                self._image_missing(order, old_agent=spark.old_agent)
                 spark.image_missing_starts += 1
                 continue
             evidence = self._evidence(order)
@@ -311,20 +317,41 @@ class Sparks:
                 self.world.clock(),
             )
 
-    def _image_missing(self, order: Order) -> None:
-        """The agent's answer to a Start whose image is gone: the helper found
-        no image, so the effect is unconfirmed and names the helper's code. It
-        is settled and then projected, in one transaction, as the queue does."""
+    def _image_missing(self, order: Order, *, old_agent: bool) -> None:
+        """The agent's answer to a Start whose image is gone: the helper proved
+        the image and the container absent, so the Start failed with no effect
+        and names the helper's code (an old agent reports the effect
+        unconfirmed). It is settled and then projected, in one transaction, as
+        the queue does."""
 
         reason = "container runtime could not start the workload"
-        result = outcome_body(
-            OutcomeUnknown(
+        if old_agent:
+            outcome: OutcomeFailed | OutcomeUnknown = OutcomeUnknown(
                 kind=OutcomeKind.UNKNOWN,
                 wait_reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
                 reason=reason,
                 evidence=OutcomeEvidence(
                     helper_error_code=HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
                 ),
+            )
+        else:
+            outcome = OutcomeFailed(
+                kind=OutcomeKind.FAILED,
+                code=FailureCode.RECIPE_START_FAILED,
+                reason=reason,
+                evidence=OutcomeEvidence(
+                    helper_error_code=HelperErrorCode.RUNTIME_IMAGE_MISSING.value
+                ),
+            )
+        result = outcome_body(outcome)
+        state = (
+            AgentResultState.OBSERVING if old_agent else AgentResultState.FAILED
+        ).value
+        report = (
+            Reported(Outcome.UNKNOWN, reason=reason)
+            if old_agent
+            else Reported.failed(
+                result_disposition(order.kind, state, result), reason=reason
             )
         )
         with self.world.sessions.begin() as session:
@@ -337,14 +364,14 @@ class Sparks:
                 operation,
                 None,
                 session.get(Job, order.job_id),
-                Reported(Outcome.UNKNOWN, reason=reason),
+                report,
                 self.world.clock(),
             )
             self.world.controller.lifecycle.consume_agent_result(
                 session,
                 operation,
                 None,
-                SimpleNamespace(state="observing", result=result),
+                SimpleNamespace(state=state, result=result),
             )
 
     @staticmethod

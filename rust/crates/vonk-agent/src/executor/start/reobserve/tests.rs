@@ -303,6 +303,38 @@ async fn proven_absence_stops_nothing() {
     assert_eq!(asked, ["inspect"]);
 }
 
+fn image_missing() -> HostRuntimeError {
+    HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeImageMissing,
+        diagnostic: None,
+        process_logs: None,
+    }
+}
+
+#[tokio::test]
+async fn a_start_whose_image_and_container_are_absent_fails_with_the_helpers_code() {
+    // Wrong implementation: the helper's proven image absence stays an
+    // unknown effect the Controller observes through its whole retry budget,
+    // or its code is dropped before the Controller can re-install the rank.
+    let (settled, asked) = settle(Seen::Absent, image_missing()).await;
+    let result = ended(settled);
+    let ExecutionResult::Failed(failure) = &result else {
+        panic!("no effect happened: the start fails: {result:?}");
+    };
+    assert_eq!(failure.failure_kind, None);
+    assert_eq!(asked, ["inspect"]);
+    let wire = serde_json::to_value(result.finish(&start_claim()).result).unwrap();
+    assert_eq!(wire["kind"], "failed");
+    assert_eq!(wire["evidence"]["helper_error_code"], "runtime_image_missing");
+}
+
+#[tokio::test]
+async fn a_start_whose_image_is_absent_but_container_runs_goes_on() {
+    let (settled, asked) = settle(Seen::Running, image_missing()).await;
+    assert!(settled.is_ok());
+    assert_eq!(asked, ["inspect"]);
+}
+
 fn busy_start() -> HostRuntimeError {
     HostRuntimeError::HelperRejected {
         code: HelperErrorCode::InstallationReconciliationBusy,

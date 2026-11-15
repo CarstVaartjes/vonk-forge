@@ -215,6 +215,20 @@ async fn settle_broken_call(
     Result<HostRuntimeOutcome, Box<ExecutionResult>>,
     Vec<&'static str>,
 ) {
+    let broken =
+        crate::host_runtime::HostRuntimeError::Io(std::io::ErrorKind::UnexpectedEof.into());
+    settle_dispatch_error(script, ago, broken).await
+}
+
+/// Settle a dispatched job whose helper call answered `error`.
+async fn settle_dispatch_error(
+    script: Vec<Answer>,
+    ago: Duration,
+    error: crate::host_runtime::HostRuntimeError,
+) -> (
+    Result<HostRuntimeOutcome, Box<ExecutionResult>>,
+    Vec<&'static str>,
+) {
     let (claim, request) = job_claim();
     let stop_plan = exact_stop_plan_from_claim(&claim, &request.run_id.to_string(), true).unwrap();
     let peers = peers(request.job_id, script);
@@ -238,9 +252,7 @@ async fn settle_broken_call(
         started: Instant::now(),
     };
     let (_cancel, mut cancellation) = tokio::sync::watch::channel(false);
-    let broken = InterruptibleJob::Completed(Err(crate::host_runtime::HostRuntimeError::Io(
-        std::io::ErrorKind::UnexpectedEof.into(),
-    )));
+    let broken = InterruptibleJob::Completed(Err(error));
     let settled = executor
         .settle_job_dispatch(&job, broken, Instant::now() - ago, &mut cancellation)
         .await;
@@ -278,6 +290,24 @@ async fn proven_absence_ends_the_job_with_that_evidence_and_no_stop() {
     let result = settled.err().expect("no exit was observed");
     assert!(cause(&result).contains("absent"), "{}", cause(&result));
     assert_eq!(log, ["absent"]);
+}
+
+#[tokio::test]
+async fn a_job_whose_image_is_absent_ends_failed_with_the_helpers_code() {
+    // Wrong implementation: the helper's code survives only as text in the
+    // job's diagnostic, so the Controller cannot re-install the rank.
+    let missing = crate::host_runtime::HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeImageMissing,
+        diagnostic: None,
+        process_logs: None,
+    };
+    let (settled, log) = settle_dispatch_error(vec![Answer::Absent], Duration::ZERO, missing).await;
+    let result = *settled.err().expect("no exit was observed");
+    assert_eq!(log, ["absent"]);
+    let (claim, _) = job_claim();
+    let wire = serde_json::to_value(result.finish(&claim).result).unwrap();
+    assert_eq!(wire["kind"], "failed");
+    assert_eq!(wire["evidence"]["helper_error_code"], "runtime_image_missing");
 }
 
 #[tokio::test]

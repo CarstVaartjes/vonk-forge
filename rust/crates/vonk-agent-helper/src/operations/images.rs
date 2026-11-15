@@ -256,7 +256,23 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 return Ok((found, identity.to_owned()));
             }
         }
+        // An inspection miss is provisional: an unreachable daemon misses
+        // too. A listing Docker answered that holds neither identity proves
+        // the accepted image absent.
+        if self.image_listing_lacks(&[config_digest, manifest_digest]) {
+            return Err(OperationError::RuntimeImageMissing);
+        }
         Err(OperationError::RuntimeImageInspectFailed)
+    }
+
+    fn image_listing_lacks(&self, identities: &[&str]) -> bool {
+        let mut held = false;
+        let listing = self.run_docker_lines(
+            &["image", "ls", "--all", "--no-trunc", "--quiet"].map(str::to_owned),
+            Duration::from_secs(15),
+            &mut |line| held |= identities.contains(&line.trim()),
+        );
+        !held && listing.is_ok_and(|listing| listing.success && listing.exit_code == Some(0))
     }
 }
 

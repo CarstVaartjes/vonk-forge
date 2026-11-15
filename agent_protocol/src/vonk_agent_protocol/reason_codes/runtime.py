@@ -176,6 +176,7 @@ class RuntimePreflightFindingCode(WireEnum):
     HELPER_RUNTIME_IMAGE_LOAD_FAILED = (
         "preflight_finding.helper_runtime_image_load_failed"
     )
+    HELPER_RUNTIME_IMAGE_MISSING = "preflight_finding.helper_runtime_image_missing"
     HELPER_RUNTIME_IMAGE_RECEIPT_FAILED = (
         "preflight_finding.helper_runtime_image_receipt_failed"
     )

@@ -33,6 +33,7 @@ impl OperationError {
             }
             Self::RuntimeImageLoadFailed => Code::HelperRuntimeImageLoadFailed.as_str(),
             Self::RuntimeImageInspectFailed => Code::HelperRuntimeImageInspectFailed.as_str(),
+            Self::RuntimeImageMissing => Code::HelperRuntimeImageMissing.as_str(),
             Self::RuntimeImageIdentityInvalid => Code::HelperRuntimeImageIdentityInvalid.as_str(),
             Self::RuntimeImageReceiptFailed => Code::HelperRuntimeImageReceiptFailed.as_str(),
             Self::RuntimeProcessExited { .. } => Code::HelperRuntimeProcessExited.as_str(),
@@ -75,6 +76,7 @@ impl OperationError {
             }
             Self::RuntimeImageLoadFailed => "runtime image load failed",
             Self::RuntimeImageInspectFailed => "runtime image inspection failed",
+            Self::RuntimeImageMissing => "runtime image is absent",
             Self::RuntimeImageIdentityInvalid => "runtime image identity is invalid",
             Self::RuntimeImageReceiptFailed => "runtime image receipt could not be written",
             Self::RuntimeProcessExited { .. } => "runtime process exited",
