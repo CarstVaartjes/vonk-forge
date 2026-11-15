@@ -48,7 +48,6 @@ PHASE_CHILD_ROWS: dict[str, frozenset[type[object]]] = {
     "stop": frozenset({Job}),
     "uninstall": frozenset({Job}),
     "verify": frozenset(),
-    "cleanup": frozenset(),
     "final_verify": frozenset(),
 }
 
