@@ -354,3 +354,47 @@ def test_shared_fleet_object_without_membership_finding_names_no_sets(
     assert "Keeps (retain-shared): 1 files" in text
     assert "other" not in text.lower().replace("another", "")
     assert " 0 " not in text.replace("0 model sets", "")
+
+
+def test_fleet_receipt_that_kept_the_nas_copy_says_so_and_why(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Catches a fleet removal receipt that read as removed (#2354): it said
+    ``succeeded`` with nothing about the NAS copy the Controller kept."""
+    from vonk_control.fleet_model_removal_contract import (
+        FleetModelRemovalCheckpoint,
+        FleetModelRemovalEffects,
+        FleetRemovalReason,
+    )
+
+    fleet = FleetModelRemovalCheckpoint(
+        deadline_at="2026-11-16T21:55:35Z",  # type: ignore[arg-type]
+        effects=FleetModelRemovalEffects(
+            nas_remove=False,
+            nas_reason=FleetRemovalReason.REFERENCED,
+            nas_detail="A live operation names this model.",
+            targets=[],
+        ),
+    ).model_dump(mode="json")
+    receipt = {
+        "action": "remove",
+        "operation_id": "a4051a72-7cff-497a-a817-6eaa3e534907",
+        "request_key": "308f45e7-8faa-44a5-a933-bfa895805286",
+        "state": "succeeded",
+        "selector": _SELECTOR,
+        "preserved": [],
+        "fleet": fleet,
+    }
+    render_payload(receipt, "model", action="remove")
+    text = capsys.readouterr().out
+
+    assert (
+        f"NAS copy: kept ({FleetRemovalReason.REFERENCED}): "
+        "A live operation names this model." in text
+    )
+    removed = fleet["effects"] | {"nas_remove": True}
+    render_payload(
+        receipt | {"fleet": fleet | {"effects": removed}}, "model", action="remove"
+    )
+    text = capsys.readouterr().out
+    assert "State: succeeded" in text and "NAS copy" not in text

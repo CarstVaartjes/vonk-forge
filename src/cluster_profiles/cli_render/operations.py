@@ -165,6 +165,16 @@ def _operation(payload: Mapping[str, object], noun: str) -> None:
         _field("Next", issue.get("next_action"))
     if "reclaimed_bytes" in payload:
         _field("Reclaimed", _bytes(payload["reclaimed_bytes"]))
+    fleet = _optional(payload.get("fleet") if noun == "model" else None, "fleet")
+    effects = _optional(fleet.get("effects"), "fleet removal effects")
+    if effects and not effects.get("nas_remove"):
+        # A fleet removal that kept the NAS copy says so, with the
+        # Controller's typed reason; "succeeded" alone read as removed.
+        _field(
+            "NAS copy",
+            f"kept ({_text(effects.get('nas_reason'))}): "
+            f"{_text(effects.get('nas_detail'))}",
+        )
     _actions(payload.get("actions") if availability else payload.get("next_actions"))
     if isinstance(identifier, str):
         _field("Inspect", f"vonkctl {noun} progress {shlex.quote(identifier)}")
