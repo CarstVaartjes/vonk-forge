@@ -471,6 +471,11 @@ fn helper_error_code_allowed(operation: &AgentOperation, code: HelperErrorCode) 
         AgentOperation::ArtifactDistributionV1 => {
             crate::helper_codes::is_distribution_evidence(code)
         }
+        // The Controller re-installs the ranks that name an image the Spark
+        // no longer holds.
+        AgentOperation::RecipeStart | AgentOperation::RecipeJobRunV1 => {
+            code == HelperErrorCode::RuntimeImageMissing
+        }
         _ => false,
     }
 }

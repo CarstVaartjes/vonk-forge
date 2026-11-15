@@ -36,6 +36,7 @@ from ..artifact_job_evidence import ArtifactJobResultEvidence
 from ..bounded_retry import bounded_attempts
 from ..categorized_errors import MissingRecord
 from ..compiled_artifact_contract import CompiledArtifactContract
+from ..installed_bytes import demote_ranks_on_lost_image
 from ..lifecycle import Effect, Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..lifecycle.artifact_job import (
@@ -413,6 +414,9 @@ class ArtifactJobService(InputService):
         raw_result = getattr(message, "result", None)
         now = self._clock()
         adapter = ArtifactJobAdapter(session, clock=self._clock)
+        demote_ranks_on_lost_image(
+            session, raw_result, artifact_job.run_id, operation.node_id, now
+        )
         if (
             isinstance(state, str)
             and state in agent_operation_states.FAILURE_REPORT

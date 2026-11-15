@@ -554,3 +554,56 @@ fn preparation_observation_reads_exact_images_without_pull_tag_or_receipt_writes
         Err(OperationError::RuntimeImageIdentityInvalid)
     ));
 }
+
+/// Docker holds no image; whether it answers a listing is the fixture's.
+struct NoImages {
+    daemon_answers: bool,
+}
+
+impl CommandRunner for NoImages {
+    fn run(&self, _executable: &Path, arguments: &[String]) -> Result<CommandOutput, String> {
+        let answered = arguments.starts_with(&["image".into(), "ls".into()]) && self.daemon_answers;
+        Ok(CommandOutput {
+            success: answered,
+            stdout: if answered { Vec::new() } else { b"\n".to_vec() },
+            stderr: Vec::new(),
+            exit_code: Some(if answered { 0 } else { 1 }),
+        })
+    }
+}
+
+#[test]
+fn an_accepted_image_is_missing_only_when_docker_answers_without_it() {
+    // Wrong implementation: an inspection miss alone (an unreachable daemon
+    // misses too) is reported as a proven absence, or a proven absence stays
+    // an inspection failure the agent can only wait on.
+    let temp = tempfile::tempdir().unwrap();
+    let (manifest, config) = ("a".repeat(64), "c".repeat(64));
+    let reference = format!("localhost/vonk/compiled-runtime-{manifest}@sha256:{manifest}");
+    for (daemon_answers, missing) in [(true, true), (false, false)] {
+        let executor = OperationExecutor::new(
+            ManagedRoots::under(temp.path()),
+            &[0; 32],
+            NoImages { daemon_answers },
+            None,
+        )
+        .unwrap();
+        let error = executor
+            .inspect_accepted_runtime_image(
+                &reference,
+                &format!("sha256:{config}"),
+                &format!("sha256:{manifest}"),
+            )
+            .unwrap_err();
+        assert_eq!(
+            matches!(error, OperationError::RuntimeImageMissing),
+            missing,
+            "{error:?}"
+        );
+        assert_eq!(
+            matches!(error, OperationError::RuntimeImageInspectFailed),
+            !missing,
+            "{error:?}"
+        );
+    }
+}

@@ -32,7 +32,7 @@ RECIPE_RUN_WRITE_VERDICTS: dict[str, dict[str, tuple[str, str]]] = {
     },
     "recipe_operations/result_consumption.py": {
         "consume_agent_result": (
-            "ac10fd436df892b3d07b5905e06583643a0ca612cbab64552a23c7935a55cbaa",
+            "3a8e642d2ff1540ed18d8427abdebed83e77fca0b520236f406dc1754be04372",
             "caller-owned: queue claim/result and background order-sweep transactions fence child effects; HTTP disposition or per-candidate sweep waits and re-observes",
         ),
     },

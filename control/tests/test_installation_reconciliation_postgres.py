@@ -30,6 +30,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 
+from .lifecycle_simulation.invariants import ENDED
 from .lifecycle_simulation.simulation import Simulation
 from .lifecycle_simulation.world import SOLO, World, build_world
 from .node_contacts import contact_row
@@ -418,7 +419,8 @@ def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
 ) -> None:
     # Wrong implementation: the rank stays installed after a Start found its
     # image gone, so the next load reuses it, copies no image and starts the
-    # missing image again; it never serves.
+    # missing image again; it never serves. Or the proven absence is retried
+    # as an unknown effect instead of ending the load at once.
     world = build_world(tmp_path, postgres_engine)
     try:
         sim = Simulation(world, seed=0)
@@ -429,11 +431,10 @@ def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
         assert sim.settle(_load(world, idle)) == "succeeded"
         removed = sim.sparks.by_node[spark]
         removed.image_removed = True  # docker rmi under the installed rank
-        _load(world, solo)
-        for _ in range(5):
-            if removed.image_missing_starts:
-                break
-            sim.round()
+        broken = _load(world, solo)
+        # No effect happened: the load ends after its one Start.
+        assert sim.settle(broken) in ENDED
+        assert removed.image_missing_starts == 1
         assert removed.image_missing_starts
 
         assert sim.settle(_load(world, solo)) == "succeeded"

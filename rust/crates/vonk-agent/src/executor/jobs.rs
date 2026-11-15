@@ -118,25 +118,36 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
                     let _ = JobScopeCleanup::new(&self.runtime, job.job_scope).finish();
                     return Err(Box::new(refused));
                 }
-                let (stage, cause) = match other {
+                let (stage, cause, helper) = match other {
                     InterruptibleJob::Completed(Err(error)) => (
                         FailureStage::RuntimeAdapter,
                         format!("job run unconfirmed: {}", error.cause()),
+                        Some(runtime_helper_code(&error)),
                     ),
                     InterruptibleJob::Completed(Ok(_)) => (
                         FailureStage::JobStop,
                         "job run stop is uncertain".to_owned(),
+                        None,
                     ),
                     InterruptibleJob::Cancelled { .. } => (
                         FailureStage::JobCancelStop,
                         "job cancellation stop is unconfirmed".to_owned(),
+                        None,
                     ),
                 };
                 // The answer was lost, not the job: it is re-observed by its
-                // identity before anything stops it.
+                // identity before anything stops it. A job that ends without
+                // an exit carries the helper's code, as a Start does; the
+                // outcome admits only the codes the Controller acts on.
                 let deadline = reobserve::job_deadline(dispatched, job.request);
                 self.reobserve_job(job, deadline, cancellation, stage, cause)
                     .await
+                    .map_err(|ended| match (*ended, helper) {
+                        (ExecutionResult::Failed(failure), Some(code)) => {
+                            Box::new(ExecutionResult::Failed(failure.helper(code, None)))
+                        }
+                        (ended, _) => Box::new(ended),
+                    })
             }
         }
     }

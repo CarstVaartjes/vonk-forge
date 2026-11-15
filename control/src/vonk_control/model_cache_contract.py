@@ -8,7 +8,6 @@ from typing import Annotated, Literal
 from pydantic import (
     AwareDatetime,
     BaseModel,
-    BeforeValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -29,6 +28,7 @@ from .integer_domains import MAX_DATABASE_INTEGER
 from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
 from .operation_contract import AvailabilityOperationFailure, OperationProgress
+from .recipe_image_availability_clocks_contract import readable_or_none
 from .settings import RECIPE_LIBRARY_SYNC_INTERVAL_SECONDS
 from .strict_json import StrictJSONModel, StrictModel, read_stored_model
 from .wait_contract import QueueWait
@@ -362,18 +362,6 @@ class _ModelCacheOperationPayload(StrippedStrictModel):
     blockers: list[OperationBlocker] = Field(default_factory=list, max_length=16)
 
 
-def _readable_or_none[T](adapter: TypeAdapter[T]) -> BeforeValidator:
-    """A field whose damage reads as absent: bookkeeping never blocks (rule 5)."""
-
-    def read(value: object) -> object:
-        try:
-            return adapter.validate_python(value)
-        except ValidationError:
-            return None
-
-    return BeforeValidator(read)
-
-
 _AWARE_TIME = TypeAdapter(AwareDatetime)
 _NAME = TypeAdapter(Annotated[str, Field(min_length=1)])
 _ATTEMPTS = TypeAdapter(Annotated[int, Field(strict=True, ge=1)])
@@ -384,10 +372,12 @@ class StoredCacheRetryClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    automatic_attempts: Annotated[int | None, _readable_or_none(_ATTEMPTS)] = None
-    next_retry_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = (
-        None
-    )
+    automatic_attempts: Annotated[
+        int | None, readable_or_none(_ATTEMPTS, json_fallback=False)
+    ] = None
+    next_retry_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
 
 
 class StoredCacheClaimClock(BaseModel):
@@ -395,8 +385,10 @@ class StoredCacheClaimClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    owner: Annotated[str | None, _readable_or_none(_NAME)] = None
-    expires_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = None
+    owner: Annotated[str | None, readable_or_none(_NAME, json_fallback=False)] = None
+    expires_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
 
 
 class StoredCacheCancelClock(BaseModel):
@@ -404,8 +396,12 @@ class StoredCacheCancelClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    requested_at: Annotated[AwareDatetime | None, _readable_or_none(_AWARE_TIME)] = None
-    request_key: Annotated[str | None, _readable_or_none(_NAME)] = None
+    requested_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
+    request_key: Annotated[str | None, readable_or_none(_NAME, json_fallback=False)] = (
+        None
+    )
 
 
 class StoredCacheClocks(BaseModel):
@@ -422,15 +418,15 @@ class StoredCacheClocks(BaseModel):
 
     claim: Annotated[
         StoredCacheClaimClock | None,
-        _readable_or_none(TypeAdapter(StoredCacheClaimClock)),
+        readable_or_none(TypeAdapter(StoredCacheClaimClock), json_fallback=False),
     ] = None
     retry: Annotated[
         StoredCacheRetryClock | None,
-        _readable_or_none(TypeAdapter(StoredCacheRetryClock)),
+        readable_or_none(TypeAdapter(StoredCacheRetryClock), json_fallback=False),
     ] = None
     cancellation: Annotated[
         StoredCacheCancelClock | None,
-        _readable_or_none(TypeAdapter(StoredCacheCancelClock)),
+        readable_or_none(TypeAdapter(StoredCacheCancelClock), json_fallback=False),
     ] = None
 
     @classmethod

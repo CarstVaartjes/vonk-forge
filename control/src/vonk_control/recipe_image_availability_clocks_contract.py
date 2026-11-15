@@ -29,26 +29,36 @@ class _Reader[T]:
 
     reader: Callable[[Any], T]
 
-    def validate_python(self, value: object) -> T:
+    def validate_python(self, value: object, *, strict: bool | None = None) -> T:
         return self.reader(value)
 
-    def validate_json(self, text: str | bytes) -> T:
+    def validate_json(self, text: str | bytes, *, strict: bool | None = None) -> T:
         return self.reader(json.loads(text))
 
 
 def readable_or_none[T](
     adapter: TypeAdapter[T] | Callable[[Any], T],
+    *,
+    strict: bool | None = None,
+    json_fallback: bool = True,
 ) -> BeforeValidator:
+    """Retain a readable field; ``strict`` refuses a coerced identity.
+
+    ``json_fallback=False`` reads the Python value only.
+    """
+
     source: TypeAdapter[T] | _Reader[T] = (
         adapter if isinstance(adapter, TypeAdapter) else _Reader(adapter)
     )
 
     def read(value: object) -> object:
         try:
-            return source.validate_python(value)
+            return source.validate_python(value, strict=strict)
         except (TypeError, ValueError):
+            if not json_fallback:
+                return None
             try:
-                return source.validate_json(canonical_message(value))
+                return source.validate_json(canonical_message(value), strict=strict)
             except (TypeError, ValueError):
                 return None
 

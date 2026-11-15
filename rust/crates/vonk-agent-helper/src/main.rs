@@ -194,6 +194,7 @@ impl HelperRejection {
             OperationError::RuntimeImageInspectFailed => {
                 (HelperErrorCode::RuntimeImageInspectFailed, None)
             }
+            OperationError::RuntimeImageMissing => (HelperErrorCode::RuntimeImageMissing, None),
             OperationError::RuntimeImageIdentityInvalid => {
                 (HelperErrorCode::RuntimeImageIdentityInvalid, None)
             }

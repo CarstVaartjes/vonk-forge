@@ -143,6 +143,9 @@ pub enum OperationError {
     RuntimeImageLoadFailed,
     #[error("runtime image inspection failed")]
     RuntimeImageInspectFailed,
+    /// Docker answered and holds neither identity of the accepted image.
+    #[error("runtime image is absent")]
+    RuntimeImageMissing,
     #[error("runtime image identity is invalid")]
     RuntimeImageIdentityInvalid,
     #[error("runtime image receipt could not be written")]

@@ -8,6 +8,8 @@ from datetime import datetime
 from sqlalchemy import ColumnElement, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    AgentFailureResult,
+    HelperErrorCode,
     InstallationBytes,
     InstallationNodeState,
     InstallationState,
@@ -15,7 +17,11 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 
 from .machine_states import rank_installed
-from .models import InstallationNode, RecipeInstallation
+from .models import InstallationNode, RecipeInstallation, RecipeRun
+
+#: The helper proved the runtime image gone from its Spark. An unreadable
+#: inspection (``runtime_image_inspect_failed``) proves nothing and never demotes.
+_LOST_IMAGE_CODES = frozenset({HelperErrorCode.RUNTIME_IMAGE_MISSING.value})
 
 
 def refresh_installed_bytes(
@@ -131,3 +137,35 @@ def demote_installed_ranks(
         installation.updated_at = observed_at
         changed += 1
     return changed
+
+
+def demote_ranks_on_lost_image(
+    session: Session, result: object, run_id: str | None, node_id: str, now: datetime
+) -> None:
+    """A Start or a job run of ``run_id`` found its runtime image gone from
+    ``node_id`` (removed under an installed rank): every installed rank there
+    that names that image is demoted, so the next plan copies the image again
+    and installs afresh instead of repeating the same launch."""
+
+    if not (
+        isinstance(result, AgentFailureResult)
+        and result.helper_error_code in _LOST_IMAGE_CODES
+    ):
+        return
+    run = None if run_id is None else session.get(RecipeRun, run_id)
+    installation = (
+        None if run is None else session.get(RecipeInstallation, run.installation_id)
+    )
+    if installation is None:
+        return
+    demote_installed_ranks(
+        session,
+        node_id,
+        InstallationNode.installation_id.in_(
+            select(RecipeInstallation.id).where(
+                RecipeInstallation.image_digest == installation.image_digest
+            )
+        ),
+        observed_at=now,
+        before=now,
+    )
