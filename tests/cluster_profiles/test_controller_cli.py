@@ -21,7 +21,7 @@ from vonk_agent_protocol import LifecycleState, OperatorActionName
 from vonk_forge_contracts import ModelDefinition, document_sha256
 
 from cluster_profiles import cli, controller_cli
-from cluster_profiles.cli_render import progress_line
+from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.control_client import (
     ControlConflict,
     ControlForbidden,
@@ -1086,6 +1086,51 @@ def test_fleet_resume_submits_even_after_advertised_action_disappears() -> None:
     assert run(("fleet", "resume", job_id, "--yes", "--json"), client)[0] == 0
 
 
+def test_activity_presentation_keeps_exact_reconnect_and_complete_continuation() -> (
+    None
+):
+    request_id = "33333333-3333-4333-8333-333333333333"
+    target = "spk_" + "1" * 32
+    operation = {
+        "id": "operation-1",
+        "kind": "recipe.stop",
+        "state": "needs-operator",
+        "attempt": 3,
+        "created_at": "2026-08-05T12:00:00Z",
+        "node_ids": [target],
+        "owner": {
+            "kind": "job",
+            "id": "job-owner-1",
+            "request_id": request_id,
+        },
+        "recovery": {"actions": ["inspect"]},
+    }
+    output = StringIO()
+    with redirect_stdout(output):
+        render_payload(
+            {
+                "operations": [operation],
+                "total": 3,
+                "next_cursor": "opaque+token",
+            },
+            "fleet",
+            action="activity",
+            activity_filters={
+                "limit": 1,
+                "state": "needs-operator",
+                "target": target,
+                "request_id": request_id,
+            },
+        )
+
+    rendered = output.getvalue()
+    assert "vonkctl fleet progress job-owner-1 --follow" in rendered
+    assert (
+        "vonkctl fleet activity --limit 1 --cursor opaque+token --state "
+        f"needs-operator --target {target} --request-id {request_id}"
+    ) in rendered
+
+
 def test_fleet_loginfo_line_count_is_bounded_without_enumerating_choices() -> None:
     parser = cli._parser()
     fleet = _subparser_choices(parser)["fleet"]
@@ -1234,7 +1279,7 @@ def test_recipe_download_rejects_a_forced_selector_intent_receipt() -> None:
     assert [call[0] for call in client.calls].count("POST") == 2
 
 
-def test_recipe_detail_prints_the_served_release_labels_and_json_never_asks() -> None:
+def test_recipe_detail_reads_the_vocabulary_only_for_the_human_detail() -> None:
     recipes = json.loads(
         (Path(__file__).parents[1] / "fixtures/library-list.json").read_text()
     )["recipes"]
@@ -3590,8 +3635,8 @@ def test_detach_returns_acceptance_without_observing_operation() -> None:
     assert [call[1] for call in client.calls] == ["/api/recipe/qwen-code/download"]
 
 
-def test_watch_retains_the_final_snapshot_at_its_deadline(
-    vonkctl_json, monkeypatch: pytest.MonkeyPatch
+def test_watch_shows_updated_resource_and_retains_final_snapshot(
+    capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The watch must retain the last observed snapshot at its deadline; renderer
     # and scheduler latency must not decide whether the second snapshot is read.
@@ -3620,22 +3665,26 @@ def test_watch_retains_the_final_snapshot_at_its_deadline(
             ]
         }
     )
-    status, document = vonkctl_json(
-        "model",
-        "detail",
-        "qwen",
-        "--watch",
-        "--interval-seconds",
-        "0.01",
-        "--timeout-seconds",
-        "0.04",
+    status = cli.main(
+        (
+            "model",
+            "detail",
+            "qwen",
+            "--watch",
+            "--interval-seconds",
+            "0.01",
+            "--timeout-seconds",
+            "0.04",
+        ),
         control_client=client,
     )
+    captured = capsys.readouterr()
     assert status == 2  # A resource watch has a deadline, not an execution outcome.
     assert clock.now == pytest.approx(0.04)
     assert len(client.calls) >= 2
-    assert document["observation"]["status"] == "timed_out"
-    assert document["result"]["local"]["controller"] == "cached"
+    assert "preparing" in captured.err and "cached" in captured.err
+    assert "preparing" not in captured.out and "cached" in captured.out
+    assert "accepted work" not in captured.err
 
 
 def test_noninteractive_removals_fail_closed_and_recipe_requires_model_choice() -> None:
@@ -4026,23 +4075,39 @@ def test_fleet_log_reconnect_uses_resolved_node_id_and_keeps_log_scope() -> None
     assert observation["timeout_seconds"] == 0
 
 
-def test_fleet_loginfo_without_follow_presents_the_snapshot_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Break caught: the watch callback also presenting a one-shot snapshot,
-    # which shows every retained line twice.
-    node_id = "spk_" + "1" * 32
+def _fleet_log_with_entries(node_id: str) -> dict[str, object]:
     response = _fleet_log_response(node_id, follow=False)
-    client = FakeClient({("GET", f"/api/fleet/{node_id}/loginfo"): response})
-    shown: list[object] = []
-    monkeypatch.setitem(
-        cli.PRESENTATIONS,
-        ("fleet", "loginfo"),
-        lambda payload, *args, **kwargs: shown.append(payload),
-    )
+    response["entries"] = [
+        {
+            "observed_at": "2026-09-24T10:00:01Z",
+            "level": "info",
+            "source": "agent",
+            "message": "first retained line",
+        },
+        {
+            "observed_at": "2026-09-24T10:00:02Z",
+            "level": "warning",
+            "source": "job",
+            "message": "second retained line",
+        },
+    ]
+    return response
 
-    assert cli.main(("fleet", "loginfo", node_id), control_client=client) == 0
-    assert len(shown) == 1
+
+def test_fleet_loginfo_without_follow_prints_each_line_once_on_stdout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    node_id = "spk_" + "1" * 32
+    path = f"/api/fleet/{node_id}/loginfo"
+    client = FakeClient({("GET", path): _fleet_log_with_entries(node_id)})
+
+    status = cli.main(("fleet", "loginfo", node_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    for line in ("first retained line", "second retained line"):
+        assert captured.out.count(line) == 1
+        assert line not in captured.err
 
 
 def test_fleet_upgrade_follows_exact_job_and_stops_at_operator_blocker() -> None:
