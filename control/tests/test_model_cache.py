@@ -1922,6 +1922,40 @@ def test_operation_transfer_progress_counts_only_missing_objects(
     assert operation.progress["expected_bytes"] == len(b"new object")
 
 
+def test_preview_hashes_the_set_identity_once_whatever_the_file_count(
+    cache, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production 2026-11-15: a preview re-hashed the whole manifest once per
+    missing file, so a many-file model cost seconds and every Library
+    assessment ran out of its read budget. The work must not grow with files."""
+    service, _sessions = cache
+    model = "8" * 64
+    shards = [f"shard {index}".encode() for index in range(40)]
+    files = [
+        _artifact(
+            tmp_path,
+            shard,
+            artifact_id=f"shard-{index}",
+            path=f"shard-{index}.bin",
+            model_content_sha256=model,
+        )
+        for index, shard in enumerate(shards)
+    ]
+    hashed = 0
+    identity = ArtifactSetManifest.identity
+
+    def counted(self: ArtifactSetManifest):
+        nonlocal hashed
+        hashed += 1
+        return identity(self)
+
+    monkeypatch.setattr(ArtifactSetManifest, "identity", counted)
+    preview = service.download_preview(model_content_sha256=model, artifacts=files)
+    assert preview["artifact_count"] == len(files)
+    assert preview["new_bytes"] == sum(len(shard) for shard in shards)
+    assert hashed <= 2
+
+
 def test_download_mutation_is_queued_until_the_controller_worker_runs(
     cache, tmp_path: Path
 ) -> None:

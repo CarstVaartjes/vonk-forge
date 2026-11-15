@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from pydantic import ValidationError
 from vonk_agent_protocol import ModelCacheCode, canonical_message
@@ -188,6 +188,9 @@ class ArtifactSetManifest:
     artifacts: tuple[ArtifactSpec, ...]
     model_definition_ref: ModelReference | None = None
     verified_models: tuple[ModelReference, ...] = ()
+    # The digest is a pure function of these frozen fields; it is computed
+    # once per manifest, not once per read (a model has hundreds of files).
+    _digest: str | None = field(default=None, init=False, repr=False, compare=False)
 
     def contract(self) -> CacheManifest:
         return CacheManifest(
@@ -208,7 +211,11 @@ class ArtifactSetManifest:
 
     @property
     def digest(self) -> str:
-        return _sha256_json(serialize_json_value(self.identity()))
+        digest = self._digest
+        if digest is None:
+            digest = _sha256_json(serialize_json_value(self.identity()))
+            object.__setattr__(self, "_digest", digest)
+        return digest
 
     def identity(self) -> CacheIdentity:
         """Return the reusable identity, separate from requested provenance."""
