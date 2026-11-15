@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallAdmissionCode,
     InvalidRequestReason,
-    ModelFileState,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -30,9 +29,10 @@ from ..disk_reservations import (
     describe_disk_charges,
     model_sets_stored_on_node,
     outstanding_disk_charges,
+    runtime_images_named_on_node,
 )
 from ..gpu_health import gpu_health_reason
-from ..inventory_items import inventory_artifacts, inventory_items
+from ..inventory_items import inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
@@ -401,12 +401,10 @@ class InstallPlanningService:
             with (
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
-                present = tuple(
-                    item
-                    for item in inventory_artifacts(session, mapping_node.node_id)
-                    if item.state == ModelFileState.VERIFIED
-                )
                 stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
+                named_images = runtime_images_named_on_node(
+                    session, mapping_node.node_id
+                )
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
@@ -417,16 +415,11 @@ class InstallPlanningService:
                 )
                 reserved = sum(charge.amount_bytes for charge in charges)
                 holders = describe_disk_charges(session, charges)
-            raw_image_digest = image_digest.removeprefix("sha256:")
+            # An image an installation on the Spark names is held (the helper
+            # never prunes it); any other is charged, as it may be pruned.
             reused_image = (
                 image_bytes
-                if image_bytes is not None
-                and any(
-                    item.kind == "image"
-                    and item.digest == raw_image_digest
-                    and item.size_bytes == image_bytes
-                    for item in present
-                )
+                if image_bytes is not None and image_digest in named_images
                 else 0
             )
             if reused_image == 0:

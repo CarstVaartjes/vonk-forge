@@ -7,14 +7,13 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState, canonical_message
+from vonk_agent_protocol import CompiledExecutionPlan, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -45,11 +44,6 @@ from vonk_forge_contracts import (
 )
 
 from .display_fixtures import legacy_model_display, model_display_denying
-from .inventory_artifact_support import (
-    clear_inventory_artifacts,
-    replace_inventory_artifact,
-    seed_inventory_artifact,
-)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -463,24 +457,12 @@ def setup(
         session.add(build)
         session.flush()
         build_id = build.id
-        image_digest = "1" * 64
-        seed_inventory_artifact(
-            session,
-            node_id=node_id,
-            kind="image",
-            digest=image_digest,
-            source="docker-archive:" + "2" * 64,
-            size_bytes=30,
-            state="verified",
-            ref_count=0,
-            verified_at=now,
-            updated_at=now,
-        )
     return sessions, now, node_id, mapping_id, build_id
 
 
 def test_exact_fit_and_safety_floor_are_explained(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(tmp_path, free=100)
+    sessions, now, node, mapping, build = setup(tmp_path, free=100)
+    _name_image_on(sessions, node, mapping, now)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     assert plan.allowed is True
@@ -618,8 +600,6 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
     sessions, now, _node, mapping, build = setup(
         tmp_path, free=free, disk_estimates=(1, 1)
     )
-    with sessions.begin() as session:
-        clear_inventory_artifacts(session)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -629,10 +609,11 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
 
 
 def test_territorial_license_install_admission_is_informational(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(
+    sessions, now, node, mapping, build = setup(
         tmp_path,
         denied_jurisdictions=("EU", "GB", "KR"),
     )
+    _name_image_on(sessions, node, mapping, now)
 
     unconfigured = _service(
         sessions, inventory_max_age=300, disk_floor_bytes=10
@@ -668,9 +649,10 @@ def test_a_3x_model_display_row_does_not_break_install_planning(tmp_path) -> Non
 
 
 def test_verified_existing_artifacts_reduce_disk_and_download(tmp_path) -> None:
-    sessions, now, _node, mapping, build = setup(
+    sessions, now, node, mapping, build = setup(
         tmp_path, free=80, model_objects=[{"sha256": "3" * 64, "bytes": 70}]
     )
+    _name_image_on(sessions, node, mapping, now)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -779,11 +761,6 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
-        artifact = next(iter(inventory_artifacts(session, node)), None)
-        assert artifact is not None
-        replace_inventory_artifact(
-            session, node, artifact.model_copy(update={"state": ModelFileState.MISSING})
-        )
         session.add(
             ResourceReservation(
                 node_id=node,
@@ -1188,3 +1165,75 @@ def test_damaged_install_identity_does_not_block_fresh_admission(tmp_path) -> No
             installation_plan_digest_from_stored_document(stored.plan)
             == plan.plan_digest
         )
+
+
+def _name_image_on(sessions, node, mapping, now) -> str:
+    """Another Model's installation on the Spark names the build's image, so the
+    helper keeps it there."""
+
+    with sessions.begin() as session:
+        installation = RecipeInstallation(
+            recipe_revision_id=RECIPE_REVISION_ID,
+            model_content_sha256="e" * 64,
+            mapping_id=mapping,
+            mapping_generation=1,
+            image_digest="sha256:" + "1" * 64,
+            plan_digest="d" * 64,
+            plan={},
+            state="installed",
+            actor="admin",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(installation)
+        session.flush()
+        session.add(
+            InstallationNode(
+                installation_id=installation.id,
+                node_id=node,
+                rank=0,
+                role="entrypoint",
+                state="installed",
+                required_bytes=0,
+                installed_bytes=0,
+                updated_at=now,
+            )
+        )
+        return installation.id
+
+
+def _set_installation_state(sessions, installation_id, installation, rank) -> None:
+    with sessions.begin() as session:
+        row = session.get(RecipeInstallation, installation_id)
+        assert row is not None
+        row.state = installation
+        for member in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        ):
+            member.state = rank
+
+
+@pytest.mark.parametrize(
+    ("installation", "rank"),
+    [("uninstalled", "uninstalled"), ("partial", "planned")],
+    ids=["uninstalled", "demoted-rank"],
+)
+def test_a_pruned_runtime_image_is_charged_again(
+    tmp_path, installation: str, rank: str
+) -> None:
+    """An image is reused only while an installed rank on the Spark names it
+    (the helper keeps an image whose plan is on the host). Catches presence
+    read from a receipt that never expires, or from an installation whose rank
+    there is no longer installed: the helper may prune that image, so
+    admission charges its bytes again."""
+
+    sessions, now, node, mapping, build = setup(tmp_path)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    installation_id = _name_image_on(sessions, node, mapping, now)
+    assert service.plan_install(mapping, build, now=now).nodes[0].reused_bytes == 30
+
+    _set_installation_state(sessions, installation_id, installation, rank)
+    pruned = service.plan_install(mapping, build, now=now).nodes[0]
+    assert (pruned.reused_bytes, pruned.required_download_bytes) == (0, 100)

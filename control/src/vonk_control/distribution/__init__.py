@@ -161,9 +161,6 @@ from .locations import _LOCATION_CACHE_ENTRIES as _LOCATION_CACHE_ENTRIES
 from .locations import ObjectLocation as ObjectLocation
 from .locations import _still_stored as _still_stored
 from .model_cache import ModelCacheObjectSource as ModelCacheObjectSource
-from .receipts import (
-    record_distributed_runtime_image as record_distributed_runtime_image,
-)
 from .service import DistributionService as DistributionService
 from .sources import CompositeObjectSource as CompositeObjectSource
 from .sources import MemoryObjectSource as MemoryObjectSource
@@ -195,5 +192,4 @@ __all__ = [
     "artifact_set_sha256",
     "build_distribution_service",
     "build_distribution_service_from_components",
-    "record_distributed_runtime_image",
 ]

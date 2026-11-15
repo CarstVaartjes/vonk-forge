@@ -43,7 +43,6 @@ from vonk_control.install_admission import (
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -147,10 +146,6 @@ from vonk_control.runtime_preflight import latest_result
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .inventory_artifact_support import (
-    all_inventory_artifacts,
-    clear_inventory_artifacts,
-)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -526,6 +521,17 @@ class RecordingArtifactExecutor:
                     "reclaimed_bytes": 0,
                     "protected_referenced_bytes": 0,
                 },
+            )
+        if phase.subphase == "runtime-image":
+            # A Spark no installation holds the image on gets it copied; the
+            # Controller's stored image is ready for that copy.
+            return ColdStartPhaseExecutor().execute(
+                plan,
+                phase,
+                item_index=item_index,
+                actor=actor,
+                request_key=request_key,
+                progress=progress,
             )
         return _fixture_execution(
             plan, phase, result=_target_copy_evidence(plan, phase)
@@ -1532,7 +1538,10 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     # below is exactly the one a profile preview and later apply will consume.
     assert plan.preparation.controller_ready is True
     assert plan.preparation.targets_ready is False
+    # No installation names the image on this Spark yet, so it is prepared
+    # and copied with the model.
     assert [phase.kind for phase in plan.phases] == [
+        "prepare",
         "prepare",
         "transfer",
         "verify",
@@ -1541,6 +1550,7 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
         "final_verify",
     ]
     assert [phase.subphase for phase in plan.phases] == [
+        "runtime-image",
         "runtime-plan",
         "target-copy",
         "target-copy",
@@ -1571,10 +1581,8 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
         == operation.operation_id
     )
 
-    assert service.tick() is True
-    assert service.tick() is True
-    assert service.tick() is True
-    assert service.tick() is True
+    for _ in range(5):
+        assert service.tick() is True
     progressed = service.get(operation.operation_id)
     assert progressed.current_phase == "prepare"
     assert progressed.progress.subphase == "runtime-install"
@@ -1608,8 +1616,9 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     )
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.storage.nas_coverage == "partial"
-    assert [(phase.kind, phase.subphase) for phase in plan.phases[:3]] == [
+    assert [(phase.kind, phase.subphase) for phase in plan.phases[:4]] == [
         ("transfer", "model-download"),
+        ("prepare", "runtime-image"),
         ("prepare", "runtime-plan"),
         ("transfer", "target-copy"),
     ]
@@ -1773,8 +1782,6 @@ def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
     sessions, lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
         tmp_path
     )
-    with sessions.begin() as session:
-        clear_inventory_artifacts(session)
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
 
     class ColdInspector(CompleteArtifactInspector):
@@ -1837,7 +1844,6 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        clear_inventory_artifacts(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest = build.image_digest
@@ -3404,42 +3410,6 @@ def test_a_newer_unfinished_build_row_keeps_the_installation_once_its_image_expi
     assert _phase_kinds(plan) == ["start", "final_verify"]
     with sessions.begin() as session:
         assert session.scalar(select(func.count()).select_from(RecipeBuild)) == 2
-
-
-def _drop_installed_image_from_spark(sessions, node_id: str) -> None:
-    with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        items = inventory_items(node)
-        record_items(node, items.model_copy(update={"artifacts": []}), NOW)
-
-
-@pytest.mark.parametrize("archive_present", [True, False])
-def test_installed_recipe_whose_image_is_missing_on_a_spark_is_healed_not_started(
-    tmp_path: Path, archive_present: bool
-) -> None:
-    """Reuse needs the image on every target Spark; a lost copy takes the full path."""
-
-    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
-    installed_recipe(
-        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
-    )
-    _drop_installed_image_from_spark(sessions, nodes[0])
-
-    plan = _installed_service(
-        sessions, lifecycle, archive_present=archive_present
-    ).preview(_request(sessions, nodes[0]), actor="admin")
-
-    assert _phase_kinds(plan) != ["start", "final_verify"]
-    if archive_present:
-        assert plan.allowed, [reason.code for reason in plan.blockers]
-        assert "transfer" in _phase_kinds(plan)
-    else:
-        # The expired image needs a build; this fixture has no builder, so the
-        # plan says so instead of starting a Spark without its image.
-        assert RunSwitchCode.CONTAINER_BUILD_UNAVAILABLE in {
-            reason.code for reason in plan.blockers
-        }
 
 
 def _build_service_that_reaches_the_archive_check(
@@ -5354,7 +5324,11 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
 
     switch = _cold_compile_switch(tmp_path)
     _host_changes_during_compile(switch)  # held for a refresh: totals unknown
-    switch.drive()
+    for _ in range(8):
+        if "runtime-plan" in switch.executor.events:
+            break
+        switch.drive()
+    assert "runtime-plan" in switch.executor.events
     reason = (
         "install plan is blocked: " + "missing durable runtime image receipt; " * 10
     )
@@ -5649,7 +5623,6 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     assert cancelled_result.child_operation_id is None
     assert not restarted._advance(operation.operation_id)
     with sessions() as session:
-        assert len(list(all_inventory_artifacts(session))) > 0
         installed = session.get(RecipeInstallation, plan.installation_id)
         assert installed is not None
         assert installed.state == "installed"

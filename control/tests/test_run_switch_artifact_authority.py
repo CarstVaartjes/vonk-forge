@@ -4,12 +4,19 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from vonk_agent_protocol import ModelCacheBlockerCode, RunSwitchCode, canonical_message
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
+)
+from vonk_control.models import (
+    ClusterMapping,
+    InstallationNode,
+    RecipeBuild,
+    RecipeInstallation,
 )
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
@@ -161,6 +168,46 @@ class _FullNas(ModelCacheManifestProvider):
         }
 
 
+def _hold_image_through_another_installation(sessions, build_id: str, node_ids) -> None:
+    """Another Model's installation of the same recipe names the build's image
+    on each Spark, so the helper keeps it there; Run/Switch of this Model does
+    not reuse that installation (its Model differs)."""
+
+    with sessions.begin() as session:
+        build = session.get(RecipeBuild, build_id)
+        mapping = session.scalars(select(ClusterMapping)).first()
+        assert build is not None and mapping is not None
+        installation = RecipeInstallation(
+            recipe_revision_id=build.recipe_revision_id,
+            model_content_sha256="e" * 64,
+            mapping_id=mapping.id,
+            mapping_generation=mapping.generation,
+            recipe_build_id=build.id,
+            image_digest=build.image_digest,
+            plan_digest="e" * 64,
+            plan={},
+            state="installed",
+            actor="admin",
+            created_at=build.created_at,
+            updated_at=build.created_at,
+        )
+        session.add(installation)
+        session.flush()
+        for rank, node_id in enumerate(node_ids):
+            session.add(
+                InstallationNode(
+                    installation_id=installation.id,
+                    node_id=node_id,
+                    rank=rank,
+                    role="entrypoint" if rank == 0 else "worker",
+                    state="installed",
+                    required_bytes=0,
+                    installed_bytes=0,
+                    updated_at=build.created_at,
+                )
+            )
+
+
 @pytest.mark.parametrize(
     ("scan", "installed"), [("held", True), ("held", False), ("empty", False)]
 )
@@ -178,6 +225,8 @@ def test_a_model_the_nas_evicted_is_downloaded_only_for_a_spark_that_lacks_it(
         installed_recipe(
             lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
         )
+    else:
+        _hold_image_through_another_installation(sessions, build_id, nodes)
     request = _request(sessions, nodes[0])
     manifest = ModelCacheManifestProvider().resolve_artifact_set(
         model_content_sha256=request.model_content_sha256

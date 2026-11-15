@@ -144,9 +144,6 @@ from vonk_forge_contracts import (
 
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
-from .inventory_artifact_support import (
-    seed_inventory_artifact,
-)
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
@@ -743,19 +740,6 @@ def setup_services(
         session.flush()
         build.plan = {**build.plan, "build_id": build.id}
         build_id = build.id
-        for node_id in node_ids:
-            seed_inventory_artifact(
-                session,
-                node_id=node_id,
-                kind="image",
-                digest="1" * 64,
-                source="docker-archive:" + image_archive_sha256,
-                size_bytes=30,
-                state="verified",
-                ref_count=0,
-                verified_at=NOW,
-                updated_at=NOW,
-            )
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):

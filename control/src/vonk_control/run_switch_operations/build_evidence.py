@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
-    ModelFileState,
     RunSwitchCode,
 )
 
-from ..inventory_items import inventory_artifacts, inventory_items
+from ..disk_reservations import runtime_images_named_on_node
+from ..inventory_items import inventory_items
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -188,38 +188,17 @@ class BuildEvidenceMixin:
         runtime_missing = 0
         runtime_missing_by_node: dict[str, int] = {}
         runtime_reclaimable = 0
-        runtime_raw_digest = (
-            image_digest.removeprefix("sha256:")
-            if isinstance(image_digest, str)
-            else None
-        )
-        if image_bytes is not None and runtime_raw_digest is not None:
+        if image_bytes is not None and isinstance(image_digest, str):
             for node in group.nodes:
-                artifact = next(
-                    (
-                        item
-                        for item in inventory_artifacts(session, node.node_id)
-                        if item.digest == runtime_raw_digest
-                    ),
-                    None,
-                )
-                if (
-                    artifact is not None
-                    and artifact.kind == "image"
-                    and artifact.state == ModelFileState.VERIFIED
-                    and artifact.size_bytes >= image_bytes
-                ):
+                # Held while an installation on the Spark names it: the
+                # helper never prunes such an image. Any other may be pruned.
+                if image_digest in runtime_images_named_on_node(session, node.node_id):
                     runtime_reused += image_bytes
+                    runtime_reclaimable += image_bytes
                 else:
                     runtime_missing += image_bytes
                     runtime_missing_by_node[node.node_id] = image_bytes
                 runtime_missing_by_node.setdefault(node.node_id, 0)
-                if (
-                    artifact is not None
-                    and artifact.state == ModelFileState.VERIFIED
-                    and artifact.ref_count == 0
-                ):
-                    runtime_reclaimable += artifact.size_bytes
         runtime_coverage = (
             "complete"
             if image_bytes is not None and runtime_missing == 0

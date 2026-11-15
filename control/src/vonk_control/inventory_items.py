@@ -5,14 +5,12 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
-from sqlalchemy.orm import Session
 from vonk_agent_protocol import UnknownOutcomeError, WaitReason, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_agent_protocol.runtime_preflight import RuntimePreflightResult
 
 from .inventory_items_contract import (
     AgentInventoryItems,
-    InventoryArtifactItem,
     PreflightInventoryItem,
 )
 from .models import AgentNode, NodeInventoryItemsSnapshot
@@ -129,23 +127,4 @@ def record_preflight(
             update={"preflights": entries, "preflight_fingerprint": result.fingerprint}
         ),
         now,
-    )
-
-
-def inventory_artifacts(
-    session: Session, node_id: str
-) -> tuple[InventoryArtifactItem, ...]:
-    return tuple(inventory_items(session.get(AgentNode, node_id)).artifacts)
-
-
-def record_artifact(node: AgentNode, artifact: InventoryArtifactItem) -> None:
-    items = _reported_items(node)
-    artifacts = [item for item in items.artifacts if item.digest != artifact.digest]
-    artifacts.append(artifact)
-    record_items(
-        node,
-        items.model_copy(
-            update={"artifacts": sorted(artifacts, key=lambda item: item.digest)}
-        ),
-        artifact.updated_at,
     )

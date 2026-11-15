@@ -229,7 +229,11 @@ inventory), and Run/Switch plans a target copy only for the files that scan does
 not report; a missing or stale scan counts as missing. A linked file is never also
 counted as free space the agent could reclaim. A profile's resource recheck
 applies the same rule: it uses the review's per-Spark missing bytes, or, before
-any build, compares the set the recipe resolves to with the store scan. The protected reference scan keeps model objects a saved profile names even
+any build, compares the set the recipe resolves to with the store scan. The
+runtime image is reused only while an installed rank on the Spark names it (the
+helper keeps an image whose installation plan is on the host); any other image
+is charged, so one the helper pruned after its last installation went is
+charged again. The protected reference scan keeps model objects a saved profile names even
 when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes
