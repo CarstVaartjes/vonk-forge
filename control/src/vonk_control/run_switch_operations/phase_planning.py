@@ -169,7 +169,6 @@ class PhasePlanningMixin:
         inspection: ArtifactInspection,
         partial_stop: bool = False,
         runtime_storage: RuntimeImageStorageImpact | None,
-        retention: RunSwitchRetention,
         blockers: Sequence[RunSwitchReason],
         stop_before_transfer: bool,
         stop_before_prepare: bool,
@@ -294,11 +293,6 @@ class PhasePlanningMixin:
         needs_prepare = (
             installation_id is None or installation_state != InstallationState.INSTALLED
         )
-        needs_cleanup = (
-            retention == "reclaim-unreferenced"
-            and runtime_storage is not None
-            and runtime_storage.reclaimable_bytes > 0
-        )
         stop_added = False
 
         def add(
@@ -394,11 +388,6 @@ class PhasePlanningMixin:
                 "prepare",
                 "Start the prepared installation after target copy and verification complete.",
                 subphase="runtime-install",
-            )
-        if needs_cleanup:
-            add(
-                "cleanup",
-                "Reclaim only unreferenced Spark-local artifacts under the selected retention policy.",
             )
         if stops and not stop_added:
             add(

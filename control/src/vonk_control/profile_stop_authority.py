@@ -346,8 +346,11 @@ def validate_profile_stop_owner(
             from_json=True,
         )
         if switch_stop:
-            root = RunSwitchJobPayload.model_validate_json(
-                canonical_message(profile_operation.payload), strict=True
+            root = read_stored_model(
+                RunSwitchJobPayload,
+                canonical_message(profile_operation.payload),
+                strict=True,
+                from_json=True,
             )
             current = RunSwitchOperationResult.model_validate_json(
                 canonical_message(profile_operation.result), strict=True

@@ -8,7 +8,7 @@ written before a rename is adopted as the word it means now (the contract's
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, overload
 
 from pydantic import BeforeValidator
 from vonk_agent_protocol import (
@@ -27,6 +27,10 @@ from vonk_agent_protocol import (
     machine_adopter,
 )
 from vonk_agent_protocol.wire_model import WireEnum
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import QueryableAttribute
+    from sqlalchemy.sql.elements import ColumnElement
 
 InstallationStateField = Annotated[
     InstallationState, BeforeValidator(machine_adopter(InstallationState))
@@ -79,6 +83,24 @@ DISTRIBUTION_HELD: tuple[DistributionAssignmentState, ...] = (
     DistributionAssignmentState.ACTIVE,
     DistributionAssignmentState.EXPIRED,
 )
+
+
+@overload
+def rank_installed(state: str) -> bool: ...
+
+
+@overload
+def rank_installed(state: QueryableAttribute[str]) -> ColumnElement[bool]: ...
+
+
+def rank_installed(state: object) -> object:
+    """The one test that an installation rank is installed on its Spark.
+
+    Takes a rank's stored state (a Python test) or ``InstallationNode.state``
+    (a SQL filter), so every reader asks the same question.
+    """
+
+    return state == InstallationNodeState.INSTALLED
 
 
 def read_state[E: WireEnum](machine: type[E], stored: str) -> E:

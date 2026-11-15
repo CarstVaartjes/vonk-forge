@@ -162,12 +162,6 @@ def _validate_artifact_execution(
                 RunSwitchCode.CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID,
                 reason=WaitReason.OBSERVATION_UNAVAILABLE,
             )
-        maximum_reclaimable = plan.runtime_storage.reclaimable_bytes
-        if reclaimed > maximum_reclaimable:
-            raise RunSwitchRetryLater(
-                RunSwitchCode.CLEANUP_RECLAIMED_BYTES_EXCEED_PLAN,
-                reason=WaitReason.STALE_PLAN,
-            )
     elif phase.kind == "transfer":
         copied = evidence.copied_bytes
         if copied is not None and (type(copied) is not int or copied < 0):

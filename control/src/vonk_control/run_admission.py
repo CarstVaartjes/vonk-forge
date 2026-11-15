@@ -14,7 +14,6 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
-    InstallationNodeState,
     InstallationState,
     InvalidRequestError,
     InvalidRequestReason,
@@ -47,6 +46,7 @@ from .install_admission.contracts import reason_documents
 from .inventory_repository import InventoryRepository
 from .legal_admission import stored_model_display, territorial_admission
 from .load_swap import swap_capacity
+from .machine_states import rank_installed
 from .memory_reservations import memory_reservations
 from .models import (
     AgentNode,
@@ -657,7 +657,7 @@ class RunAdmissionService:
                 for row in session.scalars(
                     select(InstallationNode).where(
                         InstallationNode.installation_id == installation_id,
-                        InstallationNode.state == InstallationNodeState.INSTALLED,
+                        rank_installed(InstallationNode.state),
                     )
                 )
             }

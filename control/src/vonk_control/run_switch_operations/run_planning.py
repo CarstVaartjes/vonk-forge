@@ -517,7 +517,6 @@ class RunPlanningMixin:
                 stops=stops,
                 inspection=inspection,
                 runtime_storage=runtime_storage,
-                retention=request.retention,
                 blockers=blockers,
                 stop_before_transfer=stop_before_transfer,
                 stop_before_prepare=stop_before_prepare,
@@ -565,7 +564,6 @@ class RunPlanningMixin:
                     stops=stops,
                     inspection=inspection,
                     runtime_storage=runtime_storage,
-                    retention=request.retention,
                     blockers=blockers,
                     stop_before_transfer=stop_before_transfer,
                     stop_before_prepare=stop_before_prepare,
@@ -637,11 +635,7 @@ class RunPlanningMixin:
                     "preparation": preparation,
                     "conflicts": conflicts,
                     "stops": stops,
-                    "reclaimed_bytes": (
-                        runtime_storage.reclaimable_bytes
-                        if request.retention == "reclaim-unreferenced"
-                        else 0
-                    ),
+                    "reclaimed_bytes": 0,
                     "phases": phases,
                     "allowed": not blockers,
                     "blockers": blockers,

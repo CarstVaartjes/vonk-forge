@@ -172,8 +172,11 @@ unknown or stale scan as missing (the copy reuses what the agent already
 holds); fleet model removal waits for a fresh scan instead.
 A Spark holds a runtime image while an installed rank there names it (the
 helper keeps an image whose installation plan is on the host): Run/Switch and
-install admission read `disk_reservations.runtime_images_named_on_node`, and
-any other image is charged. The Controller records no image or model-file availability receipts
+install admission read `disk_reservations.runtime_images_named_on_nodes` (one
+query for all target Sparks), and any other image is charged. Whether a rank is
+installed is `machine_states.rank_installed`, for a stored state or the
+`InstallationNode.state` column; the `rank-installed` added-line guard refuses
+an inline `== InstallationNodeState.INSTALLED`. The Controller records no image or model-file availability receipts
 of its own. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a

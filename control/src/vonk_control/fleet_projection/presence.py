@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
-    InstallationNodeState,
     InstallationState,
     InstallDegradedReason,
     RouteState,
@@ -17,7 +16,7 @@ from vonk_agent_protocol import (
 
 from ..cluster_mappings import mapping_option_choices
 from ..load_swap import held_rise, readable_run_plan
-from ..machine_states import read_state
+from ..machine_states import rank_installed, read_state
 from ..models import CatalogDocumentRevision, ClusterMappingNode
 from ..recipe_operations import _run_is_one_shot
 from ..recipe_update_notice import recipe_update_notice
@@ -94,9 +93,7 @@ def _installed_presence(
                 reason = InstallDegradedReason.INSTALLATION_NOT_INSTALLED
             if reason is None:
                 affected = [
-                    node.rank
-                    for node in nodes
-                    if node.state != InstallationNodeState.INSTALLED
+                    node.rank for node in nodes if not rank_installed(node.state)
                 ]
                 if affected:
                     reason = InstallDegradedReason.RANK_NOT_INSTALLED
