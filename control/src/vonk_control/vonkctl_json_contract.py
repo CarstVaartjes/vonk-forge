@@ -345,9 +345,9 @@ def schema_text(kind: DocumentKind) -> str:
 def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
     """What a client of ``old`` can no longer rely on in ``new``.
 
-    A removed property, a ``required`` list that grew, a changed ``type`` or a
-    shorter alternative list all need a new ``schema_version``; added
-    properties and added alternatives do not.
+    A removed property, a ``required`` list that grew or a changed ``type`` needs
+    a new ``schema_version``; added properties and added or removed
+    alternatives do not.
     """
 
     problems: list[str] = []
@@ -370,9 +370,25 @@ def incompatibilities(old: object, new: object, path: str = "") -> list[str]:
             else:
                 problems.extend(incompatibilities(value, new[key], where))
     elif isinstance(old, list) and isinstance(new, list):
-        if len(new) < len(old) and path.rsplit("/", 1)[-1] in ("anyOf", "oneOf"):
-            problems.append(f"{path}: alternatives removed")
-        for index, (before, after) in enumerate(zip(old, new, strict=False)):
+        if path.rsplit("/", 1)[-1] in ("anyOf", "oneOf"):
+            # Alternatives pair by ``$ref``; a dropped one is never emitted.
+            refs = {
+                item["$ref"]: item
+                for item in new
+                if isinstance(item, dict) and "$ref" in item
+            }
+            pairs = [
+                (before, refs[before["$ref"]])
+                for before in old
+                if isinstance(before, dict) and before.get("$ref") in refs
+            ] + [
+                pair
+                for pair in zip(old, new, strict=False)
+                if not (isinstance(pair[0], dict) and "$ref" in pair[0])
+            ]
+        else:
+            pairs = list(zip(old, new, strict=False))
+        for index, (before, after) in enumerate(pairs):
             problems.extend(incompatibilities(before, after, f"{path}/{index}"))
     return problems
 
