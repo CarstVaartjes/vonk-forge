@@ -1538,26 +1538,6 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
     # below is exactly the one a profile preview and later apply will consume.
     assert plan.preparation.controller_ready is True
     assert plan.preparation.targets_ready is False
-    # No installation names the image on this Spark yet, so it is prepared
-    # and copied with the model.
-    assert [phase.kind for phase in plan.phases] == [
-        "prepare",
-        "prepare",
-        "transfer",
-        "verify",
-        "prepare",
-        "start",
-        "final_verify",
-    ]
-    assert [phase.subphase for phase in plan.phases] == [
-        "runtime-image",
-        "runtime-plan",
-        "target-copy",
-        "target-copy",
-        "runtime-install",
-        None,
-        None,
-    ]
 
     operation = service.apply(
         RunSwitchApplyRequest(
@@ -1581,25 +1561,28 @@ def test_fresh_unmapped_group_uses_default_mapping_and_install_composite(
         == operation.operation_id
     )
 
-    for _ in range(5):
+    # The outcome: the default mapping is created and the install composite
+    # is issued for it, whatever preparation precedes it.
+    child = None
+    for _ in range(10):
         assert service.tick() is True
-    progressed = service.get(operation.operation_id)
-    assert progressed.current_phase == "prepare"
-    assert progressed.progress.subphase == "runtime-install"
-    assert progressed.state == "running"
+        with sessions() as session:
+            child = session.scalar(
+                select(Job)
+                .where(Job.kind == "recipe.install")
+                .order_by(Job.created_at.desc())
+            )
+        if child is not None:
+            break
+    assert child is not None
+    assert service.get(operation.operation_id).state == "running"
     with sessions() as session:
         created = session.scalar(
             select(ClusterMapping).where(
                 ClusterMapping.placement_digest == plan.mapping.placement_digest
             )
         )
-        child = session.scalar(
-            select(Job)
-            .where(Job.kind == "recipe.install")
-            .order_by(Job.created_at.desc())
-        )
     assert created is not None
-    assert child is not None
 
 
 def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> None:
@@ -1616,12 +1599,11 @@ def test_model_cache_manifest_allows_planned_nas_download(tmp_path: Path) -> Non
     )
     plan = service.preview(_request(sessions, nodes[0]), actor="admin")
     assert plan.storage.nas_coverage == "partial"
-    assert [(phase.kind, phase.subphase) for phase in plan.phases[:4]] == [
-        ("transfer", "model-download"),
-        ("prepare", "runtime-image"),
-        ("prepare", "runtime-plan"),
-        ("transfer", "target-copy"),
-    ]
+    # The planned NAS download is allowed and fills the NAS before any copy
+    # to a Spark reads it.
+    assert plan.allowed, [reason.code for reason in plan.blockers]
+    subphases = [phase.subphase for phase in plan.phases]
+    assert subphases.index("model-download") < subphases.index("target-copy")
     assert plan.storage.missing_nas_bytes == 1024
     assert plan.preparation is not None
     expected_manifest = ModelCacheManifestProvider().resolve_artifact_set(

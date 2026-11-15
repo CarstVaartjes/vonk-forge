@@ -713,15 +713,20 @@ def _unreadable_while_waiting_for_disk(sim: Simulation) -> tuple[str, set[str]]:
     that no longer read."""
 
     world = sim.world
-    # One round more than the load's install admission needs: Spark 2 holds
-    # no installation of the image, so the load prepares it first.
-    sim.sparks.spark(1).pressure_steps = 4
+    # The Spark stays short of disk until the faults are cleared below.
+    sim.sparks.spark(1).pressure_steps = 10
     load = _loaded(sim, "solo-2", [world.assignment(SOLO, world.nodes[1:])])
-    for _ in range(4):
+    for _ in range(10):
         sim.round()
         sim.sparks.end_step()
+        if "insufficient_disk" in (
+            world.controller.profiles.application(load).status_reason or ""
+        ):
+            break
     # Waiting for disk, below the stall threshold, it says so.
-    assert world.controller.profiles.application(load).status_reason
+    assert "insufficient_disk" in (
+        world.controller.profiles.application(load).status_reason or ""
+    )
     with world.sessions() as session:
         unreadable = set(
             session.scalars(
