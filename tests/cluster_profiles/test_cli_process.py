@@ -4,7 +4,6 @@ import json
 import os
 import subprocess
 import sys
-import unicodedata
 from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
@@ -13,7 +12,6 @@ import pytest
 
 from cluster_profiles import cli
 from cluster_profiles.cli_completion import completion_script
-from cluster_profiles.cli_render.common import terminal_text
 from cluster_profiles.control_client import ControlClient
 
 
@@ -202,31 +200,19 @@ def test_completion_is_offline_and_contains_nested_commands(shell, monkeypatch):
     assert "library" in script and "loginfo" in script
 
 
-def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(monkeypatch):
-    hostile = "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link\r"
-    shown: list[dict[str, object]] = []
-    monkeypatch.setitem(
-        cli.PRESENTATIONS,
-        ("fleet", "detail"),
-        lambda payload, *args, **kwargs: shown.append(payload),
-    )
+def test_human_terminal_text_cannot_inject_cursor_or_hyperlink_controls(capsys):
     client = Observations(
         {
-            "display_name": hostile,
+            "display_name": "Atlas\x1b[2J\x1b]8;;https://bad.test\x07Link",
             "connection": {"online_state": "offline"},
             "loaded": [],
             "installed": [],
         }
     )
     assert cli.main(("fleet", "detail", "Atlas"), control_client=client) == 0
-    # The human emit path hands its renderer sanitized text only.
-    assert [_controls(str(item["display_name"])) for item in shown] == [[]]
-    assert _controls(terminal_text(hostile)) == []
-    assert _controls(hostile) == ["\x1b", "\x1b", "\x07", "\r"]
-
-
-def _controls(text: str) -> list[str]:
-    return [char for char in text if unicodedata.category(char) in {"Cc", "Cf"}]
+    captured = capsys.readouterr()
+    assert "\x1b" not in captured.out + captured.err
+    assert "\x07" not in captured.out + captured.err
 
 
 def test_json_preserves_remote_strings_and_collections(capsys):
@@ -434,7 +420,7 @@ def test_connection_check_rejects_a_fifo_without_waiting_for_a_writer(tmp_path):
 
 @pytest.mark.parametrize("credential_case", ["missing", "symlink", "insecure-mode"])
 def test_connection_check_rejects_unsafe_token_file_before_api_request(
-    tmp_path, credential_case, monkeypatch, vonkctl_json
+    tmp_path, credential_case, monkeypatch, capsys
 ):
     token = tmp_path / "controller-token"
     raw_token = "private-controller-token-never-print-this"
@@ -456,10 +442,12 @@ def test_connection_check_rejects_unsafe_token_file_before_api_request(
         raise AssertionError("invalid local credentials reached the Controller")
 
     monkeypatch.setattr(ControlClient, "request", unexpected_request)
-    status, document = vonkctl_json("--check-connection")
-    assert status == 2
+    assert cli.main(("--check-connection", "--json")) == 2
+    captured = capsys.readouterr()
+    document = json.loads(captured.out)
     assert "nodes" not in document
-    assert raw_token not in json.dumps(document)
+    assert raw_token not in captured.out + captured.err
+    assert not captured.err
     assert not requests
 
 

@@ -373,7 +373,7 @@ def test_recipe_observer_keeps_terminal_residue_until_the_same_snapshot_repairs(
 
 @pytest.mark.parametrize("failure", ["lost", "malformed", "normal"])
 def test_received_403_remains_a_refusal_when_its_body_is_lost(
-    tmp_path, vonkctl_json, failure
+    tmp_path, capsys, failure
 ):
     token = tmp_path / "token"
     token.write_text("fixture-token")
@@ -401,20 +401,20 @@ def test_received_403_remains_a_refusal_when_its_body_is_lost(
     control = ControlClient(
         "https://forge.example.test", token, opener=opener, timeout_seconds=2
     )
-    status, result = vonkctl_json(
-        "model",
-        "download",
-        "model-" + "m" * 175,
-        "--request-key",
-        KEY,
-        control_client=control,
+    assert (
+        cli.main(
+            ("model", "download", "model-" + "m" * 175, "--request-key", KEY, "--json"),
+            control_client=control,
+        )
+        == 2
     )
-    assert status == 2
+    output = capsys.readouterr()
+    result = json.loads(output.out)
     assert acceptance(result) == "refused"
     assert result["http_status"] == 403
     assert result["request_id"] == "refused-original"
     assert calls == ["POST"]
-    assert "partial-secret" not in json.dumps(result)
+    assert "partial-secret" not in output.out + output.err
 
 
 def test_lost_server_error_body_preserves_its_retry_delay(

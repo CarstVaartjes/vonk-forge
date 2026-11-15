@@ -47,17 +47,18 @@ class KeyClient:
         }
 
 
-def test_key_create_returns_the_key_once(vonkctl_json):
+def test_key_create_prints_the_key_once(capsys):
     client = KeyClient()
-    status, document = vonkctl_json(
-        "key",
-        "create",
-        "laptop",
-        control_client=client,
-        request_id_factory=lambda: REQUEST_ID,
+    assert (
+        cli.main(
+            ["key", "create", "laptop"],
+            control_client=client,
+            request_id_factory=lambda: REQUEST_ID,
+        )
+        == 0
     )
-    assert status == 0
-    assert json.dumps(document).count(SECRET) == 1
+    output = capsys.readouterr().out
+    assert output.count(SECRET) == 1
     assert client.calls == [
         (
             "POST",
@@ -113,13 +114,10 @@ def test_key_list_and_revoke():
     assert client.calls[-1] == ("POST", "/api/key/laptop/revoke", None)
 
 
-def test_key_roll_confirms_and_returns_the_new_key_once(vonkctl_json):
+def test_key_roll_confirms_and_prints_the_new_key_once(capsys):
     client = KeyClient()
     assert cli.main(["key", "roll", "laptop", "--no-input"], control_client=client) != 0
     assert not any(call[0] == "POST" for call in client.calls)
-    status, document = vonkctl_json(
-        "key", "roll", "laptop", "--yes", control_client=client
-    )
-    assert status == 0
-    assert json.dumps(document).count(SECRET) == 1
+    assert cli.main(["key", "roll", "laptop", "--yes"], control_client=client) == 0
+    assert capsys.readouterr().out.count(SECRET) == 1
     assert client.calls[-1] == ("POST", "/api/key/laptop/roll", None)
