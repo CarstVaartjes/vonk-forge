@@ -154,18 +154,57 @@ def install_image_of_replaced_source(
     installation.recipe_build_id = previous.id
 
 
+def copy_as_another_recipe(session, revision_id: str, *, model_content_sha256=None):
+    """Copy a recipe revision as another recipe (`earlier-model`): the same
+    document, so the same image, under another identity, optionally pinning
+    another primary model. No profile of the original recipe names it and no
+    load of it reuses its installations. Returns the copied revision."""
+    import copy as copying
+    from uuid import uuid4
+
+    from vonk_control.models import CatalogDocument, CatalogDocumentRevision
+
+    revision = session.get(CatalogDocumentRevision, revision_id)
+    assert revision is not None
+    document = session.get(CatalogDocument, revision.document_id)
+    assert document is not None
+    other = CatalogDocument(
+        **{
+            column.name: getattr(document, column.name)
+            for column in CatalogDocument.__table__.columns
+        }
+    )
+    other.id, other.slug = str(uuid4()), "earlier-model"
+    session.add(other)
+    session.flush()
+    copy = CatalogDocumentRevision(
+        **{
+            column.name: getattr(revision, column.name)
+            for column in CatalogDocumentRevision.__table__.columns
+        }
+    )
+    copy.id, copy.document_id, copy.slug = str(uuid4()), other.id, other.slug
+    if model_content_sha256 is not None:
+        document = copying.deepcopy(copy.document)
+        models = document["models"]
+        assert isinstance(models, list) and isinstance(models[0], dict)
+        models[0]["model"] = {
+            **models[0]["model"],
+            "content_sha256": model_content_sha256,
+        }
+        copy.document = document
+    session.add(copy)
+    session.flush()
+    return copy
+
+
 def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     """Another recipe that builds the same image is installed on the Sparks, so
     its installed ranks keep that image there. No profile of this recipe names
-    it and no load of this recipe reuses it (the `earlier-model` recipe, as in
-    `test_profile_installed_execution._another_recipe`)."""
-    from uuid import uuid4
-
+    it and no load of this recipe reuses it."""
     from sqlalchemy import select
+    from vonk_control.install_admission.identity import _primary_model_sha256
     from vonk_control.models import (
-        CatalogDocument,
-        CatalogDocumentRevision,
-        CatalogRecipeModelReference,
         ClusterMapping,
         InstallationNode,
         RecipeBuild,
@@ -176,45 +215,24 @@ def hold_image_through_another_recipe(lifecycle, sessions, *, now) -> None:
     with sessions() as session:
         build = session.scalar(select(RecipeBuild))
         mapping = session.scalar(select(ClusterMapping))
-        model = session.scalar(select(CatalogRecipeModelReference.model_content_digest))
-        assert build is not None and mapping is not None and model is not None
+        assert build is not None and mapping is not None
         mapping_id = mapping.id
     install_plan = lifecycle.preview_install(mapping_id, build.id)
+    stored_plan = install_plan.stored_plan()
     with sessions.begin() as session:
-        revision = session.get(CatalogDocumentRevision, build.recipe_revision_id)
-        assert revision is not None
-        document = session.get(CatalogDocument, revision.document_id)
-        assert document is not None
-        other = CatalogDocument(
-            **{
-                column.name: getattr(document, column.name)
-                for column in CatalogDocument.__table__.columns
-            }
-        )
-        other.id, other.slug = str(uuid4()), "earlier-model"
-        session.add(other)
-        session.flush()
-        other_revision = CatalogDocumentRevision(
-            **{
-                column.name: getattr(revision, column.name)
-                for column in CatalogDocumentRevision.__table__.columns
-            }
-        )
-        other_revision.id = str(uuid4())
-        other_revision.document_id, other_revision.slug = other.id, other.slug
-        session.add(other_revision)
-        session.flush()
-        stored = serialize_json_value(install_plan.stored_plan())
+        other = copy_as_another_recipe(session, build.recipe_revision_id)
+        stored = serialize_json_value(stored_plan)
         assert isinstance(stored, dict)
         installation = RecipeInstallation(
-            recipe_revision_id=other_revision.id,
-            model_content_sha256=model,
+            recipe_revision_id=other.id,
+            model_content_sha256=_primary_model_sha256(other.document),
+            model_artifact_set_sha256=stored_plan.model_artifact_set_sha256,
             mapping_id=mapping_id,
             mapping_generation=install_plan.mapping_generation,
             recipe_build_id=build.id,
             image_digest=build.image_digest,
             plan_digest=install_plan.plan_digest,
-            plan={**stored, "recipe_revision_id": other_revision.id},
+            plan={**stored, "recipe_revision_id": other.id},
             state="installed",
             actor="admin",
             created_at=now,

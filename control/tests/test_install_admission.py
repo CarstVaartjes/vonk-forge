@@ -2,7 +2,6 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from importlib.resources import files
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, select, update
@@ -15,6 +14,7 @@ from vonk_control.install_admission import (
     InstallAdmissionService,
     installation_plan_digest_from_stored_document,
 )
+from vonk_control.install_admission.identity import _primary_model_sha256
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -51,6 +51,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
     set_inventory_fingerprint,
 )
+from .runtime_image_fixtures import copy_as_another_recipe
 from .stored_documents_support import valid_policy_report
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -1173,32 +1174,10 @@ def _name_image_on(sessions, node, mapping, now) -> str:
     its installed rank keeps that image there."""
 
     with sessions.begin() as session:
-        revision = session.get(CatalogDocumentRevision, RECIPE_REVISION_ID)
-        assert revision is not None
-        document = session.get(CatalogDocument, revision.document_id)
-        assert document is not None
-        other = CatalogDocument(
-            **{
-                column.name: getattr(document, column.name)
-                for column in CatalogDocument.__table__.columns
-            }
-        )
-        other.id, other.slug = str(uuid4()), "earlier-model"
-        session.add(other)
-        session.flush()
-        other_revision = CatalogDocumentRevision(
-            **{
-                column.name: getattr(revision, column.name)
-                for column in CatalogDocumentRevision.__table__.columns
-            }
-        )
-        other_revision.id = str(uuid4())
-        other_revision.document_id, other_revision.slug = other.id, other.slug
-        session.add(other_revision)
-        session.flush()
+        other = copy_as_another_recipe(session, RECIPE_REVISION_ID)
         installation = RecipeInstallation(
-            recipe_revision_id=other_revision.id,
-            model_content_sha256="e" * 64,
+            recipe_revision_id=other.id,
+            model_content_sha256=_primary_model_sha256(other.document),
             mapping_id=mapping,
             mapping_generation=1,
             image_digest="sha256:" + "1" * 64,
