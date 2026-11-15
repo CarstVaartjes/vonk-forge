@@ -1476,6 +1476,7 @@ node_id = "spk_0123456789abcdef0123456789abcdef"
             installations: None,
             unused_model_bytes: None,
             model_objects: None,
+            runtime_images: None,
             runs: None,
             installation_bytes: None,
         }

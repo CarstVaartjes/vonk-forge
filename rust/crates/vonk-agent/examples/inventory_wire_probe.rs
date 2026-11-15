@@ -43,6 +43,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })
                 .collect(),
         ),
+        runtime_images: Some(serde_json::from_str(include_str!(
+            "../../../../agent_protocol/src/vonk_agent_protocol/vectors/runtime-images-v1.json"
+        ))?),
         runs: None,
         installation_bytes: None,
         nvidia_driver_version: "550.1".to_owned(),

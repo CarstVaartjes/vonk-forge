@@ -150,36 +150,9 @@ impl<R: CommandRunner> OperationExecutor<R> {
             Err(std::sync::TryLockError::Poisoned(guard)) => guard.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => return,
         };
-        // Tagged images only: the reference filter never matches an
-        // intermediate layer, so `--all` adds nothing. The listing is read a
-        // line at a time; it grows with the images this pass must remove.
-        let mut images: Vec<(String, String)> = Vec::new();
-        let listing = self.run_docker_lines(
-            &[
-                "images",
-                "--no-trunc",
-                "--filter",
-                "reference=localhost/vonk/*",
-                "--format",
-                "{{.Repository}}:{{.Tag}}\t{{.ID}}",
-            ]
-            .map(str::to_owned),
-            Duration::from_secs(15),
-            &mut |line| {
-                if let Some((reference, id)) = line.split_once('\t') {
-                    images.push((reference.to_owned(), id.to_owned()));
-                }
-            },
-        );
-        match listing {
-            Ok(output) if output.success => {}
-            other => {
-                eprintln!(
-                    "vonk-agent-helper: Docker image inventory unavailable: {other:?}; retried next pass"
-                );
-                return;
-            }
-        }
+        let Some(images) = self.managed_images() else {
+            return;
+        };
         let protected = |reference: &str| {
             let name = reference.split(':').next().unwrap_or_default();
             let address = name.rsplit('-').next().unwrap_or_default();
@@ -309,6 +282,64 @@ impl<R: CommandRunner> OperationExecutor<R> {
                 eprintln!("vonk-agent-helper: orphan image {id} kept: {error}; retried next pass");
             }
         }
+    }
+
+    /// Docker's tagged images in the managed namespace, as (reference, id).
+    /// The reference filter never matches an intermediate layer, so `--all`
+    /// adds nothing. The listing is read a line at a time; it grows with the
+    /// images a sweep must remove. `None` when Docker cannot list them.
+    fn managed_images(&self) -> Option<Vec<(String, String)>> {
+        let mut images: Vec<(String, String)> = Vec::new();
+        let listing = self.run_docker_lines(
+            &[
+                "images",
+                "--no-trunc",
+                "--filter",
+                "reference=localhost/vonk/*",
+                "--format",
+                "{{.Repository}}:{{.Tag}}\t{{.ID}}",
+            ]
+            .map(str::to_owned),
+            Duration::from_secs(15),
+            &mut |line| {
+                if let Some((reference, id)) = line.split_once('\t') {
+                    images.push((reference.to_owned(), id.to_owned()));
+                }
+            },
+        );
+        match listing {
+            Ok(output) if output.success => Some(images),
+            other => {
+                eprintln!(
+                    "vonk-agent-helper: Docker image inventory unavailable: {other:?}; retried next pass"
+                );
+                None
+            }
+        }
+    }
+
+    /// The compiled runtime images Docker holds now, by the platform manifest
+    /// digest their local name carries; `None` when Docker cannot list them.
+    /// The agent reports it in every inventory: the Controller charges an
+    /// install for an image not listed here.
+    pub fn runtime_image_observation(
+        &self,
+    ) -> Option<vonk_agent_protocol::generated::RuntimeImageObservation> {
+        let images: std::collections::BTreeSet<String> = self
+            .managed_images()?
+            .iter()
+            .filter_map(|(reference, _)| {
+                reference
+                    .split(':')
+                    .next()?
+                    .strip_prefix("localhost/vonk/compiled-runtime-")
+                    .filter(|address| lower_hex(address, 64))
+                    .map(|address| format!("sha256:{address}"))
+            })
+            .collect();
+        Some(vonk_agent_protocol::generated::RuntimeImageObservation {
+            images: images.into_iter().collect(),
+        })
     }
 
     fn image_has_no_containers(&self, image: &str) -> Option<bool> {

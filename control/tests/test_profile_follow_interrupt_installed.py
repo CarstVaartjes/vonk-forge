@@ -18,10 +18,10 @@ from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.agent_contacts import record_contact
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.fleet_profile_contract import FleetProfileApplicationProgress
-from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
+    spark_runtime_images,
 )
 from vonk_control.models import (
     AgentCertificate,
@@ -30,9 +30,6 @@ from vonk_control.models import (
     FleetProfileApplication,
 )
 
-from .inventory_artifact_support import (
-    seed_inventory_artifact,
-)
 from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profile_api import _client, _headers
 from .test_fleet_profile_cancel import _application
@@ -79,20 +76,7 @@ def _add_disjoint_profile_node(
             management_address="192.168.1.212",
             management_observed_at=NOW,
         )
-        artifacts = tuple(inventory_artifacts(session, source_node_id))
-        for artifact in artifacts:
-            seed_inventory_artifact(
-                session,
-                node_id=node_id,
-                kind=artifact.kind,
-                digest=artifact.digest,
-                source=artifact.source,
-                size_bytes=artifact.size_bytes,
-                state=artifact.state,
-                ref_count=0,
-                verified_at=artifact.verified_at,
-                updated_at=NOW,
-            )
+        held = spark_runtime_images(session, source_node_id, now=NOW)
         revision = session.scalar(
             select(CatalogDocumentRevision).where(
                 CatalogDocumentRevision.kind == "recipe",
@@ -121,6 +105,9 @@ def _add_disjoint_profile_node(
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
+                    "runtime_images": None
+                    if held is None
+                    else {"images": sorted(held)},
                 }
             )
         )

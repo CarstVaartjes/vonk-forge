@@ -25,6 +25,7 @@
         "agent_evidence.inventory_installation_bytes_dropped",
         "agent_evidence.inventory_unused_model_bytes_dropped",
         "agent_evidence.inventory_model_objects_dropped",
+        "agent_evidence.inventory_runtime_images_dropped",
         "agent_evidence.inventory_nas_route_dropped",
         "agent_evidence.inventory_network_dropped",
         "agent_evidence.inventory_network_interface_dropped",
@@ -8586,6 +8587,17 @@
           ],
           "default": null,
           "title": "Runs"
+        },
+        "runtime_images": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RuntimeImageObservation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "schema_version": {
           "const": 1,
@@ -20230,6 +20242,25 @@
         "runtime_interface"
       ],
       "title": "RuntimeImageIdentity",
+      "type": "object"
+    },
+    "RuntimeImageObservation": {
+      "description": "The root helper's Docker listing, reported unchanged in every inventory.\n\nEach entry is the platform manifest digest of a compiled runtime image\nDocker holds under its local name. The Controller charges an install for\nany image not named here; a missing observation is unknown and charges too.",
+      "properties": {
+        "images": {
+          "items": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 1024,
+          "title": "Images",
+          "type": "array"
+        }
+      },
+      "required": [
+        "images"
+      ],
+      "title": "RuntimeImageObservation",
       "type": "object"
     },
     "RuntimeImagePreparation": {

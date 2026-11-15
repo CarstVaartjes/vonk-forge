@@ -224,7 +224,10 @@ a model exists on a Spark, its shared store holds that model's files and a new
 installation links them, so a load's disk claim leaves them out. The same holds
 for any file the agent's store scan reports (`model_objects` in its fresh
 inventory), and Run/Switch plans a target copy only for the files that scan does
-not report; a missing or stale scan counts as missing. The protected reference scan keeps model objects a saved profile names even
+not report; a missing or stale scan counts as missing. The runtime image follows
+the same rule: it is reused only when the Spark's fresh inventory lists it among
+the images Docker holds (`runtime_images`, the root helper's Docker listing), so
+an image the helper pruned is charged again. The protected reference scan keeps model objects a saved profile names even
 when its installation is removed.
 
 A load that waits for disk is not failed: it shows `storage.evicting` (bytes

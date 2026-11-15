@@ -70,3 +70,24 @@ def test_inventory_health_shared_vectors_survive_ingress() -> None:
         accepted = InventoryRequest.model_validate(document)
         assert accepted.gpu_health == health
         assert accepted.evidence_warnings == ()
+
+
+def test_the_helper_runtime_image_listing_crosses_inventory_ingress() -> None:
+    # Catches a listing ingress refuses (the image then reads as unknown and
+    # is charged on every install), or a repeated image accepted as evidence.
+    from vonk_agent_protocol import AgentEvidenceCode
+    from vonk_agent_protocol.inventory import InventoryRequest
+
+    held = _vector("runtime-images-v1.json")
+    document = _vector("inventory-wifi-link-v1.json") | {"runtime_images": held}
+    accepted = InventoryRequest.model_validate(document)
+    assert accepted.evidence_warnings == ()
+    assert accepted.runtime_images is not None
+    assert accepted.runtime_images.images == held["images"]
+
+    repeated = {"images": held["images"] + held["images"][:1]}
+    dropped = InventoryRequest.model_validate(document | {"runtime_images": repeated})
+    assert dropped.runtime_images is None
+    assert dropped.evidence_warnings == (
+        AgentEvidenceCode.INVENTORY_RUNTIME_IMAGES_DROPPED,
+    )

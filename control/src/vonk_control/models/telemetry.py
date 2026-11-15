@@ -38,6 +38,7 @@ from vonk_agent_protocol.inventory import (
     NetworkInterface,
     RunScopeId,
 )
+from vonk_agent_protocol.runtime_images import RuntimeImageObservation
 from vonk_agent_protocol.telemetry import HostResourceSample
 
 from ..inventory_items_contract import AgentInventoryItems, InventorySnapshotKind
@@ -148,6 +149,12 @@ class NodeInventorySnapshot(NodeSnapshot):
     model_objects: Mapped[list[ModelStoreObject] | Residue | None] = mapped_column(
         ContractJSON[list[ModelStoreObject]](
             "node_inventory_snapshots", "model_objects", none_as_null=True
+        )
+    )
+    # NULL: the agent did not report the runtime images Docker holds (unknown).
+    runtime_images: Mapped[RuntimeImageObservation | Residue | None] = mapped_column(
+        ContractJSON[RuntimeImageObservation](
+            "node_inventory_snapshots", "runtime_images", none_as_null=True
         )
     )
     installations: Mapped[list[InstallationId] | Residue | None] = mapped_column(

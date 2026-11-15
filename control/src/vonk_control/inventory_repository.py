@@ -8,14 +8,16 @@ import logging
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import field_validator
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import InstrumentedAttribute, Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_agent_protocol.inventory import (
     InventoryRequest,
 )
+from vonk_agent_protocol.runtime_images import RuntimeImageObservation
 from vonk_agent_protocol.wire_model import strict_json_datetime
 
 from .categorized_errors import InvalidValue
@@ -95,13 +97,55 @@ def spark_model_objects(
     object it holds); removal confirmation waits for a fresh scan instead.
     """
 
+    objects = _fresh_evidence(
+        session,
+        node_id,
+        NodeInventorySnapshot.model_objects,
+        now=now,
+        received_after=received_after,
+    )
+    if not isinstance(objects, list):
+        return None
+    return {item.sha256: item.bytes for item in objects}
+
+
+def spark_runtime_images(
+    session: Session, node_id: str, *, now: datetime
+) -> frozenset[str] | None:
+    """The runtime images (manifest digests) Docker on a Spark holds.
+
+    From the root helper's Docker listing in the Spark's newest inventory.
+    ``None`` (unknown) when that report is missing, older than
+    :data:`INVENTORY_MAX_AGE` or carries no readable listing; run planning
+    and install admission then charge the image, and the pull that follows
+    reuses an image Docker already holds.
+    """
+
+    observation = _fresh_evidence(
+        session, node_id, NodeInventorySnapshot.runtime_images, now=now
+    )
+    if not isinstance(observation, RuntimeImageObservation):
+        return None
+    return frozenset(observation.images)
+
+
+def _fresh_evidence(
+    session: Session,
+    node_id: str,
+    column: InstrumentedAttribute[Any],
+    *,
+    now: datetime,
+    received_after: datetime | None = None,
+) -> object:
+    """One evidence column of a Spark's newest inventory, when that is fresh."""
+
     row = session.execute(
-        select(NodeInventorySnapshot.model_objects, NodeInventorySnapshot.received_at)
+        select(column, NodeInventorySnapshot.received_at)
         .where(NodeInventorySnapshot.node_id == node_id)
         .order_by(NodeInventorySnapshot.observed_at.desc())
         .limit(1)
     ).first()
-    if row is None or not isinstance(row.model_objects, list):
+    if row is None:
         return None
     received = (
         row.received_at
@@ -112,7 +156,7 @@ def spark_model_objects(
         received_after is not None and received <= received_after
     ):
         return None
-    return {item.sha256: item.bytes for item in row.model_objects}
+    return row[0]
 
 
 class InventoryRepository:

@@ -462,6 +462,30 @@ fn handle(
             HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
         });
     }
+    if vonk_agent_protocol::parse_strict::<
+        vonk_agent_protocol::generated::RuntimeImageInspectionRequest,
+    >(&raw)
+    .is_ok()
+    {
+        verifier.authorize_peer(&peer).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())
+        })?;
+        let observation = executor.runtime_image_observation().ok_or_else(|| {
+            HelperRejection::new(
+                HelperErrorCode::OperationFailed,
+                "Docker image listing unavailable",
+            )
+        })?;
+        let body = vonk_agent_protocol::canonical_generated_json(&observation).map_err(|_| {
+            HelperRejection::new(
+                HelperErrorCode::OperationFailed,
+                "runtime image observation encoding failed",
+            )
+        })?;
+        return write_frame(stream, &body).map_err(|error| {
+            HelperRejection::new(HelperErrorCode::OperationFailed, error.safe_detail())
+        });
+    }
     if let Some(report) =
         vonk_agent_helper::page_cache::handle(&raw, verifier, &peer).map_err(|error| {
             HelperRejection::new(HelperErrorCode::PeerIdentityInvalid, error.safe_detail())

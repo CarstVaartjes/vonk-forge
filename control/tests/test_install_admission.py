@@ -7,14 +7,13 @@ import pytest
 from sqlalchemy import create_engine, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
-from vonk_agent_protocol import CompiledExecutionPlan, ModelFileState, canonical_message
+from vonk_agent_protocol import CompiledExecutionPlan, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.cluster_mappings import ClusterMappingService
 from vonk_control.install_admission import (
     InstallAdmissionService,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.inventory_items import inventory_artifacts
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -44,17 +43,13 @@ from vonk_forge_contracts import (
 )
 
 from .display_fixtures import legacy_model_display, model_display_denying
-from .inventory_artifact_support import (
-    clear_inventory_artifacts,
-    replace_inventory_artifact,
-    seed_inventory_artifact,
-)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
     inventory_items_fixture,
     set_inventory_fingerprint,
 )
+from .runtime_image_support import clear_runtime_images
 from .stored_documents_support import valid_policy_report
 
 MODEL_DOCUMENT_ID = "00000000-0000-4000-8000-000000000010"
@@ -375,6 +370,7 @@ def setup(
     denied_jurisdictions=(),
     disk_estimates=(30, 70),
     model_objects=None,
+    runtime_images=("sha256:" + "1" * 64,),
 ):
     tmp_path.mkdir(parents=True, exist_ok=True)
     engine = create_engine(f"sqlite:///{tmp_path / 'install.sqlite'}")
@@ -431,6 +427,7 @@ def setup(
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
                     "model_objects": model_objects,
+                    "runtime_images": {"images": list(runtime_images)},
                 }
             )
         )
@@ -462,19 +459,6 @@ def setup(
         session.add(build)
         session.flush()
         build_id = build.id
-        image_digest = "1" * 64
-        seed_inventory_artifact(
-            session,
-            node_id=node_id,
-            kind="image",
-            digest=image_digest,
-            source="docker-archive:" + "2" * 64,
-            size_bytes=30,
-            state="verified",
-            ref_count=0,
-            verified_at=now,
-            updated_at=now,
-        )
     return sessions, now, node_id, mapping_id, build_id
 
 
@@ -615,10 +599,8 @@ def test_cold_install_uses_actual_image_and_model_sizes_instead_of_recipe_estima
     tmp_path, free: int, allowed: bool
 ) -> None:
     sessions, now, _node, mapping, build = setup(
-        tmp_path, free=free, disk_estimates=(1, 1)
+        tmp_path, free=free, disk_estimates=(1, 1), runtime_images=()
     )
-    with sessions.begin() as session:
-        clear_inventory_artifacts(session)
     plan = _service(sessions, inventory_max_age=300, disk_floor_bytes=10).plan_install(
         mapping, build, now=now
     )
@@ -764,11 +746,7 @@ def test_queue_rejects_artifact_or_reservation_mutation_after_preview(tmp_path) 
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     plan = service.plan_install(mapping, build, now=now)
     with sessions.begin() as session:
-        artifact = next(iter(inventory_artifacts(session, node)), None)
-        assert artifact is not None
-        replace_inventory_artifact(
-            session, node, artifact.model_copy(update={"state": ModelFileState.MISSING})
-        )
+        clear_runtime_images(session)
         session.add(
             ResourceReservation(
                 node_id=node,
@@ -859,6 +837,7 @@ def test_plan_digest_ignores_fresh_inventory_observation_noise(tmp_path) -> None
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
+                    "runtime_images": _HELD_IMAGE,
                 }
             )
         )
@@ -1003,7 +982,12 @@ def test_install_rejects_mapping_with_wrong_endpoint_owner(tmp_path) -> None:
         node.endpoint_owner = False
 
 
-def _record_inventory(sessions, node_id, at, *, free=200) -> None:
+_HELD_IMAGE = {"images": ["sha256:" + "1" * 64]}
+
+
+def _record_inventory(
+    sessions, node_id, at, *, free=200, runtime_images=_HELD_IMAGE
+) -> None:
     """Keep reporting the same authenticated capacity at a later observation."""
 
     InventoryRepository(sessions, clock=lambda: at).record(
@@ -1028,6 +1012,7 @@ def _record_inventory(sessions, node_id, at, *, free=200) -> None:
                     "schema_version": 1,
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
+                    "runtime_images": runtime_images,
                 }
             )
         )
@@ -1173,3 +1158,23 @@ def test_damaged_install_identity_does_not_block_fresh_admission(tmp_path) -> No
             installation_plan_digest_from_stored_document(stored.plan)
             == plan.plan_digest
         )
+
+
+def test_a_pruned_runtime_image_is_charged_again(tmp_path) -> None:
+    """The Spark's newest image report decides reuse. Catches presence read
+    from a distribution receipt that never expires: once the Spark no longer
+    reports the image, admission charges its bytes again."""
+
+    sessions, now, node, mapping, build = setup(tmp_path)
+    service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
+    assert service.plan_install(mapping, build, now=now).nodes[0].reused_bytes == 30
+
+    pruned_at = now + timedelta(seconds=1)
+    _record_inventory(sessions, node, pruned_at, runtime_images={"images": []})
+    pruned = service.plan_install(mapping, build, now=pruned_at).nodes[0]
+    assert (pruned.reused_bytes, pruned.required_download_bytes) == (0, 100)
+
+    unknown_at = now + timedelta(seconds=2)
+    _record_inventory(sessions, node, unknown_at, runtime_images=None)
+    unknown = service.plan_install(mapping, build, now=unknown_at).nodes[0]
+    assert (unknown.reused_bytes, unknown.required_download_bytes) == (0, 100)

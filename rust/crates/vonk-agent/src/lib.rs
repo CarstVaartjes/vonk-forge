@@ -29,6 +29,7 @@ pub mod readiness;
 pub mod recipe_builder;
 pub mod rotation;
 pub mod runtime_identity;
+mod runtime_images;
 pub mod self_test;
 pub mod source_policy;
 pub mod stall_window;

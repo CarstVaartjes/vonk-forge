@@ -91,6 +91,8 @@ def _report_store(sessions, node_id: str, objects) -> None:
                     "nvidia_driver_version": "unknown",
                     "container_runtime_version": "unknown",
                     "model_objects": objects,
+                    # The fixture build's image stays in Docker.
+                    "runtime_images": {"images": ["sha256:" + "1" * 64]},
                 }
             )
         )

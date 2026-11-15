@@ -163,6 +163,7 @@ class CleanupPlanningMixin:
                     build_candidate,
                     group,
                     require_available=False,
+                    now=now,
                 )
             )
             node_ids = [node.node_id for node in group.nodes]

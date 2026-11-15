@@ -43,7 +43,6 @@ from vonk_control.install_admission import (
     InstallAdmissionBusy,
     installation_plan_digest_from_stored_document,
 )
-from vonk_control.inventory_items import inventory_items, record_items
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
@@ -147,10 +146,6 @@ from vonk_control.runtime_preflight import latest_result
 from vonk_control.source_bundles import SourceBundleStore, generate_source_bundle
 from vonk_forge_contracts import RecipeDefinition, document_sha256
 
-from .inventory_artifact_support import (
-    all_inventory_artifacts,
-    clear_inventory_artifacts,
-)
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
     PACKAGED_RUNTIME_IDENTITY,
@@ -159,6 +154,7 @@ from .runtime_identity_support import (
     set_inventory_identity,
 )
 from .runtime_image_fixtures import install_another_image, place_test_image
+from .runtime_image_support import clear_runtime_images, report_runtime_images
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 from .display_fixtures import reword
@@ -1774,7 +1770,7 @@ def test_cold_model_and_image_plan_defers_compile_until_both_preparations(
         tmp_path
     )
     with sessions.begin() as session:
-        clear_inventory_artifacts(session)
+        clear_runtime_images(session)
     inspector = CompleteArtifactInspector(missing_spark_bytes=1024)
 
     class ColdInspector(CompleteArtifactInspector):
@@ -1837,7 +1833,7 @@ def test_cold_production_phases_prepare_receipts_before_real_install_compile(
 
     sessions, lifecycle, _queue, _mapping_id, build_id, nodes = setup_services(tmp_path)
     with sessions.begin() as session:
-        clear_inventory_artifacts(session)
+        clear_runtime_images(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest = build.image_digest
@@ -2312,6 +2308,7 @@ def _cold_compile_switch(
                             "schema_version": 1,
                             "nvidia_driver_version": "unknown",
                             "container_runtime_version": "unknown",
+                            "runtime_images": {"images": ["sha256:" + "1" * 64]},
                         }
                     )
                 )
@@ -3408,10 +3405,7 @@ def test_a_newer_unfinished_build_row_keeps_the_installation_once_its_image_expi
 
 def _drop_installed_image_from_spark(sessions, node_id: str) -> None:
     with sessions.begin() as session:
-        node = session.get(AgentNode, node_id)
-        assert node is not None
-        items = inventory_items(node)
-        record_items(node, items.model_copy(update={"artifacts": []}), NOW)
+        report_runtime_images(session, node_id)
 
 
 @pytest.mark.parametrize("archive_present", [True, False])
@@ -5649,7 +5643,6 @@ def test_cancel_intent_waits_for_transfer_receipt_and_preserves_shared_copies(tm
     assert cancelled_result.child_operation_id is None
     assert not restarted._advance(operation.operation_id)
     with sessions() as session:
-        assert len(list(all_inventory_artifacts(session))) > 0
         installed = session.get(RecipeInstallation, plan.installation_id)
         assert installed is not None
         assert installed.state == "installed"

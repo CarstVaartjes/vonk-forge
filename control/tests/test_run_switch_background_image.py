@@ -58,10 +58,8 @@ from vonk_control.runtime_image_preparation import (
     prepare_runtime_image,
 )
 
-from .inventory_artifact_support import (
-    clear_inventory_artifacts,
-)
 from .runtime_image_fixtures import place_test_image
+from .runtime_image_support import clear_runtime_images
 from .test_lifecycle_preflight import _finish
 from .test_recipe_operations import NOW, _CanonicalModelCache, setup_services
 from .test_run_switch_operations import (
@@ -203,7 +201,7 @@ def _background_image_switch(
     clock = _AdvancingClock(NOW)
     lifecycle._clock = clock
     with sessions.begin() as session:
-        clear_inventory_artifacts(session)
+        clear_runtime_images(session)
         build = session.get(RecipeBuild, build_id)
         assert build is not None
         image_digest, layout_digest = build.image_digest, build.oci_layout_sha256

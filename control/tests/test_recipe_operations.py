@@ -144,9 +144,6 @@ from vonk_forge_contracts import (
 
 from .agent_fences import fenced_operation
 from .canonical_recipe_fixtures import canonical_example
-from .inventory_artifact_support import (
-    seed_inventory_artifact,
-)
 from .node_contacts import contact_row
 from .preflight_fixtures import record_passing_preflight
 from .runtime_identity_support import (
@@ -155,6 +152,7 @@ from .runtime_identity_support import (
     inventory_items_fixture,
 )
 from .runtime_image_fixtures import place_test_image
+from .runtime_image_support import report_runtime_images
 
 _FIXTURE_ADAPTER = resolve_runtime_adapter("vllm", {"node_count": 1})
 
@@ -744,18 +742,7 @@ def setup_services(
         build.plan = {**build.plan, "build_id": build.id}
         build_id = build.id
         for node_id in node_ids:
-            seed_inventory_artifact(
-                session,
-                node_id=node_id,
-                kind="image",
-                digest="1" * 64,
-                source="docker-archive:" + image_archive_sha256,
-                size_bytes=30,
-                state="verified",
-                ref_count=0,
-                verified_at=NOW,
-                updated_at=NOW,
-            )
+            report_runtime_images(session, node_id, "sha256:" + "1" * 64)
     canonical_cache = _CanonicalModelCache()
 
     def prepare_canonical_runtime_image(document, runtime_spec, build):

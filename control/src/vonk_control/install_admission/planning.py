@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     InstallAdmissionCode,
     InvalidRequestReason,
-    ModelFileState,
     UnknownOutcomeError,
     WaitReason,
 )
@@ -32,7 +31,7 @@ from ..disk_reservations import (
     outstanding_disk_charges,
 )
 from ..gpu_health import gpu_health_reason
-from ..inventory_items import inventory_artifacts, inventory_items
+from ..inventory_items import inventory_items
 from ..inventory_repository import InventoryRepository, InventorySnapshotView
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
@@ -403,11 +402,6 @@ class InstallPlanningService:
             with (
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
-                present = tuple(
-                    item
-                    for item in inventory_artifacts(session, mapping_node.node_id)
-                    if item.state == ModelFileState.VERIFIED
-                )
                 stored_models = models_stored_on_node(session, mapping_node.node_id)
                 charges = outstanding_disk_charges(
                     session,
@@ -419,16 +413,15 @@ class InstallPlanningService:
                 )
                 reserved = sum(charge.amount_bytes for charge in charges)
                 holders = describe_disk_charges(session, charges)
-            raw_image_digest = image_digest.removeprefix("sha256:")
+            # The Spark's own Docker listing in the inventory read above, under
+            # its freshness rule; unknown or stale counts as not held.
             reused_image = (
                 image_bytes
                 if image_bytes is not None
-                and any(
-                    item.kind == "image"
-                    and item.digest == raw_image_digest
-                    and item.size_bytes == image_bytes
-                    for item in present
-                )
+                and snapshot is not None
+                and not snapshot.stale
+                and snapshot.runtime_images is not None
+                and image_digest in snapshot.runtime_images.images
                 else 0
             )
             if reused_image == 0:

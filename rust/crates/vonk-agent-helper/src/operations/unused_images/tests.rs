@@ -401,3 +401,30 @@ fn an_orphan_image_is_collected_however_many_managed_images_the_listing_holds() 
             .all(|(reference, _)| !reference.contains("orphan"))
     );
 }
+
+#[test]
+fn the_runtime_image_observation_names_each_compiled_image_docker_holds() {
+    // Break caught: an image Docker no longer holds still reported (a pruned
+    // image reads as present), or an adapter/build image counted as runtime.
+    let (_temp, runner, executor) = executor();
+    let held: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../../../agent_protocol/src/vonk_agent_protocol/vectors/runtime-images-v1.json"
+    ))
+    .unwrap();
+    let pruned = "c".repeat(64);
+    for image in held["images"].as_array().unwrap() {
+        pull(
+            &executor,
+            image.as_str().unwrap().strip_prefix("sha256:").unwrap(),
+        );
+    }
+    pull(&executor, &pruned);
+    runner.images.lock().unwrap().remove(&local(&pruned));
+    runner.images.lock().unwrap().insert(
+        format!("localhost/vonk/runtime-adapter-{}", "d".repeat(64)),
+        format!("sha256:{}", "e".repeat(64)),
+    );
+
+    let observed = executor.runtime_image_observation().unwrap();
+    assert_eq!(serde_json::to_value(&observed).unwrap(), held);
+}

@@ -229,84 +229,40 @@ def move_runtime_facts(connection: Connection) -> None:
     connection.execute(text("ALTER TABLE agent_node_profiles DROP COLUMN hostname"))
 
 
-def move_artifact_facts(connection: Connection) -> None:
-    """Fold availability receipts into the node's typed inventory before retirement."""
-    import hashlib
-    import uuid
-    from datetime import UTC, datetime
-    from itertools import groupby
+def retire_artifact_facts(connection: Connection) -> None:
+    """Retire Controller-recorded image receipts, never adopting them.
 
-    from sqlalchemy import insert, select, update
-    from vonk_agent_protocol import canonical_message
+    A receipt said a Spark held an image long after it was pruned; the Spark
+    now reports the images Docker holds in its inventory. The items rows lose
+    their ``artifacts`` key so they stay readable, and the old receipt table
+    goes, in startup's one transaction; a later start finds nothing to do.
+    """
+    from sqlalchemy import JSON, column, select, table, update
 
-    from ..inventory_items_contract import (
-        AgentInventoryItems,
-        InventoryArtifactItem,
-        InventorySnapshotKind,
+    from ..inventory_items_contract import InventorySnapshotKind
+
+    if "node_artifacts" in inspect(connection).get_table_names():
+        connection.execute(text("DROP TABLE node_artifacts"))
+    # Raw JSON: the typed reader refuses the retired key it must remove.
+    snapshots = table(
+        "node_inventory_snapshots",
+        column("id"),
+        column("kind"),
+        column("agent_items", JSON),
     )
-    from ..models import NodeInventoryItemsSnapshot
-
-    if "node_artifacts" not in inspect(connection).get_table_names():
-        return
     rows = connection.execute(
-        text("SELECT * FROM node_artifacts ORDER BY node_id, digest")
-    ).mappings()
-    now = datetime.now(UTC)
-    for node_id, entries in groupby(rows, key=lambda row: row["node_id"]):
-        stored = connection.execute(
-            select(
-                NodeInventoryItemsSnapshot.id,
-                NodeInventoryItemsSnapshot.agent_items,
-                NodeInventoryItemsSnapshot.observed_at,
-            ).where(NodeInventoryItemsSnapshot.node_id == node_id)
-        ).one_or_none()
-        current = AgentInventoryItems() if stored is None else stored.agent_items
-        if not isinstance(current, AgentInventoryItems):
-            raise TypeError(
-                f"cannot adopt artifacts into unreadable inventory for {node_id}"
-            )
-        artifacts = {item.digest: item for item in current.artifacts}
-        observed = None if stored is None else stored.observed_at
-        for row in entries:
-            artifact = InventoryArtifactItem.model_validate_json(
-                canonical_message(
-                    {name: row[name] for name in InventoryArtifactItem.model_fields}
-                )
-            )
-            previous = artifacts.get(artifact.digest)
-            if previous is None or previous.updated_at <= artifact.updated_at:
-                artifacts[artifact.digest] = artifact
-            if observed is None or observed < artifact.updated_at:
-                observed = artifact.updated_at
-        items = current.model_copy(
-            update={
-                "artifacts": sorted(artifacts.values(), key=lambda item: item.digest)
-            }
+        select(snapshots.c.id, snapshots.c.agent_items).where(
+            snapshots.c.kind == InventorySnapshotKind.ITEMS.value
         )
-        digest = hashlib.sha256(
-            canonical_message({"node_id": node_id, "agent_items": items})
-        ).hexdigest()
-        if stored is None:
+    ).all()
+    for row_id, items in rows:
+        if isinstance(items, dict) and "artifacts" in items:
+            kept = {name: value for name, value in items.items() if name != "artifacts"}
             connection.execute(
-                insert(NodeInventoryItemsSnapshot).values(
-                    id=str(uuid.uuid4()),
-                    node_id=node_id,
-                    kind=InventorySnapshotKind.ITEMS,
-                    observed_at=observed,
-                    received_at=now,
-                    evidence_digest=digest,
-                    agent_items=items,
-                )
+                update(snapshots)
+                .where(snapshots.c.id == row_id)
+                .values(agent_items=kept)
             )
-        else:
-            connection.execute(
-                update(NodeInventoryItemsSnapshot)
-                .where(
-                    NodeInventoryItemsSnapshot.id == stored.id,
-                )
-                .values(agent_items=items, observed_at=observed, evidence_digest=digest)
-            )
-    connection.execute(text("DROP TABLE node_artifacts"))
 
 
 def move_repeated_evidence(connection: Connection) -> None:

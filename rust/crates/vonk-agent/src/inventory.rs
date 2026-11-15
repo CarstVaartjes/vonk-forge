@@ -166,6 +166,9 @@ pub struct Inventory {
     /// when a plan could not be read.
     pub unused_model_bytes: Option<u64>,
     pub model_objects: Option<Vec<vonk_agent_protocol::generated::ModelStoreObject>>,
+    /// The runtime images Docker holds, from the root helper; `None` when
+    /// the helper could not list them.
+    pub runtime_images: Option<vonk_agent_protocol::generated::RuntimeImageObservation>,
     /// The run scopes (`runs/`, `run-metadata/`), by id; `None` when they
     /// could not be listed.
     pub runs: Option<Vec<uuid::Uuid>>,
@@ -206,6 +209,7 @@ impl Inventory {
             installations: self.installations.clone(),
             unused_model_bytes: self.unused_model_bytes,
             model_objects: self.model_objects.clone(),
+            runtime_images: self.runtime_images.clone(),
             runs: self.runs.clone(),
             installation_bytes: self.installation_bytes.clone(),
         };
@@ -551,6 +555,9 @@ impl<R: ProcessRunner> InventoryCollector<'_, R> {
             installations,
             unused_model_bytes: crate::store_retention::unused_model_bytes(self.store_path),
             model_objects: crate::store_retention::model_objects(self.store_path),
+            runtime_images: crate::runtime_images::observe(Path::new(
+                crate::host_runtime::HELPER_SOCKET,
+            )),
             runs: crate::store_retention::run_scope_names(self.store_path),
             installation_bytes,
         })
@@ -879,6 +886,7 @@ mod process_tests {
             installations: None,
             unused_model_bytes: None,
             model_objects: None,
+            runtime_images: None,
             runs: None,
             installation_bytes: None,
             nvidia_driver_version: "590".into(),

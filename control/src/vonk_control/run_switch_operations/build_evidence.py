@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     LifecycleState,
-    ModelFileState,
     RunSwitchCode,
 )
 
-from ..inventory_items import inventory_artifacts, inventory_items
+from ..inventory_items import inventory_items
+from ..inventory_repository import spark_runtime_images
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -50,6 +52,7 @@ class BuildEvidenceMixin:
         defer_source_build: bool = False,
         expected_image: RuntimeImageIdentity | None = None,
         image_installed: bool = False,
+        now: datetime,
     ) -> tuple[
         RunSwitchBuildEvidence,
         RuntimeImageStorageImpact,
@@ -188,38 +191,17 @@ class BuildEvidenceMixin:
         runtime_missing = 0
         runtime_missing_by_node: dict[str, int] = {}
         runtime_reclaimable = 0
-        runtime_raw_digest = (
-            image_digest.removeprefix("sha256:")
-            if isinstance(image_digest, str)
-            else None
-        )
-        if image_bytes is not None and runtime_raw_digest is not None:
+        if image_bytes is not None and isinstance(image_digest, str):
             for node in group.nodes:
-                artifact = next(
-                    (
-                        item
-                        for item in inventory_artifacts(session, node.node_id)
-                        if item.digest == runtime_raw_digest
-                    ),
-                    None,
-                )
-                if (
-                    artifact is not None
-                    and artifact.kind == "image"
-                    and artifact.state == ModelFileState.VERIFIED
-                    and artifact.size_bytes >= image_bytes
-                ):
+                # The Spark's own Docker listing; unknown or stale is not held.
+                held = spark_runtime_images(session, node.node_id, now=now)
+                if held is not None and image_digest in held:
                     runtime_reused += image_bytes
+                    runtime_reclaimable += image_bytes
                 else:
                     runtime_missing += image_bytes
                     runtime_missing_by_node[node.node_id] = image_bytes
                 runtime_missing_by_node.setdefault(node.node_id, 0)
-                if (
-                    artifact is not None
-                    and artifact.state == ModelFileState.VERIFIED
-                    and artifact.ref_count == 0
-                ):
-                    runtime_reclaimable += artifact.size_bytes
         runtime_coverage = (
             "complete"
             if image_bytes is not None and runtime_missing == 0
