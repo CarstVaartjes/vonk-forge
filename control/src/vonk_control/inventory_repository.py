@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_agent_protocol.inventory import (
@@ -228,31 +228,48 @@ class InventoryRepository:
             )
             if row is None:
                 raise KeyError(node_id)
-            observed = (
-                row.observed_at
-                if row.observed_at.tzinfo
-                else row.observed_at.replace(tzinfo=UTC)
+            return _snapshot_view(row, now=now, maximum_age=maximum_age)
+
+    def latest_many(
+        self,
+        node_ids: Sequence[str],
+        *,
+        now: datetime,
+        maximum_age: int,
+        _session: Session | None = None,
+    ) -> dict[str, InventorySnapshotView | None]:
+        """Each node's newest snapshot in one query; None where it has none."""
+
+        with (
+            nullcontext(_session) if _session is not None else self._sessions()
+        ) as session:
+            newest = (
+                select(
+                    NodeInventorySnapshot.node_id,
+                    func.max(NodeInventorySnapshot.observed_at).label("observed_at"),
+                )
+                .where(NodeInventorySnapshot.node_id.in_(list(node_ids)))
+                .group_by(NodeInventorySnapshot.node_id)
+                .subquery()
             )
-            received = (
-                row.received_at
-                if row.received_at.tzinfo
-                else row.received_at.replace(tzinfo=UTC)
-            )
-            # Validate the persisted JSON semantics using the producer's current
-            # contract. A typed annotation or SQL string alone is not evidence.
-            validated = _validated_inventory(row, observed_at=observed)
-            return InventorySnapshotView.model_validate_json(
-                canonical_message(
-                    {
-                        **validated.model_dump(mode="json"),
-                        "id": row.id,
-                        "node_id": row.node_id,
-                        "received_at": row.received_at,
-                        "evidence_digest": row.evidence_digest,
-                        "stale": (now - received).total_seconds() > maximum_age,
-                    }
+            rows = session.scalars(
+                select(NodeInventorySnapshot).join(
+                    newest,
+                    and_(
+                        NodeInventorySnapshot.node_id == newest.c.node_id,
+                        NodeInventorySnapshot.observed_at == newest.c.observed_at,
+                    ),
                 )
             )
+            by_node = {row.node_id: row for row in rows}
+            return {
+                node_id: _snapshot_view(
+                    by_node[node_id], now=now, maximum_age=maximum_age
+                )
+                if node_id in by_node
+                else None
+                for node_id in node_ids
+            }
 
     def snapshot_count(self, node_id: str) -> int:
         with self._sessions() as session:
@@ -264,3 +281,33 @@ class InventoryRepository:
                 )
                 or 0
             )
+
+
+def _snapshot_view(
+    row: NodeInventorySnapshot, *, now: datetime, maximum_age: int
+) -> InventorySnapshotView:
+    observed = (
+        row.observed_at
+        if row.observed_at.tzinfo
+        else row.observed_at.replace(tzinfo=UTC)
+    )
+    received = (
+        row.received_at
+        if row.received_at.tzinfo
+        else row.received_at.replace(tzinfo=UTC)
+    )
+    # Validate the persisted JSON semantics using the producer's current
+    # contract. A typed annotation or SQL string alone is not evidence.
+    validated = _validated_inventory(row, observed_at=observed)
+    return InventorySnapshotView.model_validate_json(
+        canonical_message(
+            {
+                **validated.model_dump(mode="json"),
+                "id": row.id,
+                "node_id": row.node_id,
+                "received_at": row.received_at,
+                "evidence_digest": row.evidence_digest,
+                "stale": (now - received).total_seconds() > maximum_age,
+            }
+        )
+    )

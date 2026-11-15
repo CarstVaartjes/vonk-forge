@@ -27,13 +27,13 @@ from ..categorized_errors import (
 from ..cluster_mappings import validate_mapping_parameters
 from ..disk_reservations import (
     describe_disk_charges,
-    model_sets_stored_on_node,
+    model_sets_stored_on_nodes,
     outstanding_disk_charges,
     runtime_images_named_on_nodes,
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
-from ..inventory_repository import InventoryRepository, InventorySnapshotView
+from ..inventory_repository import InventoryRepository
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
     AgentNode,
@@ -172,17 +172,12 @@ class InstallPlanningService:
                 )
                 for node in nodes
             }
-            inventory_by_node: dict[str, InventorySnapshotView | None] = {}
-            for mapping_node in mapping_nodes:
-                try:
-                    inventory_by_node[mapping_node.node_id] = self._inventory.latest(
-                        mapping_node.node_id,
-                        now=now,
-                        maximum_age=self._inventory_max_age,
-                        _session=session,
-                    )
-                except KeyError:
-                    inventory_by_node[mapping_node.node_id] = None
+            inventory_by_node = self._inventory.latest_many(
+                [mapping_node.node_id for mapping_node in mapping_nodes],
+                now=now,
+                maximum_age=self._inventory_max_age,
+                _session=session,
+            )
             known_inventory = {
                 node_id: inventory
                 for node_id, inventory in inventory_by_node.items()
@@ -198,9 +193,11 @@ class InstallPlanningService:
                 ) from error
             models = resolved_entities.model_revisions
             model_display = stored_model_display(session, models[0] if models else None)
+            mapping_node_ids = [mapping_node.node_id for mapping_node in mapping_nodes]
             named_images_by_node = runtime_images_named_on_nodes(
-                session, [mapping_node.node_id for mapping_node in mapping_nodes]
+                session, mapping_node_ids
             )
+            stored_sets_by_node = model_sets_stored_on_nodes(session, mapping_node_ids)
             compiled_plan_error: str | None = None
             compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed
@@ -404,7 +401,7 @@ class InstallPlanningService:
             with (
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
-                stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
+                stored_sets = stored_sets_by_node[mapping_node.node_id]
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,
