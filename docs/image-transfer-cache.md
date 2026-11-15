@@ -82,6 +82,14 @@ records the image as present on that Spark, so the next plan does not
 distribute it again. Distribution progress and per-Spark readiness are reported
 before workloads are stopped and replaced.
 
+An image removed from a Spark under an installed rank is the same cache loss.
+The helper reports `runtime_image_missing` only when Docker answered a listing
+without either identity of the image; an inspection it could not read stays
+`runtime_image_inspect_failed`. When the container is absent too, the Start
+(or job run) fails at once with that code, as nothing happened, and the
+Controller demotes every installed rank on that Spark that names the image. The
+next load copies the image again and installs afresh.
+
 The worker reclaims image bytes nothing names any more, once an hour. An
 image is kept while its receipt exists, while a live distribution assignment
 names it, or while a build that produced it is unfinished or finished less than
