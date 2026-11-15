@@ -92,7 +92,7 @@ class ProfileClient:
         raise AssertionError(path)
 
 
-def test_name_change_preserves_complete_authoring_definition(capsys):
+def test_name_change_preserves_complete_authoring_definition():
     client = ProfileClient()
     assert (
         cli.main(
@@ -112,7 +112,7 @@ def test_name_change_preserves_complete_authoring_definition(capsys):
     ]
 
 
-def test_configure_changes_only_explicit_fields(capsys):
+def test_configure_changes_only_explicit_fields():
     client = ProfileClient()
     assert (
         cli.main(
@@ -144,7 +144,7 @@ def test_configure_changes_only_explicit_fields(capsys):
     }
 
 
-def test_export_and_import_roundtrip_without_loading(tmp_path: Path, capsys):
+def test_export_and_import_roundtrip_without_loading(tmp_path: Path):
     client = ProfileClient()
     client.definition["assignments"][0]["gpu_clock"] = {"min_mhz": 300, "max_mhz": 1800}
     destination = tmp_path / "profile.json"
@@ -186,7 +186,7 @@ def test_export_and_import_roundtrip_without_loading(tmp_path: Path, capsys):
     assert all(method != "POST" for method, _ in client.calls)
 
 
-def test_add_spark_preserves_existing_installed_state_and_variant(capsys):
+def test_add_spark_preserves_existing_installed_state_and_variant():
     client = ProfileClient()
     before = copy.deepcopy(client.definition)
     assert (
@@ -218,7 +218,7 @@ def test_add_spark_preserves_existing_installed_state_and_variant(capsys):
         ("--label", "use=one", "--remove-label", "use"),
     ],
 )
-def test_invalid_label_intent_does_not_write(edit, capsys):
+def test_invalid_label_intent_does_not_write(edit):
     client = ProfileClient()
     assert (
         cli.main(
@@ -228,7 +228,6 @@ def test_invalid_label_intent_does_not_write(edit, capsys):
         == 2
     )
     assert client.saved is None
-    capsys.readouterr()
     assert (
         cli.main(
             (
@@ -251,7 +250,7 @@ def test_invalid_label_intent_does_not_write(edit, capsys):
     }
 
 
-def test_removing_an_absent_label_saves_idempotent_intent(capsys):
+def test_removing_an_absent_label_saves_idempotent_intent():
     client = ProfileClient()
     assert (
         cli.main(
@@ -271,7 +270,7 @@ def test_removing_an_absent_label_saves_idempotent_intent(capsys):
     assert client.saved == {**client.definition, "expected_revision": 7}
 
 
-def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
+def test_malformed_saved_assignment_is_not_discarded_or_replaced():
     client = ProfileClient()
     client.definition["assignments"][0]["spark_ids"] = "not-an-array"
     assert (
@@ -282,7 +281,6 @@ def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
         == 2
     )
     assert client.saved is None
-    capsys.readouterr()
     client.definition["assignments"][0]["spark_ids"] = ["spk_" + "a" * 32]
     assert (
         cli.main(
@@ -299,7 +297,7 @@ def test_malformed_saved_assignment_is_not_discarded_or_replaced(capsys):
     }
 
 
-def test_remove_of_unmatched_sparks_saves_unchanged_intent(capsys):
+def test_remove_of_unmatched_sparks_saves_unchanged_intent():
     client = ProfileClient()
     assert (
         cli.main(
@@ -322,7 +320,7 @@ def test_remove_of_unmatched_sparks_saves_unchanged_intent(capsys):
     assert client.saved == {**client.definition, "expected_revision": 7}
 
 
-def test_edit_revision_is_decided_by_owner_and_fresh_edit_is_admitted(capsys):
+def test_edit_revision_is_decided_by_owner_and_fresh_edit_is_admitted():
     class RevisionOwner(ProfileClient):
         def request(self, method, path, payload=None, **kwargs):
             if method == "PUT":
@@ -376,7 +374,7 @@ def test_edit_revision_is_decided_by_owner_and_fresh_edit_is_admitted(capsys):
         '{"name": "New", "revision": 7}',
     ],
 )
-def test_invalid_import_fails_before_any_request(tmp_path, content, capsys):
+def test_invalid_import_fails_before_any_request(tmp_path, content):
     source = tmp_path / "input.json"
     source.write_text(content)
     client = ProfileClient()
@@ -400,15 +398,16 @@ def test_invalid_import_fails_before_any_request(tmp_path, content, capsys):
     assert client.calls == []
 
 
-def test_stdout_export_remains_a_json_definition_without_json_flag(capsys):
+def test_stdout_export_is_the_bare_definition_not_a_stamped_document(vonkctl_json):
     client = ProfileClient()
-    assert cli.main(("--profile", "2", "profile", "export"), control_client=client) == 0
-    captured = capsys.readouterr()
-    assert json.loads(captured.out) == client.definition
-    assert "Error:" not in captured.err
+    status, document = vonkctl_json(
+        "--profile", "2", "profile", "export", control_client=client
+    )
+    assert status == 0
+    assert document == client.definition
 
 
-def test_import_accepts_piped_definition_with_explicit_revision(monkeypatch, capsys):
+def test_import_accepts_piped_definition_with_explicit_revision(monkeypatch):
     client = ProfileClient()
     stream = io.TextIOWrapper(io.BytesIO(json.dumps(client.definition).encode()))
     monkeypatch.setattr(sys, "stdin", stream)
@@ -477,7 +476,7 @@ def test_failed_export_removes_only_its_partial_file(tmp_path, monkeypatch):
     assert read_json_document(str(destination)) == {"name": "New"}
 
 
-def test_configure_gpu_clock_then_clear_preserves_other_assignment_fields(capsys):
+def test_configure_gpu_clock_then_clear_preserves_other_assignment_fields():
     """Catches metadata-only configure silently ignoring the assignment setting."""
     client = ProfileClient()
     assert (
@@ -525,22 +524,19 @@ def test_configure_gpu_clock_then_clear_preserves_other_assignment_fields(capsys
     assert "gpu_clock" not in client.saved["assignments"][0]
 
 
-def test_gpu_clock_above_hardware_policy_is_refused_with_owner_safety_detail(capsys):
+def test_gpu_clock_above_hardware_policy_is_refused_with_owner_safety_detail(
+    vonkctl_json,
+):
     client = ProfileClient()
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "2",
-                "profile",
-                "configure",
-                "--gpu-clock",
-                "300,2301",
-                "--json",
-            ),
-            control_client=client,
-        )
-        != 0
+    status, document = vonkctl_json(
+        "--profile",
+        "2",
+        "profile",
+        "configure",
+        "--gpu-clock",
+        "300,2301",
+        control_client=client,
     )
+    assert status == 2
     assert client.saved is None
-    assert "hardware-safety edge" in capsys.readouterr().out
+    assert "hardware-safety edge" in document["detail"]

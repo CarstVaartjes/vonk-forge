@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from cluster_profiles import cli
@@ -65,18 +63,17 @@ def test_command_help_names_the_profile_a_change_requires():
     assert help_text.splitlines()[0] == "vonkctl profile load --profile <n> [flags]"
 
 
-def test_a_command_that_changes_a_profile_tells_how_to_name_it(capsys):
+def test_a_command_that_changes_a_profile_tells_how_to_name_it(vonkctl_json):
     class Unreachable:
         request_timeout_seconds = 1.0
 
         def request(self, *_args, **_kwargs):
             raise AssertionError("no request may be sent without a profile number")
 
-    status = cli.main(
-        ("--json", "profile", "load", "--yes"), control_client=Unreachable()
+    status, document = vonkctl_json(
+        "profile", "load", "--yes", control_client=Unreachable()
     )
 
-    document = json.loads(capsys.readouterr().out)
     assert status == 2
     assert "--profile" in document["error"]
     assert document["recovery_actions"] == [

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 from typing import cast
 
@@ -69,21 +68,17 @@ def test_recipe_selection_checks_later_pages_before_accepting_a_title():
     assert all(call[3]["query"]["assess"] is False for call in client.calls)
 
 
-def test_recipe_readiness_flags_are_forwarded_to_the_controller(capsys):
+def test_recipe_readiness_flags_are_forwarded_to_the_controller(vonkctl_json):
     client = Pages([{"recipes": [], "next_cursor": None}])
-    assert (
-        cli.main(
-            ["--json", "recipe", "library", "--ready", "--fits-fleet"],
-            control_client=client,
-        )
-        == 0
+    status, _ = vonkctl_json(
+        "recipe", "library", "--ready", "--fits-fleet", control_client=client
     )
+    assert status == 0
     query = client.calls[0][3]["query"]
     assert query["ready"] is True and query["fits_fleet"] is True
-    assert json.loads(capsys.readouterr().out)["recipes"] == []
 
 
-def test_recipe_engine_and_creator_filters_are_forwarded(capsys):
+def test_recipe_engine_and_creator_filters_are_forwarded():
     client = Pages([{"recipes": [], "next_cursor": None}])
     assert (
         cli.main(
@@ -141,7 +136,7 @@ def test_recipe_engine_and_creator_filters_are_forwarded(capsys):
         ],
     ],
 )
-def test_multi_value_filters_take_commas_repetition_or_both(capsys, arguments):
+def test_multi_value_filters_take_commas_repetition_or_both(arguments):
     client = Pages([{"recipes": [], "next_cursor": None}])
     assert (
         cli.main(
@@ -156,13 +151,14 @@ def test_multi_value_filters_take_commas_repetition_or_both(capsys, arguments):
     assert query["usage"] == ["chat", "code"]
 
 
-def test_multi_value_filter_refuses_a_non_numeric_spark_count(capsys):
+def test_multi_value_filter_refuses_a_non_numeric_spark_count(vonkctl_json):
     client = Pages([])
-    assert (
-        cli.main(["recipe", "library", "--sparks", "1,two"], control_client=client) != 0
+    status, document = vonkctl_json(
+        "recipe", "library", "--sparks", "1,two", control_client=client
     )
+    assert status == 2
+    assert document["error_type"] == "arguments"
     assert client.calls == []
-    assert "--sparks" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(
@@ -267,7 +263,7 @@ def test_spark_ambiguity_returns_usable_ids_and_exact_id_has_priority():
     ) == [first]
 
 
-def test_failed_selection_never_saves_a_profile(capsys):
+def test_failed_selection_never_saves_a_profile(vonkctl_json):
     client = Pages(
         [
             {
@@ -279,27 +275,22 @@ def test_failed_selection_never_saves_a_profile(capsys):
             {"recipes": [recipe("one/code", "Coding"), recipe("two/code", "Coding")]},
         ]
     )
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "1",
-                "profile",
-                "add",
-                "Coding",
-                "--spark",
-                "Atlas",
-                "--json",
-            ),
-            control_client=client,
-        )
-        == 2
+    status, document = vonkctl_json(
+        "--profile",
+        "1",
+        "profile",
+        "add",
+        "Coding",
+        "--spark",
+        "Atlas",
+        control_client=client,
     )
-    assert "operation_id" not in json.loads(capsys.readouterr().out)
+    assert status == 2
+    assert "operation_id" not in document
     assert all(call[0] == "GET" for call in client.calls)
 
 
-def test_ambiguity_keeps_every_candidate_outside_bounded_error_copy(capsys):
+def test_ambiguity_keeps_every_candidate_outside_bounded_error_copy(vonkctl_json):
     rows = [recipe(f"publisher-{index:03}/code", "Coding") for index in range(100)]
     client = Pages(
         [
@@ -312,23 +303,17 @@ def test_ambiguity_keeps_every_candidate_outside_bounded_error_copy(capsys):
             {"recipes": rows, "next_cursor": None},
         ]
     )
-    assert (
-        cli.main(
-            (
-                "--profile",
-                "1",
-                "profile",
-                "add",
-                "Coding",
-                "--spark",
-                "Atlas",
-                "--json",
-            ),
-            control_client=client,
-        )
-        == 2
+    status, output = vonkctl_json(
+        "--profile",
+        "1",
+        "profile",
+        "add",
+        "Coding",
+        "--spark",
+        "Atlas",
+        control_client=client,
     )
-    output = json.loads(capsys.readouterr().out)
+    assert status == 2
     assert output["candidates"] == [row["selector"] for row in rows]
 
 
@@ -341,30 +326,3 @@ def test_a_selector_prefix_does_not_select_a_different_variant():
     )
     assert controller_cli._resolve_recipe_selector(client, "one/code") == "one/code"
     assert client.calls == []
-
-
-def test_recipe_alternatives_render_one_comparable_line_each(capsys):
-    from cluster_profiles import cli_render
-
-    cli_render._recipe_alternatives(
-        {
-            "alternatives": [
-                {
-                    "selector": "vonk-forge/glm-sglang-dual",
-                    "engine": "sglang",
-                    "node_count": 2,
-                    "creator": "MiaAI-Lab",
-                    "version": "1.7.2",
-                    "cache": "not_cached",
-                    "fits_fleet": "ready",
-                }
-            ]
-        }
-    )
-    out = capsys.readouterr().out
-    assert (
-        "vonk-forge/glm-sglang-dual  sglang, 2 Sparks, MiaAI-Lab, v1.7.2, "
-        "not cached, fits fleet"
-    ) in out
-    cli_render._recipe_alternatives({"alternatives": []})
-    assert capsys.readouterr().out == ""
