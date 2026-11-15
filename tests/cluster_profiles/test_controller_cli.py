@@ -4841,6 +4841,29 @@ def test_fleet_upgrade_with_no_targets_json_keeps_the_receipt() -> None:
     assert result["targets"] == []
 
 
+def test_job_rendering_tolerates_a_missing_progress_object(capsys) -> None:
+    job_id = "upgrade-job"
+    client = FakeClient(
+        {
+            ("GET", f"/api/jobs/{job_id}"): {
+                "id": job_id,
+                "kind": "agent-upgrade",
+                "state": "succeeded",
+                "targets": [],
+                "operations": [],
+                "progress": None,
+            }
+        }
+    )
+
+    status = cli.main(("fleet", "progress", job_id), control_client=client)
+
+    captured = capsys.readouterr()
+    assert status == 0
+    assert "Job: upgrade-job" in captured.out
+    assert "not a valid object" not in captured.out + captured.err
+
+
 _RUN_KEY = "11111111-1111-4111-8111-111111111111"
 _RUN_APPLICATION = "33333333-3333-4333-8333-333333333333"
 _RUN_DIGEST = "e" * 64
