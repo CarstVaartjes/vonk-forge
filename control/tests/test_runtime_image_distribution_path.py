@@ -115,7 +115,8 @@ def test_built_image_receipt_flows_from_prepare_to_target_verify(
     monkeypatch.setattr(
         executor, "_stored_config_digest", lambda _address, _bytes: "sha256:" + "d" * 64
     )
-    # The model objects come from the persisted compiled plan, tested below.
+    # This fixture has no persisted installation (bare DB, synthetic ids); the
+    # compiled-plan read is covered by the real-installation test below.
     monkeypatch.setattr(
         executor,
         "_model_objects",
@@ -276,7 +277,6 @@ def test_target_copy_to_a_spark_holding_the_model_needs_no_nas_copy(
     from vonk_control.model_cache import ModelCacheService
     from vonk_control.models import AgentNode, Job, RecipeInstallation
     from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
     from .test_recipe_operations import NOW, installed_recipe, setup_services
 
@@ -385,22 +385,3 @@ def test_target_copy_to_a_spark_holding_the_model_needs_no_nas_copy(
     assert {(item["sha256"], item["bytes"]) for item in granted["objects"]} == {
         (item.sha256, item.size_bytes) for item in spec.artifacts
     }
-    # A newer installation took over: the copy is observed again, not failed.
-    superseded = RunSwitchOperationResult.model_validate_json(
-        canonical_message(
-            {
-                "phase_results": [
-                    {
-                        "phase": "prepare",
-                        "subphase": "runtime-plan",
-                        "installation_id": installation.id,
-                        "mapping_id": mapping_id,
-                        "install_plan_digest": "e" * 64,
-                        "compiled_plan_persisted": True,
-                    }
-                ]
-            }
-        )
-    )
-    with pytest.raises(RunSwitchRetryLater):
-        executor._model_objects(plan, superseded)

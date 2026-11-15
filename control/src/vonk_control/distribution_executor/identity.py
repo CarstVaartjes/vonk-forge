@@ -82,7 +82,6 @@ class DistributionIdentity:
         installation_id = (
             plan.installation_id if prepared is None else prepared.installation_id
         )
-        install_plan_digest = None if prepared is None else prepared.install_plan_digest
         with self._sessions() as session:
             installation = (
                 None
@@ -103,14 +102,9 @@ class DistributionIdentity:
                 ) from error
         model_set_digest = stored.model_artifact_set_sha256
         preparation = plan.preparation
-        if (
-            install_plan_digest not in (None, stored.plan_digest)
-            or model_set_digest is None
-            or (
-                preparation is not None
-                and preparation.model.artifact_set_sha256
-                not in (None, model_set_digest)
-            )
+        if model_set_digest is None or (
+            preparation is not None
+            and preparation.model.artifact_set_sha256 not in (None, model_set_digest)
         ):
             # A newer installation replaced the one this plan prepared.
             raise RunSwitchRetryLater(
