@@ -21,7 +21,6 @@ from .artifact_validation import (
     _validate_artifact_execution as _validate_artifact_execution,
 )
 from .build_helpers import _container_build_result as _container_build_result
-from .build_helpers import _recipe_model_digests as _recipe_model_digests
 from .build_helpers import _refreshed_freshness as _refreshed_freshness
 from .constants import _BUILD_EVIDENCE_STATE_ADAPTER as _BUILD_EVIDENCE_STATE_ADAPTER
 from .constants import _CHANGE_EFFECTS_ADAPTER as _CHANGE_EFFECTS_ADAPTER

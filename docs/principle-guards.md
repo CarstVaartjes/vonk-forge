@@ -82,6 +82,12 @@ profile needs and miscounted shared Spark files. Read the set's bindings
 through `model_cache.lineage` (`model_sets`, `verifies_model`,
 `stored_set_bindings`) or, for what an installation runs,
 `RecipeInstallation.model_artifact_set_sha256`.
+The same mode flags a query selecting only
+`RecipeInstallation.model_content_sha256` joined to `InstallationNode`: "which
+Models does this Spark hold" by the Model each installation was made for. After
+the contracts 5.0 re-digest it judged a Spark holding the files under the old
+digest empty, so the load review charged the whole model again. Ask by the set
+instead (`disk_reservations.model_sets_stored_on_node`).
 
 NAS coverage is required only where NAS bytes are read. A new call of
 `_require_managed_cache_coverage`, `resolve_verified_artifact_set` or
