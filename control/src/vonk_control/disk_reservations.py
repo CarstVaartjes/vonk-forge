@@ -30,13 +30,6 @@ from .recipe_execution_contract import (
 )
 from .reservation_owners import reservation_owner
 
-# Installations whose directory, plan and links are on the Spark.
-_INSTALLATIONS_ON_NODE = (
-    InstallationState.INSTALLED,
-    InstallationState.INSTALLING,
-    InstallationState.PARTIAL,
-)
-
 
 def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
     """Model sets some installation on the Spark runs.
@@ -60,7 +53,13 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
             )
             .where(
                 InstallationNode.node_id == node_id,
-                RecipeInstallation.state.in_(_INSTALLATIONS_ON_NODE),
+                RecipeInstallation.state.in_(
+                    (
+                        InstallationState.INSTALLED,
+                        InstallationState.INSTALLING,
+                        InstallationState.PARTIAL,
+                    )
+                ),
                 RecipeInstallation.model_artifact_set_sha256.is_not(None),
             )
         )
@@ -69,11 +68,14 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
 
 
 def runtime_images_named_on_node(session: Session, node_id: str) -> frozenset[str]:
-    """Runtime images (manifest digests) some installation on the Spark names.
+    """Runtime images (manifest digests) an installed rank on the Spark names.
 
-    The Spark's helper never removes an image an installation there names, so
-    such an image is held; another installation of it pulls nothing new. Any
-    other image is charged: one no installation names may already be pruned.
+    The Spark's helper never removes an image whose installation plan is on the
+    host, so an installed rank's image is held; another installation of it
+    pulls nothing new. Any other image is charged: a rank not installed (planned,
+    failed, uninstalled or demoted) may have no plan there, and an image no plan
+    names may already be pruned. The same rank test as Run/Switch's installation
+    reuse.
     """
 
     return frozenset(
@@ -85,7 +87,7 @@ def runtime_images_named_on_node(session: Session, node_id: str) -> frozenset[st
             )
             .where(
                 InstallationNode.node_id == node_id,
-                RecipeInstallation.state.in_(_INSTALLATIONS_ON_NODE),
+                InstallationNode.state == InstallationNodeState.INSTALLED,
             )
         )
     )

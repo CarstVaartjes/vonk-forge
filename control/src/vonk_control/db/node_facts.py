@@ -232,8 +232,9 @@ def move_runtime_facts(connection: Connection) -> None:
 def retire_artifact_facts(connection: Connection) -> None:
     """Retire Controller-recorded image receipts, never adopting them.
 
-    A receipt said a Spark held an image long after it was pruned; the Spark
-    now reports the images Docker holds in its inventory. The items rows lose
+    A receipt said a Spark held an image long after it was pruned; presence
+    now derives from the installed ranks that name the image on that Spark
+    (``disk_reservations.runtime_images_named_on_node``). The items rows lose
     their ``artifacts`` key so they stay readable, and the old receipt table
     goes, in startup's one transaction; a later start finds nothing to do.
     """

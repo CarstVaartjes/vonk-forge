@@ -1202,20 +1202,38 @@ def _name_image_on(sessions, node, mapping, now) -> str:
         return installation.id
 
 
-def test_a_pruned_runtime_image_is_charged_again(tmp_path) -> None:
-    """An image is reused only while an installation on the Spark names it (the
-    helper never prunes such an image). Catches presence read from a receipt
-    that never expires: once the last installation naming it is gone, the
-    helper may prune it, so admission charges its bytes again."""
+def _set_installation_state(sessions, installation_id, installation, rank) -> None:
+    with sessions.begin() as session:
+        row = session.get(RecipeInstallation, installation_id)
+        assert row is not None
+        row.state = installation
+        for member in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        ):
+            member.state = rank
+
+
+@pytest.mark.parametrize(
+    ("installation", "rank"),
+    [("uninstalled", "uninstalled"), ("partial", "planned")],
+    ids=["uninstalled", "demoted-rank"],
+)
+def test_a_pruned_runtime_image_is_charged_again(
+    tmp_path, installation: str, rank: str
+) -> None:
+    """An image is reused only while an installed rank on the Spark names it
+    (the helper keeps an image whose plan is on the host). Catches presence
+    read from a receipt that never expires, or from an installation whose rank
+    there is no longer installed: the helper may prune that image, so
+    admission charges its bytes again."""
 
     sessions, now, node, mapping, build = setup(tmp_path)
     service = _service(sessions, inventory_max_age=300, disk_floor_bytes=10)
     installation_id = _name_image_on(sessions, node, mapping, now)
     assert service.plan_install(mapping, build, now=now).nodes[0].reused_bytes == 30
 
-    with sessions.begin() as session:
-        installation = session.get(RecipeInstallation, installation_id)
-        assert installation is not None
-        installation.state = "uninstalled"
+    _set_installation_state(sessions, installation_id, installation, rank)
     pruned = service.plan_install(mapping, build, now=now).nodes[0]
     assert (pruned.reused_bytes, pruned.required_download_bytes) == (0, 100)

@@ -5328,6 +5328,7 @@ def test_measured_operation_keeps_unknown_totals_and_failure_readable(
         if "runtime-plan" in switch.executor.events:
             break
         switch.drive()
+    assert "runtime-plan" in switch.executor.events
     reason = (
         "install plan is blocked: " + "missing durable runtime image receipt; " * 10
     )
