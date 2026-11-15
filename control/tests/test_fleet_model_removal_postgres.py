@@ -2,6 +2,7 @@ from vonk_agent_protocol import canonical_message
 
 """Fleet removal reuses its owners and proves exact effects after restart."""
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -16,6 +17,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
+from vonk_control.cache_removal_review import CacheAssetDisposition
 from vonk_control.fleet_model_removal_contract import FleetRemovalDisposition
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -620,6 +622,10 @@ def test_a_file_shared_with_a_model_in_use_never_keeps_an_unused_model(
         assert review.fleet.nas_remove, review.fleet.nas_detail
         assert not review.blockers
         assert not service.review_model_removal(selector).blockers
+        # The shared file is kept per object, for the model that names it.
+        shared = hashlib.sha256(b"shared tokenizer").hexdigest()
+        kept = {a.sha256: a.disposition for a in review.assets}
+        assert kept[shared] == CacheAssetDisposition.RETAIN_SHARED
     finally:
         service.close()
 
