@@ -82,6 +82,12 @@ profile needs and miscounted shared Spark files. Read the set's bindings
 through `model_cache.lineage` (`model_sets`, `verifies_model`,
 `stored_set_bindings`) or, for what an installation runs,
 `RecipeInstallation.model_artifact_set_sha256`.
+The same mode flags a query selecting only
+`RecipeInstallation.model_content_sha256` joined to `InstallationNode`: "which
+Models does this Spark hold" by the Model each installation was made for. After
+the contracts 5.0 re-digest it judged a Spark holding the files under the old
+digest empty, so the load review charged the whole model again. Ask by the set
+instead (`disk_reservations.model_sets_stored_on_node`).
 
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through

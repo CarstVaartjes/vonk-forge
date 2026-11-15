@@ -490,7 +490,8 @@ cancellation and request-local retries remain valid. A broad handler that parks
 or defers work must consult `disposition()` or `is_definite()` first
 (`retry-dispositions`). Retention never decides "is this the head" by content
 digest (`head-digests`), and no reader matches a cached model set by its
-first-requester Model digest (`set-first-requester`). A whole-tree policy-user
+first-requester Model digest, nor reads a Spark's installations by Model digest
+(`set-first-requester`). A whole-tree policy-user
 check requires ongoing-intent scheduling for durable recovery owners. Small fixtures
 prove that added violations fail, untouched old occurrences do not, and bounded
 waits and security ingress remain valid. Detection is a syntax check; behavior,

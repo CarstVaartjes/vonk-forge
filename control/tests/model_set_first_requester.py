@@ -10,6 +10,14 @@ offered sets a profile needs and miscounted shared Spark files).
 Read the set's bindings through ``model_cache.lineage`` (``model_sets``,
 ``verifies_model``, ``stored_set_bindings``) or, for what an installation runs,
 ``RecipeInstallation.model_artifact_set_sha256``.
+
+The same holds for what a Spark's installations hold: a query selecting only
+``RecipeInstallation.model_content_sha256`` per Spark (joined to
+``InstallationNode``) answers "which Models does this Spark hold" by the Model
+each installation was made for, and missed every re-digested Model of the same
+files (the load review charged them again). Key it by the installation's set.
+Queries that read the column next to others (grouping, provenance) are not
+this question.
 """
 
 from __future__ import annotations
@@ -17,8 +25,9 @@ from __future__ import annotations
 import ast
 
 KIND = (
-    "model set matched by its first-requester Model digest; read its bindings "
-    "through model_cache.lineage or the installation's model_artifact_set_sha256"
+    "model set matched by its first-requester Model digest (or a Spark's "
+    "installations read by Model digest); read its bindings through "
+    "model_cache.lineage or the installation's model_artifact_set_sha256"
 )
 _PREFIX = "control/src/vonk_control/"
 # The owner of the binding rule (first requester plus verified bindings) and
@@ -40,11 +49,48 @@ def _is_column(node: ast.AST) -> bool:
     )
 
 
+def _projects_installation_model(call: ast.Call) -> list[int]:
+    """The line of a ``select(RecipeInstallation.model_content_sha256)`` under a
+    ``.join(InstallationNode, ...)``: the Models a Spark holds, by Model digest."""
+
+    if not (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr == "join"
+        and call.args
+        and isinstance(call.args[0], ast.Name)
+        and call.args[0].id == "InstallationNode"
+    ):
+        return []
+    inner: ast.AST = call.func.value
+    while isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute):
+        inner = inner.func.value
+    if not (
+        isinstance(inner, ast.Call)
+        and isinstance(inner.func, ast.Name)
+        and inner.func.id == "select"
+    ):
+        return []
+    if len(inner.args) != 1:
+        return []
+    (arg,) = inner.args
+    return (
+        [arg.lineno]
+        if isinstance(arg, ast.Attribute)
+        and arg.attr == "model_content_sha256"
+        and isinstance(arg.value, ast.Name)
+        and arg.value.id == "RecipeInstallation"
+        else []
+    )
+
+
 def scan_source(source: str) -> list[int]:
-    """Lines comparing the first-requester column with a digest."""
+    """Lines comparing the first-requester column with a digest, or reading a
+    Spark's installations by Model digest."""
 
     lines: set[int] = set()
     for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call):
+            lines.update(_projects_installation_model(node))
         if isinstance(node, ast.Compare) and any(
             _is_column(operand) for operand in (node.left, *node.comparators)
         ):
