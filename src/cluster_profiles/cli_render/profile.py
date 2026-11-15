@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from enum import StrEnum
 
 from .. import cli_states
 from .common import (
@@ -167,25 +168,32 @@ def _serving_now(assignments: Sequence[Sequence[object]]) -> None:
 
 
 def _profile_endpoints(payload: Mapping[str, object]) -> None:
-    number = payload.get("number")
-    application_id = payload.get("application_id")
-    if application_id is None:
-        print(f"Profile {number} has no loaded application.")
+    listing = endpoint_listing(
+        payload.get("application_id"),
+        payload.get("projection_issue"),
+        payload.get("assignments"),
+    )
+    if listing is EndpointListing.NOT_LOADED:
+        print(f"Profile {payload.get('number')} has no loaded application.")
         print("Saved profile edits do not publish routes until the profile is loaded.")
         return
-    _field("Loaded application", application_id)
+    _field("Loaded application", payload.get("application_id"))
     _field("Application state", payload.get("application_state"))
-    issue = _optional(payload.get("projection_issue"), "projection_issue")
-    if issue:
+    if listing is EndpointListing.HISTORY_INVALID:
         print(
             "Endpoint assignments are unavailable because stored application history is invalid."
         )
-        _field("Stored evidence", issue.get("detail"))
+        _field(
+            "Stored evidence",
+            _optional(payload.get("projection_issue"), "projection_issue").get(
+                "detail"
+            ),
+        )
         return
-    assignments = _records(payload, "assignments")
-    if not assignments:
+    if listing is EndpointListing.EMPTY:
         print("The loaded application has no endpoint assignments.")
         return
+    assignments = _records(payload, "assignments")
     _serving_now(
         [
             (item.get("alias"), item.get("recipe_title"), item.get("state"))
@@ -256,3 +264,23 @@ def _gateway_keys(payload: Mapping[str, object], action: object) -> None:
                 for row in rows
             ],
         )
+
+
+class EndpointListing(StrEnum):
+    NOT_LOADED = "not-loaded"
+    HISTORY_INVALID = "history-invalid"
+    EMPTY = "empty"
+    ASSIGNED = "assigned"
+
+
+def endpoint_listing(
+    application_id: object, projection_issue: object, assignments: object
+) -> EndpointListing:
+    """What a profile's endpoint answer can say; invalid history never reads as empty."""
+    if application_id is None:
+        return EndpointListing.NOT_LOADED
+    if projection_issue:
+        return EndpointListing.HISTORY_INVALID
+    if assignments == []:
+        return EndpointListing.EMPTY
+    return EndpointListing.ASSIGNED
