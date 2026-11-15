@@ -14,7 +14,6 @@ from vonk_agent_protocol import (
     SecurityRefusalError,
 )
 
-from ..bounded_retry import bounded_attempts
 from ..compiled_execution_plan import VerifiedModelObject
 from .model_cache import model_file_receipt
 from .types import (
@@ -88,37 +87,6 @@ class CompositeObjectSource:
 
     def verify_runtime_image(self, image_digest: str, archive_sha256: str) -> bool:
         return self.oci_source.verify_runtime_image(image_digest, archive_sha256)
-
-    def verified_model_objects_for_set(
-        self, artifact_set_sha256: str, manifest: object = None
-    ) -> tuple[VerifiedModelObject, ...]:
-        """Re-observe a repaired service binding within the request budget."""
-        missing: DistributionUnknown | None = None
-        for _attempt in bounded_attempts():
-            try:
-                return self._verified_model_objects_for_set_once(
-                    artifact_set_sha256, manifest
-                )
-            except DistributionUnknown as error:
-                missing = error
-        assert missing is not None
-        raise missing
-
-    def _verified_model_objects_for_set_once(
-        self, artifact_set_sha256: str, manifest: object = None
-    ) -> tuple[VerifiedModelObject, ...]:
-        resolver = getattr(self.model_source, "verified_model_objects_for_set", None)
-        if resolver is None:
-            raise DistributionUnknown(
-                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                "NAS cache source lacks canonical model-file identity",
-            )
-        receipts = (
-            resolver(artifact_set_sha256)
-            if manifest is None
-            else resolver(artifact_set_sha256, manifest)
-        )
-        return tuple(VerifiedModelObject.model_validate(item) for item in receipts)
 
     def open_object(self, digest: str, expected_bytes: int) -> OpenedObject:
         # Both sources are content addressed. Probe the model cache first so a

@@ -15,7 +15,6 @@ from ..models import ModelCacheSet
 from .artifacts import ArtifactSetManifest, _optional_digest
 from .constants import _LOGGER, _RETRY_BASE_SECONDS, _REVERIFY_ACTOR, SCHEMA_VERSION
 from .errors import (
-    ModelCacheConflictInvalid,
     ModelCacheConflictUnknown,
     ModelCacheNotFound,
     ModelCacheNotFoundInvalid,
@@ -29,11 +28,16 @@ if TYPE_CHECKING:
 class AvailabilityMixin:
     """Availability behavior of the cache service."""
 
+    def _managed_cache_covers(self, manifest: ArtifactSetManifest) -> bool:
+        """Whether managed storage holds a verified copy of every object."""
+        cache = cast("ModelCacheService", self)
+        return cache._managed_cached_objects(manifest) == frozenset(
+            spec.sha256 for spec in manifest.artifacts
+        )
+
     def _require_managed_cache_coverage(self, manifest: ArtifactSetManifest) -> None:
         cache = cast("ModelCacheService", self)
-        if cache._managed_cached_objects(manifest) != frozenset(
-            spec.sha256 for spec in manifest.artifacts
-        ):
+        if not cache._managed_cache_covers(manifest):
             cache._reverify_set(manifest)
             raise ModelCacheConflictUnknown(
                 ModelCacheCode.COVERAGE_INCOMPLETE,
@@ -186,9 +190,7 @@ class AvailabilityMixin:
         with suppress(ModelCacheNotFound):
             cache._manifest_for_set(manifest.digest)
             return
-        if cache._managed_cached_objects(manifest) == frozenset(
-            spec.sha256 for spec in manifest.artifacts
-        ):
+        if cache._managed_cache_covers(manifest):
             cache.adopt_verified_set(manifest)
 
     def adopt_verified_set(self, manifest: ArtifactSetManifest) -> None:
@@ -219,23 +221,16 @@ class AvailabilityMixin:
                 row.last_error = None
 
     def resolve_verified_artifact_set(
-        self,
-        artifact_set_sha256: str,
-        *,
-        manifest: ArtifactSetManifest | None = None,
+        self, artifact_set_sha256: str
     ) -> tuple[dict[str, object], ...]:
         """Describe every verified object in a complete immutable set.
 
-        Compilation and distribution trust durable publication receipts and
-        check managed file metadata once. Serving an object separately verifies
-        that object's bytes; describing a set must not scan every model file.
-        No source URL or caller-controlled path is exposed by this adapter.
-
-        The set is keyed by its bytes, so every model or recipe revision that
-        selects the same files shares it, while the stored row keeps the
-        provenance of whichever revision cached it first. A caller passing its
-        own resolved ``manifest`` gets the same verified objects described with
-        its model identities; nothing is re-hashed or downloaded.
+        Distribution trusts durable publication receipts and checks managed
+        file metadata once. Serving an object separately verifies that
+        object's bytes; describing a set must not scan every model file. No
+        source URL or caller-controlled path is exposed by this adapter.
+        Compilation needs no NAS copy and records a covered set through
+        ``adopt_covered_set`` instead.
         """
         cache = cast("ModelCacheService", self)
         digest = _optional_digest(artifact_set_sha256)
@@ -243,22 +238,8 @@ class AvailabilityMixin:
             raise ModelCacheNotFoundInvalid(
                 ModelCacheCode.ENTRY_MISSING, "cache entry was not found"
             )
-        if manifest is not None and manifest.digest != digest:
-            raise ModelCacheConflictInvalid(
-                ModelCacheCode.IDENTITY_CONFLICT,
-                "requested manifest does not name this artifact set",
-            )
-        try:
-            stored: ArtifactSetManifest | None = cache._manifest_for_set(digest)
-        except ModelCacheNotFound:
-            if manifest is None:
-                raise
-            stored = None
-        manifest = manifest or stored
-        assert manifest is not None
+        manifest = cache._manifest_for_set(digest)
         cache._require_managed_cache_coverage(manifest)
-        if stored is None:
-            cache.adopt_verified_set(manifest)
         descriptors = []
         for spec in manifest.artifacts:
             path = cache._object_path(spec.sha256)

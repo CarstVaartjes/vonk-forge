@@ -1726,6 +1726,29 @@ def test_the_anonymous_github_primitive_is_for_the_github_modules_only() -> None
         )
 
 
+def test_nas_coverage_is_required_only_where_nas_bytes_are_read() -> None:
+    """Catches a planner or compiler that needs the NAS copy of a model every
+    target Spark already holds (a re-download after NAS eviction)."""
+    source = "def receipts(cache, digest):\n    return cache.resolve_verified_artifact_set(digest)\n"
+    assert check_source(
+        "control/src/vonk_control/execution_plan_service.py",
+        source,
+        {2},
+        modes=("model-sets",),
+    )
+    gate = "def plan(cache, manifest):\n    cache._require_managed_cache_coverage(manifest)\n"
+    assert check_source(
+        "control/src/vonk_control/run_switch_operations/run_planning.py",
+        gate,
+        {2},
+        modes=("model-sets",),
+    )
+    for owner in ("model_cache/availability.py", "distribution/model_cache.py"):
+        assert not check_source(
+            f"control/src/vonk_control/{owner}", source, {2}, modes=("model-sets",)
+        )
+
+
 _FOLLOW_COUNT = (
     "def same_job(observed):\n"
     "    active = [item for item in observed['operations']]\n"
