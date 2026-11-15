@@ -483,7 +483,7 @@ The guards reject new handwritten contract literals, untyped mapping annotations
 provenance comparisons, security refusals outside ingress owners, unbounded waits,
 read refusals, a captured Docker listing or ranged inspection in the helper (read it line by line),
 imperative remedy text, anti-principle
-test assertions, vonkctl tests that read printed output (`printed-output`), short wall-clock limits on test work, and the existing
+test assertions, vonkctl tests that assert wording in printed output (`printed-output`), short wall-clock limits on test work, and the existing
 coordination syntax violations. The retry guard also rejects attempt/repetition
 comparisons that end standing intent or remove its next action; explicit
 cancellation and request-local retries remain valid. A broad handler that parks
@@ -585,11 +585,12 @@ otherwise have to reason about by hand:
   tested on data; the renderer only prints it. Human wording is owned by the shared vectors in
   `tests/fixtures` that the web renders too, and one module,
   `tests/cluster_profiles/test_cli_wording.py`, compares vonkctl's text with
-  them. A secret or terminal control in any output is a leak, not wording;
-  those checks keep their existing stream assertions, and a new one asserts the
-  `--json` document and the requests sent. The `printed-output` added-line guard
-  refuses newly added `capsys`, `capfd` and redirected stdout/stderr anywhere
-  else in `tests/cluster_profiles`.
+  them. A secret or terminal control in any output is a leak, not wording, and
+  a line shown twice is a duplication fault: absence, count and emptiness
+  checks on captured stdout/stderr stay valid, new ones included. The
+  `printed-output` added-line guard refuses only a new positive wording
+  assertion on captured output (a string literal `in` `.out`, `.err` or
+  `.getvalue()`) anywhere else in `tests/cluster_profiles`.
 - **Keep the fast tier fast and hermetic.** A host-dependent test belongs in the
   lane tier, which the collection-time marker applies automatically, rather than
   being skipped or made conditional. The fast tier should stay under a couple of

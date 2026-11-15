@@ -4061,21 +4061,36 @@ def test_a_component_may_not_type_not_reported(source: str) -> None:
     "body",
     [
         "    assert 'Spark' in capsys.readouterr().out\n",
-        "    with redirect_stdout(buffer):\n        pass\n",
-        "    out = capfd.readouterr().err\n",
+        "    assert 'ready' in captured.out and status == 0\n",
+        "    assert f'Job: {job}' in buffer.getvalue()\n",
+        "    assert 'Reconnect' in captured.err.splitlines()\n",
     ],
 )
-def test_a_vonkctl_test_may_not_read_printed_output(body: str) -> None:
+def test_a_vonkctl_test_may_not_assert_wording_in_printed_output(body: str) -> None:
     source = "def test_x(capsys):\n" + body
     path = "tests/cluster_profiles/test_example.py"
     modes = ("printed-output",)
-    assert check_source(path, source, {1}, modes=modes)
     assert check_source(path, source, {2}, modes=modes)
-    # The one wording test and other trees may; a comment and the fixture may.
+    # The one wording test and other trees may.
     for allowed in ("tests/cluster_profiles/test_cli_wording.py", "tests/test_x.py"):
-        assert not check_source(allowed, source, {1, 2}, modes=modes)
-    decided = "def test_x(vonkctl_json):\n    # not capsys\n    vonkctl_json('fleet')\n"
-    assert not check_source(path, decided, {1, 2, 3}, modes=modes)
+        assert not check_source(allowed, source, {2}, modes=modes)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # Leak, duplication and emptiness checks on captured output are data.
+        "    assert TOKEN not in captured.out + captured.err\n",
+        "    assert capsys.readouterr().out.count(SECRET) == 1\n",
+        "    assert not capsys.readouterr().out\n",
+        "    output = capsys.readouterr()\n",
+        "    assert 'x' in document['detail']\n",
+    ],
+)
+def test_leak_and_count_checks_on_printed_output_stay_allowed(body: str) -> None:
+    source = "def test_x(capsys):\n" + body
+    path = "tests/cluster_profiles/test_example.py"
+    assert not check_source(path, source, {1, 2}, modes=("printed-output",))
 
 
 _RETRY_PATH = "control/src/vonk_control/fleet_profiles/retry.py"

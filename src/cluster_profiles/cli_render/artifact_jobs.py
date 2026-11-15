@@ -146,10 +146,11 @@ def _artifact_job_download(payload: Mapping[str, object]) -> None:
     _field("Output manifest SHA-256", payload.get("output_manifest_sha256"))
     _field("Total output bytes", _bytes(payload.get("total_bytes")))
     files = _records(payload, "files")
-    if state != SUCCEEDED:
+    outcome = result_files(state, files)
+    if outcome is ResultFiles.UNAVAILABLE:
         _field("Output files", ENDPOINT_UNAVAILABLE)
         return
-    if not files:
+    if outcome is ResultFiles.EMPTY:
         print("Result files: none (job succeeded with an empty result).")
         return
     _field("Verified output files", len(files))

@@ -291,8 +291,7 @@ def clock_metric(
 ) -> int | GpuClockUnavailable | None:
     """A clock reading as reported, or the typed reason it is missing.
 
-    A reported value is kept as is: zero is a reading, and a reported maximum is
-    hardware evidence that the policy limit never clamps.
+    A reported value is kept as is: zero is a reading, not a missing one.
     """
     if isinstance(value, int):
         return value
@@ -353,46 +352,24 @@ def _clock_reading(value: object) -> str:
     return _text(value.value if isinstance(value, Enum) else value)
 
 
-@dataclass(frozen=True)
-class CpuClock:
-    current_mhz: int
-    maximum_mhz: int | None
-    low: bool
-
-
-def cpu_clock(
-    freshness: object, current: object, maximum: object, *, low: bool
-) -> CpuClock | None:
-    """The live average CPU clock and its maximum; nothing unless both are live."""
-    if freshness != "live" or type(current) is not int:
-        return None
-    return CpuClock(current, maximum if type(maximum) is int else None, low)
-
-
 def _cpu_clock(node: Mapping[str, object]) -> str:
     """Average current CPU clock against the hardware maximum, when reported."""
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
+    current = sample.get("cpu_frequency_avg_mhz")
+    maximum = sample.get("cpu_frequency_max_mhz")
+    if telemetry.get("freshness") != "live" or type(current) is not int:
+        return ENDPOINT_UNAVAILABLE
+    text = f"{current / 1000:.1f} GHz"
+    if type(maximum) is int:
+        text = f"{current / 1000:.1f} of {maximum / 1000:.1f} GHz"
     warnings = node.get("warnings")
-    low = isinstance(warnings, list) and any(
+    if isinstance(warnings, list) and any(
         isinstance(item, Mapping) and item.get("code") == "cpu.low-clock"
         for item in warnings
-    )
-    clock = cpu_clock(
-        telemetry.get("freshness"),
-        sample.get("cpu_frequency_avg_mhz"),
-        sample.get("cpu_frequency_max_mhz"),
-        low=low,
-    )
-    if clock is None:
-        return ENDPOINT_UNAVAILABLE
-    current = f"{clock.current_mhz / 1000:.1f}"
-    text = (
-        f"{current} GHz"
-        if clock.maximum_mhz is None
-        else f"{current} of {clock.maximum_mhz / 1000:.1f} GHz"
-    )
-    return text + (" (throttled?)" if clock.low else "")
+    ):
+        text += " (throttled?)"
+    return text
 
 
 def _nas_route(inventory: Mapping[str, object]) -> str:

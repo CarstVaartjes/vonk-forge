@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from vonk_agent_protocol import ProjectionCode
 
-from cluster_profiles.cli_render import progress_line
+from cluster_profiles.cli_render import progress_line, render_payload
 from cluster_profiles.cli_render.activity import (
     activity_continuation,
     unknown_membership,
@@ -18,19 +18,16 @@ from cluster_profiles.cli_render.artifact_jobs import (
 from cluster_profiles.cli_render.common import _text
 from cluster_profiles.cli_render.fleet import (
     NO_SPARKS,
-    CpuClock,
     RunProblem,
     _fleet_status_line,
     _needs_attention,
     clock_metric,
-    cpu_clock,
     run_problem,
 )
 from cluster_profiles.cli_render.library import (
     _applied_filters,
     _needs_download,
     _qualification_status,
-    retained_revisions,
 )
 from cluster_profiles.cli_render.operations import stalls
 from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listing
@@ -42,10 +39,6 @@ from cluster_profiles.generated_control.models.gpu_clock_observation import (
 )
 from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
     GpuClockUnavailable,
-)
-from cluster_profiles.generated_control.models.model_cache_usage import ModelCacheUsage
-from cluster_profiles.generated_control.models.retained_model_revision import (
-    RetainedModelRevision,
 )
 
 
@@ -207,13 +200,6 @@ def test_a_run_problem_is_the_controller_verdict_never_a_client_derivation():
     )
 
 
-def test_the_cpu_clock_is_shown_only_from_live_telemetry():
-    assert cpu_clock("live", 2100, 3900, low=True) == CpuClock(2100, 3900, low=True)
-    assert cpu_clock("live", 2100, "x", low=False) == CpuClock(2100, None, low=False)
-    assert cpu_clock("stale", 2100, 3900, low=False) is None
-    assert cpu_clock("live", None, 3900, low=False) is None
-
-
 def test_a_spark_whose_gpu_needs_a_reset_needs_attention():
     # Break caught: a broken GPU shown as an ordinary idle, healthy Spark.
     spark = {
@@ -228,9 +214,9 @@ def test_a_spark_whose_gpu_needs_a_reset_needs_attention():
     assert _needs_attention(spark | {"warnings": [reset]})
 
 
-def test_a_gpu_clock_keeps_zero_and_reported_max_and_names_a_missing_reading():
-    # Break caught: an idle zero hidden, the reported max clamped to the policy
-    # limit, or a driver N/A shown as a plain unknown.
+def test_a_gpu_clock_keeps_zero_and_names_a_missing_reading():
+    # Break caught: an idle zero hidden as missing, or a driver N/A shown as a
+    # plain unknown.
     missing = GpuClockUnavailable(
         metric="sm_mhz",
         reason="not-supported",
@@ -296,20 +282,6 @@ def test_invalid_endpoint_history_is_unavailable_not_an_empty_profile():
     assert endpoint_listing("a", None, [{}]) is EndpointListing.ASSIGNED
 
 
-def test_a_retained_revision_keeps_its_owners():
-    # Break caught: a listing that hides why a previous revision stays on disk.
-    revision = RetainedModelRevision(
-        content_sha256="a" * 64, unique_bytes=2, owners=["installation owner-1"]
-    )
-    usage = ModelCacheUsage(
-        disk_bytes=12, unique_bytes=3, shared_bytes=9, retained_revisions=[revision]
-    )
-    assert [item.owners for item in retained_revisions(usage)] == [
-        ["installation owner-1"]
-    ]
-    assert retained_revisions(None) == []
-
-
 def test_an_empty_library_page_names_the_flags_that_filtered_it():
     filters = {"filters": {"cached": True, "usage": ["code"], "search": ""}}
     assert _applied_filters(filters) == ["--cached", "--usage code"]
@@ -324,3 +296,60 @@ def test_an_empty_job_result_is_a_result_and_only_live_jobs_reconnect():
     assert job_reconnects("running", "op")
     assert not job_reconnects("succeeded", "op")
     assert not job_reconnects("running", None)
+
+
+def _spark(name, number, *, online=True, loaded=()):
+    return {
+        "id": f"spk_{number:032x}",
+        "display_name": name,
+        "lifecycle": "ready",
+        "connection": {
+            "online_state": "online" if online else "offline",
+            "offline_reason": None if online else "heartbeat missed",
+            "last_seen_at": "2026-09-28T10:00:00Z",
+        },
+        "inventory": {
+            "freshness": "fresh",
+            "host_memory_total_bytes": 128 << 30,
+            "host_memory_free_bytes": 32 << 30,
+            "disk_free_bytes": 1 << 40,
+        },
+        "telemetry": None,
+        "loaded": list(loaded),
+        "installed": [],
+        "warnings": [],
+    }
+
+
+def _cpu_spark(*, low_clock):
+    spark = _spark("atlas", 1)
+    spark["telemetry"] = {
+        "freshness": "live",
+        "sample": {
+            "cpu_frequency_avg_mhz": 2100,
+            "cpu_frequency_max_mhz": 3900,
+            "gpu_temperature_c": 84,
+        },
+    }
+    if low_clock:
+        spark["warnings"] = [
+            {
+                "code": "cpu.low-clock",
+                "detail": "CPU clock is low",
+                "severity": "warning",
+            }
+        ]
+    return spark
+
+
+def test_fleet_detail_shows_cpu_clock_with_temperature_and_throttle_hint(capsys):
+    render_payload(_cpu_spark(low_clock=False), "fleet", action="detail")
+    output = capsys.readouterr().out
+    assert "2.1 of 3.9 GHz" in output and "84" in output
+    assert "throttled?" not in output
+
+    render_payload(_cpu_spark(low_clock=True), "fleet", action="detail")
+    assert "throttled?" in capsys.readouterr().out
+
+    render_payload(_spark("atlas", 1), "fleet", action="detail")
+    assert "GHz" not in capsys.readouterr().out

@@ -20,7 +20,6 @@ from ..generated_control.models.published_qualification_status_view import (
 from ..generated_control.models.qualification_evidence_record import (
     QualificationEvidenceRecord,
 )
-from ..generated_control.models.retained_model_revision import RetainedModelRevision
 from ..generated_control.types import Unset
 from .common import (
     _bytes,
@@ -296,12 +295,6 @@ def _recipe_alternatives(item: Mapping[str, object]) -> None:
     print("  Compare: vonkctl recipe detail <recipe>")
 
 
-def retained_revisions(usage: ModelCacheUsage | None) -> list[RetainedModelRevision]:
-    """The previous revisions a model keeps on disk, each with the owners keeping it."""
-    retained = usage.retained_revisions if usage is not None else None
-    return list(retained) if isinstance(retained, list) else []
-
-
 def _model_storage_note(usage: ModelCacheUsage) -> None:
     _field("Unique bytes", _bytes(usage.unique_bytes))
     _field("Shared bytes", _bytes(usage.shared_bytes))
@@ -453,10 +446,14 @@ def _library(
         if noun == LibraryNoun.MODEL:
             for item in rows:
                 raw_usage = _optional(item.get("cache_usage"), "cache_usage")
-                usage = ModelCacheUsage.from_dict(raw_usage) if raw_usage else None
-                if usage is not None and retained_revisions(usage):
-                    print(f"  {_text(item.get('selector'))}")
-                    _model_storage_note(usage)
+                if raw_usage:
+                    usage = ModelCacheUsage.from_dict(raw_usage)
+                    if (
+                        isinstance(usage.retained_revisions, list)
+                        and usage.retained_revisions
+                    ):
+                        print(f"  {_text(item.get('selector'))}")
+                        _model_storage_note(usage)
         for item in rows:
             preparation = _optional(
                 _object(item.get("local"), "local").get("preparation"), "preparation"
