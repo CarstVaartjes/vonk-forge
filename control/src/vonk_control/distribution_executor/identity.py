@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DistributionObject,
     LifecycleState,
+    RunSwitchCode,
+    WaitReason,
     canonical_message,
 )
 from vonk_agent_protocol.agent_words import ProfileEffectState
@@ -23,7 +25,10 @@ from ..distribution.types import content_objects, plan_objects
 from ..distribution_assignment import NodeDistributionAssignment
 from ..models import RecipeInstallation
 from ..oci_image_store import StoreUnknown
-from ..recipe_execution_contract import parse_stored_installation_plan
+from ..recipe_execution_contract import (
+    RecipeExecutionContractError,
+    parse_stored_installation_plan,
+)
 from ..run_switch_contract import (
     RunSwitchMemberState,
     RunSwitchOperationResult,
@@ -33,6 +38,7 @@ from ..run_switch_contract import (
 )
 from ..run_switch_operations import effective_build_receipt
 from ..run_switch_operations.constants import _MEMBER_STATE_ADAPTER
+from ..run_switch_operations.errors import RunSwitchRetryLater
 from ..runtime_image_preparation import (
     RuntimeImageStorage,
 )
@@ -83,27 +89,44 @@ class DistributionIdentity:
                 if installation_id is None
                 else session.get(RecipeInstallation, installation_id)
             )
-            stored = (
-                None
-                if installation is None
-                else parse_stored_installation_plan(installation.plan)
-            )
-        if stored is None or install_plan_digest not in (None, stored.plan_digest):
-            raise RuntimeError("the persisted compiled plan is unavailable")
+            if installation is None:
+                raise RunSwitchRetryLater(
+                    RunSwitchCode.INSTALLATION_PREPARATION_UNAVAILABLE,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                )
+            try:
+                stored = parse_stored_installation_plan(installation.plan)
+            except RecipeExecutionContractError as error:
+                raise RunSwitchRetryLater(
+                    RunSwitchCode.INSTALLATION_IDENTITY_UNAVAILABLE,
+                    reason=WaitReason.OBSERVATION_UNAVAILABLE,
+                ) from error
         model_set_digest = stored.model_artifact_set_sha256
         preparation = plan.preparation
-        if model_set_digest is None or (
-            preparation is not None
-            and preparation.model.artifact_set_sha256 not in (None, model_set_digest)
+        if (
+            install_plan_digest not in (None, stored.plan_digest)
+            or model_set_digest is None
+            or (
+                preparation is not None
+                and preparation.model.artifact_set_sha256
+                not in (None, model_set_digest)
+            )
         ):
-            raise RuntimeError("the compiled plan names another model set")
+            # A newer installation replaced the one this plan prepared.
+            raise RunSwitchRetryLater(
+                RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
+                reason=WaitReason.SCOPE_CHANGED,
+            )
         objects = plan_objects(next(iter(stored.compiled_execution_plans.values())))
         actual_bytes = sum(item.bytes for item in objects)
         model_set_bytes = (
             preparation.model.artifact_set_bytes if preparation is not None else None
         )
         if model_set_bytes is not None and actual_bytes != model_set_bytes:
-            raise RuntimeError("compiled model byte total does not match the plan")
+            raise RunSwitchRetryLater(
+                RunSwitchCode.INSTALLATION_IDENTITY_CHANGED,
+                reason=WaitReason.SCOPE_CHANGED,
+            )
         return objects, model_set_digest, actual_bytes
 
     @staticmethod
