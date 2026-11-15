@@ -184,3 +184,33 @@ def test_a_grant_the_stored_manifest_disowns_serves_no_model_object(
             plan_digest=assignment.plan_digest,
             digest=hashlib.sha256(TOKENIZER).hexdigest(),
         )
+
+
+def test_a_grant_registers_after_the_nas_evicted_its_set(
+    postgres_engine, tmp_path: Path
+) -> None:
+    """A Spark holding the files gets the image: its grant needs no NAS set."""
+    from sqlalchemy import delete
+    from vonk_control.models import ModelCacheSet, ModelCacheSetArtifact
+
+    set_digest, model_source, distribution, identity, image = _world(
+        postgres_engine, tmp_path
+    )
+    objects = model_source.objects_for_set(set_digest)
+    assert distribution.sessions is not None
+    # What a finished eviction leaves: no set row, no membership, open gates.
+    with distribution.sessions.begin() as session:
+        session.execute(
+            delete(ModelCacheSetArtifact).where(
+                ModelCacheSetArtifact.artifact_set_sha256 == set_digest
+            )
+        )
+        session.execute(
+            delete(ModelCacheSet).where(ModelCacheSet.artifact_set_sha256 == set_digest)
+        )
+    assignment = _assignment(identity, image, set_digest, objects)
+
+    distribution.register(assignment)
+
+    grant = distribution.authorize(node_id=NODE_A, plan_digest=assignment.plan_digest)
+    assert grant.objects == assignment.objects
