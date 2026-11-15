@@ -31,19 +31,22 @@ from .recipe_execution_contract import (
 from .reservation_owners import reservation_owner
 
 
-def models_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
-    """Models some installation on the Spark holds files of.
+def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
+    """Model sets some installation on the Spark runs.
 
-    A Spark's shared store receives a model's files before any installation of it
-    is made, and only the agent's uninstall of the model's last installation
-    removes them, so while such an installation exists the store holds the model
-    and a new installation links its files instead of writing them.
+    A Spark's shared store receives a set's files before any installation of it
+    is made, and only the agent's uninstall of the last installation linking them
+    removes them, so while such an installation exists the store holds the set
+    and a new installation of the same set links its files instead of writing
+    them. Keyed by the set, not the Model digest: a Model re-digested over the
+    same files runs the same set. An installation with no recorded set holds
+    nothing here (its bytes are then charged again, never under-counted).
     """
 
     return frozenset(
         digest
         for digest in session.scalars(
-            select(RecipeInstallation.model_content_sha256)
+            select(RecipeInstallation.model_artifact_set_sha256)
             .join(
                 InstallationNode,
                 InstallationNode.installation_id == RecipeInstallation.id,
@@ -57,7 +60,7 @@ def models_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
                         InstallationState.PARTIAL,
                     )
                 ),
-                RecipeInstallation.model_content_sha256.is_not(None),
+                RecipeInstallation.model_artifact_set_sha256.is_not(None),
             )
         )
         if digest is not None

@@ -12,7 +12,6 @@ from vonk_agent_protocol import (
 )
 
 from ..models import (
-    CatalogDocumentRevision,
     RecipeBuild,
 )
 from ..run_switch_contract import (
@@ -21,7 +20,6 @@ from ..run_switch_contract import (
 )
 from .constants import _CONTAINER_BUILD_STATE_ADAPTER
 from .errors import RunSwitchRetryLater
-from .identity_helpers import _recipe_definition
 
 
 def _refreshed_freshness(
@@ -33,17 +31,6 @@ def _refreshed_freshness(
     kept = [current.get(item.source, item) for item in reviewed]
     reviewed_sources = {item.source for item in reviewed}
     return [*kept, *(item for item in fresh if item.source not in reviewed_sources)]
-
-
-def _recipe_model_digests(revision: CatalogDocumentRevision | None) -> frozenset[str]:
-    """The content digests of the models a recipe revision names."""
-
-    recipe = _recipe_definition(revision.document) if revision is not None else None
-    return (
-        frozenset(item.model.content_sha256 for item in recipe.models)
-        if recipe is not None
-        else frozenset()
-    )
 
 
 def _container_build_result(build: RecipeBuild) -> RunSwitchContainerBuildResult:

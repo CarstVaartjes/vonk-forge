@@ -223,8 +223,10 @@ or a schema-1 compatibility path to make the transition appear complete.
   A cached model set serves its first requester and its verified bindings:
   read them through `model_cache.lineage`, or an installation's
   `model_artifact_set_sha256`, never by comparing
-  `ModelCacheSet.model_content_sha256` with a Model digest (the
-  `set-first-requester` added-line guard).
+  `ModelCacheSet.model_content_sha256` with a Model digest. Likewise "does this
+  Spark already hold the model" is the set its installations run
+  (`disk_reservations.model_sets_stored_on_node`), never their Model digests
+  (both: the `set-first-requester` added-line guard).
   NAS coverage is required only by the copy that reads NAS bytes; planning and
   compilation see model identity only (the `model-sets` added-line guard).
 - Test process death, restart, duplicate requests, cancellation, storage loss,

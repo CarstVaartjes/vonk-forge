@@ -324,6 +324,8 @@ class RunPlanningMixin:
                     else None
                 ),
                 artifact_bytes=inspection.artifact_set_bytes,
+                artifact_set_sha256=inspection.artifact_set_sha256,
+                missing_artifact_bytes_by_node=inspection.missing_spark_bytes_by_node,
                 excluded_profile_application_ids=excluded_profile_application_ids,
                 planned_ports=planned_ports
                 | (

@@ -22,7 +22,7 @@ from vonk_forge_contracts import ModelDefinition
 from ..attempt_residues import unowned_never_installed
 from ..disk_reservations import (
     describe_disk_charges,
-    models_stored_on_node,
+    model_sets_stored_on_node,
     outstanding_disk_charges,
 )
 from ..gpu_health import gpu_health_reason
@@ -76,7 +76,6 @@ from ..run_switch_contract import (
 )
 from ..spark_disk import spark_free_bytes
 from ..unused_storage_collection import spark_eviction_capacity
-from .build_helpers import _recipe_model_digests
 from .constants import _SWAP_BEYOND_STOP_COMPONENT, _SWAP_COMPONENT
 from .planning_helpers import (
     PlanInventory,
@@ -107,6 +106,8 @@ class ResourceFitMixin:
         serving: bool = True,
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
+        artifact_set_sha256: str | None = None,
+        missing_artifact_bytes_by_node: Mapping[str, int] | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
     ) -> tuple[
@@ -139,7 +140,6 @@ class ResourceFitMixin:
         except RecipeRuntimeSpecError:
             roles = ()
         role_by_name = {role.name: role for role in roles}
-        recipe_models = _recipe_model_digests(revision)
         observed_peaks = (
             observed_role_peaks(session, revision.content_digest) if revision else {}
         )
@@ -461,6 +461,9 @@ class ResourceFitMixin:
                             else:
                                 node_blockers.append(projected)
                 disk_need = None
+                # Model bytes this load links from the Spark's store rather
+                # than writes; the agent never removes them as unused.
+                reused_model_bytes = 0
                 try:
                     image_size = (
                         image_bytes if image_bytes is not None else disk.image_bytes
@@ -472,13 +475,28 @@ class ResourceFitMixin:
                     )
                     # An unstated payload size leaves the envelope incomplete.
                     if image_size is not None and artifact_size is not None:
-                        if recipe_models and recipe_models <= models_stored_on_node(
-                            session, item.node_id
+                        set_bytes = artifact_size
+                        if (
+                            artifact_set_sha256 is not None
+                            and artifact_set_sha256
+                            in model_sets_stored_on_node(session, item.node_id)
                         ):
-                            # The Spark's shared store already holds every model of
-                            # the recipe (an installation of it exists there), so
+                            # The Spark's shared store already holds the model
+                            # set (an installation running it exists there), so
                             # the install links those files and writes none.
                             artifact_size = 0
+                        elif (
+                            missing_artifact_bytes_by_node is not None
+                            and item.node_id in missing_artifact_bytes_by_node
+                        ):
+                            # Otherwise it writes only the files the agent's
+                            # store scan does not report (install admission's
+                            # rule); no scan charges the whole set.
+                            artifact_size = missing_artifact_bytes_by_node[item.node_id]
+                            # Those scan-reported files may be unused ones the
+                            # agent could reclaim; this load keeps them. A held
+                            # set's files are linked, so never counted unused.
+                            reused_model_bytes = max(0, set_bytes - artifact_size)
                         disk_need = installation_disk_requirement(
                             disk,
                             required_download_bytes=image_size + artifact_size,
@@ -521,7 +539,9 @@ class ResourceFitMixin:
                         )
                     disk_free = (
                         spark_free_bytes(
-                            snapshot.disk_free_bytes, snapshot.unused_model_bytes
+                            snapshot.disk_free_bytes,
+                            snapshot.unused_model_bytes,
+                            reused_model_bytes=reused_model_bytes,
                         )
                         if snapshot is not None
                         else None

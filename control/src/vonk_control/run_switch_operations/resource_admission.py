@@ -15,6 +15,8 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts import ModelDefinition
 
+from ..model_cache.errors import ModelCacheError
+from ..model_cache.resolution import resolve_recipe_set
 from ..models import (
     CatalogDocumentRevision,
 )
@@ -31,6 +33,7 @@ from ..run_switch_contract import (
 from ..strict_json import (
     read_stored_model,
 )
+from .artifact_inspection import missing_spark_bytes_by_node
 from .build_helpers import _refreshed_freshness
 from .constants import (
     _MEMORY_CAPACITY_REFUSALS,
@@ -54,6 +57,45 @@ if TYPE_CHECKING:
     from .service import RunSwitchOperationService
 
 
+def _reviewed_model(
+    session: Session,
+    reviewed: RunSwitchAssessment,
+    recipe_revision_id: str,
+    node_ids: Sequence[str],
+    *,
+    now: datetime,
+) -> tuple[int | None, str | None, Mapping[str, int] | None]:
+    """The model set a recheck fits (bytes, digest, bytes missing per Spark).
+
+    The review's preparation names them. A review made before any build has
+    none: the set the recipe resolves to is the one it will run, and the
+    agents' store scans say which of its files each Spark lacks, as the
+    review's inspection does. A set the cache refuses is unknown, and the fit
+    then charges the recipe's whole envelope.
+    """
+
+    if reviewed.preparation is not None:
+        model = reviewed.preparation.model
+        return (
+            model.artifact_set_bytes,
+            model.artifact_set_sha256,
+            {
+                target.node_id: target.missing_bytes
+                for target in model.targets
+                if target.missing_bytes is not None
+            },
+        )
+    try:
+        manifest = resolve_recipe_set(session, recipe_revision_id)
+    except ModelCacheError:
+        return None, None, None
+    return (
+        manifest.expected_bytes,
+        manifest.digest,
+        missing_spark_bytes_by_node(session, manifest, node_ids, now=now),
+    )
+
+
 class ResourceAdmissionMixin:
     def recheck_resources_in_session(
         self,
@@ -69,7 +111,11 @@ class ResourceAdmissionMixin:
         The caller fences inventory/reservation writers and validates the exact
         reviewed stop set before this call. Cache, build and capability-provider
         work remains outside this transaction. Preparation evidence here stays
-        the reviewed snapshot; this method makes no new availability claim.
+        the reviewed snapshot and this method makes no new availability claim.
+        The disk fit charges model bytes by the review's rule: the reviewed
+        per-Spark missing bytes, or, for a review made before any build, the
+        set the recipe resolves to against the agents' store scans, both read
+        in this session.
         """
         service = typing_cast("RunSwitchOperationService", self)
         revision = _active_recipe_revision(session, request.recipe_revision_id)
@@ -90,6 +136,13 @@ class ResourceAdmissionMixin:
             for reason in resolution.reasons
         )
         now = _now(service._clock)
+        artifact_bytes, artifact_set_sha256, missing_by_node = _reviewed_model(
+            session,
+            reviewed,
+            revision.id,
+            tuple(node.node_id for node in request.spark_group.nodes),
+            now=now,
+        )
         resources = service._resource_fits(
             session,
             revision,
@@ -105,9 +158,9 @@ class ResourceAdmissionMixin:
             image_bytes=reviewed.preparation.runtime_image.image_bytes
             if reviewed.preparation is not None
             else None,
-            artifact_bytes=reviewed.preparation.model.artifact_set_bytes
-            if reviewed.preparation is not None
-            else None,
+            artifact_bytes=artifact_bytes,
+            artifact_set_sha256=artifact_set_sha256,
+            missing_artifact_bytes_by_node=missing_by_node,
             excluded_profile_application_ids=excluded_profile_application_ids,
             kept_run_ids=kept_run_ids,
         )
@@ -154,6 +207,8 @@ class ResourceAdmissionMixin:
         model_documents: Mapping[tuple[str, str, str], ModelDefinition],
         image_bytes: int | None = None,
         artifact_bytes: int | None = None,
+        artifact_set_sha256: str | None = None,
+        missing_artifact_bytes_by_node: Mapping[str, int] | None = None,
         excluded_profile_application_ids: tuple[str, ...] = (),
         planned_ports: frozenset[tuple[str, int]] = frozenset(),
         kept_run_ids: Collection[str] = (),
@@ -192,6 +247,8 @@ class ResourceAdmissionMixin:
             revision_digest=revision.content_digest,
             image_bytes=image_bytes,
             artifact_bytes=artifact_bytes,
+            artifact_set_sha256=artifact_set_sha256,
+            missing_artifact_bytes_by_node=missing_artifact_bytes_by_node,
             excluded_profile_application_ids=excluded_profile_application_ids,
             planned_ports=planned_ports,
         )
@@ -220,6 +277,8 @@ class ResourceAdmissionMixin:
                 revision_digest=revision.content_digest,
                 image_bytes=image_bytes,
                 artifact_bytes=artifact_bytes,
+                artifact_set_sha256=artifact_set_sha256,
+                missing_artifact_bytes_by_node=missing_artifact_bytes_by_node,
                 excluded_profile_application_ids=excluded_profile_application_ids,
                 planned_ports=planned_ports,
             )

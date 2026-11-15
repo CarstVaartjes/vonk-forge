@@ -2405,6 +2405,8 @@ def test_retention_using_the_head_revision_or_execution_identity_passes(
     [
         "rows = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256 == digest)\n",
         "rows = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256.in_(models))\n",
+        # The Models a Spark holds, by the Model its installations were made for.
+        "q = select(RecipeInstallation.model_content_sha256).join(InstallationNode, j)\n",
     ],
 )
 def test_a_set_matched_by_its_first_requester_is_flagged(source: str) -> None:
@@ -2431,6 +2433,15 @@ def test_a_set_matched_by_its_first_requester_is_flagged(source: str) -> None:
         (
             "control/src/vonk_control/unused_storage_collection/common.py",
             "q = select(ModelCacheSet).where(ModelCacheSet.model_content_sha256.is_not(None))\n",
+        ),
+        # A Spark's installations by their set, or the Model next to other facts.
+        (
+            "control/src/vonk_control/disk_reservations.py",
+            "q = select(RecipeInstallation.model_artifact_set_sha256).join(InstallationNode, j)\n",
+        ),
+        (
+            "control/src/vonk_control/disk_reservations.py",
+            "q = select(RecipeInstallation.id, RecipeInstallation.model_content_sha256).join(InstallationNode, j)\n",
         ),
     ],
 )

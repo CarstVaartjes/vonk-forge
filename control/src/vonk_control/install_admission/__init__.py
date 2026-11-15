@@ -45,7 +45,6 @@ from ..cluster_mappings import (
 from ..content_identity import same_image as same_image
 from ..content_identity import same_model_object as same_model_object
 from ..disk_reservations import describe_disk_charges as describe_disk_charges
-from ..disk_reservations import models_stored_on_node as models_stored_on_node
 from ..disk_reservations import outstanding_disk_charges as outstanding_disk_charges
 from ..disk_reservations import (
     outstanding_disk_reservation_bytes as outstanding_disk_reservation_bytes,
