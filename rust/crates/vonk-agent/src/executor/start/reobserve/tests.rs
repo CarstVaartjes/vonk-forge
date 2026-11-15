@@ -325,7 +325,10 @@ async fn a_start_whose_image_and_container_are_absent_fails_with_the_helpers_cod
     assert_eq!(asked, ["inspect"]);
     let wire = serde_json::to_value(result.finish(&start_claim()).result).unwrap();
     assert_eq!(wire["kind"], "failed");
-    assert_eq!(wire["evidence"]["helper_error_code"], "runtime_image_missing");
+    assert_eq!(
+        wire["evidence"]["helper_error_code"],
+        "runtime_image_missing"
+    );
 }
 
 #[tokio::test]
