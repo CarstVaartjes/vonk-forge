@@ -86,13 +86,12 @@ if TYPE_CHECKING:
 
 
 def _demote_ranks_naming_the_lost_image(
-    session: Session, job: Job, node_id: str, now: datetime, dispatched_at: datetime
+    session: Session, job: Job, node_id: str, now: datetime
 ) -> None:
     """A Start found its runtime image gone from its Spark (removed under an
     installed rank): every installed rank there that names that image is
     demoted, so the next plan copies the image again and installs afresh
-    instead of repeating the same Start. A rank changed after the Start was
-    dispatched may have been installed after its inspect, so it stays."""
+    instead of repeating the same Start."""
 
     run_id = _parent_identity(job, "owner_id")
     run = None if run_id is None else session.get(RecipeRun, run_id)
@@ -110,7 +109,7 @@ def _demote_ranks_naming_the_lost_image(
             )
         ),
         observed_at=now,
-        before=dispatched_at,
+        before=now,
     )
 
 
@@ -235,7 +234,7 @@ class ResultConsumptionMixin:
             == HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
         ):
             _demote_ranks_naming_the_lost_image(
-                session, job, operation.node_id, service._clock(), operation.created_at
+                session, job, operation.node_id, service._clock()
             )
         if (
             state == LifecycleState.CANCELLED.value
