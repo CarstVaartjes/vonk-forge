@@ -463,7 +463,8 @@ class UnusedStorageCollector:
         try:
             protected = protected_model_objects(session, evidence.operations)
         except ValueError:
-            # Unknown, as for the retention request: promise nothing.
+            # Unknown: promise only private bytes (the agent keeps using its
+            # last stored retention request, so it may free more).
             protected = {digest for found in objects.values() for digest in found}
         for key in groups:
             for digest in objects.get(key, {}):
