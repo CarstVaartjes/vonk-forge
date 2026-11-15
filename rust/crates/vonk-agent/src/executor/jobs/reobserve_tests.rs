@@ -307,7 +307,10 @@ async fn a_job_whose_image_is_absent_ends_failed_with_the_helpers_code() {
     let (claim, _) = job_claim();
     let wire = serde_json::to_value(result.finish(&claim).result).unwrap();
     assert_eq!(wire["kind"], "failed");
-    assert_eq!(wire["evidence"]["helper_error_code"], "runtime_image_missing");
+    assert_eq!(
+        wire["evidence"]["helper_error_code"],
+        "runtime_image_missing"
+    );
 }
 
 #[tokio::test]
