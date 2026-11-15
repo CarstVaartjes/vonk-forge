@@ -62,6 +62,7 @@ from .pressure import (
     _remove,
     _remove_within_budget,
 )
+from .protected_objects import protected_model_objects
 from .references import (
     _installation_kept,
     _installation_last_used,
@@ -459,13 +460,17 @@ class UnusedStorageCollector:
         # Which groups link each shared object, kept groups included: an object
         # a group that stays still links is not freed by removing the others.
         holders: dict[str, set[str]] = defaultdict(set)
+        try:
+            protected = protected_model_objects(session, evidence.operations)
+        except ValueError:
+            # Unknown, as for the retention request: promise nothing.
+            protected = {digest for found in objects.values() for digest in found}
         for key in groups:
-            # Live work is the only thing the agent is told to keep: saved
-            # profiles pin the NAS cache, not these disposable copies.
-            live = not evidence.operations.isdisjoint({key, *group_sets[key]})
             for digest in objects.get(key, {}):
                 holders[digest].add(key)
-                if live or digest in evidence.operations:
+                if digest in protected:
+                    # Live work keeps this object on the Spark; the agent is
+                    # told the same set.
                     holders[digest].add(f"protected:{digest}")
         candidates: list[_Item] = []
         for key, members in sorted(groups.items()):

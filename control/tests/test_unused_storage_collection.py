@@ -3703,8 +3703,11 @@ def test_pressure_promises_profile_pointed_spark_objects_but_not_live_ones(
 
     # Pointed or pinned by a profile: everything is still freeable.
     assert freeable(pointed_models=frozenset({"1" * 64})) == 150 * GIB
-    # Live work on M1 keeps its installations; M2 frees only C (30) and its own 10.
-    assert freeable(operations=frozenset({"1" * 64})) == 40 * GIB
+    # A live operation names M3, which is not installed but shares file B with
+    # the idle M1 and M2: B stays on the Spark, only A, C and own bytes go.
+    m3 = "3" * 64
+    _model_objects(world, m3, {"b" * 64: 60 * GIB})
+    assert freeable(operations=frozenset({m3})) == 90 * GIB
 
 
 def test_shared_file_does_not_pin_an_unrelated_installation(
