@@ -372,8 +372,12 @@ class StoredCacheRetryClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    automatic_attempts: Annotated[int | None, readable_or_none(_ATTEMPTS)] = None
-    next_retry_at: Annotated[AwareDatetime | None, readable_or_none(_AWARE_TIME)] = None
+    automatic_attempts: Annotated[
+        int | None, readable_or_none(_ATTEMPTS, json_fallback=False)
+    ] = None
+    next_retry_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
 
 
 class StoredCacheClaimClock(BaseModel):
@@ -381,8 +385,10 @@ class StoredCacheClaimClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    owner: Annotated[str | None, readable_or_none(_NAME)] = None
-    expires_at: Annotated[AwareDatetime | None, readable_or_none(_AWARE_TIME)] = None
+    owner: Annotated[str | None, readable_or_none(_NAME, json_fallback=False)] = None
+    expires_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
 
 
 class StoredCacheCancelClock(BaseModel):
@@ -390,8 +396,12 @@ class StoredCacheCancelClock(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    requested_at: Annotated[AwareDatetime | None, readable_or_none(_AWARE_TIME)] = None
-    request_key: Annotated[str | None, readable_or_none(_NAME)] = None
+    requested_at: Annotated[
+        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
+    ] = None
+    request_key: Annotated[str | None, readable_or_none(_NAME, json_fallback=False)] = (
+        None
+    )
 
 
 class StoredCacheClocks(BaseModel):
@@ -408,15 +418,15 @@ class StoredCacheClocks(BaseModel):
 
     claim: Annotated[
         StoredCacheClaimClock | None,
-        readable_or_none(TypeAdapter(StoredCacheClaimClock)),
+        readable_or_none(TypeAdapter(StoredCacheClaimClock), json_fallback=False),
     ] = None
     retry: Annotated[
         StoredCacheRetryClock | None,
-        readable_or_none(TypeAdapter(StoredCacheRetryClock)),
+        readable_or_none(TypeAdapter(StoredCacheRetryClock), json_fallback=False),
     ] = None
     cancellation: Annotated[
         StoredCacheCancelClock | None,
-        readable_or_none(TypeAdapter(StoredCacheCancelClock)),
+        readable_or_none(TypeAdapter(StoredCacheCancelClock), json_fallback=False),
     ] = None
 
     @classmethod
