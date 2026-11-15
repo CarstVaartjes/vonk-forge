@@ -129,23 +129,23 @@ def test_profile_edit_requires_explicit_selection_before_read(capsys) -> None:
     assert not client.calls
 
 
-def test_watch_follows_to_the_terminal_state_and_returns_it(vonkctl_json) -> None:
+def test_watch_progress_preserves_stdout_for_final_result(capsys) -> None:
     client = Observations(
         {"operation_id": "model-1", "state": "running", "phase": "copying"},
         {"operation_id": "model-1", "state": "succeeded", "phase": "ready"},
     )
-    status, document = vonkctl_json(
-        "model",
-        "progress",
-        "model-1",
-        "--follow",
-        "--interval-seconds",
-        "0.01",
-        control_client=client,
+    assert (
+        cli.main(
+            ("model", "progress", "model-1", "--follow", "--interval-seconds", "0.01"),
+            control_client=client,
+        )
+        == 0
     )
-    assert status == 0
-    assert document["phase"] == "ready"
-    assert len(client.calls) == 2
+    captured = capsys.readouterr()
+    assert "copying" in captured.err
+    assert "copying" not in captured.out
+    assert "ready" in captured.out
+    assert "\x1b" not in captured.out + captured.err
 
 
 def test_broken_output_pipe_does_not_cancel_work_or_write_again(monkeypatch) -> None:

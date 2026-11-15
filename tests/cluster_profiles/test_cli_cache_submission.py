@@ -479,7 +479,7 @@ def test_lost_server_error_body_preserves_its_retry_delay(
 
 
 def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
-    monkeypatch, vonkctl_json
+    monkeypatch, capsys
 ):
     class Stderr(StringIO):
         flushed = False
@@ -494,6 +494,10 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
     class InterruptedClient(SubmissionClient):
         def request(self, *args, **kwargs):
             assert output.flushed and KEY in output.getvalue()
+            assert (
+                f"vonkctl model progress --request-key {KEY} --follow"
+                in output.getvalue()
+            )
             raise KeyboardInterrupt()
 
     assert (
@@ -503,16 +507,22 @@ def test_human_key_is_flushed_before_the_post_and_interrupt_keeps_unknown(
         )
         == 130
     )
+    assert "acceptance is unknown" in output.getvalue().lower()
+    assert not capsys.readouterr().out
 
     # JSON emits no preamble and still records uncertainty on interruption.
     monkeypatch.setattr(controller_cli.confirmation.sys, "stderr", StringIO())
     client = SubmissionClient(
         {("POST", "/api/model/chosen/download"): KeyboardInterrupt()}
     )
-    status, document = vonkctl_json(
-        "model", "download", "chosen", "--request-key", KEY, control_client=client
+    assert (
+        cli.main(
+            ("model", "download", "chosen", "--request-key", KEY, "--json"),
+            control_client=client,
+        )
+        == 130
     )
-    assert status == 130
+    document = json.loads(capsys.readouterr().out)
     assert document["submission"]["acceptance"] == "unknown"
     assert document["request_key"] == KEY
 

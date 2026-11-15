@@ -571,6 +571,7 @@ def test_unreadable_upload_reply_reconciles_verified_bytes_and_fresh_upload(
 
 def test_cli_create_reconciles_lost_receipt_and_never_submits(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
     client = ArtifactJobClient()
@@ -608,6 +609,7 @@ def test_cli_create_reconciles_lost_receipt_and_never_submits(
         for call in client.calls
         if call[0] == "POST" and call[1].endswith("/artifact-jobs")
     )
+    assert "Draft ID:" in capsys.readouterr().err
 
 
 def test_cli_retains_create_key_when_lookup_is_unavailable_for_a_retry(
