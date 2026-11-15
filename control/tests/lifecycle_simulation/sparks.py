@@ -32,8 +32,6 @@ from vonk_agent_protocol import (
     OutcomeEvidence,
     OutcomeFailed,
     OutcomeKind,
-    OutcomeUnknown,
-    WaitReason,
     canonical_message,
     outcome_body,
 )
@@ -42,7 +40,7 @@ from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
 )
-from vonk_control.lifecycle import Outcome, Reported
+from vonk_control.lifecycle import Reported
 from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
 from vonk_control.memory_reservations import MEMORY_RESERVATION_KINDS
 from vonk_control.models import (
@@ -101,8 +99,6 @@ class Spark:
     image_removed: bool = False
     #: Starts that found the image gone.
     image_missing_starts: int = 0
-    #: It runs an agent from before the helper proved an image absent.
-    old_agent: bool = False
     serving: set[str] = field(default_factory=set)
     memory: Memory | None = None
 
@@ -277,7 +273,7 @@ class Sparks:
                 self._wait(order)
                 continue
             if spark.image_removed and order.kind == "recipe.start":
-                self._image_missing(order, old_agent=spark.old_agent)
+                self._image_missing(order)
                 spark.image_missing_starts += 1
                 continue
             evidence = self._evidence(order)
@@ -317,42 +313,25 @@ class Sparks:
                 self.world.clock(),
             )
 
-    def _image_missing(self, order: Order, *, old_agent: bool) -> None:
+    def _image_missing(self, order: Order) -> None:
         """The agent's answer to a Start whose image is gone: the helper proved
         the image and the container absent, so the Start failed with no effect
-        and names the helper's code (an old agent reports the effect
-        unconfirmed). It is settled and then projected, in one transaction, as
-        the queue does."""
+        and names the helper's code. It is settled and then projected, in one
+        transaction, as the queue does."""
 
         reason = "container runtime could not start the workload"
-        if old_agent:
-            outcome: OutcomeFailed | OutcomeUnknown = OutcomeUnknown(
-                kind=OutcomeKind.UNKNOWN,
-                wait_reason=WaitReason.RUNTIME_EFFECT_UNCONFIRMED,
-                reason=reason,
-                evidence=OutcomeEvidence(
-                    helper_error_code=HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value
-                ),
-            )
-        else:
-            outcome = OutcomeFailed(
-                kind=OutcomeKind.FAILED,
-                code=FailureCode.RECIPE_START_FAILED,
-                reason=reason,
-                evidence=OutcomeEvidence(
-                    helper_error_code=HelperErrorCode.RUNTIME_IMAGE_MISSING.value
-                ),
-            )
+        outcome = OutcomeFailed(
+            kind=OutcomeKind.FAILED,
+            code=FailureCode.RECIPE_START_FAILED,
+            reason=reason,
+            evidence=OutcomeEvidence(
+                helper_error_code=HelperErrorCode.RUNTIME_IMAGE_MISSING.value
+            ),
+        )
         result = outcome_body(outcome)
-        state = (
-            AgentResultState.OBSERVING if old_agent else AgentResultState.FAILED
-        ).value
-        report = (
-            Reported(Outcome.UNKNOWN, reason=reason)
-            if old_agent
-            else Reported.failed(
-                result_disposition(order.kind, state, result), reason=reason
-            )
+        state = AgentResultState.FAILED.value
+        report = Reported.failed(
+            result_disposition(order.kind, state, result), reason=reason
         )
         with self.world.sessions.begin() as session:
             operation = session.get(

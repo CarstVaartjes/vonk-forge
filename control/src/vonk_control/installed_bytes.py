@@ -19,16 +19,9 @@ from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 from .machine_states import rank_installed
 from .models import InstallationNode, RecipeInstallation, RecipeRun
 
-#: The helper found the runtime image gone from its Spark. An agent that
-#: proves the absence fails with ``runtime_image_missing``; an older agent
-#: reports ``runtime_image_inspect_failed`` as an unknown outcome (accepted
-#: until every agent is upgraded).
-_LOST_IMAGE_CODES = frozenset(
-    {
-        HelperErrorCode.RUNTIME_IMAGE_MISSING.value,
-        HelperErrorCode.RUNTIME_IMAGE_INSPECT_FAILED.value,
-    }
-)
+#: The helper proved the runtime image gone from its Spark. An unreadable
+#: inspection (``runtime_image_inspect_failed``) proves nothing and never demotes.
+_LOST_IMAGE_CODES = frozenset({HelperErrorCode.RUNTIME_IMAGE_MISSING.value})
 
 
 def refresh_installed_bytes(

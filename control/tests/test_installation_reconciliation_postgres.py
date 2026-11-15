@@ -414,9 +414,8 @@ def _load(world: World, profile_id: str) -> str:
 
 
 @pytest.mark.slow(30)
-@pytest.mark.parametrize("old_agent", [False, True], ids=["failed", "old-unknown"])
 def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
-    tmp_path: Path, postgres_engine, old_agent: bool
+    tmp_path: Path, postgres_engine
 ) -> None:
     # Wrong implementation: the rank stays installed after a Start found its
     # image gone, so the next load reuses it, copies no image and starts the
@@ -432,17 +431,10 @@ def test_postgres_a_start_that_finds_its_image_removed_heals_on_the_next_load(
         assert sim.settle(_load(world, idle)) == "succeeded"
         removed = sim.sparks.by_node[spark]
         removed.image_removed = True  # docker rmi under the installed rank
-        removed.old_agent = old_agent
         broken = _load(world, solo)
-        if old_agent:
-            for _ in range(5):
-                if removed.image_missing_starts:
-                    break
-                sim.round()
-        else:
-            # No effect happened: the load ends after its one Start.
-            assert sim.settle(broken) in ENDED
-            assert removed.image_missing_starts == 1
+        # No effect happened: the load ends after its one Start.
+        assert sim.settle(broken) in ENDED
+        assert removed.image_missing_starts == 1
         assert removed.image_missing_starts
 
         assert sim.settle(_load(world, solo)) == "succeeded"
