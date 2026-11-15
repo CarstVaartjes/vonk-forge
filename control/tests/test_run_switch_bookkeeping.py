@@ -86,23 +86,6 @@ def test_unreadable_stored_documents_retire_as_unknown_values(tmp_path: Path) ->
     assert _stored_result(None) is None
 
 
-def test_a_plan_stored_with_retired_image_reclaim_bytes_still_loads(
-    tmp_path: Path,
-) -> None:
-    """An operation accepted before image reclaim bytes were retired keeps its plan."""
-    accepted = _accepted(tmp_path)
-    with accepted.sessions() as session:
-        job = session.get(Job, accepted.operation.operation_id)
-        assert job is not None
-        stored = json.loads(json.dumps(job.payload["plan"]))
-    stored["runtime_storage"]["reclaimable_bytes"] = 1024
-
-    loaded = _load_plan(stored)
-
-    assert loaded is not None
-    assert loaded.plan_digest == accepted.plan.plan_digest
-
-
 def test_an_operation_without_any_recorded_target_still_has_a_progress_view() -> None:
     progress = _progress_view(
         None, RunSwitchOperationResult(), "failed", "damaged row", node_ids=[]

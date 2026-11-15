@@ -39,6 +39,7 @@ from .lifecycle.types import Effect
 from .models import FleetProfileApplication, FleetProfileSelection, Job, RecipeRun
 from .profile_capacity import release_unassigned_profile_claims
 from .run_switch_contract import RunSwitchOperationResult, RunSwitchPlan
+from .strict_json import read_stored_model
 
 _LOGGER = logging.getLogger(__name__)
 _DEFERRED = "Profile journal conversion waiting: "
@@ -145,8 +146,11 @@ def _job_proof(
         raise _UnprovenJournal(
             "exact child workload intent is unavailable or different"
         )
-    plan = RunSwitchPlan.model_validate_json(
-        canonical_message(job.payload.get("plan")), strict=True
+    plan = read_stored_model(
+        RunSwitchPlan,
+        canonical_message(job.payload.get("plan")),
+        strict=True,
+        from_json=True,
     )
     targets = tuple(
         sorted(

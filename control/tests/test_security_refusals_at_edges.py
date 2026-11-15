@@ -9,11 +9,14 @@ still refused closed.
 
 from __future__ import annotations
 
+import copy
+import hashlib
+import json
 from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     ContainerRuntimeAction,
@@ -216,6 +219,61 @@ def test_profile_stop_whose_parent_changed_replans_and_completes(
     lifecycle.record_node_result(stop_id, nodes[0], succeeded=True, evidence={})
     _inventory_reported_again(sessions, monkeypatch)
     assert _drive(profiles, planner, sessions, monkeypatch, _NEXT)
+
+
+def test_profile_stop_accepts_a_parent_stored_with_a_retired_plan_field(
+    tmp_path, postgres_engine, monkeypatch
+):
+    """A switch stored before ``reclaimable_bytes`` was retired still gets its Stop."""
+    sessions, profiles, planner, profile, api, headers, nodes, installation = (
+        _ready_profile(tmp_path, postgres_engine)
+    )
+    lifecycle = planner._lifecycle
+    assert lifecycle is not None
+    recipe_fixtures.started_recipe(
+        sessions,
+        lifecycle,
+        installation,
+        nodes,
+        request_id=str(uuid4()),
+        alias="previous",
+    )
+    _load(profile, api, headers)
+    accept = lifecycle.stop
+    aged: list[str] = []
+
+    def stop_after_parent_aged(*args, **kwargs):
+        if not aged:
+            with sessions.begin() as session:
+                root = session.scalar(select(Job).where(Job.kind == _ROOT))
+                assert root is not None
+                payload = copy.deepcopy(root.payload)
+                payload["plan"]["runtime_storage"]["reclaimable_bytes"] = 0
+                # Raw SQL: the write guard rightly refuses the retired key, but
+                # rows written before the retirement still carry it.
+                session.execute(
+                    text(
+                        "UPDATE jobs SET payload = CAST(:payload AS json),"
+                        " payload_digest = :digest WHERE id = :id"
+                    ),
+                    {
+                        "payload": json.dumps(payload),
+                        "digest": hashlib.sha256(
+                            canonical_message(payload)
+                        ).hexdigest(),
+                        "id": root.id,
+                    },
+                )
+                aged.append(root.id)
+        return accept(*args, **kwargs)
+
+    monkeypatch.setattr(lifecycle, "stop", stop_after_parent_aged)
+    stop_id = _drive(profiles, planner, sessions, monkeypatch, _STOP)
+    assert aged
+    assert _children_of(sessions, stop_id)
+    with sessions() as session:
+        root = session.get(Job, aged[0])
+        assert root is not None and root.state != LifecycleState.FAILED.value
 
 
 def test_cache_resolution_shape_is_an_invalid_request_not_a_refusal() -> None:
