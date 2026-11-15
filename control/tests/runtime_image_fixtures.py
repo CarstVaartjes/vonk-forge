@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 
 from vonk_agent_protocol import canonical_message
 from vonk_control.oci_image_store import OCI_MANIFEST
@@ -117,3 +118,37 @@ def install_another_image(installation, *, digest: str = "sha256:" + "e" * 64) -
         compiled["runtime_image"]["image_digest"] = digest
     installation.plan = plan
     installation.image_digest = digest
+
+
+def install_image_of_replaced_source(
+    session, installation, *, digest: str = "sha256:" + "e" * 64
+) -> None:
+    """Make an installation run an image built from a source bundle its revision
+    has since replaced, so a load of the revision needs a new build.
+
+    Its installed ranks keep that image on their Sparks; it is simply not the
+    image this revision builds now.
+    """
+    from vonk_control.models import RecipeBuild
+
+    install_another_image(installation, digest=digest)
+    current = session.get(RecipeBuild, installation.recipe_build_id)
+    assert current is not None
+    previous = RecipeBuild(
+        recipe_revision_id=current.recipe_revision_id,
+        builder_node_id=current.builder_node_id,
+        source_bundle_sha256="f" * 64,
+        build_input_sha256="f" * 64,
+        state="succeeded",
+        policy_report=current.policy_report,
+        plan=current.plan,
+        image_digest=digest,
+        oci_layout_sha256=digest.removeprefix("sha256:"),
+        image_bytes=current.image_bytes or 30,
+        # Built before the current row, so the current row stays the newest.
+        created_at=current.created_at - timedelta(days=1),
+        updated_at=current.created_at - timedelta(days=1),
+    )
+    session.add(previous)
+    session.flush()
+    installation.recipe_build_id = previous.id
