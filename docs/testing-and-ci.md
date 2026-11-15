@@ -580,7 +580,9 @@ otherwise have to reason about by hand:
 - **Decide on data, not on prints.** A vonkctl test asserts the exit status,
   the requests sent, a typed result or the `--json` document (the
   `vonkctl_json` fixture in `tests/cluster_profiles/conftest.py`), which is the
-  public client contract. Human wording is owned by the shared vectors in
+  public client contract. A renderer decision is a small pure view function
+  in `cluster_profiles/cli_render` returning an enum, dataclass or typed value,
+  tested on data; the renderer only prints it. Human wording is owned by the shared vectors in
   `tests/fixtures` that the web renders too, and one module,
   `tests/cluster_profiles/test_cli_wording.py`, compares vonkctl's text with
   them. A secret or terminal control in any output is a leak, not wording;

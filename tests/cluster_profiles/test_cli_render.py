@@ -2,10 +2,51 @@ import sys
 from io import BytesIO, TextIOWrapper
 from pathlib import Path
 
+import pytest
+from vonk_agent_protocol import ProjectionCode
+
 from cluster_profiles.cli_render import progress_line
+from cluster_profiles.cli_render.activity import (
+    activity_continuation,
+    unknown_membership,
+)
+from cluster_profiles.cli_render.artifact_jobs import (
+    ResultFiles,
+    job_reconnects,
+    result_files,
+)
 from cluster_profiles.cli_render.common import _text
-from cluster_profiles.cli_render.library import _needs_download, _qualification_status
-from cluster_profiles.cli_states_generated import QualificationStatus
+from cluster_profiles.cli_render.fleet import (
+    NO_SPARKS,
+    CpuClock,
+    RunProblem,
+    _fleet_status_line,
+    _needs_attention,
+    clock_metric,
+    cpu_clock,
+    run_problem,
+)
+from cluster_profiles.cli_render.library import (
+    _applied_filters,
+    _needs_download,
+    _qualification_status,
+    retained_revisions,
+)
+from cluster_profiles.cli_render.operations import stalls
+from cluster_profiles.cli_render.profile import EndpointListing, endpoint_listing
+from cluster_profiles.cli_render.review import ReviewVerdict, review_verdict
+from cluster_profiles.cli_states_generated import GpuClockMetric, QualificationStatus
+from cluster_profiles.control_client import ControlMalformedResponse
+from cluster_profiles.generated_control.models.gpu_clock_observation import (
+    GpuClockObservation,
+)
+from cluster_profiles.generated_control.models.gpu_clock_unavailable import (
+    GpuClockUnavailable,
+)
+from cluster_profiles.generated_control.models.model_cache_usage import ModelCacheUsage
+from cluster_profiles.generated_control.models.retained_model_revision import (
+    RetainedModelRevision,
+)
 
 
 def test_unknown_transfer_total_does_not_hide_measured_work_or_invent_percent():
@@ -142,3 +183,144 @@ def test_gpu_partial_readings_and_typed_failure_survive_fleet_render():
             }
         }
     )
+
+
+# The renderer's decisions, each tested on the typed value it prints from.
+
+_SPARK = "spk_" + "1" * 32
+
+
+def test_an_empty_fleet_has_no_sparks_and_a_malformed_one_is_refused():
+    # Break caught: a malformed roster read as an empty fleet.
+    assert _fleet_status_line({"nodes": []}) == NO_SPARKS
+    for malformed in ({}, {"nodes": "offline"}, {"nodes": [{}, None]}):
+        with pytest.raises(ControlMalformedResponse):
+            _fleet_status_line(malformed)
+
+
+def test_a_run_problem_is_the_controller_verdict_never_a_client_derivation():
+    # Break caught: notes derived from route or rank state the Controller did not flag.
+    assert run_problem([(None, None)], route_reason=None) is None
+    assert run_problem([(None, "rank-stale")], "x") == RunProblem("rank-stale", "x")
+    assert run_problem([("unreadable", None), (None, "rank-stale")], "x") == (
+        RunProblem("unreadable")
+    )
+
+
+def test_the_cpu_clock_is_shown_only_from_live_telemetry():
+    assert cpu_clock("live", 2100, 3900, low=True) == CpuClock(2100, 3900, low=True)
+    assert cpu_clock("live", 2100, "x", low=False) == CpuClock(2100, None, low=False)
+    assert cpu_clock("stale", 2100, 3900, low=False) is None
+    assert cpu_clock("live", None, 3900, low=False) is None
+
+
+def test_a_spark_whose_gpu_needs_a_reset_needs_attention():
+    # Break caught: a broken GPU shown as an ordinary idle, healthy Spark.
+    spark = {
+        "display_name": "atlas",
+        "connection": {"online_state": "online"},
+        "telemetry": {"freshness": "live"},
+        "inventory": {"freshness": "fresh"},
+        "warnings": [],
+    }
+    assert not _needs_attention(spark)
+    reset = {"code": ProjectionCode.NODE_GPU_REQUIRES_RESET, "detail": "GPU reset"}
+    assert _needs_attention(spark | {"warnings": [reset]})
+
+
+def test_a_gpu_clock_keeps_zero_and_reported_max_and_names_a_missing_reading():
+    # Break caught: an idle zero hidden, the reported max clamped to the policy
+    # limit, or a driver N/A shown as a plain unknown.
+    missing = GpuClockUnavailable(
+        metric="sm_mhz",
+        reason="not-supported",
+        detail="driver returned [N/A]",
+    )
+    clock = GpuClockObservation(
+        graphics_mhz=0, max_graphics_mhz=2400, unavailable=[missing]
+    )
+    assert clock_metric(clock, clock.graphics_mhz, GpuClockMetric.GRAPHICS) == 0
+    assert (
+        clock_metric(clock, clock.max_graphics_mhz, GpuClockMetric.MAX_GRAPHICS) == 2400
+    )
+    assert clock_metric(clock, clock.sm_mhz, GpuClockMetric.SM) == missing
+    assert clock_metric(clock, clock.max_sm_mhz, GpuClockMetric.MAX_SM) is None
+
+
+def test_a_review_is_ready_only_when_allowed_and_waiting_only_for_preparation():
+    assert review_verdict(True, None) is ReviewVerdict.READY
+    assert review_verdict(False, True) is ReviewVerdict.READY_AFTER_PREPARATION
+    assert review_verdict(False, None) is ReviewVerdict.BLOCKED
+    assert review_verdict(None, None) is ReviewVerdict.BLOCKED
+
+
+def test_unreadable_activity_is_unknown_not_empty():
+    # Break caught: unreadable membership shown as "0 of 0" or "no activity".
+    issue = "Stored observations are unreadable; membership is unknown."
+    assert unknown_membership(None, None, issue) == issue
+    assert unknown_membership([], 0, None) is None
+
+
+def test_the_next_activity_page_keeps_every_filter_of_this_one():
+    # Break caught: a continuation that drops a filter and pages a different query.
+    command = activity_continuation(
+        "opaque+token", limit=1, state="running", target=_SPARK, request_id="r"
+    )
+    assert command is not None
+    assert command[3:] == ["--limit", "1", "--cursor", "opaque+token"] + [
+        "--state",
+        "running",
+        "--target",
+        _SPARK,
+        "--request-id",
+        "r",
+    ]
+    for unreadable in ("", "x" * 513, 7):
+        assert activity_continuation(unreadable) is None
+
+
+def test_only_the_controller_stall_alarm_marks_an_application_stalled():
+    alarm = {"code": "progress.stalled", "detail": "No progress across 6 attempts"}
+    retry = {"code": "profile.retry_conflict", "detail": "payload unavailable"}
+    assert stalls([retry, alarm]) == ["No progress across 6 attempts"]
+    assert stalls([retry]) == []
+    assert stalls(None) == []
+
+
+def test_invalid_endpoint_history_is_unavailable_not_an_empty_profile():
+    # Break caught: unreadable history read as "no endpoint assignments".
+    invalid = {"detail": "stored document is invalid"}
+    assert endpoint_listing(None, None, []) is EndpointListing.NOT_LOADED
+    assert endpoint_listing("a", None, []) is EndpointListing.EMPTY
+    assert endpoint_listing("a", invalid, None) is EndpointListing.HISTORY_INVALID
+    assert endpoint_listing("a", None, [{}]) is EndpointListing.ASSIGNED
+
+
+def test_a_retained_revision_keeps_its_owners():
+    # Break caught: a listing that hides why a previous revision stays on disk.
+    revision = RetainedModelRevision(
+        content_sha256="a" * 64, unique_bytes=2, owners=["installation owner-1"]
+    )
+    usage = ModelCacheUsage(
+        disk_bytes=12, unique_bytes=3, shared_bytes=9, retained_revisions=[revision]
+    )
+    assert [item.owners for item in retained_revisions(usage)] == [
+        ["installation owner-1"]
+    ]
+    assert retained_revisions(None) == []
+
+
+def test_an_empty_library_page_names_the_flags_that_filtered_it():
+    filters = {"filters": {"cached": True, "usage": ["code"], "search": ""}}
+    assert _applied_filters(filters) == ["--cached", "--usage code"]
+    assert _applied_filters({"filters": {}}) == []
+
+
+def test_an_empty_job_result_is_a_result_and_only_live_jobs_reconnect():
+    # Break caught: a succeeded job with no files reported as "unavailable".
+    assert result_files("succeeded", []) is ResultFiles.EMPTY
+    assert result_files("succeeded", [{}]) is ResultFiles.FILES
+    assert result_files("running", []) is ResultFiles.UNAVAILABLE
+    assert job_reconnects("running", "op")
+    assert not job_reconnects("succeeded", "op")
+    assert not job_reconnects("running", None)

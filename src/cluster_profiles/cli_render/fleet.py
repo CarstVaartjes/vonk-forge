@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from enum import Enum
 
 from ..cli_states_generated import (
@@ -20,6 +21,7 @@ from ..generated_control.models.display_memory_observation import (
 from ..generated_control.models.gpu_clock_observation import GpuClockObservation
 from ..generated_control.models.gpu_clock_policy import GpuClockPolicy
 from ..generated_control.models.gpu_clock_range import GpuClockRange
+from ..generated_control.models.gpu_clock_unavailable import GpuClockUnavailable
 from ..generated_control.models.run_presence import RunPresence
 from ..generated_control.models.swap_checkpoint import SwapCheckpoint
 from ..generated_control.models.swap_intent import SwapIntent
@@ -252,16 +254,11 @@ def _gpu_clock(node: object) -> str:
     def clock_range(value: GpuClockRange | None) -> str:
         return f"{value.min_mhz}–{value.max_mhz} MHz" if value is not None else UNKNOWN
 
-    def metric(value: object, name: GpuClockMetric) -> str:
-        if (
-            (value is None or isinstance(value, Unset))
-            and not isinstance(clock.unavailable, Unset)
-            and clock.unavailable is not None
-        ):
-            for failure in clock.unavailable:
-                if failure.metric == name:
-                    return f"{failure.reason.replace('-', ' ')} ({failure.detail})"
-        return _clock_reading(value)
+    def metric(value: int | None | Unset, name: GpuClockMetric) -> str:
+        reading = clock_metric(clock, value, name)
+        if isinstance(reading, GpuClockUnavailable):
+            return f"{reading.reason.replace('-', ' ')} ({reading.detail})"
+        return _clock_reading(reading)
 
     reasons = clock.throttle_reasons
     throttle = (
@@ -287,6 +284,24 @@ def _gpu_clock(node: object) -> str:
             else ""
         )
     )
+
+
+def clock_metric(
+    clock: GpuClockObservation, value: int | None | Unset, name: GpuClockMetric
+) -> int | GpuClockUnavailable | None:
+    """A clock reading as reported, or the typed reason it is missing.
+
+    A reported value is kept as is: zero is a reading, and a reported maximum is
+    hardware evidence that the policy limit never clamps.
+    """
+    if isinstance(value, int):
+        return value
+    failures = clock.unavailable
+    if isinstance(failures, list):
+        for failure in failures:
+            if failure.metric == name:
+                return failure
+    return None
 
 
 def _swap(node: object) -> str:
@@ -338,24 +353,46 @@ def _clock_reading(value: object) -> str:
     return _text(value.value if isinstance(value, Enum) else value)
 
 
+@dataclass(frozen=True)
+class CpuClock:
+    current_mhz: int
+    maximum_mhz: int | None
+    low: bool
+
+
+def cpu_clock(
+    freshness: object, current: object, maximum: object, *, low: bool
+) -> CpuClock | None:
+    """The live average CPU clock and its maximum; nothing unless both are live."""
+    if freshness != "live" or type(current) is not int:
+        return None
+    return CpuClock(current, maximum if type(maximum) is int else None, low)
+
+
 def _cpu_clock(node: Mapping[str, object]) -> str:
     """Average current CPU clock against the hardware maximum, when reported."""
     telemetry = _optional(node.get("telemetry"), "telemetry")
     sample = _optional(telemetry.get("sample"), "telemetry sample")
-    current = sample.get("cpu_frequency_avg_mhz")
-    maximum = sample.get("cpu_frequency_max_mhz")
-    if telemetry.get("freshness") != "live" or type(current) is not int:
-        return ENDPOINT_UNAVAILABLE
-    text = f"{current / 1000:.1f} GHz"
-    if type(maximum) is int:
-        text = f"{current / 1000:.1f} of {maximum / 1000:.1f} GHz"
     warnings = node.get("warnings")
-    if isinstance(warnings, list) and any(
+    low = isinstance(warnings, list) and any(
         isinstance(item, Mapping) and item.get("code") == "cpu.low-clock"
         for item in warnings
-    ):
-        text += " (throttled?)"
-    return text
+    )
+    clock = cpu_clock(
+        telemetry.get("freshness"),
+        sample.get("cpu_frequency_avg_mhz"),
+        sample.get("cpu_frequency_max_mhz"),
+        low=low,
+    )
+    if clock is None:
+        return ENDPOINT_UNAVAILABLE
+    current = f"{clock.current_mhz / 1000:.1f}"
+    text = (
+        f"{current} GHz"
+        if clock.maximum_mhz is None
+        else f"{current} of {clock.maximum_mhz / 1000:.1f} GHz"
+    )
+    return text + (" (throttled?)" if clock.low else "")
 
 
 def _nas_route(inventory: Mapping[str, object]) -> str:
@@ -581,6 +618,29 @@ def _alert_notes(payload: object) -> list[str]:
     return notes
 
 
+@dataclass(frozen=True)
+class RunProblem:
+    cause: object
+    route_reason: object = None
+
+
+def run_problem(
+    verdicts: Sequence[tuple[object, object]], route_reason: object
+) -> RunProblem | None:
+    """What the Controller says is wrong with a run; the client derives nothing.
+
+    ``verdicts`` holds each member's (projection issue, degraded reason) in rank
+    order. The first member with either names the problem; a degraded reason
+    carries the run's route reason. A healthy run has none.
+    """
+    for projection_issue, degraded_reason in verdicts:
+        if projection_issue is not None:
+            return RunProblem(projection_issue)
+        if degraded_reason is not None:
+            return RunProblem(degraded_reason, route_reason)
+    return None
+
+
 def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> list[str]:
     """Show each run once, its members by name, and return its problems."""
     names = {node.get("id"): _text(node.get("display_name")) for node in nodes}
@@ -634,16 +694,22 @@ def _fleet_workloads(nodes: Sequence[Mapping[str, object]], *, wide: bool) -> li
             print(f"    Installation: {_text(first.get('installation_id'))}")
         if first.get("run_state") != "running":
             notes.append(f"{title} is {_text(first.get('run_state'))}")
-        for _, member in members:
-            if member.get("projection_issue") is not None:
-                notes.append(f"{title}: {_text(member.get('projection_issue'))}")
-                break
-            if member.get("degraded_reason") is not None:
-                note = f"{title}: {_text(member['degraded_reason'])}"
-                if first.get("route_reason") is not None:
-                    note += f" ({_text(first.get('route_reason'))})"
-                notes.append(note)
-                break
+        problem = run_problem(
+            [
+                (member.get("projection_issue"), member.get("degraded_reason"))
+                for _, member in members
+            ],
+            first.get("route_reason"),
+        )
+        if problem is not None:
+            notes.append(
+                f"{title}: {_text(problem.cause)}"
+                + (
+                    f" ({_text(problem.route_reason)})"
+                    if problem.route_reason is not None
+                    else ""
+                )
+            )
     loaded = {
         member.get("installation_id")
         for members in runs.values()

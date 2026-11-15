@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from enum import StrEnum
 
 from ..cli_states import ARTIFACT_JOB_IN_FLIGHT, lifecycle_state
 from ..cli_states_generated import ENDPOINT_UNAVAILABLE, SUCCEEDED
@@ -14,6 +15,24 @@ from ..generated_control.models.artifact_job_contract_response import (
 from ..generated_control.models.artifact_slot_contract import ArtifactSlotContract
 from ..generated_control.types import Unset
 from .common import _bytes, _field, _records, _text, _time
+
+
+class ResultFiles(StrEnum):
+    FILES = "files"
+    EMPTY = "empty"
+    UNAVAILABLE = "unavailable"
+
+
+def result_files(state: object, output_files: Sequence[object]) -> ResultFiles:
+    """A succeeded job's files, or its empty result; any other state has none yet."""
+    if state != SUCCEEDED:
+        return ResultFiles.UNAVAILABLE
+    return ResultFiles.FILES if output_files else ResultFiles.EMPTY
+
+
+def job_reconnects(state: object, operation_id: object) -> bool:
+    """A job can be followed while its operation is in flight."""
+    return isinstance(operation_id, str) and state in ARTIFACT_JOB_IN_FLIGHT
 
 
 def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
@@ -55,9 +74,10 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
 
     state = payload.get("state")
     output_files = _records(payload, "output_files")
-    if state == "succeeded":
+    files = result_files(state, output_files)
+    if files is not ResultFiles.UNAVAILABLE:
         _field("Output manifest SHA-256", payload.get("output_manifest_sha256"))
-        if not output_files:
+        if files is ResultFiles.EMPTY:
             print("Result files: none (job succeeded with an empty result).")
         else:
             _field("Result files", len(output_files))
@@ -71,7 +91,7 @@ def _artifact_job_record(payload: Mapping[str, object], action: str) -> None:
             "Result files", f"unavailable until job succeeds (state: {_text(state)})"
         )
 
-    if isinstance(operation_id, str) and state in ARTIFACT_JOB_IN_FLIGHT:
+    if job_reconnects(state, operation_id):
         _field(
             "Reconnect",
             f"vonkctl recipe job detail {shlex.quote(str(payload.get('id')))} --follow",
@@ -96,11 +116,12 @@ def _artifact_job_list(payload: Mapping[str, object]) -> None:
         uploaded_inputs = _records(job, "input_files")
         _field("Inputs", f"{len(inputs)} declared, {len(uploaded_inputs)} uploaded")
         outputs = _records(job, "output_files")
-        if job.get("state") == "succeeded":
+        files = result_files(job.get("state"), outputs)
+        if files is not ResultFiles.UNAVAILABLE:
             _field(
                 "Outputs",
                 "none (successful empty result)"
-                if not outputs
+                if files is ResultFiles.EMPTY
                 else f"{len(outputs)} verified result files",
             )
         else:
@@ -111,7 +132,7 @@ def _artifact_job_list(payload: Mapping[str, object]) -> None:
         operation_id = job.get("operation_id")
         if operation_id is not None:
             _field("Operation", operation_id)
-        if isinstance(operation_id, str) and job.get("state") in ARTIFACT_JOB_IN_FLIGHT:
+        if job_reconnects(job.get("state"), operation_id):
             _field(
                 "Reconnect",
                 f"vonkctl recipe job detail {shlex.quote(str(job.get('id')))} --follow",
