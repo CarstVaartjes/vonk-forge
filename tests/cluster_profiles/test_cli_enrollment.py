@@ -109,7 +109,7 @@ def test_grant_is_delivered_privately_and_never_printed(tmp_path, capsys, flags)
     assert len(client.calls) == 1
 
 
-def test_existing_or_linked_output_never_issues_a_grant(tmp_path, capsys):
+def test_existing_or_linked_output_never_issues_a_grant(tmp_path):
     destination = tmp_path / "existing.json"
     destination.write_text("keep")
     link = tmp_path / "linked.json"
@@ -122,7 +122,7 @@ def test_existing_or_linked_output_never_issues_a_grant(tmp_path, capsys):
 
 
 def test_private_reservation_failure_closes_descriptor_before_issuance(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch
 ):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
@@ -136,7 +136,6 @@ def test_private_reservation_failure_closes_descriptor_before_issuance(
     try:
         assert run(client, destination, "--json") == 2
         assert client.calls == []
-        capsys.readouterr()
         assert not destination.exists()
         with pytest.raises(Exception):  # noqa: B017 -- ending witness; effects and fresh admission establish behaviour
             os.fstat(descriptors[0])
@@ -258,7 +257,9 @@ def test_output_path_replacement_never_receives_secret_bytes(tmp_path):
     assert json.loads(fresh.read_text()) == GRANT
 
 
-def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, capsys):
+def test_reenrollment_requires_consent_and_pins_the_resolved_node(
+    tmp_path, vonkctl_json
+):
     node_id = "spk_" + "a" * 32
     destination = tmp_path / "replacement.json"
 
@@ -281,25 +282,22 @@ def test_reenrollment_requires_consent_and_pins_the_resolved_node(tmp_path, caps
             }
 
     client = ReenrollmentClient()
-    args = ("fleet", "re-enroll", "Atlas", "--output", str(destination), "--json")
-    assert (
-        cli.main(args, control_client=client, request_id_factory=lambda: IDENTITY) == 2
+    args = ("fleet", "re-enroll", "Atlas", "--output", str(destination))
+    status, _ = vonkctl_json(
+        *args, control_client=client, request_id_factory=lambda: IDENTITY
     )
+    assert status == 2
     assert not destination.exists()
     assert client.calls == [("GET", "/api/fleet/Atlas")]
-    capsys.readouterr()
-    assert (
-        cli.main(
-            (*args, "--yes"), control_client=client, request_id_factory=lambda: IDENTITY
-        )
-        == 0
+    status, result = vonkctl_json(
+        *args, "--yes", control_client=client, request_id_factory=lambda: IDENTITY
     )
-    result = json.loads(capsys.readouterr().out)
+    assert status == 0
     assert result["node_id"] == node_id
     assert json.loads(destination.read_text())["purpose"] == "re-enroll"
 
 
-def test_absent_destination_fails_before_issuance(tmp_path, capsys):
+def test_absent_destination_fails_before_issuance(tmp_path):
     destination = tmp_path / "grant.json"
     client = EnrollmentClient(destination)
     assert cli.main(("fleet", "enroll", "Atlas", "--json"), control_client=client) == 2

@@ -140,7 +140,7 @@ def test_http_denial_preserves_correlation_without_effect_then_fresh_read_works(
     ],
 )
 def test_transport_loss_is_reobserved_and_fresh_read_is_admitted(
-    tmp_path: Path, monkeypatch, capsys, fault
+    tmp_path: Path, monkeypatch, vonkctl_json, fault
 ) -> None:
     calls = []
     clock = [0.0]
@@ -159,10 +159,10 @@ def test_transport_loss_is_reobserved_and_fresh_read_is_admitted(
         "https://forge.example.test", _token(tmp_path), opener=opener
     )
     if isinstance(fault, ssl.SSLError):
-        assert cli.main(("fleet", "--json"), control_client=client) == 2
-        capsys.readouterr()
-    assert cli.main(("fleet", "--json"), control_client=client) == 0
-    assert json.loads(capsys.readouterr().out)["nodes"] == []
+        assert vonkctl_json("fleet", control_client=client)[0] == 2
+    status, document = vonkctl_json("fleet", control_client=client)
+    assert status == 0
+    assert document["nodes"] == []
     assert clock[0] <= 30
     assert cli.main(("fleet", "--json"), control_client=client) == 0
 

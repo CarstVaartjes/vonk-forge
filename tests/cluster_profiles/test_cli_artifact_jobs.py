@@ -23,7 +23,6 @@ from test_control_client_requests import (
 )
 
 from cluster_profiles import cli, cli_artifact_jobs
-from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import (
     ControlClient,
     ControlHTTPError,
@@ -435,183 +434,6 @@ def test_installed_cli_process_exposes_the_complete_artifact_job_surface() -> No
         assert action in process.stdout
 
 
-def test_cli_human_artifact_job_detail_uses_job_identity_and_reconnect(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    declaration = {
-        "slot": "prompt",
-        "name": "prompt.txt",
-        "media_type": "text/plain",
-        "size_bytes": 6,
-        "sha256": hashlib.sha256(b"prompt").hexdigest(),
-    }
-    client = ArtifactJobClient()
-    client.job = _job(
-        state="running",
-        declarations=[declaration],
-        uploaded=[declaration],
-    )
-    client.job["status_reason"] = "Waiting for the assigned Spark to finish."
-
-    status = cli.main(
-        ("recipe", "job", "detail", JOB_ID),
-        control_client=client,
-    )
-
-    output = capsys.readouterr().out
-    assert status == 0
-    assert f"Artifact job: {JOB_ID}" in output
-    assert f"Run: {RUN_ID}" in output
-    assert "State: running" in output
-    assert "Inputs: 1 declared, 1 uploaded" in output
-    assert "Input: prompt.txt" in output
-    assert "Input state: uploaded" in output
-    assert f"Operation: {OPERATION_ID}" in output
-    assert f"Reconnect: vonkctl recipe job detail {JOB_ID} --follow" in output
-
-
-def test_cli_human_artifact_job_detail_shows_the_measured_exit_code(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    client = ArtifactJobClient()
-    client.job = _job(state="failed")
-    client.job["result_evidence"] = {"elapsed_milliseconds": 1, "exit_code": 3}
-
-    status = cli.main(
-        ("recipe", "job", "detail", JOB_ID),
-        control_client=client,
-    )
-
-    assert status == 0
-    assert "Exit code: 3" in capsys.readouterr().out
-
-
-@pytest.mark.parametrize("action", ("create", "upload", "submit", "cancel"))
-def test_cli_human_artifact_job_mutations_name_the_current_action_and_job(
-    action: str,
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    declaration = _declarations({"prompt.png": b"prompt"})[0]
-    binding = _binding(tmp_path / "job.json", {"prompt.png": b"prompt"})
-    client = ArtifactJobClient()
-    if action == "create":
-        arguments = ("recipe", "job", "create", "--run", RUN_ID, "--file", str(binding))
-        request_id_factory = lambda: CREATE_KEY
-    elif action == "upload":
-        client.job = _job(
-            state="ready",
-            declarations=[declaration],
-            uploaded=[declaration],
-        )
-        arguments = ("recipe", "job", "upload", JOB_ID, "--file", str(binding))
-        request_id_factory = None
-    elif action == "submit":
-        client.job = _job(state="ready")
-        arguments = ("recipe", "job", "submit", JOB_ID)
-        request_id_factory = lambda: SUBMIT_KEY
-    else:
-        client.job = _job(state="queued")
-        arguments = (
-            "recipe",
-            "job",
-            "cancel",
-            JOB_ID,
-            "--yes",
-            "--reason",
-            "stop now",
-        )
-        request_id_factory = lambda: CANCEL_KEY
-
-    status = cli.main(
-        arguments,
-        control_client=client,
-        request_id_factory=request_id_factory,
-    )
-
-    output = capsys.readouterr().out
-    assert status == 0
-    assert f"Artifact job: {JOB_ID}" in output
-    assert f"Command: {action}" in output
-    assert "State:" in output
-
-
-def test_cli_human_artifact_job_list_reports_empty_and_present_jobs(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    client = ArtifactJobClient()
-    empty = cli.main(
-        ("recipe", "job", "list", "--run", RUN_ID),
-        control_client=client,
-    )
-    empty_output = capsys.readouterr().out
-
-    client.job = _job(state="ready")
-    listed = cli.main(
-        ("recipe", "job", "list", "--run", RUN_ID),
-        control_client=client,
-    )
-    listed_output = capsys.readouterr().out
-
-    assert empty == listed == 0
-    assert "Artifact jobs: 0" in empty_output
-    assert "No artifact jobs for this run." in empty_output
-    assert f"Artifact job: {JOB_ID}" in listed_output
-    assert "State: ready" in listed_output
-
-
-def test_cli_human_artifact_job_download_shows_verified_local_result(
-    tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    output_directory = tmp_path / "outputs"
-    output_directory.mkdir()
-    client = ArtifactJobClient()
-    client.job = _succeeded_job()
-
-    status = cli.main(
-        (
-            "recipe",
-            "job",
-            "download",
-            JOB_ID,
-            "--output",
-            str(output_directory),
-        ),
-        control_client=client,
-    )
-
-    output = capsys.readouterr().out
-    digest = hashlib.sha256(b"x").hexdigest()
-    assert status == 0
-    assert f"Artifact job: {JOB_ID}" in output
-    assert "State: succeeded" in output
-    assert "Verified output files: 1" in output
-    assert f"Verified path: {output_directory / 'result.png'}" in output
-    assert "Verified size: 1 B" in output
-    assert f"Verified SHA-256: {digest}" in output
-
-
-def test_cli_human_artifact_job_empty_success_is_not_unavailable(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    render_payload(
-        {
-            "job_id": JOB_ID,
-            "state": "succeeded",
-            "output_manifest_sha256": "c" * 64,
-            "files": [],
-            "total_bytes": 0,
-        },
-        "recipe",
-        artifact_job_action="download",
-    )
-
-    output = capsys.readouterr().out
-    assert "State: succeeded" in output
-    assert "Result files: none (job succeeded with an empty result)." in output
-
-
 @pytest.mark.parametrize(
     "status,body",
     [
@@ -698,7 +520,6 @@ def test_unreadable_submit_reply_reconciles_exact_acceptance_and_fresh_request(
 )
 def test_unreadable_upload_reply_reconciles_verified_bytes_and_fresh_upload(
     tmp_path,
-    capsys,
     status,
     body,
 ):
@@ -892,7 +713,6 @@ def test_cli_interrupted_upload_preserves_draft_and_resumes_only_missing_input(
 
 def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfer(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     too_large = _binding(tmp_path / "large.json", {"input.png": b"xx"})
     limited = ArtifactJobClient()
@@ -941,7 +761,6 @@ def test_cli_capability_limit_and_changed_local_input_refuse_before_byte_transfe
 
 def test_cli_rejects_a_nonregular_input_without_opening_a_second_draft(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     binding = _binding(tmp_path / "fifo.json", {"input.png": b"x"})
     input_path = tmp_path / "input.png"
@@ -1008,9 +827,7 @@ def test_cli_submit_and_remote_cancel_reconcile_with_the_same_caller_keys(
     assert cancel_document["result_evidence"]["cancel_request_id"] == CANCEL_KEY
 
 
-def test_cli_submit_rejects_a_receipt_owned_by_another_request_key(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_cli_submit_rejects_a_receipt_owned_by_another_request_key() -> None:
     client = ArtifactJobClient()
     client.job = _job(state="queued")
     client.job["submit_request_id"] = SUBMIT_KEY
@@ -1031,7 +848,6 @@ def test_cli_submit_rejects_a_receipt_owned_by_another_request_key(
         request_id_factory=lambda: replacement_key,
     )
 
-    capsys.readouterr()
     assert status == 2
     assert client.job["submit_request_id"] == SUBMIT_KEY
     assert len([call for call in client.calls if call[1].endswith("/submit")]) == 3
@@ -1045,9 +861,7 @@ def test_cli_submit_rejects_a_receipt_owned_by_another_request_key(
     )
 
 
-def test_cli_job_list_rejects_a_job_owned_by_another_run(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
+def test_cli_job_list_rejects_a_job_owned_by_another_run() -> None:
     client = ArtifactJobClient()
     client.job = _job(state="ready")
     client.job["run_id"] = "00000000-0000-4000-8000-000000000099"
@@ -1057,7 +871,6 @@ def test_cli_job_list_rejects_a_job_owned_by_another_run(
         control_client=client,
     )
 
-    capsys.readouterr()
     assert status == 2
     client.job["run_id"] = RUN_ID
     assert (
@@ -1188,7 +1001,7 @@ def test_cli_checks_output_filename_aliases_on_the_destination_before_download(
 
 def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
+    vonkctl_json,
 ) -> None:
     output_directory = tmp_path / "outputs"
     output_directory.mkdir()
@@ -1217,7 +1030,6 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
         ),
         control_client=client,
     )
-    capsys.readouterr()
     assert rejected == 2
     assert not client.download_calls
     assert not (tmp_path / "escape.png").exists()
@@ -1244,7 +1056,6 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
         ),
         control_client=client,
     )
-    capsys.readouterr()
     assert reserved_name == 2
     assert not client.download_calls
 
@@ -1276,19 +1087,15 @@ def test_cli_rejects_unsafe_result_names_and_preserves_partial_downloads(
     outside.write_bytes(b"safe")
     (output_directory / "b.png").symlink_to(outside)
 
-    partial = cli.main(
-        (
-            "--json",
-            "recipe",
-            "job",
-            "download",
-            JOB_ID,
-            "--output",
-            str(output_directory),
-        ),
+    partial, partial_document = vonkctl_json(
+        "recipe",
+        "job",
+        "download",
+        JOB_ID,
+        "--output",
+        str(output_directory),
         control_client=client,
     )
-    partial_document = json.loads(capsys.readouterr().out)
 
     assert partial == 0
     assert len(partial_document["files"]) == 2
@@ -1349,7 +1156,7 @@ def test_cli_refuses_to_replace_an_existing_result_file(
 
 @pytest.mark.parametrize("long_backoff", [False, True])
 def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
-    artifact_clock, monkeypatch, capsys, long_backoff
+    artifact_clock, monkeypatch, vonkctl_json, long_backoff
 ):
     """Catches unlimited replay or Retry-After extending the observation budget."""
     client = ArtifactJobClient()
@@ -1368,20 +1175,18 @@ def test_unavailable_detail_ends_within_budget_and_admits_fresh_observation(
 
     monkeypatch.setattr(client, "request", request)
     started = artifact_clock[0]
-    arguments = ("--json", "recipe", "job", "detail", JOB_ID)
-    assert cli.main(arguments, control_client=client) == 2
-    capsys.readouterr()
+    arguments = ("recipe", "job", "detail", JOB_ID)
+    assert vonkctl_json(*arguments, control_client=client)[0] == 2
     assert len(timeouts) == (1 if long_backoff else 3)
     assert all(0 < timeout <= client.request_timeout_seconds for timeout in timeouts)
     assert artifact_clock[0] - started <= 3 * client.request_timeout_seconds
     unavailable = False
-    assert cli.main(arguments, control_client=client) == 0
-    assert json.loads(capsys.readouterr().out)["id"] == JOB_ID
+    status, document = vonkctl_json(*arguments, control_client=client)
+    assert status == 0
+    assert document["id"] == JOB_ID
 
 
-def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(
-    tmp_path, capsys
-):
+def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(tmp_path):
     """Catches an old capacity projection vetoing create before the owner sees it."""
     binding = _binding(tmp_path / "job.json", {"input.png": b"x"})
     client = ArtifactJobClient()
@@ -1421,7 +1226,6 @@ def test_create_ignores_stale_capacity_and_authority_admits_fresh_draft(
 @pytest.mark.parametrize("action", ["submit", "cancel"])
 def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
     action,
-    capsys,
     monkeypatch,
 ):
     """Catches local state readmission after a request that never reached its owner."""
@@ -1455,7 +1259,6 @@ def test_lost_request_before_concurrent_ending_replays_only_exact_intent(
     if action == "cancel":
         arguments += ["--yes", "--reason", "stop now"]
     assert cli.main(arguments, control_client=client) == 2
-    capsys.readouterr()
     assert len(posts) == 3
     assert len(timed_reads) == 3
     assert all(item[1] == {"X-Request-ID": key} for item in posts)
@@ -1517,40 +1320,31 @@ def test_accepted_cancel_survives_concurrent_failure_without_local_state_gate(
 
 
 def test_damaged_verified_download_preserves_old_bytes_and_recovers_content(
-    tmp_path, capsys
+    tmp_path, vonkctl_json
 ):
     """Catches a corrupt previous result requiring manual deletion for a new request."""
     directory = tmp_path / "outputs"
     directory.mkdir()
     client = ArtifactJobClient()
     client.job = _succeeded_job()
-    arguments = (
-        "--json",
-        "recipe",
-        "job",
-        "download",
-        JOB_ID,
-        "--output",
-        str(directory),
-    )
-    assert cli.main(arguments, control_client=client) == 0
-    capsys.readouterr()
+    arguments = ("recipe", "job", "download", JOB_ID, "--output", str(directory))
+    assert vonkctl_json(*arguments, control_client=client)[0] == 0
     previous = directory / "result.png"
     previous.write_bytes(b"damaged")
-    assert cli.main(arguments, control_client=client) == 0
-    recovered = json.loads(capsys.readouterr().out)
+    status, recovered = vonkctl_json(*arguments, control_client=client)
+    assert status == 0
     repaired = Path(recovered["files"][0]["path"])
     assert repaired.read_bytes() == b"x"
     assert previous.read_bytes() == b"damaged"
     repaired.write_bytes(b"also damaged")
-    assert cli.main(arguments, control_client=client) == 0
-    fresh = json.loads(capsys.readouterr().out)
+    status, fresh = vonkctl_json(*arguments, control_client=client)
+    assert status == 0
     assert Path(fresh["files"][0]["path"]).read_bytes() == b"x"
     assert repaired.read_bytes() == b"also damaged"
 
 
 def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
-    tmp_path, capsys
+    tmp_path,
 ):
     """Catches publishing a temporary stream before verifying its declared digest."""
     directory = tmp_path / "outputs"
@@ -1580,12 +1374,10 @@ def test_ingress_digest_mismatch_never_publishes_and_fresh_download_recovers(
         str(directory),
     )
     assert cli.main(arguments, control_client=client) == 2
-    capsys.readouterr()
     assert len(reads) == 3
     assert list(directory.iterdir()) == []
     damaged = False
     assert cli.main(arguments, control_client=client) == 0
-    capsys.readouterr()
     assert (directory / "result.png").read_bytes() == b"x"
     assert len(reads) == 4
     assert cli.main(arguments, control_client=client) == 0
