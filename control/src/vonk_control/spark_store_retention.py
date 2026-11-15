@@ -5,14 +5,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, StorageDemandCode, WaitReason
 from vonk_agent_protocol.inventory import StoreRetentionRequest
-from vonk_forge_contracts import ModelDefinition
 
 from .agent_operation_facts import aware
-from .catalog_revision_contract import read_catalog_document
 from .fleet_model_removal_contract import (
     FLEET_REMOVAL_DEADLINE,
     STORE_RETENTION_MAX_AGE,
@@ -22,17 +20,16 @@ from .fleet_profile_contract import FleetProfileApplicationProgress
 from .lifecycle.evidence import Residue
 from .logging import log_event
 from .model_cache.persistence import _operation_removal
-from .model_cache_contract import CacheManifest, CacheOperationKind
+from .model_cache_contract import CacheOperationKind
 from .models import (
     ArtifactLifecycleGate,
-    CatalogDocumentRevision,
     FleetProfileApplication,
     ModelCacheOperation,
-    ModelCacheSet,
     RecipeBuild,
 )
 from .strict_json import read_stored_model
 from .unused_storage_collection.evidence import _Evidence
+from .unused_storage_collection.protected_objects import protected_model_objects
 
 # An inventory arrives every two minutes. A stopped writer cannot keep demanding
 # space or authorizing deletion indefinitely.
@@ -49,51 +46,7 @@ def _store_retention_request(
     # Saved profiles pin the NAS cache, not disposable Spark copies. Local
     # installation plans/hard links protect installed content; this projection
     # protects live work before its local installation exists.
-    references = evidence.operations
-    objects = set(references)
-    for document in session.scalars(
-        select(ModelCacheSet.manifest).where(
-            or_(
-                ModelCacheSet.artifact_set_sha256.in_(references),
-                ModelCacheSet.model_content_sha256.in_(references),
-            )
-        )
-    ):
-        manifest = read_stored_model(CacheManifest, document, from_json=True)
-        objects.update(artifact.sha256 for artifact in manifest.artifacts)
-    # A reusable cache set keeps its first requester's provenance. A pinned
-    # editorial successor can name the same files under a different model ID;
-    # the accepted model definitions own those file identities, not that index.
-    pending = set(references)
-    visited: set[str] = set()
-    required_dependencies: set[str] = set()
-    # This walk ends with the finite set of persisted definitions; cycles
-    # cannot revisit a content identity. It never waits or retries a missing row.
-    while pending:
-        batch, pending = pending - visited, set()
-        unresolved = required_dependencies & batch
-        for revision in session.scalars(
-            select(CatalogDocumentRevision)
-            .where(
-                CatalogDocumentRevision.kind == "model",
-                CatalogDocumentRevision.content_digest.in_(batch),
-            )
-            .execution_options(yield_per=1)
-        ):
-            digest = revision.content_digest
-            if digest is None:
-                raise ValueError("model reference has no content identity")
-            unresolved.discard(digest)
-            visited.add(digest)
-            # The row's digest was verified at ingress; it is read, never re-hashed.
-            definition = read_catalog_document(revision)
-            assert isinstance(definition, ModelDefinition)  # kind "model" above
-            objects.update(file.sha256 for file in definition.files)
-            dependencies = {item.content_sha256 for item in definition.dependencies}
-            required_dependencies.update(dependencies)
-            pending.update(dependencies - visited)
-        if unresolved:
-            raise ValueError("model dependency definition is unavailable")
+    objects = protected_model_objects(session, evidence.operations)
     images = set(evidence.operations)
     # Docker receipts name manifest digests; NAS retention names layout digests.
     # Resolve that content identity, including builds reused by recipe successors.
