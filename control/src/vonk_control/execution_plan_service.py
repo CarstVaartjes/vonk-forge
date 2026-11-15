@@ -253,29 +253,11 @@ class ControllerExecutionPlanService:
             if not isinstance(declared_digest, str):
                 raise TypeError("NAS cache artifact-set digest is unavailable")
             artifact_set_sha256 = declared_digest
-            direct_receipts = getattr(
-                self._model_cache, "verified_model_objects_for_set", None
+            # Receipts are the resolved manifest's model identity; only a copy
+            # to a Spark that lacks the files reads the NAS copy.
+            model_objects: Sequence[VerifiedModelObject] = verified_model_receipts(
+                self._model_cache, artifact_set_sha256, manifest
             )
-            model_objects: Sequence[VerifiedModelObject]
-            if callable(direct_receipts):
-                # The production ModelCacheService exposes the persisted
-                # manifest through ModelCacheObjectSource.  A bound
-                # canonical cache adapter may expose the already validated
-                # receipt sequence directly; it is still required to carry
-                # selection/file identity and exact distribution objects.
-                direct_objects = direct_receipts(artifact_set_sha256)
-                if not isinstance(direct_objects, Sequence) or isinstance(
-                    direct_objects, (str, bytes)
-                ):
-                    raise TypeError("verified model object receipts are unavailable")
-                model_objects = tuple(
-                    VerifiedModelObject.model_validate(item) for item in direct_objects
-                )
-            else:
-                # Resolve the shared bytes with this revision's canonical identities.
-                model_objects = verified_model_receipts(
-                    self._model_cache, artifact_set_sha256, manifest
-                )
         except (UnknownOutcomeError, SecurityRefusalError):
             # Unconfirmed storage or bookkeeping keeps its type: the admitting
             # owner observes it again instead of reading a verdict on the plan.

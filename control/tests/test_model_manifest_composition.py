@@ -19,7 +19,7 @@ from vonk_control.compiled_execution_plan import (
     VerifiedRuntimeImage,
     compile_verified_execution_plan,
 )
-from vonk_control.distribution import ModelCacheObjectSource
+from vonk_control.distribution import verified_model_receipts
 from vonk_control.execution_plan_service import _bind_runtime_artifacts
 from vonk_control.model_cache import ArtifactSetManifest, ModelCacheService
 from vonk_control.model_cache_contract import ModelCacheDownloadPayload
@@ -226,8 +226,7 @@ def test_shared_catalog_files_resume_the_same_parent_after_producer_repair(
     assert shared_path.read_bytes() == payloads["shared"]
     entry = cache.get_entry(manifest.digest)
     assert entry["expected_bytes"] == entry["verified_bytes"] == manifest.expected_bytes
-    source = ModelCacheObjectSource.from_service(cache)
-    receipts = source.verified_model_objects_for_set(manifest.digest, manifest)
+    receipts = verified_model_receipts(cache, manifest.digest, manifest)
     assert {(item.model_content_sha256, item.file_id) for item in receipts} == {
         (spec.model_content_sha256, spec.artifact_id) for spec in manifest.artifacts
     }

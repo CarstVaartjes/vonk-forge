@@ -712,8 +712,10 @@ hash of every asset.
 If the exact model or recipe image is absent, preview and admission return a
 named, actionable blocker and the prepare-cache action. Preparation reuses the
 same exact cache identities and deduplicates shared assets; it does not turn a
-missing asset into an implicit Spark-side download. A profile becomes ready only
-after the NAS cache reports the required assets available.
+missing asset into an implicit Spark-side download. A load needs the NAS copy
+only for a copy to a Spark that lacks the model or its image: when every target
+Spark's own store scan holds both, a model the NAS evicted is not downloaded
+again, and a NAS without room for it does not block the load.
 
 Applying a ready, digest-bound profile fans exact model and recipe-image
 preparation out to the target Sparks in parallel. Each target skips an asset it

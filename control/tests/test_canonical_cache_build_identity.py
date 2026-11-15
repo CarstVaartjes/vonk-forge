@@ -370,7 +370,10 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     no download and no re-hash.
     """
 
-    from vonk_control.distribution import ModelCacheObjectSource
+    from vonk_control.distribution import (
+        ModelCacheObjectSource,
+        verified_model_receipts,
+    )
     from vonk_control.execution_plan_service import (
         ControllerExecutionPlanService,
     )
@@ -450,9 +453,7 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
             for item in stored.verified_model_objects_for_set(first.digest)
         } == {first_digest}
     # Revision 2 gets the same verified objects under its own identity.
-    receipts = ModelCacheObjectSource.from_service(
-        service
-    ).verified_model_objects_for_set(second.digest, second)
+    receipts = verified_model_receipts(service, second.digest, second)
     assert [
         (item.model_content_sha256, item.file_id, item.sha256) for item in receipts
     ] == [(second_digest, "weights", file_digest)]
@@ -464,19 +465,17 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     assert "model-not-cached" not in status.blockers
 
     # Compilation asks for exactly that: capture what it binds.
-    bound: list[tuple[VerifiedModelObject, ...]] = []
-    original = ModelCacheObjectSource.verified_model_objects_for_set
+    from vonk_control import execution_plan_service
 
-    def capture(self, digest, manifest=None):
-        result = original(self, digest, manifest)
+    bound: list[tuple[VerifiedModelObject, ...]] = []
+    original = execution_plan_service.verified_model_receipts
+
+    def capture(cache, digest, manifest):
+        result = original(cache, digest, manifest)
         bound.append(result)
         return result
 
-    monkeypatch.setattr(
-        ModelCacheObjectSource,
-        "verified_model_objects_for_set",
-        capture,
-    )
+    monkeypatch.setattr(execution_plan_service, "verified_model_receipts", capture)
     with sessions() as session:
         revision = session.get(CatalogDocumentRevision, second_recipe.id)
         assert revision is not None

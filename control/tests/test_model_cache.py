@@ -27,8 +27,6 @@ from vonk_control.bounded_json import require_mapping, require_sequence, text
 from vonk_control.catalog_entities import CatalogEntityService
 from vonk_control.coordinator_failures import CoordinatorFailures
 from vonk_control.distribution import (
-    CompositeObjectSource,
-    MemoryObjectSource,
     ModelCacheObjectSource,
 )
 from vonk_control.jobs import JobService
@@ -1479,11 +1477,6 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
     model_source = ModelCacheObjectSource.from_service(service)
     receipts = model_source.verified_model_objects_for_set(
         first.artifact_set_sha256 or ""
-    )
-    composed_source = CompositeObjectSource(model_source, MemoryObjectSource())
-    assert (
-        composed_source.verified_model_objects_for_set(first.artifact_set_sha256 or "")
-        == receipts
     )
     assert {
         (

@@ -716,33 +716,25 @@ def test_controller_service_binds_canonical_model_cache_and_build_receipts() -> 
 
     class Manifest:
         digest = artifact_set_digest
+        # Compilation describes the set in the resolved manifest's own terms.
+        artifacts = (
+            SimpleNamespace(
+                artifact_id="weights",
+                path="model.safetensors",
+                sha256="c" * 64,
+                expected_bytes=1024,
+                roles=("weights",),
+                model_content_sha256=model_digest,
+            ),
+        )
 
     class Cache:
         def resolve_artifact_set(self, *, recipe_revision_sha256: str) -> Manifest:
             assert recipe_revision_sha256 == recipe_digest
             return Manifest()
 
-        def manifest_for_artifact_set(self, digest: str) -> Manifest:
-            assert digest == artifact_set_digest
-            return Manifest()
-
-        def resolve_verified_artifact_set(
-            self, digest: str, *, manifest: Manifest | None = None
-        ) -> tuple[dict[str, object], ...]:
-            assert digest == artifact_set_digest
-            # Compilation describes the set in its own requested terms.
-            assert isinstance(manifest, Manifest)
-            return (
-                {
-                    "path": "model.safetensors",
-                    "sha256": "c" * 64,
-                    "bytes": 1024,
-                    "file": "controller-owned",
-                    "file_id": "weights",
-                    "model_content_sha256": model_digest,
-                    "roles": ["weights"],
-                },
-            )
+        def adopt_covered_set(self, manifest: Manifest) -> None:
+            assert manifest.digest == artifact_set_digest
 
     node = ClusterMappingNode(
         mapping_id="mapping-1",

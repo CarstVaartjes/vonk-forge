@@ -83,6 +83,14 @@ through `model_cache.lineage` (`model_sets`, `verifies_model`,
 `stored_set_bindings`) or, for what an installation runs,
 `RecipeInstallation.model_artifact_set_sha256`.
 
+NAS coverage is required only where NAS bytes are read. A new call of
+`_require_managed_cache_coverage`, `resolve_verified_artifact_set` or
+`verified_model_objects_for_set` on an added
+line outside `model_cache/` and `distribution/model_cache.py` is flagged
+(added-line mode `model-sets`). A planner or compiler that required it
+downloaded a model every target Spark already held, after the NAS evicted it
+(#2337). Compile model receipts with `distribution.verified_model_receipts`.
+
 Three rules are whole-tree rather than added-line. The first: a failure's retry follows its
 one disposition (`vonk_agent_protocol.Disposition`, read through
 `failure_classification.disposition`). A `WAIT` never spends a retry and never

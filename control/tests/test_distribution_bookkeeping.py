@@ -10,7 +10,6 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_control.distribution import (
-    CompositeObjectSource,
     DistributionService,
     FilesystemObjectSource,
     MemoryObjectSource,
@@ -55,42 +54,6 @@ def test_manifest_access_denial_is_not_wrapped_as_bookkeeping():
     source = ModelCacheObjectSource.from_service(Cache())
     with pytest.raises(Exception) as _ending:
         source.objects_for_set("a" * 64)
-
-
-def test_missing_receipt_provider_recovers_after_provider_restoration():
-    """A wiring miss does not poison the next exact receipt request."""
-    source = CompositeObjectSource(MemoryObjectSource(), MemoryObjectSource())
-    with pytest.raises(Exception) as _ending:
-        source.verified_model_objects_for_set("a" * 64)
-    from vonk_control.compiled_execution_plan import (
-        DistributionObjectReceipt,
-        VerifiedModelObject,
-    )
-
-    item = DistributionObjectReceipt(
-        name="weights", sha256="b" * 64, bytes=7, kind="model"
-    )
-    receipt = VerifiedModelObject(
-        model_content_sha256="c" * 64,
-        file_id="weights",
-        path="weights",
-        sha256=item.sha256,
-        bytes=7,
-        roles=["weights"],
-        distribution_object=item,
-    )
-    source.model_source = ModelCacheObjectSource(
-        lambda *_: pytest.fail("receipt reuse must not open bytes"),
-        {
-            "a" * 64: (
-                DistributionObject(
-                    name="weights", sha256=item.sha256, bytes=7, kind="model"
-                ),
-            )
-        },
-    )
-    source.model_source._receipts["a" * 64] = (receipt,)
-    assert source.verified_model_objects_for_set("a" * 64) == (receipt,)
 
 
 def test_active_grant_content_cannot_be_substituted():

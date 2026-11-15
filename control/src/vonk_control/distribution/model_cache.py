@@ -28,6 +28,28 @@ from .types import (
 )
 
 
+def model_file_receipt(
+    *,
+    model_content_sha256: str,
+    file_id: str,
+    item: DistributionObject,
+    roles: list[str],
+) -> VerifiedModelObject:
+    """One model file's receipt: its model, file identity and content digest."""
+
+    return VerifiedModelObject(
+        model_content_sha256=model_content_sha256,
+        file_id=file_id,
+        path=item.name,
+        sha256=item.sha256,
+        bytes=item.bytes,
+        roles=roles,
+        distribution_object=DistributionObjectReceipt(
+            name=item.name, sha256=item.sha256, bytes=item.bytes, kind="model"
+        ),
+    )
+
+
 class ModelCacheObjectSource:
     """Narrow adapter for the NAS model-cache verified-object service.
 
@@ -92,7 +114,7 @@ class ModelCacheObjectSource:
         return objects
 
     def _describe(
-        self, digest: str, requested: object = None
+        self, digest: str
     ) -> tuple[
         tuple[DistributionObject, ...],
         tuple[VerifiedModelObject, ...],
@@ -111,16 +133,10 @@ class ModelCacheObjectSource:
                 descriptor_provider, Callable
             ):
                 raise TypeError("NAS cache manifest provider is unavailable")
-            # The caller's own resolved manifest may name a set no row
-            # records yet; the cache checks it covers verified objects.
-            manifest = requested if requested is not None else manifest_provider(digest)
+            manifest = manifest_provider(digest)
             if getattr(manifest, "digest", None) != digest:
                 raise ValueError("cache manifest identity changed")
-            descriptors = (
-                descriptor_provider(digest)
-                if requested is None
-                else descriptor_provider(digest, manifest=requested)
-            )
+            descriptors = descriptor_provider(digest)
         except SecurityRefusalError:
             raise
         except Exception as error:
@@ -147,19 +163,11 @@ class ModelCacheObjectSource:
                 roles = descriptor.get("roles")
                 if isinstance(file_id, str) and isinstance(model_content_sha256, str):
                     receipts.append(
-                        VerifiedModelObject(
+                        model_file_receipt(
                             model_content_sha256=model_content_sha256,
                             file_id=file_id,
-                            path=item.name,
-                            sha256=item.sha256,
-                            bytes=item.bytes,
+                            item=item,
                             roles=list(roles) if isinstance(roles, list) else [],
-                            distribution_object=DistributionObjectReceipt(
-                                name=item.name,
-                                sha256=item.sha256,
-                                bytes=item.bytes,
-                                kind="model",
-                            ),
                         )
                     )
             except (KeyError, TypeError, ValueError) as error:
@@ -237,24 +245,10 @@ class ModelCacheObjectSource:
         )
 
     def verified_model_objects_for_set(
-        self, artifact_set_sha256: str, manifest: object = None
+        self, artifact_set_sha256: str
     ) -> tuple[VerifiedModelObject, ...]:
-        """Return receipts keyed by canonical model identity and file ID.
-
-        With the caller's resolved ``manifest``, the shared verified set is
-        described with that caller's model identities (see the model cache).
-        """
+        """Return receipts keyed by canonical model identity and file ID."""
         digest = artifact_set_sha256
-        if manifest is not None and hasattr(self, "_service"):
-            objects, receipts, paths = self._describe(digest, manifest)
-            if len(receipts) != len(objects):
-                raise DistributionUnknown(
-                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
-                    "NAS cache manifest lacks canonical model-file identity",
-                )
-            with self._metadata_guard:
-                self._paths.update(paths)
-            return receipts
         with self._metadata_guard:
             cached_receipts = self._receipts.get(digest)
         if cached_receipts is None:

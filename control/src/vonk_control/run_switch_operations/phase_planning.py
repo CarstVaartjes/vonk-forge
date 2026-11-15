@@ -59,6 +59,24 @@ if TYPE_CHECKING:
     from .service import RunSwitchOperationService
 
 
+def targets_hold_model_and_image(
+    inspection: ArtifactInspection,
+    runtime_storage: RuntimeImageStorageImpact | None,
+) -> bool:
+    """Whether every target Spark's own store scan holds the model and image.
+
+    The NAS copy feeds only target-copy, which sends model files to a Spark
+    lacking the model or the image. When every target holds both, a set the
+    NAS evicted is not fetched again. Unknown coverage counts as lacking.
+    """
+
+    return (
+        inspection.missing_spark_bytes == 0
+        and runtime_storage is not None
+        and runtime_storage.missing_image_distribution_bytes == 0
+    )
+
+
 class PhasePlanningMixin:
     def _inspect_artifacts(
         self,
@@ -238,7 +256,9 @@ class PhasePlanningMixin:
         # Unknown availability with a resolved exact manifest is preparation,
         # not a refusal. The durable download phase waits for observation and
         # skips bytes already present once coverage is known.
-        needs_model_download = inspection.missing_nas_bytes != 0
+        needs_model_download = inspection.missing_nas_bytes != 0 and not (
+            targets_hold_model_and_image(inspection, runtime_storage)
+        )
         needs_target_copy = (
             installation_id is None
             or inspection.missing_spark_bytes not in (None, 0)

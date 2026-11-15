@@ -1260,6 +1260,9 @@ _ANONYMOUS_SEND_MODULES = frozenset(
 
 _MEMBERSHIP_KEYS = frozenset({"artifact_set_sha256", "artifact_sha256"})
 
+# The one reader outside the model cache that may require NAS coverage.
+NAS_COVERAGE_READER = "control/src/vonk_control/distribution/model_cache.py"
+
 
 def _targets_membership_rows(node: ast.AST) -> bool:
     """Whether a condition names specific rows: ``key.in_(...)`` or ``key == x``.
@@ -2335,6 +2338,26 @@ def check_source(
         hits.extend(
             (line, "whole-table membership read; select only the named sets")
             for line in unfiltered_membership_selects(source)
+        )
+    if (
+        python
+        and not is_test
+        and "model-sets" in modes
+        and path.startswith("control/src/vonk_control/")
+        and not path.startswith("control/src/vonk_control/model_cache/")
+        and path != NAS_COVERAGE_READER
+    ):
+        # NAS coverage is read only where NAS bytes are read: the distribution
+        # adapter. A planner or compiler that required it downloaded a model
+        # every target Spark already held, after the NAS evicted it (#2337).
+        hits.extend(
+            (line, "NAS coverage required outside the copy that reads NAS bytes")
+            for line, text in enumerate(source.splitlines(), 1)
+            if re.search(
+                r"\b(?:_require_managed_cache_coverage|resolve_verified_artifact_set"
+                r"|verified_model_objects_for_set)\b",
+                text,
+            )
         )
     if (
         python
