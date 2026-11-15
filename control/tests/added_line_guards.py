@@ -207,14 +207,38 @@ PRINTED_OUTPUT_KIND = (
 )
 
 
+def _captured(expr: ast.expr, names: set[str]) -> bool:
+    """Captured stdout/stderr text, directly or through a stored name; never JSON."""
+    if any(
+        isinstance(call, ast.Call) and ast.unparse(call.func) == "json.loads"
+        for call in ast.walk(expr)
+    ):
+        return False
+    return bool(CAPTURED_TEXT.search(ast.unparse(expr))) or any(
+        isinstance(name, ast.Name) and name.id in names for name in ast.walk(expr)
+    )
+
+
 def printed_wording_lines(source: str) -> list[int]:
     """Lines of `assert "<literal>" in <captured stdout/stderr>` assertions."""
     lines: list[int] = []
-    for node in ast.walk(ast.parse(source)):
-        if not isinstance(node, ast.Assert):
+    for function in ast.walk(ast.parse(source)):
+        if not isinstance(function, ast.FunctionDef | ast.AsyncFunctionDef):
             continue
-        for compare in ast.walk(node.test):
-            if (
+        # Names a function binds to captured text: `out = capsys.readouterr().out`.
+        names: set[str] = set()
+        for assign in ast.walk(function):
+            if isinstance(assign, ast.Assign) and _captured(assign.value, set()):
+                names.update(
+                    target.id
+                    for node in assign.targets
+                    for target in ast.walk(node)
+                    if isinstance(target, ast.Name)
+                )
+        for node in ast.walk(function):
+            if not isinstance(node, ast.Assert):
+                continue
+            if any(
                 isinstance(compare, ast.Compare)
                 and isinstance(compare.left, ast.Constant | ast.JoinedStr)
                 and (
@@ -222,14 +246,11 @@ def printed_wording_lines(source: str) -> list[int]:
                     or isinstance(compare.left.value, str)
                 )
                 and any(isinstance(op, ast.In) for op in compare.ops)
-                and any(
-                    CAPTURED_TEXT.search(ast.unparse(item))
-                    for item in compare.comparators
-                )
+                and any(_captured(item, names) for item in compare.comparators)
+                for compare in ast.walk(node.test)
             ):
                 lines.extend(range(node.lineno, (node.end_lineno or node.lineno) + 1))
-                break
-    return lines
+    return sorted(set(lines))
 
 
 AGENT_REQUESTS = "control/tests/agent_grant_requests.py"

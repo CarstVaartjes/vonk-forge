@@ -4064,16 +4064,18 @@ def test_a_component_may_not_type_not_reported(source: str) -> None:
         "    assert 'ready' in captured.out and status == 0\n",
         "    assert f'Job: {job}' in buffer.getvalue()\n",
         "    assert 'Reconnect' in captured.err.splitlines()\n",
+        "    out, err = capsys.readouterr()\n    assert 'Ready' in out\n",
     ],
 )
 def test_a_vonkctl_test_may_not_assert_wording_in_printed_output(body: str) -> None:
     source = "def test_x(capsys):\n" + body
     path = "tests/cluster_profiles/test_example.py"
     modes = ("printed-output",)
-    assert check_source(path, source, {2}, modes=modes)
+    every_line = set(range(1, source.count("\n") + 1))
+    assert check_source(path, source, {source.count("\n")}, modes=modes)
     # The one wording test and other trees may.
     for allowed in ("tests/cluster_profiles/test_cli_wording.py", "tests/test_x.py"):
-        assert not check_source(allowed, source, {2}, modes=modes)
+        assert not check_source(allowed, source, every_line, modes=modes)
 
 
 @pytest.mark.parametrize(
@@ -4085,12 +4087,13 @@ def test_a_vonkctl_test_may_not_assert_wording_in_printed_output(body: str) -> N
         "    assert not capsys.readouterr().out\n",
         "    output = capsys.readouterr()\n",
         "    assert 'x' in document['detail']\n",
+        "    doc = json.loads(capsys.readouterr().out)\n    assert 'x' in doc\n",
     ],
 )
 def test_leak_and_count_checks_on_printed_output_stay_allowed(body: str) -> None:
     source = "def test_x(capsys):\n" + body
     path = "tests/cluster_profiles/test_example.py"
-    assert not check_source(path, source, {1, 2}, modes=("printed-output",))
+    assert not check_source(path, source, {1, 2, 3}, modes=("printed-output",))
 
 
 _RETRY_PATH = "control/src/vonk_control/fleet_profiles/retry.py"
