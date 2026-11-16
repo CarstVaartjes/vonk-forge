@@ -4239,6 +4239,8 @@ def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
         "q = select(x).group_by(other, NodeInventorySnapshot.node_id)\n",
         "f = row_number().over(partition_by=(NodeInventorySnapshot.node_id, x))\n",
         "q = select(x).group_by(\n    func.max(y),\n    NodeSnapshot.node_id,\n)\n",
+        "q = select(func.max(NodeInventorySnapshot.observed_at))\n",
+        "q = select(func.max(NodeSnapshot.observed_at))\n",
     ):
         assert check_source(path, source, {1}, modes=("newest-snapshot",))
     assert not check_source(

@@ -205,16 +205,17 @@ RANK_INSTALLED_KIND = (
 # tuple at the close paren (two nested paren levels are read).
 _NEST = r"\((?:[^()]|\([^()]*\))*\)"
 NEWEST_SNAPSHOT_SCAN = re.compile(
-    r"(?:partition_by\s*=\s*(?:\((?:[^()]|"
+    r"(?:(?:partition_by\s*=\s*(?:\((?:[^()]|"
     + _NEST
     + r")*?|(?:[^(),]|"
     + _NEST
     + r")*?)"
     r"|group_by\s*\((?:[^()]|" + _NEST + r")*?)"
-    r"\bNode(?:Inventory)?Snapshot\.node_id\b"
+    r"\bNode(?:Inventory)?Snapshot\.node_id\b)"
+    r"|func\.max\(\s*Node(?:Inventory)?Snapshot\.observed_at\s*\)"
 )
 NEWEST_SNAPSHOT_KIND = (
-    "newest report per node by window or grouped max; "
+    "newest report per node by window, grouped max or max(observed_at); "
     "use inventory_repository.newest_snapshot_ids"
 )
 WEB_NOT_REPORTED_KIND = (
