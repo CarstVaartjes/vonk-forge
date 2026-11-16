@@ -23,6 +23,7 @@ from ..status_notes import (
     BOUNDARY_NOTES,
     StatusNote,
     is_replaceable,
+    write_note,
 )
 from .contracts import (
     _CONCLUDED_OUTCOMES,
@@ -162,6 +163,7 @@ def _record_claim_refusal(
         operation=operation,
         job_id=job_id,
         reason=_claim_refusal_reason(check, **facts),
+        note=StatusNote.CLAIM_REFUSED,
     )
 
 
@@ -172,6 +174,7 @@ def _write_refusal_note(
     operation: StoredOperation | None,
     job_id: str | None,
     reason: str,
+    note: StatusNote,
 ) -> None:
     """Write one bounded refusal note without erasing a domain reason.
 
@@ -194,7 +197,7 @@ def _write_refusal_note(
         # A domain reason such as "retry budget exhausted" already explains
         # why the operation is not progressing; a refusal must add evidence,
         # never erase it.
-        operation.status_reason = reason
+        write_note(operation, note, reason)
     if job_id is not None and (
         operation is None or operation.state not in _CONCLUDED_OUTCOMES
     ):
@@ -205,7 +208,7 @@ def _write_refusal_note(
             and job.status_reason != reason
             and is_replaceable(job)
         ):
-            job.status_reason = reason
+            write_note(job, note, reason)
 
 
 def _note_malformed_cancel_flag(
@@ -234,6 +237,7 @@ def _note_malformed_cancel_flag(
         operation=None,
         job_id=job.id,
         reason=_claim_note_reason("parent-cancel-flag-malformed", kind=operation.kind),
+        note=StatusNote.CLAIM_NOTE,
     )
 
 
@@ -299,12 +303,13 @@ def record_boundary_refusal(
         )
         if operation is None or operation.current_attempt != current.attempt:
             return False
-        reason = _refusal_reason(note, check, attempt=current.attempt, **facts)
+        reason = _refusal_reason(note.prefix, check, attempt=current.attempt, **facts)
         self._write_refusal_note(
             session,
             operation=operation,
             job_id=operation.parent_job_id,
             reason=reason,
+            note=note,
         )
         return True
 

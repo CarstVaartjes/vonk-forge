@@ -40,6 +40,7 @@ from ..recipe_execution_contract import (
     parse_stored_build_policy,
 )
 from ..spark_disk import spark_free_bytes
+from ..status_notes import StatusNote, carry_note
 from .contracts import (
     _TERMINAL_PARENT_STATES,
     _WORKLOAD_INTENT_OPERATIONS,
@@ -517,7 +518,9 @@ def dispatch_wait(
         retry_due_at=next_check.isoformat(),
         recovery_deadline=deadline.isoformat(),
     )
+    operation.status_note = StatusNote.CLAIM_REFUSED
     parent = session.get(Job, operation.parent_job_id)
     if parent is not None:
         parent.status_reason = operation.status_reason
+        carry_note(operation, parent)
     return True

@@ -9,7 +9,7 @@ its own column, written with the text, so no reader decides by the text.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING
 
 
 class StatusNote(StrEnum):
@@ -35,21 +35,17 @@ _PREFIX = {
 BOUNDARY_NOTES = (StatusNote.HEARTBEAT_REFUSED, StatusNote.RESULT_REFUSED)
 
 
-class NoteText(str):
-    """A note's text that carries its kind into the row it is assigned to."""
-
-    note: StatusNote
-
-    def __new__(cls, note: StatusNote, text: str) -> Self:
-        instance = super().__new__(cls, text)
-        instance.note = note
-        return instance
-
-
 if TYPE_CHECKING:
     from .models import AgentOperation, Job
 
     type NotedRow = Job | AgentOperation
+
+
+def write_note(row: NotedRow, note: StatusNote, text: str) -> None:
+    """Store a note's text and its kind together."""
+
+    row.status_reason = text
+    row.status_note = note.value
 
 
 def carry_note(source: NotedRow, target: NotedRow) -> None:
@@ -66,10 +62,8 @@ def is_replaceable(row: NotedRow) -> bool:
 
 
 def validated_text(row: NotedRow, new_text: str | None) -> str | None:
-    """Model validator body: a note's text records its kind, other text clears it."""
+    """Model validator body: different text is not the note any more."""
 
-    if isinstance(new_text, NoteText):
-        row.status_note = new_text.note.value
-    elif new_text != row.status_reason:
+    if new_text != row.status_reason:
         row.status_note = None
     return new_text

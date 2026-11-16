@@ -52,6 +52,7 @@ from ..operation_progress import progress_document, sample_progress, stored_prog
 from ..optimistic import Stale, transition
 from ..own_cleanup import CLEANUP_KINDS
 from ..settings import DATABASE_WAIT_BUDGETS
+from ..status_notes import StatusNote
 from .aggregation import _aggregate_parent, _aggregate_parent_state
 from .claim import _claim_once
 from .claim_authority import (
@@ -331,9 +332,10 @@ class AgentJobService:
         operation: StoredOperation | None,
         job_id: str | None,
         reason: str,
+        note: StatusNote,
     ) -> None:
         return _write_refusal_note(
-            self, session, operation=operation, job_id=job_id, reason=reason
+            self, session, operation=operation, job_id=job_id, reason=reason, note=note
         )
 
     def _note_malformed_cancel_flag(

@@ -19,10 +19,11 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireOperation
+from vonk_control import agent_operation_states as aos
 from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentOperation, Job
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
-from vonk_control.status_notes import NoteText, StatusNote
+from vonk_control.status_notes import StatusNote
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, parent
@@ -121,7 +122,8 @@ def test_no_refusal_note_survives_as_the_outcome(tmp_path, note, succeeded) -> N
             session,
             operation=operation,
             job_id=started.id,
-            reason=NoteText(note, note.prefix + "x"),
+            reason=note.prefix + "x",
+            note=note,
         )
     jobs.record_result(_result(claim, succeeded=succeeded))
     if succeeded:
@@ -231,7 +233,8 @@ def test_a_reason_is_a_note_by_its_kind_not_its_text(tmp_path) -> None:
             session,
             operation=operation,
             job_id=started.id,
-            reason=NoteText(StatusNote.CLAIM_REFUSED, "claim refused: newer"),
+            reason="claim refused: newer",
+            note=StatusNote.CLAIM_REFUSED,
         )
     assert _outcome(sessions, started.id) == lookalike
 
@@ -249,6 +252,56 @@ def test_a_reason_is_a_note_by_its_kind_not_its_text(tmp_path) -> None:
             session,
             operation=operation,
             job_id=started.id,
-            reason=NoteText(StatusNote.CLAIM_REFUSED, "claim refused: newer"),
+            reason="claim refused: newer",
+            note=StatusNote.CLAIM_REFUSED,
         )
     assert _outcome(sessions, started.id).endswith("newer")
+
+
+def test_a_note_copied_from_a_sibling_keeps_its_kind_and_stays_replaceable(
+    tmp_path,
+) -> None:
+    """The kind travels with the copied text: a later refusal replaces it."""
+
+    sessions, _service, jobs, clock, started, nodes, _claim = _running_start(tmp_path)
+    stale = StatusNote.CLAIM_REFUSED.prefix + "stale"
+    sibling_note = StatusNote.CLAIM_REFUSED.prefix + "sibling"
+    newer = StatusNote.CLAIM_REFUSED.prefix + "newer"
+    with sessions.begin() as session:
+        recovered = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=started.id, node_id=nodes[0])
+            .one()
+        )
+        sibling = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=started.id, node_id=nodes[1])
+            .one()
+        )
+        sibling.state = aos.RUNNING
+        sibling.status_reason = sibling_note
+        sibling.status_note = StatusNote.CLAIM_REFUSED
+        parent = session.get(Job, started.id)
+        assert parent is not None
+        parent.status_reason = stale
+        parent.status_note = StatusNote.CLAIM_REFUSED
+        jobs._refresh_parent_claim_refusal(session, recovered, clock.now)
+    with sessions() as session:
+        parent = session.get(Job, started.id)
+        assert parent is not None
+        assert parent.status_reason == sibling_note
+        assert parent.status_note == StatusNote.CLAIM_REFUSED
+    with sessions.begin() as session:
+        recovered = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=started.id, node_id=nodes[0])
+            .one()
+        )
+        jobs._write_refusal_note(
+            session,
+            operation=recovered,
+            job_id=started.id,
+            reason=newer,
+            note=StatusNote.CLAIM_REFUSED,
+        )
+    assert _outcome(sessions, started.id) == newer

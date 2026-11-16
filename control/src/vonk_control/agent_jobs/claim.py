@@ -249,6 +249,7 @@ def _claim_once(
                     else None
                 )
                 previous_reason = parked.status_reason
+                previous_note = parked.status_note
                 # Evidence that the order is restart-safe makes its parked
                 # attempt an uncertain effect: the core retries it.
                 AgentOperationAdapter(session).settle(
@@ -277,6 +278,7 @@ def _claim_once(
                 else:
                     AgentOperationAdapter.withdraw_retry(parked)
                     parked.status_reason = previous_reason
+                    parked.status_note = previous_note
             # Recovery schedules a future exact claim. It never reissues
             # an effect inside this observation of an old parked attempt.
             return None

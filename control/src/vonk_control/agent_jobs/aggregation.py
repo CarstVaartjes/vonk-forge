@@ -20,6 +20,7 @@ from ..lifecycle.agent_operation import (
     set_parent_state,
 )
 from ..lifecycle.artifact_job import ArtifactJobAdapter
+from ..lifecycle.types import TERMINAL_STATES
 from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
@@ -123,7 +124,7 @@ def _aggregate_parent_state(
     # A parent that already ended keeps its recorded state and reason; one
     # ended without an outcome reason, or carrying only a claim note (a wait
     # diagnostic, never an outcome), still receives its failed order's evidence.
-    ended = not is_replaceable(job) and job.state not in job_states.LIVE
+    ended = not is_replaceable(job) and job_states.core(job.state) in TERMINAL_STATES
     state = verdict
     set_parent_state(job, state, None, self._clock(), keep_reason=True)
     if state == "succeeded":

@@ -856,10 +856,10 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
     assert waiting.blockers and waiting.blockers[0].code == waiting.reason
 
 
-def test_final_verification_expiry_is_recorded_once(
+def test_final_verification_expiry_is_logged_on_each_expired_observation(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The expiry event is decided by the stored progress, never by reason text."""
+    """An expired final verification is logged by the observation, not by reason text."""
 
     service, operation, _start = _parked_start_switch(tmp_path, healthy=True)
     now = [NOW]
@@ -893,10 +893,9 @@ def test_final_verification_expiry_is_recorded_once(
         if view.next_attempt_at is not None and view.next_attempt_at > now[0]:
             now[0] = view.next_attempt_at
     assert RunSwitchCode.FINAL_VERIFICATION_EXPIRED in (view.status_reason or "")
-    assert _result(view).final_verification_expired_at is not None
     events = [
         record
         for record in caplog.records
         if "final_verification_expired" in record.getMessage()
     ]
-    assert len(events) == 1
+    assert events

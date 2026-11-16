@@ -5302,19 +5302,6 @@
           "default": null,
           "title": "Final Observation"
         },
-        "final_verification_expired_at": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Final Verification Expired At"
-        },
         "final_verify_started_at": {
           "anyOf": [
             {

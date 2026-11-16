@@ -444,7 +444,6 @@ class PhaseDispatchMixin:
             progress = _read_progress(read_row_column(job, "result"))
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
-            expiry_recorded = progress.final_verification_expired_at is not None
             if job.next_action_at is not None:
                 schedule_wait(job, None)
                 progress.observation_deadline_at = None
@@ -581,8 +580,6 @@ class PhaseDispatchMixin:
                             f"{owner_reason[:220]}; exact reconciliation retains the "
                             f"run and reservations; next observation at {due.isoformat()}"
                         )[:512]
-                        if not expiry_recorded:
-                            progress.final_verification_expired_at = now
                         _ADAPTER.project(
                             job,
                             progress,
@@ -591,46 +588,38 @@ class PhaseDispatchMixin:
                             due=due,
                             visible=_OBSERVING,
                         )
-                        if not expiry_recorded:
-                            phase_evidence = _phase_result(
-                                execution.result or {}, phase=phase
+                        phase_evidence = _phase_result(
+                            execution.result or {}, phase=phase
+                        )
+                        expiry_event = FinalVerificationExpiry(
+                            operation_id=job.id,
+                            run_id=phase_evidence.run_id
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            run_state=next(
+                                (
+                                    state
+                                    for state in RunState
+                                    if state.value == phase_evidence.state
+                                ),
+                                None,
                             )
-                            expiry_event = FinalVerificationExpiry(
-                                operation_id=job.id,
-                                run_id=phase_evidence.run_id
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                run_state=next(
-                                    (
-                                        state
-                                        for state in RunState
-                                        if state.value == phase_evidence.state
-                                    ),
-                                    None,
-                                )
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                route_state=next(
-                                    (
-                                        state
-                                        for state in RouteState
-                                        if state.value == phase_evidence.route_state
-                                    ),
-                                    None,
-                                )
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                accepted_start_deadline=start_deadline.isoformat(),
-                                status_reason=job.status_reason,
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            route_state=next(
+                                (
+                                    state
+                                    for state in RouteState
+                                    if state.value == phase_evidence.route_state
+                                ),
+                                None,
                             )
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            accepted_start_deadline=start_deadline.isoformat(),
+                            status_reason=job.status_reason,
+                        )
                     else:
-                        progress.final_verification_expired_at = None
                         job.status_reason = execution.status_reason or (
                             "Waiting for exact run and route verification; "
                             f"next observation at {due.isoformat()}"
