@@ -84,8 +84,7 @@ class RemovalScopeMixin:
             if observed_bytes < expected_bytes:
                 availability: AssetAvailability = AssetAvailability.PARTIAL
             else:
-                # Includes an exact-size file without its verified receipt
-                # and a file larger than the expected length. Neither is ready.
+                # A file larger than the expected length is not ready.
                 availability = AssetAvailability.UNKNOWN
             object_status[digest] = (availability, observed_bytes)
 

@@ -475,8 +475,15 @@ def test_model_removal_review_preserves_unknown_storage_observation(
         object_path.unlink()
         object_path.mkdir()
     else:
-        service._receipt_path(object_digest).unlink()
         original_lstat = Path.lstat
+        original_open = os.open
+
+        def unreadable_open(file, *args, **kwargs):
+            if file == object_path:
+                raise PermissionError("fixture denies object open")
+            return original_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(os, "open", unreadable_open)
 
         def unreadable_lstat(path: Path):
             if path == object_path:
@@ -1643,7 +1650,6 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
     [
         "verified",
         "missing",
-        "partial",
         "symlink",
         "truncated",
         "receipt_missing",
@@ -1673,10 +1679,8 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
     ).artifacts[0]
     path = service._object_path(spec.sha256)
     if stored_state == "receipt_missing":
-        # Bytes are present but the managed-storage receipt is gone: this is
-        # the wrong implementation's masked case, so admission must not use it.
-        service._receipt_path(spec.sha256).unlink()
-    elif stored_state == "partial":
+        # Bytes of the exact size are present, the receipt is gone: still
+        # present by the one presence rule (reconcile and download reuse heal it).
         service._receipt_path(spec.sha256).unlink()
     elif stored_state == "missing":
         path.unlink()
@@ -1723,7 +1727,7 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         monkeypatch.setattr(os, "close", unavailable_close)
 
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
-    expected = len(data) if stored_state == "verified" else 0
+    expected = len(data) if stored_state in ("verified", "receipt_missing") else 0
     assert preview["already_cached_bytes"] == expected
     assert preview["new_bytes"] == len(data) - expected
     if stored_state in ("unreadable", "close_unavailable"):
@@ -1746,13 +1750,11 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         assert recovered["new_bytes"] == 0
 
 
-def test_stored_bytes_without_a_receipt_are_not_admitted(cache, tmp_path: Path) -> None:
-    """Managed storage owns availability; SQL and bare bytes may not infer it.
-
-    It fails on the wrong implementation that treats an object as available
-    because its bytes are present and the size matches, which is exactly how a
-    lost receipt or a restored-but-unadopted cache would be silently admitted.
-    """
+def test_stored_bytes_of_the_exact_size_are_present_without_a_receipt(
+    cache, tmp_path: Path
+) -> None:
+    """One presence rule: a regular file of the expected size is present, as
+    reconcile_storage already adopts it; the receipt is healed, not required."""
 
     service, _sessions = cache
     model = "8" * 64
@@ -1765,14 +1767,12 @@ def test_stored_bytes_without_a_receipt_are_not_admitted(cache, tmp_path: Path) 
     assert not service._receipt_path(digest).exists()
 
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
-    assert preview["already_cached_bytes"] == 0
-    assert preview["new_bytes"] == len(data)
+    assert preview["already_cached_bytes"] == len(data)
+    assert preview["new_bytes"] == 0
 
 
-def test_a_receipt_for_a_different_size_does_not_admit_the_object(
-    cache, tmp_path: Path
-) -> None:
-    """The receipt records the exact verified size, not merely its presence."""
+def test_an_object_of_a_different_size_is_not_present(cache, tmp_path: Path) -> None:
+    """Presence is the exact size, whatever a receipt claims."""
 
     service, _sessions = cache
     model = "9" * 64
@@ -1781,30 +1781,12 @@ def test_a_receipt_for_a_different_size_does_not_admit_the_object(
     digest = _required_text(artifact["sha256"], "artifact digest")
     object_path = service.root / "objects" / digest[:2] / digest
     object_path.parent.mkdir(parents=True)
-    object_path.write_bytes(data)
-    _write_object_receipt(service, digest, len(data) - 1)
+    object_path.write_bytes(data[:-1])
+    _write_object_receipt(service, digest, len(data))
 
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     assert preview["already_cached_bytes"] == 0
     assert preview["new_bytes"] == len(data)
-
-
-def test_a_malformed_receipt_is_not_trusted(cache, tmp_path: Path) -> None:
-    """A damaged receipt is repaired through prepare/verify, never trusted."""
-
-    service, _sessions = cache
-    model = "b" * 64
-    data = b"malformed receipt"
-    artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    digest = _required_text(artifact["sha256"], "artifact digest")
-    object_path = service.root / "objects" / digest[:2] / digest
-    object_path.parent.mkdir(parents=True)
-    object_path.write_bytes(data)
-    receipt_path = service._receipt_path(digest)
-    receipt_path.write_text("{not json", encoding="utf-8")
-
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
-    assert preview["already_cached_bytes"] == 0
 
 
 def test_verification_publishes_the_object_receipt(cache, tmp_path: Path) -> None:

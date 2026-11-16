@@ -256,14 +256,14 @@ class CheckpointsMixin:
     def _stored_object(self, digest: str, expected_bytes: int) -> int | None:
         """Return the stored bytes when storage holds this exact object.
 
-        One receipt read and one descriptor check answer both "is it
-        available" and "how many bytes are there", so a whole-set read costs
-        one pass over the objects instead of several.
+        The one presence rule: the object file is a regular file of the
+        expected size. Bytes were hashed once at ingress; a missing receipt does
+        not make an object absent (``_object_is_stored`` and reconcile rewrite
+        it). One descriptor check answers both "is it available" and "how many
+        bytes are there", so a whole-set read costs one pass over the objects.
         """
         cache = cast("ModelCacheService", self)
 
-        if cache._read_object_receipt(digest, expected_bytes) is None:
-            return None
         try:
             fd = os.open(
                 cache._object_path(digest),

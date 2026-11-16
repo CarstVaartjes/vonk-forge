@@ -735,3 +735,21 @@ def test_lifecycle_reads_preserve_the_owners_pending_transaction(cache, tmp_path
         ) + timedelta(seconds=1)
     service.run_pending()
     assert service.get_operation(operation.id).state == State.SUCCEEDED
+
+
+def test_an_object_without_a_receipt_is_present_and_reused_not_fetched(cache, tmp_path):
+    """Catches two presence rules: reconcile adopted a same-size object without
+    a receipt while download reuse re-fetched it (77 of 98 GLM files)."""
+    service, _sessions = cache
+    artifact = _artifact(tmp_path, b"receiptless", model_content_sha256=MODEL)
+    downloaded = _download(
+        service,
+        [artifact],
+        model_content_sha256=MODEL,
+        request_key="00000000-0000-4000-8000-00000000a060",
+    )
+    manifest = service._manifest_for_set(str(downloaded.artifact_set_sha256))
+    spec = manifest.artifacts[0]
+    service._receipt_path(spec.sha256).unlink()
+    assert service._manifest_coverage_complete(manifest)  # the download gate
+    assert service._read_object_receipt(spec.sha256, spec.expected_bytes)  # healed

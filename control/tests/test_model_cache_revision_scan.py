@@ -314,3 +314,30 @@ def test_unreadable_heads_are_resolved_once_per_scan_and_settled(
     finally:
         service.close()
         engine.dispose()
+
+
+def test_re_digested_head_over_present_files_is_cached_without_a_download(
+    tmp_path, monkeypatch
+) -> None:
+    """Catches binding a head only to an already-held set of its exact digest:
+    a metadata-only re-digest (same files, other set digest) read not_cached
+    although every object was on disk."""
+    now = [datetime(2026, 10, 25, tzinfo=UTC)]
+    engine, sessions, service, catalog, _held, alias, set_digest = _held_set_and_alias(
+        tmp_path, now
+    )
+    try:
+        redigested = {**alias, "files": [{**alias["files"][0], "id": "renamed"}]}
+        catalog.import_catalog_models("system:test", [redigested])
+        digest = document_sha256(redigested)
+        resolved = service.resolve_artifact_set(model_content_sha256=digest)
+        assert resolved.digest != set_digest
+        _counting_scans(service, monkeypatch)()
+        with sessions() as session:
+            row = session.get(ModelCacheSet, resolved.digest)
+            assert row is not None
+            assert row.state == "cached"
+        assert digest in _bound(sessions, service, resolved.digest)
+    finally:
+        service.close()
+        engine.dispose()

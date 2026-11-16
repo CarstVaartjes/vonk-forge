@@ -290,10 +290,11 @@ class RevisionsMixin:
     def _adopt_current_model_bindings(self, stored: _StoredSets) -> bool:
         """Recover editorial bindings by exact canonical identity, not history.
 
-        This only updates an existing verified set (a damaged stored manifest
-        is replaced by the resolved one); it cannot resurrect a removed cache
-        entry, transfer bytes or authorize a workload. True when it adopted a
-        set.
+        A model is cached when every object of its resolved set is present
+        (the one presence rule): a metadata-only re-digest over the same files
+        adopts its set from those objects, with no download. This cannot
+        resurrect a removed cache entry (its files are gone), transfer bytes or
+        authorize a workload. True when it adopted a set.
 
         Each unbound model digest is resolved once per pass on a jittered
         re-observation schedule, not with the in-request retry loop: catalogue
@@ -309,8 +310,6 @@ class RevisionsMixin:
             for digest, (row, _manifest) in stored.items()
             if row.state == ModelCacheSetState.CACHED
         }
-        if not held:
-            return False
         with cache._session() as session:
             current = set(
                 session.execute(
@@ -345,9 +344,7 @@ class RevisionsMixin:
                     manifest.digest,
                     _recheck_at(now, _SETTLED_RECHECK_SCANS),
                 )
-                if manifest.digest in held and cache._manifest_coverage_complete(
-                    manifest
-                ):
+                if cache._manifest_coverage_complete(manifest):
                     cache.adopt_verified_set(manifest)
                     adopted = True
             except ModelCacheError as error:
