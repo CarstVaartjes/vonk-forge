@@ -858,6 +858,19 @@ def test_unused_yes_refused_everywhere_exits_nonzero_and_keeps_the_key():
     assert entry["request_key"] == KEY and entry["failure"]
 
 
+def test_unused_yes_unknown_acceptance_is_not_labelled_refused():
+    client = _unused_client(
+        {
+            ("POST", "/api/model/a/remove"): ControlTransportError("answer lost"),
+            ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
+        }
+    )
+    status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
+    [entry] = entries(result, "submissions")
+    assert status != 0 and entry["failure"]
+    assert f"--request-key {KEY}" in str(entry["reconnect"])
+
+
 def test_fleet_remove_replans_once_when_the_scope_moved_before_acceptance():
     client = _unused_client(
         {
