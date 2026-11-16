@@ -156,15 +156,13 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
 
 
 def test_a_newer_transition_wins_over_a_stale_demotion(tmp_path: Path) -> None:
-    """Catches a demotion that overwrites a rank or installation a newer
-    transition (here a re-install) moved after the evidence was read."""
+    """Catches a demotion that overwrites a rank a newer transition moved
+    between the evidence and the write (here a re-install that grew it)."""
 
     from datetime import timedelta
 
-    from vonk_agent_protocol import InstallationState
-    from vonk_control.installation_transitions import demote_installed_rank
+    from sqlalchemy import event
     from vonk_control.installed_bytes import demote_installed_ranks
-    from vonk_control.models import RecipeInstallation
 
     from .test_catalog_revision_collection import NOW
 
@@ -172,49 +170,35 @@ def test_a_newer_transition_wins_over_a_stale_demotion(tmp_path: Path) -> None:
     Base.metadata.create_all(engine)
     world = Catalog(engine)
     revision = world.revision("glm", 1)
-    stale, _ = world.workload(revision, run="stopped")
-    fresh, _ = world.workload(revision, run="stopped")
-    everything = InstallationNode.node_id == NODE
-    with world.sessions.begin() as session:
-        from sqlalchemy import update
-        from vonk_control.installation_transitions import RankRead
+    installation_id, _ = world.workload(revision, run="stopped")
+    newer = (NOW + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S.%f")
+    landed: list[str] = []
 
-        seen = next(
-            RankRead(r.id, r.installation_id, r.updated_at)
-            for r in session.scalars(
-                select(InstallationNode).where(
-                    InstallationNode.installation_id == stale
-                )
+    @event.listens_for(engine, "before_cursor_execute")
+    def _newer_transition_lands(connection, cursor, statement, parameters, *_):
+        # The first write to a rank finds that another writer got there first.
+        if statement.startswith("UPDATE installation_nodes") and not landed:
+            landed.append(statement)
+            cursor.execute(
+                "UPDATE installation_nodes SET installed_bytes = 777, updated_at = ?",
+                (newer,),
             )
-        )
-        # A newer transition lands after the read: the rank is installing again.
-        session.execute(
-            update(InstallationNode)
-            .where(InstallationNode.installation_id.in_((stale, fresh)))
-            .values(updated_at=NOW + timedelta(seconds=5))
-        )
-        session.execute(
-            update(InstallationNode)
-            .where(InstallationNode.installation_id == stale)
-            .values(state=InstallationNodeState.PLANNED)
-        )
+
     with world.sessions.begin() as session:
-        assert not demote_installed_rank(
-            session, seen, before=NOW, now=NOW + timedelta(seconds=9)
+        demote_installed_ranks(
+            session,
+            NODE,
+            InstallationNode.node_id == NODE,
+            observed_at=NOW + timedelta(seconds=9),
+            before=NOW + timedelta(seconds=1),
         )
-    with world.sessions.begin() as session:
-        # Evidence older than the newer transition moves neither row.
-        assert (
-            demote_installed_ranks(
-                session,
-                NODE,
-                everything,
-                observed_at=NOW + timedelta(seconds=9),
-                before=NOW,
-            )
-            == 0
-        )
+    assert landed
     with world.sessions() as session:
-        for installation_id in (stale, fresh):
-            row = session.get(RecipeInstallation, installation_id)
-            assert row is not None and row.state == InstallationState.INSTALLED
+        rank = session.scalar(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation_id
+            )
+        )
+        assert rank is not None
+        assert rank.state == InstallationNodeState.INSTALLED
+        assert rank.installed_bytes == 777

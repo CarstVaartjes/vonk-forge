@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, update
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import InstallationNodeState, InstallationState
 
@@ -110,9 +110,10 @@ def demote_installed_rank(
     The Spark lost what the rank needs, so the next plan installs it afresh. A
     transition that landed after the read changes ``updated_at``, so this
     misses (False) instead of overwriting it; the caller re-reads and re-decides.
-    The installation moves only while no newer transition (``before``) has
-    touched it, and a miss there leaves it to that transition: the rank is
-    already planned, which every installation state tolerates.
+    The rank moves only while its installation is installed or partial and no
+    transition newer than ``before`` has touched it (one statement, so the pair
+    cannot split); the installation then follows to ``partial`` unless a later
+    install already moved it.
     """
 
     moved = session.execute(
@@ -121,6 +122,15 @@ def demote_installed_rank(
             InstallationNode.id == seen.rank_id,
             rank_installed(InstallationNode.state),
             InstallationNode.updated_at == seen.updated_at,
+            InstallationNode.installation_id.in_(
+                select(RecipeInstallation.id).where(
+                    RecipeInstallation.id == seen.installation_id,
+                    RecipeInstallation.state.in_(
+                        (InstallationState.INSTALLED, InstallationState.PARTIAL)
+                    ),
+                    RecipeInstallation.updated_at <= before,
+                )
+            ),
         )
         .values(state=InstallationNodeState.PLANNED, installed_bytes=0, updated_at=now)
     )
@@ -133,7 +143,6 @@ def demote_installed_rank(
             RecipeInstallation.state.in_(
                 (InstallationState.INSTALLED, InstallationState.PARTIAL)
             ),
-            RecipeInstallation.updated_at <= before,
         )
         .values(state=InstallationState.PARTIAL, updated_at=now)
     )
