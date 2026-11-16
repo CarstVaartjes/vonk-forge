@@ -7,6 +7,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from contextlib import nullcontext
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 
 from pydantic import field_validator
@@ -32,6 +33,12 @@ _LOG = logging.getLogger(__name__)
 MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
 # A report received longer ago than this no longer says what a Spark holds.
 INVENTORY_MAX_AGE = timedelta(minutes=5)
+
+# A re-plan after a failed attempt counts a Spark's store scan received at or
+# before that attempt as unknown: it can still list what the attempt found gone.
+SPARK_SCAN_RECEIVED_AFTER: ContextVar[datetime | None] = ContextVar(
+    "spark_scan_received_after", default=None
+)
 
 
 class NodeInventoryReport(InventoryRequest):

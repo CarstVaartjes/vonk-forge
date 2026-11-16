@@ -25,6 +25,7 @@ from ..admission_locking import ConstraintReplay, admitting
 from ..agent_jobs import AgentJobService
 from ..bounded_json import require_integer, require_mapping
 from ..failure_classification import error_code, is_security_failure
+from ..inventory_repository import SPARK_SCAN_RECEIVED_AFTER
 from ..job_documents import (
     RunSwitchCleanupIntent,
     RunSwitchIntent,
@@ -319,6 +320,10 @@ class ReservationMixin:
             due = row.next_action_at
             if due is not None and now < _aware(due):
                 return False
+            # A failed attempt re-plans from Spark scans received after it.
+            failed_at = (
+                _aware(row.updated_at) if persisted_progress.force_replan else None
+            )
             parent = _run_switch_payload(row)
             intent = parent.intent if parent is not None else None
             if intent is None:
@@ -333,6 +338,7 @@ class ReservationMixin:
                 else None
             )
 
+        scan_floor = SPARK_SCAN_RECEIVED_AFTER.set(failed_at)
         try:
             if unreadable is not None:
                 refreshed = None
@@ -367,6 +373,8 @@ class ReservationMixin:
                         service._mark_failed(current, str(error), now=now)
                 return True
             refreshed = None
+        finally:
+            SPARK_SCAN_RECEIVED_AFTER.reset(scan_floor)
 
         with service._sessions.begin() as session:
             current = session.get(Job, operation_id, with_for_update=True)

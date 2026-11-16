@@ -17,7 +17,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_repository import spark_model_objects
+from ..inventory_repository import SPARK_SCAN_RECEIVED_AFTER, spark_model_objects
 from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
@@ -44,7 +44,12 @@ def missing_spark_bytes_by_node(
     return missing_spark_bytes(
         manifest,
         {
-            node_id: spark_model_objects(session, node_id, now=now)
+            node_id: spark_model_objects(
+                session,
+                node_id,
+                now=now,
+                received_after=SPARK_SCAN_RECEIVED_AFTER.get(),
+            )
             for node_id in node_ids
         },
     )

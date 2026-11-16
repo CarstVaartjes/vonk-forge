@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
+    SPARK_SCAN_RECEIVED_AFTER,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
@@ -108,7 +109,7 @@ def _report_store(sessions, node_id: str, objects) -> None:
     )
 
 
-@pytest.mark.parametrize("scan", ["held", "empty", "unknown"])
+@pytest.mark.parametrize("scan", ["held", "empty", "unknown", "held-before-failure"])
 def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
     tmp_path, scan: str
 ) -> None:
@@ -135,9 +136,12 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
             {"sha256": spec.sha256, "bytes": spec.expected_bytes}
             for spec in manifest.artifacts
         ]
-        if held
+        if scan.startswith("held")
         else [],
     )
+    if scan == "held-before-failure":
+        # A re-plan after a failed attempt does not trust a scan older than it.
+        SPARK_SCAN_RECEIVED_AFTER.set(NOW)
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -148,7 +152,10 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
         memory_floor_bytes=50,
     )
 
-    plan = service.preview(request, actor="admin")
+    try:
+        plan = service.preview(request, actor="admin")
+    finally:
+        SPARK_SCAN_RECEIVED_AFTER.set(None)
 
     assert plan.allowed, [reason.code for reason in plan.blockers]
     copies = [phase for phase in plan.phases if phase.subphase == "target-copy"]
