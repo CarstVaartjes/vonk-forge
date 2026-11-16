@@ -219,25 +219,28 @@ def test_replan_after_a_failed_target_copy_waits_for_a_scan_received_after_it(
 
     def copies() -> list[str]:
         with sessions() as session:
-            stored = _stored_job_plan(session.get(Job, op_id))
+            row = session.get(Job, op_id)
+            assert row is not None
+            stored = _stored_job_plan(row)
         assert stored is not None
         return [p.subphase for p in stored.phases if p.subphase == "target-copy"]
 
-    def fail_attempt(subphase: str) -> None:
+    def fail_attempt() -> None:
         with sessions.begin() as session:
             row = session.get(Job, op_id)
+            assert row is not None and row.result is not None
             progress = _read_progress(row.result)
             progress.force_replan = True
-            progress.subphase = subphase
+            progress.subphase = "target-copy"
             row.result = _persisted_result(progress)
             row.updated_at = failed_at
 
     assert not copies()
-    fail_attempt("target-copy")
+    fail_attempt()
     assert service._refresh_blocked_plan(op_id, NOW)
     assert copies()
     _report_store(sessions, nodes[0], held, received=NOW, observed=timedelta(seconds=2))
-    fail_attempt("target-copy")
+    fail_attempt()
     assert service._refresh_blocked_plan(op_id, NOW)
     assert not copies()
 
