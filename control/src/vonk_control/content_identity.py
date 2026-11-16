@@ -215,7 +215,7 @@ def _chosen_runtime(execution: RecipeExecution) -> object | None:
 
     from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 
-    from .catalog_revision_contract import cached_catalog_document
+    from .catalog_revision_contract import shared_catalog_document
     from .lifecycle.evidence import Residue, read_or_rebuild
     from .models import CatalogDocumentRevision
 
@@ -223,7 +223,7 @@ def _chosen_runtime(execution: RecipeExecution) -> object | None:
         kind=CatalogDocumentRevision.__tablename__,
         subject=execution.digest,
         read=partial(
-            cached_catalog_document,
+            shared_catalog_document,
             RunSwitchReasonScopeName.RECIPE,
             execution.digest,
             execution.document,

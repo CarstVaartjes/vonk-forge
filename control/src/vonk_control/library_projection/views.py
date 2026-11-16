@@ -629,6 +629,16 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
         if item.identity.content_sha256 != entry.identity.content_sha256
         and set(item.model_selectors) & set(entry.model_selectors)
     ]
+    ordered = sorted(
+        siblings,
+        key=lambda item: (
+            item.node_count,
+            item.engine,
+            item.creator or "",
+            item.selector,
+        ),
+    )
+    assessed = self._assessed(ordered, deadline=deadline)
     alternatives = [
         RecipeAlternative(
             selector=item.selector,
@@ -644,15 +654,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
                 else item.assessment.fleet_fit.state
             ),
         )
-        for item in sorted(
-            self._assessed(siblings, deadline=deadline),
-            key=lambda item: (
-                item.node_count,
-                item.engine,
-                item.creator or "",
-                item.selector,
-            ),
-        )
+        for item in assessed
     ]
     model_row_by_key = {row.content_digest: row for row, _ in model_rows}
     model_documents = []
