@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    InstallationState,
     LifecycleState,
     RecipeBuildCleanupRequest,
     RecipeBuildEvidence,
@@ -20,6 +21,7 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    RunState,
     WaitReason,
     canonical_message,
 )
@@ -48,6 +50,7 @@ from ..models import (
     CatalogDocumentRevision,
     Job,
     RecipeBuild,
+    RecipeInstallation,
     RecipeRun,
     RunNode,
 )
@@ -95,6 +98,57 @@ def wait_for_installation_upkeep(session: Session, installation_id: str) -> None
             f"recipe installation waits for its {upkeep.kind} operation "
             f"{upkeep.id} to end"
         )
+
+
+def run_takes_jobs(session: Session, run: RecipeRun | None) -> bool:
+    """Whether a held run admits a job now: running, and no Stop of it live.
+
+    An accepted Stop of a job run waits on its jobs' cancellation with the run
+    still ``running``; a job (or a reinstall for one) admitted then would
+    escape it, and a stopping run never takes jobs again.
+    """
+
+    if run is None or run.state != RunState.RUNNING:
+        return False
+    return (
+        session.scalar(
+            select(Job.id)
+            .where(
+                Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                Job.owner_kind == OwnerKind.RUN,
+                Job.owner_id == run.id,
+                Job.state.in_(job_states.LIVE),
+            )
+            .limit(1)
+        )
+        is None
+    )
+
+
+def reinstall_in_flight(session: Session, installation_id: str) -> str | None:
+    """The live install a held run's jobs wait for, while it is not installed.
+
+    A lost image makes the installation partial under its held job run
+    (``installed_bytes.demote_ranks_on_lost_image``); the next submission
+    installs it again (``start_installation``) and its job waits for exactly
+    that install: dispatch holds the order and the job shows the wait. With no
+    live install there is nothing to wait for, so the order goes on and the
+    launch grant answers it.
+    """
+
+    installation = session.get(RecipeInstallation, installation_id)
+    if installation is None or installation.state == InstallationState.INSTALLED:
+        return None
+    return session.scalar(
+        select(Job.id)
+        .where(
+            Job.kind == WireAgentOperation.RECIPE_INSTALL.value,
+            Job.state.in_(job_states.LIVE),
+            Job.owner_kind == OwnerKind.INSTALLATION,
+            Job.owner_id == installation_id,
+        )
+        .limit(1)
+    )
 
 
 def _active_recipe_revision(
