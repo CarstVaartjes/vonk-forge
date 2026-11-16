@@ -352,20 +352,6 @@ class StoredCacheRetryClock(BaseModel):
     automatic_attempts: Annotated[
         int | None, readable_or_none(_ATTEMPTS, json_fallback=False)
     ] = None
-    next_retry_at: Annotated[
-        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
-    ] = None
-
-
-class StoredCacheClaimClock(BaseModel):
-    """The claim a Controller wrote into the payload before the lifecycle core."""
-
-    model_config = ConfigDict(extra="ignore")
-
-    owner: Annotated[str | None, readable_or_none(_NAME, json_fallback=False)] = None
-    expires_at: Annotated[
-        AwareDatetime | None, readable_or_none(_AWARE_TIME, json_fallback=False)
-    ] = None
 
 
 class StoredCacheCancelClock(BaseModel):
@@ -393,10 +379,6 @@ class StoredCacheClocks(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    claim: Annotated[
-        StoredCacheClaimClock | None,
-        readable_or_none(TypeAdapter(StoredCacheClaimClock), json_fallback=False),
-    ] = None
     retry: Annotated[
         StoredCacheRetryClock | None,
         readable_or_none(TypeAdapter(StoredCacheRetryClock), json_fallback=False),

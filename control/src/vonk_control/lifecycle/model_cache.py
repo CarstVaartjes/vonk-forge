@@ -46,9 +46,7 @@ A removal has no lease: its steps are short, fenced transactions the worker
 advances one per tick, so a stored ``running`` removal is a queued one between
 two steps (core ``queued``) and a lapsed process costs nothing.
 
-Legacy rows: ``payload.retry.next_retry_at`` / ``retry_after_seconds`` and
-``payload.claim`` are read by ``adopt`` when the columns are empty, never
-written; ``apply`` strips them on the row's next transition.
+Legacy rows: a stored ``payload.claim`` is stripped on the row's next transition.
 """
 
 from __future__ import annotations
@@ -166,22 +164,6 @@ class CacheEffects(Protocol):
         ...
 
 
-def legacy_retry_due(document: object) -> datetime | None:
-    """The retry instant of a row written before the core, else ``None``."""
-
-    retry = StoredCacheClocks.read(document).retry
-    return None if retry is None else retry.next_retry_at
-
-
-def legacy_claim(document: object) -> tuple[str, datetime] | None:
-    """The claim (owner, expiry) of a row written before the core, else ``None``."""
-
-    claim = StoredCacheClocks.read(document).claim
-    if claim is not None and claim.owner and claim.expires_at is not None:
-        return claim.owner, claim.expires_at
-    return None
-
-
 def cancellation_of(
     document: object, now: datetime
 ) -> tuple[datetime | None, str | None]:
@@ -270,13 +252,10 @@ class ModelCacheAdapter:
             if operation.lease_deadline is None
             else aware(operation.lease_deadline)
         )
-        claim = legacy_claim(operation.payload) if lease is None else None
-        if claim is not None:
-            fence, lease = claim[0], aware(claim[1])
         next_action = (
             aware(operation.next_action_at)
             if operation.next_action_at is not None
-            else legacy_retry_due(operation.payload)
+            else None
         )
         observe = operation.observe_count or 0
         stored = operation.state
@@ -300,12 +279,12 @@ class ModelCacheAdapter:
             state = State.RUNNING
             lease = max(lease or now, now + timedelta(seconds=1))
             next_action = lease
-        elif lease is not None and (stored == "running" or claim is not None):
-            state, next_action = State.RUNNING, lease
         elif stored == "running":
-            # A running row with no claim at all: nobody can be running it.
             state = State.RUNNING
-            lease = next_action = aware(operation.updated_at)
+            if lease is None:
+                # A running row with no claim at all: nobody can be running it.
+                lease = aware(operation.updated_at)
+            next_action = lease
         elif next_action is not None:
             state = State.BACKOFF
         elif stored == "queued":
@@ -928,6 +907,4 @@ __all__ = [
     "ModelCacheAdapter",
     "ModelCacheStore",
     "cancellation_of",
-    "legacy_claim",
-    "legacy_retry_due",
 ]

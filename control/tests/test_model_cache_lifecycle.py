@@ -33,8 +33,6 @@ from vonk_control.lifecycle import (
 )
 from vonk_control.lifecycle.model_cache import (
     RECOVERY_BUDGET,
-    legacy_claim,
-    legacy_retry_due,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import ModelCacheOperation, ModelCacheSet
@@ -106,111 +104,6 @@ def _aware(value: datetime | None) -> datetime | None:
 
 
 # ------------------------------------------------------------ adopt and heal
-
-
-def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(
-    cache, tmp_path, damaged_json_rows
-):
-    service, sessions = cache
-    operation, _artifact_document = _queue(
-        service, tmp_path, "00000000-0000-4000-8000-00000000a001"
-    )
-    now = _clock_at(service)
-    due = now[0] + timedelta(minutes=10)
-    # The row as a Controller before the core left it: the retry clock in the
-    # payload, no column.
-    _edit_payload(
-        sessions,
-        operation.id,
-        retry={"next_retry_at": due.isoformat(), "retry_after_seconds": 600},
-    )
-    _edit(sessions, operation.id, next_action_at=None, wait_evidence=None)
-    stored = _row(sessions, operation.id)
-    assert stored.next_action_at is None
-    assert legacy_retry_due(stored.payload) == due
-
-    # Lazy adoption: the core reads it as a scheduled retry, nothing rewritten.
-    adopted = service._lifecycle.adopt(stored)
-    assert (adopted.state, adopted.next_action_at) == (State.BACKOFF, due)
-    assert service._claim_operations(limit=1, respect_backoff=True) == []
-
-    # It heals: due, it is claimed; the legacy clock is gone with the claim.
-    now[0] = due + timedelta(seconds=1)
-    assert service._claim_operations(limit=1, respect_backoff=True) == [
-        (operation.id, "download")
-    ]
-    claimed = _row(sessions, operation.id)
-    assert (claimed.state, claimed.fence) == ("running", service._claim_owner)
-    assert claimed.next_action_at is None
-    assert legacy_retry_due(claimed.payload) is None
-
-
-def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(
-    cache, tmp_path, damaged_json_rows
-):
-    service, sessions = cache
-    operation, _artifact_document = _queue(
-        service, tmp_path, "00000000-0000-4000-8000-00000000a002"
-    )
-    now = _clock_at(service)
-    # A transfer another (older) Controller process is running: its claim lives in
-    # the payload, and the row says running.
-    _edit(
-        sessions, operation.id, state="running", next_action_at=None, wait_evidence=None
-    )
-    _edit_payload(
-        sessions,
-        operation.id,
-        claim={
-            "owner": "older-process",
-            "expires_at": (now[0] + timedelta(seconds=90)).isoformat(),
-        },
-    )
-    assert legacy_claim(_row(sessions, operation.id).payload) is not None
-    live = _row(sessions, operation.id)
-    assert live.state == "running"
-
-    # A live lease is never touched: not claimed, not decided, not rewritten.
-    assert service._claim_operations(limit=1, respect_backoff=False) == []
-    assert service._reconciler.reconcile().changed == 0
-
-    # Its process dies: once the lease lapses the core retries the attempt (the
-    # kind is idempotent) and the next claim takes it.
-    now[0] += timedelta(seconds=200)
-    assert service._reconciler.reconcile().changed == 1
-    retried = _row(sessions, operation.id)
-    assert (
-        retried.state == LifecycleState.BACKOFF and retried.next_action_at is not None
-    )
-    assert retried.lease_deadline is None
-    assert service._reconciler.reconcile().changed == 0  # idempotent
-    now[0] += timedelta(minutes=5)
-    assert service._claim_operations(limit=1, respect_backoff=True) == [
-        (operation.id, "download")
-    ]
-
-
-def test_an_unadopted_lapsed_legacy_row_still_heals(cache, tmp_path):
-    """Startup adoption is a convenience: a row it missed heals on its own."""
-
-    service, sessions = cache
-    operation, _artifact_document = _queue(
-        service, tmp_path, "00000000-0000-4000-8000-00000000a003"
-    )
-    now = _clock_at(service)
-    _edit(sessions, operation.id, state="running")
-    _edit_payload(
-        sessions,
-        operation.id,
-        claim={
-            "owner": "dead-process",
-            "expires_at": (now[0] - timedelta(minutes=3)).isoformat(),
-        },
-    )
-    assert service._reconciler.reconcile().changed == 1
-    healed = _row(sessions, operation.id)
-    assert healed.state == LifecycleState.BACKOFF and healed.next_action_at is not None
-    assert "claim" not in healed.payload  # the legacy claim retired with the decision
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
