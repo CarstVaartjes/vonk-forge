@@ -289,10 +289,13 @@ def _unused_removal(payload: object) -> None:
         _field("Not reviewed", f"{entry.get('selector')}: {entry.get('failure')}")
     for entry in _records(document, "submissions") if "submissions" in document else ():
         if entry.get("failure") is not None:
+            reconnect = entry.get("reconnect")
             _field(
-                "Refused",
+                # An unknown acceptance may still be applied: not a refusal.
+                "Refused" if reconnect is None else "Unknown",
                 f"{entry.get('selector')}: {entry.get('failure')} "
-                f"(request key {entry.get('request_key')})",
+                f"(request key {entry.get('request_key')})"
+                + ("" if reconnect is None else f"; reconnect: {reconnect}"),
             )
         elif entry.get("retained") is not None:
             _field("Now kept", f"{entry.get('selector')}: {entry.get('retained')}")

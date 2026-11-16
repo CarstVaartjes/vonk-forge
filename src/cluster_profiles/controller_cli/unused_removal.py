@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from dataclasses import asdict, dataclass, field
 
+from ..cli_outcome import SubmissionAcceptance
 from ..cli_render import render_payload
 from ..cli_states import PARTIAL_FIELD
 from ..control_client import (
@@ -31,6 +32,7 @@ from ..generated_control.models.fleet_model_removal_effects import (
 from .cache_removal import (
     _cache_operation_id,
     _cache_removal_review,
+    _model_removal_reconnect,
     _submit_model_removal,
 )
 from .common import ControllerClient, _query
@@ -69,6 +71,8 @@ class Outcome:
     operation_id: str | None = None
     retained: str | None = None
     failure: str | None = None
+    # Set only when the Controller's answer is not known (not refused).
+    reconnect: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,7 +206,19 @@ def _submit_one(
         return _submit_planned(client, one, factory, entry, key)
     except (ControlClientError, OSError) as error:
         # One refusal does not stop the others; the next run reviews again.
-        return Outcome(entry.selector, request_key=key, failure=str(error))
+        submission = getattr(one, "submission", None)
+        unknown = (
+            submission is not None
+            and submission.acceptance is SubmissionAcceptance.UNKNOWN
+        )
+        return Outcome(
+            entry.selector,
+            request_key=key,
+            failure=str(error),
+            reconnect=_model_removal_reconnect(entry.selector, key, fleet=True)
+            if unknown
+            else None,
+        )
 
 
 def _submit_planned(

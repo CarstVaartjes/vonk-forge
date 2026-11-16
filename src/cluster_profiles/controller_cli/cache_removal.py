@@ -285,6 +285,21 @@ def _existing_cache_removal(
     return result
 
 
+def _model_removal_reconnect(selector: str, key: str, *, fleet: bool) -> str:
+    return shlex.join(
+        [
+            "vonkctl",
+            "model",
+            "remove",
+            selector,
+            *(["--fleet"] if fleet else []),
+            "--yes",
+            "--request-key",
+            key,
+        ]
+    )
+
+
 def _submit_model_removal(
     client: ControllerClient,
     args: argparse.Namespace,
@@ -329,17 +344,8 @@ def _submit_model_removal(
         lookup_validate=validate,
         # A reviewed scope that moved is the Controller's refusal: re-plan.
         conflict_is_refusal=True,
-        reconnect=shlex.join(
-            [
-                "vonkctl",
-                "model",
-                "remove",
-                selector,
-                *(["--fleet"] if getattr(args, "fleet", False) else []),
-                "--yes",
-                "--request-key",
-                key,
-            ]
+        reconnect=_model_removal_reconnect(
+            selector, key, fleet=getattr(args, "fleet", False)
         ),
     )
 
