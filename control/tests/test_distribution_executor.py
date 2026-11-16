@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     AgentResultState,
     ArtifactDistributionPayload,
     DistributionObject,
+    FailureCode,
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
@@ -901,13 +902,25 @@ def test_abandon_closes_only_a_parked_distribution_child(
 
 
 @pytest.mark.parametrize(
-    "failure_kind",
-    ["temporary-dependency", "integrity-failure"],
+    ("failure_kind", "error_code", "lifted"),
+    [
+        ("temporary-dependency", "artifact_distribution_failed", None),
+        ("integrity-failure", "artifact_distribution_failed", None),
+        # The Controller's lost source is a typed ending the Run/Switch owner
+        # turns into a new plan; a generic code stays on its member.
+        (
+            "invalid-contract",
+            FailureCode.ARTIFACT_SOURCE_UNAVAILABLE.value,
+            FailureCode.ARTIFACT_SOURCE_UNAVAILABLE.value,
+        ),
+    ],
 )
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_member_failure_kind_and_diagnostic_survive_aggregation(
     agent_system,  # noqa: F811
     failure_kind: str,
+    error_code: str,
+    lifted: str | None,
 ) -> None:
     """The agent's typed failure decides the parent's retry and stays visible."""
 
@@ -980,7 +993,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
                 result={
                     "reason": "Controller distribution could not be verified and retained",
                     "failure_kind": failure_kind,
-                    "error_code": "artifact_distribution_failed",
+                    "error_code": error_code,
                     "stage": "artifact-distribution",
                     "diagnostic": "http_status=404 error_code=controller.http_404",
                 },
@@ -993,6 +1006,7 @@ def test_member_failure_kind_and_diagnostic_survive_aggregation(
     assert view is not None
     assert isinstance(view.result, RunSwitchDistributionChildResult)
     assert view.result.members[0].diagnostic
+    assert view.result.error_code == lifted
     with services.sessions() as session:
         persisted = session.get(Job, child_id).result
     for _ in range(3):

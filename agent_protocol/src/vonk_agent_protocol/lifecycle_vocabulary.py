@@ -591,6 +591,10 @@ class FailureCode(WireEnum):
     #: A container this agent cannot prove it owns occupies the exact name a start
     #: needs. It is left untouched; the start waits for the name to be free.
     RETAINED_CONTAINER_FOREIGN = "retained_container_foreign"
+    #: The Controller cannot serve a model file the destination Spark lacks (its
+    #: NAS copy is gone). A definite outcome, not a wait: the Controller plans
+    #: again with a model download for the missing files.
+    ARTIFACT_SOURCE_UNAVAILABLE = "artifact_source_unavailable"
 
 
 class RunAdmissionCode(WireEnum):

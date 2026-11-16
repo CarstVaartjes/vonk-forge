@@ -1052,6 +1052,36 @@ fn a_full_disk_during_distribution_is_a_resource_wait_not_a_credential_failure()
     );
 }
 
+#[test]
+fn a_missing_controller_source_during_distribution_is_a_definite_typed_outcome() {
+    // Wrong implementation: the Controller's 503 for a model set it can no longer
+    // serve was a temporary dependency, so the order waited out its whole window
+    // instead of ending so the Controller plans a model download.
+    let error = ClientError::Controller(Box::new(crate::client::controller_error(
+        reqwest::StatusCode::SERVICE_UNAVAILABLE,
+        "/agent/distribution/objects/x",
+        None,
+        Some(DistributionCode::ModelSetIdentityUnavailable.to_string()),
+    )));
+    assert!(error.retryable(), "the wire status alone reads as a wait");
+    assert!(error.distribution_source_unavailable());
+    let raw = distribution_failure_result(&error);
+    let failure = raw.failure().expect("a failure");
+    assert_eq!(failure.code, Some(FailureCode::ArtifactSourceUnavailable));
+    assert_eq!(failure.failure_kind, Some(AgentFailureKind::InvalidContract));
+    assert_eq!(failure.retry_after_seconds, None);
+    // Any other 503 stays a wait.
+    let other = ClientError::Controller(Box::new(ControllerError::from_status(503)));
+    assert!(!other.distribution_source_unavailable());
+    assert_eq!(
+        distribution_failure_result(&other)
+            .failure()
+            .expect("a failure")
+            .failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
+}
+
 /// Every route a Controller denial reaches result evidence by, built through the
 /// production constructors, as the bodies the agent sends.
 fn controller_denial_results() -> Vec<(&'static str, AgentOperation, ExecutionResult)> {

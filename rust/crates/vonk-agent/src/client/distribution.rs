@@ -108,6 +108,7 @@ impl AgentHttpClient {
             match result {
                 Err(error)
                     if error.retryable()
+                        && !error.distribution_source_unavailable()
                         && (attempt < 2
                             || (error.disposition() == Disposition::Wait
                                 && error.code().is_some_and(|code| vocabulary::is(
@@ -547,7 +548,11 @@ impl AgentHttpClient {
                     drop(stream);
                     return Ok(());
                 }
-                Err(error) if error.retryable() && retries < max_attempts => {
+                Err(error)
+                    if error.retryable()
+                        && !error.distribution_source_unavailable()
+                        && retries < max_attempts =>
+                {
                     drop(stream);
                     governor.throttled();
                     accepted

@@ -322,7 +322,8 @@
         "runtime_observation_unavailable",
         "installation_reconciliation_busy",
         "recipe_reconciliation_dependency_unavailable",
-        "retained_container_foreign"
+        "retained_container_foreign",
+        "artifact_source_unavailable"
       ],
       "title": "FailureCode",
       "type": "string"

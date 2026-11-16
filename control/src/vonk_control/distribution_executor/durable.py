@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as AgentOperationKind
 from vonk_agent_protocol import (
     DistributionCode,
+    FailureCode,
     LifecycleState,
     OperationMemberProgress,
     OperationProgress,
@@ -453,11 +454,21 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         )
         failed = [member for member in members if member.state == LifecycleState.FAILED]
         kinds = {member.failure_kind for member in failed}
-        denied = next(
+        # A security denial first; otherwise the agent's definite statement that
+        # the Controller cannot serve what the Spark lacks, which the Run/Switch
+        # ending turns into a new plan with a model download.
+        definite_code = next(
             (
                 member.error_code
                 for member in failed
                 if is_security_failure(member.error_code)
+            ),
+            None,
+        ) or next(
+            (
+                member.error_code
+                for member in failed
+                if member.error_code == FailureCode.ARTIFACT_SOURCE_UNAVAILABLE
             ),
             None,
         )
@@ -477,7 +488,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
             reason=child.status_reason
             or next((member.error for member in members if member.error), None),
             failure_kind=next(iter(kinds)) if len(kinds) == 1 else None,
-            error_code=denied,
+            error_code=definite_code,
             uncertain=bool(failed) or any(item.uncertain for item in evidence),
         )
         return _ChildView(

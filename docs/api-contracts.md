@@ -587,6 +587,13 @@ start ends as `retained_container_foreign` with `failure_kind: resource-prerequi
 naming the container. The Controller reads that as a prerequisite, re-issues the
 start with backoff and keeps the load open until the name is free; it is never an
 invalid contract and never removes anything the agent does not own.
+
+A distribution order whose Controller answers `distribution.model_set_identity_unavailable`
+(the NAS copy of the model files this Spark lacks is gone) is not retried or waited
+on: the agent ends it as `artifact_source_unavailable` with `failure_kind:
+invalid-contract`. The Controller carries the code to the Run/Switch ending and
+the profile recovery plans again, which adds the model download for the evicted
+files. Agents older than this ending keep waiting out the observation window.
 `rust/crates/vonk-agent/tests/wait_actions.rs` requires an advertised action
 for every wait reason the agent constructs.
 

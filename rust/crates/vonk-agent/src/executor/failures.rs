@@ -344,6 +344,20 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
 /// The incident's `invalid-authority` outcome reported only that the
 /// distribution failed, so the denied request and status were unrecoverable.
 pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
+    if error.distribution_source_unavailable() {
+        // The Controller has no copy of the files this Spark lacks. Waiting
+        // cannot bring them back; the definite outcome makes the Controller plan
+        // again with a model download.
+        let mut failure = Failure::new("Controller cannot serve the model files this Spark lacks")
+            .code(FailureCode::ArtifactSourceUnavailable)
+            .kind(AgentFailureKind::InvalidContract)
+            .stage(FailureStage::ArtifactDistribution);
+        let diagnostic = controller_denial_diagnostic(error);
+        if !diagnostic.is_empty() {
+            failure = failure.diagnostic(diagnostic);
+        }
+        return ExecutionResult::Failed(failure);
+    }
     let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new("Controller distribution could not be verified and retained")
         .kind(failure_kind)
