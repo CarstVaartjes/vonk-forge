@@ -389,7 +389,7 @@ def test_operations_route_accepts_a_cursor_up_to_the_cursor_contract_length() ->
         ),
         resume_job=lambda _job_id, *, receipt=None: None,
         list_operations=listing,
-        get_operation=lambda _operation_id: None,
+        get_operation=lambda _operation_id: {},
     )
     client, operator, *_ = _client(operations=services)
 
