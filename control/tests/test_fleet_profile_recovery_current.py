@@ -1274,29 +1274,6 @@ def test_an_automatic_retry_supersedes_its_predecessor_instead_of_failing_it(
     assert not service.retry_eligible(first.id)
 
 
-def test_a_failed_row_is_never_relabelled_superseded_from_its_prose(
-    tmp_path: Path,
-) -> None:
-    sessions, _lifecycle, service, _profile, _desired, first, _child, _nodes = (
-        _failed_profile(tmp_path)
-    )
-    successor = _uuid(990)
-    with sessions.begin() as session:
-        row = session.get(FleetProfileApplication, first.id)
-        assert row is not None
-        row.state = "failed"
-        row.status_reason = f"Automatically reconciled by profile retry {successor}"
-        progress = dict(row.progress)
-        row.next_action_at = None
-        row.progress = progress
-
-    assert not service._heal_legacy_applications(_lifecycle._clock())
-
-    view = service.application(first.id)
-    assert view.state != LifecycleState.SUPERSEDED
-    assert view.superseded_by is None
-
-
 def test_a_stale_retry_keeps_waiting_past_the_old_window_and_admits_a_fresh_load(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

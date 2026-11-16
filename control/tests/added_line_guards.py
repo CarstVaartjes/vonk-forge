@@ -1990,6 +1990,10 @@ def check_source(
                 (line, "free-text lifecycle reason")
                 for line in reasons.scan_source(source, path=path)
             )
+            hits.extend(
+                (line, "decision by reason text")
+                for line in reasons.prose_reason_reads(source)
+            )
         if "claims" in modes and path.startswith("control/src/"):
             hits.extend(
                 (line, "in-flight-by-stored-state")
