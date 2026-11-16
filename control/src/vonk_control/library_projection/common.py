@@ -26,6 +26,7 @@ from vonk_forge_contracts.api_checks import (
 
 from cluster_profiles.control_limits import MAX_CONTROL_DOCUMENT_BYTES
 
+from ..auth import CursorError
 from ..catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
@@ -63,6 +64,18 @@ class LibrarySelectorAmbiguous(ValueError):
 
 
 _LIBRARY_ORDER = "catalog"
+
+
+def _boundary_key(boundary: object, length: int) -> tuple[str, ...]:
+    """The sort key a signed cursor carries; any other shape is an invalid cursor."""
+
+    if (
+        isinstance(boundary, list)
+        and len(boundary) == length
+        and all(isinstance(part, str) for part in boundary)
+    ):
+        return tuple(boundary)
+    raise CursorError("cursor is invalid")
 
 
 _ACTIVE_RUN_STATES = RUN_LIVE

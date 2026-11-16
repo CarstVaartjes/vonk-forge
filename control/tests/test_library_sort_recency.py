@@ -24,7 +24,7 @@ from typing import Literal
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from vonk_control.auth import TokenCodec
+from vonk_control.auth import CursorError, TokenCodec
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.models import (
     Base,
@@ -186,6 +186,35 @@ def test_cursor_continues_after_a_boundary_that_left_the_catalog(
     assert page(projection, 100)[0] == _selectors((order[0], order[2]))
     # The boundary is gone, yet the listing continues after it, not at page 1.
     assert page(projection, 2, cursor)[0] == _selectors(order[2:])
+
+
+@pytest.mark.parametrize("kind", ["model", "recipe"])
+@pytest.mark.parametrize("sort", ["name", "updated"])
+@pytest.mark.parametrize("boundary", [["old-shape"], "bare-string", None, [1, 2]])
+def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
+    tmp_path: Path, kind: str, sort: Literal["name", "updated"], boundary: object
+) -> None:
+    """A signed cursor whose boundary is not the current sort key is rejected.
+
+    It used to restart the listing at page 1, which an older client read as the
+    next page of the same listing.
+    """
+
+    class _OldShape(type(TokenCodec(b"s" * 32).cursor_codec())):
+        def decode(self, token, *, resource, order, context):
+            return boundary
+
+    _projection, sessions = _build(tmp_path)
+    projection = LibraryProjection(
+        sessions,
+        cursors=_OldShape(TokenCodec(b"s" * 32).cursor_codec()._key),
+        clock=lambda: _EPOCH + timedelta(days=1),
+    )
+    with pytest.raises(CursorError):
+        if kind == "model":
+            projection.models(limit=2, sort=sort, cursor="any")
+        else:
+            projection.recipe_library(limit=2, sort=sort, cursor="any")
 
 
 def test_models_sort_name_and_updated_are_distinct_and_complete(

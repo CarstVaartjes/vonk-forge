@@ -34,6 +34,7 @@ from ..operator_receipt_contract import ReceiptOwner
 from ..request_fault import RequestFault
 from .common import (
     _LIBRARY_ORDER,
+    _boundary_key,
     _canonical_model,
     _canonical_recipe,
     _canonical_recipe_summary,
@@ -171,19 +172,11 @@ def models(
         )
         # The cursor carries the whole sort key, so a boundary that has left
         # the catalog still continues the listing after its position.
-        expected_length = 3 if sort == "updated" else 2
-        boundary_key = (
-            tuple(boundary)
-            if isinstance(boundary, list)
-            and len(boundary) == expected_length
-            and all(isinstance(part, str) for part in boundary)
-            else None
-        )
+        boundary_key = _boundary_key(boundary, 3 if sort == "updated" else 2)
         filtered = [
             item
             for item in filtered
-            if boundary_key is None
-            or (
+            if (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key
@@ -435,18 +428,11 @@ def recipe_library(
         )
         # The cursor carries the whole sort key, so a boundary that has left
         # the catalog still continues the listing after its position.
-        boundary_key = (
-            tuple(boundary)
-            if isinstance(boundary, list)
-            and len(boundary) == 3
-            and all(isinstance(part, str) for part in boundary)
-            else None
-        )
+        boundary_key = _boundary_key(boundary, 3)
         filtered = [
             item
             for item in filtered
-            if boundary_key is None
-            or (
+            if (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key
