@@ -20580,8 +20580,6 @@
         "recipe_update.authority_denied",
         "request_replayed",
         "run-switch.artifact-digest-verification-failed",
-        "run-switch.cleanup-nas-eviction-forbidden",
-        "run-switch.cleanup-reclaimed-digest-not-planned",
         "run-switch.runtime-image-preparation-digest-mismatch",
         "runtime_image.authorization_invalid",
         "runtime_image.authorization_revoked",

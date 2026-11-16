@@ -13,7 +13,6 @@ from vonk_agent_protocol import (
     RunAdmissionCode,
     RunSwitchCode,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..categorized_errors import (
     MissingRecord,
@@ -57,7 +56,7 @@ from ..run_switch_observation_contract import (
     RunSwitchObservedImageIdentity,
 )
 from ..strict_json import read_stored_model
-from .constants import _active_recipe_revision
+from .constants import _active_recipe_revision, _is_artifact_phase
 from .identity_helpers import _primary_model_digest
 from .phase_planning import targets_hold_model
 from .planning_helpers import (
@@ -540,7 +539,7 @@ class RunPlanningMixin:
                 not service._custom_phase_executor
                 and service._artifact_phase_executor is None
                 and any(
-                    phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
+                    _is_artifact_phase(phase.kind)
                     or (phase.kind == "prepare" and phase.subphase == "runtime-image")
                     for phase in phases
                 )
