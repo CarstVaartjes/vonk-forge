@@ -205,7 +205,9 @@ class InstallAdmissionService(InstallPlanningService):
                     "node-resource-reservations",
                     ResourceReservation,
                     select(ResourceReservation).where(
-                        ResourceReservation.node_id.in_(node_ids)
+                        ResourceReservation.node_id.in_(node_ids),
+                        # A released claim is history: admission never writes it.
+                        ResourceReservation.state != ReservationState.RELEASED,
                     ),
                 ),
             )

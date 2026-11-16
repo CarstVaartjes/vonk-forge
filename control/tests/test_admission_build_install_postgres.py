@@ -172,3 +172,50 @@ def test_source_build_plan_writer_and_install_retry_share_builder_admission(
     assert len(installations) == 1
     assert len(install_jobs) == 1
     assert len(builds_after) == 1 and builds_after[0].state == "planned"
+
+
+def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
+    tmp_path, postgres_engine
+) -> None:
+    from datetime import UTC, datetime
+
+    from sqlalchemy.orm import Session
+    from vonk_agent_protocol import ReservationState
+    from vonk_control.models import ResourceReservation
+
+    sessions, operations, _queue, mapping_id, build_id, nodes = setup_services(
+        tmp_path, engine=postgres_engine, model_artifact=True
+    )
+    plan = operations.preview_install(mapping_id, build_id)
+    assert plan.allowed
+    now = datetime.now(UTC)
+    with sessions.begin() as session:
+        released = ResourceReservation(
+            node_id=nodes[0],
+            kind="disk",
+            resource_key="history",
+            amount_bytes=1,
+            owner_kind="installation",
+            owner_id=str(uuid4()),
+            state=ReservationState.RELEASED,
+            plan_digest="0" * 64,
+            created_at=now,
+            released_at=now,
+        )
+        session.add(released)
+        session.flush()
+        released_id = released.id
+
+    # Retention or another writer is mid-transaction on the kept history row.
+    with Session(postgres_engine) as holder, holder.begin():
+        holder.scalars(
+            select(ResourceReservation)
+            .where(ResourceReservation.id == released_id)
+            .with_for_update()
+        ).all()
+        operations.install(
+            plan,
+            plan_digest=plan.plan_digest,
+            actor="admin",
+            request_id=str(uuid4()),
+        )
