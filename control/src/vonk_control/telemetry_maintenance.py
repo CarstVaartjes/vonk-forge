@@ -106,6 +106,20 @@ def _raw_candidate_statement(
     ).limit(limit)
 
 
+def _expired_inventory_statement(*, cutoff: datetime, newest: list[str], limit: int):
+    """The oldest expired reports, never a node's newest; served by the report index."""
+
+    return (
+        select(NodeInventorySnapshot.id)
+        .where(
+            NodeInventorySnapshot.observed_at < cutoff,
+            NodeInventorySnapshot.id.not_in(newest),
+        )
+        .order_by(NodeInventorySnapshot.observed_at, NodeInventorySnapshot.id)
+        .limit(limit)
+    )
+
+
 class TelemetryMaintenance:
     def __init__(
         self,
@@ -253,14 +267,9 @@ class TelemetryMaintenance:
         ]
         stale = list(
             session.scalars(
-                select(NodeInventorySnapshot.id)
-                .where(
-                    NodeInventorySnapshot.observed_at < cutoff,
-                    NodeInventorySnapshot.id.not_in(newest),
-                )
-                .order_by(NodeInventorySnapshot.observed_at, NodeInventorySnapshot.id)
-                .limit(limit)
-                .with_for_update(of=NodeInventorySnapshot, skip_locked=True)
+                _expired_inventory_statement(
+                    cutoff=cutoff, newest=newest, limit=limit
+                ).with_for_update(of=NodeInventorySnapshot, skip_locked=True)
             )
         )
         for chunk in TelemetryMaintenance._chunks(stale):

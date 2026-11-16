@@ -272,6 +272,8 @@ class NodeTelemetrySample(Base):
             name="ck_telemetry_gpu_memory",
         ),
         Index("ix_telemetry_node_observed", "node_id", "observed_at"),
+        # Retention selects the oldest expired samples across all nodes.
+        Index("ix_telemetry_observed_node_id", "observed_at", "node_id", "id"),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
