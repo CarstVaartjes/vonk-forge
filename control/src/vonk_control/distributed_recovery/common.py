@@ -484,7 +484,7 @@ def release_inactive_run_claims_in_session(session: Session, now: datetime) -> b
 
 
 def settle_observed_absent_runs_in_session(session: Session, now: datetime) -> bool:
-    """Release the claims of a stoppable run every Spark reports absent.
+    """Record a stoppable run every Spark reports absent as stopped, and release its claims.
 
     Unknown resident usage is resolved by observation, never held forever. A
     run that is not running (a cancelled start leaves it lost) and that no live
@@ -499,12 +499,6 @@ def settle_observed_absent_runs_in_session(session: Session, now: datetime) -> b
         select(RecipeRun)
         .where(
             RecipeRun.state.in_(STOPPABLE_NOT_RUNNING_RUN_STATES),
-            RecipeRun.id.in_(
-                select(ResourceReservation.owner_id).where(
-                    ResourceReservation.owner_kind == "run",
-                    ResourceReservation.state == ReservationState.ACTIVE,
-                )
-            ),
         )
         .order_by(RecipeRun.created_at, RecipeRun.id)
         .with_for_update(of=RecipeRun, skip_locked=True)

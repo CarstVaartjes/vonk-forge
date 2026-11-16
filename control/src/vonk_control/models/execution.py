@@ -230,6 +230,7 @@ class RecipeRun(Base):
             "recovery_attempts>=0",
             name="ck_recipe_runs_recovery_attempts",
         ),
+        Index("ix_recipe_runs_state", "state"),
     )
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
