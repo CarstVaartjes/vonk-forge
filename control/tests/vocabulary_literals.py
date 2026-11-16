@@ -42,6 +42,7 @@ PYTHON_ROOTS = (
 )
 #: Generated Python (never hand-edited) is not scanned.
 PYTHON_EXCLUDED_PREFIXES = ("src/cluster_profiles/generated_control/",)
+AGENT_WORDS_MODULE = "agent_protocol/src/vonk_agent_protocol/agent_words.py"
 #: The contract itself, and the one place that still reads an untyped agent body.
 ALLOWED_FILES = frozenset(
     {
@@ -768,8 +769,11 @@ def contract_words(root: Path = REPO_ROOT) -> frozenset[str]:
     registry = json.loads((root / "tools/python-model-registry.json").read_text())
     classes = [
         node
-        for entry in registry["modules"]
-        for node in ast.walk(ast.parse((root / entry["module"]).read_text()))
+        for module in (
+            *(entry["module"] for entry in registry["modules"]),
+            AGENT_WORDS_MODULE,
+        )
+        for node in ast.walk(ast.parse((root / module).read_text()))
         if isinstance(node, ast.ClassDef)
     ]
     enum_names = {"Enum", "StrEnum", "WireEnum", "IntEnum"}
