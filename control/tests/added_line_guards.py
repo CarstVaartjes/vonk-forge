@@ -202,9 +202,10 @@ RANK_INSTALLED_KIND = (
 NEWEST_SNAPSHOT_SCAN = re.compile(
     r"partition_by\s*=\s*Node(?:Inventory)?Snapshot\.node_id"
     r"|group_by\(\s*Node(?:Inventory)?Snapshot\.node_id\s*\)"
+    r"|func\.max\(\s*Node(?:Inventory)?Snapshot\.observed_at\s*\)"
 )
 NEWEST_SNAPSHOT_KIND = (
-    "newest report per node by window or grouped max; "
+    "newest report per node by window, grouped max or max(observed_at); "
     "use inventory_repository.newest_snapshot_ids"
 )
 WEB_NOT_REPORTED_KIND = (
