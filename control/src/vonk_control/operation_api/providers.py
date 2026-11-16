@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..auth import CursorCodec
+from ..auth import CursorCodec, CursorError
 from ..models import AgentOperation, Job
 from ..operation_blockers import read_blockers
 from ..operation_item_contract import (
@@ -85,17 +85,16 @@ def merge_operation_providers(
             order="created-at-desc/id-desc/v1",
             context=context,
         )
-        # The codec authenticated the token. Unreadable issued bookkeeping
-        # restarts this finite observation against the current providers.
-        if (
+        if not (
             isinstance(decoded, list)
             and len(decoded) == 2
             and all(isinstance(item, str) for item in decoded)
         ):
-            try:
-                after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
-            except ValueError:
-                after = None
+            raise CursorError("cursor is invalid")
+        try:
+            after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
+        except ValueError:
+            raise CursorError("cursor is invalid") from None
     query = OperationQuery(
         after=after,
         limit=limit + 1,
