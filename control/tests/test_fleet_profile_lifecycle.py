@@ -199,7 +199,7 @@ _EVENTS = (
 )
 
 
-@pytest.mark.parametrize("stored", ["queued", "running", "needs-operator"])
+@pytest.mark.parametrize("stored", ["queued", "running"])
 @pytest.mark.parametrize("shape", sorted(_SHAPES))
 def test_no_profile_state_can_wait_for_an_operator(stored: str, shape: str) -> None:
     """Rule 3 for this kind, over the whole state space: nothing is irreversible
@@ -212,8 +212,6 @@ def test_no_profile_state_can_wait_for_an_operator(stored: str, shape: str) -> N
     assert adapter.irreversible(lifecycle) is False
     assert adapter.actions(lifecycle) == ()
     for event in _EVENTS:
-        if lifecycle.state is State.NEEDS_OPERATOR and isinstance(event, LeaseLapsed):
-            continue  # a lease lapse says nothing about a load that holds none
         decision = adapter.decide(row, event, now)
         assert decision.row.state is not State.NEEDS_OPERATOR, (event, stored, shape)
 

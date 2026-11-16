@@ -179,7 +179,6 @@
             "queued",
             "running",
             "backoff",
-            "needs-operator",
             "succeeded",
             "failed",
             "cancelled",

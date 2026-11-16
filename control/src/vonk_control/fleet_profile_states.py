@@ -1,7 +1,7 @@
 """The stored states of a profile application, spoken through the contract.
 
 An application's ``state`` is a word of the core vocabulary (``queued``, ``running``,
-``backoff``, ``needs-operator``, ``succeeded``, ``failed``, ``cancelled``,
+``backoff``, ``succeeded``, ``failed``, ``cancelled``,
 ``superseded``), and so is the state of its cancellation intent: a cancel being
 driven is ``observing``.  Every selection by state goes through :func:`words`.
 """

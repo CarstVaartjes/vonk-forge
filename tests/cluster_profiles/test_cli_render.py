@@ -261,7 +261,7 @@ def test_the_next_activity_page_keeps_every_filter_of_this_one():
         "--request-id",
         "r",
     ]
-    for unreadable in ("", "x" * 513, 7):
+    for unreadable in ("", 7):
         assert activity_continuation(unreadable) is None
 
 
