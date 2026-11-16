@@ -440,9 +440,7 @@ def dispatch_wait(
     from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     from ..agent_operation_facts import (
-        AGENT_ORDER_RECOVERY_BUDGET,
         aware,
-        operation_start_deadline,
     )
     from ..operation_blockers import make_blocker
     from ..persisted_waits import schedule_wait
@@ -480,23 +478,12 @@ def dispatch_wait(
             snapshot = None  # the owning admission's missing-inventory rule applies
         reason = None if snapshot is None else gpu_health_reason(snapshot.gpu_health)
         if reason is None:
-            if (
-                isinstance(payload, RecipeJobRunRequest)
-                and operation.current_attempt == 0
-            ):
-                # A hold that ended leaves no budget behind: the job keeps its
-                # own observation window, not what remained of the wait's.
-                operation.recovery_deadline = None
+            AgentOperationAdapter.clear_hold_deadline(operation)
             return False
         code, detail = reason
         waiting = f"Waiting for healthy GPU inventory from {operation.node_id};"
-    # Use the accepted start budget where present, otherwise the existing
-    # agent-order observation window. Persist once, never extend on polling.
-    if operation.recovery_deadline is None:
-        operation.recovery_deadline = operation_start_deadline(operation) or (
-            now + AGENT_ORDER_RECOVERY_BUDGET
-        )
-    deadline = aware(operation.recovery_deadline)
+    # Persist once, never extend on polling.
+    deadline = AgentOperationAdapter.stamp_hold_deadline(operation, now)
     note = f"{code}: {detail} {waiting} deadline {deadline.isoformat()}"
     if aware(now) >= deadline:
         end_unobserved_order(

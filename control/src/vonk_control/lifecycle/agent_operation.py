@@ -88,6 +88,7 @@ from ..agent_operation_facts import (
     attempt_holds_open_launch_budget,
     attempt_is_live,
     aware,
+    operation_start_deadline,
     order_recovery_deadline,
     stalled_interruptions,
     start_deadline,
@@ -272,6 +273,35 @@ class AgentOperationAdapter:
                 AgentOperationAttempt.attempt == operation.current_attempt,
             )
         )
+
+    # Orders whose first attempt keeps its own observation window once a hold on
+    # dispatch ends; a start keeps the budget the hold began.
+    _FRESH_WINDOW_KINDS = frozenset(
+        {
+            AgentOperation.RECIPE_JOB_RUN,
+            AgentOperation.RECIPE_INSTALL,
+            AgentOperation.RECIPE_BUILD,
+        }
+    )
+
+    @staticmethod
+    def stamp_hold_deadline(operation: StoredOperation, now: datetime) -> datetime:
+        """The observation deadline of an order held at dispatch: stamped once
+        (the accepted start budget, else the order budget), never extended."""
+
+        if operation.recovery_deadline is None:
+            operation.recovery_deadline = operation_start_deadline(operation) or (
+                now + AGENT_ORDER_RECOVERY_BUDGET
+            )
+        return aware(operation.recovery_deadline)
+
+    @classmethod
+    def clear_hold_deadline(cls, operation: StoredOperation) -> None:
+        """A hold that ended before the first attempt leaves no budget behind: a
+        job, install or build keeps its own observation window."""
+
+        if operation.current_attempt == 0 and operation.kind in cls._FRESH_WINDOW_KINDS:
+            operation.recovery_deadline = None
 
     # ---------------------------------------------------------------- adopt
 
