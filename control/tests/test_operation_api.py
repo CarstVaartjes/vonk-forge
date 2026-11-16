@@ -23,6 +23,7 @@ from vonk_control.agent_upgrade_status import (
 from vonk_control.api import create_app
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.bounded_json import BoundedJSONError
+from vonk_control.cursor_contract import MAX_CURSOR_LENGTH
 from vonk_control.fleet_profile_contract import (
     FleetProfileDefinition,
     FleetProfileEffects,
@@ -372,6 +373,34 @@ def test_progress_projection_accepts_phase_only_bytes_and_object_identity() -> N
         assert operation_api._progress_projection(
             {"phase": "download", retired: 1}
         ) == operation_api._progress_projection({"phase": "download"})
+
+
+def test_operations_route_accepts_a_cursor_up_to_the_cursor_contract_length() -> None:
+    seen: list[object] = []
+
+    def listing(cursor, _limit, _state, _node_id, _request_id):
+        seen.append(cursor)
+        return operation_api.OperationListPage((), None, 0)
+
+    services = OperationApiServices(
+        agents=lambda: (),
+        job_operations=lambda _job_id, _cursor, _limit: OperationPage(
+            (), None, JobProgress(completed=0, failed=0, running=0, total=0)
+        ),
+        resume_job=lambda _job_id, *, receipt=None: None,
+        list_operations=listing,
+        get_operation=lambda _operation_id: None,
+    )
+    client, operator, *_ = _client(operations=services)
+
+    at_limit = client.get(
+        "/api/operations",
+        headers=operator,
+        params={"cursor": "c" * MAX_CURSOR_LENGTH},
+    )
+
+    assert at_limit.status_code == 200
+    assert seen == ["c" * MAX_CURSOR_LENGTH]
 
 
 def test_generic_operation_read_contract_is_unavailable_without_projection() -> None:

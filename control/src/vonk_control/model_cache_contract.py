@@ -24,6 +24,7 @@ from vonk_agent_protocol import (
 )
 from vonk_forge_contracts.model import ModelReference
 
+from .cursor_contract import MAX_CURSOR_LENGTH
 from .integer_domains import MAX_DATABASE_INTEGER
 from .machine_states import ModelFileStateField
 from .operation_blockers import OperationBlocker
@@ -681,7 +682,7 @@ class ModelCacheInventoryResponse(StrippedStrictModel):
     entries: list[CacheEntryResponse] = Field(max_length=100)
     storage: CacheStorageResponse
     total: int = Field(ge=0)
-    next_cursor: str | None = Field(default=None, max_length=1024)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
 
 
 class ModelCacheOperationProgress(StrippedStrictModel):
@@ -789,7 +790,7 @@ class ModelCacheOperationsResponse(StrippedStrictModel):
     schema_version: Literal[2] = 2
     operations: list[ModelCacheOperationResponse] = Field(max_length=100)
     total: int = Field(ge=0)
-    next_cursor: str | None = Field(default=None, max_length=1024)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
 
 
 class ModelCacheRepairPreviewResponse(StrippedStrictModel):
@@ -839,7 +840,7 @@ class ModelCacheUpdatesResponse(StrippedStrictModel):
     source_policy: Literal["nas-first"] = "nas-first"
     updates: list[ModelCacheUpdateResponse] = Field(max_length=100)
     total: int = Field(ge=0)
-    next_cursor: str | None = Field(default=None, max_length=1024)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
 
 
 class CachedRecipeResolution(StrictModel):
