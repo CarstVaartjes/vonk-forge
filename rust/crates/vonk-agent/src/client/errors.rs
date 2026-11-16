@@ -209,7 +209,7 @@ impl ClientError {
         self.code().is_some_and(|code| {
             vocabulary::is(
                 code,
-                vonk_agent_protocol::generated::DistributionCode::ModelSetIdentityUnavailable,
+                vonk_agent_protocol::generated::DistributionCode::DistributionModelSetIdentityUnavailable,
             )
         })
     }
