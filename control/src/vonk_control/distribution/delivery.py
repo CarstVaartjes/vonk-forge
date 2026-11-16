@@ -330,7 +330,7 @@ class DeliveryMixin:
             assignment.model_artifact_set_sha256, assignment.objects
         ):
             raise DistributionUnknown(
-                DistributionCode.OBJECT_UNAVAILABLE,
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
                 "assignment model objects do not match the cache manifest",
             )
         try:

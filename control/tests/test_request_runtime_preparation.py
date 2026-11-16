@@ -203,3 +203,35 @@ def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
             node_id=operation.node_id, plan_digest=payload.plan_digest, digest="f" * 64
         )
     assert foreign.value.code == DistributionCode.UNASSIGNED
+
+
+def test_a_warm_process_reads_a_deleted_set_as_definite() -> None:
+    """The process memo holds the manifest after eviction deleted the set; the
+    file read must still say the set is gone, not that it is waiting."""
+    from types import SimpleNamespace
+
+    from vonk_control.distribution.model_cache import ModelCacheObjectSource
+    from vonk_control.distribution.types import DistributionError
+    from vonk_control.model_cache.errors import ModelCacheNotFound
+
+    digest, file_sha = "a" * 64, "b" * 64
+    held = {"present": True}
+
+    def cached_artifact_file(*_args: object) -> object:
+        if not held["present"]:
+            raise ModelCacheNotFound("not_found", "set deleted")
+        raise AssertionError("not reached")
+
+    service = SimpleNamespace(
+        manifest_for_artifact_set=lambda _digest: SimpleNamespace(digest=digest),
+        resolve_verified_artifact_set=lambda _digest: [
+            {"path": "w.bin", "sha256": file_sha, "bytes": 4, "file": "w.bin"}
+        ],
+        cached_artifact_file=cached_artifact_file,
+    )
+    source = ModelCacheObjectSource.from_service(service)
+    assert source.objects_for_set(digest)
+    held["present"] = False
+    with pytest.raises(DistributionError) as gone:
+        source.open_object(file_sha, 4)
+    assert gone.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
