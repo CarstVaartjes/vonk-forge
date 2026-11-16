@@ -39,6 +39,7 @@ from .selection import _library_pages
 
 _LIST_BUDGET_SECONDS = 60.0
 _REVIEW_WORKERS = 4
+_NOTHING_TO_FREE = "Nothing to free: every file is shared with another cached model."
 
 
 @dataclass(frozen=True)
@@ -119,18 +120,31 @@ def _reviewed(selector: str, document: dict) -> ReviewedModel:
     if not isinstance(fleet, FleetModelRemovalEffects):
         raise ControlMalformedResponse("Fleet removal review has no Spark effects")
     nas = review.nas_reclaimable_bytes
+    nas_bytes = nas if isinstance(nas, int) else None
+    sparks = {
+        target.node_id: target.reclaimable_bytes
+        if isinstance(target.reclaimable_bytes, int)
+        else None
+        for target in fleet.targets
+    }
+    removable = bool(fleet.nas_remove) and not review.blockers
+    # A removal that frees nothing anywhere changes nothing (the model stays
+    # cached while a sibling holds its files), so it would be resubmitted on
+    # every run: list it as kept instead.
+    nothing_to_free = removable and all(
+        size == 0 for size in (nas_bytes, *sparks.values())
+    )
     return ReviewedModel(
         selector=selector,
         # The Controller's own answer: its fleet review keeps nothing back.
-        removable=bool(fleet.nas_remove) and not review.blockers,
-        reason=review.blockers[0].detail if review.blockers else fleet.nas_detail,
-        nas_bytes=nas if isinstance(nas, int) else None,
-        sparks={
-            target.node_id: target.reclaimable_bytes
-            if isinstance(target.reclaimable_bytes, int)
-            else None
-            for target in fleet.targets
-        },
+        removable=removable and not nothing_to_free,
+        reason=_NOTHING_TO_FREE
+        if nothing_to_free
+        else review.blockers[0].detail
+        if review.blockers
+        else fleet.nas_detail,
+        nas_bytes=nas_bytes,
+        sparks=sparks,
         review_digest=review.review_digest,
     )
 

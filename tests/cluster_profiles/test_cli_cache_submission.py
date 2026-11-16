@@ -723,7 +723,9 @@ def test_model_resume_access_rejects_other_request_receipt():
     assert acceptance(result) == "unknown"
 
 
-def _fleet_review(selector, *, removable, nas_bytes=100, digest="d", blocker=None):
+def _fleet_review(
+    selector, *, removable, nas_bytes=100, digest="d", blocker=None, spark_bytes=None
+):
     from test_controller_cli import _removal_review
 
     return _removal_review("model", selector, model_digest="a" * 64) | {
@@ -740,7 +742,9 @@ def _fleet_review(selector, *, removable, nas_bytes=100, digest="d", blocker=Non
                     "objects": [],
                     "installations": [],
                     "observation_available": True,
-                    "reclaimable_bytes": 7 if removable else 0,
+                    "reclaimable_bytes": (7 if removable else 0)
+                    if spark_bytes is None
+                    else spark_bytes,
                 }
             ],
         },
@@ -799,6 +803,26 @@ def test_unused_review_keeps_what_the_controller_keeps_and_totals_the_rest():
     ]
     assert [e["selector"] for e in entries(result, "unreviewed")] == ["c"]
     assert result["totals"] == {"nas_bytes": 100, "sparks": {"spk_1": 7}}
+
+
+def test_unused_yes_lists_a_zero_byte_model_as_nothing_to_free_and_never_posts_it():
+    """Catches resubmitting an alias whose files a sibling holds, every run."""
+    client = _unused_client(
+        {
+            ("GET", "/api/model/b/remove-review"): _fleet_review(
+                "b", removable=True, nas_bytes=0, spark_bytes=0
+            ),
+            ("POST", "/api/model/a/remove"): _fleet_receipt("a", KEY),
+            ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
+        }
+    )
+    status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
+    assert status == 0
+    assert [e["selector"] for e in entries(result, "removals")] == ["a"]
+    assert [(e["selector"], e["reason"]) for e in entries(result, "retained")] == [
+        ("b", "Nothing to free: every file is shared with another cached model.")
+    ]
+    assert [c[1] for c in client.calls if c[0] == "POST"] == ["/api/model/a/remove"]
 
 
 def test_unused_yes_replans_a_moved_scope_with_the_fresh_digest():
