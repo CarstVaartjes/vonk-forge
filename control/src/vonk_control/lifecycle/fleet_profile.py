@@ -31,7 +31,7 @@ core state                stored application
                           ``backoff`` after a failure the Controller retries by
                           itself (its next attempt is ``next_action_at``), else
                           ``running`` (a cancel being driven keeps the label)
-``needs-operator``        a word the adapter does not know: read and healed,
+``needs-operator``        a word the adapter does not know: read,
                           never written
 ``succeeded``/``failed``  ``succeeded``/``failed``: ``failed`` only when nothing
                           will try the load again, so a recorded end is final
@@ -732,7 +732,7 @@ class FleetProfileAdapter:
     @staticmethod
     def retry_pending(application: FleetProfileApplication) -> bool:
         """A live load whose automatic retry is pending: it backs off after a
-        failure, or (legacy) waits for a person."""
+        failure, or its word is not known (read as ``needs-operator``)."""
 
         return application.state == BACKOFF or job_states.means(
             application.state, State.NEEDS_OPERATOR
