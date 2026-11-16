@@ -46,7 +46,7 @@ from .install_admission.contracts import reason_documents
 from .inventory_repository import InventoryRepository
 from .legal_admission import stored_model_display, territorial_admission
 from .load_swap import swap_capacity
-from .machine_states import rank_installed
+from .machine_states import rank_installed, reservation_live
 from .memory_reservations import memory_reservations
 from .models import (
     AgentNode,
@@ -1079,8 +1079,7 @@ class RunAdmissionService:
                     ResourceReservation,
                     select(ResourceReservation).where(
                         ResourceReservation.node_id.in_(node_ids),
-                        # A released claim is history: admission never writes it.
-                        ResourceReservation.state != ReservationState.RELEASED,
+                        reservation_live(ResourceReservation.state),
                     ),
                 ),
             ),

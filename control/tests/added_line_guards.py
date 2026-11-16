@@ -120,6 +120,7 @@ MODES = (
     "contract-constants",
     "web-not-reported",
     "rank-installed",
+    "live-reservation",
     "newest-snapshot",
     "retry-dispositions",
     "head-digests",
@@ -195,6 +196,14 @@ WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<"""
 RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
 RANK_INSTALLED_KIND = (
     "rank INSTALLED test spelled inline; use machine_states.rank_installed"
+)
+# Whether a reservation is live (not history) is one shared predicate,
+# machine_states.reservation_live.
+LIVE_RESERVATION_COPY = re.compile(
+    r"ResourceReservation\.state\s*!=\s*(?:ReservationState\.RELEASED|\"released\")"
+)
+LIVE_RESERVATION_KIND = (
+    "live-reservation test spelled inline; use machine_states.reservation_live"
 )
 # A node's newest inventory report is one indexed probe per node
 # (inventory_repository.newest_snapshot_ids); a window or grouped max over
@@ -2574,6 +2583,18 @@ def check_source(
             (number, RANK_INSTALLED_KIND)
             for number, text in enumerate(source.splitlines(), 1)
             if RANK_INSTALLED_COPY.search(text)
+        )
+    if (
+        python
+        and not is_test
+        and "live-reservation" in modes
+        and path.startswith("control/src/")
+        and path != "control/src/vonk_control/machine_states.py"
+    ):
+        hits.extend(
+            (number, LIVE_RESERVATION_KIND)
+            for number, text in enumerate(source.splitlines(), 1)
+            if LIVE_RESERVATION_COPY.search(text)
         )
     if (
         python

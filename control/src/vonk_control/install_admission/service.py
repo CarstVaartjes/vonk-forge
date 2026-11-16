@@ -30,6 +30,7 @@ from ..disk_reservations import (
     outstanding_disk_reservation_bytes,
 )
 from ..inventory_items_contract import InventorySnapshotKind
+from ..machine_states import reservation_live
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -206,8 +207,7 @@ class InstallAdmissionService(InstallPlanningService):
                     ResourceReservation,
                     select(ResourceReservation).where(
                         ResourceReservation.node_id.in_(node_ids),
-                        # A released claim is history: admission never writes it.
-                        ResourceReservation.state != ReservationState.RELEASED,
+                        reservation_live(ResourceReservation.state),
                     ),
                 ),
             )

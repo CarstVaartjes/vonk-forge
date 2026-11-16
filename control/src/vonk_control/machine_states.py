@@ -103,6 +103,28 @@ def rank_installed(state: object) -> object:
     return state == InstallationNodeState.INSTALLED
 
 
+@overload
+def reservation_live(state: str) -> bool: ...
+
+
+@overload
+def reservation_live(state: QueryableAttribute[str]) -> ColumnElement[bool]: ...
+
+
+def reservation_live(state: object) -> object:
+    """The one test that a reservation is not history (anything but released).
+
+    Takes a stored state (a Python test) or ``ResourceReservation.state`` (a SQL
+    filter). Released rows are kept 24 h as history; admission locks only live ones.
+    Admission reads released rows (memory credit) and run admission may revive one
+    (profile memory repair rewrites a released claim to promised): that row is
+    unlocked, a concurrent retention delete then fails as a stale write, a wait
+    that heals on the next attempt.
+    """
+
+    return state != ReservationState.RELEASED
+
+
 def read_state[E: WireEnum](machine: type[E], stored: str) -> E:
     """The member a stored word means, adopting an old spelling; a foreign word is refused."""
 

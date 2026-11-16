@@ -213,9 +213,23 @@ def test_install_admission_ignores_a_row_lock_on_a_released_reservation(
             .where(ResourceReservation.id == released_id)
             .with_for_update()
         ).all()
+        request_id = str(uuid4())
         operations.install(
             plan,
             plan_digest=plan.plan_digest,
             actor="admin",
-            request_id=str(uuid4()),
+            request_id=request_id,
         )
+
+    with sessions() as observer:
+        assert observer.scalar(select(Job.id).where(Job.request_id == request_id))
+        live_disk = tuple(
+            observer.scalars(
+                select(ResourceReservation).where(
+                    ResourceReservation.node_id == nodes[0],
+                    ResourceReservation.kind == "disk",
+                    ResourceReservation.state == ReservationState.ACTIVE,
+                )
+            )
+        )
+        assert live_disk and all(c.id != released_id for c in live_disk)
