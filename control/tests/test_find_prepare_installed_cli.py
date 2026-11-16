@@ -107,7 +107,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
     )
     target = revisions["candidate-0001"]
     manifest = cache.resolve_artifact_set(model_content_sha256=target.content_digest)
-    artifact = manifest.artifacts[0]
+    object_path = cache._object_path(manifest.artifacts[0].sha256)
 
     # Model a verified cache set whose managed object has since been lost. The
     # cache owner's own reconciliation must discover the missing bytes and
@@ -118,12 +118,6 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
         cache_set.verified_bytes = manifest.expected_bytes
         cache_set.verified_at = _NOW
         cache_set.updated_at = _NOW
-    object_path = cache._object_path(artifact.sha256)
-    object_path.parent.mkdir(parents=True, exist_ok=True)
-    object_path.write_bytes(_PAYLOAD)
-    cache._write_object_receipt(artifact, _NOW)
-    object_path.unlink()
-    cache._receipt_path(artifact.sha256).unlink()
     cache.reconcile_storage()
     with sessions() as session:
         reconciled = session.get(type(cache_set), manifest.digest)
@@ -238,7 +232,6 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
             assert observed["state"] == "queued"
 
             assert not object_path.exists()
-            assert not cache._receipt_path(artifact.sha256).exists()
             assert token not in (
                 first.stdout
                 + first.stderr

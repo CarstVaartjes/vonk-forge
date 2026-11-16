@@ -635,7 +635,7 @@ it has succeeded. A model-cache operation (download, repair, removal) is decided
 lifecycle core through its adapter: nothing it does is irreversible, so a failed,
 interrupted or lapsed transfer is retried on the one `next_action_at` clock (the
 transfer's lease replaces the payload claim), a cancel always completes, and a
-missing or unverified object receipt is re-verified and repaired instead of
+missing or wrong-size object is re-verified and repaired instead of
 ending the request; a full disk queues the download behind a retryable blocker.
 Model files live under `/state/model-cache`; the image store
 lives under `/state/agent-artifacts/image-cache`, shared by the API and worker.

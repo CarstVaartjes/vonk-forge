@@ -261,6 +261,9 @@ pub(super) enum DistributionFixtureMode {
     MalformedFirstThreeManifests,
     ReferenceBusyFirstFourManifests,
     InterruptFirstFiveObjects,
+    /// The Controller no longer holds the model files: every manifest and
+    /// object request answers the typed source-gone 503.
+    SourceGone,
 }
 
 pub(super) fn authenticated_test_client(controller: &str, node_id: &str) -> AgentHttpClient {
@@ -337,6 +340,15 @@ pub(super) fn distribution_fixture_server(
                 write!(
                     stream,
                     "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .unwrap();
+                continue;
+            }
+            if matches!(mode, DistributionFixtureMode::SourceGone) {
+                write!(
+                    stream,
+                    "HTTP/1.1 503 Service Unavailable\r\nx-vonk-error-code: {}\r\nRetry-After: 1\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    vonk_agent_protocol::generated::DistributionCode::DistributionModelSetIdentityUnavailable,
                 )
                 .unwrap();
                 continue;

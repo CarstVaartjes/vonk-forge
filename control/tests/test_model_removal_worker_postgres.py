@@ -307,7 +307,6 @@ def test_model_removal_process_death_before_batch_checkpoint_restarts_same_remov
     assert service._observe_model_removal_scope(accepted.id)
     initial = _removal_payload(sessions, accepted.id)
     assert len(initial.delete_objects) == 1
-    receipt_path = service._receipt_path(initial.delete_objects[0])
     database_url = postgres_engine.url.render_as_string(hide_password=False)
     config = tmp_path / "removal-process.json"
     config.write_text(
@@ -355,7 +354,6 @@ raise AssertionError("removal worker did not reach the batch checkpoint")
         )
         assert crashed.returncode == 47, crashed.stderr
         assert not object_path.exists()
-        assert not receipt_path.exists()
         with sessions() as session:
             row = session.get(ModelCacheOperation, accepted.id)
             assert row is not None and row.state in {"queued", "running"}

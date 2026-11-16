@@ -82,6 +82,7 @@ from .constants import (
     _OBSERVING,
     _RUNTIME_IMAGE_OWNER_CHANGED,
     _TERMINAL_STATES,
+    _is_artifact_phase,
 )
 from .contracts import FinalVerificationExpiry
 from .endings_helpers import _reject_invalid_operation
@@ -414,7 +415,7 @@ class PhaseDispatchMixin:
             execution.operation_id is None
             and execution.result is not None
             and (
-                phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
+                _is_artifact_phase(phase.kind)
                 or (phase.kind == "prepare" and phase.subphase == "runtime-image")
             )
         ):

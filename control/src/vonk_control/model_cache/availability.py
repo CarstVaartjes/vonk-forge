@@ -227,7 +227,7 @@ class AvailabilityMixin:
     ) -> tuple[dict[str, object], ...]:
         """Describe every verified object in a complete immutable set.
 
-        Distribution trusts durable publication receipts and checks managed
+        Distribution trusts ingress-verified objects and checks managed
         file metadata once. Serving an object separately verifies that
         object's bytes; describing a set must not scan every model file. No
         source URL or caller-controlled path is exposed by this adapter.

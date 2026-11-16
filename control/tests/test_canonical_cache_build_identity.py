@@ -435,7 +435,6 @@ def test_new_model_revision_with_the_same_files_reuses_the_cached_set(
     spec = first.artifacts[0]
     service._object_path(spec.sha256).parent.mkdir(parents=True, exist_ok=True)
     service._object_path(spec.sha256).write_bytes(data)
-    service._write_object_receipt(spec, NOW)
     if cached_by == "earlier-revision-set":
         with sessions.begin() as session:
             row = service._ensure_set(session, first)

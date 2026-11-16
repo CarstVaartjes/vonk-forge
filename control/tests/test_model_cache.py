@@ -246,30 +246,6 @@ def test_a_service_that_starts_no_background_work_passes_the_net(tmp_path: Path)
         )
 
 
-def _write_object_receipt(
-    service: ModelCacheService, digest: str, expected_bytes: int
-) -> None:
-    """Publish the managed-storage receipt that makes a stored object available."""
-
-    path = service.root / "objects" / digest[:2] / f"{digest}.receipt.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "sha256": digest,
-                "storage_key": f"objects/{digest[:2]}/{digest}",
-                "expected_bytes": expected_bytes,
-                "actual_bytes": expected_bytes,
-                "verified_at": NOW.isoformat(),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        encoding="utf-8",
-    )
-
-
 def _artifact(
     root: Path,
     data: bytes,
@@ -527,8 +503,6 @@ def test_model_removal_applies_to_current_storage_after_an_old_review(
     assert all(item.availability == "verified" for item in reviewed.assets)
 
     service._object_path(digest).unlink()
-    receipt = service.root / "objects" / digest[:2] / f"{digest}.receipt.json"
-    receipt.unlink()
     # The earlier review is advisory: removal applies to the current state.
     accepted = service.remove_model_selector(
         "a" * 64,
@@ -1187,7 +1161,6 @@ def test_resolve_latest_cached_returns_the_head_even_when_an_older_revision_is_c
     image_object.write_bytes(b"x" * build.image_bytes)
     with sessions.begin() as session:
         session.add(model_cache)
-    _write_object_receipt(service, artifact.sha256, 3)
 
     # The catalog head is current: an older cached revision never stands in for
     # it. The head comes back with its missing cache reported.
@@ -1507,8 +1480,6 @@ def test_download_persists_real_primary_and_auxiliary_bytes_and_deduplicates(
         assert (
             session.scalar(select(func.count()).select_from(ModelCacheSetArtifact)) == 4
         )
-    # Managed storage owns availability: one receipt per stored object.
-    assert len(list((service.root / "objects").glob("*/*.receipt.json"))) == 2
     assert service.storage_summary().unique_used_bytes == len(
         b"primary model bytes"
     ) + len(b"tokenizer auxiliary bytes")
@@ -1652,7 +1623,6 @@ def test_one_set_with_shared_digest_counts_one_physical_payload(
         "missing",
         "symlink",
         "truncated",
-        "receipt_missing",
         "unreadable",
         "close_unavailable",
     ],
@@ -1678,13 +1648,8 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         artifacts=[artifact],
     ).artifacts[0]
     path = service._object_path(spec.sha256)
-    if stored_state == "receipt_missing":
-        # Bytes of the exact size are present, the receipt is gone: still
-        # present by the one presence rule (reconcile and download reuse heal it).
-        service._receipt_path(spec.sha256).unlink()
-    elif stored_state == "missing":
+    if stored_state == "missing":
         path.unlink()
-        service._receipt_path(spec.sha256).unlink()
     elif stored_state == "truncated":
         path.write_bytes(data[:-1])
     elif stored_state == "symlink":
@@ -1748,30 +1713,6 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         )
         assert recovered["already_cached_bytes"] == len(data)
         assert recovered["new_bytes"] == 0
-
-
-def test_verification_publishes_the_object_receipt(cache, tmp_path: Path) -> None:
-    """A verified object is published with the receipt that owns its availability."""
-
-    service, _sessions = cache
-    model = "c" * 64
-    data = b"receipt publication"
-    artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    downloaded = _download(
-        service,
-        [artifact],
-        model_content_sha256=model,
-        request_key="00000000-0000-4000-8000-000000000019",
-    )
-    digest = _required_text(artifact["sha256"], "artifact digest")
-    receipt_path = service._receipt_path(digest)
-    assert receipt_path.is_file()
-    document = json.loads(receipt_path.read_text(encoding="utf-8"))
-    assert document["schema_version"] == 2
-    assert document["sha256"] == digest
-    assert document["expected_bytes"] == len(data)
-    assert document["actual_bytes"] == len(data)
-    assert downloaded.artifact_set_sha256
 
 
 def test_admission_checks_storage_size_after_the_read_transaction_closes(

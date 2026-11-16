@@ -145,7 +145,6 @@ def _held_set_and_alias(tmp_path, now):
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "wb") as handle:
             handle.truncate(spec.expected_bytes)
-        service._write_object_receipt(spec, now[0])
     service.adopt_verified_set(manifest)
     return engine, sessions, service, catalog, held, alias, manifest.digest
 

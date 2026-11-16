@@ -62,8 +62,7 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
             )
         )
     object_path = service._object_path(object_digest)
-    receipt_path = service._receipt_path(object_digest)
-    assert not object_path.exists() and not receipt_path.exists()
+    assert not object_path.exists()
     # This is a fixture transport of the identical reviewed asset manifest,
     # not replacement cache bytes or a synthetic successful receipt.
     artifact = _artifact(
@@ -99,7 +98,7 @@ def test_terminal_crash_recovered_removal_allows_new_exact_download(
         service._run_download(accepted.id, force=False)
         completed = service.get_operation(accepted.id)
         assert completed.state == "succeeded", completed.last_error
-        assert object_path.read_bytes() == data and receipt_path.is_file()
+        assert object_path.read_bytes() == data
         with sessions() as session:
             restored = session.get(ModelCacheSet, removed_set)
             assert restored is not None and restored.state == "cached"

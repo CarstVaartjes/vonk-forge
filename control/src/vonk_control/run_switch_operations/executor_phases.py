@@ -21,7 +21,6 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     WaitReason,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
 
 from ..cluster_mappings import (
     ClusterMappingPlan,
@@ -62,6 +61,7 @@ from ..run_switch_contract import (
     RunSwitchStopResult,
 )
 from .artifact_validation import _validate_artifact_execution
+from .constants import _is_artifact_phase
 from .errors import (
     RunSwitchInstallPreflightExpired,
     RunSwitchIssuedWorkloadPending,
@@ -121,7 +121,7 @@ class ExecutorPhasesMixin:
         progress: RunSwitchOperationResult,
     ) -> PhaseExecution:
         service = typing_cast("RecipeLifecyclePhaseExecutor", self)
-        if phase.kind in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}:
+        if _is_artifact_phase(phase.kind):
             if service._artifact_executor is None:
                 raise RunSwitchRetryLater(
                     f"run-switch.{phase.kind}-executor-unavailable"

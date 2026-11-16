@@ -173,17 +173,18 @@ def _generated_client_schema(
     return schema
 
 
-def _run(command: list[str]) -> None:
+def _node_wheel_root() -> Path:
     import nodejs_wheel
 
-    # The locked control environment also supplies Node/npm to Linux test lanes.
-    node_bin = str(Path(nodejs_wheel.__file__).parent / "bin")
+    return Path(nodejs_wheel.__file__).parent
+
+
+def _run(command: list[str]) -> None:
     subprocess.run(
         command,
         cwd=ROOT,
         env={
             **os.environ,
-            "PATH": os.pathsep.join([os.environ.get("PATH", ""), node_bin]),
             "PYTHONHASHSEED": "0",
             "SOURCE_DATE_EPOCH": "0",
         },
@@ -319,11 +320,23 @@ def main() -> None:
         if not (
             ROOT / "tools/openapi-client/node_modules/.package-lock.json"
         ).is_file():
-            _run(["npm", "ci", "--prefix", "tools/openapi-client"])
+            _run(
+                [
+                    str(_node_wheel_root() / "bin/node"),
+                    # The wheel's bin/npm shim requires ../lib/cli.js, which the
+                    # wheel does not ship; run npm's real entry point (as
+                    # nodejs_wheel.executable.npm does) so a host without a
+                    # system npm works.
+                    str(_node_wheel_root() / "lib/node_modules/npm/bin/npm-cli.js"),
+                    "ci",
+                    "--prefix",
+                    "tools/openapi-client",
+                ],
+            )
 
         _run(
             [
-                "node",
+                str(_node_wheel_root() / "bin/node"),
                 str(ROOT / "tools/openapi-client/generate-runtime.mjs"),
                 str(OPENAPI),
             ],

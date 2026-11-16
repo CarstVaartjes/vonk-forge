@@ -27,7 +27,8 @@ git -C "$work/repo" checkout --quiet --detach "$sha"
 
 recipe_root=${VONK_RECIPE_LIBRARY_ROOT:-/opt/vonk-forge-recipes}
 printf -v guest_repo '%q' "$work/repo"
-printf -v guest_args '%q ' "$@"
+guest_args=""
+[[ $# -gt 0 ]] && printf -v guest_args '%q ' "$@"
 tag=$(basename "$work")
 
 orb -m vonk-ci bash -lc "

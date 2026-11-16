@@ -339,6 +339,28 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
     parts.join(" ").chars().take(400).collect()
 }
 
+/// The result of a distribution order, whose Controller re-plans a download
+/// when the source is gone (see [`ClientError::distribution_source_unavailable`]).
+/// A standalone install uses [`distribution_failure_result`] and keeps waiting:
+/// it has no plan the Controller could change.
+pub(super) fn distribution_order_failure_result(error: &ClientError) -> ExecutionResult {
+    if error.distribution_source_unavailable() {
+        // The Controller has no copy of the files this Spark lacks. Waiting
+        // cannot bring them back; the definite outcome makes the Controller plan
+        // again with a model download.
+        let mut failure = Failure::new("Controller cannot serve the model files this Spark lacks")
+            .code(FailureCode::ArtifactSourceUnavailable)
+            .kind(AgentFailureKind::InvalidContract)
+            .stage(FailureStage::ArtifactDistribution);
+        let diagnostic = controller_denial_diagnostic(error);
+        if !diagnostic.is_empty() {
+            failure = failure.diagnostic(diagnostic);
+        }
+        return ExecutionResult::Failed(failure);
+    }
+    distribution_failure_result(error)
+}
+
 /// Classify a refused distribution and keep the bounded denial facts.
 ///
 /// The incident's `invalid-authority` outcome reported only that the

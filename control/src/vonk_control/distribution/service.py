@@ -46,7 +46,7 @@ class DistributionService(RegistrationMixin, DeliveryMixin):
         self._authorized_lock = Lock()  # guards only the dicts, never I/O
         # Where an authorized object sits, remembered like the authorization:
         # a transfer asks once per 64 MiB range, and resolving the object
-        # reads the cache manifest and receipt each time. Objects are immutable
+        # reads the cache manifest each time. Objects are immutable
         # and content addressed, and every hit still checks the file's type and
         # size, so only a deletion within the window waits for it to end.
         self._located: OrderedDict[

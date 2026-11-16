@@ -38,7 +38,8 @@ Only fully verified objects are published. Partial transfers remain outside
 the published namespace. Admission uses actual filesystem free space, reserve,
 and temporary transfer/build requirements—not just logical model size.
 Unknown sizes are reported as unknown. Describing a complete set trusts its
-durable publication receipts and checks managed file metadata. Each download
+ingress-verified objects and checks managed file metadata (a regular file of the
+expected size). Each download
 request verifies the bytes of its selected file without scanning unrelated
 weights. An in-progress refresh keeps the previous verified copy available.
 

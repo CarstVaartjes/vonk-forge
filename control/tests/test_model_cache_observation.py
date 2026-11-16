@@ -134,7 +134,6 @@ def observed_cache(postgres_engine, tmp_path):
         path = cache._object_path(spec.sha256)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((tmp_path / spec.path).read_bytes())
-        cache._write_object_receipt(spec, now[0])
     with cache._session(write=True) as session:
         row = cache._ensure_set(session, manifest)
         row.state = ModelCacheSetState.CACHED

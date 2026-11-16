@@ -48,7 +48,6 @@ from .test_library_local_state_history import _cache_set, _operation
 from .test_model_cache import (  # noqa: F401  (cache is a pytest fixture)
     _canonical_model,
     _canonical_recipe,
-    _write_object_receipt,
     cache,
 )
 
@@ -221,7 +220,6 @@ class _World:
                 path = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"one")
-                _write_object_receipt(service, artifact.sha256, artifact.expected_bytes)
         return row
 
     def build(
@@ -343,7 +341,6 @@ def test_a_first_model_set_alone_does_not_make_a_two_model_recipe_cached(
         path = service.root / "objects" / artifact.sha256[:2] / artifact.sha256
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"one")
-        _write_object_receipt(service, artifact.sha256, artifact.expected_bytes)
     with sessions.begin() as session:
         session.add(row)
     blocked = service.resolve_latest_cached(

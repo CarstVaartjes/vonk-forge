@@ -587,6 +587,14 @@ start ends as `retained_container_foreign` with `failure_kind: resource-prerequi
 naming the container. The Controller reads that as a prerequisite, re-issues the
 start with backoff and keeps the load open until the name is free; it is never an
 invalid contract and never removes anything the agent does not own.
+
+A distribution order whose Controller answers `distribution.model_set_identity_unavailable`
+(the cache no longer holds the set the Spark lacks; any other read failure answers
+`distribution.object_unavailable` and stays a wait) is not retried in place: the agent ends it
+as `artifact_source_unavailable` with `failure_kind: invalid-contract`. A failed target-copy
+reads as an uncertain effect, so the load replays and plans again, which adds the model
+download for the evicted files. A standalone install keeps waiting. Older agents keep waiting
+out the observation window.
 `rust/crates/vonk-agent/tests/wait_actions.rs` requires an advertised action
 for every wait reason the agent constructs.
 

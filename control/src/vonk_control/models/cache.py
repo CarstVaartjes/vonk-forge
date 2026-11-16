@@ -132,7 +132,7 @@ class ModelCacheSetArtifact(Base):
         primary_key=True,
     )
     artifact_key: Mapped[str] = mapped_column(String(256), primary_key=True)
-    # The object's bytes and verification receipt are a managed-storage fact,
+    # The object file at its expected size is a managed-storage fact,
     # so membership records the exact digest without a SQL availability row.
     artifact_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     path: Mapped[str] = mapped_column(String(512), nullable=False)

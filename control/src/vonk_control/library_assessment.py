@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 from itertools import combinations
 from typing import get_args
@@ -14,16 +14,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LibraryAssessmentCode
 
+from .inventory_repository import spark_model_objects
 from .library_contract import (
     LibraryRecipeProjection,
     RecipeReadiness,
     RecipeReadinessCheck,
 )
 from .model_cache import ModelCacheService
+from .model_cache.resolution import artifact_sets_resolved_once
 from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
-from .run_switch_operations.artifact_inspection import missing_spark_bytes_by_node
+from .run_switch_operations.artifact_inspection import missing_spark_bytes
 from .run_switch_operations.phase_planning import targets_hold_model
 
 
@@ -101,7 +103,11 @@ class LibraryAssessment:
         deadline = time.monotonic() + budget
         exceeded = f"Assessment exceeded its {budget:g}-second read budget."
         assessments: list[RecipeReadiness | None] = [None] * len(recipes)
-        if not self._active.acquire(blocking=False):
+        # One worker reads at a time, so a read that never returns cannot
+        # gather workers. A worker left past its deadline stops at its next
+        # check; the next assessment waits out that last read within its own
+        # budget instead of being refused at once.
+        if not self._active.acquire(timeout=max(0.0, deadline - time.monotonic())):
             return [
                 item.model_copy(
                     update={"assessment": unassessed(self._clock, exceeded)}
@@ -111,6 +117,9 @@ class LibraryAssessment:
         stop = threading.Event()
 
         def assess_in_order() -> None:
+            # The Sparks' store scans are read once for this whole assessment,
+            # and each exact artifact set is resolved once, not per placement.
+            held: dict[str, Mapping[str, int] | None] = {}
             try:
                 # Roster discovery shares the same observation deadline as cache
                 # and placement reads, rather than blocking before the timer.
@@ -125,10 +134,11 @@ class LibraryAssessment:
                             .order_by(AgentNode.node_id)
                         )
                     )
-                for index, recipe in enumerate(recipes):
-                    if stop.is_set() or time.monotonic() >= deadline:
-                        return
-                    assessments[index] = self._assess(recipe, nodes, deadline)
+                with artifact_sets_resolved_once():
+                    for index, recipe in enumerate(recipes):
+                        if stop.is_set() or time.monotonic() >= deadline:
+                            return
+                        assessments[index] = self._assess(recipe, nodes, held, deadline)
             except (SQLAlchemyError, OSError, RuntimeError, TypeError, ValueError):
                 return
             finally:
@@ -284,10 +294,15 @@ class LibraryAssessment:
         return RecipeReadinessCheck(state="ready")
 
     def _groups_holding_first(
-        self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], now: datetime
+        self,
+        recipe: LibraryRecipeProjection,
+        nodes: tuple[str, ...],
+        held: dict[str, Mapping[str, int] | None],
+        now: datetime,
     ) -> list[tuple[tuple[str, ...], int | None]]:
         """Candidate groups with the model bytes their Sparks lack, least first.
 
+        ``held`` is this assessment's store scan per Spark, read on first use.
         The bytes are None when the ordering read failed."""
 
         groups = list(combinations(nodes, recipe.node_count))
@@ -295,8 +310,15 @@ class LibraryAssessment:
             manifest = self._model_cache.resolve_artifact_set(
                 recipe_revision_id=recipe.identity.recipe_revision_id
             )
-            with self._sessions() as session:
-                missing = missing_spark_bytes_by_node(session, manifest, nodes, now=now)
+            if not held:
+                with self._sessions() as session:
+                    held.update(
+                        {
+                            node: spark_model_objects(session, node, now=now)
+                            for node in nodes
+                        }
+                    )
+            missing = missing_spark_bytes(manifest, held)
         except (
             SQLAlchemyError,
             OSError,
@@ -312,7 +334,11 @@ class LibraryAssessment:
         return sorted(ordered, key=lambda entry: entry[1] or 0)
 
     def _assess(
-        self, recipe: LibraryRecipeProjection, nodes: tuple[str, ...], deadline: float
+        self,
+        recipe: LibraryRecipeProjection,
+        nodes: tuple[str, ...],
+        held: dict[str, Mapping[str, int] | None],
+        deadline: float,
     ) -> RecipeReadiness:
         observed = self._clock()
         cache, image_digest = self._cache(recipe)
@@ -343,7 +369,7 @@ class LibraryAssessment:
                 (group, None) for group in combinations(nodes, recipe.node_count)
             ]
         else:
-            candidates = self._groups_holding_first(recipe, nodes, observed)
+            candidates = self._groups_holding_first(recipe, nodes, held, observed)
         for group, missing_bytes in candidates:
             if time.monotonic() >= deadline:
                 unknown = unavailable(
