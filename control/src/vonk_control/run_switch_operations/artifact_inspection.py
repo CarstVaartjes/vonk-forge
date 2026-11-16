@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
+    LifecycleState,
     RunSwitchCode,
     WaitReason,
 )
@@ -17,24 +19,47 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_repository import spark_model_objects
+from ..inventory_repository import (
+    INVENTORY_MAX_AGE,
+    spark_model_objects,
+)
+from ..lifecycle.evidence import Residue
 from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
+from ..models import Job
 from ..run_switch_contract import (
     RunSwitchReason,
 )
+from ..stored_json import read_row_column
 from .interfaces import ArtifactInspection
-from .planning_helpers import _as_reason, _inspection_unavailable
+from .planning_helpers import (
+    _as_reason,
+    _aware,
+    _inspection_unavailable,
+    _stored_job_plan,
+)
+from .result_helpers import _read_progress
 
 
 def spark_stores(
-    session: Session, node_ids: Iterable[str], *, now: datetime
+    session: Session,
+    node_ids: Iterable[str],
+    *,
+    now: datetime,
+    floors: Mapping[str, datetime] | None = None,
 ) -> dict[str, Mapping[str, int] | None]:
-    """Each Spark's own store scan, None where it could not be read."""
+    """Each Spark's own store scan, None where it could not be read or was
+    received at or before that Spark's floor."""
 
     return {
-        node_id: spark_model_objects(session, node_id, now=now) for node_id in node_ids
+        node_id: spark_model_objects(
+            session,
+            node_id,
+            now=now,
+            received_after=None if floors is None else floors.get(node_id),
+        )
+        for node_id in node_ids
     }
 
 
@@ -51,7 +76,57 @@ def missing_spark_bytes_by_node(
     then plans reuses what the Spark already holds.
     """
 
-    return missing_spark_bytes(manifest, spark_stores(session, node_ids, now=now))
+    nodes = tuple(node_ids)
+    floors = _scan_floors(session, manifest, nodes, now)
+    return missing_spark_bytes(
+        manifest, spark_stores(session, nodes, now=now, floors=floors)
+    )
+
+
+def _scan_floors(
+    session: Session,
+    manifest: ArtifactSetManifest,
+    node_ids: tuple[str, ...],
+    now: datetime,
+) -> dict[str, datetime]:
+    """Per node, the time at or before which its store scan no longer counts.
+
+    A target copy that failed (ended, or being re-planned) found the files
+    gone, so a scan received before it can still list them: the plan for the
+    same node and model plans the copy until a newer scan arrives. Only an end
+    younger than a scan can be is read; an older scan is already unknown.
+    """
+
+    floors: dict[str, datetime] = {}
+    wanted = set(node_ids)
+    if not wanted:
+        return floors
+    for job in session.scalars(
+        select(Job)
+        .options(
+            load_only(Job.state, Job.targets, Job.updated_at, Job.result, Job.payload)
+        )
+        .where(
+            Job.kind == "recipe.run-switch.v2",
+            Job.updated_at >= now - INVENTORY_MAX_AGE,
+        )
+    ):
+        nodes = wanted.intersection(job.targets)
+        result = read_row_column(job, "result")
+        if not nodes or isinstance(result, Residue):
+            continue
+        progress = _read_progress(result)
+        if progress.subphase != "target-copy" or not (
+            job.state == LifecycleState.FAILED.value or progress.force_replan
+        ):
+            continue
+        plan = _stored_job_plan(job)
+        if plan is None or plan.model_content_sha256 != manifest.model_content_sha256:
+            continue
+        failed_at = _aware(job.updated_at)
+        for node_id in nodes:
+            floors[node_id] = max(failed_at, floors.get(node_id, failed_at))
+    return floors
 
 
 def missing_spark_bytes(
