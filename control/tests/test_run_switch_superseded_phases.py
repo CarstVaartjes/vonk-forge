@@ -108,3 +108,20 @@ def phase(service, ordinal):
         return later
 """
     assert unwrapped_intent_calls(source) == [5]
+
+
+def test_a_stale_mapping_preview_replans_and_other_mapping_errors_do_not() -> None:
+    from vonk_agent_protocol import ClusterMappingCode, WaitReason
+    from vonk_control.cluster_mappings import ClusterMappingError
+    from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
+    from vonk_control.run_switch_operations.executor_phases import (
+        _replans_when_superseded,
+    )
+
+    with pytest.raises(RunSwitchRetryLater) as retry, _replans_when_superseded():
+        raise ClusterMappingError(
+            ClusterMappingCode.STALE_PLAN, "recipe changed after mapping preview"
+        )
+    assert retry.value.typed_reason is WaitReason.STALE_PLAN
+    with pytest.raises(ClusterMappingError), _replans_when_superseded():
+        raise ClusterMappingError(ClusterMappingCode.NODE_COUNT, "nodes")

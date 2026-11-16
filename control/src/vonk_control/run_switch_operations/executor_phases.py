@@ -12,6 +12,7 @@ from typing import cast as typing_cast
 
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
+    ClusterMappingCode,
     InstallationState,
     InstallDegradedReason,
     InvalidRequestError,
@@ -23,6 +24,7 @@ from vonk_agent_protocol import (
 )
 
 from ..cluster_mappings import (
+    ClusterMappingError,
     ClusterMappingPlan,
 )
 from ..install_admission import (
@@ -106,6 +108,13 @@ def _replans_when_superseded() -> Iterator[None]:
         raise RunSwitchRetryLater(
             f"run-switch phase authority moved on: {redact_text(str(error))}",
             reason=WaitReason.SCOPE_CHANGED,
+        ) from error
+    except ClusterMappingError as error:
+        if error.code != ClusterMappingCode.STALE_PLAN:
+            raise
+        raise RunSwitchRetryLater(
+            f"run-switch mapping preview moved on: {redact_text(str(error))}",
+            reason=WaitReason.STALE_PLAN,
         ) from error
 
 
@@ -286,9 +295,10 @@ class ExecutorPhasesMixin:
                     nodes=tuple(_mapping_node(node) for node in plan.mapping.nodes),
                     placement_digest=plan.mapping.placement_digest,
                 )
-                mapping_id = service._mappings.materialize(
-                    mapping_plan, actor=actor, now=_now(service._clock)
-                )
+                with _replans_when_superseded():
+                    mapping_id = service._mappings.materialize(
+                        mapping_plan, actor=actor, now=_now(service._clock)
+                    )
             if mapping_id is None:
                 return PhaseExecution(
                     result=_phase_result({"prepared": True}, phase=phase)
