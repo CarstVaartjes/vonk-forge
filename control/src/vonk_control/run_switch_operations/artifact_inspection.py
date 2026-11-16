@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from vonk_agent_protocol import (
     LifecycleState,
     RunSwitchCode,
@@ -21,7 +21,6 @@ from vonk_agent_protocol.state_machines import PlacementInstallState
 from ..categorized_errors import BookkeepingUnknown
 from ..inventory_repository import (
     INVENTORY_MAX_AGE,
-    SPARK_SCAN_RECEIVED_AFTER,
     spark_model_objects,
 )
 from ..lifecycle.evidence import Residue
@@ -56,50 +55,63 @@ def missing_spark_bytes_by_node(
     then plans reuses what the Spark already holds.
     """
 
+    nodes = tuple(node_ids)
+    floors = _scan_floors(session, manifest, nodes, now)
     return missing_spark_bytes(
         manifest,
         {
             node_id: spark_model_objects(
-                session,
-                node_id,
-                now=now,
-                received_after=_scan_floor(session, manifest, node_id, now),
+                session, node_id, now=now, received_after=floors.get(node_id)
             )
-            for node_id in node_ids
+            for node_id in nodes
         },
     )
 
 
-def _scan_floor(
-    session: Session, manifest: ArtifactSetManifest, node_id: str, now: datetime
-) -> datetime | None:
-    """The time at or before which this Spark's store scan no longer counts.
+def _scan_floors(
+    session: Session,
+    manifest: ArtifactSetManifest,
+    node_ids: tuple[str, ...],
+    now: datetime,
+) -> dict[str, datetime]:
+    """Per node, the time at or before which its store scan no longer counts.
 
-    A target copy that ended failed found the files gone, so a scan received
-    before it can still list them: the plan for the same node and model waits
-    for a newer scan and plans the copy until then. Only an end younger than
-    a scan can be is read; an older scan is already unknown.
+    A target copy that failed (ended, or being re-planned) found the files
+    gone, so a scan received before it can still list them: the plan for the
+    same node and model plans the copy until a newer scan arrives. Only an end
+    younger than a scan can be is read; an older scan is already unknown.
     """
 
-    floors = [SPARK_SCAN_RECEIVED_AFTER.get()]
+    floors: dict[str, datetime] = {}
+    wanted = set(node_ids)
+    if not wanted:
+        return floors
     for job in session.scalars(
-        select(Job).where(
+        select(Job)
+        .options(
+            load_only(Job.state, Job.targets, Job.updated_at, Job.result, Job.payload)
+        )
+        .where(
             Job.kind == "recipe.run-switch.v2",
-            Job.state == LifecycleState.FAILED.value,
             Job.updated_at >= now - INVENTORY_MAX_AGE,
         )
     ):
-        plan = _stored_job_plan(job)
+        nodes = wanted.intersection(job.targets)
         result = read_row_column(job, "result")
-        if (
-            plan is not None
-            and not isinstance(result, Residue)
-            and plan.model_content_sha256 == manifest.model_content_sha256
-            and node_id in job.targets
-            and _read_progress(result).subphase == "target-copy"
+        if not nodes or isinstance(result, Residue):
+            continue
+        progress = _read_progress(result)
+        if progress.subphase != "target-copy" or not (
+            job.state == LifecycleState.FAILED.value or progress.force_replan
         ):
-            floors.append(_aware(job.updated_at))
-    return max((f for f in floors if f is not None), default=None)
+            continue
+        plan = _stored_job_plan(job)
+        if plan is None or plan.model_content_sha256 != manifest.model_content_sha256:
+            continue
+        failed_at = _aware(job.updated_at)
+        for node_id in nodes:
+            floors[node_id] = max(failed_at, floors.get(node_id, failed_at))
+    return floors
 
 
 def missing_spark_bytes(

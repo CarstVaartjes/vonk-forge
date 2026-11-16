@@ -4,6 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import event
 from vonk_agent_protocol import (
     LibraryAssessmentCode,
     LifecycleState,
@@ -25,6 +26,9 @@ from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchRea
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
     RunSwitchOperationService,
+)
+from vonk_control.run_switch_operations.artifact_inspection import (
+    missing_spark_bytes_by_node,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
 from vonk_control.run_switch_operations.result_helpers import (
@@ -301,6 +305,32 @@ def test_new_plan_after_a_definite_target_copy_failure_waits_for_a_newer_scan(
     assert copies()
     _report_store(sessions, nodes[0], held, received=NOW, observed=timedelta(seconds=2))
     assert not copies()
+
+
+def test_scan_floor_reads_jobs_once_however_many_nodes(tmp_path) -> None:
+    sessions, _lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=3
+    )
+    provider = ModelCacheManifestProvider(missing_nas_bytes=0)
+    manifest = provider.resolve_artifact_set(
+        model_content_sha256=_request(sessions, nodes[0]).model_content_sha256
+    )
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.lower())
+
+    def job_selects(node_ids) -> int:
+        statements.clear()
+        with sessions() as session:
+            event.listen(session.get_bind(), "before_cursor_execute", record)
+            try:
+                missing_spark_bytes_by_node(session, manifest, node_ids, now=NOW)
+            finally:
+                event.remove(session.get_bind(), "before_cursor_execute", record)
+        return sum("from jobs" in statement for statement in statements)
+
+    assert job_selects(nodes[:1]) == job_selects(nodes) == 1
 
 
 class _FullNas(ModelCacheManifestProvider):
