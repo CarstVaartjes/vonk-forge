@@ -31,14 +31,12 @@ from ..run_switch_contract import (
     RunSwitchSubphase,
 )
 
-_ARTIFACT_PHASES = frozenset(
-    {ProfileChildPhase.TRANSFER.value, ProfileChildPhase.VERIFY.value}
-)
+_ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
 
 
-def _is_artifact_phase(kind: object) -> bool:
+def _is_artifact_phase(kind: ProfileChildPhase | str) -> bool:
     """Whether a phase kind moves or verifies artifact bytes (transfer, verify)."""
-    return str(kind) in _ARTIFACT_PHASES
+    return kind in _ARTIFACT_PHASES
 
 
 _KNOBS_ADAPTER: TypeAdapter[dict[str, Scalar]] = TypeAdapter(dict[str, Scalar])
