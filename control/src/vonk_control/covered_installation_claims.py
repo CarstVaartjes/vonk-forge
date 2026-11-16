@@ -60,6 +60,8 @@ def release_covered_installation_claims(
             rank_installed(InstallationNode.state),
         )
     ).all()
+    if not rows:
+        return ()
     newest = {
         node_id: observed_at
         for node_id, observed_at in session.execute(
