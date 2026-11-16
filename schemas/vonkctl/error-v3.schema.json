@@ -22573,7 +22573,9 @@
         "receipt-missing",
         "stale-plan",
         "scope-changed",
-        "legacy-unclassified"
+        "legacy-unclassified",
+        "removal-checkpoint-pending",
+        "set-incomplete"
       ],
       "title": "WaitReason",
       "type": "string"

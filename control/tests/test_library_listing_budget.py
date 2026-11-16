@@ -26,8 +26,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library_api import install_library_routes
-from vonk_control.library_assessment import LibraryAssessment
-from vonk_control.library_contract import ModelDetailResponse, ModelLibraryResponse
+from vonk_control.library_assessment import LibraryAssessment, unavailable
+from vonk_control.library_contract import (
+    ModelDetailResponse,
+    ModelLibraryResponse,
+    RecipeReadiness,
+    RecipeReadinessCheck,
+)
 from vonk_control.library_image_presence import ImagePresenceIndex
 from vonk_control.library_projection import LibraryProjection
 from vonk_control.library_storage_observation import (
@@ -750,9 +755,11 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         # placement SQL and gets the full bounded budget on a loaded CI runner.
         first = assessment(recipes, budget_seconds=1.0)
         assert entered.wait(timeout=30)
-        for _ in range(20):
+        for _ in range(3):
             # Each waits out its own short budget for the blocked read.
-            assert assessment(recipes, budget_seconds=0.01)[0].assessment is not None
+            blocked = assessment(recipes, budget_seconds=0.01)[0].assessment
+            assert blocked is not None
+            assert blocked.readiness.state == "unavailable"
         assert len(workers) == 1
         assert first[0].assessment is not None
         assert projection.models().models
@@ -1235,3 +1242,90 @@ def test_deadline_after_a_failed_walk_names_no_earlier_error():
     healed = observer.snapshot().observation
     assert healed.storage_reason is None
     assert healed.storage_error_type is None
+
+
+def test_ready_filter_assesses_only_enough_recipes_to_fill_the_page(
+    assessed_library,  # noqa: F811
+):
+    _, sessions, *_ = assessed_library
+    _seed_recipes_with_images(assessed_library, recipes=8, history=0)
+    assessed: list[str] = []
+    ready = RecipeReadinessCheck(state="ready")
+
+    def assess(recipes, *, budget_seconds):
+        assessed.extend(item.identity.slug for item in recipes)
+        return [
+            item.model_copy(
+                update={
+                    "assessment": RecipeReadiness(
+                        observed_at=NOW, fleet_fit=ready, cache=ready, readiness=ready
+                    )
+                }
+            )
+            for item in recipes
+        ]
+
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"b" * 32).cursor_codec(),
+        clock=lambda: NOW,
+        assessment=assess,
+    )
+    first = projection.recipe_library(ready=True, limit=2, search="recipe-")
+    assert len(first.recipes) == 2
+    # The page and one more entry, not every match.
+    assert len(assessed) == 3
+    assert first.next_cursor is not None
+    second = projection.recipe_library(
+        ready=True, limit=2, search="recipe-", cursor=first.next_cursor
+    )
+    shown = [item.identity.slug for item in (*first.recipes, *second.recipes)]
+    assert len(set(shown)) == 4
+    # Page two assesses the next page and one more entry, not the rest.
+    assert len(assessed) == 6
+
+
+def test_ready_page_two_continues_after_its_boundary_stops_being_ready(
+    assessed_library,  # noqa: F811
+):
+    _, sessions, *_ = assessed_library
+    _seed_recipes_with_images(assessed_library, recipes=8, history=0)
+    blocked: set[str] = set()
+
+    def assess(recipes, *, budget_seconds):
+        def check(slug):
+            if slug in blocked:
+                # A blocked check carries its reason, as the real assessment's.
+                return unavailable("test").model_copy(update={"state": "blocked"})
+            return RecipeReadinessCheck(state="ready")
+
+        return [
+            item.model_copy(
+                update={
+                    "assessment": RecipeReadiness(
+                        observed_at=NOW,
+                        fleet_fit=check(item.identity.slug),
+                        cache=check(item.identity.slug),
+                        readiness=check(item.identity.slug),
+                    )
+                }
+            )
+            for item in recipes
+        ]
+
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"b" * 32).cursor_codec(),
+        clock=lambda: NOW,
+        assessment=assess,
+    )
+    first = projection.recipe_library(ready=True, limit=2, search="recipe-")
+    assert first.next_cursor is not None
+    blocked.add(first.recipes[-1].identity.slug)
+    second = projection.recipe_library(
+        ready=True, limit=2, search="recipe-", cursor=first.next_cursor
+    )
+    first_slugs = {item.identity.slug for item in first.recipes}
+    second_slugs = {item.identity.slug for item in second.recipes}
+    assert len(second_slugs) == 2
+    assert not first_slugs & second_slugs

@@ -419,22 +419,6 @@ def recipe_library(
     filtering_assessment = any(
         value is not None for value in readiness_filters.values()
     )
-    if filtering_assessment:
-        filtered = self._assessed(filtered, deadline=deadline)
-        # Unknown evidence is not a negative filter match. Keep the
-        # candidate visible with its typed unavailable assessment so a
-        # stale node cannot hide the rest of the library or claim absence.
-        filtered = [
-            item
-            for item in filtered
-            if all(
-                expected is None
-                or item.assessment is None
-                or getattr(item.assessment, name).state == "unavailable"
-                or (getattr(item.assessment, name).state == "ready") == expected
-                for name, expected in readiness_filters.items()
-            )
-        ]
     context = {
         "l": limit,
         "s": sort,
@@ -492,6 +476,33 @@ def recipe_library(
                 else key(item) > boundary_key
             )
         ]
+    following = len(filtered)
+    if filtering_assessment:
+        # Assess in page order and stop once the page and one more entry are
+        # known, so a page costs its own entries, not every match. Entries
+        # the budget left unassessed stay visible with their typed
+        # unavailable assessment, so this always terminates.
+        matched: list[LibraryRecipeProjection] = []
+        offset = 0
+        while offset < len(filtered) and len(matched) <= limit:
+            # Whole page-sized chunks: each assessment call has fixed cost
+            # (roster, store scans), so one-entry calls would repeat it.
+            chunk = filtered[offset : offset + limit + 1]
+            offset += len(chunk)
+            matched.extend(
+                item
+                for item in self._assessed(chunk, deadline=deadline)
+                # Unknown evidence is not a negative filter match.
+                if all(
+                    expected is None
+                    or item.assessment is None
+                    or getattr(item.assessment, name).state == "unavailable"
+                    or (getattr(item.assessment, name).state == "ready") == expected
+                    for name, expected in readiness_filters.items()
+                )
+            )
+        following = len(matched)
+        filtered = matched
     response = RecipeLibraryResponse(
         catalog_observed_at=_utc(self._catalog_observed_at),
         generated_at=_utc(self._clock()),
@@ -558,7 +569,7 @@ def recipe_library(
 
     page, next_cursor = _observed_library_page(
         filtered[:limit],
-        following=len(filtered),
+        following=following,
         observe=observe,
         collection_field="recipes",
         empty_response=response,

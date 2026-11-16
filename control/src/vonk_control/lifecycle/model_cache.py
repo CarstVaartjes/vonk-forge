@@ -66,6 +66,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
     ModelAccessReason,
+    ModelCacheCode,
     WaitOwnerKind,
     WaitReason,
 )
@@ -411,9 +412,9 @@ class ModelCacheAdapter:
         with self._scope() as session:
             operation = session.get(ModelCacheOperation, row.id)
             if operation is None:
-                return Observed(Effect.NONE, "the operation no longer exists")
+                return Observed(Effect.NONE, ModelCacheCode.OPERATION_MISSING)
             if operation.kind == "remove":
-                return Observed(Effect.UNKNOWN, "a removal resumes its checkpoint")
+                return Observed(Effect.UNKNOWN, WaitReason.REMOVAL_CHECKPOINT_PENDING)
             payload = self._payload(operation)
             set_digest = operation.artifact_set_sha256
         if payload is None:
@@ -423,7 +424,7 @@ class ModelCacheAdapter:
             return Observed(Effect.UNKNOWN, WaitReason.OBSERVATION_UNAVAILABLE)
         if present and self._effects.set_is_cached(set_digest):
             return Observed(Effect.ESTABLISHED)
-        return Observed(Effect.NONE, "the set is not complete in storage")
+        return Observed(Effect.NONE, WaitReason.SET_INCOMPLETE)
 
     def stop(self, row: Lifecycle) -> StopResult:
         """Idempotent: signal the transfer, confirm once no writer is active.

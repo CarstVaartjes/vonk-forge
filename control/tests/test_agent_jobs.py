@@ -4832,6 +4832,33 @@ def test_gpu_fault_between_admission_and_claim_waits_then_recovers(service) -> N
         assert current.recovery_deadline == deadline
 
 
+def test_ended_hold_clears_the_stamped_deadline_of_install_build_and_job_not_start() -> (
+    None
+):
+    # Catches an install or build that keeps what remained of a dispatch hold.
+    from vonk_control.lifecycle.agent_operation import AgentOperationAdapter
+
+    stamped = datetime(2026, 1, 1, tzinfo=UTC)
+    for kind, cleared in (
+        (ProtocolAgentOperation.RECIPE_INSTALL, True),
+        (ProtocolAgentOperation.RECIPE_BUILD, True),
+        (ProtocolAgentOperation.RECIPE_JOB_RUN, True),
+        (ProtocolAgentOperation.RECIPE_START, False),
+    ):
+        operation = AgentOperation(
+            kind=kind.value, current_attempt=0, recovery_deadline=stamped
+        )
+        AgentOperationAdapter.clear_hold_deadline(operation)
+        assert (operation.recovery_deadline is None) is cleared
+    later = AgentOperation(
+        kind=ProtocolAgentOperation.RECIPE_INSTALL.value,
+        current_attempt=1,
+        recovery_deadline=stamped,
+    )
+    AgentOperationAdapter.clear_hold_deadline(later)
+    assert later.recovery_deadline == stamped
+
+
 def test_reusable_preflight_survives_operation_history_collection(service) -> None:
     """Catches treating a historical command receipt as current capability storage."""
     from sqlalchemy import delete

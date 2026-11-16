@@ -14,7 +14,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import LibraryAssessmentCode
 
-from .inventory_repository import spark_model_objects
 from .library_contract import (
     LibraryRecipeProjection,
     RecipeReadiness,
@@ -25,7 +24,10 @@ from .model_cache.resolution import artifact_sets_resolved_once
 from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
-from .run_switch_operations.artifact_inspection import missing_spark_bytes
+from .run_switch_operations.artifact_inspection import (
+    missing_spark_bytes,
+    spark_stores,
+)
 from .run_switch_operations.phase_planning import targets_hold_model
 
 
@@ -312,12 +314,7 @@ class LibraryAssessment:
             )
             if not held:
                 with self._sessions() as session:
-                    held.update(
-                        {
-                            node: spark_model_objects(session, node, now=now)
-                            for node in nodes
-                        }
-                    )
+                    held.update(spark_stores(session, nodes, now=now))
             missing = missing_spark_bytes(manifest, held)
         except (
             SQLAlchemyError,

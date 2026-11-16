@@ -268,6 +268,26 @@ def test_parked_legacy_rows_are_reevaluated_on_their_first_tick() -> None:
     assert kept.row.next_action_at is not None
 
 
+def test_an_established_effect_ends_every_wait_word() -> None:
+    """A success never keeps the wait word of an earlier attempt."""
+
+    adapter = FakeAdapter()
+    waiting = _row(state=State.OBSERVING, reason=WaitReason.SPARK_BUSY)
+    done = transition(waiting, Observed(Effect.ESTABLISHED), adapter, NOW).row
+    assert done.state is State.SUCCEEDED and done.reason is None
+    own = transition(
+        waiting, Observed(Effect.ESTABLISHED, WaitReason.SET_INCOMPLETE), adapter, NOW
+    ).row
+    assert own.reason == WaitReason.SET_INCOMPLETE
+    reported = transition(
+        _row(state=State.RUNNING, reason=WaitReason.SPARK_BUSY),
+        Reported(Outcome.DONE),
+        adapter,
+        NOW,
+    ).row
+    assert reported.state is State.SUCCEEDED and reported.reason is None
+
+
 def test_an_irreversible_uncertain_effect_is_observed_first() -> None:
     """Rule 2."""
 

@@ -28,6 +28,16 @@ from .interfaces import ArtifactInspection
 from .planning_helpers import _as_reason, _inspection_unavailable
 
 
+def spark_stores(
+    session: Session, node_ids: Iterable[str], *, now: datetime
+) -> dict[str, Mapping[str, int] | None]:
+    """Each Spark's own store scan, None where it could not be read."""
+
+    return {
+        node_id: spark_model_objects(session, node_id, now=now) for node_id in node_ids
+    }
+
+
 def missing_spark_bytes_by_node(
     session: Session,
     manifest: ArtifactSetManifest,
@@ -41,13 +51,7 @@ def missing_spark_bytes_by_node(
     then plans reuses what the Spark already holds.
     """
 
-    return missing_spark_bytes(
-        manifest,
-        {
-            node_id: spark_model_objects(session, node_id, now=now)
-            for node_id in node_ids
-        },
-    )
+    return missing_spark_bytes(manifest, spark_stores(session, node_ids, now=now))
 
 
 def missing_spark_bytes(

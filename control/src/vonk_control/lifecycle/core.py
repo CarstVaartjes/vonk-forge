@@ -112,7 +112,7 @@ def transition(
             if event.effect is Effect.UNKNOWN and not blind_retry_is_safe(row, adapter):
                 return _lost(row, now, event.reason, observed=True)
             established = event.effect is Effect.ESTABLISHED
-            why = event.reason or row.reason
+            why = event.reason if established else event.reason or row.reason
             return Decision(
                 replace(
                     row,
@@ -532,7 +532,10 @@ def _end(row: Lifecycle, state: State, effect: Effect, event: Reported) -> Decis
             effect=effect,
             next_action_at=None,
             lease_deadline=None,
-            reason=event.reason or row.reason,
+            # A success ends every wait; a stale wait word must not outlive it.
+            reason=event.reason
+            if state is State.SUCCEEDED
+            else event.reason or row.reason,
         )
     )
 
@@ -588,7 +591,9 @@ def _observed(
                     state=State.SUCCEEDED,
                     effect=Effect.ESTABLISHED,
                     next_action_at=None,
-                    reason=event.reason or row.reason,
+                    # An established effect ends every wait: the earlier wait
+                    # word is stale, only the event's own reason survives.
+                    reason=event.reason,
                 )
             )
         case Effect.STOPPED if not blind_retry_is_safe(row, adapter):
