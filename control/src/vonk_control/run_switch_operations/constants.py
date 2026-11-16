@@ -12,7 +12,7 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunSwitchCode,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_forge_contracts.recipe import Scalar
 
 from .. import job_states
@@ -94,7 +94,11 @@ _TERMINAL_STATES = frozenset(
 
 
 _OPERATION_KINDS = frozenset(
-    {"recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"}
+    {
+        ProfileChildJobKind.RUN_SWITCH.value,
+        ProfileChildJobKind.STOP.value,
+        ProfileChildJobKind.CLEANUP.value,
+    }
 )
 
 

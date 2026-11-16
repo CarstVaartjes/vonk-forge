@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.enrollment import NodeId
 from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 from vonk_agent_protocol.recipe_operations import RecipeStopPayload
@@ -288,8 +289,8 @@ def validate_profile_stop_owner(
         )
     if application.profile_id is None:
         raise ProfileStopAuthorityError("profile Stop has no saved profile owner")
-    switch_stop = profile_operation.kind == "recipe.run-switch.v2"
-    if profile_operation.kind != "recipe.stop.v2" and not switch_stop:
+    switch_stop = profile_operation.kind == ProfileChildJobKind.RUN_SWITCH.value
+    if profile_operation.kind != ProfileChildJobKind.STOP.value and not switch_stop:
         raise ProfileStopAuthorityError("profile Stop parent operation kind changed")
     if (
         hashlib.sha256(canonical_message(profile_operation.payload)).hexdigest()

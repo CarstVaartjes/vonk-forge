@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     is_state,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .. import agent_operation_states
 from ..admission_locking import AdmissionLockBusy
@@ -67,7 +68,7 @@ def _try_repair_once(
             job = session.get(Job, operation_id)
             if (
                 job is None
-                or job.kind != "recipe.run-switch.v2"
+                or job.kind != ProfileChildJobKind.RUN_SWITCH.value
                 or job.state
                 not in {
                     LifecycleState.QUEUED.value,

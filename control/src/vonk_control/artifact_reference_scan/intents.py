@@ -8,6 +8,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from ..artifact_lifecycle import (
     ArtifactReferenceUnverified,
@@ -136,7 +137,7 @@ def _run_switch_runtime_image_intent(
     target_nodes = tuple(sorted(node.node_id for node in plan.spark_group.nodes))
     expected_build_id = plan.recipe_build_id or plan.build.build_id
     valid = (
-        operation.kind == "recipe.run-switch.v2"
+        operation.kind == ProfileChildJobKind.RUN_SWITCH.value
         and intent.owner_kind == "run-switch-job"
         and intent.operation_id == operation.id
         and intent.request_key == operation.request_id

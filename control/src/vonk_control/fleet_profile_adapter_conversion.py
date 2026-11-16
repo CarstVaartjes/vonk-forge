@@ -18,6 +18,7 @@ from sqlalchemy import cast, func, or_, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import AgentProtocolError, RunState, canonical_message
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
 
 from .fleet_profile_adapter_conversion_contract import (
     ProfileAdapterConversionOutcome,
@@ -127,10 +128,10 @@ def _job_proof(
         raise _UnprovenJournal("exact child payload or target scope is malformed")
     expected_key = profile_switch_child_request_key(row.id, index, item.kind, item.id)
     expected_kind = {
-        "run": "recipe.run-switch.v2",
-        "install": "recipe.run-switch.v2",
-        "stop": "recipe.stop.v2",
-        "cleanup": "recipe.cleanup.v2",
+        ProfileSwitchChildKind.RUN.value: ProfileChildJobKind.RUN_SWITCH.value,
+        ProfileSwitchChildKind.INSTALL.value: ProfileChildJobKind.RUN_SWITCH.value,
+        ProfileSwitchChildKind.STOP.value: ProfileChildJobKind.STOP.value,
+        ProfileSwitchChildKind.CLEANUP.value: ProfileChildJobKind.CLEANUP.value,
     }[item.kind]
     if job.request_id != expected_key or job.kind != expected_kind:
         raise _UnprovenJournal(

@@ -30,6 +30,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     SecurityRefusalReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.failure_evidence import (
     FailureDiagnostics,
     FailureLogTail,
@@ -824,7 +825,7 @@ class FailureEvidenceService:
                 ),
             )
             .where(
-                Job.kind == "recipe.run-switch.v2",
+                Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
                 Job.state.in_(FAILED_ATTEMPT_STATES),
                 Job.result["profile_application_id"].as_string() == application_id,
                 failed_attempt_condition(AgentOperation, AgentOperationAttempt),

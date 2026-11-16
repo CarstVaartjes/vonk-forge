@@ -23,7 +23,7 @@ from vonk_agent_protocol import (
     WaitReason,
     canonical_message,
 )
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 
 from .. import artifact_job_states
 from ..agent_jobs import (
@@ -205,7 +205,7 @@ def _switch_stops_run_now(operation: Job | None, run_id: str) -> bool:
     run's Stop.  Progress that cannot be read proves no ownership.
     """
 
-    if operation is None or operation.kind != "recipe.run-switch.v2":
+    if operation is None or operation.kind != ProfileChildJobKind.RUN_SWITCH.value:
         return False
     payload = read_row_column(operation, "payload")
     result = read_row_column(operation, "result")
