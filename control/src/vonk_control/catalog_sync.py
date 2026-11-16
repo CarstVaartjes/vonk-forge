@@ -35,10 +35,7 @@ from vonk_forge_contracts import CatalogVocabulary, RecipeDisplay
 from .admission_locking import ConstraintReplan, ConstraintReplay, admitting
 from .capabilities import CapabilityUnavailableError
 from .catalog_queries import active_head_revision
-from .catalog_revision_contract import (
-    CatalogRevisionContractError,
-    view_catalog_document,
-)
+from .catalog_revision_contract import catalog_document_readable
 from .catalog_service import CatalogService
 from .catalog_sync_contract import (
     SEMVER_PATTERN,
@@ -634,10 +631,10 @@ class ManagedRecipeCatalogSyncService:
                 )
                 if selected is None:
                     return False
-                try:
-                    view_catalog_document(row)
-                    view_catalog_document(selected)
-                except CatalogRevisionContractError:
+                if not (
+                    catalog_document_readable(row)
+                    and catalog_document_readable(selected)
+                ):
                     return False
         return not snapshot.problems
 

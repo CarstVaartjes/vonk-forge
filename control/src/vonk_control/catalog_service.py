@@ -48,10 +48,10 @@ from .catalog_revision_contract import (
     CatalogRevisionContractError,
     ModelRevisionProjection,
     RecipeRevisionProjection,
+    catalog_document_readable,
     read_catalog_document,
     read_catalog_projection,
     rederive_projection,
-    view_catalog_document,
     write_catalog_projection,
 )
 from .identity_insert import insert_identity
@@ -280,9 +280,7 @@ class CatalogService:
             for row in rows:
                 identity = (row.publisher, row.slug)
                 if identity in requested_set:
-                    try:
-                        view_catalog_document(row)
-                    except CatalogRevisionContractError:
+                    if not catalog_document_readable(row):
                         # A cache miss forces the ordinary exact signed import.
                         continue
                     result[identity] = RecipeCatalogLocalRevision(
@@ -685,7 +683,10 @@ class CatalogService:
                     raise CatalogRevisionContractError(
                         "stored catalog content differs from verified ingress"
                     )
-                view_catalog_document(existing)
+                if not catalog_document_readable(existing):
+                    raise CatalogRevisionContractError(
+                        "stored catalog document is unreadable"
+                    )
                 projection_type = (
                     ModelRevisionProjection
                     if kind == "model"
@@ -724,10 +725,7 @@ class CatalogService:
                 if head.active_revision_id is not None
                 else None
             )
-            try:
-                if selected is not None:
-                    view_catalog_document(selected)
-            except CatalogRevisionContractError:
+            if selected is not None and not catalog_document_readable(selected):
                 # This verified import is the sync owner's source, not a
                 # guess from history. Retire an unreadable selection and
                 # restore the source revision in the same transaction.

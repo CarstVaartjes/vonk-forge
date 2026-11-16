@@ -567,9 +567,6 @@ def recipe_library(
     return response.model_copy(update={"recipes": page, "next_cursor": next_cursor})
 
 
-_SIBLING_ASSESSMENT_CHUNK = 100
-
-
 def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailResponse:
     deadline = time.monotonic() + self._request_budget
     wanted = selector.casefold()
@@ -658,19 +655,7 @@ def recipe_detail(self: LibraryProjection, selector: str) -> RecipeDetailRespons
             item.selector,
         ),
     )
-    # Assess page-sized chunks in listing order while this request's budget
-    # lasts; a sibling past it stays listed with its typed unavailable fit.
-    # Each assessment call has fixed cost (roster, store scans).
-    assessed: list[LibraryRecipeProjection] = []
-    for start in range(0, len(ordered), _SIBLING_ASSESSMENT_CHUNK):
-        if time.monotonic() >= deadline:
-            assessed.extend(ordered[start:])
-            break
-        assessed.extend(
-            self._assessed(
-                ordered[start : start + _SIBLING_ASSESSMENT_CHUNK], deadline=deadline
-            )
-        )
+    assessed = self._assessed(ordered, deadline=deadline)
     alternatives = [
         RecipeAlternative(
             selector=item.selector,

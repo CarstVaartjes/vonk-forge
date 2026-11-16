@@ -350,14 +350,13 @@ def catalog_document_readable(revision: CatalogDocumentRevision) -> bool:
     return True
 
 
-def view_catalog_document(
+def read_catalog_document(
     revision: CatalogDocumentRevision,
 ) -> ModelDefinition | RecipeDefinition:
-    """:func:`read_catalog_document` without the copy, for callers that only
-    read or validate: the returned parse is shared and must never be mutated."""
+    """Parse one persisted published document; its digest is stored with it."""
 
     try:
-        return shared_catalog_document(
+        return cached_catalog_document(
             revision.kind, revision.content_digest, revision.document
         )
     except CatalogRevisionContractError:
@@ -368,15 +367,6 @@ def view_catalog_document(
             f"catalog {revision.kind} revision {revision.id} "
             f"({revision.publisher}/{revision.slug}@{revision.content_digest})"
         ) from error
-
-
-def read_catalog_document(
-    revision: CatalogDocumentRevision,
-) -> ModelDefinition | RecipeDefinition:
-    """Parse one persisted published document into the caller's own copy; its
-    digest is stored with it."""
-
-    return view_catalog_document(revision).model_copy(deep=True)
 
 
 def read_model_set(value: object) -> dict[str, ModelDefinition]:
@@ -420,6 +410,5 @@ __all__ = [
     "read_model_set",
     "rederive_projection",
     "shared_catalog_document",
-    "view_catalog_document",
     "write_catalog_projection",
 ]
