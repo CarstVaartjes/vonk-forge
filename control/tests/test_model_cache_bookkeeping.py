@@ -13,12 +13,14 @@ observed, is *unknown*, never a reason to stop a load.  Three families:
 # ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from vonk_control.model_cache import (
     _validate_source,
 )
@@ -29,6 +31,7 @@ from vonk_control.models import (
 )
 
 from .non_blocking import assert_ended_without_blocking
+from .removal_settle import advance_until_ended, release_ended_gates
 from .test_model_cache import (
     _artifact,
     _download,
@@ -36,6 +39,12 @@ from .test_model_cache import (
 )
 from .test_model_cache_lifecycle import _edit, _queue
 from .test_model_cache_recovery_support import observe_unknown
+from .test_model_removal_reference_lifecycle import (
+    _force_model_request,
+    _one_model,
+    _register_model,
+    _seed_model,
+)
 
 MODEL = "a" * 64
 
@@ -326,3 +335,61 @@ def test_requests_naming_nothing_still_get_a_defined_refusal(cache, tmp_path):
         ),
         fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
     )
+
+
+def test_a_removal_whose_set_row_is_gone_ends_instead_of_waiting_forever(
+    cache, tmp_path: Path
+):
+    """Catches a removal kept in backoff forever on "exact model-set membership
+    is unavailable": the set row was deleted after the removal was accepted (as
+    terminal-history retention does for a non-cached set) and no one will
+    produce that fact. An absent set is nothing to remove; the removal ends."""
+
+    service, sessions = cache
+    removed = _one_model(tmp_path, "removed-model")
+    sibling = _one_model(tmp_path, "sibling-model")
+    selector = _register_model(sessions, removed)
+    _register_model(sessions, sibling)
+    removed_digest, artifact, removed_set = _seed_model(
+        service, tmp_path, removed, "00000000-0000-4000-8000-00000000b0f1"
+    )
+    _digest, _artifact_doc, sibling_set = _seed_model(
+        service, tmp_path, sibling, "00000000-0000-4000-8000-00000000b0f2"
+    )
+    shared = service._object_path(hashlib.sha256(b"abc").hexdigest())
+    removal = service.remove_model_selector(
+        selector, actor="test", request_key="00000000-0000-4000-8000-00000000b0f3"
+    )
+    with sessions.begin() as session:
+        for artifact_row in session.scalars(
+            select(ModelCacheSetArtifact).where(
+                ModelCacheSetArtifact.artifact_set_sha256 == removed_set
+            )
+        ):
+            session.delete(artifact_row)
+        for producer in session.scalars(
+            select(ModelCacheOperation).where(
+                ModelCacheOperation.artifact_set_sha256 == removed_set,
+                ModelCacheOperation.kind != "remove",
+            )
+        ):
+            producer.artifact_set_sha256 = None  # ON DELETE SET NULL
+        gone = session.get(ModelCacheSet, removed_set)
+        assert gone is not None
+        session.delete(gone)
+    advance_until_ended(service, removal.id)
+    assert service.get_operation(removal.id).state == "succeeded"
+    assert shared.read_bytes() == b"abc"
+    with sessions() as session:
+        sibling_row = session.get(ModelCacheSet, sibling_set)
+        assert sibling_row is not None and sibling_row.state == "cached"
+    release_ended_gates(service)
+    fresh = _force_model_request(
+        service,
+        selector=selector,
+        digest=removed_digest,
+        artifact=artifact,
+        request_key="00000000-0000-4000-8000-00000000b0f4",
+    )
+    service.run_pending()
+    assert service.get_operation(fresh.id).state == "succeeded"
