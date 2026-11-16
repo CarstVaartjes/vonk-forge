@@ -359,6 +359,18 @@ class CursorError(InvalidRequestError, ValueError):
     """
 
 
+def cursor_key(boundary: object, length: int) -> tuple[str, ...]:
+    """The sort key a signed cursor carries; any other shape is an invalid cursor."""
+
+    if (
+        isinstance(boundary, list)
+        and len(boundary) == length
+        and all(isinstance(part, str) for part in boundary)
+    ):
+        return tuple(boundary)
+    raise CursorError("cursor is invalid")
+
+
 class CursorCodec:
     """Versioned authenticated cursors bound to one resource and query context."""
 

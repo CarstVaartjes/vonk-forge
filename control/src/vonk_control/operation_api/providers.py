@@ -18,7 +18,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 
-from ..auth import CursorCodec, CursorError
+from ..auth import CursorCodec, CursorError, cursor_key
 from ..models import AgentOperation, Job
 from ..operation_blockers import read_blockers
 from ..operation_item_contract import (
@@ -85,14 +85,9 @@ def merge_operation_providers(
             order="created-at-desc/id-desc/v1",
             context=context,
         )
-        if not (
-            isinstance(decoded, list)
-            and len(decoded) == 2
-            and all(isinstance(item, str) for item in decoded)
-        ):
-            raise CursorError("cursor is invalid")
+        key = cursor_key(decoded, 2)
         try:
-            after = (_aware(datetime.fromisoformat(decoded[0])), decoded[1])
+            after = (_aware(datetime.fromisoformat(key[0])), key[1])
         except ValueError:
             raise CursorError("cursor is invalid") from None
     query = OperationQuery(

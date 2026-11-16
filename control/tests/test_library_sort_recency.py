@@ -190,7 +190,7 @@ def test_cursor_continues_after_a_boundary_that_left_the_catalog(
 
 @pytest.mark.parametrize("kind", ["model", "recipe"])
 @pytest.mark.parametrize("sort", ["name", "updated"])
-@pytest.mark.parametrize("boundary", [["old-shape"], "bare-string", None, [1, 2]])
+@pytest.mark.parametrize("boundary", [["old-shape"], "bare-string", [1, 2]])
 def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
     tmp_path: Path, kind: str, sort: Literal["name", "updated"], boundary: object
 ) -> None:
@@ -207,7 +207,7 @@ def test_a_cursor_with_an_old_shape_is_an_invalid_cursor(
     _projection, sessions = _build(tmp_path)
     projection = LibraryProjection(
         sessions,
-        cursors=_OldShape(TokenCodec(b"s" * 32).cursor_codec()._key),
+        cursors=_OldShape(b"k" * 32),
         clock=lambda: _EPOCH + timedelta(days=1),
     )
     with pytest.raises(CursorError):

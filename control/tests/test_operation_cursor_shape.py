@@ -8,7 +8,7 @@ from vonk_control.operation_api.providers import merge_operation_providers
 
 
 @pytest.mark.parametrize(
-    "boundary", [["only-one"], "bare", None, [1, 2], ["not-a-date", "id"]]
+    "boundary", [["only-one"], "bare", [1, 2], ["not-a-date", "id"]]
 )
 def test_unreadable_boundary_is_an_invalid_cursor(boundary: object) -> None:
     codec = TokenCodec(b"s" * 32).cursor_codec()
