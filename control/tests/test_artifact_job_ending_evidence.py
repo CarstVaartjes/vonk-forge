@@ -40,6 +40,7 @@ from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
 from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
+    AgentNode,
     AgentOperation,
     AgentOperationAttempt,
     ArtifactJob,
@@ -77,12 +78,12 @@ def _receipt(job, outputs: tuple[RecipeJobFile, ...] = ()) -> dict[str, object]:
     ).model_dump(mode="json")
 
 
-def _wired(tmp_path):
+def _wired(tmp_path, engine=None):
     """A submitted job on an agent queue wired to its result consumers as
     production wires them (``api/production.py``)."""
 
     sessions, recipe_operations, _queue, service, run_id, node_id = (
-        running_artifact_service(tmp_path)
+        running_artifact_service(tmp_path, engine=engine)
     )
     clock = MutableClock(NOW)
     agent_jobs = AgentJobService(sessions, clock=clock)
@@ -433,10 +434,10 @@ _IMAGE_MISSING = {
 }
 
 
-def _image_lost(tmp_path):
+def _image_lost(tmp_path, engine=None):
     """A held run whose job found its runtime image gone from the Spark."""
 
-    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path, engine)
     claim = claim_agent(agent_jobs, node_id, "serial-0")
     assert claim is not None
     clock.advance(seconds=5)
@@ -477,13 +478,20 @@ def _next_claim(agent_jobs, clock, node_id):
     """The order the Spark gets next; one held at dispatch steps aside until
     its next check, so the poll after it reaches the order behind it."""
 
-    for _ in range(2):
+    for _ in range(8):
         for _ in range(2):
             claim = claim_agent(agent_jobs, node_id, "serial-0")
             if claim is not None:
                 return claim
         clock.advance(seconds=CLAIM_LEASE_SECONDS)
     return None
+
+
+def _intent(sessions, node_id) -> int:
+    with sessions() as session:
+        node = session.get(AgentNode, node_id)
+        assert node is not None
+        return node.workload_intent_ordinal
 
 
 def _launch_grant(sessions, job):
@@ -505,17 +513,24 @@ def _launch_grant(sessions, job):
         )
 
 
+@pytest.mark.parametrize(
+    "database", ("sqlite", pytest.param("postgres", marks=pytest.mark.postgres))
+)
 def test_a_submission_on_a_run_that_lost_its_image_installs_it_again_then_runs(
-    tmp_path,
+    tmp_path, request, database
 ) -> None:
     # Wrong implementation caught: the held run kept taking jobs while its
     # installation was partial; nothing installed the lost image again, so
     # every submission was launched into a launch grant refused as not ready.
-    sessions, service, agent_jobs, clock, node_id, lost = _image_lost(tmp_path)
+    engine = (
+        request.getfixturevalue("postgres_engine") if database == "postgres" else None
+    )
+    sessions, service, agent_jobs, clock, node_id, lost = _image_lost(tmp_path, engine)
     with sessions() as session:
         run = session.get(RecipeRun, lost.run_id)
         assert run is not None
         installation_id = run.installation_id
+    intent = _intent(sessions, node_id)
     first = submitted_artifact_job(service, lost.run_id, request_suffix=670)
     newest = submitted_artifact_job(service, lost.run_id, request_suffix=672)
 
@@ -536,6 +551,24 @@ def test_a_submission_on_a_run_that_lost_its_image_installs_it_again_then_runs(
             )
         ).all()
     assert len(installs) == 1
+    # A submission never takes a new workload intent: it fences no load.
+    assert _intent(sessions, node_id) == intent
+    # An install that must try again keeps the job waiting, never launched.
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        install,
+        "failed",
+        {
+            "kind": "failed",
+            "code": "recipe_install_failed",
+            "reason": "distribution download stalled",
+            "failure_kind": "temporary-dependency",
+        },
+    )
+    install = _next_claim(agent_jobs, clock, node_id)
+    assert install is not None
+    assert install.operation == WireAgentOperation.RECIPE_INSTALL
     clock.advance(seconds=5)
     _report(agent_jobs, install, "succeeded", {"installed_bytes": 120})
 
@@ -544,6 +577,8 @@ def test_a_submission_on_a_run_that_lost_its_image_installs_it_again_then_runs(
     assert ran is not None
     assert ran.operation == WireAgentOperation.RECIPE_JOB_RUN
     assert isinstance(ran.payload, RecipeJobRunRequest)
+    # The hold leaves no deadline on the job it released.
+    assert _order(sessions, service.get(newest.id)).recovery_deadline is None
     assert str(ran.payload.job_id) == newest.id
     assert str(ran.payload.run_id) == lost.run_id
     assert _launch_grant(sessions, service.get(newest.id)).runtime_target_id == (

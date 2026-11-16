@@ -477,9 +477,16 @@ def dispatch_wait(
                 operation.node_id, now=now, maximum_age=300, _session=session
             )
         except KeyError:
-            return False  # the owning admission's missing-inventory rule applies
-        reason = gpu_health_reason(snapshot.gpu_health)
+            snapshot = None  # the owning admission's missing-inventory rule applies
+        reason = None if snapshot is None else gpu_health_reason(snapshot.gpu_health)
         if reason is None:
+            if (
+                isinstance(payload, RecipeJobRunRequest)
+                and operation.current_attempt == 0
+            ):
+                # A hold that ended leaves no budget behind: the job keeps its
+                # own observation window, not what remained of the wait's.
+                operation.recovery_deadline = None
             return False
         code, detail = reason
         waiting = f"Waiting for healthy GPU inventory from {operation.node_id};"
