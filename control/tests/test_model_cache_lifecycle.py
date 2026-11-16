@@ -19,7 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, WaitReason
 from vonk_control.lifecycle import (
     STOP_BUDGET,
     Effect,
@@ -511,7 +511,9 @@ def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_p
     # The bytes are there but the set is not published: the observer says "not
     # yet" (the transfer's retry publishes it), it does not mark anything done.
     _edit_set_state(sessions, str(downloaded.artifact_set_sha256), "incomplete")
-    assert service._lifecycle.observe(row).effect is Effect.NONE
+    incomplete = service._lifecycle.observe(row)
+    assert incomplete.effect is Effect.NONE
+    assert incomplete.reason == WaitReason.SET_INCOMPLETE
     # An unreadable storage is unknown, not a refusal.
     service.objects_present = lambda payload: None  # type: ignore[method-assign]
     assert service._lifecycle.observe(row).effect is Effect.UNKNOWN

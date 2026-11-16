@@ -418,6 +418,10 @@ class WaitReason(WireEnum):
     STALE_PLAN = "stale-plan"
     SCOPE_CHANGED = "scope-changed"
     LEGACY_UNCLASSIFIED = "legacy-unclassified"
+    #: A cache removal is observed by its own checkpoint, which resumes it.
+    REMOVAL_CHECKPOINT_PENDING = "removal-checkpoint-pending"
+    #: A cached set's objects are not all in storage yet; the transfer finishes it.
+    SET_INCOMPLETE = "set-incomplete"
 
 
 class WaitResumeCondition(WireEnum):
