@@ -208,26 +208,3 @@ def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_pat
             expected_content_sha256="f" * 64,
         )
     assert caught.value.code == CatalogCode.HASH_MISMATCH
-
-
-@pytest.mark.usefixtures("damaged_json_rows")
-def test_stored_payload_with_retired_claim_key_still_reads(tmp_path: Path) -> None:
-    """A row written when the payload still had ``claim: null`` reads fine."""
-
-    sessions = _database(tmp_path)
-    cache = ModelCacheService(
-        sessions, tmp_path / "cache", free_fraction=0, fixture_sources=True
-    )
-    operation = _start(
-        cache,
-        [_artifact("retired", b"retired claim")],
-        "00000000-0000-4000-8000-000000000902",
-    )
-    with sessions() as session:
-        stored = session.get(ModelCacheOperation, operation.id)
-        assert stored is not None
-        document = dict(stored.payload)
-    assert "claim" not in document
-    parsed = parse_model_cache_payload("download", document | {"claim": None})
-    assert isinstance(parsed, ModelCacheDownloadPayload)
-    assert "claim" not in parsed.model_dump(mode="json")

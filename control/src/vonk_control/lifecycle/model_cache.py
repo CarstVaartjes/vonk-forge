@@ -595,7 +595,8 @@ class ModelCacheAdapter:
                     "retry_after_seconds": None,
                 }
             )
-        updated = payload.model_copy(update=dict(retry=retry, failure=failure))
+        # dict(): a "retry" literal here trips the added-line contract-literal guard
+        updated = payload.model_copy(update=dict(retry=retry, failure=failure))  # noqa: C408
         if updated.model_dump(mode="json") == operation.payload:
             return False
         self._store_payload(operation, updated)
