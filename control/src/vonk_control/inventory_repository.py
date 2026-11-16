@@ -33,6 +33,7 @@ _LOG = logging.getLogger(__name__)
 MAX_INVENTORY_FUTURE_SKEW = timedelta(seconds=30)
 # A report received longer ago than this no longer says what a Spark holds.
 INVENTORY_MAX_AGE = timedelta(minutes=5)
+INVENTORY_MAX_AGE_SECONDS = int(INVENTORY_MAX_AGE.total_seconds())
 
 
 class NodeInventoryReport(InventoryRequest):

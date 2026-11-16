@@ -7,7 +7,7 @@ import shutil
 from collections import Counter
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -92,9 +92,6 @@ ACTOR = "system:storage-sweep"
 
 
 SWEEP_BUDGET_SECONDS = 30.0
-
-
-INVENTORY_MAX_AGE = timedelta(seconds=300)
 
 
 #: Runs no load wants. A lost run may still occupy its Sparks: the collector

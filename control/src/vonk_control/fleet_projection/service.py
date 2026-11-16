@@ -19,7 +19,7 @@ from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..inventory_items import inventory_items
-from ..inventory_repository import newest_snapshot_ids
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
@@ -71,7 +71,7 @@ class FleetProjection:
         telemetry_live_seconds: float = 6,
         telemetry_delayed_seconds: float = 20,
         agent_online_seconds: float = SPARK_PRESENCE_WINDOW.total_seconds(),
-        inventory_fresh_seconds: float = 300,
+        inventory_fresh_seconds: float = INVENTORY_MAX_AGE_SECONDS,
         run_rank_fresh_seconds: float = 300,
     ) -> None:
         windows = (

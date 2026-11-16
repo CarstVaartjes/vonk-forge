@@ -33,7 +33,11 @@ from ..disk_reservations import (
 )
 from ..gpu_health import gpu_health_reason
 from ..inventory_items import inventory_items
-from ..inventory_repository import InventoryRepository, InventorySnapshotView
+from ..inventory_repository import (
+    INVENTORY_MAX_AGE_SECONDS,
+    InventoryRepository,
+    InventorySnapshotView,
+)
 from ..legal_admission import stored_model_display, territorial_admission
 from ..models import (
     AgentNode,
@@ -76,7 +80,7 @@ class InstallPlanningService:
         self,
         sessions: sessionmaker[Session],
         *,
-        inventory_max_age: int = 300,
+        inventory_max_age: int = INVENTORY_MAX_AGE_SECONDS,
         disk_floor_bytes: int = 10_000_000_000,
         compiled_plan_provider: Callable[..., Mapping[str, WireCompiledExecutionPlan]]
         | None = None,

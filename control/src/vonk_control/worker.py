@@ -31,6 +31,7 @@ from .capabilities import CapabilityRegistry
 from .capability_contract import ControllerCapability
 from .coordinator_failures import CoordinatorFailures
 from .failure_classification import disposition
+from .inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from .jobs import JobService
 from .logging import log_event, redact_text
 from .operator_receipt_contract import ReceiptOwner
@@ -787,7 +788,7 @@ def assemble_production_worker(
     recipe_builds = RecipeBuildService(
         sessions,
         bundles=DatabaseSourceBundleStore(sessions),
-        inventory_max_age=300,
+        inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
         build_archive_available=runtime_archive_available,
         prepared_builds=(
             runtime_archive_storage.find_build
@@ -799,13 +800,13 @@ def assemble_production_worker(
         sessions,
         install_admission=InstallAdmissionService(
             sessions,
-            inventory_max_age=300,
+            inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=compiled_plan_provider,
         ),
         run_admission=RunAdmissionService(
             sessions,
-            inventory_max_age=300,
+            inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
             memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         ),
         agent_jobs=agent_jobs,
