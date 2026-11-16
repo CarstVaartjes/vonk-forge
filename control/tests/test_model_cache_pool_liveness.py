@@ -373,7 +373,6 @@ def test_a_stored_plan_whose_object_vanished_is_replanned_and_queues_for_a_slot(
     # The object goes after the plan was made; the only slot stays hung.
     vanished = text(stored[1]["sha256"])
     assert vanished is not None
-    service._receipt_path(vanished).unlink()
     service._object_path(vanished).unlink()
     for _ in range(3):
         service.tick()

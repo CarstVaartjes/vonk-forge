@@ -1645,7 +1645,6 @@ def test_profile_admits_unpublished_cache_observation(tmp_path, monkeypatch, mis
         path = cache._object_path(spec.sha256)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"x" * spec.expected_bytes)
-        cache._write_object_receipt(spec, NOW)
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,

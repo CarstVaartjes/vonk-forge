@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import stat
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy import ColumnElement, select
@@ -28,7 +27,7 @@ from ..models import (
 )
 from ..reference_facts import profiles_naming
 from ..stored_json import read_row_column
-from .artifacts import ArtifactSetManifest, ArtifactSpec, _optional_digest
+from .artifacts import ArtifactSetManifest, _optional_digest
 from .catalog_helpers import _iso, _recipe_model_content_digests
 from .constants import SCHEMA_VERSION
 from .errors import (
@@ -111,8 +110,8 @@ class InventoryMixin:
             seen: set[str] = set()
             for spec in manifest.artifacts if manifest is not None else ():
                 # One owner per fact: managed storage decides availability, and
-                # the same descriptor check reports the stored length, so a
-                # receipt alone cannot invent bytes.
+                # the same descriptor check reports the stored length, so no
+                # recorded fact can invent bytes.
                 stored = cache._stored_object(spec.sha256, spec.expected_bytes)
                 actual = stored or 0
                 state = (
@@ -166,30 +165,6 @@ class InventoryMixin:
     def reconcile_storage(self) -> dict[str, object]:
         cache = cast("ModelCacheService", self)
         with cache._lock:
-            # Object availability lives in managed storage. Reconciliation
-            # removes the leftover receipt of an object whose bytes are gone or
-            # of the wrong size.
-            with cache._session() as session:
-                sets = list(session.scalars(select(ModelCacheSet)))
-                expected: dict[str, ArtifactSpec] = {}
-                for row in sets:
-                    stored = cache._stored_manifest(row)
-                    if stored is None:
-                        continue  # unknown set: skipped, the rest reconcile
-                    for spec in stored.artifacts:
-                        expected[spec.sha256] = spec
-            for sha256, spec in expected.items():
-                path = cache._object_path(sha256)
-                try:
-                    metadata = path.lstat()
-                except FileNotFoundError:
-                    cache._receipt_path(sha256).unlink(missing_ok=True)
-                    continue
-                if not stat.S_ISREG(metadata.st_mode):
-                    cache._receipt_path(sha256).unlink(missing_ok=True)
-                    continue
-                if not cache._object_is_available(sha256, spec.expected_bytes):
-                    cache._receipt_path(sha256).unlink(missing_ok=True)
             with cache._session(write=True) as session:
                 sets = list(session.scalars(select(ModelCacheSet)))
                 for row in sets:

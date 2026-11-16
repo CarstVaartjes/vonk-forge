@@ -1,7 +1,7 @@
 """The lifecycle adapter of the NAS model cache (``ModelCacheOperation``).
 
 ``model_cache`` keeps what is specific to the cache: SQL, the transfer pool, the
-object locks, the per-object receipts, the removal fences and checkpoints.  This
+object locks, the stored-object checks, the removal fences and checkpoints.  This
 module owns the rest: what a stored (possibly legacy) operation *is* to the core
 (:meth:`ModelCacheAdapter.lifecycle`, the ``adopt`` hook), what the kind knows
 that the core asks (nothing here is irreversible, the retry fence, a stop), and
@@ -63,7 +63,12 @@ from typing import Any, Protocol
 from sqlalchemy import select, true, update
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import Disposition, ModelAccessReason, WaitOwnerKind
+from vonk_agent_protocol import (
+    Disposition,
+    ModelAccessReason,
+    WaitOwnerKind,
+    WaitReason,
+)
 
 from .. import model_cache_states
 from ..agent_operation_facts import aware
@@ -135,7 +140,8 @@ class CacheEffects(Protocol):
         ...
 
     def objects_present(self, payload: ModelCacheOperationPayload) -> bool | None:
-        """Whether every object of the operation's set has a receipt in storage,
+        """Whether every object of the operation's set is stored (a verified
+        object file of the expected size),
         or ``None`` when storage could not be read."""
         ...
 
@@ -393,9 +399,9 @@ class ModelCacheAdapter:
         return Dispatch(issued=False)
 
     def observe(self, row: Lifecycle) -> Observed:
-        """Read-only: do the object receipts already prove the effect?
+        """Read-only: do the stored objects already prove the effect?
 
-        ``established`` only when every object of the set has a receipt *and* the
+        ``established`` only when every object of the set is stored at its expected size *and* the
         set is already recorded as cached; a set whose bytes are all there but is
         not published yet is the transfer's to finish (its next attempt finds the
         bytes and publishes), so it is ``none`` and retried, never marked done by
@@ -411,12 +417,12 @@ class ModelCacheAdapter:
             payload = self._payload(operation)
             set_digest = operation.artifact_set_sha256
         if payload is None:
-            return Observed(Effect.UNKNOWN, "storage receipts could not be read")
+            return Observed(Effect.UNKNOWN, WaitReason.OBSERVATION_UNAVAILABLE)
         present = self._effects.objects_present(payload)
         if present is None:
-            return Observed(Effect.UNKNOWN, "storage receipts could not be read")
+            return Observed(Effect.UNKNOWN, WaitReason.OBSERVATION_UNAVAILABLE)
         if present and self._effects.set_is_cached(set_digest):
-            return Observed(Effect.ESTABLISHED, "every object has a receipt")
+            return Observed(Effect.ESTABLISHED)
         return Observed(Effect.NONE, "the set is not complete in storage")
 
     def stop(self, row: Lifecycle) -> StopResult:

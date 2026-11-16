@@ -94,12 +94,10 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
     )
     assert len(manifest.artifacts) == 1
     managed_object = cache._object_path(manifest.artifacts[0].sha256)
-    managed_receipt = cache._receipt_path(manifest.artifacts[0].sha256)
     assert managed_object.read_bytes() == _PAYLOAD
     assert hashlib.sha256(managed_object.read_bytes()).hexdigest() == (
         manifest.artifacts[0].sha256
     )
-    assert managed_receipt.is_file()
 
     library = LibraryProjection(
         sessions,
@@ -286,7 +284,7 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
             assert observed["progress"]["total_items"] == 1
             # Object membership is observed by the worker after acceptance.
             assert observed["progress"]["completed_bytes"] == 0
-            assert managed_object.is_file() and managed_receipt.is_file()
+            assert managed_object.is_file()
             assert token not in stdout + stderr + replay.stdout + replay.stderr
             assert token not in progress.stdout + progress.stderr
             assert sum(method == "POST" for method, _, _ in peer.calls) == 1
@@ -298,7 +296,6 @@ def test_installed_model_remove_recovers_exact_digest_after_head_change(
         assert isinstance(settled.result, ModelCacheRemovalResult)
         assert settled.result.reclaimed_bytes == len(_PAYLOAD)
         assert not managed_object.exists()
-        assert not managed_receipt.exists()
 
         with sessions() as session:
             persisted = session.scalar(

@@ -346,7 +346,6 @@ def test_assessment_reads_do_not_walk_the_stored_model_objects(
         directory = cache.root / "objects" / digest[:2]
         directory.mkdir(parents=True, exist_ok=True)
         (directory / digest).write_bytes(b"x")
-        (directory / f"{digest}.receipt.json").write_text("{}")
     populated = stats_for_one_listing()
     # Admission reads the free space; it does not measure every stored object.
     assert populated - empty < 60, (empty, populated)

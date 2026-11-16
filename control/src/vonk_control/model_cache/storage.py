@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
-import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
@@ -18,21 +15,18 @@ from .. import model_cache_states
 from ..model_cache_contract import (
     CacheOperationKind,
     ModelCacheDownloadPayload,
-    ModelCacheObjectReceipt,
     ModelCacheTransfer,
 )
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands
 from .artifacts import (
     ArtifactSetManifest,
-    ArtifactSpec,
     _is_hex,
     _unique_artifacts,
 )
-from .constants import _DIGEST_LENGTH, SCHEMA_VERSION
+from .constants import _DIGEST_LENGTH
 from .errors import ModelCacheError
 from .persistence import _manifest_of
-from .source_helpers import _fsync_directory
 from .views import StorageSummary
 
 if TYPE_CHECKING:
@@ -378,45 +372,6 @@ class StorageMixin:
     def _object_path(self, digest: str) -> Path:
         cache = cast("ModelCacheService", self)
         return cache._root / "objects" / digest[:2] / digest
-
-    def _receipt_path(self, digest: str) -> Path:
-        cache = cast("ModelCacheService", self)
-        return cache._root / "objects" / digest[:2] / f"{digest}.receipt.json"
-
-    def _write_object_receipt(self, spec: ArtifactSpec, verified_at: datetime) -> None:
-        """Publish an object's receipt (write-only, pending deletion; presence is the file).
-
-        The receipt is written after the verified bytes are in place, and it is
-        replaced atomically so a reader never sees a partial document.
-        """
-        cache = cast("ModelCacheService", self)
-
-        receipt = ModelCacheObjectReceipt(
-            schema_version=SCHEMA_VERSION,
-            sha256=spec.sha256,
-            storage_key=cache._object_key(spec.sha256),
-            expected_bytes=spec.expected_bytes,
-            actual_bytes=spec.expected_bytes,
-            verified_at=verified_at.isoformat(),
-        )
-        path = cache._receipt_path(spec.sha256)
-        path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            with open(temporary, "w", encoding="utf-8") as handle:
-                handle.write(
-                    json.dumps(
-                        receipt.model_dump(mode="json"),
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    )
-                )
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, path)
-        finally:
-            temporary.unlink(missing_ok=True)
-        _fsync_directory(path.parent)
 
     def _object_is_available(self, digest: str, expected_bytes: int) -> bool:
         """Whether managed storage holds the object: a regular file of the expected size."""

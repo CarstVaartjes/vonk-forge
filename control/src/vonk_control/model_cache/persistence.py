@@ -316,7 +316,7 @@ def _operation_progress(
 ) -> ModelCacheOperationProgress:
     """The operation's progress; a damaged measurement restarts from zero.
 
-    Progress is a derived measurement (the transfer ledger and the receipts are
+    Progress is a derived measurement (the transfer ledger and the stored objects are
     the evidence), so it is never a reason to stop: the next sample rebuilds it.
     """
 

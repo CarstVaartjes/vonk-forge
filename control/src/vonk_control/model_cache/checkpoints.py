@@ -242,11 +242,10 @@ class CheckpointsMixin:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
         # Availability is a managed-storage fact: the object file at its expected
-        # size owns it; the receipt written here is write-only. This runs once per object inside the publication lock, so it
+        # size owns it. This runs once per object inside the publication lock, so it
         # stays bounded -- the set-level projection is recomputed once when the
         # operation finalizes or the entry is read, never per object, which
         # would make one set quadratic in its own membership.
-        cache._write_object_receipt(spec, now)
         with cache._session(write=True) as session:
             row = session.get(ModelCacheSet, set_digest)
             if row is not None:
@@ -258,8 +257,7 @@ class CheckpointsMixin:
 
         The one presence rule: the object file is a regular file of the
         expected size. Bytes were hashed once at ingress, and only verified bytes
-        reach the object path. Receipts are write-only (pending deletion) and
-        play no part in presence. One descriptor check answers both "is it available" and "how many
+        reach the object path. One descriptor check answers both "is it available" and "how many
         bytes are there", so a whole-set read costs one pass over the objects.
         """
         cache = cast("ModelCacheService", self)

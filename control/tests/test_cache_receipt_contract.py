@@ -128,10 +128,9 @@ def test_a_set_the_nas_evicted_still_compiles_without_a_download(
         request_key="00000000-0000-4000-8000-000000000112",
     )
     manifest = cache.manifest_for_artifact_set(digest)
-    # Eviction removes the bytes, their receipts and the set's rows.
+    # Eviction removes the bytes and the set's rows.
     for spec in manifest.artifacts if nas == "evicted" else ():
         cache._object_path(spec.sha256).unlink()
-        cache._receipt_path(spec.sha256).unlink()
     with sessions.begin() as session:
         session.execute(
             delete(ModelCacheSetArtifact).where(
