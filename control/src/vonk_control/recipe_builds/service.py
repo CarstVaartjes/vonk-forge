@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..inventory_repository import InventoryRepository
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from ..models import RecipeBuild
 from ..recipe_build_receipts import PreparedBuildLookup
 from ..source_bundles import SourceBundleStoreProtocol
@@ -48,7 +48,7 @@ class RecipeBuildService:
         sessions: sessionmaker[Session],
         *,
         bundles: SourceBundleStoreProtocol,
-        inventory_max_age: int = 300,
+        inventory_max_age: int = INVENTORY_MAX_AGE_SECONDS,
         build_archive_available: Callable[[str, int], bool] | None = None,
         prepared_builds: PreparedBuildLookup | None = None,
         source_rederiver: SourceBundleRederiver = rederive_source_bundle_from_closure,

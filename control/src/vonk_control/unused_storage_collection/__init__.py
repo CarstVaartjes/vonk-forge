@@ -13,7 +13,6 @@ from .common import _LOGGER as _LOGGER
 from .common import _RECEIPT_SUFFIX as _RECEIPT_SUFFIX
 from .common import _STORAGE_WAIT_CODES as _STORAGE_WAIT_CODES
 from .common import ACTOR as ACTOR
-from .common import INVENTORY_MAX_AGE as INVENTORY_MAX_AGE
 from .common import SWEEP_BUDGET_SECONDS as SWEEP_BUDGET_SECONDS
 from .common import EvictionCapacity as EvictionCapacity
 from .common import ImageBlobReclaimer as ImageBlobReclaimer

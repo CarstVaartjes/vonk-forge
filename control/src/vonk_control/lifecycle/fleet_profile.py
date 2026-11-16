@@ -49,7 +49,6 @@ operation ids kept as the residue.  It never parks the application for a person.
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
@@ -60,7 +59,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     Disposition,
     LifecycleState,
-    SupersedeCode,
     WaitOwnerKind,
 )
 
@@ -848,31 +846,6 @@ class FleetProfileAdapter:
         assert scheduled is not None  # ongoing intent never exhausts
         return scheduled
 
-    def heal_superseded(
-        self,
-        application: FleetProfileApplication,
-        now: datetime,
-    ) -> bool:
-        """Re-label a legacy ended row that was really a supersession.
-
-        An older Controller recorded a replaced application as ``failed`` (the
-        parent of an automatic retry) or ``cancelled`` (a replaced order); clients
-        then reported a fault.  Only the label and typed reason change: the row was
-        already ended and no effect is touched.
-        """
-
-        found = legacy_supersession(application.state, application.status_reason)
-        if found is None:
-            return False
-        code, successor = found
-        document = dict(application.progress or {})
-        document["supersede_code"] = code
-        document["superseded_by"] = successor
-        application.progress = document
-        application.state = SUPERSEDED
-        application.updated_at = aware(now)
-        return True
-
     def adopt_backoff(
         self,
         application: FleetProfileApplication,
@@ -939,47 +912,6 @@ class FleetProfileAdapter:
             session=session,
         )
         return after
-
-
-#: What an older Controller wrote when a successor or later intent replaced an
-#: application: ``failed`` for an automatic retry's parent, ``cancelled`` for a
-#: replaced order.  ``legacy_supersession`` reads it back as the typed reason.
-RETRY_REASON_PREFIX = "Automatically reconciled by profile retry "
-_LEGACY_INTENT_PREFIXES = (
-    "Profile order was replaced",
-    "Pending profile intent was superseded by",
-    "Pending profile workload intent was superseded",
-    "Profile intent was superseded by",
-    "Profile load was superseded by",
-    "Profile workload intent was superseded",
-    "A later accepted profile intent owns",
-)
-LEGACY_SUPERSEDED_PREFIXES = (
-    RETRY_REASON_PREFIX,
-    "Pending profile intent was superseded: ",
-    *_LEGACY_INTENT_PREFIXES,
-)
-
-
-def legacy_supersession(
-    stored: str, reason: str | None
-) -> tuple[str, str | None] | None:
-    """``(code, successor)`` of a legacy ended row that was really a supersession."""
-
-    text = (reason or "").strip()
-    if stored == State.FAILED.value and text.startswith(RETRY_REASON_PREFIX):
-        successor = text[len(RETRY_REASON_PREFIX) :].split(";", 1)[0].strip()
-        try:
-            uuid.UUID(successor)
-        except ValueError:
-            return None
-        return (SupersedeCode.SUPERSEDED_BY_RETRY, successor)
-    if stored == State.CANCELLED.value:
-        if text.startswith("Pending profile intent was superseded: "):
-            return (SupersedeCode.EFFECTS_CHANGED_DURING_ADMISSION, None)
-        if text.startswith(_LEGACY_INTENT_PREFIXES):
-            return (SupersedeCode.SUPERSEDED_BY_INTENT, None)
-    return None
 
 
 def _recorded(identity: str, stored: str) -> Lifecycle:

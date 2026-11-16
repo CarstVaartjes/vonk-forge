@@ -2,9 +2,7 @@
 
 Which installations use a model set is ``recipe_installations.
 model_artifact_set_sha256``; which saved profiles name a recipe is
-``fleet_profile_recipes``. Both are written with the row they describe, and rows
-from before they existed are filled at startup (and, for installations, by the
-model-cache pass) from their own stored documents.
+``fleet_profile_recipes``. Both are written with the row they describe.
 """
 
 from __future__ import annotations
@@ -15,23 +13,17 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     CatalogDocumentRevision,
     FleetProfile,
-    FleetProfileRecipe,
     InstallationNode,
     RecipeInstallation,
 )
-from vonk_control.recipe_execution_contract import parse_stored_installation_plan
-from vonk_control.reference_facts import (
-    fill_installation_payload_bytes,
-    fill_reference_facts,
-    profiles_naming,
-)
+from vonk_control.reference_facts import profiles_naming
 
 from .test_fleet_model_removal_postgres import inventory
 from .test_recipe_operations import NOW, installed_recipe, setup_services
@@ -256,135 +248,5 @@ def test_a_profile_save_rewrites_its_recipes_in_the_same_flush(
             profile = session.get(FleetProfile, profile_id)
             assert profile is not None
             profile.assignments = [{"recipe_selector": "Not A Selector"}]
-    finally:
-        world.cache.close()
-
-
-@pytest.mark.slow(30)
-def test_rows_from_before_the_facts_are_filled_and_an_upgrade_install_heals(
-    tmp_path: Path,
-) -> None:
-    """Fault test: an upgrade adopts rows written without the facts.
-
-    Admission records the set. Rows in the old shape (no set, no projection)
-    are filled once at startup; a damaged plan stays unfilled without stopping
-    startup; a projection row its profile no longer names is removed.
-    """
-    world = _small(tmp_path)
-    try:
-        with world.sessions() as session:
-            row = session.get(RecipeInstallation, world.target_installation)
-            assert row is not None
-            assert row.model_artifact_set_sha256 is not None
-            assert (
-                row.model_artifact_set_sha256
-                == parse_stored_installation_plan(row.plan).model_artifact_set_sha256
-            )
-            admitted = row.model_artifact_set_sha256
-        reused = _reused_installation(world)
-        pins = _profile(world, world.target_recipe)
-        damaged = _reused_installation(world)
-        with world.sessions.begin() as session:
-            # The old shape: neither fact is recorded.
-            session.execute(
-                text("UPDATE recipe_installations SET model_artifact_set_sha256 = NULL")
-            )
-            session.execute(text("DELETE FROM fleet_profile_recipes"))
-            session.execute(
-                text("UPDATE recipe_installations SET plan = :plan WHERE id = :id"),
-                {"plan": '{"damaged": true}', "id": damaged},
-            )
-        with world.sessions.begin() as session:
-            filled = fill_reference_facts(session.connection())
-        assert filled == 3  # two plans and one profile recipe
-        with world.sessions.begin() as session:
-            assert fill_reference_facts(session.connection()) == 0
-            sets = dict(
-                session.execute(
-                    select(
-                        RecipeInstallation.id,
-                        RecipeInstallation.model_artifact_set_sha256,
-                    )
-                ).all()
-            )
-            assert sets[world.target_installation] == admitted
-            reused_row = session.get(RecipeInstallation, reused)
-            assert reused_row is not None
-            assert (
-                sets[reused]
-                == parse_stored_installation_plan(
-                    reused_row.plan
-                ).model_artifact_set_sha256
-            )
-            assert sets[damaged] is None
-            assert session.scalars(select(FleetProfileRecipe.profile_id)).all() == [
-                pins
-            ]
-            # A row the profile no longer names is removed; its own are kept.
-            session.add(
-                FleetProfileRecipe(profile_id=pins, publisher="stale", slug="gone")
-            )
-            session.flush()
-            assert fill_reference_facts(session.connection()) == 1
-            assert session.scalars(select(FleetProfileRecipe.profile_id)).all() == [
-                pins
-            ]
-            assert session.scalars(select(FleetProfileRecipe.publisher)).all() != [
-                "stale"
-            ]
-    finally:
-        world.cache.close()
-
-
-@pytest.mark.slow(30)
-def test_ranks_from_before_the_payload_expectation_are_filled_once(
-    tmp_path: Path,
-) -> None:
-    """Admission records each rank's payload expectation; older ranks are filled."""
-    world = _small(tmp_path)
-    try:
-        with world.sessions() as session:
-            plan = session.get(RecipeInstallation, world.target_installation)
-            assert plan is not None
-            expected = {
-                node.node_id: node.required_payload_bytes
-                for node in parse_stored_installation_plan(plan.plan).nodes
-            }
-            recorded = dict(
-                session.execute(
-                    select(
-                        InstallationNode.node_id,
-                        InstallationNode.required_payload_bytes,
-                    ).where(
-                        InstallationNode.installation_id == world.target_installation
-                    )
-                ).all()
-            )
-        assert recorded == expected
-        with world.sessions.begin() as session:
-            session.execute(
-                text("UPDATE installation_nodes SET required_payload_bytes = NULL")
-            )
-        with world.sessions.begin() as session:
-            connection = session.connection()
-            assert fill_installation_payload_bytes(connection) == len(
-                [value for value in expected.values() if value is not None]
-            )
-            assert fill_installation_payload_bytes(connection) == 0
-        with world.sessions() as session:
-            assert (
-                dict(
-                    session.execute(
-                        select(
-                            InstallationNode.node_id,
-                            InstallationNode.required_payload_bytes,
-                        ).where(
-                            InstallationNode.installation_id
-                            == world.target_installation
-                        )
-                    ).all()
-                )
-                == expected
-            )
     finally:
         world.cache.close()

@@ -176,7 +176,7 @@ install admission read `disk_reservations.runtime_images_named_on_nodes` (one
 query for all target Sparks), and any other image is charged. Whether a rank is
 installed is `machine_states.rank_installed`, for a stored state or the
 `InstallationNode.state` column; the `rank-installed` added-line guard refuses
-an inline `== InstallationNodeState.INSTALLED`. A node's newest inventory report is `inventory_repository.newest_snapshot_ids` (one indexed probe per node); the `newest-snapshot` added-line guard refuses a window or grouped max over `node_id`. The Controller records no image or model-file availability receipts
+an inline `== InstallationNodeState.INSTALLED`. Admission row locks cover only live reservations (`machine_states.reservation_live`; released rows are 24 h history), and the `live-reservation` added-line guard refuses an inline `ResourceReservation.state != RELEASED`. A node's newest inventory report is `inventory_repository.newest_snapshot_ids` (one indexed probe per node); the `newest-snapshot` added-line guard refuses a window or grouped max over `node_id`. The Controller records no image or model-file availability receipts
 of its own. Contact,
 claim and result recording take no explicit lock on `agent_nodes` and never
 update it; admission locks that identity/intent row FOR NO KEY UPDATE, which a
@@ -194,8 +194,7 @@ does too until lock-plan step 6. Telemetry, inventory and contact writes never
 lock `agent_nodes` (`test_agent_node_lock_tree.py`). An artifact-job submit or create never calls a Stop (a run Stop ends the whole run and every job on it): an unobservable previous job answers a bounded retryable wait (`tests/test_submit_never_stops_guard.py`). A recipe revision's source bundle digest is the typed, indexed column
 `catalog_document_revisions.source_bundle_sha256`, written by the import and read
 by every lookup (build planning, reconcile, collection); the `projected` JSON
-carries no copy. Revisions from before it are moved by `fill_revision_source_bundles`
-at startup. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
+carries no copy. Do not add per-feature fact tables, ad hoc JSON, duplicate fact
 owners, or authoritative in-memory copies. Operation intent/history, grants,
 and desired configuration are distinct from observed Spark facts. Existing
 misplaced fields require an owner-approved move; do not extend them. The

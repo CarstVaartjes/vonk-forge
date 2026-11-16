@@ -23,7 +23,6 @@ from ..fleet_profile_contract import (
     FleetProfileSupersedeCode,
 )
 from ..lifecycle.evidence import Residue
-from ..lifecycle.fleet_profile import LEGACY_SUPERSEDED_PREFIXES
 from ..models import FleetProfile, FleetProfileApplication
 from ..operation_blockers import OperationBlocker, make_blocker
 from .assessment_support import (
@@ -471,37 +470,4 @@ class FleetProfileService:
             )
             for row in rows:
                 self._lifecycle.heal(row, now, session=session)
-            superseded = tuple(
-                session.scalars(
-                    select(FleetProfileApplication)
-                    .where(
-                        FleetProfileApplication.id == application_id
-                        if application_id is not None
-                        else true()
-                    )
-                    .where(
-                        or_(
-                            *(
-                                FleetProfileApplication.status_reason.startswith(prefix)
-                                for prefix in LEGACY_SUPERSEDED_PREFIXES
-                            )
-                        ),
-                        FleetProfileApplication.state.in_(
-                            (
-                                LifecycleState.FAILED.value,
-                                LifecycleState.CANCELLED.value,
-                            )
-                        ),
-                    )
-                    .order_by(
-                        FleetProfileApplication.created_at,
-                        FleetProfileApplication.id,
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
-                )
-            )
-            relabelled = [
-                self._lifecycle.heal_superseded(row, now) for row in superseded
-            ]
-            return bool(rows) or any(relabelled)
+            return bool(rows)

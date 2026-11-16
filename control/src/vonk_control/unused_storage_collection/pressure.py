@@ -21,6 +21,7 @@ from ..artifact_lifecycle import (
 )
 from ..capabilities import CapabilityUnavailableError
 from ..exact_integer_storage import DecimalIntegerOrderKey
+from ..inventory_repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models import (
     ArtifactLifecycleGate,
@@ -34,7 +35,6 @@ from ..storage_demands import NAS_IMAGES, NAS_MODELS, StorageDemand, spark_scope
 from .common import (
     _LOGGER,
     _RECEIPT_SUFFIX,
-    INVENTORY_MAX_AGE,
     _eviction_order,
     _Kept,
     _Stopping,

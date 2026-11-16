@@ -791,18 +791,6 @@ class RemovalReconcileMixin:
                             ModelCacheOperation.next_action_at.is_(None),
                             ModelCacheOperation.next_action_at <= now,
                         ),
-                        # A row the startup adoption has not reached still carries
-                        # its clock in the payload; it must not take a batch slot
-                        # from a due one.  Retired once no such row can exist.
-                        or_(
-                            ModelCacheOperation.payload["retry"]["next_retry_at"]
-                            .as_string()
-                            .is_(None),
-                            ModelCacheOperation.payload["retry"][
-                                "next_retry_at"
-                            ].as_string()
-                            <= _iso(now),
-                        ),
                     )
                     .order_by(ModelCacheOperation.updated_at, ModelCacheOperation.id)
                     .with_for_update(skip_locked=True)

@@ -30,6 +30,7 @@ from ..disk_reservations import (
     outstanding_disk_reservation_bytes,
 )
 from ..inventory_items_contract import InventorySnapshotKind
+from ..machine_states import reservation_live
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -205,7 +206,8 @@ class InstallAdmissionService(InstallPlanningService):
                     "node-resource-reservations",
                     ResourceReservation,
                     select(ResourceReservation).where(
-                        ResourceReservation.node_id.in_(node_ids)
+                        ResourceReservation.node_id.in_(node_ids),
+                        reservation_live(ResourceReservation.state),
                     ),
                 ),
             )

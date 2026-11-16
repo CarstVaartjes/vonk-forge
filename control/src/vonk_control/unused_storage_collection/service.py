@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
+from ..inventory_repository import INVENTORY_MAX_AGE
 from ..logging import log_event
 from ..models import InstallationNode, RecipeInstallation
 from ..oci_image_store import IMAGE_CACHE_DIRECTORY
@@ -39,7 +40,6 @@ from .common import (
     _HOLDING_STATES,
     _KEPT_WORDS,
     _LOGGER,
-    INVENTORY_MAX_AGE,
     SWEEP_BUDGET_SECONDS,
     ImageBlobReclaimer,
     InstallationRemoval,

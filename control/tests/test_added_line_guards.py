@@ -718,6 +718,25 @@ def test_a_typed_lifecycle_reason_is_allowed(source):
     assert not check_source(PATH, source, lines, modes=("reasons",))
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = job.status_reason.startswith('A')\n",
+        "x = reason.startswith(PREFIXES)\n",
+        "x = retry_reason.endswith('z')\n",
+    ],
+)
+def test_deciding_by_reason_text_is_flagged(source):
+    assert "decision by reason text" in " ".join(
+        check_source(PATH, source, {1}, modes=("reasons",))
+    )
+
+
+def test_a_prefix_test_on_a_non_reason_name_is_allowed():
+    source = "x = path.startswith('a')\ny = job.status.startswith('b')\n"
+    assert not check_source(PATH, source, {1, 2}, modes=("reasons",))
+
+
 def test_a_controller_test_sends_the_agents_pinned_request_never_its_own():
     # The hand-built JobRun Stop that agreed with the Controller, not the agent.
     source = (
@@ -4227,6 +4246,24 @@ def test_an_inline_rank_installed_test_is_flagged() -> None:
         "installed = state == InstallationNodeState.INSTALLED\n",
         {1},
         modes=("rank-installed",),
+    )
+
+
+def test_an_inline_live_reservation_test_is_flagged() -> None:
+    path = "control/src/vonk_control/other.py"
+    source = "q = q.where(ResourceReservation.state != ReservationState.RELEASED)\n"
+    assert check_source(path, source, {1}, modes=("live-reservation",))
+    assert not check_source(
+        path,
+        "q = q.where(reservation_live(ResourceReservation.state))\n",
+        {1},
+        modes=("live-reservation",),
+    )
+    assert not check_source(
+        "control/src/vonk_control/machine_states.py",
+        "return state != ReservationState.RELEASED\n",
+        {1},
+        modes=("live-reservation",),
     )
 
 

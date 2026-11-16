@@ -106,6 +106,5 @@ from .schema_helpers import (
 )
 from .schema_helpers import _repair_check_constraints as _repair_check_constraints
 from .schema_helpers import _schema_difference_key as _schema_difference_key
-from .startup import adopt_legacy_rows as adopt_legacy_rows
 from .startup import initialize_database as initialize_database
 from .startup import verify_schema_is_current as verify_schema_is_current

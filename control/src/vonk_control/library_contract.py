@@ -39,6 +39,7 @@ from .catalog_revision_contract import (
     RecipeRevisionProjection,
 )
 from .cursor_contract import MAX_CURSOR_LENGTH
+from .inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from .machine_states import (
     InstallationStateField,
     RouteStateField,
@@ -97,7 +98,9 @@ class LibraryProjectionReason(StrictModel):
 
 
 class FreshnessPolicy(StrictModel):
-    inventory_fresh_seconds: int = Field(default=300, ge=1, le=3_600)
+    inventory_fresh_seconds: int = Field(
+        default=INVENTORY_MAX_AGE_SECONDS, ge=1, le=3_600
+    )
     telemetry_live_seconds: int = Field(default=6, ge=1, le=60)
     telemetry_delayed_seconds: int = Field(default=20, ge=1, le=300)
 

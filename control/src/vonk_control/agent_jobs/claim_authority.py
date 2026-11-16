@@ -25,7 +25,7 @@ from vonk_agent_protocol.contracts import AgentFailureResult
 from .. import agent_operation_states, job_states
 from ..disk_reservations import outstanding_disk_charges
 from ..gpu_health import gpu_health_reason
-from ..inventory_repository import InventoryRepository
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS, InventoryRepository
 from ..lifecycle import Outcome, Reported
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.evidence import BookkeepingReason, retire_as_unknown
@@ -71,7 +71,7 @@ def recipe_build_disk_wait(
         snapshot = InventoryRepository(service._sessions).latest(
             node_id,
             now=now,
-            maximum_age=300,
+            maximum_age=INVENTORY_MAX_AGE_SECONDS,
             _session=session,
         )
     except KeyError:
@@ -472,7 +472,10 @@ def dispatch_wait(
     else:
         try:
             snapshot = InventoryRepository(service._sessions).latest(
-                operation.node_id, now=now, maximum_age=300, _session=session
+                operation.node_id,
+                now=now,
+                maximum_age=INVENTORY_MAX_AGE_SECONDS,
+                _session=session,
             )
         except KeyError:
             snapshot = None  # the owning admission's missing-inventory rule applies

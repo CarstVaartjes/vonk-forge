@@ -32,6 +32,7 @@ from ..distribution_executor import CompositeDistributionPhaseExecutor
 from ..failure_evidence import FailureEvidenceService
 from ..gateway_keys import GatewayKeyError, GatewayKeyService, keep_default_key
 from ..gateway_route_grants import recipe_key_routes
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..library_assessment import LibraryAssessment
 from ..library_projection import LibraryProjection
 from ..logging import configure_controller_logging
@@ -334,7 +335,7 @@ def production_app(settings: Settings | None = None) -> FastAPI:
     recipe_builds = RecipeBuildService(
         sessions,
         bundles=database_bundles,
-        inventory_max_age=300,
+        inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
         build_archive_available=runtime_image_storage.build_archive_available,
         prepared_builds=runtime_image_storage.find_build,
     )
@@ -342,13 +343,13 @@ def production_app(settings: Settings | None = None) -> FastAPI:
         sessions,
         install_admission=InstallAdmissionService(
             sessions,
-            inventory_max_age=300,
+            inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
             disk_floor_bytes=10_000_000_000,
             compiled_plan_provider=execution_plans.compile_installation,
         ),
         run_admission=RunAdmissionService(
             sessions,
-            inventory_max_age=300,
+            inventory_max_age=INVENTORY_MAX_AGE_SECONDS,
             memory_floor_bytes=PLATFORM_MEMORY_FLOOR_BYTES,
         ),
         agent_jobs=agent_services.operations,

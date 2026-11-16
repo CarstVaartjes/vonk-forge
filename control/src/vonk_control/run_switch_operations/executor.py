@@ -16,6 +16,7 @@ from ..categorized_errors import (
 from ..cluster_mappings import (
     ClusterMappingService,
 )
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..lifecycle_preflight import LifecyclePreflight
 from ..recipe_operations import (
     RecipeOperationService,
@@ -43,7 +44,7 @@ class RecipeLifecyclePhaseExecutor(
         mappings: ClusterMappingService,
         clock: Callable[[], datetime],
         artifact_executor: RunSwitchArtifactPhaseExecutor | None = None,
-        inventory_max_age_seconds: int = 300,
+        inventory_max_age_seconds: int = INVENTORY_MAX_AGE_SECONDS,
     ) -> None:
         self._lifecycle = lifecycle
         self._sessions = sessions
