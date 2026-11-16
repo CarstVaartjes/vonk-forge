@@ -1,8 +1,3 @@
-from vonk_agent_protocol import canonical_message
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-
 """Library reads exercise real placement, cache, and authenticated route owners."""
 
 import json
@@ -18,6 +13,8 @@ import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from vonk_agent_protocol import canonical_message
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -45,6 +42,7 @@ from cluster_profiles.cli import main
 from cluster_profiles.cli_render import render_payload
 from cluster_profiles.control_client import ControlClient
 
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
 from .test_recipe_operations import NOW, setup_services

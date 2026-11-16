@@ -1,5 +1,3 @@
-from vonk_agent_protocol import canonical_message
-
 """Fleet removal reuses its owners and proves exact effects after restart."""
 
 import hashlib
@@ -14,6 +12,7 @@ from vonk_agent_protocol import (
     InstallationState,
     LifecycleState,
     ModelCacheCode,
+    canonical_message,
 )
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState

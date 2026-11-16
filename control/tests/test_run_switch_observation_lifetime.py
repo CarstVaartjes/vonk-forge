@@ -1,5 +1,3 @@
-from sqlalchemy import update
-
 """Connected request/store/worker regressions for damaged artifact observations."""
 
 from datetime import timedelta
@@ -7,7 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase

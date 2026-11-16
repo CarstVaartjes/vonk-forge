@@ -1,12 +1,3 @@
-from vonk_agent_protocol import (
-    DesiredAssignmentState,
-    ReservationState,
-    RunSwitchCode,
-    UnknownOutcomeError,
-    WaitReason,
-)
-from vonk_agent_protocol.agent_words import ProfileChildJobKind
-
 """Capacity ownership from accepted profile intent to its exact child.
 
 The ordinary ResourceReservation row is the claim. Handoff changes its owner
@@ -29,8 +20,16 @@ from uuid import UUID, uuid5
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
-from vonk_agent_protocol import LifecycleState, canonical_message
-from vonk_agent_protocol.agent_words import ProfileChildPhase
+from vonk_agent_protocol import (
+    DesiredAssignmentState,
+    LifecycleState,
+    ReservationState,
+    RunSwitchCode,
+    UnknownOutcomeError,
+    WaitReason,
+    canonical_message,
+)
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileChildPhase
 from vonk_agent_protocol.inventory import MemoryPool
 
 from . import fleet_profile_states, job_states

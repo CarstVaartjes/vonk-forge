@@ -1,7 +1,3 @@
-from vonk_agent_protocol.claims import AgentRuntimeIdentity
-
-from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
-
 """An independent unchanged executor survives a newer whole-fleet decision."""
 
 from datetime import timedelta
@@ -9,6 +5,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import InvalidRequestError, InvalidRequestReason
+from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.fleet_profile_contract import FleetProfileInput
 from vonk_control.fleet_profiles import FleetProfileService
 from vonk_control.models import (
@@ -19,6 +16,7 @@ from vonk_control.models import (
 )
 
 from .display_fixtures import reword
+from .runtime_identity_support import PACKAGED_RUNTIME_IDENTITY, inventory_items_fixture
 from .test_fleet_profiles import NOW, _database, _node_id, _seed, _SwitchAdapter, _uuid
 
 
