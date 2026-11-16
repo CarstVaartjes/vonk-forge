@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 
 from sqlalchemy.orm import Session
@@ -41,18 +41,32 @@ def missing_spark_bytes_by_node(
     then plans reuses what the Spark already holds.
     """
 
+    return missing_spark_bytes(
+        manifest,
+        {
+            node_id: spark_model_objects(session, node_id, now=now)
+            for node_id in node_ids
+        },
+    )
+
+
+def missing_spark_bytes(
+    manifest: ArtifactSetManifest,
+    held_by_node: Mapping[str, Mapping[str, int] | None],
+) -> dict[str, int]:
+    """Bytes of a model set each Spark lacks, from store scans already read."""
+
     expected_by_digest = {
         artifact.sha256: artifact.expected_bytes for artifact in manifest.artifacts
     }
-    missing: dict[str, int] = {}
-    for node_id in node_ids:
-        held = spark_model_objects(session, node_id, now=now) or {}
-        missing[node_id] = sum(
+    return {
+        node_id: sum(
             size
             for digest, size in expected_by_digest.items()
-            if held.get(digest) != size
+            if (held or {}).get(digest) != size
         )
-    return missing
+        for node_id, held in held_by_node.items()
+    }
 
 
 class DatabaseRunSwitchArtifactInspector:

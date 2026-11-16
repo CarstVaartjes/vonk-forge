@@ -374,9 +374,17 @@ def read_stored_document[T](validate: Callable[[object], T], document: object) -
 
     Wire and request models stay strict; a document written by an older build
     may carry fields that were since removed, and that must never make history
-    unreadable. Any other defect still raises the original error.
+    unreadable. Any other defect still raises the original error. A current
+    document is validated as it is; only a repair copies it, so the caller's
+    value is never changed.
     """
 
+    try:
+        return validate(document)
+    except ValidationError as error:
+        issues = error.errors()
+        if not issues or any(i["type"] != "extra_forbidden" for i in issues):
+            raise
     document = copy.deepcopy(document)
     for _ in range(64):
         try:

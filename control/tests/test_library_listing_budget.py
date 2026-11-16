@@ -317,6 +317,104 @@ def test_a_blocked_placement_read_degrades_the_recipe_not_the_listing(
     assert assessment.readiness.state == "unavailable"
 
 
+def test_the_next_assessment_waits_out_an_overrun_worker_and_is_assessed(
+    monkeypatch,
+    frozen_pass_budgets,
+    assessed_library,  # noqa: F811
+):
+    projection, sessions, cache, service, *_ = assessed_library
+    recipes = projection.recipe_library(assess=False).recipes
+    release = threading.Event()
+    entered = threading.Event()
+    inspect = service.inspect_candidate
+    inspections = []
+
+    def first_inspection_blocks(*args, **kwargs):
+        inspections.append(args)
+        if len(inspections) == 1:
+            entered.set()
+            release.wait(_BLOCKED_SECONDS * 2)
+        return inspect(*args, **kwargs)
+
+    joins = []
+
+    class FirstJoinExpires(threading.Thread):
+        def join(self, timeout=None):
+            joins.append(timeout)
+            if len(joins) > 1:
+                super().join()
+                return
+            assert entered.wait(timeout=30)
+            frozen_pass_budgets.advance(timeout or 0)
+            super().join(timeout=0)
+
+    class OverrunEndsWhileWaited:
+        """The overrun worker's last read returns once a request waits for it."""
+
+        def __init__(self):
+            self._lock = threading.Lock()
+
+        def acquire(self, blocking=True, timeout=-1):
+            if timeout > 0 and self._lock.locked():
+                release.set()
+            return self._lock.acquire(blocking, timeout)
+
+        def release(self):
+            self._lock.release()
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "vonk_control.library_assessment.threading",
+        SimpleNamespace(
+            Thread=FirstJoinExpires, Lock=OverrunEndsWhileWaited, Event=threading.Event
+        ),
+    )
+    service.inspect_candidate = first_inspection_blocks  # type: ignore[method-assign]
+    assess = LibraryAssessment(
+        sessions,
+        run_switch=service,
+        model_cache=cache,
+        clock=lambda: NOW,
+        budget_seconds=10.0,
+    )
+    try:
+        overrun = assess(recipes)[0].assessment
+        # The first worker is still in its placement read when this one asks.
+        following = assess(recipes)[0].assessment
+    finally:
+        release.set()
+    assert overrun is not None and overrun.fleet_fit.state == "unavailable"
+    assert following is not None
+    assert following.fleet_fit.state == "ready", following.model_dump(mode="json")
+
+
+def test_an_assessment_resolves_each_exact_artifact_set_once(
+    monkeypatch,
+    assessed_library,  # noqa: F811
+):
+    projection, sessions, cache, service, *_ = assessed_library
+    recipes = projection.recipe_library(assess=False).recipes
+    resolved: dict[tuple[object, ...], list[object]] = {}
+    resolve = cache.resolve_artifact_set
+
+    def recording(**request):
+        manifest = resolve(**request)
+        resolved.setdefault(tuple(sorted(request.items())), []).append(manifest)
+        return manifest
+
+    monkeypatch.setattr(cache, "resolve_artifact_set", recording)
+    assessment = LibraryAssessment(
+        sessions, run_switch=service, model_cache=cache, clock=lambda: NOW
+    )(recipes)[0].assessment
+    assert assessment is not None and assessment.fleet_fit.state == "ready"
+    # Cache, ordering and placement reads ask for the same exact sets more
+    # than once; each is resolved once and shared, not re-read per placement.
+    assert any(len(manifests) > 1 for manifests in resolved.values()), resolved
+    for manifests in resolved.values():
+        assert all(manifest is manifests[0] for manifest in manifests)
+
+
 def test_assessment_reads_do_not_walk_the_stored_model_objects(
     assessed_library,  # noqa: F811
     monkeypatch,
@@ -653,7 +751,8 @@ def test_blocked_assessment_reuses_one_executor_then_fresh_read_is_assessed(
         first = assessment(recipes, budget_seconds=1.0)
         assert entered.wait(timeout=30)
         for _ in range(20):
-            assert assessment(recipes)[0].assessment is not None
+            # Each waits out its own short budget for the blocked read.
+            assert assessment(recipes, budget_seconds=0.01)[0].assessment is not None
         assert len(workers) == 1
         assert first[0].assessment is not None
         assert projection.models().models
