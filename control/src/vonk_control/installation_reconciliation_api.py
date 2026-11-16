@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import FastAPI, HTTPException, Path, status
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .auth import MUTATION_ROLES, Actor
 from .logging import redact_text
@@ -95,7 +96,7 @@ def install_installation_reconciliation_routes(
         if (
             (operation_id is not None and operation.operation_id != operation_id)
             or (request_key is not None and operation.request_key != request_key)
-            or operation.kind != "recipe.cleanup.v2"
+            or operation.kind != ProfileChildJobKind.CLEANUP.value
             or operation.action != "cleanup"
             or operation.cleanup_mode != "reconcile"
             or (

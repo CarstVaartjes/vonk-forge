@@ -17,7 +17,6 @@ from vonk_agent_protocol.agent_words import (
 
 from .. import fleet_profile_states, job_states
 from ..admission_locking import patient_admission
-from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
     FleetProfilePreview,
@@ -471,10 +470,8 @@ class FleetProfileService:
                 )
             )
             for row in rows:
-                if needs_conversion(row):
-                    continue
                 self._lifecycle.heal(row, now, session=session)
-            legacy = tuple(
+            superseded = tuple(
                 session.scalars(
                     select(FleetProfileApplication)
                     .where(
@@ -505,8 +502,6 @@ class FleetProfileService:
                 )
             )
             relabelled = [
-                self._lifecycle.heal_superseded(row, now)
-                for row in legacy
-                if not needs_conversion(row)
+                self._lifecycle.heal_superseded(row, now) for row in superseded
             ]
             return bool(rows) or any(relabelled)

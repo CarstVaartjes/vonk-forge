@@ -72,6 +72,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from . import job_states
 from .agent_operation_facts import aware as _aware
@@ -108,9 +109,9 @@ _OWNER_ENDED = "owner-ended"
 _LEFTOVER_ACTOR = "system:residue-sweep"
 # Operations that may own an installation plan or a distribution grant.
 _OWNER_JOB_KINDS = (
-    "recipe.run-switch.v2",
-    "recipe.stop.v2",
-    "recipe.cleanup.v2",
+    ProfileChildJobKind.RUN_SWITCH.value,
+    ProfileChildJobKind.STOP.value,
+    ProfileChildJobKind.CLEANUP.value,
     "artifact-distribution",
     "recipe.install",
     "recipe.uninstall",

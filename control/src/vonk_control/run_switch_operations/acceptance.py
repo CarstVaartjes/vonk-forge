@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from ..categorized_errors import (
     MissingRecord,
@@ -63,7 +64,7 @@ class AcceptanceMixin:
         if request.request_key is not None:
             existing = service._existing_request_operation(
                 request.request_key,
-                kind="recipe.cleanup.v2",
+                kind=ProfileChildJobKind.CLEANUP.value,
                 intent=intent,
             )
             if existing is not None:
@@ -79,7 +80,7 @@ class AcceptanceMixin:
             preview,
             request_key=request_key,
             actor=actor,
-            kind="recipe.cleanup.v2",
+            kind=ProfileChildJobKind.CLEANUP.value,
             workload_intent_ordinal=workload_intent_ordinal,
             intent=intent,
         )
@@ -100,7 +101,7 @@ class AcceptanceMixin:
         if request.request_key is not None:
             existing = service._existing_request_operation(
                 request.request_key,
-                kind="recipe.run-switch.v2",
+                kind=ProfileChildJobKind.RUN_SWITCH.value,
                 intent=intent,
             )
             if existing is not None:
@@ -118,7 +119,7 @@ class AcceptanceMixin:
             plan,
             request_key=request_key,
             actor=actor,
-            kind="recipe.run-switch.v2",
+            kind=ProfileChildJobKind.RUN_SWITCH.value,
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
             intent=intent,
@@ -156,7 +157,7 @@ class AcceptanceMixin:
         if request.request_key is not None:
             existing = service._existing_request_operation(
                 request.request_key,
-                kind="recipe.stop.v2",
+                kind=ProfileChildJobKind.STOP.value,
                 intent=intent,
             )
             if existing is not None:
@@ -173,7 +174,7 @@ class AcceptanceMixin:
             preview,
             request_key=request_key,
             actor=actor,
-            kind="recipe.stop.v2",
+            kind=ProfileChildJobKind.STOP.value,
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
             intent=intent,
@@ -198,7 +199,7 @@ class AcceptanceMixin:
         )
         existing = service._existing_request_operation(
             request_key,
-            kind="recipe.stop.v2",
+            kind=ProfileChildJobKind.STOP.value,
             intent=intent,
         )
         if existing is not None:
@@ -217,7 +218,7 @@ class AcceptanceMixin:
             plan,
             request_key=request_key,
             actor=actor,
-            kind="recipe.stop.v2",
+            kind=ProfileChildJobKind.STOP.value,
             workload_intent_ordinal=workload_intent_ordinal,
             profile_application_id=profile_application_id,
             intent=intent,

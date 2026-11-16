@@ -79,7 +79,6 @@ CLASSIFIED = {
     "vonk_control.unused_storage_collection.pressure": (
         "test_unused_storage_collection: every slow step, one shared attempt budget"
     ),
-    "vonk_control.fleet_profile_adapter_conversion": "deadline bounds the scan itself",
     "vonk_control.recipe_image_availability.removal_acceptance": "bounds the checks",
     "vonk_control.recipe_image_availability.removal_execution": (
         "step deadline bounds the archive batch; one always runs"

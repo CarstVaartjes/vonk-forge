@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_forge_contracts import read_recipe
 
 from . import fleet_profile_states, job_states
@@ -283,7 +284,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
         .where(
             or_(
                 and_(
-                    Job.kind == "recipe.run-switch.v2",
+                    Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
                     Job.state.in_(("queued", "running")),
                     or_(
                         Job.payload["plan"]["recipe_build_id"].as_string() == build.id,
@@ -314,7 +315,7 @@ def current_build_consumers(session: Session, build: RecipeBuild) -> tuple[str, 
         try:
             current = (
                 _run_switch_consumer(session, parent, build)
-                if parent.kind == "recipe.run-switch.v2"
+                if parent.kind == ProfileChildJobKind.RUN_SWITCH.value
                 else _availability_consumer(parent, build)
             )
         except (KeyError, TypeError, ValueError):
@@ -418,7 +419,7 @@ def _profile_consumer(
                 from_json=True,
             )
             if (
-                child.kind != "recipe.run-switch.v2"
+                child.kind != ProfileChildJobKind.RUN_SWITCH.value
                 or child_progress.profile_application_id != application.id
                 or child_progress.workload_intent_ordinal
                 != progress.workload_intent_ordinal

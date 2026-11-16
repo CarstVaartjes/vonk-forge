@@ -195,7 +195,6 @@ module defines its own.
 | `control/src/vonk_control/enrollment_contract.py` | controller-contract | 8 | Enrollment status, grants, exact issuance/rotation claims and local/CA revocation confirmation. |
 | `control/src/vonk_control/failure_evidence.py` | declared | 5 | Failure diagnostics rendered on request from durable failure rows. |
 | `control/src/vonk_control/fleet_event_contract.py` | controller-contract | 9 | Strict payload contracts for the durable Fleet outbox. |
-| `control/src/vonk_control/fleet_profile_adapter_conversion_contract.py` | controller-contract | 3 | Private one-time retained journal proof inputs and typed conversion outcome; never execution authority. |
 | `control/src/vonk_control/fleet_profile_contract/endpoints.py` | controller-contract | 3 | Fleet profile contract: endpoints. |
 | `control/src/vonk_control/fleet_profile_contract/definitions.py` | controller-contract | 17 | Fleet profile contract: definitions. |
 | `control/src/vonk_control/fleet_profile_contract/assessment.py` | controller-contract | 11 | Fleet profile contract: assessment. |

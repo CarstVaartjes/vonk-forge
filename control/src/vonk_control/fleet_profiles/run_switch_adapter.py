@@ -537,7 +537,7 @@ class RunSwitchFleetProfileAdapter(
             # the parent AgentNode row lock and do not require a table lock.
             tuple(
                 session.scalars(
-                    select(NodeInventorySnapshot)
+                    select(NodeInventorySnapshot.id)
                     .where(NodeInventorySnapshot.node_id.in_(node_ids))
                     .order_by(
                         NodeInventorySnapshot.node_id,

@@ -68,7 +68,9 @@ export function CacheRemovalReviewDetails({ review }: { review: CacheRemovalRevi
                 ? "Remove"
                 : asset.disposition === CacheAssetDisposition.RETAIN_SHARED
                   ? "Retain shared"
-                  : "Retain referenced"}
+                  : asset.disposition === CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE
+                    ? "Retain (observation unavailable)"
+                    : "Retain referenced"}
               : {asset.kind} {asset.sha256} (expected:{" "}
               {asset.expected_bytes === null || asset.expected_bytes === undefined
                 ? AssetAvailability.UNKNOWN

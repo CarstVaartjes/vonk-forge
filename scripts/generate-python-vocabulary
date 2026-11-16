@@ -43,11 +43,11 @@ def cli_words() -> str:
         ProfileReasonCode,
         StopOutcome,
     )
-    from vonk_agent_protocol.agent_words import ProfileEffectState
+    from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileEffectState
     from vonk_agent_protocol.gpu_clock import GpuClockMetric
     from vonk_agent_protocol.lifecycle_vocabulary import ArtifactPreparation
-    from vonk_agent_protocol.state_machines import RunState
     from vonk_agent_protocol.reason_codes.profiles import PROFILE_REFUSAL_CODES
+    from vonk_agent_protocol.state_machines import RunState
     from vonk_control.artifact_jobs.job_contract import JobContractState
     from vonk_control.cache_removal_review import ArtifactKind, CacheAssetDisposition
     from vonk_forge_contracts.qualification_status import (
@@ -87,6 +87,8 @@ def cli_words() -> str:
         "ASSET_REMOVE": CacheAssetDisposition.REMOVE,
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
+        "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
+        "JOB_KIND_CLEANUP": ProfileChildJobKind.CLEANUP,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
         **{
             f"ASSET_{kind.upper().replace('-', '_')}": kind

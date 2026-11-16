@@ -624,7 +624,9 @@ def test_read_uses_postgresql_registration_latest_rows_and_a_bounded_query_set()
     registered = [
         statement
         for statement in statements
-        if "from agent_nodes" in statement and "order by" in statement
+        if "from agent_nodes" in statement
+        and "order by" in statement
+        and "node_inventory_snapshots" not in statement
     ]
     assert registered
     assert all("enrolled_at asc nulls first" in statement for statement in registered)

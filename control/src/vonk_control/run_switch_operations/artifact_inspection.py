@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     WaitReason,
 )
 from vonk_agent_protocol.agent_words import (
+    ProfileChildJobKind,
     ProfileReasonSeverity,
     RunSwitchReasonScopeName,
 )
@@ -107,7 +108,7 @@ def _scan_floors(
             load_only(Job.state, Job.targets, Job.updated_at, Job.result, Job.payload)
         )
         .where(
-            Job.kind == "recipe.run-switch.v2",
+            Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
             Job.updated_at >= now - INVENTORY_MAX_AGE,
         )
     ):

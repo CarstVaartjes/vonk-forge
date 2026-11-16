@@ -18,6 +18,7 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationProgress,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 from vonk_agent_protocol.claims import AGENT_PROTOCOL_VERSION
 from vonk_agent_protocol.state_machines import CertificateRecordState
 
@@ -54,8 +55,8 @@ _JOB_KINDS = frozenset(
         "agent-upgrade",
         "artifact-distribution",
         "fleet.revoke",
-        "recipe.run-switch.v2",
-        "recipe.stop.v2",
+        ProfileChildJobKind.RUN_SWITCH.value,
+        ProfileChildJobKind.STOP.value,
     }
 )
 _JOB_STATES = frozenset(

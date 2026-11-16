@@ -24,7 +24,6 @@ from vonk_agent_protocol.agent_words import (
 
 from .. import fleet_profile_states
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_adapter_conversion import needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileApplicationCancellationIntent,
     FleetProfileApplicationProgress,
@@ -330,7 +329,7 @@ class FleetProfileService:
                 )
                 .limit(1)
             )
-            if candidate is None or needs_conversion(candidate):
+            if candidate is None:
                 return False
             application_id = candidate.id
             try:
@@ -356,7 +355,7 @@ class FleetProfileService:
                 .with_for_update(skip_locked=True)
                 .limit(1)
             )
-            if row is None or needs_conversion(row):
+            if row is None:
                 return False
             plan = _persisted_profile_plan(row)
             current = _stored_progress(row)

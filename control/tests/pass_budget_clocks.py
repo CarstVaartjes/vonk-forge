@@ -28,7 +28,6 @@ PASS_BUDGET_MODULES = (
     "vonk_control.model_cache.removal_execution",
     "vonk_control.model_cache.removal_reconcile",
     "vonk_control.unused_storage_collection.pressure",
-    "vonk_control.fleet_profile_adapter_conversion",
     "vonk_control.recipe_image_availability.removal_acceptance",
     "vonk_control.recipe_image_availability.removal_execution",
     "vonk_control.library_projection.views",

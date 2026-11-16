@@ -5,6 +5,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 """Capacity ownership from accepted profile intent to its exact child.
 
@@ -325,7 +326,7 @@ def profile_build_memory_claims(
     query = (
         select(Job)
         .where(
-            Job.kind == "recipe.run-switch.v2",
+            Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
             Job.payload["plan"]["build"]["build_input_sha256"].as_string()
             == build.build_input_sha256,
         )

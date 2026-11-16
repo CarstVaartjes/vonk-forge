@@ -1,13 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,
+    newest_snapshot_ids,
 )
 from vonk_control.models import AgentNode, Base, NodeInventorySnapshot
 from vonk_control.stored_json import write_guard_mode
@@ -227,3 +228,43 @@ def test_original_directory_items_and_sizes_survive_store_load(
     assert latest.installations == reported
     assert latest.runs == reported
     assert latest.installation_bytes == measured
+
+
+def test_newest_snapshot_ids_pick_each_nodes_newest_report(tmp_path) -> None:
+    repo, now = repository(tmp_path)
+    node = "spk_" + "1" * 32
+    ids = []
+    for seconds in (0, 10, 5):
+        report = NodeInventoryReport.model_validate_json(
+            canonical_message(
+                {
+                    "node_id": node,
+                    "observed_at": now + timedelta(seconds=seconds),
+                    "disk_total_bytes": 1000,
+                    "disk_free_bytes": 700 - seconds,
+                    "host_memory_total_bytes": 500,
+                    "host_memory_free_bytes": 300,
+                    "gpu_memory_total_bytes": 400,
+                    "gpu_memory_free_bytes": 250,
+                    "gpu_count": 1,
+                    "artifact_store_read_only": False,
+                    "capabilities": ("runtime.vllm.v1",),
+                    "memory_pool": "separate",
+                    "schema_version": 1,
+                    "nvidia_driver_version": "unknown",
+                    "container_runtime_version": "unknown",
+                }
+            )
+        )
+        ids.append(repo.record(report).id)
+    with repo._sessions() as session:
+        found = set(
+            session.scalars(
+                select(NodeInventorySnapshot.id).where(
+                    NodeInventorySnapshot.id.in_(
+                        newest_snapshot_ids([node, "spk_" + "2" * 32])
+                    )
+                )
+            )
+        )
+    assert found == {ids[1]}

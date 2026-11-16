@@ -13,7 +13,6 @@ from vonk_agent_protocol import (
     LifecycleState,
     OperationFailureCode,
     OperationProgress,
-    ProfileReasonCode,
     input_state,
 )
 from vonk_agent_protocol.agent_words import (
@@ -28,7 +27,6 @@ from vonk_agent_protocol.agent_words import (
 from .. import fleet_profile_states, job_states
 from ..auth import MUTATION_ROLES
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_adapter_conversion import conversion_observation, needs_conversion
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationView,
@@ -37,7 +35,6 @@ from ..fleet_profile_contract import (
 from ..lifecycle.evidence import Residue
 from ..logging import redact_text
 from ..models import FleetProfile, FleetProfileApplication, User
-from ..operation_blockers import bound_blockers, make_blocker
 from ..operation_contract import OperationFailureEvidence
 from ..operation_item_contract import (
     OperationItem,
@@ -208,25 +205,6 @@ class FleetProfileService:
         """
         cls = _typing_cast("type[_FleetProfileService]", cls)  # noqa: PLW0642 -- assembled mixin interface
 
-        if needs_conversion(row):
-            observed = conversion_observation(row)
-            item = cls._unreadable_operation_item(row)
-            item.status_reason = observed.detail
-            item.next_attempt_at = (
-                observed.next_attempt_at.isoformat()
-                if observed.next_attempt_at
-                else None
-            )
-            item.blockers = bound_blockers(
-                [
-                    make_blocker(
-                        ProfileReasonCode.RETRY_CONFLICT,
-                        observed.detail
-                        or "Exact retained child evidence is being reconciled",
-                    )
-                ]
-            )
-            return item
         try:
             typed_progress = _persisted_profile_progress(row)
         except (FleetProfileConflict, ValidationError, TypeError, ValueError):
