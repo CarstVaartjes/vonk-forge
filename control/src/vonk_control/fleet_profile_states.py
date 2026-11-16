@@ -44,6 +44,21 @@ LIVE: tuple[str, ...] = words(
 )
 
 
+#: A load the worker advances in turn: accepted or running.
+ORDINARY: tuple[str, ...] = words(LifecycleState.QUEUED, LifecycleState.RUNNING)
+#: Every word an application is in (an end included); a stored word outside it is
+#: unknown, and the ordinary scan re-observes it until the adapter settles it.
+KNOWN: tuple[str, ...] = words(
+    LifecycleState.QUEUED,
+    LifecycleState.RUNNING,
+    LifecycleState.BACKOFF,
+    LifecycleState.SUCCEEDED,
+    LifecycleState.FAILED,
+    LifecycleState.CANCELLED,
+    LifecycleState.SUPERSEDED,
+)
+
+
 def cancel_in_flight(stored: object) -> bool:
     return isinstance(stored, str) and is_state(
         SUBJECT, stored, LifecycleState.OBSERVING

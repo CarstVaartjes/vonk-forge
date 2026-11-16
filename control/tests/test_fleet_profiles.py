@@ -22,6 +22,7 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
+from vonk_control import fleet_profile_states
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -328,6 +329,28 @@ def test_profile_worker_retires_malformed_persisted_plan_as_unknown() -> None:
         # Retired, not failed for a person: its effect is unknown, and the worker
         # went on to the next item.
         assert retired.state == "cancelled"
+
+
+def test_profile_worker_re_observes_an_unknown_stored_state_word() -> None:
+    sessions = _database()
+    _recipe_id, revision_id = _seed(sessions)
+    service = FleetProfileService(
+        sessions, clock=lambda: NOW, switch_adapter=_SwitchAdapter()
+    )
+    profile = service.create(_input(revision_id), actor="admin")
+    application = service.apply(profile.id, request_key=_uuid(707), actor="admin")
+
+    with sessions.begin() as session:
+        row = session.get(FleetProfileApplication, application.id)
+        assert row is not None
+        # A word the check constraint admits but no application is in.
+        row.state = LifecycleState.NEEDS_OPERATOR.value
+
+    assert service.tick() is True
+    with sessions() as session:
+        settled = session.get(FleetProfileApplication, application.id)
+        assert settled is not None
+        assert settled.state in fleet_profile_states.KNOWN
 
 
 def test_profile_worker_retires_malformed_persisted_progress_as_unknown() -> None:

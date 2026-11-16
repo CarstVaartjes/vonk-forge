@@ -6,7 +6,7 @@ import uuid
 from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
-from sqlalchemy import case, func, select, true
+from sqlalchemy import case, func, or_, select, true
 from vonk_agent_protocol import (
     LifecycleState,
     ProfileReasonCode,
@@ -192,8 +192,14 @@ class FleetProfileService:
                     else true()
                 )
                 .where(
-                    FleetProfileApplication.state.in_(
-                        (LifecycleState.QUEUED.value, LifecycleState.RUNNING.value)
+                    or_(
+                        FleetProfileApplication.state.in_(
+                            fleet_profile_states.ORDINARY
+                        ),
+                        # An unknown stored word is re-observed, never left.
+                        FleetProfileApplication.state.not_in(
+                            fleet_profile_states.KNOWN
+                        ),
                     ),
                     cancellation_state.not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
                     admission_pending.is_(False),
