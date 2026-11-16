@@ -11,7 +11,7 @@ from typing import (
 )
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 from vonk_agent_protocol import (
     RunSwitchCode,
     canonical_message,
@@ -338,6 +338,8 @@ def _latest_inventory(
 ) -> tuple[NodeInventorySnapshot | None, FreshnessEvidence]:
     snapshot = session.scalar(
         select(NodeInventorySnapshot)
+        # The store scan is read by its own query; a plan never needs it here.
+        .options(defer(NodeInventorySnapshot.model_objects))
         .where(NodeInventorySnapshot.node_id == node_id)
         .order_by(NodeInventorySnapshot.observed_at.desc())
         .limit(1)

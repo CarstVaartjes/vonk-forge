@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import ProjectionCode
 
 from .catalog_queries import active_head_revision
-from .catalog_revision_contract import cached_catalog_document
+from .catalog_revision_contract import shared_catalog_document
 from .content_identity import RecipeExecution, runs_identically
 from .models import CatalogDocumentRevision
 from .strict_json import StrictJSONModel
@@ -68,7 +68,7 @@ def newest_active_revisions(
         if row.document_id in newest:
             continue
         try:
-            cached_catalog_document(row.kind, row.content_digest, row.document)
+            shared_catalog_document(row.kind, row.content_digest, row.document)
         except (TypeError, ValueError):
             continue
         newest[row.document_id] = row

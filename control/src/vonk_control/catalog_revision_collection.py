@@ -96,7 +96,7 @@ from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
 from vonk_forge_contracts import ModelDefinition
 
 from .agent_jobs import release_owned_reservations_in_session
-from .catalog_revision_contract import UnprojectedRevision, cached_catalog_document
+from .catalog_revision_contract import UnprojectedRevision, shared_catalog_document
 from .logging import log_event
 from .model_cache_contract import CacheManifest, CacheOperationKind
 from .models import (
@@ -908,7 +908,7 @@ def _model_dependencies(
         .execution_options(yield_per=_SCAN_BATCH)
     ):
         try:
-            model = cached_catalog_document(
+            model = shared_catalog_document(
                 RunSwitchReasonScopeName.MODEL, digest, document
             )
         except (TypeError, ValueError):

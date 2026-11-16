@@ -295,14 +295,19 @@ _document_cache_lock = Lock()
 def cached_catalog_document(
     kind: str, digest: str, raw: object
 ) -> ModelDefinition | RecipeDefinition:
-    """A caller's own copy of the parsed document; the shared parse never changes."""
+    """A caller's own copy of the parsed document; the shared parse never changes.
 
-    return _shared_catalog_document(kind, digest, raw).model_copy(deep=True)
+    Callers that only read or validate use :func:`shared_catalog_document`.
+    """
+
+    return shared_catalog_document(kind, digest, raw).model_copy(deep=True)
 
 
-def _shared_catalog_document(
+def shared_catalog_document(
     kind: str, digest: str, raw: object
 ) -> ModelDefinition | RecipeDefinition:
+    """The shared parse itself, uncopied: the caller must never mutate it."""
+
     from .operator_receipt_contract import ReceiptOwner
 
     global _document_cache_size
@@ -337,7 +342,7 @@ def catalog_document_readable(revision: CatalogDocumentRevision) -> bool:
     """Whether :func:`read_catalog_document` reads ``revision``, without a copy."""
 
     try:
-        _shared_catalog_document(
+        shared_catalog_document(
             revision.kind, revision.content_digest, revision.document
         )
     except (TypeError, ValueError, ValidationError):
@@ -404,5 +409,6 @@ __all__ = [
     "read_catalog_projection",
     "read_model_set",
     "rederive_projection",
+    "shared_catalog_document",
     "write_catalog_projection",
 ]

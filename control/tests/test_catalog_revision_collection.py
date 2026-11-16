@@ -1562,14 +1562,14 @@ def test_the_dependency_inventory_parses_each_model_once_per_pass(
     catalog.revision("stale", 2, kind="model", head="active")
     catalog.revision("other", 2, kind="model", head="active")
     parsed: list[str] = []
-    real_read = catalog_revision_collection.cached_catalog_document
+    real_read = catalog_revision_collection.shared_catalog_document
 
     def counting_read(kind: str, digest: str, raw: object) -> object:
         parsed.append(digest)
         return real_read(kind, digest, raw)
 
     monkeypatch.setattr(
-        catalog_revision_collection, "cached_catalog_document", counting_read
+        catalog_revision_collection, "shared_catalog_document", counting_read
     )
     result = catalog.collector().collect()
 

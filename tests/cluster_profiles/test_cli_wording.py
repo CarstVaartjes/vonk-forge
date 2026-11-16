@@ -320,3 +320,23 @@ def test_connection_examples_are_the_vector_text(case, printed):
 )
 def test_metric_values_read_as_the_vector_wording(case):
     assert metric_value_text(case["unit"], case["value"]) == case["text"]
+
+
+def test_unused_removal_unknown_acceptance_reads_unknown_not_refused(printed):
+    base = {"selector": "a", "request_key": "k", "failure": "timed out"}
+    payload = {
+        "unused_removal": True,
+        "removals": [],
+        "retained": [],
+        "unreviewed": [],
+        "totals": {"nas_bytes": 0, "sparks": {}},
+        "submissions": [
+            base | {"reconnect": "vonkctl model remove a --fleet --yes"},
+            base | {"selector": "b"},
+        ],
+    }
+    lines = printed(render_payload, payload, "model", action="remove")
+    labels = [line.split(":")[0].strip() for line in lines]
+    assert "Unknown" in labels and "Refused" in labels
+    unknown = next(line for line in lines if line.startswith("Unknown"))
+    assert "reconnect: vonkctl model remove a --fleet --yes" in unknown
