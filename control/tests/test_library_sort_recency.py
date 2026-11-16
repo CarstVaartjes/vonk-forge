@@ -18,6 +18,8 @@ import json
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Literal
 
 import pytest
 from sqlalchemy import create_engine
@@ -132,12 +134,9 @@ def _insert_synthetic_corpus(
         session.add_all(heads)
 
 
-@pytest.fixture(scope="module")
-def projection(tmp_path_factory: pytest.TempPathFactory) -> LibraryProjection:
+def _build(path: Path) -> tuple[LibraryProjection, sessionmaker]:
     index = json.loads((ROOT / "catalog-index.json").read_text(encoding="utf-8"))
-    engine = create_engine(
-        f"sqlite:///{tmp_path_factory.mktemp('sort-recency') / 'library.sqlite'}"
-    )
+    engine = create_engine(f"sqlite:///{path / 'library.sqlite'}")
     Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     _insert_synthetic_corpus(
@@ -146,11 +145,47 @@ def projection(tmp_path_factory: pytest.TempPathFactory) -> LibraryProjection:
     _insert_synthetic_corpus(
         sessions, kind="recipe", template=index["recipes"][0]["document"]
     )
-    return LibraryProjection(
+    projection = LibraryProjection(
         sessions,
         cursors=TokenCodec(b"s" * 32).cursor_codec(),
         clock=lambda: _EPOCH + timedelta(days=1),
     )
+    return projection, sessions
+
+
+@pytest.fixture(scope="module")
+def projection(tmp_path_factory: pytest.TempPathFactory) -> LibraryProjection:
+    return _build(tmp_path_factory.mktemp("sort-recency"))[0]
+
+
+@pytest.mark.parametrize("kind", ["model", "recipe"])
+@pytest.mark.parametrize(
+    ("sort", "order"), [("name", _NAME_ORDER), ("updated", _RECENT_FIRST)]
+)
+def test_cursor_continues_after_a_boundary_that_left_the_catalog(
+    tmp_path: Path, kind: str, sort: Literal["name", "updated"], order: tuple[str, ...]
+) -> None:
+    def page(projection: LibraryProjection, limit: int, cursor: str | None = None):
+        if kind == "model":
+            result = projection.models(limit=limit, sort=sort, cursor=cursor)
+            return [item.selector for item in result.models], result.next_cursor
+        result = projection.recipe_library(limit=limit, sort=sort, cursor=cursor)
+        return [item.selector for item in result.recipes], result.next_cursor
+
+    projection, sessions = _build(tmp_path)
+    selectors, cursor = page(projection, 2)
+    assert selectors == _selectors(order[:2]) and cursor
+    with sessions.begin() as session:
+        session.query(CatalogDocumentHead).filter_by(kind=kind, slug=order[1]).delete()
+    # A fresh projection: the first one may hold the earlier catalog snapshot.
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"s" * 32).cursor_codec(),
+        clock=lambda: _EPOCH + timedelta(days=1),
+    )
+    assert page(projection, 100)[0] == _selectors((order[0], order[2]))
+    # The boundary is gone, yet the listing continues after it, not at page 1.
+    assert page(projection, 2, cursor)[0] == _selectors(order[2:])
 
 
 def test_models_sort_name_and_updated_are_distinct_and_complete(

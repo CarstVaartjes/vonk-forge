@@ -169,25 +169,16 @@ def models(
         boundary = self._cursors.decode(
             cursor, resource="models", order=_LIBRARY_ORDER, context=context
         )
-        expected_length = 2 if sort == "updated" else 1
-        if not isinstance(boundary, list) or len(boundary) != expected_length:
-            boundary = [None] * expected_length
-        if sort == "updated":
-            boundary_updated_at, boundary_digest = map(str, boundary)
-            boundary_items = [
-                item
-                for item in filtered
-                if item.updated_at.strftime("%Y%m%dT%H%M%SZ") == boundary_updated_at
-                and item.identity.content_sha256 == boundary_digest
-            ]
-        else:
-            (boundary_digest,) = map(str, boundary)
-            boundary_items = [
-                item
-                for item in filtered
-                if item.identity.content_sha256 == boundary_digest
-            ]
-        boundary_key = key(boundary_items[0]) if boundary_items else None
+        # The cursor carries the whole sort key, so a boundary that has left
+        # the catalog still continues the listing after its position.
+        expected_length = 3 if sort == "updated" else 2
+        boundary_key = (
+            tuple(boundary)
+            if isinstance(boundary, list)
+            and len(boundary) == expected_length
+            and all(isinstance(part, str) for part in boundary)
+            else None
+        )
         filtered = [
             item
             for item in filtered
@@ -225,11 +216,7 @@ def models(
 
     def encode_cursor(item: LibraryModelProjection) -> str:
         item_key = key(item)
-        boundary = (
-            [item_key[0], item.identity.content_sha256]
-            if sort == "updated"
-            else [item.identity.content_sha256]
-        )
+        boundary = list(item_key)
         return self._cursors.encode(
             resource="models",
             order=_LIBRARY_ORDER,
@@ -462,26 +449,15 @@ def recipe_library(
         boundary = self._cursors.decode(
             cursor, resource="recipes", order=_LIBRARY_ORDER, context=context
         )
-        if not isinstance(boundary, list) or len(boundary) != (
-            2 if sort == "updated" else 1
-        ):
-            boundary = [None] * (2 if sort == "updated" else 1)
-        if sort == "updated":
-            boundary_updated_at, boundary_digest = map(str, boundary)
-            boundary_items = [
-                item
-                for item in filtered
-                if item.updated_at.strftime("%Y%m%dT%H%M%SZ") == boundary_updated_at
-                and item.identity.content_sha256 == boundary_digest
-            ]
-        else:
-            (boundary_digest,) = map(str, boundary)
-            boundary_items = [
-                item
-                for item in filtered
-                if item.identity.content_sha256 == boundary_digest
-            ]
-        boundary_key = key(boundary_items[0]) if boundary_items else None
+        # The cursor carries the whole sort key, so a boundary that has left
+        # the catalog still continues the listing after its position.
+        boundary_key = (
+            tuple(boundary)
+            if isinstance(boundary, list)
+            and len(boundary) == 3
+            and all(isinstance(part, str) for part in boundary)
+            else None
+        )
         filtered = [
             item
             for item in filtered
@@ -521,11 +497,7 @@ def recipe_library(
 
     def encode_cursor(item: LibraryRecipeProjection) -> str:
         item_key = key(item)
-        boundary = (
-            [item_key[0], item.identity.content_sha256]
-            if sort == "updated"
-            else [item.identity.content_sha256]
-        )
+        boundary = list(item_key)
         return self._cursors.encode(
             resource="recipes",
             order=_LIBRARY_ORDER,
