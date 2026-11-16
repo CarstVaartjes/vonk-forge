@@ -4,6 +4,7 @@ import {LifecycleState, ProgressPhase} from "../api/vocabulary.generated";
 import {ApiClient, ApiError} from "../api/client";
 import type {ControlApi, RecipeOperatorResponse} from "../api/types";
 import {cacheRemovalReview} from "../test-fixtures/cache-removal";
+import {CacheRemovalReviewDetails} from "./cache-removal-review";
 import {CacheRemovalProgress} from "./cache-removal-progress";
 import {LibraryCacheAction} from "./library-cache-action";
 import {LibraryRecipeRemoveAction} from "./library-recipe-remove-action";
@@ -231,4 +232,12 @@ test("unreadable removal effects show unknown and preserve the original operatio
   expect(screen.getByText("Removal unknown: operation")).toBeVisible();
   expect(screen.queryByRole("button", {name: "Retry same reviewed request"})).not.toBeInTheDocument();
   expect(onComplete).not.toHaveBeenCalled();
+});
+
+test("an unknown asset disposition shows its raw value, not a guessed reason", () => {
+  const review = cacheRemovalReview();
+  const asset = {...review.assets[0], disposition: "retain-future"} as unknown as (typeof review.assets)[number];
+  render(<CacheRemovalReviewDetails review={{...review, assets: [asset]}}/>);
+  expect(screen.getByLabelText("Cache removal review")).toHaveTextContent("retain-future: runtime-image");
+  expect(screen.getByLabelText("Cache removal review")).not.toHaveTextContent("Retain referenced");
 });
