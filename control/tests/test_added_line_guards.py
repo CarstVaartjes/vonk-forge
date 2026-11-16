@@ -4235,11 +4235,26 @@ def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
     for source in (
         "f = func.row_number().over(partition_by=NodeInventorySnapshot.node_id)\n",
         "q = select(x).group_by(NodeSnapshot.node_id)\n",
+        "q = select(x).group_by(NodeInventorySnapshot.node_id, other)\n",
+        "q = select(x).group_by(other, NodeInventorySnapshot.node_id)\n",
+        "f = row_number().over(partition_by=(NodeInventorySnapshot.node_id, x))\n",
+        "q = select(x).group_by(\n    func.max(y),\n    NodeSnapshot.node_id,\n)\n",
     ):
         assert check_source(path, source, {1}, modes=("newest-snapshot",))
     assert not check_source(
         path,
         "ids = NodeInventorySnapshot.id.in_(newest_snapshot_ids(nodes))\n",
         {1},
+        modes=("newest-snapshot",),
+    )
+    wrapped = (
+        "q = select(x).group_by(\n    func.max(y),\n    NodeSnapshot.node_id,\n)\n"
+    )
+    assert check_source(path, wrapped, {3}, modes=("newest-snapshot",))
+    assert not check_source(
+        path,
+        "q = select(NodeInventorySnapshot.node_id).group_by(x)\n"
+        "r = select(y).where(NodeSnapshot.node_id == n).order_by(z)\n",
+        {1, 2},
         modes=("newest-snapshot",),
     )
