@@ -1,11 +1,3 @@
-from vonk_agent_protocol import (
-    ResourceBlockerCode,
-    RunAdmissionCode,
-    RunState,
-    canonical_message,
-)
-from vonk_agent_protocol.swap import GIB
-
 """Admission bounds a recipe's load by what its runs really used."""
 
 from datetime import timedelta
@@ -13,6 +5,13 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, select, update
+from vonk_agent_protocol import (
+    ResourceBlockerCode,
+    RunAdmissionCode,
+    RunState,
+    canonical_message,
+)
+from vonk_agent_protocol.swap import GIB
 from vonk_control.models import (
     CatalogDocumentRevision,
     InstallationNode,

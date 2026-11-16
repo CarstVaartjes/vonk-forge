@@ -1,5 +1,3 @@
-from .runtime_identity_support import set_inventory_fingerprint
-
 """Persisted preflight recovery must dispatch the accepted installation."""
 
 from pathlib import Path
@@ -16,6 +14,7 @@ from vonk_control.run_switch_contract import (
 )
 from vonk_control.run_switch_operations import _persisted_result
 
+from .runtime_identity_support import set_inventory_fingerprint
 from .test_lifecycle_preflight import _clear, _finish
 from .test_run_switch_operations import _cold_compile_switch
 
