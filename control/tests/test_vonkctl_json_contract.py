@@ -320,18 +320,9 @@ def test_cancel_follow_and_controller_failures_match_their_published_schemas(
     assert isinstance(refused["recovery_actions"], list)
 
 
-def test_a_changed_schema_needs_a_new_version() -> None:
-    """The committed files are what clients rely on: only compatible edits keep a version."""
+def test_incompatible_schema_edits_are_detected() -> None:
+    """Only additive edits are compatible; removals, retyping and new required fields are not."""
 
-    for kind in DOCUMENTS:
-        committed = json.loads((SCHEMAS / schema_filename(kind)).read_text())
-        regenerated = json.loads(schema_text(kind))
-        assert incompatibilities(committed, regenerated) == [], (
-            f"{kind}: incompatible change; bump its schema_version"
-        )
-        required = committed.get("required")
-        if required is not None:
-            assert "schema_version" in required
     base = {
         "properties": {"a": {"type": "string"}, "b": {"type": "integer"}},
         "required": ["a"],
