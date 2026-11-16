@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from importlib import resources
 
 import pytest
-from sqlalchemy import create_engine, select, update
+from sqlalchemy import create_engine, inspect, select, update
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import ProjectionCode, canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
@@ -832,6 +832,53 @@ def test_postgres_competing_admissions_have_one_capacity_winner(
         active = session.query(ResourceReservation).filter_by(state="active").all()
         assert len(active) == 2
         assert len({row.owner_id for row in active}) == 1
+
+
+def test_postgres_retention_lock_on_an_old_report_does_not_block_admission(
+    tmp_path, postgres_engine
+) -> None:
+    """Catches admission locking every retained report row of its nodes."""
+    Base.metadata.drop_all(postgres_engine)
+    sessions, now, node, installation = setup(
+        tmp_path, free_memory=300, engine=postgres_engine
+    )
+    service = RunAdmissionService(
+        sessions, inventory_max_age=300, memory_floor_bytes=50
+    )
+    plan = service.plan_run(installation, "qwen-a", now=now)
+    with sessions.begin() as session:
+        newest = session.scalars(
+            select(NodeInventorySnapshot).where(NodeInventorySnapshot.node_id == node)
+        ).one()
+        session.add(
+            NodeInventorySnapshot(
+                **{
+                    attr.key: getattr(newest, attr.key)
+                    for attr in inspect(NodeInventorySnapshot).column_attrs
+                    if attr.key not in {"id", "kind", "observed_at", "evidence_digest"}
+                },
+                observed_at=newest.observed_at - timedelta(hours=1),
+                evidence_digest="f" * 64,
+            )
+        )
+    with sessions() as session:
+        old_id = session.scalars(
+            select(NodeInventorySnapshot.id)
+            .where(NodeInventorySnapshot.node_id == node)
+            .order_by(NodeInventorySnapshot.observed_at)
+            .limit(1)
+        ).one()
+    # Retention holds an old report row FOR UPDATE (skip locked) in its own transaction.
+    with postgres_engine.connect() as retention:
+        retention.execute(
+            select(NodeInventorySnapshot.id)
+            .where(NodeInventorySnapshot.id == old_id)
+            .with_for_update()
+        ).all()
+        service.accept_run(plan, actor="admin", now=now)
+        retention.rollback()
+    with sessions() as session:
+        assert session.query(ResourceReservation).filter_by(state="active").count()
 
 
 @pytest.mark.parametrize(

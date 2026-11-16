@@ -194,13 +194,11 @@ class InstallAdmissionService(InstallPlanningService):
         requests.extend(
             (
                 AdmissionRowLock(
-                    "node-inventory-snapshots",
+                    "node-items-snapshots",
                     NodeSnapshot,
                     select(NodeSnapshot).where(
                         NodeSnapshot.node_id.in_(node_ids),
-                        NodeSnapshot.kind.in_(
-                            (InventorySnapshotKind.REPORT, InventorySnapshotKind.ITEMS)
-                        ),
+                        NodeSnapshot.kind == InventorySnapshotKind.ITEMS,
                     ),
                 ),
                 AdmissionRowLock(
