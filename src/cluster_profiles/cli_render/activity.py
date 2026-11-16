@@ -82,7 +82,7 @@ def activity_continuation(
     request_id: object = None,
 ) -> list[str] | None:
     """The next page's command with every filter of this one, for a readable cursor."""
-    if not isinstance(cursor, str) or not cursor or len(cursor) > 512:
+    if not isinstance(cursor, str) or not cursor:
         return None
     command = [
         "vonkctl",

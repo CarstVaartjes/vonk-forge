@@ -243,10 +243,8 @@ def _activity_target(value: str) -> str:
 
 
 def _activity_cursor(value: str) -> str:
-    if not value or len(value) > 512:
-        raise argparse.ArgumentTypeError(
-            "activity cursor must contain 1 to 512 characters"
-        )
+    if not value:
+        raise argparse.ArgumentTypeError("activity cursor must not be empty")
     return value
 
 

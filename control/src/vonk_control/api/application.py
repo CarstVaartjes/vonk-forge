@@ -74,6 +74,7 @@ from ..capabilities import CapabilityUnavailableError
 from ..capability_contract import ControllerCapability
 from ..catalog_api import CatalogProblem, install_catalog_routes
 from ..catalog_service import CatalogService
+from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..download_contract import download_responses
 from ..failure_classification import disposition as failure_disposition
 from ..failure_evidence import FailureEvidenceService
@@ -825,7 +826,7 @@ def create_app(
         openapi_extra={"x-vonk-response-max-bytes": MAX_CONTROL_DOCUMENT_BYTES},
     )
     def operations_view(
-        cursor: str | None = Query(default=None, max_length=512),
+        cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
         limit: int = Query(default=20, ge=1, le=100),
         operation_state: str | None = Query(
             default=None,
@@ -927,8 +928,10 @@ def create_app(
     )
     def job_view(
         job_id: str,
-        operation_cursor: str | None = Query(default=None, max_length=512),
-        target_cursor: str | None = Query(default=None, max_length=512),
+        operation_cursor: str | None = Query(
+            default=None, max_length=MAX_CURSOR_LENGTH
+        ),
+        target_cursor: str | None = Query(default=None, max_length=MAX_CURSOR_LENGTH),
         limit: int = Query(default=20, ge=1, le=100),
         _actor: Actor = authenticated_actor,
     ) -> JobDetailResponse:
