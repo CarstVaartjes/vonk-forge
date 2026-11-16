@@ -187,7 +187,7 @@ def _run(command: list[str]) -> None:
         cwd=ROOT,
         env={
             **os.environ,
-            "PATH": os.pathsep.join([os.environ.get("PATH", ""), node_bin]),
+            "PATH": os.pathsep.join([node_bin, os.environ.get("PATH", "")]),
             "PYTHONHASHSEED": "0",
             "SOURCE_DATE_EPOCH": "0",
         },
@@ -339,7 +339,7 @@ def main() -> None:
 
         _run(
             [
-                "node",
+                str(_node_wheel_root() / "bin/node"),
                 str(ROOT / "tools/openapi-client/generate-runtime.mjs"),
                 str(OPENAPI),
             ],
