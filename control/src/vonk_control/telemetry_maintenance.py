@@ -25,6 +25,7 @@ from .catalog_revision_collection import GRACE
 from .fleet_event_contract import NodeTelemetryPayload
 from .fleet_events import FleetEventDraft, FleetEventRepository
 from .inventory_items_contract import InventorySnapshotKind
+from .inventory_repository import newest_snapshot_ids
 from .models import (
     AgentCertificate,
     AgentNode,
@@ -242,21 +243,20 @@ class TelemetryMaintenance:
         every read that looks for the newest row.
         """
 
-        newest = (
-            select(
-                NodeInventorySnapshot.node_id.label("node_id"),
-                func.max(NodeInventorySnapshot.observed_at).label("observed_at"),
+        # One indexed probe per node (not a scan of every retained report).
+        newest = [
+            snapshot_id
+            for snapshot_id in session.scalars(
+                newest_snapshot_ids(tuple(session.scalars(select(AgentNode.node_id))))
             )
-            .group_by(NodeInventorySnapshot.node_id)
-            .subquery()
-        )
+            if snapshot_id is not None
+        ]
         stale = list(
             session.scalars(
                 select(NodeInventorySnapshot.id)
-                .join(newest, NodeInventorySnapshot.node_id == newest.c.node_id)
                 .where(
                     NodeInventorySnapshot.observed_at < cutoff,
-                    NodeInventorySnapshot.observed_at < newest.c.observed_at,
+                    NodeInventorySnapshot.id.not_in(newest),
                 )
                 .order_by(NodeInventorySnapshot.observed_at, NodeInventorySnapshot.id)
                 .limit(limit)
