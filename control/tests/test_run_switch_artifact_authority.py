@@ -28,6 +28,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
 )
 from vonk_control.run_switch_operations.artifact_inspection import (
+    failed_copies_read_once,
     missing_spark_bytes_by_node,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
@@ -331,6 +332,18 @@ def test_scan_floor_reads_jobs_once_however_many_nodes(tmp_path) -> None:
         return sum("from jobs" in statement for statement in statements)
 
     assert job_selects(nodes[:1]) == job_selects(nodes) == 1
+
+    # A pass over many candidates (the library) reads the jobs once in total.
+    with failed_copies_read_once():
+        statements.clear()
+        with sessions() as session:
+            event.listen(session.get_bind(), "before_cursor_execute", record)
+            try:
+                for group in (nodes[:1], nodes[1:], nodes):
+                    missing_spark_bytes_by_node(session, manifest, group, now=NOW)
+            finally:
+                event.remove(session.get_bind(), "before_cursor_execute", record)
+        assert sum("from jobs" in statement for statement in statements) == 1
 
 
 class _FullNas(ModelCacheManifestProvider):
