@@ -33,6 +33,7 @@ from vonk_control.models import (
 )
 from vonk_control.preparation_contract import RolloutPreparation
 from vonk_control.run_switch_contract import RunSwitchAssessment
+from vonk_control.run_switch_operations.errors import RunSwitchRetryLater
 
 from cluster_profiles.cli_render import render_payload
 
@@ -775,7 +776,7 @@ def test_resource_recheck_contract_error_replans_then_admits(
         nonlocal calls
         calls += 1
         if transient:
-            raise ValueError("resource observation temporarily unavailable")
+            raise RunSwitchRetryLater("resource observation temporarily unavailable")
         assessment = recheck(*args, **kwargs)
         return _unbound_inventory_sample(assessment) if inject_defect else assessment
 
@@ -814,6 +815,36 @@ def test_resource_recheck_contract_error_replans_then_admits(
         reason.code == ProfileReasonCode.ADMISSION_DEFECT
         for reason in application.progress.blockers
     )
+
+
+def test_deterministic_recheck_error_ends_after_one_fresh_review(
+    tmp_path, postgres_engine, monkeypatch
+) -> None:
+    """Catch a deterministic recheck error turned into a retry loop."""
+    _sessions, planner, service, clock, profile = _recheck_world(
+        tmp_path, postgres_engine
+    )
+    calls = 0
+
+    def failing_recheck(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise ValueError("recheck input is invalid")
+
+    monkeypatch.setattr(planner, "recheck_resources_in_session", failing_recheck)
+    owner = service()
+    application = owner.apply(profile.id, request_key=str(uuid4()), actor="admin")
+    restarted = service()
+    for _ in range(5):
+        clock[0] += timedelta(minutes=1)
+        restarted.tick()
+    ended = restarted.application(application.id)
+    assert ended.state == LifecycleState.FAILED
+    assert ended.next_attempt_at is None
+    assert calls == 2
+    (defect,) = ended.progress.blockers
+    assert defect.code == ProfileReasonCode.ADMISSION_DEFECT
+    assert "recheck input is invalid" in defect.detail
 
 
 def test_persistent_recheck_contract_defect_ends_after_one_fresh_review(

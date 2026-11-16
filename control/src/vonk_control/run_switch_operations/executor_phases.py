@@ -349,8 +349,9 @@ class ExecutorPhasesMixin:
                 TypeError,
                 ValueError,
             ) as error:
-                raise RunSwitchRetryLater(
+                raise retry_later_unless_deterministic(
                     f"{RunSwitchCode.INSTALL_PLAN_UNAVAILABLE}: {error}",
+                    error,
                     reason=WaitReason.STALE_PLAN,
                 ) from error
             prepare_installation = getattr(

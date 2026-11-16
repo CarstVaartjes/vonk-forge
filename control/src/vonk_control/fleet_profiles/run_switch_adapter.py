@@ -622,6 +622,11 @@ class RunSwitchFleetProfileAdapter(
                     _error_summary(error),
                     exc_info=True,
                 )
+                if is_definite(error):
+                    raise FleetProfileRecheckContractDefect(
+                        f"Resource recheck failed for assignment {assignment.id} "
+                        f"({_error_summary(error)})"
+                    ) from error
                 raise FleetProfileResourceRecheckUnavailable(
                     "Profile resource admission could not be rechecked "
                     f"({_error_summary(error)}); retrying automatically"
