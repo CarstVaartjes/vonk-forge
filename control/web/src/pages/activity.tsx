@@ -1332,7 +1332,7 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
     ]);
     if (requestGeneration.current !== generation) return;
     if (
-      canonicalResult.status === "rejected" &&
+      "reason" in canonicalResult &&
       canonicalResult.reason instanceof ApiError &&
       canonicalResult.reason.status === 422
     ) {
