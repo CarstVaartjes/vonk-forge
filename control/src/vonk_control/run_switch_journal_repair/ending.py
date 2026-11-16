@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 from .. import agent_operation_states
 from ..admission_locking import AdmissionRowLock, lock_admission_rows
 from ..job_documents import RecipeInstallParent
+from ..machine_states import reservation_live
 from ..models import (
     AgentNode,
     AgentOperation,
@@ -83,7 +84,8 @@ def _end_unproven_journal(
                 "expiry-reservations",
                 ResourceReservation,
                 select(ResourceReservation).where(
-                    ResourceReservation.owner_id.in_(owner_ids)
+                    ResourceReservation.owner_id.in_(owner_ids),
+                    reservation_live(ResourceReservation.state),
                 ),
             ),
             AdmissionRowLock(
