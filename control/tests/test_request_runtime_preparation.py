@@ -235,3 +235,25 @@ def test_a_warm_process_reads_a_deleted_set_as_definite() -> None:
     with pytest.raises(DistributionError) as gone:
         source.open_object(file_sha, 4)
     assert gone.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
+
+
+def test_the_object_source_memo_is_bounded_by_recent_sets() -> None:
+    """Catches a memo that keeps every set the process ever served."""
+    from types import SimpleNamespace
+
+    from vonk_control.distribution.model_cache import (
+        _MEMOISED_SETS,
+        ModelCacheObjectSource,
+    )
+
+    service = SimpleNamespace(
+        manifest_for_artifact_set=lambda d: SimpleNamespace(digest=d),
+        resolve_verified_artifact_set=lambda d: [
+            {"path": "w", "sha256": d[::-1], "bytes": 1, "file": "w"}
+        ],
+    )
+    source = ModelCacheObjectSource.from_service(service)
+    for number in range(_MEMOISED_SETS + 10):
+        source.objects_for_set(f"{number:064x}")
+    assert len(source._manifests) == _MEMOISED_SETS
+    assert len(source._paths) == _MEMOISED_SETS

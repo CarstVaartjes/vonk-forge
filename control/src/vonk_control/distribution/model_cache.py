@@ -51,6 +51,10 @@ def model_file_receipt(
     )
 
 
+# Process-local memo of recently asked sets; the stored manifest stays the authority.
+_MEMOISED_SETS = 64
+
+
 class ModelCacheObjectSource:
     """Narrow adapter for the NAS model-cache verified-object service.
 
@@ -103,8 +107,16 @@ class ModelCacheObjectSource:
         # Stage every descriptor before making authorization visible. The guard
         # protects only process-local metadata; cache/SQL/file IO occurs outside.
         with self._metadata_guard:
+            self._manifests.pop(digest, None)
             self._paths.update(paths)
             self._manifests[digest] = objects
+            # Newest sets stay; the oldest set's authorization is re-derived
+            # from the stored manifest the next time it is asked for.
+            while len(self._manifests) > _MEMOISED_SETS:
+                oldest = next(iter(self._manifests))
+                del self._manifests[oldest]
+                for key in [k for k, v in self._paths.items() if v[0] == oldest]:
+                    del self._paths[key]
         return objects
 
     def _describe(
