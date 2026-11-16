@@ -16,6 +16,7 @@ from ..catalog_revision_contract import (
     ModelRevisionProjection,
     RecipeRevisionProjection,
 )
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..library_contract import (
     FreshnessPolicy,
     LibraryFacetValues,
@@ -79,7 +80,7 @@ class LibraryProjection:
         *,
         cursors: CursorCodec,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
-        inventory_fresh_seconds: int = 300,
+        inventory_fresh_seconds: int = INVENTORY_MAX_AGE_SECONDS,
         telemetry_live_seconds: int = 6,
         telemetry_delayed_seconds: int = 20,
         local_state: Callable[[], Mapping[str, Mapping[str, object]]] | None = None,

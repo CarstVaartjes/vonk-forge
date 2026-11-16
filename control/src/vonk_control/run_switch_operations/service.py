@@ -18,6 +18,7 @@ from ..cluster_mappings import (
     ClusterMappingService,
     candidate_placements,
 )
+from ..inventory_repository import INVENTORY_MAX_AGE_SECONDS
 from ..model_cache import ModelCacheService
 from ..preparation_contract import (
     RuntimeImageIdentity,
@@ -66,9 +67,6 @@ from .resource_fit import ResourceFitMixin
 from .retry_holds import RetryHoldsMixin
 from .run_planning import RunPlanningMixin
 from .stop_planning import StopPlanningMixin
-
-#: How old a Spark's inventory sample may be and still count as current.
-INVENTORY_MAX_AGE_SECONDS = 300
 
 
 class RunSwitchOperationService(
