@@ -103,9 +103,7 @@ def _scan_floors(
         return floors
     for job in session.scalars(
         select(Job)
-        .options(
-            load_only(Job.state, Job.targets, Job.updated_at, Job.result, Job.payload)
-        )
+        .options(load_only(Job.state, Job.targets, Job.updated_at, Job.result))
         .where(
             Job.kind == "recipe.run-switch.v2",
             Job.updated_at >= now - INVENTORY_MAX_AGE,

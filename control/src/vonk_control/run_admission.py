@@ -1078,7 +1078,7 @@ class RunAdmissionService:
                 AdmissionRowLock(
                     "node-inventory-snapshots",
                     NodeInventorySnapshot,
-                    select(NodeInventorySnapshot).where(
+                    select(NodeInventorySnapshot.id).where(
                         NodeInventorySnapshot.node_id.in_(node_ids)
                     ),
                 ),

@@ -19,6 +19,7 @@ from ..evidence_repeats import repeating_evidence
 from ..fleet_event_contract import NodeProfilePayload
 from ..fleet_events import FleetEventDraft, FleetEventRepository
 from ..inventory_items import inventory_items
+from ..inventory_repository import newest_snapshot_ids
 from ..model_layout_notice import model_layout_notices
 from ..models import (
     AgentCertificate,
@@ -301,26 +302,9 @@ class FleetProjection:
     def _latest_inventory(
         session: Session, node_ids: Sequence[str]
     ) -> dict[str, NodeInventorySnapshot]:
-        ranked = (
-            select(
-                NodeInventorySnapshot.id.label("id"),
-                func.row_number()
-                .over(
-                    partition_by=NodeInventorySnapshot.node_id,
-                    order_by=(
-                        NodeInventorySnapshot.observed_at.desc(),
-                        NodeInventorySnapshot.id.desc(),
-                    ),
-                )
-                .label("position"),
-            )
-            .where(NodeInventorySnapshot.node_id.in_(node_ids))
-            .subquery()
-        )
         rows = session.scalars(
             select(NodeInventorySnapshot)
-            .join(ranked, NodeInventorySnapshot.id == ranked.c.id)
-            .where(ranked.c.position == 1)
+            .where(NodeInventorySnapshot.id.in_(newest_snapshot_ids(node_ids)))
             .order_by(NodeInventorySnapshot.node_id)
         )
         return {row.node_id: row for row in rows}

@@ -11,13 +11,14 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only, sessionmaker
 from vonk_agent_protocol import ClusterMappingCode
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
 
 from .inventory_items import runtime_value
+from .inventory_repository import newest_snapshot_ids
 from .mapping_parameters import MappingParameters
 from .models import (
     AgentNode,
@@ -322,23 +323,6 @@ def _topology_capabilities(
     """Runtime and fabric capabilities from each node's latest inventory."""
 
     node_ids = tuple(node.node_id for node in nodes)
-    ranked = (
-        select(
-            NodeInventorySnapshot.id.label("inventory_id"),
-            func.row_number()
-            .over(
-                partition_by=NodeInventorySnapshot.node_id,
-                order_by=(
-                    NodeInventorySnapshot.observed_at.desc(),
-                    NodeInventorySnapshot.received_at.desc(),
-                    NodeInventorySnapshot.id.desc(),
-                ),
-            )
-            .label("inventory_rank"),
-        )
-        .where(NodeInventorySnapshot.node_id.in_(node_ids))
-        .subquery()
-    )
     inventories = {
         item.node_id: item
         for item in session.scalars(
@@ -348,8 +332,7 @@ def _topology_capabilities(
                     NodeInventorySnapshot.node_id, NodeInventorySnapshot.capabilities
                 )
             )
-            .join(ranked, ranked.c.inventory_id == NodeInventorySnapshot.id)
-            .where(ranked.c.inventory_rank == 1)
+            .where(NodeInventorySnapshot.id.in_(newest_snapshot_ids(node_ids)))
         )
     }
     result: dict[str, tuple[str, ...]] = {}

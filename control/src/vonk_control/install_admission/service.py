@@ -196,7 +196,7 @@ class InstallAdmissionService(InstallPlanningService):
                 AdmissionRowLock(
                     "node-inventory-snapshots",
                     NodeSnapshot,
-                    select(NodeSnapshot).where(
+                    select(NodeSnapshot.id).where(
                         NodeSnapshot.node_id.in_(node_ids),
                         NodeSnapshot.kind.in_(
                             (InventorySnapshotKind.REPORT, InventorySnapshotKind.ITEMS)

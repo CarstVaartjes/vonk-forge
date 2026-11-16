@@ -5,12 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from pydantic import field_validator
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import InvalidRequestReason, canonical_message
 from vonk_agent_protocol.inventory import (
@@ -75,6 +76,26 @@ def _validated_inventory(
             node_id=value.node_id,
         )
     return validated
+
+
+def newest_snapshot_ids(node_ids: Sequence[str]) -> Select[Any]:
+    """Id of each node's newest inventory report: one indexed probe per node.
+
+    The probe is a correlated ``ORDER BY observed_at DESC LIMIT 1`` on the
+    ``(node_id, observed_at)`` index, so rows read per node is one however many
+    reports are retained; a window or grouped max over ``node_id`` reads them
+    all. Use it as ``NodeInventorySnapshot.id.in_(newest_snapshot_ids(ids))``.
+    """
+
+    newest = (
+        select(NodeInventorySnapshot.id)
+        .where(NodeInventorySnapshot.node_id == AgentNode.node_id)
+        .order_by(NodeInventorySnapshot.observed_at.desc())
+        .limit(1)
+        .correlate(AgentNode)
+        .scalar_subquery()
+    )
+    return select(newest).where(AgentNode.node_id.in_(node_ids))
 
 
 def spark_model_objects(
