@@ -173,10 +173,10 @@ class FleetProfileApplicationView(StrictModel):
                     "successful application must complete every planned step"
                 )
         if (
-            self.state in {LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR}
+            self.state == LifecycleState.FAILED
             and not (self.status_reason or "").strip()
         ):
-            raise ValueError("failed or waiting application requires a failure reason")
+            raise ValueError("failed application requires a failure reason")
         if self.state == "superseded":
             if self.reason_code is None and self.projection_issue is None:
                 raise ValueError("superseded application requires a reason code")

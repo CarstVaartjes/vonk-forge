@@ -259,8 +259,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
         pending = [
             view
             for receipt in lost_responses.values()
-            if (view := profiles.application(receipt.id)).state
-            in {LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR}
+            if (view := profiles.application(receipt.id)).state == LifecycleState.QUEUED
             and view.progress.admission_pending
         ]
         if not pending:
@@ -280,12 +279,7 @@ def test_postgres_paired_profile_has_one_owner_and_lane_attributed_receipts(
     live_rows = [
         row
         for row in rows
-        if row.state
-        in {
-            LifecycleState.QUEUED,
-            LifecycleState.RUNNING,
-            LifecycleState.NEEDS_OPERATOR,
-        }
+        if row.state in {LifecycleState.QUEUED, LifecycleState.RUNNING}
     ]
     assert len(live_rows) == 1
     active = live_rows[0]

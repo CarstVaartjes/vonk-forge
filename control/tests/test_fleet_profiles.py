@@ -4485,7 +4485,7 @@ def test_every_application_state_is_active_or_named_ended() -> None:
         FleetProfileOperationState,
     )
 
-    active = {"queued", "running", "backoff", "needs-operator"}
+    active = {"queued", "running", "backoff"}
     assert {
         str(state) for state in get_args(FleetProfileOperationState)
     } == active | set(FLEET_PROFILE_ENDED_STATES)
