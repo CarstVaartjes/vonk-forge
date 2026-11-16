@@ -12,24 +12,32 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC
 
+import pytest
 from sqlalchemy import select
 from vonk_agent_protocol import (
     AgentOperation as WireAgentOperation,
 )
 from vonk_agent_protocol import (
     AgentResult,
+    ContainerRuntimeAction,
     InstallationNodeState,
+    InvalidRequestError,
+    InvalidRequestReason,
     OperationFailureCode,
     RecipeJobEnding,
     RecipeJobFile,
+    RecipeJobRunRequest,
     RecipeJobRunResult,
+    RunAdmissionCode,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
 )
-from vonk_control import operation_api
+from vonk_control import job_states, operation_api
 from vonk_control.agent_jobs import AgentJobService, controller_result_consumer
+from vonk_control.agent_jobs.contracts import CLAIM_LEASE_SECONDS
 from vonk_control.cancelled_runtime import reconcile_cancelled_runtime
+from vonk_control.host_runtime_plan_authority import derive_runtime_plan_binding
 from vonk_control.lifecycle.artifact_job import ArtifactJobAdapter
 from vonk_control.models import (
     AgentOperation,
@@ -413,31 +421,36 @@ def test_a_pre_launch_wait_after_a_cancel_ends_the_job_cancelled(tmp_path) -> No
     assert claim_agent(agent_jobs, node_id, "serial-0") is not None
 
 
+_IMAGE_MISSING = {
+    "kind": "failed",
+    "code": "recipe_job_run_failed",
+    "reason": "job ended without an observed exit",
+    "failure_kind": "uncertain-effect",
+    "evidence": {
+        "stage": "runtime-adapter",
+        "helper_error_code": "runtime_image_missing",
+    },
+}
+
+
+def _image_lost(tmp_path):
+    """A held run whose job found its runtime image gone from the Spark."""
+
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    clock.advance(seconds=5)
+    _report(agent_jobs, claim, "failed", _IMAGE_MISSING)
+    return sessions, service, agent_jobs, clock, node_id, job
+
+
 def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
     tmp_path,
 ) -> None:
     # Wrong implementation caught: the helper's code reached the Controller
     # only as text, so the rank whose image the Spark lost stayed installed
     # and the run's next activation launched the missing image again.
-    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
-    claim = claim_agent(agent_jobs, node_id, "serial-0")
-    assert claim is not None
-    clock.advance(seconds=5)
-    _report(
-        agent_jobs,
-        claim,
-        "failed",
-        {
-            "kind": "failed",
-            "code": "recipe_job_run_failed",
-            "reason": "job ended without an observed exit",
-            "failure_kind": "uncertain-effect",
-            "evidence": {
-                "stage": "runtime-adapter",
-                "helper_error_code": "runtime_image_missing",
-            },
-        },
-    )
+    sessions, service, _agent_jobs, _clock, node_id, job = _image_lost(tmp_path)
     assert service.get(job.id).state == "failed"
     with sessions() as session:
         attempt = session.scalar(
@@ -458,3 +471,114 @@ def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
         )
         assert rank is not None
         assert rank.state == InstallationNodeState.PLANNED
+
+
+def _next_claim(agent_jobs, clock, node_id):
+    """The order the Spark gets next; one held at dispatch steps aside until
+    its next check, so the poll after it reaches the order behind it."""
+
+    for _ in range(2):
+        for _ in range(2):
+            claim = claim_agent(agent_jobs, node_id, "serial-0")
+            if claim is not None:
+                return claim
+        clock.advance(seconds=CLAIM_LEASE_SECONDS)
+    return None
+
+
+def _launch_grant(sessions, job):
+    with sessions() as session:
+        order = session.scalar(
+            select(AgentOperation).where(
+                AgentOperation.parent_job_id == job.operation_id
+            )
+        )
+        parent = session.get(Job, job.operation_id)
+        assert order is not None and parent is not None
+        return derive_runtime_plan_binding(
+            session,
+            parent=parent,
+            operation=order,
+            node_id=order.node_id,
+            action=ContainerRuntimeAction.START,
+            stop_plan_sha256=None,
+        )
+
+
+def test_a_submission_on_a_run_that_lost_its_image_installs_it_again_then_runs(
+    tmp_path,
+) -> None:
+    # Wrong implementation caught: the held run kept taking jobs while its
+    # installation was partial; nothing installed the lost image again, so
+    # every submission was launched into a launch grant refused as not ready.
+    sessions, service, agent_jobs, clock, node_id, lost = _image_lost(tmp_path)
+    with sessions() as session:
+        run = session.get(RecipeRun, lost.run_id)
+        assert run is not None
+        installation_id = run.installation_id
+    first = submitted_artifact_job(service, lost.run_id, request_suffix=670)
+    newest = submitted_artifact_job(service, lost.run_id, request_suffix=672)
+
+    # The newest submission waits, visibly, for one install of what was lost.
+    waiting = service.get(newest.id)
+    assert waiting.state == "queued"
+    assert waiting.status_reason == RunAdmissionCode.NOT_INSTALLED.value
+    assert service.get(first.id).state == "cancelled"
+    install = _next_claim(agent_jobs, clock, node_id)
+    assert install is not None
+    assert install.operation == WireAgentOperation.RECIPE_INSTALL
+    with sessions() as session:
+        installs = session.scalars(
+            select(Job.id).where(
+                Job.kind == WireAgentOperation.RECIPE_INSTALL.value,
+                Job.owner_id == installation_id,
+                Job.state.in_(job_states.LIVE),
+            )
+        ).all()
+    assert len(installs) == 1
+    clock.advance(seconds=5)
+    _report(agent_jobs, install, "succeeded", {"installed_bytes": 120})
+
+    # Healed: the same held run takes the newest job, and its launch is granted.
+    ran = _next_claim(agent_jobs, clock, node_id)
+    assert ran is not None
+    assert ran.operation == WireAgentOperation.RECIPE_JOB_RUN
+    assert isinstance(ran.payload, RecipeJobRunRequest)
+    assert str(ran.payload.job_id) == newest.id
+    assert str(ran.payload.run_id) == lost.run_id
+    assert _launch_grant(sessions, service.get(newest.id)).runtime_target_id == (
+        newest.id
+    )
+    # The job the lost image ended is never run again.
+    assert _order(sessions, lost).current_attempt == 1
+    assert _next_claim(agent_jobs, clock, node_id) is None
+
+
+def test_a_job_waiting_on_a_failed_reinstall_goes_on_to_a_definite_answer(
+    tmp_path,
+) -> None:
+    # Wrong implementation caught: a job held for a reinstall that failed
+    # would wait out its whole budget instead of ending at once.
+    sessions, service, agent_jobs, clock, node_id, lost = _image_lost(tmp_path)
+    waiting = submitted_artifact_job(service, lost.run_id, request_suffix=674)
+    install = _next_claim(agent_jobs, clock, node_id)
+    assert install is not None
+    assert install.operation == WireAgentOperation.RECIPE_INSTALL
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        install,
+        "failed",
+        {
+            "kind": "failed",
+            "code": "recipe_install_failed",
+            "reason": "image pull refused",
+            "failure_kind": "invalid-contract",
+        },
+    )
+    ran = _next_claim(agent_jobs, clock, node_id)
+    assert ran is not None
+    assert ran.operation == WireAgentOperation.RECIPE_JOB_RUN
+    with pytest.raises(InvalidRequestError) as refused:
+        _launch_grant(sessions, service.get(waiting.id))
+    assert refused.value.typed_reason is InvalidRequestReason.NOT_READY

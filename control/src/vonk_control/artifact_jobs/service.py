@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    InstallationState,
     InvalidRequestReason,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -46,6 +47,7 @@ from ..models import (
 from ..recipe_execution_contract import RecipeExecutionContractError
 from ..recipe_operations import (
     RecipeOperationConflict,
+    RecipeRetryLater,
 )
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
@@ -484,9 +486,55 @@ class ArtifactJobService(OutputService):
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._end_preparation(session, job)
 
+    def _reinstall_lost_installation(
+        self, job_id: str, *, actor: str, request_id: str
+    ) -> None:
+        """The submission is the request that installs its held run's
+        installation again.
+
+        A Spark that lost the run's runtime image leaves the installation
+        partial under the held run (``demote_ranks_on_lost_image``). The load's
+        own install step is queued for it, joining the Spark's current intent so
+        it fences nothing; the job's order then waits for that install at
+        dispatch (``reinstall_in_flight``) and runs once on the healed run.
+        """
+
+        with self._sessions() as session:
+            job = session.get(ArtifactJob, job_id)
+            if (
+                job is None
+                or job.operation_id is not None
+                or ajs.is_ended(job)
+                or ajs.preparation_of(job) != ajs.READY
+            ):
+                return
+            run = session.get(RecipeRun, job.run_id)
+            if run is None or run.state != RunState.RUNNING:
+                return
+            installation = session.get(RecipeInstallation, run.installation_id)
+            if (
+                installation is None
+                or installation.state == InstallationState.INSTALLED
+            ):
+                return
+            run_id, installation_id = run.id, installation.id
+
+        def still_held(session: Session) -> None:
+            held = session.get(RecipeRun, run_id)
+            if held is None or held.state != RunState.RUNNING:
+                raise RecipeRetryLater("the held run moved on before its reinstall")
+
+        self._recipe_operations.start_installation(
+            installation_id,
+            actor=actor,
+            request_id=str(uuid.uuid5(uuid.UUID(request_id), "reinstall")),
+            unattended_guard=still_held,
+        )
+
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
     ) -> ArtifactJobView:
+        self._reinstall_lost_installation(job_id, actor=actor, request_id=request_id)
         now = self._clock()
         with self._sessions.begin() as session:
             artifact_job = session.get(ArtifactJob, job_id, with_for_update=True)

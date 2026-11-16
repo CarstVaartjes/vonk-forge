@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
     RecipeJobOutputLimits,
     RecipeJobRunRequest,
     RecipeJobRunResult,
+    RunAdmissionCode,
     SecurityRefusalReason,
     WaitReason,
     canonical_message,
@@ -57,6 +58,7 @@ from ..recipe_execution_contract import (
     parse_stored_run_plan,
 )
 from ..recipe_operations import RecipeOperationService
+from ..recipe_operations.observation_helpers import reinstall_in_flight
 from ..settings import ARTIFACT_JOB_RETENTION_SECONDS
 from ..strict_json import read_stored_model
 from .contracts import (
@@ -645,6 +647,14 @@ class ArtifactJobService:
                 ).live
             ):
                 status_reason = f"{ProjectionCode.NODE_OFFLINE.value}: {order.node_id}"
+            run = session.get(RecipeRun, job.run_id)
+            if (
+                order is not None
+                and run is not None
+                and reinstall_in_flight(session, run.installation_id) is not None
+            ):
+                # Its held run's installation is being installed again.
+                status_reason = RunAdmissionCode.NOT_INSTALLED.value
         manifest = self._stored_input_manifest(session, job)
         inputs = tuple(
             ArtifactFileDeclaration.model_validate(item.model_dump(mode="json"))

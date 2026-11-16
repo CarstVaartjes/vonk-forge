@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import cast as typing_cast
@@ -333,8 +333,15 @@ class InstallationPreparationMixin:
         actor: str,
         request_id: str,
         workload_intent_ordinal: int | None = None,
+        unattended_guard: Callable[[Session], None] | None = None,
     ) -> RecipeOperationView:
-        """Queue the already prepared installation after target verification."""
+        """Queue the already prepared installation after target verification.
+
+        An install nobody loaded (a held run's job submission reinstalling what
+        its Spark lost) passes ``unattended_guard``: it joins the Spark's
+        current workload intent, so it never fences a load, and any later load
+        supersedes it.
+        """
         service = typing_cast("RecipeOperationService", self)
 
         now = service._clock()
@@ -458,6 +465,7 @@ class InstallationPreparationMixin:
                 authority_digest=revision.content_digest,
                 now=now,
                 workload_intent_ordinal=workload_intent_ordinal,
+                unattended_guard=unattended_guard,
             )
         service._agent_jobs.notify_available()
         return service.get(job.id)

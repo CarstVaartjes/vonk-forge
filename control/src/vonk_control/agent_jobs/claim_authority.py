@@ -419,15 +419,24 @@ def _claim_has_authority(
     return True
 
 
-def gpu_health_wait(
+def dispatch_wait(
     service: AgentJobService,
     session: Session,
     operation: StoredOperation,
     now: datetime,
 ) -> bool:
-    """Recheck GPU health at dispatch; cleanup and exited output still proceed."""
+    """Hold an order at dispatch while what it needs is not there yet.
+
+    A job of a held run waits for the reinstall of its installation
+    (``reinstall_in_flight``); recipe work waits for healthy GPU inventory.
+    Cleanup and exited output still proceed. The wait is scheduled: a held
+    order steps aside until its next check, so the next poll claims the order
+    behind it (the reinstall, queued before the job), and the wait is bounded
+    like any agent order.
+    """
     from datetime import timedelta
 
+    from vonk_agent_protocol import RunAdmissionCode
     from vonk_agent_protocol.recipe_jobs import RecipeJobRunRequest
 
     from ..agent_operation_facts import (
@@ -437,6 +446,7 @@ def gpu_health_wait(
     )
     from ..operation_blockers import make_blocker
     from ..persisted_waits import schedule_wait
+    from ..recipe_operations.observation_helpers import reinstall_in_flight
     from ..recovery_policy import WAIT_STEP
     from .predicates import _claim_refusal_reason
 
@@ -450,16 +460,29 @@ def gpu_health_wait(
     payload = column_value(operation, "payload")
     if isinstance(payload, RecipeJobRunRequest) and payload.output_delivery_only:
         return False
-    try:
-        snapshot = InventoryRepository(service._sessions).latest(
-            operation.node_id, now=now, maximum_age=300, _session=session
+    install = (
+        reinstall_in_flight(session, str(payload.installation_id))
+        if isinstance(payload, RecipeJobRunRequest)
+        else None
+    )
+    if install is not None:
+        code, detail = (
+            RunAdmissionCode.NOT_INSTALLED,
+            f"installation {payload.installation_id} is being installed again",
         )
-    except KeyError:
-        return False  # the owning admission's missing-inventory rule applies
-    reason = gpu_health_reason(snapshot.gpu_health)
-    if reason is None:
-        return False
-    code, detail = reason
+        waiting = f"Waiting for install {install} on {operation.node_id};"
+    else:
+        try:
+            snapshot = InventoryRepository(service._sessions).latest(
+                operation.node_id, now=now, maximum_age=300, _session=session
+            )
+        except KeyError:
+            return False  # the owning admission's missing-inventory rule applies
+        reason = gpu_health_reason(snapshot.gpu_health)
+        if reason is None:
+            return False
+        code, detail = reason
+        waiting = f"Waiting for healthy GPU inventory from {operation.node_id};"
     # Use the accepted start budget where present, otherwise the existing
     # agent-order observation window. Persist once, never extend on polling.
     if operation.recovery_deadline is None:
@@ -467,7 +490,7 @@ def gpu_health_wait(
             now + AGENT_ORDER_RECOVERY_BUDGET
         )
     deadline = aware(operation.recovery_deadline)
-    note = f"{code}: {detail} Waiting for healthy GPU inventory from {operation.node_id}; deadline {deadline.isoformat()}"
+    note = f"{code}: {detail} {waiting} deadline {deadline.isoformat()}"
     if aware(now) >= deadline:
         end_unobserved_order(
             service,

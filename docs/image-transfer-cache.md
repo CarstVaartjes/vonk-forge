@@ -88,7 +88,16 @@ without either identity of the image; an inspection it could not read stays
 `runtime_image_inspect_failed`. When the container is absent too, the Start
 (or job run) fails at once with that code, as nothing happened, and the
 Controller demotes every installed rank on that Spark that names the image. The
-next load copies the image again and installs afresh.
+next load copies the image again and installs afresh. A held job-recipe run is
+healed by its next job submission instead: the submission queues the load's own
+install step for the partial installation (joining the Spark's current workload
+intent, so it never fences a load), and the job's order waits at dispatch,
+shown as `run.not_installed`, until that install ends. Installed, the same run
+takes the job once; an install that failed lets the order go on to the launch
+grant's definite `not-ready` answer. A load that arrives meanwhile replaces the
+degraded member as any load does: it stops the held run, which cancels the
+waiting job, and activates the reinstalled installation afresh. A job that
+ended on the lost image is never run again.
 
 The worker reclaims image bytes nothing names any more, once an hour. An
 image is kept while its receipt exists, while a live distribution assignment
