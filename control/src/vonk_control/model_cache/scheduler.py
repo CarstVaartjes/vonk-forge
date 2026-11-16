@@ -265,7 +265,7 @@ class SchedulerMixin:
             return
         specs = list(_unique_artifacts(manifest.artifacts).values())
         if not force and planned_total == 0:
-            # The claim just confirmed every object's receipt and size (bytes
+            # The claim just confirmed every object's presence and size (bytes
             # are verified at ingress, never re-hashed): there is nothing to
             # transfer or re-record, so the download ends here instead of
             # queueing behind the pool. Publication still checks the gates.

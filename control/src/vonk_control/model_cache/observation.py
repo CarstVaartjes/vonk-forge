@@ -1,6 +1,6 @@
 """Durable set observations, independent of a profile request's deadline.
 
-Receipts remain the storage owner. This disposable index checkpoints one object
+Stored object files remain the storage owner. This disposable index checkpoints one object
 at a time; slow storage and process death cannot reset the completed prefix.
 """
 

@@ -102,7 +102,7 @@ class FailureMixin:
         cancellation_pending = False
         digest_mismatch = failure_code == ModelCacheCode.DIGEST_MISMATCH
         source_status = getattr(error, "source_status", None)
-        # The receipts are read before the transaction takes its row locks.
+        # Object presence is read before the transaction takes its row locks.
         all_valid = all(cache._object_is_stored(spec) for spec in manifest.artifacts)
         verified_bytes = cache._verified_bytes(set_digest)
         with cache._session(write=True) as session:

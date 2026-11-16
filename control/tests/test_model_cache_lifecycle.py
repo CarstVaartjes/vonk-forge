@@ -735,3 +735,32 @@ def test_lifecycle_reads_preserve_the_owners_pending_transaction(cache, tmp_path
         ) + timedelta(seconds=1)
     service.run_pending()
     assert service.get_operation(operation.id).state == State.SUCCEEDED
+
+
+def test_a_stored_object_is_reused_by_the_next_download_not_fetched(cache, tmp_path):
+    """Catches two presence rules: reconcile adopted a same-size object while
+    download reuse re-fetched it (77 of 98 GLM files). The receipt is gone and
+    the source is blocked, so only reuse can succeed."""
+    service, _sessions = cache
+    artifact = _artifact(tmp_path, b"receiptless", model_content_sha256=MODEL)
+    _download(
+        service,
+        [artifact],
+        model_content_sha256=MODEL,
+        request_key="00000000-0000-4000-8000-00000000a060",
+    )
+    digest = str(artifact["sha256"])
+    for receipt in (service.root / "objects" / digest[:2]).glob("*.receipt.json"):
+        receipt.unlink()
+    Path(str(artifact["source"]).removeprefix("file://")).unlink()
+    preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
+    assert preview["new_bytes"] == 0
+    operation = service.start_download(
+        actor="test",
+        request_key="00000000-0000-4000-8000-00000000a061",
+        plan_digest=str(preview["plan_digest"]),
+        model_content_sha256=MODEL,
+        artifacts=[artifact],
+    )
+    service.run_pending()
+    assert service.get_operation(operation.id).state == State.SUCCEEDED

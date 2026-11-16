@@ -229,7 +229,7 @@ class RemovalReviewMixin:
         """Bytes removing this set frees, shared objects excluded; unknown defers.
 
         A ``cached`` set is answered from stored facts alone (manifest sizes and
-        set membership): receipts were verified at ingress, so this pass does no
+        set membership): bytes were verified at ingress, so this pass does no
         storage I/O.  Any other set is measured on storage.
         """
         cache = cast("ModelCacheService", self)

@@ -101,8 +101,11 @@ remain separately recorded.
   attempt. Uncertain effects require exact observation or a safe same-effect
   retry. Invalid authority, invalid contracts, denied access, and integrity
   failures remain explicit blockers.
-- Preserve completed work and partial transfers. Managed cache receipts make
-  reuse cheap; ordinary retries must not repeat downloads, full-file hashing,
+- Preserve completed work and partial transfers. A model-cache object is
+  present when its file exists with the expected size (one rule for reconcile,
+  download reuse and the Model's cached state; a missing receipt is rewritten,
+  never a reason to fetch again, and a Model is cached when every object of its
+  set is present). Reuse is cheap; ordinary retries must not repeat downloads, full-file hashing,
   image imports, or package installation without a reason.
 - Agent upgrades roll out to every Spark in parallel, each as soon as it is
   free; per-Spark rollback and the identity proof are the safety net. Other

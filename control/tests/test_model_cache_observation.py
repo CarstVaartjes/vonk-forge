@@ -179,7 +179,7 @@ def test_slow_nas_observation_converges_beyond_ten_request_budgets(
     cache, _sessions, manifest, _now = observed_cache
     budget = profile_read_observation.PROFILE_READ_STORAGE_SECONDS
     calls = Counter()
-    original = cache._read_object_receipt
+    original = cache._stored_object
     answered, stalled = Event(), []
 
     def slow(digest, expected):
@@ -192,7 +192,7 @@ def test_slow_nas_observation_converges_beyond_ten_request_budgets(
         frozen_pass_budgets.advance(budget)  # every object outlasts a request
         return original(digest, expected)
 
-    monkeypatch.setattr(cache, "_read_object_receipt", slow)
+    monkeypatch.setattr(cache, "_stored_object", slow)
     read = profile_read(
         lambda: cache.download_preview(artifact_set_sha256=manifest.digest)
     )

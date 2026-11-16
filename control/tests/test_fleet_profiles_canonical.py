@@ -1335,7 +1335,7 @@ def test_profile_read_observes_distinct_content_once(
         storage_calls["image"] += 1
         time.sleep(0.5)  # injected network storage latency
 
-    monkeypatch.setattr(cache, "_read_object_receipt", model_receipt)
+    monkeypatch.setattr(cache, "_stored_object", model_receipt)
     monkeypatch.setattr(images, "_observe_stored_image", image_receipt)
     calls = []
 
@@ -1444,7 +1444,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
     storage_calls = []
     images = FilesystemRuntimeImageStorage(tmp_path / "images")
     original = (
-        cache._read_object_receipt if asset == "model" else images._observe_stored_image
+        cache._stored_object if asset == "model" else images._observe_stored_image
     )
 
     def delayed(digest, *args):
@@ -1458,7 +1458,7 @@ def test_profile_storage_wait_is_bounded_and_recovers(
             completed.set()
 
     if asset == "model":
-        monkeypatch.setattr(cache, "_read_object_receipt", delayed)
+        monkeypatch.setattr(cache, "_stored_object", delayed)
     else:
         monkeypatch.setattr(images, "_observe_stored_image", delayed)
 

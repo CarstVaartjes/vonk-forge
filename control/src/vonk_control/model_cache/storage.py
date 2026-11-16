@@ -10,7 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
-from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, ModelCacheBlockerCode
@@ -24,7 +23,6 @@ from ..model_cache_contract import (
 )
 from ..models import ModelCacheOperation, ModelCacheSet, ModelCacheSetArtifact
 from ..storage_demands import NAS_MODELS, StorageDemands
-from ..strict_json import read_stored_model
 from .artifacts import (
     ArtifactSetManifest,
     ArtifactSpec,
@@ -386,7 +384,7 @@ class StorageMixin:
         return cache._root / "objects" / digest[:2] / f"{digest}.receipt.json"
 
     def _write_object_receipt(self, spec: ArtifactSpec, verified_at: datetime) -> None:
-        """Publish the managed-storage receipt that owns an object's availability.
+        """Publish an object's receipt (write-only, pending deletion; presence is the file).
 
         The receipt is written after the verified bytes are in place, and it is
         replaced atomically so a reader never sees a partial document.
@@ -420,35 +418,8 @@ class StorageMixin:
             temporary.unlink(missing_ok=True)
         _fsync_directory(path.parent)
 
-    def _read_object_receipt(
-        self, digest: str, expected_bytes: int
-    ) -> ModelCacheObjectReceipt | None:
-        """Read a receipt and confirm it still describes the object on disk.
-
-        Missing, malformed, or mismatched receipts all mean "not available":
-        admission must never infer availability from bytes alone, and a
-        damaged receipt is repaired through the normal prepare/verify path
-        rather than trusted.
-        """
-        cache = cast("ModelCacheService", self)
-
-        path = cache._receipt_path(digest)
-        try:
-            document = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
-            return None
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            return None
-        try:
-            receipt = read_stored_model(ModelCacheObjectReceipt, document)
-        except ValidationError:
-            return None
-        if receipt.sha256 != digest or receipt.expected_bytes != expected_bytes:
-            return None
-        return receipt
-
     def _object_is_available(self, digest: str, expected_bytes: int) -> bool:
-        """Whether managed storage holds a verified object with its receipt."""
+        """Whether managed storage holds the object: a regular file of the expected size."""
         cache = cast("ModelCacheService", self)
 
         return cache._stored_object(digest, expected_bytes) is not None

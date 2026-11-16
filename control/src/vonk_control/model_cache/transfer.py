@@ -53,9 +53,10 @@ class TransferMixin:
     def _managed_cached_objects(self, manifest: ArtifactSetManifest) -> frozenset[str]:
         """Read admission metadata for objects verified into managed storage.
 
-        Publication verifies content before atomically placing an object and
-        recording its receipt. Admission trusts that receipt across processes
-        and restarts, while checking the file is still present and complete.
+        Publication verifies content before atomically placing an object, so
+        only verified bytes reach the object path. Admission trusts that across
+        processes and restarts, while checking the file is still present and
+        of the expected size.
         Transfers and explicit verification retain their content checks.
         """
         cache = cast("ModelCacheService", self)
@@ -67,10 +68,10 @@ class TransferMixin:
                 if entry.available
             )
         specs = _unique_artifacts(manifest.artifacts)
-        # Managed storage owns per-object availability: a verified object is
-        # available exactly when its receipt is beside its bytes. SQL is not
-        # consulted and holds no availability flag, so a damage or restore that
-        # loses the receipt cannot be masked by a stale database row.
+        # Managed storage owns per-object availability: an object is available
+        # exactly when its file is there with the expected size. SQL is not
+        # consulted and holds no availability flag, so a damage or restore
+        # cannot be masked by a stale database row.
         return frozenset(
             sha256
             for sha256, spec in specs.items()
@@ -311,7 +312,7 @@ class TransferMixin:
         )
         for spec in manifest.artifacts:
             # SQL owns membership only. The object's identity, size, and
-            # availability are the manifest and the managed-storage receipt.
+            # availability are the manifest and the object file at its expected size.
             membership = session.get(
                 ModelCacheSetArtifact,
                 {"artifact_set_sha256": set_digest, "artifact_key": spec.key},
