@@ -237,23 +237,31 @@ def test_a_warm_process_reads_a_deleted_set_as_definite() -> None:
     assert gone.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
 
 
-def test_the_object_source_memo_is_bounded_by_recent_sets() -> None:
-    """Catches a memo that keeps every set the process ever served."""
+def test_the_object_source_memo_forgets_old_sets_and_keeps_recent_ones() -> None:
+    """Catches a memo that keeps every set the process ever served: an old set
+    is read again from the stored manifest, a recent one is not."""
     from types import SimpleNamespace
 
-    from vonk_control.distribution.model_cache import (
-        _MEMOISED_SETS,
-        ModelCacheObjectSource,
-    )
+    from vonk_control.distribution.model_cache import ModelCacheObjectSource
+
+    reads: list[str] = []
+
+    def manifest(digest: str) -> SimpleNamespace:
+        reads.append(digest)
+        return SimpleNamespace(digest=digest)
 
     service = SimpleNamespace(
-        manifest_for_artifact_set=lambda d: SimpleNamespace(digest=d),
+        manifest_for_artifact_set=manifest,
         resolve_verified_artifact_set=lambda d: [
             {"path": "w", "sha256": d[::-1], "bytes": 1, "file": "w"}
         ],
     )
     source = ModelCacheObjectSource.from_service(service)
-    for number in range(_MEMOISED_SETS + 10):
-        source.objects_for_set(f"{number:064x}")
-    assert len(source._manifests) == _MEMOISED_SETS
-    assert len(source._paths) == _MEMOISED_SETS
+    sets = [f"{number:064x}" for number in range(65)]
+    for digest in sets:
+        source.objects_for_set(digest)
+    assert len(reads) == 65
+    source.objects_for_set(sets[0])
+    assert len(reads) == 66
+    source.objects_for_set(sets[64])
+    assert len(reads) == 66

@@ -114,9 +114,9 @@ class ModelCacheObjectSource:
             # from the stored manifest the next time it is asked for.
             while len(self._manifests) > _MEMOISED_SETS:
                 oldest = next(iter(self._manifests))
-                del self._manifests[oldest]
-                for key in [k for k, v in self._paths.items() if v[0] == oldest]:
-                    del self._paths[key]
+                for evicted in self._manifests.pop(oldest):
+                    if self._paths.get(evicted.sha256, ("",))[0] == oldest:
+                        del self._paths[evicted.sha256]
         return objects
 
     def _describe(
