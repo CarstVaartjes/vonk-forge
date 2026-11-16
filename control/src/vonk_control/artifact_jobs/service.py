@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    InstallationState,
     InvalidRequestReason,
     RecipeJobInputFile,
     RecipeJobOutputLimits,
@@ -33,6 +35,7 @@ from ..lifecycle import CancelRequested, Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
+from ..logging import log_event
 from ..models import (
     ArtifactJob,
     ArtifactJobBlob,
@@ -46,7 +49,9 @@ from ..models import (
 from ..recipe_execution_contract import RecipeExecutionContractError
 from ..recipe_operations import (
     RecipeOperationConflict,
+    RecipeRetryLater,
 )
+from ..recipe_operations.observation_helpers import run_takes_jobs
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -71,6 +76,8 @@ from .contracts import (
 )
 from .job_contract import ArtifactJobContractResponse, read_job_contract
 from .outputs import ArtifactJobService as OutputService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ArtifactJobService(OutputService):
@@ -484,9 +491,69 @@ class ArtifactJobService(OutputService):
                 raise MissingRecord(job_id, reason=InvalidRequestReason.NOT_FOUND)
             return self._end_preparation(session, job)
 
+    def _reinstall_lost_installation(
+        self, job_id: str, *, actor: str, request_id: str
+    ) -> None:
+        """The submission is the request that installs its held run's
+        installation again.
+
+        A Spark that lost the run's runtime image leaves the installation
+        partial under the held run (``demote_ranks_on_lost_image``). The load's
+        own install step is queued for it, joining the Spark's current intent
+        rather than taking a new one; the job's order then waits for that
+        install at dispatch (``reinstall_in_flight``) and runs once on the
+        healed run. A run that takes no jobs (ended, or its Stop live) is never
+        healed: the submission gets its own definite answer.
+        """
+
+        with self._sessions() as session:
+            job = session.get(ArtifactJob, job_id)
+            if (
+                job is None
+                or job.operation_id is not None
+                or ajs.is_ended(job)
+                or ajs.preparation_of(job) != ajs.READY
+            ):
+                return
+            run = session.get(RecipeRun, job.run_id)
+            if run is None or not run_takes_jobs(session, run):
+                return
+            installation = session.get(RecipeInstallation, run.installation_id)
+            if (
+                installation is None
+                or installation.state == InstallationState.INSTALLED
+            ):
+                return
+            run_id, installation_id = run.id, installation.id
+
+        def still_held(session: Session) -> None:
+            if not run_takes_jobs(session, session.get(RecipeRun, run_id)):
+                raise RecipeRetryLater("the held run takes no jobs any more")
+
+        try:
+            self._recipe_operations.start_installation(
+                installation_id,
+                actor=actor,
+                request_id=str(uuid.uuid5(uuid.UUID(request_id), "reinstall")),
+                unattended_guard=still_held,
+            )
+        except (RecipeOperationConflict, UnknownOutcomeError) as error:
+            # Best effort: the run heals on the next submission; this job gets
+            # the launch grant's definite answer, as without the heal.
+            log_event(
+                _LOGGER,
+                "artifact_job.reinstall_not_queued",
+                service="control-api",
+                level=logging.WARNING,
+                job_id=job_id,
+                installation_id=installation_id,
+                error=str(error),
+            )
+
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str
     ) -> ArtifactJobView:
+        self._reinstall_lost_installation(job_id, actor=actor, request_id=request_id)
         now = self._clock()
         with self._sessions.begin() as session:
             artifact_job = session.get(ArtifactJob, job_id, with_for_update=True)
