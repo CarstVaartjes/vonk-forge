@@ -55,7 +55,6 @@ from .models import (
     ClusterMappingNode,
     InstallationNode,
     Job,
-    NodeInventorySnapshot,
     RecipeInstallation,
     RecipeRun,
     ResourceReservation,
@@ -1073,13 +1072,6 @@ class RunAdmissionService:
                     InstallationNode,
                     select(InstallationNode).where(
                         InstallationNode.installation_id == plan.installation_id
-                    ),
-                ),
-                AdmissionRowLock(
-                    "node-inventory-snapshots",
-                    NodeInventorySnapshot,
-                    select(NodeInventorySnapshot.id).where(
-                        NodeInventorySnapshot.node_id.in_(node_ids)
                     ),
                 ),
                 AdmissionRowLock(
