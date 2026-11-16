@@ -200,11 +200,17 @@ RANK_INSTALLED_KIND = (
 # (inventory_repository.newest_snapshot_ids); a window or grouped max over
 # node_id reads every retained report (~720 per node over 24 h).
 # The scan runs over the whole source so a formatter-wrapped call, a further
-# grouping column or a partition_by tuple is found; it stops at the first
-# balanced close of the group_by( / partition_by call (one nested paren level).
+# grouping column or a partition_by tuple is found. It stays inside the call: a
+# bare partition_by= ends at its argument comma, group_by( and a partition_by
+# tuple at the close paren (two nested paren levels are read).
+_NEST = r"\((?:[^()]|\([^()]*\))*\)"
 NEWEST_SNAPSHOT_SCAN = re.compile(
-    r"(?:partition_by\s*=\s*\(?|group_by\s*\()"
-    r"(?P<args>(?:[^()]|\((?:[^()]|\([^()]*\))*\))*?)"
+    r"(?:partition_by\s*=\s*(?:\((?:[^()]|"
+    + _NEST
+    + r")*?|(?:[^(),]|"
+    + _NEST
+    + r")*?)"
+    r"|group_by\s*\((?:[^()]|" + _NEST + r")*?)"
     r"\bNode(?:Inventory)?Snapshot\.node_id\b"
 )
 NEWEST_SNAPSHOT_KIND = (

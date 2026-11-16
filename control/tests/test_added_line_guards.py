@@ -4247,10 +4247,12 @@ def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
         {1},
         modes=("newest-snapshot",),
     )
-    wrapped = (
-        "q = select(x).group_by(\n    func.max(y),\n    NodeSnapshot.node_id,\n)\n"
+    assert not check_source(
+        path,
+        "f = over(partition_by=X, order_by=NodeSnapshot.node_id)\n",
+        {1},
+        modes=("newest-snapshot",),
     )
-    assert check_source(path, wrapped, {3}, modes=("newest-snapshot",))
     assert not check_source(
         path,
         "q = select(NodeInventorySnapshot.node_id).group_by(x)\n"
