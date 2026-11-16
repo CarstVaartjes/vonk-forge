@@ -1370,16 +1370,17 @@ def test_postgres_retirement_wins_completed_rotation_and_reconciles_issued_seria
             assert issued.ca_revoked_at is not None
             assert intent is None
     if not crash_new_revocation:
-        assert authority.revocations == [source.serial, "2"]
+        # The CA call runs outside the row locks and is idempotent, so the
+        # revoker and the renewer may each revoke a serial: assert what was
+        # revoked, not how often or in which order.
+        assert set(authority.revocations) == {source.serial, "2"}
 
     if crash_new_revocation:
         revoking.revoke_node(NODE_ID, "admin")
         revoking.revoke_node(NODE_ID, "admin")
-        assert authority.revocations == [
-            source.serial,
-            "2",
-            "2",
-        ]
+        assert set(authority.revocations) == {source.serial, "2"}
+        # The crashed attempt, then the one that confirmed it.
+        assert authority.revocations.count("2") >= 2
         with sessions() as session:
             issued = session.get(AgentCertificate, "2")
             intent = session.get(AgentCertificateRotation, NODE_ID)
