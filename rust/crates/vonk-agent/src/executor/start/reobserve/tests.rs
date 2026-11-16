@@ -512,39 +512,48 @@ async fn another_generations_container_under_a_retained_start_is_healed() {
     assert_eq!(asked, ["grant"]);
 }
 
-/// An unread inspection of a retained start waits and stops nothing (an earlier
-/// agent may have launched it). A collective readiness phase ends with its
-/// exact-identity reason on a definite answer, and is observed again (unknown)
-/// on an unread one; neither stops anything.
+fn process_exited() -> HostRuntimeError {
+    HostRuntimeError::HelperRejected {
+        code: HelperErrorCode::RuntimeProcessExited,
+        diagnostic: None,
+        process_logs: None,
+    }
+}
+
+/// An unread inspection of a retained start waits and stops nothing (an
+/// earlier agent may have launched it).
 #[tokio::test]
-async fn inspected_start_failures_wait_end_or_observe_again_without_a_stop() {
+async fn an_unread_inspection_of_a_retained_start_waits_and_stops_nothing() {
     let (settled, asked, _, _) = settle_failed(Seen::Running, Failed::Retained(lost_reply())).await;
     assert!(waits(settled));
     assert!(asked.is_empty());
+}
 
+/// An unread inspection of a collective readiness phase is observed again,
+/// never ended or stopped.
+#[tokio::test]
+async fn an_unread_inspection_of_a_collective_phase_is_observed_again() {
     let (settled, asked, _, _) =
         settle_failed(Seen::Running, Failed::Collective(lost_reply())).await;
     assert!(matches!(ended(settled), ExecutionResult::Unknown(_)));
     assert!(asked.is_empty());
+}
 
-    let (settled, asked, _, _) = settle_failed(
-        Seen::Running,
-        Failed::Collective(HostRuntimeError::HelperRejected {
-            code: HelperErrorCode::RuntimeProcessExited,
-            diagnostic: None,
-            process_logs: None,
-        }),
-    )
-    .await;
+/// A definite answer ends a collective phase with the helper's typed code.
+#[tokio::test]
+async fn a_definite_answer_ends_a_collective_phase_with_the_helpers_code() {
+    let (settled, asked, _, _) =
+        settle_failed(Seen::Running, Failed::Collective(process_exited())).await;
     let ExecutionResult::Failed(failure) = ended(settled) else {
         panic!("a definite answer ends the collective phase");
     };
-    assert!(
-        failure
-            .reason
-            .contains("collective workload is not running with exact identity"),
-        "{}",
-        failure.reason
+    assert_eq!(
+        failure.helper_error_code,
+        Some(HelperErrorCode::RuntimeProcessExited)
+    );
+    assert_ne!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
     );
     assert!(asked.is_empty());
 }
@@ -553,16 +562,19 @@ async fn inspected_start_failures_wait_end_or_observe_again_without_a_stop() {
 /// that definite answer: it neither waits nor stops anything.
 #[tokio::test]
 async fn a_retained_start_whose_process_exited_is_reported_not_waited_on() {
-    let (settled, asked, _, _) = settle_failed(
-        Seen::Running,
-        Failed::Retained(HostRuntimeError::HelperRejected {
-            code: HelperErrorCode::RuntimeProcessExited,
-            diagnostic: None,
-            process_logs: None,
-        }),
-    )
-    .await;
-    assert!(!waits(settled));
+    let (settled, asked, _, _) =
+        settle_failed(Seen::Running, Failed::Retained(process_exited())).await;
+    let ExecutionResult::Failed(failure) = ended(settled) else {
+        panic!("a definite answer ends the retained start");
+    };
+    assert_eq!(
+        failure.helper_error_code,
+        Some(HelperErrorCode::RuntimeProcessExited)
+    );
+    assert_ne!(
+        failure.failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
     assert!(asked.is_empty());
 }
 
