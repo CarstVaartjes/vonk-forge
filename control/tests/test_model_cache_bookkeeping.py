@@ -326,3 +326,39 @@ def test_requests_naming_nothing_still_get_a_defined_refusal(cache, tmp_path):
         ),
         fresh=lambda _world: _queue(service, tmp_path, str(uuid.uuid4()))[0],
     )
+
+
+def test_a_removal_whose_set_row_is_gone_ends_instead_of_waiting_forever(
+    cache, tmp_path: Path
+):
+    """Catches a removal kept in backoff forever on "exact model-set membership
+    is unavailable": its set row was removed after acceptance and no one will
+    produce that fact. An absent set is nothing to remove; the removal ends."""
+
+    service, sessions = cache
+    downloaded = _download(
+        service,
+        [_artifact(tmp_path, b"gone set", model_content_sha256=MODEL)],
+        model_content_sha256=MODEL,
+        request_key="00000000-0000-4000-8000-00000000b0f1",
+    )
+    set_digest = str(downloaded.artifact_set_sha256)
+    with sessions.begin() as session:
+        accepted = service._accept_model_removal(
+            session,
+            actor="test",
+            request_key="00000000-0000-4000-8000-00000000b0f2",
+            selector="recipe-child",
+            model_content_sha256=MODEL,
+            selected_sets=None,
+            defer_scope=True,
+        )
+        gone = session.get(ModelCacheSet, set_digest)
+        assert gone is not None
+        session.delete(gone)
+        # No producer is left to re-derive the set from.
+        session.delete(session.get(ModelCacheOperation, downloaded.id))
+    assert service._observe_model_removal_scope(accepted.id)
+    for _ in range(6):
+        service.advance_removals(limit=1)
+    assert service.get_operation(accepted.id).state == "succeeded"

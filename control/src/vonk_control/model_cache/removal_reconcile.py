@@ -186,7 +186,18 @@ class RemovalReconcileMixin:
                         cache._ensure_set(session, manifest)
                         break
             session.flush()
-            scope = cache._model_removal_scope_for_sets(session, checkpoint.selected)
+            # A set whose row is gone and that no producer can re-derive is
+            # absent: nothing is left to remove, and waiting for its membership
+            # would be forever (nobody produces that fact). Drop it from the
+            # scope; the rest of the removal proceeds on what exists.
+            present = tuple(
+                sorted(
+                    digest
+                    for digest in set(checkpoint.selected)
+                    if session.get(ModelCacheSet, digest) is not None
+                )
+            )
+            scope = cache._model_removal_scope_for_sets(session, present)
         identities = (
             *(ArtifactIdentity("model-set", digest) for digest in scope.selected_sets),
             *(
@@ -218,15 +229,14 @@ class RemovalReconcileMixin:
             if newer_request(session, operation, current):
                 session.rollback()
                 return False
-            confirmed = cache._model_removal_scope_for_sets(
-                session, checkpoint.selected
-            )
+            confirmed = cache._model_removal_scope_for_sets(session, present)
             if confirmed != scope:
                 session.rollback()
                 return False
             resolved = checkpoint.model_copy(
                 update={
                     "scope_pending": False,
+                    "selected": list(scope.selected_sets),
                     "selected_objects": list(scope.selected_objects),
                     "delete_objects": list(scope.delete_objects),
                 }
