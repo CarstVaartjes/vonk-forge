@@ -512,6 +512,60 @@ async fn another_generations_container_under_a_retained_start_is_healed() {
     assert_eq!(asked, ["grant"]);
 }
 
+/// An unread inspection of a retained start waits and stops nothing (an earlier
+/// agent may have launched it). A collective readiness phase ends with its
+/// exact-identity reason on a definite answer, and is observed again (unknown)
+/// on an unread one; neither stops anything.
+#[tokio::test]
+async fn inspected_start_failures_wait_end_or_observe_again_without_a_stop() {
+    let (settled, asked, _, _) = settle_failed(Seen::Running, Failed::Retained(lost_reply())).await;
+    assert!(waits(settled));
+    assert!(asked.is_empty());
+
+    let (settled, asked, _, _) =
+        settle_failed(Seen::Running, Failed::Collective(lost_reply())).await;
+    assert!(matches!(ended(settled), ExecutionResult::Unknown(_)));
+    assert!(asked.is_empty());
+
+    let (settled, asked, _, _) = settle_failed(
+        Seen::Running,
+        Failed::Collective(HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::RuntimeProcessExited,
+            diagnostic: None,
+            process_logs: None,
+        }),
+    )
+    .await;
+    let ExecutionResult::Failed(failure) = ended(settled) else {
+        panic!("a definite answer ends the collective phase");
+    };
+    assert!(
+        failure
+            .reason
+            .contains("collective workload is not running with exact identity"),
+        "{}",
+        failure.reason
+    );
+    assert!(asked.is_empty());
+}
+
+/// A retained start whose inspection found the process exited is reported as
+/// that definite answer: it neither waits nor stops anything.
+#[tokio::test]
+async fn a_retained_start_whose_process_exited_is_reported_not_waited_on() {
+    let (settled, asked, _, _) = settle_failed(
+        Seen::Running,
+        Failed::Retained(HostRuntimeError::HelperRejected {
+            code: HelperErrorCode::RuntimeProcessExited,
+            diagnostic: None,
+            process_logs: None,
+        }),
+    )
+    .await;
+    assert!(!waits(settled));
+    assert!(asked.is_empty());
+}
+
 /// The readiness guard and the evidence read before a stop name the start's
 /// generation: another generation's container never stands in for it.
 #[tokio::test]

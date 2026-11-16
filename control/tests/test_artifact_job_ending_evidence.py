@@ -19,10 +19,12 @@ from vonk_agent_protocol import (
 from vonk_agent_protocol import (
     AgentResult,
     InstallationNodeState,
+    InstallationState,
     OperationFailureCode,
     RecipeJobEnding,
     RecipeJobFile,
     RecipeJobRunResult,
+    RunState,
     canonical_message,
     recipe_job_manifest_document,
     recipe_job_manifest_sha256,
@@ -37,10 +39,12 @@ from vonk_control.models import (
     ArtifactJob,
     InstallationNode,
     Job,
+    RecipeInstallation,
     RecipeRun,
 )
 from vonk_control.operation_contract import OperationFailureEvidence
 from vonk_control.operation_item_contract import agent_receipt_for
+from vonk_control.owner_liveness import OwnerKind, OwnerRef, owner
 
 from .runtime_identity_support import claim_agent
 from .test_artifact_jobs import (
@@ -458,3 +462,60 @@ def test_a_job_that_finds_its_image_gone_ends_and_reinstalls_its_rank(
         )
         assert rank is not None
         assert rank.state == InstallationNodeState.PLANNED
+
+
+def test_a_held_job_run_keeps_its_claims_while_its_demoted_installation_lets_go(
+    tmp_path,
+) -> None:
+    # The held job run (running, route withdrawn) outlives the image loss: its
+    # own claims stay live, the partial installation's claim is released, and
+    # once the installation is installed again the run takes the next
+    # submission without any re-run of the lost one.
+    sessions, service, agent_jobs, clock, node_id, job = _wired(tmp_path)
+    claim = claim_agent(agent_jobs, node_id, "serial-0")
+    assert claim is not None
+    clock.advance(seconds=5)
+    _report(
+        agent_jobs,
+        claim,
+        "failed",
+        {
+            "kind": "failed",
+            "code": "recipe_job_run_failed",
+            "reason": "job ended without an observed exit",
+            "failure_kind": "uncertain-effect",
+            "evidence": {
+                "stage": "runtime-adapter",
+                "helper_error_code": "runtime_image_missing",
+            },
+        },
+    )
+    clock.advance(seconds=600)
+    with sessions.begin() as session:
+        run = session.get(RecipeRun, job.run_id)
+        assert run is not None
+        installation = session.get(RecipeInstallation, run.installation_id)
+        assert installation is not None
+        assert installation.state == InstallationState.PARTIAL
+        assert run.state == RunState.RUNNING
+        assert owner(session, OwnerRef(OwnerKind.RUN, run.id), clock()).live
+        assert not owner(
+            session, OwnerRef(OwnerKind.INSTALLATION, installation.id), clock()
+        ).live
+        installation.state = InstallationState.INSTALLED
+        for rank in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id == installation.id
+            )
+        ):
+            rank.state = InstallationNodeState.INSTALLED
+    jobs_before = _job_count(sessions)
+    assert submitted_artifact_job(service, job.run_id, request_suffix=661).state == (
+        "queued"
+    )
+    assert _job_count(sessions) == jobs_before + 1
+
+
+def _job_count(sessions) -> int:
+    with sessions() as session:
+        return len(session.scalars(select(Job.id)).all())
