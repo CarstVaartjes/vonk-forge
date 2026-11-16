@@ -16,6 +16,7 @@ from vonk_agent_protocol import (
 )
 from vonk_agent_protocol.inventory import MAX_REPORTED_INSTALLATIONS
 
+from .installation_transitions import RankRead, demote_installed_rank
 from .machine_states import rank_installed
 from .models import InstallationNode, RecipeInstallation, RecipeRun
 
@@ -92,51 +93,63 @@ def demote_installed_ranks(
     (and copies whatever the Spark no longer holds). Only rows last changed at
     or before ``before`` move, so a receipt newer than the evidence stays; an
     in-flight install and running workload claims are never touched. Busy rows
-    wait for the next evidence rather than blocking it.
+    wait for the next evidence rather than blocking it. Each rank moves by the
+    one ``demote_installed_rank`` edge, a compare-and-set on what was read.
     """
-    candidates = select(InstallationNode.installation_id).where(
-        InstallationNode.node_id == node_id,
-        rank_installed(InstallationNode.state),
-        InstallationNode.updated_at <= before,
-        which,
-    )
-    installations = tuple(
-        session.scalars(
-            select(RecipeInstallation)
-            .where(
-                RecipeInstallation.id.in_(candidates),
-                RecipeInstallation.state.in_(
-                    (InstallationState.INSTALLED, InstallationState.PARTIAL)
-                ),
-                RecipeInstallation.updated_at <= before,
-            )
-            .order_by(RecipeInstallation.id)
-            .with_for_update(skip_locked=True)
-        )
-    )
-    if not installations:
-        return 0
-    owners = {row.id: row for row in installations}
     changed = 0
-    for rank in session.scalars(
-        select(InstallationNode)
+    for rank_id, seen in _demotable(session, node_id, which, before).items():
+        if demote_installed_rank(session, seen, before=before, now=observed_at):
+            changed += 1
+            continue
+        # A lost compare-and-set means a newer transition moved the row: read
+        # it again once and decide on what it is now, never overwrite it.
+        again = _demotable(session, node_id, which, before, rank_id=rank_id)
+        if rank_id in again and demote_installed_rank(
+            session, again[rank_id], before=before, now=observed_at
+        ):
+            changed += 1
+    return changed
+
+
+def _demotable(
+    session: Session,
+    node_id: str,
+    which: ColumnElement[bool],
+    before: datetime,
+    *,
+    rank_id: str | None = None,
+) -> dict[str, RankRead]:
+    """The installed ranks on ``node_id`` that ``which`` selects and that no
+    transition newer than ``before`` has touched, as read right now."""
+
+    query = (
+        select(
+            InstallationNode.id,
+            InstallationNode.installation_id,
+            InstallationNode.updated_at,
+        )
+        .join(
+            RecipeInstallation,
+            RecipeInstallation.id == InstallationNode.installation_id,
+        )
         .where(
-            InstallationNode.installation_id.in_(tuple(owners)),
             InstallationNode.node_id == node_id,
             rank_installed(InstallationNode.state),
             InstallationNode.updated_at <= before,
+            RecipeInstallation.state.in_(
+                (InstallationState.INSTALLED, InstallationState.PARTIAL)
+            ),
+            RecipeInstallation.updated_at <= before,
+            which,
         )
         .order_by(InstallationNode.id)
-        .with_for_update(skip_locked=True)
-    ):
-        rank.state = InstallationNodeState.PLANNED
-        rank.installed_bytes = 0
-        rank.updated_at = observed_at
-        installation = owners[rank.installation_id]
-        installation.state = InstallationState.PARTIAL
-        installation.updated_at = observed_at
-        changed += 1
-    return changed
+    )
+    if rank_id is not None:
+        query = query.where(InstallationNode.id == rank_id)
+    return {
+        row.id: RankRead(row.id, row.installation_id, row.updated_at)
+        for row in session.execute(query)
+    }
 
 
 def demote_ranks_on_lost_image(

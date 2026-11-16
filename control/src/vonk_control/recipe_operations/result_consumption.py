@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import (
     InstallationNodeState,
-    InstallationState,
     LifecycleState,
     RecipeBuildCleanupEvidence,
     RecipeBuildCleanupRequest,
@@ -31,6 +30,7 @@ from ..admission_locking import (
     admission_attempts,
     admission_wait_exhausted,
 )
+from ..installation_transitions import end_cancelled_operation
 from ..installed_bytes import demote_ranks_on_lost_image
 from ..job_documents import (
     RecipeBuildCleanupParent,
@@ -77,7 +77,7 @@ from .errors import RecipeRequestInvalid, RecipeRetryLater
 from .intent import _intent_is_current, _job_workload_intent
 from .interfaces import _TERMINAL_JOB_STATES, RecipeOperationView
 from .orphan_cleanup import consume_orphan_cleanup
-from .results import _RANK_FAILED, _node_result, _unproven_evidence
+from .results import _node_result, _unproven_evidence
 
 if TYPE_CHECKING:
     from .service import RecipeOperationService
@@ -239,12 +239,7 @@ class ResultConsumptionMixin:
                 )
                 # The queue validated the exact attempt before calling this
                 # projection. Missing SQL rows must not roll its receipt back.
-                if node is not None:
-                    node.state = _RANK_FAILED
-                    node.updated_at = now
-                if installation is not None:
-                    installation.state = InstallationState.PARTIAL
-                    installation.updated_at = now
+                end_cancelled_operation(node, installation, now)
             elif job.kind in {
                 WireAgentOperation.RECIPE_START.value,
                 WireAgentOperation.RECIPE_STOP.value,

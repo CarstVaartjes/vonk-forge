@@ -153,3 +153,68 @@ def test_postgres_missing_installation_inventory_allows_reinstall_without_releas
     # An out-of-order listing cannot reverse the reconciled absence.
     record(NOW + timedelta(seconds=61.5), [kept, missing])
     assert _sizes(world) == {missing: 0, kept: 1}
+
+
+def test_a_newer_transition_wins_over_a_stale_demotion(tmp_path: Path) -> None:
+    """Catches a demotion that overwrites a rank or installation a newer
+    transition (here a re-install) moved after the evidence was read."""
+
+    from datetime import timedelta
+
+    from vonk_agent_protocol import InstallationState
+    from vonk_control.installation_transitions import demote_installed_rank
+    from vonk_control.installed_bytes import demote_installed_ranks
+    from vonk_control.models import RecipeInstallation
+
+    from .test_catalog_revision_collection import NOW
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'controller.sqlite'}")
+    Base.metadata.create_all(engine)
+    world = Catalog(engine)
+    revision = world.revision("glm", 1)
+    stale, _ = world.workload(revision, run="stopped")
+    fresh, _ = world.workload(revision, run="stopped")
+    everything = InstallationNode.node_id == NODE
+    with world.sessions.begin() as session:
+        from sqlalchemy import update
+        from vonk_control.installation_transitions import RankRead
+
+        seen = next(
+            RankRead(r.id, r.installation_id, r.updated_at)
+            for r in session.scalars(
+                select(InstallationNode).where(
+                    InstallationNode.installation_id == stale
+                )
+            )
+        )
+        # A newer transition lands after the read: the rank is installing again.
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id.in_((stale, fresh)))
+            .values(updated_at=NOW + timedelta(seconds=5))
+        )
+        session.execute(
+            update(InstallationNode)
+            .where(InstallationNode.installation_id == stale)
+            .values(state=InstallationNodeState.PLANNED)
+        )
+    with world.sessions.begin() as session:
+        assert not demote_installed_rank(
+            session, seen, before=NOW, now=NOW + timedelta(seconds=9)
+        )
+    with world.sessions.begin() as session:
+        # Evidence older than the newer transition moves neither row.
+        assert (
+            demote_installed_ranks(
+                session,
+                NODE,
+                everything,
+                observed_at=NOW + timedelta(seconds=9),
+                before=NOW,
+            )
+            == 0
+        )
+    with world.sessions() as session:
+        for installation_id in (stale, fresh):
+            row = session.get(RecipeInstallation, installation_id)
+            assert row is not None and row.state == InstallationState.INSTALLED
