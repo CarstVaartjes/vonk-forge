@@ -169,11 +169,7 @@ export function LibraryCacheAction({
   }, [api, modelContentSha256, selector, fleetOnly]);
 
   const remove = useCallback(async () => {
-    if (
-      !review ||
-      (!review.fleet && review.blockers.length) ||
-      review.target_identity !== modelContentSha256
-    )
+    if (!review || review.blockers.length > 0 || review.target_identity !== modelContentSha256)
       return;
     abort.current?.abort();
     const controller = new AbortController();
@@ -258,7 +254,7 @@ export function LibraryCacheAction({
               disabled={
                 busy ||
                 !review ||
-                (!review.fleet && review.blockers.length > 0) ||
+                review.blockers.length > 0 ||
                 Boolean(review.fleet?.targets.some((target) => !target.observation_available))
               }
               onClick={() => void remove()}

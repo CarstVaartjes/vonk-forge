@@ -90,3 +90,39 @@ test.each([LifecycleState.QUEUED, LifecycleState.SUCCEEDED])(
     );
   },
 );
+
+test("fleet removal with blockers cannot be confirmed", async () => {
+  const review = cacheRemovalReview({
+    resource_kind: "model",
+    selector: "example/model",
+    target_identity: "e".repeat(64),
+    with_model: null,
+    nas_reclaimable_bytes: 0,
+    blockers: [
+      { code: "referenced", detail: "Saved profile 20 retains this model", retryable: false },
+    ],
+    fleet: {
+      nas_remove: false,
+      nas_reason: FleetRemovalReason.REFERENCED,
+      nas_detail: "Saved profile 20 retains this model",
+      targets: [],
+    },
+  } as Parameters<typeof cacheRemovalReview>[0]);
+  const modelRemovalReview = vi.fn().mockResolvedValue(review);
+  const removeModelCache = vi.fn();
+  const api = { modelRemovalReview, removeModelCache } as unknown as ControlApi;
+  render(
+    <LibraryCacheAction
+      fleetOnly
+      api={api}
+      selector={review.selector}
+      modelContentSha256={review.target_identity}
+      state="not_cached"
+      onPrepared={() => undefined}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove model from fleet" }));
+  const confirm = await screen.findByRole("button", { name: "Confirm remove" });
+  expect(confirm).toBeDisabled();
+  expect(removeModelCache).not.toHaveBeenCalled();
+});
