@@ -62,9 +62,10 @@ unpublished.
   it does not guess at the fields. `--check-connection --json` `.client.version`
   identifies the CLI build.
 - Regeneration refuses to rewrite a published file with an incompatible schema
-  (a removed property, a `required` list that grew, a changed type), and a test
-  fails on the same difference: the version must be bumped, which writes a new
-  file.
+  (a removed property, a `required` list that grew, a changed type). A test
+  fails when a committed file is not exactly the model's current export, and
+  names an incompatible difference as needing a version bump, which writes a
+  new file.
 
 ## Absent and `null`
 

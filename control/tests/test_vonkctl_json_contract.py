@@ -321,14 +321,18 @@ def test_cancel_follow_and_controller_failures_match_their_published_schemas(
 
 
 def test_a_changed_schema_needs_a_new_version() -> None:
-    """The committed files are what clients rely on: only compatible edits keep a version."""
+    """The committed files are the export clients rely on; an incompatible edit needs a new version."""
 
     for kind in DOCUMENTS:
-        committed = json.loads((SCHEMAS / schema_filename(kind)).read_text())
+        committed_text = (SCHEMAS / schema_filename(kind)).read_text()
+        committed = json.loads(committed_text)
         regenerated = json.loads(schema_text(kind))
         assert incompatibilities(committed, regenerated) == [], (
             f"{kind}: incompatible change; bump its schema_version"
         )
+        # A hand-written or stale file is not the export clients rely on, even
+        # when every difference is one the rule allows.
+        assert committed_text == schema_text(kind), f"{kind}: file is not the export"
         required = committed.get("required")
         if required is not None:
             assert "schema_version" in required
