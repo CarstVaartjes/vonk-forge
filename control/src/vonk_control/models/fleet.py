@@ -266,7 +266,6 @@ class FleetProfileApplication(Base):
                 LifecycleState.QUEUED,
                 LifecycleState.RUNNING,
                 LifecycleState.BACKOFF,
-                LifecycleState.NEEDS_OPERATOR,
                 LifecycleState.SUCCEEDED,
                 LifecycleState.FAILED,
                 LifecycleState.CANCELLED,
