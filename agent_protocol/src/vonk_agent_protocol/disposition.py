@@ -70,6 +70,8 @@ WAIT_REASON_DISPOSITION = MappingProxyType(
         WaitReason.STALE_PLAN: _OBSERVE,
         WaitReason.SCOPE_CHANGED: _OBSERVE,
         WaitReason.LEGACY_UNCLASSIFIED: _OBSERVE,
+        WaitReason.REMOVAL_CHECKPOINT_PENDING: _OBSERVE,
+        WaitReason.SET_INCOMPLETE: _OBSERVE,
     }
 )
 
