@@ -180,14 +180,11 @@ def _node_wheel_root() -> Path:
 
 
 def _run(command: list[str]) -> None:
-    # The locked control environment also supplies Node/npm to Linux test lanes.
-    node_bin = str(_node_wheel_root() / "bin")
     subprocess.run(
         command,
         cwd=ROOT,
         env={
             **os.environ,
-            "PATH": os.pathsep.join([node_bin, os.environ.get("PATH", "")]),
             "PYTHONHASHSEED": "0",
             "SOURCE_DATE_EPOCH": "0",
         },
