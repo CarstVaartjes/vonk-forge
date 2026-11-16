@@ -48,6 +48,7 @@ def _host_status(*services: str) -> str:
     }
     return json.dumps(
         {
+            "BackendState": "Running",
             "Self": {
                 "CapMap": {"service-host": [mappings]},
                 "PrimaryRoutes": [
@@ -55,7 +56,7 @@ def _host_status(*services: str) -> str:
                     for addresses in mappings.values()
                     for address in addresses
                 ],
-            }
+            },
         },
         separators=(",", ":"),
     )
@@ -87,7 +88,7 @@ def _write_stateful_tailscale(tmp_path: Path) -> tuple[Path, Path]:
         "    value = load()\n"
         "    mappings = {name: [f'100.64.0.{index}'] for index, name in enumerate(value['advertised'], start=1)}\n"
         "    routes = [addresses[0] + '/32' for addresses in mappings.values()]\n"
-        "    print(json.dumps({'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
         "    time.sleep(float(os.environ.get('TS_TEST_READ_DELAY', '0')))\n"
         "    value = load()\n"
@@ -237,6 +238,71 @@ def test_default_gateway_reconciles_only_the_vonk_service(
     assert result.returncode == 0, result.stderr
     invocation_log = calls.read_text(encoding="utf-8")
     assert "serve get-config --all" in invocation_log
+
+
+def test_configurator_waits_for_gateway_login_before_configuring(
+    tmp_path: Path, short_socket_directory: Path
+) -> None:
+    """The socket answers before the first login; `serve` then fails.
+
+    The reconciler must keep waiting instead of dying on that failure: Docker
+    marks the container unhealthy the moment it exits, which failed
+    `compose up --wait` whenever the first login was slow.
+    """
+    socket_path = short_socket_directory / "tailscaled.sock"
+    daemon_socket = socket.socket(socket.AF_UNIX)
+    daemon_socket.bind(str(socket_path))
+    inner = tmp_path / "logged-in"
+    inner.mkdir()
+    state, calls = _write_stateful_tailscale(inner)
+    status_calls = tmp_path / "status-calls"
+    fake = tmp_path / "tailscale"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"status_calls={os.fspath(status_calls)!r}\n"
+        'case "$*" in\n'
+        '  *"serve status --json"*|*"serve get-config --all"*) ;;\n'
+        '  *" status --json"*) printf x >>"$status_calls" ;;\n'
+        "esac\n"
+        'logins=$(cat "$status_calls" 2>/dev/null || true)\n'
+        'if [ "${#logins}" -le 2 ]; then\n'
+        '  case "$*" in\n'
+        "    *\" status --json\"*) printf '%s\\n' "
+        '\'{"BackendState":"NeedsLogin","Self":{}}\'; exit 0 ;;\n'
+        '    *"serve status --json"*|*"serve get-config --all"*) ;;\n'
+        "    *) echo 'Logged out.' >&2; exit 1 ;;\n"
+        "  esac\n"
+        "fi\n"
+        f'exec {os.fspath(inner / "tailscale")!r} "$@"\n',
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+    _write_instant_sleep(tmp_path)
+    try:
+        result = subprocess.run(
+            ["/bin/sh", COMPOSE / "tailscale/configure.sh"],
+            env=os.environ
+            | {
+                "PATH": f"{tmp_path}:{os.environ['PATH']}",
+                "TS_CONFIGURE_ONCE": "1",
+                "TS_SOCKET_PATH": str(socket_path),
+                "TS_TEST_STATE": str(state),
+                "TS_TEST_CALLS": str(calls),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    finally:
+        daemon_socket.close()
+
+    assert result.returncode == 0, result.stderr
+    assert "Logged out." not in result.stderr
+    assert json.loads(state.read_text(encoding="utf-8")) == {
+        "config": DEFAULT_MAP,
+        "advertised": ["svc:vonk-forge"],
+    }
 
 
 def _environment() -> dict[str, str]:
@@ -454,7 +520,7 @@ def test_unapproved_advertisement_does_not_claim_service_host_readiness(
         "#!/bin/sh\n"
         'case "$*" in\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"AdvertisedServices":["svc:vonk-forge"],"CapMap":{"service-host":[{}],"services/vonk-forge":[{}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"AdvertisedServices":["svc:vonk-forge"],"CapMap":{"service-host":[{}],"services/vonk-forge":[{}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -494,7 +560,7 @@ def test_service_host_mapping_without_primary_routes_is_healthy(
         "  *\"serve get-config --all\"*) printf '%s\\n' "
         '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"}}}}\' ;;\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":[]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -544,7 +610,7 @@ def test_pending_advertisement_is_acceptance_only(
         "  *\"serve get-config --all\"*) printf '%s\\n' "
         '\'{"version":"0.0.1","services":{"svc:vonk-forge":{"endpoints":{"tcp:443":"http://caddy:8080"},"advertised":false}}}\' ;;\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"CapMap":{"service-host":[{"svc:vonk-forge":["100.70.230.202"]}]},"PrimaryRoutes":["100.70.230.202/32"]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -593,7 +659,7 @@ def test_empty_pending_service_map_is_ephemeral_acceptance_only(
         "  *\"serve get-config --all\"*) printf '%s\\n' "
         '\'{"version":"0.0.1"}\' ;;\n'
         "  *\"status --json\"*) printf '%s\\n' "
-        '\'{"Self":{"CapMap":{},"PrimaryRoutes":[]}}\' ;;\n'
+        '\'{"BackendState":"Running","Self":{"CapMap":{},"PrimaryRoutes":[]}}\' ;;\n'
         "esac\n",
         encoding="utf-8",
     )
@@ -654,7 +720,7 @@ def test_configurator_re_advertises_pending_service_host(
         "if args == ['status', '--json']:\n"
         "    mappings = {'svc:vonk-forge': ['100.70.230.202']} if repaired.exists() else {}\n"
         "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
-        "    print(json.dumps({'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [mappings]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"
@@ -705,7 +771,7 @@ def test_configurator_replaces_exact_map_for_stale_primary_route(
         "args = [value for value in sys.argv[1:] if not value.startswith('--socket=')]\n"
         "if args == ['status', '--json']:\n"
         "    routes = ['100.70.230.202/32'] if repaired.exists() else []\n"
-        "    print(json.dumps({'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.70.230.202']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
+        "    print(json.dumps({'BackendState': 'Running', 'Self': {'CapMap': {'service-host': [{'svc:vonk-forge': ['100.70.230.202']}]}, 'PrimaryRoutes': routes}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'status', '--json']:\n"
         "    print(json.dumps({'Services': {'svc:vonk-forge': {'TCP': {'443': {'HTTPS': True}}}}}, separators=(',', ':')))\n"
         "elif args == ['serve', 'get-config', '--all']:\n"

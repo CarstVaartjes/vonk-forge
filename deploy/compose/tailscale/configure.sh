@@ -330,8 +330,15 @@ fi
 # healthcheck runs this same script and must never withdraw healthy routes.
 trap shutdown_services 1 2 15
 
+# Wait for the backend to be logged in, not only for the socket to answer:
+# `status --json` succeeds while the gateway still logs in (NeedsLogin), and
+# `serve` then fails ("Logged out."). Under `set -e` that ended this reconciler,
+# and Docker marks a container unhealthy the moment its process exits, so a
+# slow first login failed `compose up --wait` within seconds. Same predicate as
+# the gateway healthcheck.
 while [ "${remaining}" -gt 0 ]; do
-    if [ -S "${socket}" ] && ts status --json >/dev/null 2>&1; then
+    if [ -S "${socket}" ] && ts status --json 2>/dev/null \
+        | tr -d '[:space:]' | grep -Fq '"BackendState":"Running"'; then
         break
     fi
     sleep 2
