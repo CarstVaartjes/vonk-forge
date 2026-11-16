@@ -208,6 +208,17 @@ Index(
 )
 
 
+#: Retention selects expired reports oldest first on every pass; without an index
+#: leading on ``observed_at`` it read every retained report.
+Index(
+    "ix_inventory_report_observed",
+    NodeSnapshot.observed_at,
+    NodeSnapshot.id,
+    postgresql_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+    sqlite_where=NodeSnapshot.kind == InventorySnapshotKind.REPORT,
+)
+
+
 class NodeInventoryResourceSnapshot(NodeSnapshot):
     __mapper_args__: ClassVar = {
         "polymorphic_identity": InventorySnapshotKind.MEASUREMENTS
