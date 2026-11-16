@@ -9,6 +9,7 @@ import tarfile
 import threading
 import time
 import types
+import uuid
 from pathlib import Path
 
 import pytest
@@ -779,3 +780,61 @@ def test_release_mode_carry_with_equal_generations_is_skipped(monkeypatch, tmp_p
         "g1",
     )
     assert report["status"] == "skipped"
+
+
+def _cleanup_application(*, final_verified: bool = True) -> dict[str, object]:
+    def child(kind: str, phases: list[dict[str, object]]) -> dict[str, object]:
+        return {
+            "kind": kind,
+            "state": "succeeded",
+            "operation_id": str(uuid.uuid5(uuid.NAMESPACE_URL, kind)),
+            "result": {
+                "run_switch_operation_id": str(uuid.uuid5(uuid.NAMESPACE_URL, kind)),
+                "run_switch": {"phase_results": phases},
+            },
+        }
+
+    stop = child(
+        "stop", [{"phase": "stop", "run_id": "5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61"}]
+    )
+    cleanup = child(
+        "cleanup",
+        [
+            {
+                "phase": "uninstall",
+                "installation_id": "5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62",
+            },
+            {
+                "phase": "final_verify",
+                "installation_id": "5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62",
+                "final_verified": final_verified,
+                "removed": True,
+                "active_runs": 0,
+                "installation_state": "uninstalled",
+            },
+        ],
+    )
+    return {
+        "id": "app-1",
+        "state": "succeeded",
+        "progress": {
+            "step_results": {"switch": {"kind": "switch"}},
+            "switch_adapter": {"result": {"children": [stop, cleanup]}},
+        },
+    }
+
+
+def test_a_cleanup_application_is_accepted_whole_and_refused_when_damaged():
+    lifecycle = object.__new__(carry.UpgradeCarryLifecycle)
+    lifecycle._current_release = lambda: types.SimpleNamespace(  # type: ignore[method-assign]
+        contract=types.SimpleNamespace(check_json_response=lambda *_args: None)
+    )
+    check = lambda application: lifecycle._validate_cleanup_application(
+        application,
+        installation_ids=["5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a62"],
+        run_id="5b6a3f2e-1c4d-4e8f-9a0b-1c2d3e4f5a61",
+    )
+
+    check(_cleanup_application())
+    with pytest.raises(LifecycleError, match="removal receipt is incomplete"):
+        check(_cleanup_application(final_verified=False))
