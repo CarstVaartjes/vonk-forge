@@ -47,7 +47,6 @@ from cluster_profiles.control_client import ControlClient
 
 from .runtime_image_fixtures import remove_test_image
 from .test_library_canonical_projection import _insert_canonical_rows
-from .test_model_cache import _write_object_receipt
 from .test_recipe_operations import NOW, setup_services
 from .test_run_switch_artifact_authority import _report_store
 from .test_run_switch_operations import RecordingArtifactExecutor
@@ -229,11 +228,9 @@ def _publish_model_fixture(cache, sessions, manifest: ArtifactSetManifest):
     for artifact in manifest.artifacts:
         path = cache.root / "objects" / artifact.sha256[:2] / artifact.sha256
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Receipt publication is outside this read-boundary test; admission
-        # trusts the verified receipt and checks real presence and length.
+        # Admission checks real presence and length.
         with path.open("wb") as output:
             output.truncate(artifact.expected_bytes)
-        _write_object_receipt(cache, artifact.sha256, artifact.expected_bytes)
         paths.append(path)
     with sessions.begin() as session:
         session.add(

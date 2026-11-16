@@ -309,8 +309,6 @@ def test_a_cached_whole_file_skips_every_part_download(service, hub) -> None:
     target = service._object_path(digest)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(whole)
-    other = replace(_spec(whole, split_parts=False), path="model-00047.safetensors")
-    service._write_object_receipt(other, NOW)
     preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     assert preview["new_bytes"] == 0
     assert preview["already_cached_bytes"] == len(whole)

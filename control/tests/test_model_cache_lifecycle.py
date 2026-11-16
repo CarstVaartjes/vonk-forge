@@ -5,7 +5,7 @@ adapter and its reconcile loop against the stored operation: what a stored (and 
 legacy) row *is* to the core, the single projection back onto the row, and the
 promises the audit asked for: a legacy row adopts and heals, no operator wait
 without an action, a cancel completes, a restart in the middle of a transfer is
-harmless, and a missing receipt or a full disk is a wait that heals, never an end.
+harmless, and a missing object or a full disk is a wait that heals, never an end.
 """
 
 # ruff: noqa: F811 - tests take the imported ``cache`` fixture by name
@@ -497,7 +497,7 @@ def test_a_restart_in_the_middle_of_a_transfer_is_harmless(cache, tmp_path):
     assert done.fence == restarted._claim_owner and done.attempt == 2
 
 
-def test_the_adapter_observes_the_receipts_and_never_marks_work_done(cache, tmp_path):
+def test_the_adapter_observes_the_objects_and_never_marks_work_done(cache, tmp_path):
     service, sessions = cache
     downloaded = _download(
         service,
@@ -527,7 +527,7 @@ def _edit_set_state(sessions, set_digest: str, state: str) -> None:
 # ------------------------------------- unknown, then re-verify (top-10 #8)
 
 
-def test_a_lost_receipt_is_reverified_not_final(cache, tmp_path):
+def test_a_lost_object_is_reverified_not_final(cache, tmp_path):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"coverage", model_content_sha256=MODEL)
     downloaded = _download(
@@ -592,7 +592,7 @@ def test_an_unverified_object_is_reverified_not_final(cache, tmp_path):
     assert path.read_bytes() == b"unverified"
 
 
-def test_receipts_that_are_complete_heal_a_set_that_says_otherwise(cache, tmp_path):
+def test_objects_that_are_complete_heal_a_set_that_says_otherwise(cache, tmp_path):
     service, sessions = cache
     artifact = _artifact(tmp_path, b"healed", model_content_sha256=MODEL)
     downloaded = _download(
@@ -739,19 +739,15 @@ def test_lifecycle_reads_preserve_the_owners_pending_transaction(cache, tmp_path
 
 def test_a_stored_object_is_reused_by_the_next_download_not_fetched(cache, tmp_path):
     """Catches two presence rules: reconcile adopted a same-size object while
-    download reuse re-fetched it (77 of 98 GLM files). The receipt is gone and
-    the source is blocked, so only reuse can succeed."""
+    download reuse re-fetched it (77 of 98 GLM files). The source is blocked, so only reuse can succeed."""
     service, _sessions = cache
-    artifact = _artifact(tmp_path, b"receiptless", model_content_sha256=MODEL)
+    artifact = _artifact(tmp_path, b"stored", model_content_sha256=MODEL)
     _download(
         service,
         [artifact],
         model_content_sha256=MODEL,
         request_key="00000000-0000-4000-8000-00000000a060",
     )
-    digest = str(artifact["sha256"])
-    for receipt in (service.root / "objects" / digest[:2]).glob("*.receipt.json"):
-        receipt.unlink()
     Path(str(artifact["source"]).removeprefix("file://")).unlink()
     preview = service.download_preview(model_content_sha256=MODEL, artifacts=[artifact])
     assert preview["new_bytes"] == 0

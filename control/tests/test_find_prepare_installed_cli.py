@@ -121,9 +121,7 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
     object_path = cache._object_path(artifact.sha256)
     object_path.parent.mkdir(parents=True, exist_ok=True)
     object_path.write_bytes(_PAYLOAD)
-    cache._write_object_receipt(artifact, _NOW)
     object_path.unlink()
-    cache._receipt_path(artifact.sha256).unlink()
     cache.reconcile_storage()
     with sessions() as session:
         reconciled = session.get(type(cache_set), manifest.digest)
@@ -238,7 +236,6 @@ def test_installed_cli_finds_later_page_missing_asset_and_accepts_exact_cache_op
             assert observed["state"] == "queued"
 
             assert not object_path.exists()
-            assert not cache._receipt_path(artifact.sha256).exists()
             assert token not in (
                 first.stdout
                 + first.stderr
