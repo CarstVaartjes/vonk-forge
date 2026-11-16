@@ -100,7 +100,7 @@ class CoreMixin:
         return frozenset(list(cache._background_operations))
 
     def objects_present(self, payload: ModelCacheOperationPayload) -> bool | None:
-        """Whether every object of the operation's set has a storage receipt."""
+        """Whether every object of the operation's set is stored with its expected size."""
         cache = cast("ModelCacheService", self)
 
         if not isinstance(payload, ModelCacheDownloadPayload):
@@ -295,8 +295,8 @@ class CoreMixin:
     ) -> None:
         """What a cancelled download leaves behind, in the transaction that ends it.
 
-        The set's row follows what storage proves (cached when every object has a
-        receipt, else incomplete) unless a sibling operation still works on it.
+        The set's row follows what storage proves (cached when every object is
+        stored, else incomplete) unless a sibling operation still works on it.
         """
         cache = cast("ModelCacheService", self)
 
@@ -311,7 +311,7 @@ class CoreMixin:
         operation.current_artifact_key = None
         if isinstance(payload, Residue):
             # The cancel stands; the set row is left to the storage sweep, which
-            # follows what the receipts prove.
+            # follows what storage proves.
             return
         payload = payload.model_copy(update={"failure": None})
         _store_operation_payload(operation, operation.kind, payload)

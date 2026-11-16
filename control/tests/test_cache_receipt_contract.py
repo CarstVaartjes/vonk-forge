@@ -42,11 +42,10 @@ def test_runtime_receipt_projection_keeps_exact_launch_identity():
     assert VerifiedRuntimeImage.model_validate_json(launch.model_dump_json()) == launch
 
 
-@pytest.mark.parametrize("damage", ["missing", "malformed", "different", "unreadable"])
-def test_local_receipt_miss_triggers_preparation_and_reuses_repaired_content(
-    controller, tmp_path, damage, monkeypatch
+def test_a_damaged_object_triggers_preparation_and_reuses_repaired_content(
+    controller, tmp_path
 ):
-    """Catches refusing local metadata, publishing it, or waiting for an operator.
+    """Catches refusing a wrong-size object, publishing it, or waiting for an operator.
 
     The copy to a Spark is what reads the NAS bytes, so it owns this repair.
     """
@@ -70,24 +69,7 @@ def test_local_receipt_miss_triggers_preparation_and_reuses_repaired_content(
     )
     manifest = cache.manifest_for_artifact_set(digest)
     object_digest = manifest.artifacts[0].sha256
-    receipt_path = cache._receipt_path(object_digest)
-    if damage == "missing":
-        receipt_path.unlink()
-    elif damage == "malformed":
-        receipt_path.write_text("{damaged")
-    elif damage == "different":
-        receipt_path.write_text(
-            receipt_path.read_text().replace(object_digest, "f" * 64)
-        )
-    else:
-        original = type(receipt_path).read_text
-
-        def unreadable(path, *args, **kwargs):
-            if path == receipt_path:
-                raise OSError("unreadable local receipt")
-            return original(path, *args, **kwargs)
-
-        monkeypatch.setattr(type(receipt_path), "read_text", unreadable)
+    cache._object_path(object_digest).write_bytes(b"short")
     with pytest.raises(UnknownOutcomeError):
         ModelCacheObjectSource.from_service(cache).objects_for_set(digest)
     from sqlalchemy import select
@@ -104,7 +86,6 @@ def test_local_receipt_miss_triggers_preparation_and_reuses_repaired_content(
             )
         )
     assert len(repairs) == 1
-    monkeypatch.undo()
     cache.run_pending()
     source = ModelCacheObjectSource.from_service(cache)
     (served,) = source.objects_for_set(digest)

@@ -383,18 +383,13 @@ class HttpMixin:
         """Whether the object is in the cache: a regular file of the exact size.
 
         Bytes are hashed once, where they enter from Hugging Face, before the
-        object is published. Reuse trusts that and heals a missing receipt in
-        place instead of fetching the object again.
+        object is published. Reuse trusts that and never fetches it again.
         """
         cache = cast("ModelCacheService", self)
-        if not cache._object_is_available(spec.sha256, spec.expected_bytes):
-            return False
-        if cache._read_object_receipt(spec.sha256, spec.expected_bytes) is None:
-            cache._write_object_receipt(spec, cache._clock())
-        return True
+        return cache._object_is_available(spec.sha256, spec.expected_bytes)
 
     def _manifest_coverage_complete(self, manifest: ArtifactSetManifest) -> bool:
-        """Whether every unique object is stored (receipt and size), including empty ones."""
+        """Whether every unique object is stored (exact size), including empty ones."""
         cache = cast("ModelCacheService", self)
         return all(
             cache._object_is_stored(spec)

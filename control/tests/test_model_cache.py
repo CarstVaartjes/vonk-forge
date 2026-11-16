@@ -1750,39 +1750,17 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         assert recovered["new_bytes"] == 0
 
 
-def test_stored_bytes_of_the_exact_size_are_present_without_a_receipt(
-    cache, tmp_path: Path
-) -> None:
-    """One presence rule: a regular file of the expected size is present, as
-    reconcile_storage already adopts it; the receipt is healed, not required."""
-
-    service, _sessions = cache
-    model = "8" * 64
-    data = b"bytes present, receipt absent"
-    artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    digest = _required_text(artifact["sha256"], "artifact digest")
-    object_path = service.root / "objects" / digest[:2] / digest
-    object_path.parent.mkdir(parents=True)
-    object_path.write_bytes(data)
-    assert not service._receipt_path(digest).exists()
-
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
-    assert preview["already_cached_bytes"] == len(data)
-    assert preview["new_bytes"] == 0
-
-
 def test_an_object_of_a_different_size_is_not_present(cache, tmp_path: Path) -> None:
-    """Presence is the exact size, whatever a receipt claims."""
+    """Presence is the exact size of the object file."""
 
     service, _sessions = cache
     model = "9" * 64
-    data = b"receipt size disagrees with the manifest"
+    data = b"object size disagrees with the manifest"
     artifact = _artifact(tmp_path, data, model_content_sha256=model)
     digest = _required_text(artifact["sha256"], "artifact digest")
     object_path = service.root / "objects" / digest[:2] / digest
     object_path.parent.mkdir(parents=True)
     object_path.write_bytes(data[:-1])
-    _write_object_receipt(service, digest, len(data))
 
     preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
     assert preview["already_cached_bytes"] == 0
