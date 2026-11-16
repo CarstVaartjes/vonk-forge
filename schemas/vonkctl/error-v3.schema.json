@@ -16949,7 +16949,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "final_verify",
@@ -16989,79 +16988,6 @@
         }
       },
       "title": "RunSwitchChildProgress",
-      "type": "object"
-    },
-    "RunSwitchCleanupResult": {
-      "properties": {
-        "nas_evicted": {
-          "title": "Nas Evicted",
-          "type": "boolean"
-        },
-        "phase": {
-          "const": "cleanup",
-          "title": "Phase",
-          "type": "string"
-        },
-        "protected_digests": {
-          "items": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "title": "Protected Digests",
-          "type": "array"
-        },
-        "protected_referenced_bytes": {
-          "default": 0,
-          "minimum": 0,
-          "title": "Protected Referenced Bytes",
-          "type": "integer"
-        },
-        "reclaimed_bytes": {
-          "minimum": 0,
-          "title": "Reclaimed Bytes",
-          "type": "integer"
-        },
-        "reclaimed_digests": {
-          "items": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "title": "Reclaimed Digests",
-          "type": "array"
-        },
-        "scope": {
-          "const": "spark-local",
-          "title": "Scope",
-          "type": "string"
-        },
-        "subphase": {
-          "anyOf": [
-            {
-              "enum": [
-                "container-build",
-                "model-download",
-                "runtime-image",
-                "runtime-plan",
-                "target-copy",
-                "runtime-install"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Subphase"
-        }
-      },
-      "required": [
-        "phase",
-        "scope",
-        "reclaimed_bytes",
-        "nas_evicted"
-      ],
-      "title": "RunSwitchCleanupResult",
       "type": "object"
     },
     "RunSwitchCleanupVerifyResult": {
@@ -17169,11 +17095,6 @@
         "run-switch.artifact-manifest-unknown",
         "run-switch.artifact-phase-executor-unavailable",
         "run-switch.artifact-verification-result-invalid",
-        "run-switch.cleanup-reclaim-evidence-invalid",
-        "run-switch.cleanup-reclaimed-bytes-exceed-plan",
-        "run-switch.cleanup-reference-protection-evidence-invalid",
-        "run-switch.cleanup-reference-protection-overlap",
-        "run-switch.cleanup-scope-invalid",
         "run-switch.container-build-evidence-invalid",
         "run-switch.container-build-executor-unavailable",
         "run-switch.container-build-identity-unavailable",
@@ -17315,9 +17236,6 @@
         "run-switch.verify-executor-unavailable",
         "run-switch.verify-waiting-without-child",
         "run-switch.verify-returned-no-evidence",
-        "run-switch.cleanup-executor-unavailable",
-        "run-switch.cleanup-waiting-without-child",
-        "run-switch.cleanup-returned-no-evidence",
         "run-switch.resource.capacity_unknown",
         "run-switch.resource.envelope_exceeds_capacity",
         "run-switch.resource.envelope_unverified",
@@ -17671,7 +17589,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "uninstall",
@@ -17800,7 +17717,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "uninstall",
@@ -18085,7 +18001,6 @@
               "transfer",
               "verify",
               "prepare",
-              "cleanup",
               "stop",
               "start",
               "uninstall",
@@ -18104,7 +18019,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "uninstall",
@@ -18160,9 +18074,6 @@
             },
             {
               "$ref": "#/$defs/RunSwitchVerifyResult"
-            },
-            {
-              "$ref": "#/$defs/RunSwitchCleanupResult"
             },
             {
               "$ref": "#/$defs/RunSwitchRuntimePlanResult"
@@ -18276,7 +18187,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "uninstall",
@@ -18327,9 +18237,6 @@
               },
               {
                 "$ref": "#/$defs/RunSwitchVerifyResult"
-              },
-              {
-                "$ref": "#/$defs/RunSwitchCleanupResult"
               },
               {
                 "$ref": "#/$defs/RunSwitchRuntimePlanResult"
@@ -18647,7 +18554,6 @@
                 "transfer",
                 "verify",
                 "prepare",
-                "cleanup",
                 "stop",
                 "start",
                 "uninstall",

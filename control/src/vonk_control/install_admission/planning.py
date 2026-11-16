@@ -27,7 +27,7 @@ from ..categorized_errors import (
 from ..cluster_mappings import validate_mapping_parameters
 from ..disk_reservations import (
     describe_disk_charges,
-    model_sets_stored_on_node,
+    model_sets_stored_on_nodes,
     outstanding_disk_charges,
     runtime_images_named_on_nodes,
 )
@@ -198,9 +198,11 @@ class InstallPlanningService:
                 ) from error
             models = resolved_entities.model_revisions
             model_display = stored_model_display(session, models[0] if models else None)
+            mapping_node_ids = [mapping_node.node_id for mapping_node in mapping_nodes]
             named_images_by_node = runtime_images_named_on_nodes(
-                session, [mapping_node.node_id for mapping_node in mapping_nodes]
+                session, mapping_node_ids
             )
+            stored_sets_by_node = model_sets_stored_on_nodes(session, mapping_node_ids)
             compiled_plan_error: str | None = None
             compiled_plan_unsettled = False
             # The snapshot is complete. Production compilation consults managed
@@ -404,7 +406,7 @@ class InstallPlanningService:
             with (
                 nullcontext(_session) if _session is not None else self._sessions()
             ) as session:
-                stored_sets = model_sets_stored_on_node(session, mapping_node.node_id)
+                stored_sets = stored_sets_by_node[mapping_node.node_id]
                 charges = outstanding_disk_charges(
                     session,
                     mapping_node.node_id,

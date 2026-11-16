@@ -16,7 +16,7 @@ from vonk_forge_contracts import EndpointAlias
 from ..integer_domains import MAX_DATABASE_INTEGER
 from ..run_switch_identity_contract import NodeId, UuidId
 from ..strict_json import StrictModel
-from .vocabulary import Digest, RunSwitchPlacementAction, RunSwitchRetention
+from .vocabulary import Digest, RunSwitchPlacementAction
 
 
 class InvocationMetadata(StrictModel):
@@ -127,7 +127,6 @@ class RunSwitchPreviewRequest(StrictModel):
     spark_group: SparkGroup
     alias: EndpointAlias
     action: RunSwitchPlacementAction = "run"
-    retention: RunSwitchRetention = "retain-cached"
     # Recipe option name -> chosen value. An option left out takes the
     # recipe's default; an unknown name or value is refused.
     gpu_clock: GpuClockRange | None = None

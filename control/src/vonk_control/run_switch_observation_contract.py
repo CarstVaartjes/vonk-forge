@@ -111,10 +111,6 @@ class RunSwitchArtifactGuardEvidence(BaseModel):
     copied_bytes: ObservedBytes = None
     total_bytes: ObservedBytes = None
     verified_build_id: str | None = None
-    scope: str | None = None
-    nas_evicted: bool | None = None
-    reclaimed_bytes: ObservedBytes = None
-    protected_referenced_bytes: ObservedBytes = None
 
 
 class RunSwitchObservedImageIdentity(BaseModel):

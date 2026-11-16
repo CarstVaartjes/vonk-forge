@@ -257,34 +257,44 @@ def incomplete_installation_ids(session: Session) -> tuple[str, ...]:
     installed or is short of the admitted payload.
     """
 
-    found: list[str] = []
-    for installation in session.scalars(
-        select(RecipeInstallation).where(
-            RecipeInstallation.state.in_(
-                (
-                    InstallationState.INSTALLED,
-                    InstallationState.PARTIAL,
-                    InstallationState.FAILED,
+    installations = tuple(
+        session.scalars(
+            select(RecipeInstallation).where(
+                RecipeInstallation.state.in_(
+                    (
+                        InstallationState.INSTALLED,
+                        InstallationState.PARTIAL,
+                        InstallationState.FAILED,
+                    )
                 )
             )
         )
-    ):
-        if installation.state != InstallationState.INSTALLED:
-            found.append(installation.id)
-            continue
-        if any(
-            not rank_installed(node.state)
-            or (
-                node.required_payload_bytes is not None
-                and node.installed_bytes < node.required_payload_bytes
-            )
-            for node in session.scalars(
-                select(InstallationNode).where(
-                    InstallationNode.installation_id == installation.id
+    )
+    short_installed = {
+        node.installation_id
+        for node in session.scalars(
+            select(InstallationNode).where(
+                InstallationNode.installation_id.in_(
+                    [
+                        installation.id
+                        for installation in installations
+                        if installation.state == InstallationState.INSTALLED
+                    ]
                 )
             )
-        ):
-            found.append(installation.id)
+        )
+        if not rank_installed(node.state)
+        or (
+            node.required_payload_bytes is not None
+            and node.installed_bytes < node.required_payload_bytes
+        )
+    }
+    found = [
+        installation.id
+        for installation in installations
+        if installation.state != InstallationState.INSTALLED
+        or installation.id in short_installed
+    ]
     return tuple(found)
 
 

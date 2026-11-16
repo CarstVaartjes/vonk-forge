@@ -31,7 +31,9 @@ from .recipe_execution_contract import (
 from .reservation_owners import reservation_owner
 
 
-def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
+def model_sets_stored_on_nodes(
+    session: Session, node_ids: Collection[str]
+) -> dict[str, frozenset[str]]:
     """Model sets some installation on the Spark runs.
 
     A Spark's shared store receives a set's files before any installation of it
@@ -43,28 +45,34 @@ def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
     nothing here (its bytes are then charged again, never under-counted).
     """
 
-    return frozenset(
-        digest
-        for digest in session.scalars(
-            select(RecipeInstallation.model_artifact_set_sha256)
-            .join(
-                InstallationNode,
-                InstallationNode.installation_id == RecipeInstallation.id,
-            )
-            .where(
-                InstallationNode.node_id == node_id,
-                RecipeInstallation.state.in_(
-                    (
-                        InstallationState.INSTALLED,
-                        InstallationState.INSTALLING,
-                        InstallationState.PARTIAL,
-                    )
-                ),
-                RecipeInstallation.model_artifact_set_sha256.is_not(None),
-            )
+    found: dict[str, set[str]] = {node_id: set() for node_id in node_ids}
+    for node_id, digest in session.execute(
+        select(InstallationNode.node_id, RecipeInstallation.model_artifact_set_sha256)
+        .join(
+            RecipeInstallation,
+            InstallationNode.installation_id == RecipeInstallation.id,
         )
-        if digest is not None
-    )
+        .where(
+            InstallationNode.node_id.in_(list(found)),
+            RecipeInstallation.state.in_(
+                (
+                    InstallationState.INSTALLED,
+                    InstallationState.INSTALLING,
+                    InstallationState.PARTIAL,
+                )
+            ),
+            RecipeInstallation.model_artifact_set_sha256.is_not(None),
+        )
+    ):
+        if digest is not None:
+            found[node_id].add(digest)
+    return {node_id: frozenset(digests) for node_id, digests in found.items()}
+
+
+def model_sets_stored_on_node(session: Session, node_id: str) -> frozenset[str]:
+    """One Spark's model sets; see ``model_sets_stored_on_nodes``."""
+
+    return model_sets_stored_on_nodes(session, (node_id,))[node_id]
 
 
 def runtime_images_named_on_nodes(

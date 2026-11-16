@@ -20,17 +20,6 @@ class RunSwitchCode(WireEnum):
     ARTIFACT_VERIFICATION_RESULT_INVALID = (
         "run-switch.artifact-verification-result-invalid"
     )
-    CLEANUP_RECLAIM_EVIDENCE_INVALID = "run-switch.cleanup-reclaim-evidence-invalid"
-    CLEANUP_RECLAIMED_BYTES_EXCEED_PLAN = (
-        "run-switch.cleanup-reclaimed-bytes-exceed-plan"
-    )
-    CLEANUP_REFERENCE_PROTECTION_EVIDENCE_INVALID = (
-        "run-switch.cleanup-reference-protection-evidence-invalid"
-    )
-    CLEANUP_REFERENCE_PROTECTION_OVERLAP = (
-        "run-switch.cleanup-reference-protection-overlap"
-    )
-    CLEANUP_SCOPE_INVALID = "run-switch.cleanup-scope-invalid"
     CONTAINER_BUILD_EVIDENCE_INVALID = "run-switch.container-build-evidence-invalid"
     CONTAINER_BUILD_EXECUTOR_UNAVAILABLE = (
         "run-switch.container-build-executor-unavailable"
@@ -216,9 +205,6 @@ class RunSwitchCode(WireEnum):
     VERIFY_EXECUTOR_UNAVAILABLE = "run-switch.verify-executor-unavailable"
     VERIFY_WAITING_WITHOUT_CHILD = "run-switch.verify-waiting-without-child"
     VERIFY_RETURNED_NO_EVIDENCE = "run-switch.verify-returned-no-evidence"
-    CLEANUP_EXECUTOR_UNAVAILABLE = "run-switch.cleanup-executor-unavailable"
-    CLEANUP_WAITING_WITHOUT_CHILD = "run-switch.cleanup-waiting-without-child"
-    CLEANUP_RETURNED_NO_EVIDENCE = "run-switch.cleanup-returned-no-evidence"
     RESOURCE_CAPACITY_UNKNOWN = "run-switch.resource.capacity_unknown"
     RESOURCE_ENVELOPE_EXCEEDS_CAPACITY = "run-switch.resource.envelope_exceeds_capacity"
     RESOURCE_ENVELOPE_UNVERIFIED = "run-switch.resource.envelope_unverified"

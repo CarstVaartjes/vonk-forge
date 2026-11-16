@@ -122,7 +122,6 @@ class RunSwitchChildProgress(StrictModel):
             "transfer",
             "verify",
             "prepare",
-            "cleanup",
             "stop",
             "start",
             "final_verify",
