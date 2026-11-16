@@ -325,7 +325,7 @@ def main() -> None:
         ).is_file():
             _run(
                 [
-                    "node",
+                    str(_node_wheel_root() / "bin/node"),
                     # The wheel's bin/npm shim requires ../lib/cli.js, which the
                     # wheel does not ship; run npm's real entry point (as
                     # nodejs_wheel.executable.npm does) so a host without a
