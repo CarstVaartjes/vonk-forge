@@ -87,6 +87,7 @@ def cli_words() -> str:
         "ASSET_REMOVE": CacheAssetDisposition.REMOVE,
         "ASSET_RETAIN_SHARED": CacheAssetDisposition.RETAIN_SHARED,
         "ASSET_RETAIN_REFERENCED": CacheAssetDisposition.RETAIN_REFERENCED,
+        "ASSET_RETAIN_OBSERVATION_UNAVAILABLE": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
         "ASSET_VERIFIED": AssetAvailability.VERIFIED,
         **{
             f"ASSET_{kind.upper().replace('-', '_')}": kind
