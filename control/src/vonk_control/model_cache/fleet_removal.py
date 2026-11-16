@@ -489,6 +489,10 @@ class FleetRemovalMixin:
         nas_detail = "Remove unshared NAS objects through model cache removal."
         if any(issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues):
             nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, keep_detail
+        elif issues:
+            # Acceptance refuses while a Spark's inventory is stale, so the
+            # review answers the same: wait for that Spark's fresh scan.
+            nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, issues[0].detail
         elif protected:
             nas_reason, nas_detail = R.REFERENCED, keep_detail
         elif not sets and not kept_sets:
@@ -508,7 +512,7 @@ class FleetRemovalMixin:
                 "removal drops its cache entries and retains the objects."
             )
         return FleetModelRemovalEffects(
-            nas_remove=not protected,
+            nas_remove=not protected and not issues,
             nas_reason=nas_reason,
             nas_detail=nas_detail,
             targets=targets,

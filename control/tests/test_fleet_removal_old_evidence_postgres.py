@@ -9,6 +9,7 @@ from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
 from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
     AgentNode,
@@ -109,6 +110,9 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
             item.code == ArtifactLifecycleCode.REFERENCE_SCAN_FAILED
             for item in wire.blockers
         )
+        # Acceptance refuses on any of these, so the review never shows removable.
+        assert not wire.fleet.nas_remove
+        assert wire.fleet.nas_reason == FleetRemovalReason.OBSERVATION_UNAVAILABLE
         if fault == "manifest":
             assert wire.nas_reclaimable_bytes is None
         assert path.read_bytes() == b"shared weights"
