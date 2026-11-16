@@ -1235,3 +1235,37 @@ def test_deadline_after_a_failed_walk_names_no_earlier_error():
     healed = observer.snapshot().observation
     assert healed.storage_reason is None
     assert healed.storage_error_type is None
+
+
+def test_recipe_detail_assesses_siblings_only_while_its_budget_lasts(
+    assessed_library,  # noqa: F811
+    monkeypatch,
+):
+    """Catches a detail that assesses every sibling in one call even when its
+    request budget is spent; the siblings stay listed, fit unavailable."""
+    projection, sessions, *_rest = assessed_library
+    template = projection.recipe_library(assess=False).recipes[0]
+    _insert_canonical_rows(
+        sessions,
+        kind="recipe",
+        template=projection.recipe_detail(template.selector).document.model_dump(
+            mode="json"
+        ),
+        count=3,
+    )
+    projection.refresh_catalog()
+    sizes: list[int] = []
+    assess = projection._assessed
+
+    def spy(recipes, *, deadline):
+        sizes.append(len(recipes))
+        return assess(recipes, deadline=deadline)
+
+    monkeypatch.setattr(projection, "_assessed", spy)
+    monkeypatch.setattr(projection, "_request_budget", 0.0)
+
+    detail = projection.recipe_detail(template.selector)
+
+    assert detail.alternatives
+    assert sizes == [1]
+    assert {item.fits_fleet for item in detail.alternatives} == {"unavailable"}

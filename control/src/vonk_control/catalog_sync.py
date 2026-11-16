@@ -37,7 +37,7 @@ from .capabilities import CapabilityUnavailableError
 from .catalog_queries import active_head_revision
 from .catalog_revision_contract import (
     CatalogRevisionContractError,
-    read_catalog_document,
+    view_catalog_document,
 )
 from .catalog_service import CatalogService
 from .catalog_sync_contract import (
@@ -635,8 +635,8 @@ class ManagedRecipeCatalogSyncService:
                 if selected is None:
                     return False
                 try:
-                    read_catalog_document(row)
-                    read_catalog_document(selected)
+                    view_catalog_document(row)
+                    view_catalog_document(selected)
                 except CatalogRevisionContractError:
                     return False
         return not snapshot.problems

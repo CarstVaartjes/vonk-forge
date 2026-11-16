@@ -11,6 +11,7 @@ from vonk_control.catalog_revision_contract import (
     ModelRevisionProjection,
     read_catalog_document,
     read_catalog_projection,
+    view_catalog_document,
 )
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.model_cache_contract import (
@@ -146,6 +147,9 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
         if kind == "recipe":
             assert _stored_recipe(row) == parsed
     assert len(calls) == 1
+    # A read-only caller shares the one parse; a reading caller gets its own.
+    assert view_catalog_document(row) is view_catalog_document(row)
+    assert read_catalog_document(row) is not view_catalog_document(row)
     # A caller cannot poison another reader of this immutable content identity.
     if isinstance(parsed, ModelDefinition):
         parsed.files[0].roles = ["caller-local"]

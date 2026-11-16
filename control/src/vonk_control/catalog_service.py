@@ -51,6 +51,7 @@ from .catalog_revision_contract import (
     read_catalog_document,
     read_catalog_projection,
     rederive_projection,
+    view_catalog_document,
     write_catalog_projection,
 )
 from .identity_insert import insert_identity
@@ -280,7 +281,7 @@ class CatalogService:
                 identity = (row.publisher, row.slug)
                 if identity in requested_set:
                     try:
-                        read_catalog_document(row)
+                        view_catalog_document(row)
                     except CatalogRevisionContractError:
                         # A cache miss forces the ordinary exact signed import.
                         continue
@@ -684,7 +685,7 @@ class CatalogService:
                     raise CatalogRevisionContractError(
                         "stored catalog content differs from verified ingress"
                     )
-                read_catalog_document(existing)
+                view_catalog_document(existing)
                 projection_type = (
                     ModelRevisionProjection
                     if kind == "model"
@@ -725,7 +726,7 @@ class CatalogService:
             )
             try:
                 if selected is not None:
-                    read_catalog_document(selected)
+                    view_catalog_document(selected)
             except CatalogRevisionContractError:
                 # This verified import is the sync owner's source, not a
                 # guess from history. Retire an unreadable selection and
