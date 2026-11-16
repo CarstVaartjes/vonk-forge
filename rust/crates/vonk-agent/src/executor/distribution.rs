@@ -50,7 +50,7 @@ impl<R: ProcessRunner> RecipeExecutor<'_, R> {
             Some(Ok(value)) => value,
             // A credential being replaced, a full disk: the shared disposition
             // and its one failure-kind mapping decide (a wait, never authority).
-            Some(Err(error)) => return distribution_failure_result(&error),
+            Some(Err(error)) => return distribution_order_failure_result(&error),
             None if *cancellation.borrow() => {
                 return cancelled("controller cancelled during distribution");
             }

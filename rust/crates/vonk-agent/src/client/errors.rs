@@ -203,6 +203,17 @@ impl ClientError {
         }
     }
 
+    /// The Controller says it cannot serve the model files this Spark lacks:
+    /// a definite outcome that only a new plan changes, never a retry.
+    pub fn distribution_source_unavailable(&self) -> bool {
+        self.code().is_some_and(|code| {
+            vocabulary::is(
+                code,
+                vonk_agent_protocol::generated::DistributionCode::DistributionModelSetIdentityUnavailable,
+            )
+        })
+    }
+
     pub fn request_id(&self) -> Option<&str> {
         match self {
             Self::Controller(error) | Self::ResultRejected(error) => error.request_id.as_deref(),

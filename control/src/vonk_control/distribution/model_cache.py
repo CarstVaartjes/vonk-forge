@@ -14,6 +14,7 @@ from vonk_agent_protocol import (
 )
 
 from ..compiled_execution_plan import DistributionObjectReceipt, VerifiedModelObject
+from ..model_cache.errors import ModelCacheNotFound
 
 if TYPE_CHECKING:
     from ..model_cache import ModelCacheService
@@ -131,9 +132,18 @@ class ModelCacheObjectSource:
             descriptors = descriptor_provider(digest)
         except SecurityRefusalError:
             raise
-        except Exception as error:
+        except ModelCacheNotFound as error:
+            # Only a set the cache no longer holds is definite: the agent ends
+            # the order and the Controller plans a download. Any other cause (a
+            # database or pool error, an unreadable file, incomplete coverage)
+            # clears by itself and stays a wait.
             raise DistributionUnknown(
                 DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "NAS cache manifest is unavailable",
+            ) from error
+        except Exception as error:
+            raise DistributionUnknown(
+                DistributionCode.OBJECT_UNAVAILABLE,
                 "NAS cache manifest is unavailable",
             ) from error
         objects = []
@@ -151,7 +161,7 @@ class ModelCacheObjectSource:
                 paths[item.sha256] = (digest, item.name, path)
             except (KeyError, TypeError, ValueError) as error:
                 raise DistributionUnknown(
-                    DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                    DistributionCode.OBJECT_UNAVAILABLE,
                     "NAS cache manifest is malformed",
                 ) from error
         return tuple(objects), paths
@@ -195,6 +205,11 @@ class ModelCacheObjectSource:
                 SecurityRefusalReason.PERMISSION_DENIED,
                 "NAS cache object access was denied",
                 reason=SecurityRefusalReason.PERMISSION_DENIED,
+            ) from error
+        except ModelCacheNotFound as error:
+            raise DistributionUnknown(
+                DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE,
+                "NAS cache object is no longer held",
             ) from error
         except Exception as error:
             raise DistributionUnknown(
