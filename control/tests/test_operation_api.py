@@ -491,7 +491,7 @@ def test_global_operation_projection_merges_typed_provider_families() -> None:
     assert filtered.json()["operations"][0]["id"] == "run-1"
 
 
-@pytest.mark.parametrize("profile_state", ["running", "failed", "needs-operator"])
+@pytest.mark.parametrize("profile_state", ["running", "failed"])
 def test_profile_operation_provider_is_registered_through_the_global_api(
     tmp_path,
     profile_state,
@@ -612,7 +612,7 @@ def test_profile_operation_provider_is_registered_through_the_global_api(
     if profile_state != "running":
         failure = detail.json()["failure"]
         assert failure["detail"] == "Spark could not start: token=<redacted>"
-        assert failure["uncertain"] is (profile_state not in {"running", "failed"})
+        assert failure["uncertain"] is False
         assert first.json()["operations"][0]["failure"] == failure
         assert detail.json()["recovery"]["uncertain"] == failure["uncertain"]
         assert "private-credential" not in first.text + detail.text

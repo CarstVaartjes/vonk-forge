@@ -30,13 +30,9 @@ def words(*states: LifecycleState) -> tuple[str, ...]:
 
 #: A cancel that is being driven: ``observing``.
 CANCEL_IN_FLIGHT: tuple[str, ...] = words(LifecycleState.OBSERVING)
-#: An application that waits for a person.
-NEEDS_OPERATOR: tuple[str, ...] = words(LifecycleState.NEEDS_OPERATOR)
 #: A live load whose automatic retry is pending: one backing off after a failure
-#: (its last failure is the evidence), or a legacy wait for a person.
-RETRY_PENDING: tuple[str, ...] = words(
-    LifecycleState.BACKOFF, LifecycleState.NEEDS_OPERATOR
-)
+#: (its last failure is the evidence).
+RETRY_PENDING: tuple[str, ...] = words(LifecycleState.BACKOFF)
 #: A load a retry starts from: one backing off, or a failed one a person retries
 #: (a retry is a new load; the failed one keeps its end).
 RETRY_FROM: tuple[str, ...] = (*RETRY_PENDING, *words(LifecycleState.FAILED))
@@ -45,7 +41,6 @@ LIVE: tuple[str, ...] = words(
     LifecycleState.QUEUED,
     LifecycleState.RUNNING,
     LifecycleState.BACKOFF,
-    LifecycleState.NEEDS_OPERATOR,
 )
 
 

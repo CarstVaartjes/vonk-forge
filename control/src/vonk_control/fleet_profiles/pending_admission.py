@@ -95,9 +95,7 @@ class FleetProfileService:
                     )
                     .where(
                         FleetProfileApplication.state.in_(
-                            job_states.words(
-                                LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
-                            )
+                            job_states.words(LifecycleState.QUEUED)
                         ),
                         FleetProfileApplication.current_operation_id.is_(None),
                         FleetProfileApplication.current_step == 0,
@@ -120,9 +118,7 @@ class FleetProfileService:
                 )
                 .where(
                     FleetProfileApplication.state.in_(
-                        job_states.words(
-                            LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
-                        )
+                        job_states.words(LifecycleState.QUEUED)
                     ),
                     FleetProfileApplication.current_operation_id.is_(None),
                     FleetProfileApplication.current_step == 0,
@@ -402,10 +398,7 @@ class FleetProfileService:
                 and _raw_pending(row)
                 and row.current_operation_id is None
                 and row.current_step == 0
-                and row.state
-                in job_states.words(
-                    LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR
-                )
+                and row.state in job_states.words(LifecycleState.QUEUED)
             )
             if not _owns_pending_admission(row, progress) and not damaged:
                 return

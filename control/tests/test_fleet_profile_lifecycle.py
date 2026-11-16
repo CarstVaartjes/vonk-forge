@@ -5,9 +5,8 @@ A profile application is a composite over Run/Switch: its state is
 exists), and its cancel always completes.  These tests pin what the migration
 changed:
 
-* a load parked as ``needs-operator`` (the mirror of a child that waited for a
-  person) adopts and heals: it runs again and its child is observed, never left
-  and never touched;
+* a load whose stored word is unknown adopts and is re-observed, never left and
+  never touched;
 * ``needs-operator`` is unreachable for this kind, over the whole state space;
 * a cancel completes: for a child issued without a recorded workload intent (it
   used to be refused with "cannot reconcile"), for a child that cannot be
@@ -30,7 +29,6 @@ from vonk_agent_protocol import (
     InvalidRequestReason,
     LifecycleState,
 )
-from vonk_control import fleet_profile_states
 from vonk_control.agent_operation_facts import SUPERSEDED_CANCELLATION_SECONDS
 from vonk_control.fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -220,15 +218,15 @@ def test_no_profile_state_can_wait_for_an_operator(stored: str, shape: str) -> N
         assert decision.row.state is not State.NEEDS_OPERATOR, (event, stored, shape)
 
 
-def test_the_legacy_wait_is_the_only_needs_operator_and_it_is_read_only() -> None:
+def test_an_unknown_stored_word_is_re_observed_and_only_it() -> None:
     adapter = FleetProfileAdapter()
-    legacy = adapter.adopt(_application_row("needs-operator", dict(_PROGRESS)))
-    assert legacy.state is State.NEEDS_OPERATOR
-    for stored in ("queued", "running", "succeeded", "failed", "cancelled"):
-        assert (
-            adapter.adopt(_application_row(stored, dict(_PROGRESS))).state
-            is not State.NEEDS_OPERATOR
-        )
+    unknown = adapter.adopt(_application_row("not-a-state", dict(_PROGRESS)))
+    # not an end: the core re-observes it
+    assert unknown.state not in {State.SUCCEEDED, State.FAILED, State.CANCELLED}
+    assert (
+        unknown.state
+        is not adapter.adopt(_application_row("running", dict(_PROGRESS))).state
+    )
 
 
 # -------------------------------------------------------------------- cancel
@@ -492,72 +490,6 @@ def test_profile_stop_selection_never_uses_the_active_run_set() -> None:
 
 
 # ----------------------------------------- the exact rows an older Controller left
-
-
-def _legacy_cancel_parking(world: _World) -> None:
-    """Audit C9: a cancel parked as ``waiting-for-operator`` because it "cannot
-    reconcile" its child: the load, its cancellation and the document all wait."""
-
-    requested = world.now[0].isoformat()
-
-    def legacy(progress) -> None:
-        progress["cancellation"] = {
-            "request_key": _uuid(720),
-            "actor": "admin",
-            "requested_at": requested,
-            "state": "observing",
-            "cause": "operator",
-            "workload_intent_ordinal": (progress.get("workload_intent_ordinal") or 0)
-            + 1,
-        }
-        progress["switch_adapter"]["state"] = "needs-operator"
-        progress["switch_adapter"]["status_reason"] = (
-            "Cancellation cannot reconcile Run/Switch child state unknown"
-        )
-
-    world.edit_progress(legacy)
-    world.edit(
-        state="needs-operator",
-        status_reason="Cancellation cannot reconcile Run/Switch child state unknown",
-    )
-
-
-def test_a_legacy_parked_cancel_leaves_the_wait_and_completes(tmp_path) -> None:
-    world = _World(tmp_path)
-    _stuck_child(world)
-    _legacy_cancel_parking(world)
-    assert world.row().state in fleet_profile_states.NEEDS_OPERATOR
-
-    world.now[0] += timedelta(seconds=6)
-    world.service.tick()
-    assert world.row().state != LifecycleState.NEEDS_OPERATOR  # on the first pass
-    states = []
-    for _ in range(200):
-        world.now[0] += timedelta(seconds=15)
-        world.service.tick()
-        states.append(world.row().state)
-        if states[-1] == "cancelled":
-            break
-    assert states[-1] == "cancelled"
-    assert "needs-operator" not in states
-    final = world.service.application(world.id)
-    assert final.cancellation is not None and final.cancellation.state == "cancelled"
-
-    world.assert_fresh_admitted()
-
-
-def test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does(tmp_path) -> None:
-    world = _World(tmp_path)
-    _legacy_cancel_parking(world)
-    for _ in range(12):
-        world.now[0] += timedelta(seconds=10)
-        world.service.tick()
-        world.run_switch.tick()
-        if world.row().state == "cancelled":
-            break
-    assert world.row().state == "cancelled"
-
-    world.assert_fresh_admitted()
 
 
 def test_a_child_that_is_a_legacy_wait_is_mirrored_as_running_not_as_a_wait(

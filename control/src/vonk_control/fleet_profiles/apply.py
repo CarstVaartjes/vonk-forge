@@ -18,7 +18,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileOperationKind,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import fleet_profile_states
 from ..admission_locking import (
     AdmissionLockBusy,
     AdmissionRowLock,
@@ -375,8 +375,5 @@ class FleetProfileService:
             # admission boundary; this read never refreshes the approved intent.
             replay = self._load_replay(profile_id, request_key=request_key, actor=actor)
             if replay is not None:
-                if replay.state in job_states.words(LifecycleState.NEEDS_OPERATOR):
-                    self._discard_pending_application(replay.id)
-                    raise
                 return replay
             raise
