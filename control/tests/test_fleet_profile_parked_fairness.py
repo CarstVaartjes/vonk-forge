@@ -62,7 +62,7 @@ def test_new_whole_fleet_profile_supersedes_a_parked_parent(
     adapter._operations[parked_child_id] = [
         FleetProfileChildOperation(
             id=parked_child_id,
-            state=LifecycleState.NEEDS_OPERATOR,
+            state=LifecycleState.RUNNING,
             status_reason="Waiting for exact interrupted-effect reconciliation",
         )
     ]
