@@ -221,8 +221,8 @@ class ModelCacheAdapter:
     ) -> ModelCacheOperationPayload | None:
         """The operation's payload; ``None`` when its envelope does not read.
 
-        Bookkeeping never raises here (rule 5).  The clocks the core needs (retry,
-        legacy claim, cancel request) are read from the stored document by
+        Bookkeeping never raises here (rule 5).  The clocks the core needs (retry
+        attempts, cancel request) are read from the stored document by
         :class:`StoredCacheClocks`, which keeps them when the rest is damaged.
         """
 
@@ -578,7 +578,7 @@ class ModelCacheAdapter:
     def _tidy_payload(
         self, operation: ModelCacheOperation, after: Lifecycle, *, spent: bool
     ) -> bool:
-        """Retire the legacy claim and retry clock; count a consumed attempt."""
+        """Strip the retired claim and retry clock keys; count a consumed attempt."""
 
         payload = self._payload(operation)
         if payload is None:

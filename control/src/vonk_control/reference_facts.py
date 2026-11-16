@@ -14,7 +14,6 @@ Readers ask the facts only; they never read assignments or plans to answer these
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection, Mapping
 
 from pydantic import TypeAdapter
@@ -27,8 +26,6 @@ from .models import (
     FleetProfile,
     FleetProfileRecipe,
 )
-
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:

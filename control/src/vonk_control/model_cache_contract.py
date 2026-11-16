@@ -372,7 +372,7 @@ class StoredCacheClocks(BaseModel):
 
     A tolerant projection, not a second contract: the full payload is
     :data:`ModelCacheOperationPayload`.  The lifecycle core reads the retry
-    clock, the legacy claim and the cancel request from here, so a row whose
+    attempts and the cancel request from here, so a row whose
     envelope no longer validates still keeps its cancel and its schedule.
     Anything unreadable is absent.
     """
