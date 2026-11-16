@@ -12,9 +12,7 @@ Controller mirrors onto the row).
 
 * :meth:`FleetProfileAdapter.lifecycle` (the ``adopt`` hook) maps a stored, possibly
   legacy, application onto the core.  A row with a word the adapter does not know
-  is ``needs-operator`` and is healed
-  by :meth:`FleetProfileAdapter.heal`: no profile action exists, so it is
-  re-evaluated (it runs again, observing its child), never left waiting;
+  is ``needs-operator``;
 * :meth:`FleetProfileAdapter.children` reads the Run/Switch children recorded in the
   switch-adapter document (the unissued steps count as queued children), and
   :meth:`FleetProfileAdapter.aggregate_state` is the profile's state from them;
@@ -33,7 +31,7 @@ core state                stored application
                           ``backoff`` after a failure the Controller retries by
                           itself (its next attempt is ``next_action_at``), else
                           ``running`` (a cancel being driven keeps the label)
-``needs-operator``        a word the adapter does not know: read and healed,
+``needs-operator``        a word the adapter does not know: read,
                           never written
 ``succeeded``/``failed``  ``succeeded``/``failed``: ``failed`` only when nothing
                           will try the load again, so a recorded end is final
@@ -734,7 +732,7 @@ class FleetProfileAdapter:
     @staticmethod
     def retry_pending(application: FleetProfileApplication) -> bool:
         """A live load whose automatic retry is pending: it backs off after a
-        failure, or (legacy) waits for a person."""
+        failure, or its word is not known (read as ``needs-operator``)."""
 
         return application.state == BACKOFF or job_states.means(
             application.state, State.NEEDS_OPERATOR
@@ -857,8 +855,8 @@ class FleetProfileAdapter:
 
         An older Controller stored a failure it retried by itself as ``failed``
         and showed it as queued: the old spelling of ``backoff``.  The caller has
-        decided the Controller still retries it, so the row is relabelled once (as
-        :meth:`heal` adopts a legacy wait), keeping its reason and evidence and
+        decided the Controller still retries it, so the row is relabelled once,
+        keeping its reason and evidence and
         naming its next attempt.  Nothing is issued or stopped.  A ``failed`` row
         this Controller wrote is not a candidate: it is only written when nothing
         will try the load again.
@@ -881,37 +879,6 @@ class FleetProfileAdapter:
         after = replace(before, state=State.BACKOFF, next_action_at=due)
         self.apply(application, before, after, now, visible=BACKOFF, session=session)
         return True
-
-    def heal(
-        self,
-        application: FleetProfileApplication,
-        now: datetime,
-        *,
-        session: Session | None = None,
-    ) -> Lifecycle:
-        """Re-evaluate a load parked as ``needs-operator`` (rules 1 and 3).
-
-        No profile action exists and nothing here is irreversible, so it is not
-        left waiting for a person: it runs again (its child is observed) or, when
-        it was still being admitted, retries its admission.
-        """
-
-        now = aware(now)
-        progress = _progress(application)
-        row = self.lifecycle(application, progress, now)
-        if row.state is not State.NEEDS_OPERATOR:
-            return row
-        admitting = progress is not None and progress.admission_pending
-        after = replace(row, state=State.BACKOFF if admitting else State.RUNNING)
-        self.apply(
-            application,
-            row,
-            after,
-            now,
-            visible="queued" if admitting else "running",
-            session=session,
-        )
-        return after
 
 
 def _recorded(identity: str, stored: str) -> Lifecycle:
