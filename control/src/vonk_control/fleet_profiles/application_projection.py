@@ -22,11 +22,6 @@ from vonk_agent_protocol.agent_words import (
 
 from .. import job_states
 from ..categorized_errors import MissingRecord
-from ..fleet_profile_adapter_conversion import (
-    conversion_observation,
-    conversion_progress,
-    needs_conversion,
-)
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationProjectionIssue,
@@ -40,15 +35,12 @@ from ..fleet_profile_contract import (
 )
 from ..lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from ..models import FleetProfileApplication, Job
-from ..operation_blockers import MAX_BLOCKERS, bound_blockers, make_blocker
+from ..operation_blockers import MAX_BLOCKERS
 from ..operation_progress import project_progress
 from ..persisted_waits import read_wait
 from ..progress_stall import WAITING_STATES, is_stalled, stalled_blocker
 from ..run_switch_contract import RunSwitchStopResult
 from ..run_switch_operations import RunSwitchOperationService
-from .assessment_support import (
-    _operation_state,
-)
 from .contracts import FleetProfileReviewStale
 from .persistence import (
     _persisted_profile_plan,
@@ -250,62 +242,6 @@ class FleetProfileService:
         # A damaged plan exposes recorded progress without cancellation authority;
         # a damaged result is unavailable, never reconstructed from a state label.
         self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-        if needs_conversion(row):
-            observed = conversion_observation(row)
-            plan = _persisted_profile_plan(row)
-            total = row.current_step if isinstance(plan, Residue) else len(plan.steps)
-            blockers = bound_blockers(
-                [
-                    make_blocker(
-                        ProfileReasonCode.RETRY_CONFLICT,
-                        observed.detail
-                        or "Exact retained child evidence is being reconciled",
-                    )
-                ]
-            )
-            outer_progress = conversion_progress(row)
-            progress = outer_progress or _progress_from_receipt(row)
-            progress.total_steps = total
-            progress.current_label = "Reconciling exact retained cleanup journal"
-            progress.blockers = blockers
-            state = _operation_state(row.state, default=LifecycleState.RUNNING)
-            return FleetProfileApplicationView(
-                wait=read_wait(row),
-                id=row.id,
-                request_key=row.request_key,
-                profile_id=row.profile_id,
-                profile_digest=row.profile_digest,
-                plan_digest=row.plan_digest,
-                state=state,
-                attempt=progress.attempt,
-                retry_of_application_id=progress.retry_of_application_id,
-                superseded_by=progress.superseded_by
-                if state == ProfileCancellationCause.SUPERSEDED.value
-                else None,
-                reason_code=progress.supersede_code
-                if state == ProfileCancellationCause.SUPERSEDED.value
-                else None,
-                current_step=row.current_step,
-                total_steps=total,
-                current_operation_id=row.current_operation_id,
-                status_reason=row.status_reason
-                if state == LifecycleState.SUCCEEDED.value
-                else observed.detail,
-                progress=progress,
-                result=_persisted_profile_result(row),
-                projection_issue=(
-                    FleetProfileApplicationProjectionIssue(
-                        code=ProfileReasonCode.APPLICATION_INTENT_INVALID,
-                        detail="Retained outer metadata cannot be verified; historical state and exact child evidence remain unchanged",
-                    )
-                    if outer_progress is None
-                    else None
-                ),
-                blockers=blockers,
-                next_attempt_at=observed.next_attempt_at,
-                created_at=_aware(row.created_at),
-                updated_at=_aware(row.updated_at),
-            )
         plan = _persisted_profile_plan(row)
         progress = _persisted_profile_progress(row)
         if (

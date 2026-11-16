@@ -25,10 +25,6 @@ from vonk_agent_protocol.agent_words import (
 
 from .. import fleet_profile_states, job_states
 from ..failure_classification import error_code, is_definite, is_security_failure
-from ..fleet_profile_adapter_conversion import (
-    convert_due_retained_applications,
-    needs_conversion,
-)
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
     FleetProfileApplicationResult,
@@ -87,15 +83,12 @@ class FleetProfileService:
         now = _aware(self._clock())
         with self._sessions.begin() as session:
             released = bool(release_dead_owner_reservations(session, now))
-        converted = (
-            bool(convert_due_retained_applications(self._sessions, now)) or released
-        )
         if self._switch_adapter is None:
-            return converted
+            return released
         # A roster repair can remain busy on every tick. Give due accepted
         # loads their turn before maintenance can return or re-arm its backoff.
         pending_admission_observed = (
-            self._observe_pending_admissions(now, application_id) or converted
+            self._observe_pending_admissions(now, application_id) or released
         )
         if application_id is None and self._reconcile_selected_roster(now):
             return True
@@ -225,13 +218,6 @@ class FleetProfileService:
                     or recovery_deferred
                 )
             self._ordinary_cursor = row.id
-            if needs_conversion(row):
-                return (
-                    pending_admission_observed
-                    or cancellation_observed
-                    or parked_observed
-                    or recovery_deferred
-                )
             plan = _persisted_profile_plan(row)
             stored = _stored_progress(row)
             if isinstance(plan, Residue) or isinstance(stored, Residue):
