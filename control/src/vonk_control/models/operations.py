@@ -14,7 +14,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, validates
+from sqlalchemy.orm import Mapped, mapped_column
 from vonk_agent_protocol import (
     DistributionAssignmentState,
     LifecycleState,
@@ -24,7 +24,6 @@ from vonk_agent_protocol import (
 
 from ..model_primitives import Base, _lower_hex, _state_in
 from ..repeated_evidence_contract import RepeatedEvidence
-from ..status_notes import validated_text
 from ..stored_json import ContractJSON
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
@@ -60,13 +59,6 @@ class AgentOperation(Base):
     #: operation without any attempt result, so without this the operator sees
     #: an interrupted operation and no evidence of what actually happened.
     status_reason: Mapped[str | None] = mapped_column(String(512))
-    #: The ``StatusNote`` kind when ``status_reason`` is a control-plane note.
-    status_note: Mapped[str | None] = mapped_column(String(32))
-
-    @validates("status_reason")
-    def _status_reason_text(self, _key: str, value: str | None) -> str | None:
-        return validated_text(self, value)
-
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     #: The one retry, observation and cancel clock of the lifecycle core.  On a
     #: ``waiting-for-operator`` order it is the instant its next attempt may be

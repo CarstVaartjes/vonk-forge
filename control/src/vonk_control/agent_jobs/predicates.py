@@ -28,9 +28,10 @@ from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from ..status_notes import StatusNote
 from ..stored_json import read_row_column
 from .contracts import (
+    _CLAIM_NOTE_PREFIX,
+    _CLAIM_REFUSAL_PREFIX,
     _MAX_CLAIM_REFUSAL_REASON,
     _WORKLOAD_INTENT_OPERATIONS,
 )
@@ -55,11 +56,11 @@ def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
 
 
 def _claim_refusal_reason(check: str, **facts: object) -> str:
-    return _refusal_reason(StatusNote.CLAIM_REFUSED.prefix, check, **facts)
+    return _refusal_reason(_CLAIM_REFUSAL_PREFIX, check, **facts)
 
 
 def _claim_note_reason(check: str, **facts: object) -> str:
-    return _refusal_reason(StatusNote.CLAIM_NOTE.prefix, check, **facts)
+    return _refusal_reason(_CLAIM_NOTE_PREFIX, check, **facts)
 
 
 def _document(value: BaseModel) -> Any:

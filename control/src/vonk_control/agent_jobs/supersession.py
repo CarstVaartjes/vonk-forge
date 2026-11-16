@@ -35,9 +35,9 @@ from ..offline_stops import pending_run_stop_nodes
 from ..own_cleanup import CLEANUP_KINDS
 from ..recovery_policy import FailureKind
 from ..stall_window import stall_deadline
-from ..status_notes import StatusNote
 from .contracts import (
     _ABANDONABLE_OPERATIONS,
+    _CLAIM_REFUSAL_PREFIX,
     _WORKLOAD_INTENT_OPERATIONS,
     SupersededAgentEffect,
 )
@@ -145,7 +145,7 @@ def request_superseded_workload_cancellation_in_session(
                 and not (
                     child.state in agent_operation_states.PARKED
                     and child.current_attempt > 0
-                    and child.status_note == StatusNote.CLAIM_REFUSED
+                    and (child.status_reason or "").startswith(_CLAIM_REFUSAL_PREFIX)
                 )
                 for child in children
             ):

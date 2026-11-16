@@ -19,17 +19,14 @@ from ..logging import redact_text
 from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..persisted_waits import read_wait
-from ..status_notes import (
-    BOUNDARY_NOTES,
-    StatusNote,
-    is_replaceable,
-    write_note,
-)
 from .contracts import (
+    _BOUNDARY_REFUSAL_PREFIXES,
+    _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
     _LOGGER,
 )
+from .evidence import _is_refusal_reason
 from .predicates import (
     _claim_condition_facts,
     _claim_note_reason,
@@ -163,7 +160,6 @@ def _record_claim_refusal(
         operation=operation,
         job_id=job_id,
         reason=_claim_refusal_reason(check, **facts),
-        note=StatusNote.CLAIM_REFUSED,
     )
 
 
@@ -174,7 +170,6 @@ def _write_refusal_note(
     operation: StoredOperation | None,
     job_id: str | None,
     reason: str,
-    note: StatusNote,
 ) -> None:
     """Write one bounded refusal note without erasing a domain reason.
 
@@ -192,12 +187,12 @@ def _write_refusal_note(
         operation is not None
         and operation.state not in _CONCLUDED_OUTCOMES
         and operation.status_reason != reason
-        and is_replaceable(operation)
+        and _is_refusal_reason(operation.status_reason)
     ):
         # A domain reason such as "retry budget exhausted" already explains
         # why the operation is not progressing; a refusal must add evidence,
         # never erase it.
-        write_note(operation, note, reason)
+        operation.status_reason = reason
     if job_id is not None and (
         operation is None or operation.state not in _CONCLUDED_OUTCOMES
     ):
@@ -206,9 +201,9 @@ def _write_refusal_note(
             job is not None
             and job.state not in _CONCLUDED_OUTCOMES
             and job.status_reason != reason
-            and is_replaceable(job)
+            and _is_refusal_reason(job.status_reason)
         ):
-            write_note(job, note, reason)
+            job.status_reason = reason
 
 
 def _note_malformed_cancel_flag(
@@ -237,7 +232,6 @@ def _note_malformed_cancel_flag(
         operation=None,
         job_id=job.id,
         reason=_claim_note_reason("parent-cancel-flag-malformed", kind=operation.kind),
-        note=StatusNote.CLAIM_NOTE,
     )
 
 
@@ -247,10 +241,14 @@ def _refresh_parent_claim_refusal(
     """Replace a recovered claim's stale note with a live sibling's cause."""
 
     job = session.get(Job, operation.parent_job_id)
-    if job is None or job.status_note != StatusNote.CLAIM_REFUSED:
+    if (
+        job is None
+        or not isinstance(job.status_reason, str)
+        or not job.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
+    ):
         return
-    sibling = session.execute(
-        select(StoredOperation.status_reason, StoredOperation.status_note)
+    sibling_reason = session.scalar(
+        select(StoredOperation.status_reason)
         .where(
             StoredOperation.parent_job_id == job.id,
             StoredOperation.id != operation.id,
@@ -259,11 +257,9 @@ def _refresh_parent_claim_refusal(
         )
         .order_by(StoredOperation.node_id, StoredOperation.id)
         .limit(1)
-    ).one_or_none()
-    sibling_reason, sibling_note = sibling or (None, None)
+    )
     if job.status_reason != sibling_reason:
         job.status_reason = sibling_reason
-        job.status_note = sibling_note
         job.updated_at = now
 
 
@@ -285,8 +281,10 @@ def record_boundary_refusal(
     receives the same note on the same surface the jobs API returns.
     """
 
-    note = next((n for n in BOUNDARY_NOTES if n.value == f"{boundary}-refused"), None)
-    if note is None:
+    prefix = next(
+        (p for p in _BOUNDARY_REFUSAL_PREFIXES if p.startswith(f"{boundary} ")), None
+    )
+    if prefix is None:
         raise InvalidValue(
             "agent boundary is invalid", reason=InvalidRequestReason.MALFORMED
         )
@@ -303,13 +301,12 @@ def record_boundary_refusal(
         )
         if operation is None or operation.current_attempt != current.attempt:
             return False
-        reason = _refusal_reason(note.prefix, check, attempt=current.attempt, **facts)
+        reason = _refusal_reason(prefix, check, attempt=current.attempt, **facts)
         self._write_refusal_note(
             session,
             operation=operation,
             job_id=operation.parent_job_id,
             reason=reason,
-            note=note,
         )
         return True
 

@@ -30,7 +30,7 @@ from ..models import AgentNode, AgentOperationAttempt, Job, RecipeRun, RunNode
 from ..models import AgentOperation as StoredOperation
 from ..operation_contract import sanitize_failure_evidence
 from ..recovery_policy import FailureKind
-from .contracts import AgentResultRefused
+from .contracts import _REFUSAL_PREFIXES, AgentResultRefused
 from .predicates import _document
 from .stored import column_field, column_message, column_value
 
@@ -151,6 +151,10 @@ def _reconciled_dead_attempt_reason(
         f"{detail}; {contact}; reconciled at {_aware(now).isoformat()}; "
         "the effect is unobserved"
     )[:512]
+
+
+def _is_refusal_reason(reason: str | None) -> bool:
+    return reason is None or reason.startswith(_REFUSAL_PREFIXES)
 
 
 def _exact_service_stop_receipt_covers_start(

@@ -54,7 +54,6 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationConflict,
     _read_progress,
 )
-from vonk_control.run_switch_operations.interfaces import PhaseExecution
 
 from .test_recipe_operations import NOW, installed_recipe, setup_services
 from .test_run_switch_operations import (
@@ -854,48 +853,3 @@ def test_preflight_checkpoint_cannot_hide_retry_or_cancellation_wait(cancelling)
         WaitReason.STOP_UNCONFIRMED if cancelling else RunSwitchCode.PHASE_RETRY
     )
     assert waiting.blockers and waiting.blockers[0].code == waiting.reason
-
-
-def test_final_verification_expiry_is_logged_on_each_expired_observation(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    """An expired final verification is logged by the observation, not by reason text."""
-
-    service, operation, _start = _parked_start_switch(tmp_path, healthy=True)
-    now = [NOW]
-    inner = service._phase_executor
-    assert inner is not None
-
-    class _Waiting:
-        def __getattr__(self, name: str):
-            return getattr(inner, name)
-
-        def execute(self, plan, phase, **kwargs):
-            if phase.kind != "final_verify":
-                return inner.execute(plan, phase, **kwargs)
-            with service._sessions.begin() as session:
-                job = session.get(Job, operation.operation_id)
-                assert job is not None
-                document = dict(job.result)
-                document["start_deadline"] = (NOW - timedelta(hours=1)).isoformat()
-                job.result = document
-            observed = inner.execute(plan, phase, **kwargs)
-            return PhaseExecution(
-                result=observed.result, waiting=True, status_reason="owners are quiet"
-            )
-
-    service._phase_executor = _Waiting()
-    service._clock = lambda: now[0]
-    caplog.set_level("INFO")
-    for _ in range(6):
-        service.tick()
-        view = service.get(operation.operation_id)
-        if view.next_attempt_at is not None and view.next_attempt_at > now[0]:
-            now[0] = view.next_attempt_at
-    assert RunSwitchCode.FINAL_VERIFICATION_EXPIRED in (view.status_reason or "")
-    events = [
-        record
-        for record in caplog.records
-        if "final_verification_expired" in record.getMessage()
-    ]
-    assert events

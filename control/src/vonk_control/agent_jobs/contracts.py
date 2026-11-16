@@ -317,4 +317,20 @@ class OperatorRetirementRefused(InvalidRequestError, ValueError):
         )
 
 
+_CLAIM_REFUSAL_PREFIX = "claim refused: "
+
+
+_CLAIM_NOTE_PREFIX = "claim note: "
+
+
+_BOUNDARY_REFUSAL_PREFIXES = ("heartbeat refused: ", "result refused: ")
+
+
+_REFUSAL_PREFIXES = (
+    _CLAIM_REFUSAL_PREFIX,
+    _CLAIM_NOTE_PREFIX,
+    *_BOUNDARY_REFUSAL_PREFIXES,
+)
+
+
 _MAX_CLAIM_REFUSAL_REASON = 512

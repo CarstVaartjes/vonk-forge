@@ -19,11 +19,10 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, MappedColumn, mapped_column, validates
+from sqlalchemy.orm import Mapped, MappedColumn, mapped_column
 from vonk_agent_protocol import LifecycleState, LifecycleSubject
 
 from ..model_primitives import Base, _lower_hex, _state_in
-from ..status_notes import validated_text
 from .waits import Residue, WaitEvidence, wait_due_column, wait_evidence_column
 
 
@@ -69,13 +68,6 @@ class Job(Base):
     )
     result: Mapped[dict[str, object] | None] = mapped_column(JSON)
     status_reason: Mapped[str | None] = mapped_column(Text)
-    #: The ``StatusNote`` kind when ``status_reason`` is a control-plane note.
-    status_note: Mapped[str | None] = mapped_column(String(32))
-
-    @validates("status_reason")
-    def _status_reason_text(self, _key: str, value: str | None) -> str | None:
-        return validated_text(self, value)
-
     current_attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True

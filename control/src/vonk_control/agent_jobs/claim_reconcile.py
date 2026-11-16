@@ -29,7 +29,6 @@ from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
-from ..status_notes import is_replaceable
 from .contracts import (
     _WORKLOAD_INTENT_OPERATIONS,
     OFF_LANE_OPERATIONS,
@@ -38,6 +37,7 @@ from .contracts import (
 )
 from .evidence import (
     _failure_result,
+    _is_refusal_reason,
     _reconciled_dead_attempt_reason,
 )
 from .predicates import _claim_predicate
@@ -91,7 +91,7 @@ def _cancel_superseded_operation(
     # Aggregate first: it recomputes the parent's operator reason from its
     # children, so the defect note has to be written afterwards to survive.
     self._aggregate_parent(session, operation.parent_job_id)
-    if disarmed and is_replaceable(parent):
+    if disarmed and _is_refusal_reason(parent.status_reason):
         parent.status_reason = (
             "cancel_requested carried no cancel_requested_at; the superseded "
             "order was reconciled to cancelled"
