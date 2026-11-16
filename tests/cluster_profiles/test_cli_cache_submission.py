@@ -862,7 +862,7 @@ def test_unused_yes_unknown_acceptance_is_not_labelled_refused():
     client = _unused_client(
         {
             ("POST", "/api/model/a/remove"): ControlTransportError("answer lost"),
-            ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
+            ("GET", f"/api/model/requests/{KEY}"): ControlTransportError("no answer"),
         }
     )
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
