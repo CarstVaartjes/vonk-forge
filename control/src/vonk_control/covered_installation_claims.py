@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     InstallationState,
     ReservationState,
 )
 
-from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW
+from .inventory_repository import MAX_INVENTORY_FUTURE_SKEW, newest_snapshot_ids
 from .machine_states import rank_installed
 from .models import (
     STOPPABLE_RUN_STATES,
@@ -60,12 +60,22 @@ def release_covered_installation_claims(
             rank_installed(InstallationNode.state),
         )
     ).all()
-    for reservation, installation, node in rows:
-        observed = session.scalar(
-            select(func.max(NodeInventorySnapshot.observed_at)).where(
-                NodeInventorySnapshot.node_id == reservation.node_id
+    if not rows:
+        return ()
+    newest = {
+        node_id: observed_at
+        for node_id, observed_at in session.execute(
+            select(
+                NodeInventorySnapshot.node_id, NodeInventorySnapshot.observed_at
+            ).where(
+                NodeInventorySnapshot.id.in_(
+                    newest_snapshot_ids(sorted({r.node_id for r, _, _ in rows}))
+                )
             )
         )
+    }
+    for reservation, installation, node in rows:
+        observed = newest.get(reservation.node_id)
         if observed is None or _aware(observed) <= (
             _aware(node.updated_at) + MAX_INVENTORY_FUTURE_SKEW
         ):

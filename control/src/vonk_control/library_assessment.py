@@ -25,6 +25,7 @@ from .models import AgentNode
 from .run_switch_contract import RunSwitchPlan, RunSwitchReason
 from .run_switch_operations import RunSwitchOperationService
 from .run_switch_operations.artifact_inspection import (
+    failed_copies_read_once,
     missing_spark_bytes,
     spark_stores,
 )
@@ -136,7 +137,7 @@ class LibraryAssessment:
                             .order_by(AgentNode.node_id)
                         )
                     )
-                with artifact_sets_resolved_once():
+                with artifact_sets_resolved_once(), failed_copies_read_once():
                     for index, recipe in enumerate(recipes):
                         if stop.is_set() or time.monotonic() >= deadline:
                             return

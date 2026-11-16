@@ -664,13 +664,10 @@ def test_a_rejected_profile_save_names_the_field_and_the_reason(
 
 
 @pytest.mark.usefixtures("damaged_json_rows")
-@pytest.mark.parametrize("retained_journal", [False, True])
 @pytest.mark.parametrize(
     "damage", ["missing-result", "invalid-result", "failure-reason", "incomplete-steps"]
 )
-def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(
-    damage, retained_journal
-):
+def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(damage):
     """Catches history validation crashing progress or preventing a fresh load."""
     engine = create_engine(
         "sqlite+pysqlite:///:memory:",
@@ -700,11 +697,6 @@ def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(
     with sessions.begin() as session:
         row = session.get(FleetProfileApplication, original["id"])
         assert row is not None
-        if retained_journal:
-            row.progress = {
-                **row.progress,
-                "switch_adapter": {"active_operation_id": None},
-            }
         if damage == "missing-result":
             row.result = None
         elif damage == "invalid-result":

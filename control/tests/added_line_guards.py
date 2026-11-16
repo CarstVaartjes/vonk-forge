@@ -199,12 +199,23 @@ RANK_INSTALLED_KIND = (
 # A node's newest inventory report is one indexed probe per node
 # (inventory_repository.newest_snapshot_ids); a window or grouped max over
 # node_id reads every retained report (~720 per node over 24 h).
+# The scan runs over the whole source so a formatter-wrapped call, a further
+# grouping column or a partition_by tuple is found. It stays inside the call: a
+# bare partition_by= ends at its argument comma, group_by( and a partition_by
+# tuple at the close paren (two nested paren levels are read).
+_NEST = r"\((?:[^()]|\([^()]*\))*\)"
 NEWEST_SNAPSHOT_SCAN = re.compile(
-    r"partition_by\s*=\s*Node(?:Inventory)?Snapshot\.node_id"
-    r"|group_by\(\s*Node(?:Inventory)?Snapshot\.node_id\s*\)"
+    r"(?:(?:partition_by\s*=\s*(?:\((?:[^()]|"
+    + _NEST
+    + r")*?|(?:[^(),]|"
+    + _NEST
+    + r")*?)"
+    r"|group_by\s*\((?:[^()]|" + _NEST + r")*?)"
+    r"\bNode(?:Inventory)?Snapshot\.node_id\b)"
+    r"|func\.max\(\s*Node(?:Inventory)?Snapshot\.observed_at\s*\)"
 )
 NEWEST_SNAPSHOT_KIND = (
-    "newest report per node by window or grouped max; "
+    "newest report per node by window, grouped max or max(observed_at); "
     "use inventory_repository.newest_snapshot_ids"
 )
 WEB_NOT_REPORTED_KIND = (
@@ -2571,9 +2582,9 @@ def check_source(
         and path.startswith("control/src/")
     ):
         hits.extend(
-            (number, NEWEST_SNAPSHOT_KIND)
-            for number, text in enumerate(source.splitlines(), 1)
-            if NEWEST_SNAPSHOT_SCAN.search(text)
+            (source.count("\n", 0, position) + 1, NEWEST_SNAPSHOT_KIND)
+            for found in NEWEST_SNAPSHOT_SCAN.finditer(source)
+            for position in (found.start(), found.end())
         )
     if (
         "web-not-reported" in modes

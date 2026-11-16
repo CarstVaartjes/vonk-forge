@@ -1,5 +1,3 @@
-from vonk_agent_protocol import canonical_message
-
 """A reconciled stop does not turn pre-stop physical readings into free memory."""
 
 from datetime import timedelta
@@ -7,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
-from vonk_agent_protocol import LifecycleState
+from vonk_agent_protocol import LifecycleState, canonical_message
 from vonk_control.inventory_repository import (
     MAX_INVENTORY_FUTURE_SKEW,
     InventoryRepository,

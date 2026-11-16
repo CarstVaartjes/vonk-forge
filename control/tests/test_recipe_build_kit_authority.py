@@ -1,5 +1,3 @@
-from .runtime_identity_support import set_inventory_identity
-
 """Accepted kit content survives unrelated builder/provenance damage."""
 
 import io
@@ -15,6 +13,7 @@ from vonk_control.source_bundles import generate_source_bundle
 from tests.signed_recipe_release import signed_recipe_releases
 
 from .non_blocking import assert_no_orphaned_holds
+from .runtime_identity_support import set_inventory_identity
 from .test_recipe_builds import setup
 
 

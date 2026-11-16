@@ -1,6 +1,3 @@
-from vonk_agent_protocol import canonical_message
-from vonk_control.inventory_items import inventory_items, runtime_value
-
 """Prove confirmed profile cleanup leaves the same physical gang admissible."""
 
 from collections.abc import Callable
@@ -8,8 +5,10 @@ from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
+from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.recipe_operations import RecipeStartPayload
 from vonk_control.agent_jobs import AgentJobService
+from vonk_control.inventory_items import inventory_items, runtime_value
 from vonk_control.inventory_repository import (
     InventoryRepository,
     NodeInventoryReport,

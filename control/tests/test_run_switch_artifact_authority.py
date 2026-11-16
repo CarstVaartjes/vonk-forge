@@ -28,6 +28,7 @@ from vonk_control.run_switch_operations import (
     RunSwitchOperationService,
 )
 from vonk_control.run_switch_operations.artifact_inspection import (
+    failed_copies_read_once,
     missing_spark_bytes_by_node,
 )
 from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
@@ -331,6 +332,99 @@ def test_scan_floor_reads_jobs_once_however_many_nodes(tmp_path) -> None:
         return sum("from jobs" in statement for statement in statements)
 
     assert job_selects(nodes[:1]) == job_selects(nodes) == 1
+
+    # A pass over many candidates (the library) reads the jobs once in total.
+    with failed_copies_read_once():
+        statements.clear()
+        with sessions() as session:
+            event.listen(session.get_bind(), "before_cursor_execute", record)
+            try:
+                for group in (nodes[:1], nodes[1:], nodes):
+                    missing_spark_bytes_by_node(session, manifest, group, now=NOW)
+            finally:
+                event.remove(session.get_bind(), "before_cursor_execute", record)
+        assert sum("from jobs" in statement for statement in statements) == 1
+
+
+def test_covered_claims_read_each_newest_report_in_one_statement(tmp_path) -> None:
+    """Catches one newest-report query per reservation."""
+    from vonk_agent_protocol import (
+        InstallationNodeState,
+        InstallationState,
+        ReservationState,
+    )
+    from vonk_control.covered_installation_claims import (
+        release_covered_installation_claims,
+    )
+    from vonk_control.models import (
+        InstallationNode,
+        RecipeInstallation,
+        ResourceReservation,
+    )
+
+    sessions, _lifecycle, _queue, _mapping_id, _build_id, nodes = setup_services(
+        tmp_path, nodes=3
+    )
+    with sessions.begin() as session:
+        for index, node_id in enumerate(nodes):
+            installation = RecipeInstallation(
+                id=f"installation-{index}",
+                recipe_revision_id="revision",
+                mapping_id="mapping",
+                mapping_generation=1,
+                image_digest="sha256:" + "a" * 64,
+                plan_digest="b" * 64,
+                plan={},
+                state=InstallationState.INSTALLED,
+                actor="test",
+                created_at=NOW,
+                updated_at=NOW,
+            )
+            session.add(installation)
+            session.add(
+                InstallationNode(
+                    installation_id=installation.id,
+                    node_id=node_id,
+                    rank=0,
+                    role="worker",
+                    state=InstallationNodeState.INSTALLED,
+                    required_bytes=1,
+                    updated_at=NOW - timedelta(hours=1),
+                )
+            )
+            session.add(
+                ResourceReservation(
+                    node_id=node_id,
+                    kind="disk",
+                    resource_key="disk",
+                    amount_bytes=1,
+                    owner_kind="installation",
+                    owner_id=installation.id,
+                    state=ReservationState.ACTIVE,
+                    plan_digest="b" * 64,
+                    created_at=NOW,
+                )
+            )
+    for node_id in nodes:
+        _report_store(sessions, node_id, [])
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement.lower())
+
+    with sessions() as session:
+        event.listen(session.get_bind(), "before_cursor_execute", record)
+        try:
+            released = release_covered_installation_claims(session, NOW)
+        finally:
+            event.remove(session.get_bind(), "before_cursor_execute", record)
+    assert len(released) == len(nodes)
+    assert (
+        sum(
+            "node_inventory_snapshots" in s or "node_snapshots" in s for s in statements
+        )
+        == 1
+    )
 
 
 class _FullNas(ModelCacheManifestProvider):

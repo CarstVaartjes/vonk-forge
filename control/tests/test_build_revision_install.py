@@ -1,7 +1,3 @@
-from vonk_control.inventory_items import runtime_value
-
-from .runtime_identity_support import set_inventory_identity
-
 """The same verified build must survive a recipe-only revision through install."""
 
 import json
@@ -22,6 +18,7 @@ from vonk_control.execution_plan_service import ControllerExecutionPlanService
 from vonk_control.install_admission import (
     InstallAdmissionService,
 )
+from vonk_control.inventory_items import runtime_value
 from vonk_control.models import (
     AgentCertificate,
     AgentNode,
@@ -47,6 +44,7 @@ from vonk_forge_contracts import read_model
 
 from .display_fixtures import reword
 from .preflight_fixtures import record_passing_preflight
+from .runtime_identity_support import set_inventory_identity
 from .runtime_image_fixtures import place_test_image, remove_test_image
 from .test_recipe_builds import (
     RecordingQueue,

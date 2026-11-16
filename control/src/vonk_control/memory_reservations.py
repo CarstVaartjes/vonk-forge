@@ -1,5 +1,3 @@
-from vonk_agent_protocol import ReservationState, RunState
-
 """One ledger projection for all consumers of physical memory."""
 
 from collections.abc import Collection, Sequence
@@ -8,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from vonk_agent_protocol import ReservationState, RunState
 from vonk_agent_protocol.inventory import MemoryPool
 
 from .models import RecipeBuild, RecipeRun, ResourceReservation, RunNode
