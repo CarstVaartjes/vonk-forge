@@ -128,7 +128,10 @@ not yet been installed, verify it is no longer ephemeral, then revoke the old
 gateway entry. Never delete database, repository, model, control-state, or
 other application volumes during this repair.
 
-The configurator tolerates the bounded control-plane propagation delay after a
+The configurator first waits (up to two minutes) until the gateway is logged
+in, the same `BackendState` `Running` check as the gateway healthcheck, before
+it changes Serve: a slow first enrollment leaves it `starting`, not restarting.
+It tolerates the bounded control-plane propagation delay after a
 new advertisement and requires the exact HTTPS listeners and upstream map
 before publishing browser readiness.
 
