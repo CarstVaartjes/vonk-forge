@@ -489,12 +489,12 @@ class FleetRemovalMixin:
         nas_detail = "Remove unshared NAS objects through model cache removal."
         if any(issue.kind != NodeInventorySnapshot.__tablename__ for issue in issues):
             nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, keep_detail
+        elif protected:
+            nas_reason, nas_detail = R.REFERENCED, keep_detail
         elif issues:
             # Acceptance refuses while a Spark's inventory is stale, so the
             # review answers the same: wait for that Spark's fresh scan.
             nas_reason, nas_detail = R.OBSERVATION_UNAVAILABLE, issues[0].detail
-        elif protected:
-            nas_reason, nas_detail = R.REFERENCED, keep_detail
         elif not sets and not kept_sets:
             nas_detail = "No NAS copy of this model is stored."
         elif not sets:
@@ -644,9 +644,7 @@ class FleetRemovalMixin:
         assert effects is not None
         # Missing evidence is retained in the review, not permission to infer
         # an empty remote cache. Acceptance requires an exact complete scope.
-        if effects.observation_issues or any(
-            not target.observation_available for target in effects.targets
-        ):
+        if effects.observation_issues:
             raise ModelCacheConflictInvalid(
                 ArtifactLifecycleCode.REFERENCE_SCAN_FAILED,
                 "Fleet evidence is unavailable; refresh owner evidence and review again.",

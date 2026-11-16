@@ -132,6 +132,8 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         assert healed.fleet is not None
         assert all(target.observation_available for target in healed.fleet.targets)
         assert not healed.blockers
+        assert healed.fleet.nas_remove
+        assert healed.fleet.nas_reason != FleetRemovalReason.OBSERVATION_UNAVAILABLE
         assert path.read_bytes() == b"shared weights"
     finally:
         cache.close()
