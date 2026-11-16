@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, vi } from "vitest";
+import { ApiError } from "../api/errors";
 import type { ControlApi, OperationDetail } from "../api/types";
 import { ActivityPage, activityStateLabel, activityStatus } from "./activity";
 
@@ -1013,4 +1014,28 @@ test("keeps known operation state visible when one fact exceeds its response bud
     ).not.toBeInTheDocument(),
   );
   expect(client.operation).toHaveBeenCalledWith(initial.id);
+});
+
+test("reloads the first page when Load more is refused for an invalid cursor", async () => {
+  const loadOperations = vi
+    .fn()
+    .mockResolvedValueOnce({
+      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      next_cursor: "stale",
+      total: 2,
+    })
+    .mockRejectedValueOnce(new ApiError(422, "operation cursor is invalid"))
+    .mockResolvedValueOnce({
+      operations: [jobActivity("operation-1", "recipe-install", "running", "2026-08-15T11:58:00Z")],
+      next_cursor: "fresh",
+      total: 2,
+    });
+  const user = userEvent.setup();
+  render(<ActivityPage api={api(undefined, undefined, loadOperations)} now={NOW} />);
+  await screen.findByRole("heading", { name: "Recipe Install · Running" });
+  await user.click(screen.getByRole("button", { name: "Load older operations" }));
+
+  await waitFor(() => expect(loadOperations).toHaveBeenCalledTimes(3));
+  expect(loadOperations.mock.calls[2][0]).toBeUndefined();
+  expect(await screen.findByRole("button", { name: "Load older operations" })).toBeEnabled();
 });
