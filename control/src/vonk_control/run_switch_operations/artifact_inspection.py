@@ -17,7 +17,7 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_repository import spark_model_objects
+from ..inventory_repository import spark_model_objects_by_node
 from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
@@ -33,9 +33,7 @@ def spark_stores(
 ) -> dict[str, Mapping[str, int] | None]:
     """Each Spark's own store scan, None where it could not be read."""
 
-    return {
-        node_id: spark_model_objects(session, node_id, now=now) for node_id in node_ids
-    }
+    return spark_model_objects_by_node(session, node_ids, now=now)
 
 
 def missing_spark_bytes_by_node(

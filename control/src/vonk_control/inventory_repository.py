@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
@@ -84,7 +84,21 @@ def spark_model_objects(
     now: datetime,
     received_after: datetime | None = None,
 ) -> Mapping[str, int] | None:
-    """The model objects (sha256 -> bytes) a Spark's store holds.
+    """One Spark's store scan; see :func:`spark_model_objects_by_node`."""
+
+    return spark_model_objects_by_node(
+        session, (node_id,), now=now, received_after=received_after
+    )[node_id]
+
+
+def spark_model_objects_by_node(
+    session: Session,
+    node_ids: Iterable[str],
+    *,
+    now: datetime,
+    received_after: datetime | None = None,
+) -> dict[str, Mapping[str, int] | None]:
+    """The model objects (sha256 -> bytes) each Spark's store holds, one read.
 
     "Does this Spark hold model file X", from the agent's own store scan in
     its newest inventory (install admission reads the same scan from the
@@ -95,24 +109,43 @@ def spark_model_objects(
     object it holds); removal confirmation waits for a fresh scan instead.
     """
 
-    row = session.execute(
-        select(NodeInventorySnapshot.model_objects, NodeInventorySnapshot.received_at)
-        .where(NodeInventorySnapshot.node_id == node_id)
-        .order_by(NodeInventorySnapshot.observed_at.desc())
-        .limit(1)
-    ).first()
-    if row is None or not isinstance(row.model_objects, list):
-        return None
-    received = (
-        row.received_at
-        if row.received_at.tzinfo is not None
-        else row.received_at.replace(tzinfo=UTC)
+    wanted = tuple(dict.fromkeys(node_ids))
+    result: dict[str, Mapping[str, int] | None] = dict.fromkeys(wanted)
+    if not wanted:
+        return result
+    ranked = (
+        select(
+            NodeInventorySnapshot.node_id,
+            NodeInventorySnapshot.model_objects,
+            NodeInventorySnapshot.received_at,
+            func.row_number()
+            .over(
+                partition_by=NodeInventorySnapshot.node_id,
+                order_by=NodeInventorySnapshot.observed_at.desc(),
+            )
+            .label("inventory_rank"),
+        )
+        .where(NodeInventorySnapshot.node_id.in_(wanted))
+        .subquery()
     )
-    if received < now - INVENTORY_MAX_AGE or (
-        received_after is not None and received <= received_after
+    for row in session.execute(
+        select(ranked.c.node_id, ranked.c.model_objects, ranked.c.received_at).where(
+            ranked.c.inventory_rank == 1
+        )
     ):
-        return None
-    return {item.sha256: item.bytes for item in row.model_objects}
+        if not isinstance(row.model_objects, list):
+            continue
+        received = (
+            row.received_at
+            if row.received_at.tzinfo is not None
+            else row.received_at.replace(tzinfo=UTC)
+        )
+        if received < now - INVENTORY_MAX_AGE or (
+            received_after is not None and received <= received_after
+        ):
+            continue
+        result[row.node_id] = {item.sha256: item.bytes for item in row.model_objects}
+    return result
 
 
 class InventoryRepository:

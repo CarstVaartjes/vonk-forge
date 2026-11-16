@@ -272,3 +272,28 @@ def test_each_asked_spark_holds_only_the_images_its_installed_ranks_name(
         **{node_id: frozenset({build.image_digest}) for node_id in nodes},
         "spark-without-ranks": frozenset(),
     }
+
+
+def test_every_spark_store_scan_is_one_read(tmp_path) -> None:
+    """Catches a store read that costs one query per Spark of the placement."""
+    from sqlalchemy import event
+    from vonk_control.run_switch_operations.artifact_inspection import spark_stores
+
+    sessions, *_rest, nodes = setup_services(tmp_path)
+    digest = "c" * 64
+    _report_store(sessions, nodes[0], [{"sha256": digest, "bytes": 7}])
+    asked = (*nodes, "spk_" + "d" * 32)
+    reads: list[str] = []
+    engine = sessions.kw["bind"]
+
+    def count(_conn, _cursor, statement, *_args):
+        if "model_objects" in statement:
+            reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", count)
+    with sessions() as session:
+        stores = spark_stores(session, asked, now=NOW)
+
+    assert len(reads) == 1
+    assert stores[nodes[0]] == {digest: 7}
+    assert stores["spk_" + "d" * 32] is None
