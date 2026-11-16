@@ -78,6 +78,7 @@ from ..stall_window import Verdict, stall_deadline
 from ..stored_json import read_row_column
 from .artifact_validation import _validate_artifact_execution
 from .constants import (
+    _ARTIFACT_WAIT_CODES,
     _LOGGER,
     _OBSERVING,
     _RUNTIME_IMAGE_OWNER_CHANGED,
@@ -339,7 +340,7 @@ class PhaseDispatchMixin:
                 # not to match) ends with its evidence instead of looping.
                 code = getattr(error, "code", None)
                 if isinstance(code, str) and (
-                    code == _RUNTIME_IMAGE_OWNER_CHANGED or code.startswith("artifact.")
+                    code == _RUNTIME_IMAGE_OWNER_CHANGED or code in _ARTIFACT_WAIT_CODES
                 ):
                     return service._hold_capacity_writer(
                         operation_id,
@@ -360,7 +361,7 @@ class PhaseDispatchMixin:
                 # visibly: a cancelled or superseded owner settles on the next
                 # tick, a current one prepares again (reusing the archive).
                 if error.code == _RUNTIME_IMAGE_OWNER_CHANGED or (
-                    error.retryable and error.code.startswith("artifact.")
+                    error.retryable and error.code in _ARTIFACT_WAIT_CODES
                 ):
                     return service._hold_capacity_writer(
                         operation_id,
@@ -443,7 +444,6 @@ class PhaseDispatchMixin:
             progress = _read_progress(read_row_column(job, "result"))
             if not _checkpoint_matches(job, progress, phase_index, item_index, None):
                 return False
-            previous_status_reason = job.status_reason
             if job.next_action_at is not None:
                 schedule_wait(job, None)
                 progress.observation_deadline_at = None
@@ -469,10 +469,7 @@ class PhaseDispatchMixin:
                     RunSwitchPostStopEvidencePending.code,
                     _RUNTIME_IMAGE_OWNER_CHANGED,
                 )
-                or (
-                    isinstance(retry_reason, str)
-                    and retry_reason.startswith("artifact.")
-                )
+                or retry_reason in _ARTIFACT_WAIT_CODES
             ):
                 progress.retry_reason = None
                 progress.retry_attempt = None
@@ -591,49 +588,37 @@ class PhaseDispatchMixin:
                             due=due,
                             visible=_OBSERVING,
                         )
-                        if not (
-                            isinstance(previous_status_reason, str)
-                            and previous_status_reason.startswith(
-                                f"{RunSwitchCode.FINAL_VERIFICATION_EXPIRED}:"
+                        phase_evidence = _phase_result(
+                            execution.result or {}, phase=phase
+                        )
+                        expiry_event = FinalVerificationExpiry(
+                            operation_id=job.id,
+                            run_id=phase_evidence.run_id
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            run_state=next(
+                                (
+                                    state
+                                    for state in RunState
+                                    if state.value == phase_evidence.state
+                                ),
+                                None,
                             )
-                        ):
-                            phase_evidence = _phase_result(
-                                execution.result or {}, phase=phase
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            route_state=next(
+                                (
+                                    state
+                                    for state in RouteState
+                                    if state.value == phase_evidence.route_state
+                                ),
+                                None,
                             )
-                            expiry_event = FinalVerificationExpiry(
-                                operation_id=job.id,
-                                run_id=phase_evidence.run_id
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                run_state=next(
-                                    (
-                                        state
-                                        for state in RunState
-                                        if state.value == phase_evidence.state
-                                    ),
-                                    None,
-                                )
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                route_state=next(
-                                    (
-                                        state
-                                        for state in RouteState
-                                        if state.value == phase_evidence.route_state
-                                    ),
-                                    None,
-                                )
-                                if isinstance(
-                                    phase_evidence, RunSwitchFinalVerifyResult
-                                )
-                                else None,
-                                accepted_start_deadline=start_deadline.isoformat(),
-                                status_reason=job.status_reason,
-                            )
+                            if isinstance(phase_evidence, RunSwitchFinalVerifyResult)
+                            else None,
+                            accepted_start_deadline=start_deadline.isoformat(),
+                            status_reason=job.status_reason,
+                        )
                     else:
                         job.status_reason = execution.status_reason or (
                             "Waiting for exact run and route verification; "
