@@ -22,7 +22,7 @@ from ..run_switch_contract import (
 from ..run_switch_journal_contract import (
     RunSwitchJournalRepairPendingState,
 )
-from ..run_switch_operations.results import _persisted_result
+from ..run_switch_operations.results import _persisted_result, _stored_result
 from ..stall_window import stall_deadline
 from .discovery import REPAIR_WAIT, _candidate
 
@@ -83,15 +83,15 @@ def record_repair_cancellation(
             return
         # The repair may have committed after cancel's initial snapshot. The
         # same Job lock hands intent to the now-readable canonical checkpoint.
-        if _candidate(job) is None:
-            progress = RunSwitchOperationResult.model_validate_json(
-                canonical_message(job.result), strict=True
-            )
+        progress = _stored_result(job.result) if _candidate(job) is None else None
+        if isinstance(progress, RunSwitchOperationResult):
             if progress.cancellation is None:
                 progress.cancellation = cancellation
                 job.result = _persisted_result(progress)
                 job.updated_at = cancellation.requested_at
             return
+        # A damaged stored result keeps the intent in the pending row's typed
+        # cancellation column, which does not depend on it.
         row, state = _pending(session, job, cancellation.requested_at)
         if row.cancellation is None:
             row.cancellation = cancellation

@@ -31,6 +31,7 @@ from ..run_switch_journal_contract import (
     RunSwitchJournalRepairEvidence,
 )
 from ..run_switch_operations.results import _persisted_result
+from ..strict_json import read_stored_model
 from .discovery import (
     REPAIR_WAIT,
     _candidate,
@@ -204,8 +205,10 @@ def _try_repair_once(
                     )
                 session.delete(pending)
             job.result = _persisted_result(
-                RunSwitchOperationResult.model_validate_json(
-                    journal_document(corrected)
+                read_stored_model(
+                    RunSwitchOperationResult,
+                    journal_document(corrected),
+                    from_json=True,
                 )
             )
             clear_wait(job)

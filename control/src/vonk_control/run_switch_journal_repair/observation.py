@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     LifecycleState,
     UnknownOutcomeError,
-    canonical_message,
 )
 
 from ..admission_locking import AdmissionLockBusy
@@ -28,7 +27,7 @@ from ..run_switch_journal_contract import (
     JournalRepairDisposition,
     JournalRepairPurpose,
 )
-from ..run_switch_operations.results import _persisted_result
+from ..run_switch_operations.results import _persisted_result, _stored_result
 from ..stall_window import Verdict, Wait, progress_verdict, stall_deadline
 from .discovery import REPAIR_WAIT, _candidate
 from .ending import _end_unproven_journal
@@ -165,10 +164,12 @@ def _observe_zero_transfer_journal(
             return result
         _, state = _pending(session, job, now)
         if result == JournalRepairDisposition.REPAIRED:
-            if state.cancellation is not None:
-                progress = RunSwitchOperationResult.model_validate_json(
-                    canonical_message(job.result), strict=True
-                )
+            progress = _stored_result(job.result)
+            # A damaged stored result stays as it is: the repair is done and
+            # the advancing tick re-observes accepted intent from its sources.
+            if state.cancellation is not None and isinstance(
+                progress, RunSwitchOperationResult
+            ):
                 progress.cancellation = state.cancellation
                 job.result = _persisted_result(progress)
             session.delete(row)

@@ -6,13 +6,14 @@ from uuid import uuid4
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from vonk_agent_protocol import LifecycleState, OperationProgress
-from vonk_control.models import Base, Job
+from vonk_control.models import Base, Job, RunSwitchJournalRepairPending
 from vonk_control.run_switch_contract import (
     RunSwitchCancellation,
     RunSwitchOperationResult,
 )
 from vonk_control.run_switch_journal_repair import record_repair_cancellation
 from vonk_control.run_switch_operations import _persisted_result, _stored_result
+from vonk_control.stored_json import write_guard_mode
 
 
 def test_repair_cancellation_producer_round_trips_through_strict_result_reader() -> (
@@ -64,4 +65,41 @@ def test_repair_cancellation_producer_round_trips_through_strict_result_reader()
         result = _stored_result(stored.result)
         assert isinstance(result, RunSwitchOperationResult)
         assert result == expected
+    engine.dispose()
+
+
+def test_damaged_stored_result_keeps_cancellation_in_the_pending_row() -> None:
+    """Catches one unreadable result raising out of the cancellation record."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine)
+    operation_id = str(uuid4())
+    now = datetime.now(UTC)
+    with write_guard_mode(strict=False), sessions.begin() as session:
+        session.add(
+            Job(
+                id=operation_id,
+                request_id=str(uuid4()),
+                kind="recipe.run-switch.v2",
+                state=LifecycleState.RUNNING.value,
+                actor="operator",
+                authority_revision="a" * 64,
+                payload_digest="b" * 64,
+                targets=[],
+                payload={},
+                result={"item_index": "not a number"},
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    cancellation = RunSwitchCancellation(
+        request_key=str(uuid4()),
+        actor="operator",
+        reason="observation ended",
+        requested_at=now,
+    )
+    record_repair_cancellation(sessions, operation_id, cancellation)
+    with sessions() as session:
+        pending = session.get(RunSwitchJournalRepairPending, operation_id)
+        assert pending is not None and pending.cancellation == cancellation
     engine.dispose()
