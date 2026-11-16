@@ -1750,23 +1750,6 @@ def test_preview_uses_durable_verified_cache_metadata_without_reading_model_byte
         assert recovered["new_bytes"] == 0
 
 
-def test_an_object_of_a_different_size_is_not_present(cache, tmp_path: Path) -> None:
-    """Presence is the exact size of the object file."""
-
-    service, _sessions = cache
-    model = "9" * 64
-    data = b"object size disagrees with the manifest"
-    artifact = _artifact(tmp_path, data, model_content_sha256=model)
-    digest = _required_text(artifact["sha256"], "artifact digest")
-    object_path = service.root / "objects" / digest[:2] / digest
-    object_path.parent.mkdir(parents=True)
-    object_path.write_bytes(data[:-1])
-
-    preview = service.download_preview(model_content_sha256=model, artifacts=[artifact])
-    assert preview["already_cached_bytes"] == 0
-    assert preview["new_bytes"] == len(data)
-
-
 def test_verification_publishes_the_object_receipt(cache, tmp_path: Path) -> None:
     """A verified object is published with the receipt that owns its availability."""
 

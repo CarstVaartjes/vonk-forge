@@ -32,7 +32,7 @@ class RemovalScopeMixin:
         """Project exact model removal identities and managed-storage status.
 
         Manifest and membership reads happen in a short SQL context. That
-        context closes before receipt or filesystem observations begin.
+        context closes before filesystem observations begin.
         """
         cache = cast("ModelCacheService", self)
 

@@ -312,7 +312,7 @@ class TransferMixin:
         )
         for spec in manifest.artifacts:
             # SQL owns membership only. The object's identity, size, and
-            # availability are the manifest and the managed-storage receipt.
+            # availability are the manifest and the object file at its expected size.
             membership = session.get(
                 ModelCacheSetArtifact,
                 {"artifact_set_sha256": set_digest, "artifact_key": spec.key},

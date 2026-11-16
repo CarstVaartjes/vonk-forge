@@ -384,7 +384,7 @@ class StorageMixin:
         return cache._root / "objects" / digest[:2] / f"{digest}.receipt.json"
 
     def _write_object_receipt(self, spec: ArtifactSpec, verified_at: datetime) -> None:
-        """Publish the managed-storage receipt that owns an object's availability.
+        """Publish an object's receipt (write-only, pending deletion; presence is the file).
 
         The receipt is written after the verified bytes are in place, and it is
         replaced atomically so a reader never sees a partial document.

@@ -7,9 +7,6 @@ contract it returns is proven to be the one ``create`` validates against.
 from __future__ import annotations
 
 import pytest
-from cluster_profiles.generated_control.models.artifact_job_contract_response import (
-    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
-)
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -28,6 +25,9 @@ from vonk_control.models import RecipeInstallation, RecipeRun
 from vonk_control.strict_json import ControllerAPIRoute
 
 from cluster_profiles.control_client import validate_control_document
+from cluster_profiles.generated_control.models.artifact_job_contract_response import (
+    ArtifactJobContractResponse as ClientArtifactJobContractResponse,
+)
 
 from .test_agent_api import Jobs
 from .test_artifact_job_uncompilable_contract import (

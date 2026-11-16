@@ -166,7 +166,7 @@ class CheckpointsMixin:
                 if operation is not None and operation.state in {"succeeded", "failed"}:
                     return
                 # Refresh bytes belong to the operation's transfer ledger. The
-                # last verified receipt and its object remain published until
+                # last verified object remains published until
                 # the replacement has been verified and atomically committed.
                 payload = (
                     None if operation is None else cache._transfer_or_none(operation)
@@ -241,8 +241,8 @@ class CheckpointsMixin:
     def _mark_artifact_verified(self, spec: ArtifactSpec, set_digest: str) -> None:
         cache = cast("ModelCacheService", self)
         now = cache._clock()
-        # Availability is a managed-storage fact: the receipt beside the bytes
-        # owns it. This runs once per object inside the publication lock, so it
+        # Availability is a managed-storage fact: the object file at its expected
+        # size owns it; the receipt written here is write-only. This runs once per object inside the publication lock, so it
         # stays bounded -- the set-level projection is recomputed once when the
         # operation finalizes or the entry is read, never per object, which
         # would make one set quadratic in its own membership.
@@ -257,9 +257,9 @@ class CheckpointsMixin:
         """Return the stored bytes when storage holds this exact object.
 
         The one presence rule: the object file is a regular file of the
-        expected size. Bytes were hashed once at ingress; a missing receipt does
-        not make an object absent (``_object_is_stored`` and reconcile rewrite
-        it). One descriptor check answers both "is it available" and "how many
+        expected size. Bytes were hashed once at ingress, and only verified bytes
+        reach the object path. Receipts are write-only (pending deletion) and
+        play no part in presence. One descriptor check answers both "is it available" and "how many
         bytes are there", so a whole-set read costs one pass over the objects.
         """
         cache = cast("ModelCacheService", self)
