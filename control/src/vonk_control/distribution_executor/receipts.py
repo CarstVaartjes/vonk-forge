@@ -16,6 +16,7 @@ from ..run_switch_contract import (
     RunSwitchPhaseResult,
 )
 from ..run_switch_observation_contract import RunSwitchObservedEvidence
+from ..run_switch_operations.constants import _is_artifact_phase
 from ..strict_json import read_stored_model
 
 
@@ -54,10 +55,7 @@ def _phase_receipt(
         receipt = _PHASE_RECEIPT_ADAPTER.validate_python(value, strict=True)
         if phase is not None:
             subphase = phase.subphase
-            if subphase is None and phase.kind in {
-                ProfileChildPhase.TRANSFER,
-                ProfileChildPhase.VERIFY,
-            }:
+            if subphase is None and _is_artifact_phase(phase.kind):
                 subphase = ProfileChildPhase.TARGET_COPY
             if receipt.phase != phase.kind or receipt.subphase != subphase:
                 raise ValueError("phase receipt belongs to a different checkpoint")

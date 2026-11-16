@@ -44,6 +44,7 @@ from ..run_switch_contract import (
     RunSwitchTargetTransferResult,
 )
 from ..run_switch_operations import PhaseExecution
+from ..run_switch_operations.constants import _is_artifact_phase
 from ..strict_json import read_stored_model
 from .children import DistributionChildren
 from .receipts import (
@@ -67,10 +68,7 @@ class DurableDistributionPhaseExecutor(DistributionChildren):
         request_key: str,
         progress: RunSwitchOperationResult,
     ) -> PhaseExecution:
-        if phase.kind not in {
-            ProfileChildPhase.TRANSFER.value,
-            ProfileChildPhase.VERIFY.value,
-        }:
+        if not _is_artifact_phase(phase.kind):
             raise RuntimeError(f"unexpected {phase.kind} phase")
         if item_index != 0:
             raise RuntimeError(f"unexpected {phase.kind} item index {item_index}")

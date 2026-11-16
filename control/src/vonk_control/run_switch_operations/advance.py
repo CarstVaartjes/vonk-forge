@@ -73,6 +73,7 @@ from .constants import (
     _OBSERVING,
     _OPERATION_KINDS,
     _TERMINAL_STATES,
+    _is_artifact_phase,
 )
 from .endings_helpers import _reject_invalid_operation
 from .errors import (
@@ -842,10 +843,7 @@ class AdvanceMixin:
                     if not any(same_image(item, receipt) for item in results):
                         results.append(_phase_result(receipt, phase=phase))
                         progress.phase_results = results
-                if phase.kind in {
-                    ProfileChildPhase.TRANSFER,
-                    ProfileChildPhase.VERIFY,
-                } or (
+                if _is_artifact_phase(phase.kind) or (
                     phase.kind == ProfileChildPhase.PREPARE
                     and phase.subphase == "runtime-image"
                 ):
@@ -870,8 +868,7 @@ class AdvanceMixin:
                     child_receipts is None
                     and child_result is not None
                     and (
-                        phase.kind
-                        in {ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY}
+                        _is_artifact_phase(phase.kind)
                         or phase.subphase == "runtime-image"
                     )
                 ):

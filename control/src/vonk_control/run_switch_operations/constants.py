@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ResourceBlockerCode,
     RunSwitchCode,
 )
+from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_forge_contracts.recipe import Scalar
 
 from .. import job_states
@@ -29,6 +30,14 @@ from ..run_switch_contract import (
     RunSwitchReasonSeverity,
     RunSwitchSubphase,
 )
+
+_ARTIFACT_PHASES = frozenset({ProfileChildPhase.TRANSFER, ProfileChildPhase.VERIFY})
+
+
+def _is_artifact_phase(kind: ProfileChildPhase | str) -> bool:
+    """Whether a phase kind moves or verifies artifact bytes (transfer, verify)."""
+    return kind in _ARTIFACT_PHASES
+
 
 _KNOBS_ADAPTER: TypeAdapter[dict[str, Scalar]] = TypeAdapter(dict[str, Scalar])
 

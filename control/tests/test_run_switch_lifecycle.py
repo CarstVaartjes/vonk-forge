@@ -514,8 +514,6 @@ def test_phase_observation_fault_recovers_and_admits_a_fresh_request(
     "reason",
     [
         SecurityRefusalReason.RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED,
-        SecurityRefusalReason.RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN,
-        SecurityRefusalReason.RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED,
         SecurityRefusalReason.RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH,
     ],
 )

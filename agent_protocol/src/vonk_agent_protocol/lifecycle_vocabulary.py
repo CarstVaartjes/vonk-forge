@@ -529,12 +529,6 @@ class SecurityRefusalReason(WireEnum):
     RUN_SWITCH_ARTIFACT_DIGEST_VERIFICATION_FAILED = (
         "run-switch.artifact-digest-verification-failed"
     )
-    RUN_SWITCH_CLEANUP_NAS_EVICTION_FORBIDDEN = (
-        "run-switch.cleanup-nas-eviction-forbidden"
-    )
-    RUN_SWITCH_CLEANUP_RECLAIMED_DIGEST_NOT_PLANNED = (
-        "run-switch.cleanup-reclaimed-digest-not-planned"
-    )
     RUN_SWITCH_RUNTIME_IMAGE_PREPARATION_DIGEST_MISMATCH = (
         "run-switch.runtime-image-preparation-digest-mismatch"
     )
