@@ -21,6 +21,7 @@ from vonk_agent_protocol import (
     RecipeStartResult,
     RecipeStopPayload,
     RecipeUninstallPayload,
+    RunState,
     WaitReason,
     canonical_message,
 )
@@ -97,6 +98,31 @@ def wait_for_installation_upkeep(session: Session, installation_id: str) -> None
             f"recipe installation waits for its {upkeep.kind} operation "
             f"{upkeep.id} to end"
         )
+
+
+def run_takes_jobs(session: Session, run: RecipeRun | None) -> bool:
+    """Whether a held run admits a job now: running, and no Stop of it live.
+
+    An accepted Stop of a job run waits on its jobs' cancellation with the run
+    still ``running``; a job (or a reinstall for one) admitted then would
+    escape it, and a stopping run never takes jobs again.
+    """
+
+    if run is None or run.state != RunState.RUNNING:
+        return False
+    return (
+        session.scalar(
+            select(Job.id)
+            .where(
+                Job.kind == WireAgentOperation.RECIPE_STOP.value,
+                Job.owner_kind == OwnerKind.RUN,
+                Job.owner_id == run.id,
+                Job.state.in_(job_states.LIVE),
+            )
+            .limit(1)
+        )
+        is None
+    )
 
 
 def reinstall_in_flight(session: Session, installation_id: str) -> str | None:

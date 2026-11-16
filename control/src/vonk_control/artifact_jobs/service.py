@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
@@ -34,6 +35,7 @@ from ..lifecycle import CancelRequested, Outcome
 from ..lifecycle.agent_operation import AgentOperationAdapter, set_parent_state
 from ..lifecycle.artifact_job import ArtifactJobAdapter
 from ..lifecycle.evidence import Damaged, Residue
+from ..logging import log_event
 from ..models import (
     ArtifactJob,
     ArtifactJobBlob,
@@ -49,6 +51,7 @@ from ..recipe_operations import (
     RecipeOperationConflict,
     RecipeRetryLater,
 )
+from ..recipe_operations.observation_helpers import run_takes_jobs
 from .contracts import (
     MAX_INPUT_FILE_BYTES,
     MAX_INPUT_FILES,
@@ -73,6 +76,8 @@ from .contracts import (
 )
 from .job_contract import ArtifactJobContractResponse, read_job_contract
 from .outputs import ArtifactJobService as OutputService
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ArtifactJobService(OutputService):
@@ -494,9 +499,11 @@ class ArtifactJobService(OutputService):
 
         A Spark that lost the run's runtime image leaves the installation
         partial under the held run (``demote_ranks_on_lost_image``). The load's
-        own install step is queued for it, joining the Spark's current intent so
-        it fences nothing; the job's order then waits for that install at
-        dispatch (``reinstall_in_flight``) and runs once on the healed run.
+        own install step is queued for it, joining the Spark's current intent
+        rather than taking a new one; the job's order then waits for that
+        install at dispatch (``reinstall_in_flight``) and runs once on the
+        healed run. A run that takes no jobs (ended, or its Stop live) is never
+        healed: the submission gets its own definite answer.
         """
 
         with self._sessions() as session:
@@ -509,7 +516,7 @@ class ArtifactJobService(OutputService):
             ):
                 return
             run = session.get(RecipeRun, job.run_id)
-            if run is None or run.state != RunState.RUNNING:
+            if run is None or not run_takes_jobs(session, run):
                 return
             installation = session.get(RecipeInstallation, run.installation_id)
             if (
@@ -520,16 +527,28 @@ class ArtifactJobService(OutputService):
             run_id, installation_id = run.id, installation.id
 
         def still_held(session: Session) -> None:
-            held = session.get(RecipeRun, run_id)
-            if held is None or held.state != RunState.RUNNING:
-                raise RecipeRetryLater("the held run moved on before its reinstall")
+            if not run_takes_jobs(session, session.get(RecipeRun, run_id)):
+                raise RecipeRetryLater("the held run takes no jobs any more")
 
-        self._recipe_operations.start_installation(
-            installation_id,
-            actor=actor,
-            request_id=str(uuid.uuid5(uuid.UUID(request_id), "reinstall")),
-            unattended_guard=still_held,
-        )
+        try:
+            self._recipe_operations.start_installation(
+                installation_id,
+                actor=actor,
+                request_id=str(uuid.uuid5(uuid.UUID(request_id), "reinstall")),
+                unattended_guard=still_held,
+            )
+        except (RecipeOperationConflict, UnknownOutcomeError) as error:
+            # Best effort: the run heals on the next submission; this job gets
+            # the launch grant's definite answer, as without the heal.
+            log_event(
+                _LOGGER,
+                "artifact_job.reinstall_not_queued",
+                service="control-api",
+                level=logging.WARNING,
+                job_id=job_id,
+                installation_id=installation_id,
+                error=str(error),
+            )
 
     def _submit_once(
         self, job_id: str, *, actor: str, request_id: str

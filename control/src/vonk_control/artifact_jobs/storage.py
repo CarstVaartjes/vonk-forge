@@ -647,10 +647,9 @@ class ArtifactJobService:
                 ).live
             ):
                 status_reason = f"{ProjectionCode.NODE_OFFLINE.value}: {order.node_id}"
-            run = session.get(RecipeRun, job.run_id)
-            if (
+            elif (
                 order is not None
-                and run is not None
+                and (run := session.get(RecipeRun, job.run_id)) is not None
                 and reinstall_in_flight(session, run.installation_id) is not None
             ):
                 # Its held run's installation is being installed again.
