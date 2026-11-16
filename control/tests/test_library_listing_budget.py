@@ -26,7 +26,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, select, update
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.library_api import install_library_routes
-from vonk_control.library_assessment import LibraryAssessment
+from vonk_control.library_assessment import LibraryAssessment, unavailable
 from vonk_control.library_contract import (
     ModelDetailResponse,
     ModelLibraryResponse,
@@ -1294,7 +1294,10 @@ def test_ready_page_two_continues_after_its_boundary_stops_being_ready(
 
     def assess(recipes, *, budget_seconds):
         def check(slug):
-            return RecipeReadinessCheck(state="blocked" if slug in blocked else "ready")
+            if slug in blocked:
+                # A blocked check carries its reason, as the real assessment's.
+                return unavailable("test").model_copy(update={"state": "blocked"})
+            return RecipeReadinessCheck(state="ready")
 
         return [
             item.model_copy(
