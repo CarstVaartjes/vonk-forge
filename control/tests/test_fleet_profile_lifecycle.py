@@ -153,74 +153,6 @@ def _json(value) -> str:
 # -------------------------------------------------------- adoption and heal
 
 
-def test_a_legacy_operator_wait_is_healed_and_its_child_is_left_alone(tmp_path) -> None:
-    """The mirror of a child that waited for a person: nothing can end that wait,
-    so the load runs again and its exact child is observed; it is never touched."""
-
-    world = _World(tmp_path)
-    child_id = world.child_id()
-    with world.sessions() as session:
-        before = session.get(Job, child_id)
-        assert before is not None
-        snapshot = (before.state, before.status_reason, dict(before.result or {}))
-    world.edit(state="needs-operator", status_reason="the child is parked")
-    assert world.service.application(world.id).state == LifecycleState.NEEDS_OPERATOR
-
-    assert world.service.tick() is True  # healed
-    healed = world.service.application(world.id)
-    assert healed.state in {"running", "queued"}
-    assert healed.state != LifecycleState.NEEDS_OPERATOR
-    assert world.child_id() == child_id  # the same child
-    with world.sessions() as session:
-        after = session.get(Job, child_id)
-        assert after is not None
-        assert (after.state, after.status_reason, dict(after.result or {})) == snapshot
-
-    for _ in range(3):  # and it never goes back to waiting for anyone
-        world.service.tick()
-        assert (
-            world.service.application(world.id).state != LifecycleState.NEEDS_OPERATOR
-        )
-
-
-def test_a_legacy_child_state_is_mirrored_as_running_never_as_a_wait(tmp_path) -> None:
-    """The switch-adapter document of an older Controller carried the child's wait."""
-
-    world = _World(tmp_path)
-
-    def legacy(progress) -> None:
-        document = progress["switch_adapter"]
-        document["state"] = "needs-operator"
-        document["status_reason"] = "the child is parked"
-
-    world.edit_progress(legacy)
-    world.edit(state="needs-operator")
-    for _ in range(4):
-        world.service.tick()
-    view = world.service.application(world.id)
-    assert view.state != LifecycleState.NEEDS_OPERATOR
-    assert view.progress.switch_adapter is not None
-    assert view.progress.switch_adapter.state != LifecycleState.NEEDS_OPERATOR
-
-
-def test_a_legacy_wait_still_being_admitted_retries_its_admission(tmp_path) -> None:
-    world = _World(tmp_path)
-    world.edit(state="needs-operator", current_operation_id=None, current_step=0)
-
-    def pending(progress) -> None:
-        progress["admission_pending"] = True
-        progress["admission_attempt"] = 1
-        progress["workload_intent_ordinal"] = None
-        progress["switch_adapter"] = None
-
-    world.edit_progress(pending)
-    world.edit(next_action_at=world.now[0] + timedelta(hours=1))
-    assert world.service.tick() is True
-    healed = world.service.application(world.id)
-    assert healed.state == "queued"
-    assert healed.progress.admission_pending is True
-
-
 # ------------------------------------------------------------- state space
 
 
@@ -624,29 +556,6 @@ def test_a_legacy_parked_cancel_ends_as_soon_as_its_child_does(tmp_path) -> None
         if world.row().state == "cancelled":
             break
     assert world.row().state == "cancelled"
-
-    world.assert_fresh_admitted()
-
-
-def test_a_legacy_wait_whose_child_already_ended_records_that_ending(tmp_path) -> None:
-    """Audit C10, the terminal-child shape the old parked-application observer
-    handled: the parent heals, and the ordinary tick records what its child did."""
-
-    world = _World(tmp_path)
-    child_id = world.child_id()
-    with world.sessions.begin() as session:
-        child = session.get(Job, child_id)
-        assert child is not None
-        child.state = "failed"
-        child.status_reason = "run-switch.the-child-ended"
-    world.edit(state="needs-operator", status_reason="the child is parked")
-
-    for _ in range(4):
-        world.service.tick()
-        if world.row().state == "backoff":
-            break
-    # The child's untyped ending is retried by the Controller: the load backs off.
-    assert world.row().state == "backoff"
 
     world.assert_fresh_admitted()
 

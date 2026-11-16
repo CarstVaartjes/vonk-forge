@@ -4586,7 +4586,6 @@ def test_exhausted_preparation_ends_and_a_fresh_load_is_admitted(
         for method in (
             "_reconcile_selected_roster",
             "_observe_pending_admissions",
-            "_heal_legacy_applications",
             "_observe_pending_cancellation",
         ):
             monkeypatch.setattr(service, method, lambda now, application_id=None: False)

@@ -13,6 +13,11 @@ from typing import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session, defer
 from vonk_agent_protocol import (
+    AdmissionCode,
+    InstallAdmissionCode,
+    RecipeBuildCode,
+    ReconcileCode,
+    RunAdmissionCode,
     RunSwitchCode,
     canonical_message,
     run_switch_code,
@@ -61,17 +66,26 @@ from .constants import (
 )
 from .interfaces import ArtifactInspection
 
+#: The lock-contention word of every admission owner a phase can wait on.
+_CAPACITY_BUSY = frozenset(
+    code.value
+    for code in (
+        AdmissionCode.CAPACITY_BUSY,
+        InstallAdmissionCode.CAPACITY_BUSY,
+        RunAdmissionCode.CAPACITY_BUSY,
+        RecipeBuildCode.CAPACITY_BUSY,
+        ReconcileCode.CAPACITY_BUSY,
+        RunSwitchCode.RECONCILE_CAPACITY_BUSY,
+    )
+)
+
 
 def _refused_retries(progress: RunSwitchOperationResult) -> int:
     """How many times in a row admission was refused for capacity (0 if not)."""
 
     reason = progress.retry_reason
     attempt = progress.retry_attempt
-    if (
-        isinstance(reason, str)
-        and reason.endswith(".capacity_busy")
-        and type(attempt) is int
-    ):
+    if reason in _CAPACITY_BUSY and type(attempt) is int:
         return attempt
     return 0
 

@@ -118,7 +118,6 @@ with open(sys.argv[1], "a+b") as lock:
             assert row.lease_deadline is None
             queued_payload = parse_model_cache_payload(row.kind, row.payload)
             assert isinstance(queued_payload, ModelCacheDownloadPayload)
-            assert queued_payload.claim is None
         holder.stdin.close()
         assert holder.wait(timeout=30) == 0
         deadline = time.monotonic() + 30
@@ -135,7 +134,7 @@ with open(sys.argv[1], "a+b") as lock:
                     assert payload.failure is not None
                     # A retained historical fence rejects old reports. Only
                     # the running state and live lease denote a current claim.
-                    assert row.lease_deadline is None and payload.claim is None
+                    assert row.lease_deadline is None
                     assert row.next_action_at is not None
                     now[0] = max(now[0], row.next_action_at)
             service.tick()

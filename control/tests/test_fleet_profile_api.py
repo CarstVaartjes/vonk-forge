@@ -706,7 +706,7 @@ def test_damaged_success_is_unknown_and_fresh_profile_load_proceeds(damage):
                 .values(result=["damaged"])
             )
         elif damage == "failure-reason":
-            row.status_reason = "Profile journal retired; effect unknown"
+            row.status_reason = "Load failed; effect unknown"
         else:
             row.current_step = 1
     response = api.get("/api/profile/1/progress", headers=admin)

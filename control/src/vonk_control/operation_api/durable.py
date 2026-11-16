@@ -26,7 +26,7 @@ from ..agent_jobs import (
     operator_resume_eligible_operations_in_session,
     retire_exhausted_operations_in_session,
 )
-from ..auth import CursorCodec, CursorError
+from ..auth import CursorCodec, CursorError, cursor_key
 from ..endpoint_contract import EndpointResponse
 from ..fleet_profile_contract import (
     FleetProfileEndpointAssignmentView,
@@ -386,13 +386,8 @@ class _DurableOperationProjection:
                     order="created-at-asc/id-asc/v1",
                     context={"job_id": job_id},
                 )
-                if (
-                    not isinstance(decoded, list)
-                    or len(decoded) != 2
-                    or not all(isinstance(item, str) for item in decoded)
-                ):
-                    raise ValueError
-                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
+                key = cursor_key(decoded, 2)
+                boundary = (datetime.fromisoformat(key[0]), key[1])
             except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
                 raise CursorError("operation cursor is invalid") from None
         now = _aware(self._clock())
@@ -544,13 +539,8 @@ class _DurableOperationProjection:
                     order="created-at-desc/id-desc/v1",
                     context=context,
                 )
-                if (
-                    not isinstance(decoded, list)
-                    or len(decoded) != 2
-                    or not all(isinstance(item, str) for item in decoded)
-                ):
-                    raise ValueError
-                boundary = (datetime.fromisoformat(decoded[0]), decoded[1])
+                key = cursor_key(decoded, 2)
+                boundary = (datetime.fromisoformat(key[0]), key[1])
             except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
                 raise CursorError("operation cursor is invalid") from None
         now = _aware(self._clock() if now is None else now)

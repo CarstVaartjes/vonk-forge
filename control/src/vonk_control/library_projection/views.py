@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import select
 
+from ..auth import cursor_key
 from ..catalog_queries import active_head_revision
 from ..library_contract import (
     _MAX_PAGE_RECIPES,
@@ -171,19 +172,11 @@ def models(
         )
         # The cursor carries the whole sort key, so a boundary that has left
         # the catalog still continues the listing after its position.
-        expected_length = 3 if sort == "updated" else 2
-        boundary_key = (
-            tuple(boundary)
-            if isinstance(boundary, list)
-            and len(boundary) == expected_length
-            and all(isinstance(part, str) for part in boundary)
-            else None
-        )
+        boundary_key = cursor_key(boundary, 3 if sort == "updated" else 2)
         filtered = [
             item
             for item in filtered
-            if boundary_key is None
-            or (
+            if (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key
@@ -435,18 +428,11 @@ def recipe_library(
         )
         # The cursor carries the whole sort key, so a boundary that has left
         # the catalog still continues the listing after its position.
-        boundary_key = (
-            tuple(boundary)
-            if isinstance(boundary, list)
-            and len(boundary) == 3
-            and all(isinstance(part, str) for part in boundary)
-            else None
-        )
+        boundary_key = cursor_key(boundary, 3)
         filtered = [
             item
             for item in filtered
-            if boundary_key is None
-            or (
+            if (
                 key(item) < boundary_key
                 if sort == "updated"
                 else key(item) > boundary_key

@@ -409,26 +409,20 @@ def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) ->
     assert ended.state == "superseded"
 
 
-def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
+def test_a_changed_saved_draft_does_not_cancel_accepted_backing_off_application(
     tmp_path: Path,
 ) -> None:
-    """A parked order is revisited once the saved profile it bound has changed.
+    """A backing-off order is revisited once the saved profile it bound has changed.
 
-    The parked state owns no live step, so the advancement path never sees it.
+    The order owns no live step, so the advancement path never sees it.
     Without observing it, an edit to the saved profile would leave the order
     waiting forever even though its recorded intent is already obsolete.
     """
 
-    sessions, _lifecycle, service, profile, desired, first, child_id, nodes = (
+    _sessions, lifecycle, service, profile, desired, first, _child, _nodes = (
         _failed_profile(tmp_path)
     )
-    _park_exhausted_application(
-        sessions,
-        first,
-        child_id,
-        nodes,
-        attempt=RecoveryPolicy().max_failures,
-    )
+    assert service.application(first.id).state == "backoff"
     changed = desired.assignments[0].model_copy(
         update={"assignment_name": "different-chat"}
     )
@@ -440,11 +434,11 @@ def test_a_changed_saved_draft_does_not_cancel_accepted_parked_application(
         actor="admin",
     )
 
+    _expire_backoff(service, lifecycle)
     assert service.tick() is True
 
     ended = service.application(first.id)
-    assert ended.state in {"cancelled", "failed", "queued", "running"}
-    assert ended.state != LifecycleState.NEEDS_OPERATOR
+    assert ended.state == LifecycleState.SUPERSEDED
     assert ended.status_reason
 
 
@@ -470,13 +464,11 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
         row.progress = FleetProfileApplicationProgress.model_validate_json(
             canonical_message(progress_data), strict=True
         ).model_dump(mode="json")
-        row.state = "needs-operator"
+        row.state = "queued"
         row.status_reason = "Profile admission is waiting for the active workload owner"
 
-    # No action exists for a legacy wait: the first tick heals it (it returns to the
-    # queue and retries its admission), and admission retry still owns it - the
-    # parked-child observer never cancels it.
-    assert service.tick() is True
+    # Admission retry owns the order; the parked-child observer never cancels it.
+    service.tick()
     parked = service.application(application.id)
     assert parked.state == "queued"
     assert parked.progress.admission_pending is True

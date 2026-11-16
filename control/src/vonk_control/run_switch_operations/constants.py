@@ -8,6 +8,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    ArtifactLifecycleCode,
     LifecycleState,
     ResourceBlockerCode,
     RunSwitchCode,
@@ -133,6 +134,10 @@ _INSTALL_PREFLIGHT_REFRESH_REASON = (
 
 
 _RUNTIME_IMAGE_OWNER_CHANGED = RunSwitchCode.RUNTIME_IMAGE_OWNER_CHANGED
+
+#: Every artifact lifecycle code: an image preparation that reports one waits
+#: and is observed again.
+_ARTIFACT_WAIT_CODES = frozenset(code.value for code in ArtifactLifecycleCode)
 
 
 _RUNTIME_IMAGE_IDENTITY_MISMATCH = (
