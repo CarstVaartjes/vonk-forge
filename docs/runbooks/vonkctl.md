@@ -1160,7 +1160,8 @@ confirmation, recovery and its deadline.
 `vonkctl model remove --unused --review` shows every cached model that no saved
 or loaded profile, live operation or running workload keeps, with the bytes
 freed on the NAS and each Spark; `--unused --yes` removes them on the NAS and
-every Spark. It covers the models the library lists as cached; Spark-only
+every Spark. A model whose removal would free nothing, because every file is
+shared with another cached model, is listed as kept and never submitted. It covers the models the library lists as cached; Spark-only
 leftovers are cleared by the 24 h Spark retention. A refused removal is listed
 with its request key and the command exits non-zero.
 
