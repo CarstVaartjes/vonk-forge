@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
+from typing import NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, load_only
@@ -102,6 +105,47 @@ def _scan_floors(
     wanted = set(node_ids)
     if not wanted:
         return floors
+    for copy in _failed_target_copies(session, now):
+        if copy.model_content_sha256 != manifest.model_content_sha256:
+            continue
+        for node_id in wanted.intersection(copy.targets):
+            floors[node_id] = max(copy.failed_at, floors.get(node_id, copy.failed_at))
+    return floors
+
+
+class _FailedCopy(NamedTuple):
+    targets: frozenset[str]
+    failed_at: datetime
+    model_content_sha256: str | None
+
+
+_FAILED_COPY_SCOPE: ContextVar[list[tuple[_FailedCopy, ...]] | None] = ContextVar(
+    "failed_copy_read_scope", default=None
+)
+
+
+@contextmanager
+def failed_copies_read_once() -> Iterator[None]:
+    """Read the recent failed target copies once inside this read.
+
+    The scan is independent of the model, so a pass that inspects many
+    candidates (the library) runs one jobs query, not one per candidate.
+    """
+
+    token = _FAILED_COPY_SCOPE.set([])
+    try:
+        yield
+    finally:
+        _FAILED_COPY_SCOPE.reset(token)
+
+
+def _failed_target_copies(session: Session, now: datetime) -> tuple[_FailedCopy, ...]:
+    """Recent target copies that failed or are being re-planned, per node set."""
+
+    scope = _FAILED_COPY_SCOPE.get()
+    if scope:
+        return scope[0]
+    copies: list[_FailedCopy] = []
     for job in session.scalars(
         select(Job)
         .options(
@@ -112,9 +156,8 @@ def _scan_floors(
             Job.updated_at >= now - INVENTORY_MAX_AGE,
         )
     ):
-        nodes = wanted.intersection(job.targets)
         result = read_row_column(job, "result")
-        if not nodes or isinstance(result, Residue):
+        if not job.targets or isinstance(result, Residue):
             continue
         progress = _read_progress(result)
         if progress.subphase != "target-copy" or not (
@@ -122,12 +165,19 @@ def _scan_floors(
         ):
             continue
         plan = _stored_job_plan(job)
-        if plan is None or plan.model_content_sha256 != manifest.model_content_sha256:
+        if plan is None:
             continue
-        failed_at = _aware(job.updated_at)
-        for node_id in nodes:
-            floors[node_id] = max(failed_at, floors.get(node_id, failed_at))
-    return floors
+        copies.append(
+            _FailedCopy(
+                frozenset(job.targets),
+                _aware(job.updated_at),
+                plan.model_content_sha256,
+            )
+        )
+    found = tuple(copies)
+    if scope is not None:
+        scope.append(found)
+    return found
 
 
 def missing_spark_bytes(

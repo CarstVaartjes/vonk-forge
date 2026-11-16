@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from vonk_agent_protocol import canonical_message
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.auth import Actor, TokenCodec
@@ -416,6 +416,53 @@ def _hold_model(sessions, cache, projection, node_id: str) -> None:
             for spec in manifest.artifacts
         ],
     )
+
+
+def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
+    assessed_library, monkeypatch
+):
+    """Catches one jobs scan per candidate placement."""
+    from vonk_agent_protocol import LibraryAssessmentCode
+    from vonk_control import library_assessment
+    from vonk_control.library_contract import RecipeReadinessCheck
+
+    projection, sessions, _, service, _, _, _, _, _, _ = assessed_library
+    _add_fitting_spark(sessions, "spk_" + "0" * 32)
+    _add_fitting_spark(sessions, "spk_" + "f" * 32)
+    # No group fits, so the search inspects every candidate placement.
+    blocked = library_assessment._reason(
+        LibraryAssessmentCode.INSUFFICIENT_NODES, "forced"
+    )
+    monkeypatch.setattr(
+        library_assessment.LibraryAssessment,
+        "_fit",
+        staticmethod(
+            lambda plan: RecipeReadinessCheck(state="blocked", reasons=[blocked])
+        ),
+    )
+    inspected: list[tuple[str, ...]] = []
+    inspect = service.inspect_candidate
+
+    def counting_inspect(revision_id, group, **kwargs):
+        inspected.append(tuple(group))
+        return inspect(revision_id, group, **kwargs)
+
+    monkeypatch.setattr(service, "inspect_candidate", counting_inspect)
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, *_args):
+        if "jobs.result" in statement and "FROM jobs" in statement:
+            statements.append(statement)
+
+    engine = sessions.kw["bind"]
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        projection.recipe_library(assess=True)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert len(inspected) >= 2
+    assert len(statements) == 1
 
 
 def test_a_failing_group_does_not_turn_a_holder_search_blocked(
