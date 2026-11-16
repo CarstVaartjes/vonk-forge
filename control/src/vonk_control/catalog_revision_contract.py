@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 from threading import Lock
 from typing import TYPE_CHECKING
@@ -282,7 +281,6 @@ _DOCUMENT_CACHE_BYTES = 64 * 1024 * 1024
 
 @dataclass(frozen=True)
 class _CachedDocument:
-    source: object
     parsed: ModelDefinition | RecipeDefinition
     source_bytes: int
 
@@ -315,7 +313,9 @@ def shared_catalog_document(
     key = (kind, digest)
     with _document_cache_lock:
         previous = _document_cache.get(key)
-        if previous is not None and previous.source == document:
+        # Content identity: the digest keys the parse, so a hit never compares
+        # the document (digests are verified at ingress, rows are immutable).
+        if previous is not None:
             _document_cache.move_to_end(key)
             return previous.parsed
         if kind == "model":
@@ -333,7 +333,7 @@ def shared_catalog_document(
                 _document_cache_size -= _document_cache.popitem(last=False)[
                     1
                 ].source_bytes
-            _document_cache[key] = _CachedDocument(deepcopy(document), parsed, size)
+            _document_cache[key] = _CachedDocument(parsed, size)
             _document_cache_size += size
         return parsed
 

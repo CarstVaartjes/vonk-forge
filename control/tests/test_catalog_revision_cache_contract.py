@@ -172,6 +172,35 @@ def test_catalog_readers_parse_one_content_identity_once(monkeypatch, kind, exam
     assert len(calls) == 2
 
 
+def test_a_cache_hit_is_keyed_by_the_digest_and_never_compares_the_document(
+    monkeypatch,
+):
+    """Catches comparing the whole raw document on every hit."""
+    from collections import OrderedDict
+
+    import vonk_control.catalog_revision_contract as contract
+    from vonk_forge_contracts import document_sha256
+
+    monkeypatch.setattr(contract, "_document_cache", OrderedDict(), raising=False)
+    monkeypatch.setattr(contract, "_document_cache_size", 0, raising=False)
+    raw = json.loads(
+        files("vonk_forge_contracts")
+        .joinpath("examples", "model-definition.json")
+        .read_text()
+    )
+
+    class Untouchable(dict):
+        def __eq__(self, other):
+            raise AssertionError("a cache hit compared the document")
+
+        __hash__ = None
+
+    digest = document_sha256(raw)
+    first = contract.cached_catalog_document("model", digest, raw)
+    again = contract.cached_catalog_document("model", digest, Untouchable(raw))
+    assert again == first
+
+
 def test_import_refuses_a_mismatched_digest_even_when_content_was_cached(tmp_path):
     """The process cache cannot bypass the signed ingress content identity check."""
     from vonk_agent_protocol import CatalogCode
