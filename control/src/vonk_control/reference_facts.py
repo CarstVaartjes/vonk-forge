@@ -9,35 +9,23 @@
 * Which source bundle a recipe revision was imported with:
   ``catalog_document_revisions.source_bundle_sha256``, written by the import.
 
-Rows written before these facts existed are filled from their own stored
-documents at Controller startup (``fill_reference_facts``). Readers ask the
-facts only; they never read assignments or plans to answer these questions.
+Readers ask the facts only; they never read assignments or plans to answer these questions.
 """
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection, Mapping
 
 from pydantic import TypeAdapter
-from sqlalchemy import delete, insert, select, update
-from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy import delete, insert, select
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
-from vonk_agent_protocol import InstallationState
 
 from .content_identity import catalog_selector_membership
-from .lifecycle.evidence import BookkeepingReason, Residue, retire_as_unknown
 from .models import (
-    CatalogDocumentRevision,
     FleetProfile,
     FleetProfileRecipe,
-    InstallationNode,
-    RecipeInstallation,
 )
-from .operator_receipt_contract import ReceiptOwner
-
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def profile_recipes(assignments: object) -> frozenset[tuple[str, str]]:
@@ -111,220 +99,3 @@ def profiles_naming(
     for owner, publisher, slug in session.execute(statement):
         found.setdefault(owner, set()).add((publisher, slug))
     return {owner: frozenset(names) for owner, names in found.items()}
-
-
-def fill_reference_facts(connection: Connection) -> int:
-    """Fill both facts for rows written before they existed; the rows filled.
-
-    Idempotent, and run once at startup. An installation that is not
-    uninstalled is filled from its own stored plan; a plan that does not name
-    one set is reported once and left for its owner to replace. A profile with
-    readable assignments has its projection rows made to match them (rows
-    missing are added, rows it no longer names are removed); a profile whose
-    assignments are damaged is reported and left as it is.
-    """
-    filled, _unreadable = fill_installation_model_sets(connection)
-    return (
-        filled
-        + _fill_profile_recipes(connection)
-        + fill_installation_payload_bytes(connection)
-        + fill_revision_source_bundles(connection)
-    )
-
-
-def fill_revision_source_bundles(connection: Connection) -> int:
-    """Move each recipe revision's stored source bundle digest to its column.
-
-    Revisions imported before the column existed carry the digest in their
-    ``projected`` JSON. For each revision with no column value and a digest in
-    its projection, one update records the column and removes the JSON key, so
-    the column is the only copy. A revision whose projection names no digest
-    stays empty, which is an unknown source; so does one whose stored value is not
-    a digest (it never fits the column). Returns the revisions moved.
-    """
-    moved = 0
-    for revision_id, projected in connection.execute(
-        select(CatalogDocumentRevision.id, CatalogDocumentRevision.projected).where(
-            CatalogDocumentRevision.kind == ReceiptOwner.RECIPE.value,
-            CatalogDocumentRevision.source_bundle_sha256.is_(None),
-        )
-    ).all():
-        digest = (
-            projected.get("source_bundle_sha256")
-            if isinstance(projected, Mapping)
-            else None
-        )
-        if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
-            continue
-        moved += connection.execute(
-            update(CatalogDocumentRevision)
-            .where(
-                CatalogDocumentRevision.id == revision_id,
-                CatalogDocumentRevision.source_bundle_sha256.is_(None),
-            )
-            .values(
-                source_bundle_sha256=digest,
-                projected={
-                    key: value
-                    for key, value in projected.items()
-                    if key != "source_bundle_sha256"
-                },
-            )
-        ).rowcount
-    return moved
-
-
-def plan_model_set(plan: object) -> str | None:
-    """The one model set a stored installation plan runs; ``None`` when unreadable."""
-    from .recipe_execution_contract import (
-        RecipeExecutionContractError,
-        parse_stored_installation_plan,
-    )
-
-    try:
-        return parse_stored_installation_plan(
-            plan, for_uninstall=True
-        ).model_artifact_set_sha256
-    except RecipeExecutionContractError:
-        return None
-
-
-def fill_installation_model_sets(
-    connection: Connection,
-) -> tuple[int, tuple[Residue, ...]]:
-    """Record the model set of every installation that has none recorded yet.
-
-    Returns how many were filled and the installations whose plan names no
-    single set (reported once per process).
-    """
-    filled = 0
-    unreadable: list[Residue] = []
-    for installation_id, plan in connection.execute(
-        select(RecipeInstallation.id, RecipeInstallation.plan).where(
-            RecipeInstallation.model_artifact_set_sha256.is_(None),
-            # An uninstalled installation holds no model: nothing reads it.
-            RecipeInstallation.state != InstallationState.UNINSTALLED,
-        )
-    ).all():
-        model_set = plan_model_set(plan)
-        if model_set is None:
-            unreadable.append(
-                retire_as_unknown(
-                    "recipe.installation-model-set",
-                    installation_id,
-                    BookkeepingReason.PERSISTED_STATE_DAMAGED,
-                    "the stored plan names no single model set",
-                )
-            )
-            continue
-        connection.execute(
-            update(RecipeInstallation)
-            .where(
-                RecipeInstallation.id == installation_id,
-                RecipeInstallation.model_artifact_set_sha256.is_(None),
-            )
-            .values(model_artifact_set_sha256=model_set)
-        )
-        filled += 1
-    return filled, tuple(unreadable)
-
-
-def fill_installation_payload_bytes(connection: Connection) -> int:
-    """Record each rank's admitted payload for installations that predate it.
-
-    ``installation_nodes.required_payload_bytes`` is written with the rank at
-    install admission. A rank of an installation that is not uninstalled and has
-    none is filled from its own stored plan; a plan that carries no expectation
-    (or no longer reads) leaves the rank empty, which is no expectation. Returns
-    the ranks filled.
-    """
-    from .recipe_execution_contract import (
-        RecipeExecutionContractError,
-        parse_stored_installation_plan,
-    )
-
-    filled = 0
-    for installation_id, plan in connection.execute(
-        select(RecipeInstallation.id, RecipeInstallation.plan).where(
-            RecipeInstallation.state != InstallationState.UNINSTALLED,
-            RecipeInstallation.id.in_(
-                select(InstallationNode.installation_id).where(
-                    InstallationNode.required_payload_bytes.is_(None)
-                )
-            ),
-        )
-    ).all():
-        try:
-            stored = parse_stored_installation_plan(plan)
-        except RecipeExecutionContractError:
-            continue
-        for node in stored.nodes:
-            if node.required_payload_bytes is None:
-                continue
-            filled += connection.execute(
-                update(InstallationNode)
-                .where(
-                    InstallationNode.installation_id == installation_id,
-                    InstallationNode.node_id == node.node_id,
-                    InstallationNode.required_payload_bytes.is_(None),
-                )
-                .values(required_payload_bytes=node.required_payload_bytes)
-            ).rowcount
-    return filled
-
-
-def _fill_profile_recipes(connection: Connection) -> int:
-    present = {
-        (profile_id, publisher, slug)
-        for profile_id, publisher, slug in connection.execute(
-            select(
-                FleetProfileRecipe.profile_id,
-                FleetProfileRecipe.publisher,
-                FleetProfileRecipe.slug,
-            )
-        )
-    }
-    wanted: set[tuple[str, str, str]] = set()
-    readable: set[str] = set()
-    for profile_id, assignments in connection.execute(
-        select(FleetProfile.id, FleetProfile.assignments)
-    ):
-        recipes = _readable_recipes(profile_id, assignments)
-        if isinstance(recipes, Residue):
-            continue
-        readable.add(profile_id)
-        wanted.update((profile_id, publisher, slug) for publisher, slug in recipes)
-    missing = [
-        {"profile_id": profile_id, "publisher": publisher, "slug": slug}
-        for profile_id, publisher, slug in sorted(wanted - present)
-    ]
-    stale = sorted(row for row in present - wanted if row[0] in readable)
-    for profile_id, publisher, slug in stale:
-        connection.execute(
-            delete(FleetProfileRecipe).where(
-                FleetProfileRecipe.profile_id == profile_id,
-                FleetProfileRecipe.publisher == publisher,
-                FleetProfileRecipe.slug == slug,
-            )
-        )
-    if missing:
-        dialect = postgresql if connection.dialect.name == "postgresql" else sqlite
-        connection.execute(
-            dialect.insert(FleetProfileRecipe).on_conflict_do_nothing(), missing
-        )
-    return len(missing) + len(stale)
-
-
-def _readable_recipes(
-    profile_id: str, assignments: object
-) -> frozenset[tuple[str, str]] | Residue:
-    """The recipes a stored profile names; damage is reported, never guessed."""
-    try:
-        return profile_recipes(assignments)
-    except (TypeError, ValueError):
-        return retire_as_unknown(
-            "fleet-profile.recipes",
-            profile_id,
-            BookkeepingReason.PERSISTED_STATE_DAMAGED,
-            "the saved assignments name no readable recipes",
-        )

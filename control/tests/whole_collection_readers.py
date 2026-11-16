@@ -43,8 +43,6 @@ COLLECTOR_FUNCTIONS = {
     f"{_STORAGE}service.py": frozenset(
         {"tick", "collect", "redrive_installation", "redrive_artifact", "_expire"}
     ),
-    # Controller startup fills the saved-profile projection once per start.
-    "control/src/vonk_control/reference_facts.py": frozenset({"_fill_profile_recipes"}),
     # Both walk every saved profile by design: the image scan is itself a
     # whole-collection reader, and the storage refresh recomputes every set.
     "control/src/vonk_control/artifact_reference_scan/image_references.py": frozenset(

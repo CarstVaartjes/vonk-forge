@@ -204,10 +204,6 @@ class ModelCacheOperation(Base):
     actor: Mapped[str] = mapped_column(String(200), nullable=False)
     current_artifact_key: Mapped[str | None] = mapped_column(String(256))
     last_error: Mapped[str | None] = mapped_column(String(512))
-    #: The one retry, observation and cancel clock of the lifecycle core: when a
-    #: queued or interrupted operation may be claimed again.  It replaces the
-    #: payload's ``retry.next_retry_at``/``retry_after_seconds`` (read only by the
-    #: lifecycle adapter's ``adopt`` for rows written before the core).
     #: How many times the core looked at a cancelled operation since it last ran
     #: (a stop and its confirmation); the stop budget of a cancel.
     observe_count: Mapped[int] = mapped_column(
