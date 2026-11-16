@@ -12,6 +12,7 @@ from vonk_agent_protocol import (
     ArtifactLifecycleCode,
     LifecycleState,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
@@ -193,7 +194,7 @@ def _persist_run_switch_runtime_image_reference(
             ) from error
         if (
             job is None
-            or job.kind != "recipe.run-switch.v2"
+            or job.kind != ProfileChildJobKind.RUN_SWITCH.value
             or job.actor != actor
             # Background preparation publishes while its operation waits on
             # it; the exact checkpoint below still binds ownership.

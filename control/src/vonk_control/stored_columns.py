@@ -13,7 +13,10 @@ from typing import Annotated
 
 from pydantic import Field
 from vonk_agent_protocol import CacheReferenceReason, OperationProgress
-from vonk_agent_protocol.agent_words import RunSwitchReasonScopeName
+from vonk_agent_protocol.agent_words import (
+    ProfileChildJobKind,
+    RunSwitchReasonScopeName,
+)
 from vonk_agent_protocol.contracts import (
     PAYLOAD_MODELS,
     AgentResultPayload,
@@ -269,9 +272,9 @@ bind(
         "recipe.job.activate.v1": RecipeJobActivateParent,
         "recipe.build.v1": RecipeBuildParent,
         "recipe.build.cleanup.v1": RecipeBuildCleanupParent,
-        "recipe.run-switch.v2": RunSwitchJobPayload,
-        "recipe.stop.v2": RunSwitchJobPayload,
-        "recipe.cleanup.v2": RunSwitchJobPayload,
+        ProfileChildJobKind.RUN_SWITCH.value: RunSwitchJobPayload,
+        ProfileChildJobKind.STOP.value: RunSwitchJobPayload,
+        ProfileChildJobKind.CLEANUP.value: RunSwitchJobPayload,
         "recipe.image.availability.v2": AvailabilityJobPayload | AvailabilityUnknownEnd,
         "agent-upgrade": AgentUpgradeRolloutPayload,
         "artifact-distribution": DistributionJobPayload,
@@ -301,9 +304,9 @@ bind(
         "recipe.build.cleanup.v1": _LIFECYCLE_RESULT,
         "recipe.job.run.v1": RecipeJobRunResult | RecipeOperationCancellationResult,
         "recipe.job.activate.v1": RecipeOperationActivatedResult,
-        "recipe.run-switch.v2": RunSwitchOperationResult,
-        "recipe.stop.v2": RunSwitchOperationResult,
-        "recipe.cleanup.v2": RunSwitchOperationResult,
+        ProfileChildJobKind.RUN_SWITCH.value: RunSwitchOperationResult,
+        ProfileChildJobKind.STOP.value: RunSwitchOperationResult,
+        ProfileChildJobKind.CLEANUP.value: RunSwitchOperationResult,
         "recipe.cache.update.v2": RecipeUpdateFailure,
         "recipe.cache.remove.v2": RecipeCacheRemovalResult,
         "recipe.image.availability.v2": AvailabilityJobResult,

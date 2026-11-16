@@ -61,6 +61,7 @@ from .run_switch_contract import (
     RunSwitchApplyRequest,
     RunSwitchCleanupApplyRequest,
     RunSwitchMemberReceipt,
+    RunSwitchOperationKind,
     RunSwitchOperationResult,
     RunSwitchPhaseKind,
     RunSwitchPlan,
@@ -300,9 +301,7 @@ class RunSwitchJobPayload(_Document):
     """The reviewed plan, the request that asked for it and the live progress."""
 
     schema_version: Literal[2]
-    operation_kind: Literal[
-        "recipe.run-switch.v2", "recipe.stop.v2", "recipe.cleanup.v2"
-    ]
+    operation_kind: RunSwitchOperationKind
     action: RunSwitchAction
     plan_digest: DigestText
     plan: RunSwitchPlan

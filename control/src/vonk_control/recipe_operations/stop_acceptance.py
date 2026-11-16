@@ -17,6 +17,7 @@ from vonk_agent_protocol import (
     UnknownOutcomeError,
     canonical_message,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind, ProfileSwitchChildKind
 
 from ..admission_locking import (
     set_admission_timeout,
@@ -85,7 +86,9 @@ class StopAcceptanceMixin:
             if candidate is None:
                 continue
             expected_kind = (
-                "recipe.stop.v2" if child.kind == "stop" else "recipe.run-switch.v2"
+                ProfileChildJobKind.STOP.value
+                if child.kind == ProfileSwitchChildKind.STOP.value
+                else ProfileChildJobKind.RUN_SWITCH.value
             )
             if candidate.kind != expected_kind:
                 raise RecipeRequestInvalid(
@@ -109,7 +112,7 @@ class StopAcceptanceMixin:
                 or candidate_root.action != candidate_root.plan.action
                 or (
                     candidate_root.action != "stop"
-                    if child.kind == "stop"
+                    if child.kind == ProfileSwitchChildKind.STOP.value
                     else candidate_root.action != "install"
                     if child.kind == "install"
                     else candidate_root.action not in {"run", "switch"}

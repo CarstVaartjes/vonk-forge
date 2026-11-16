@@ -13,6 +13,7 @@ from vonk_agent_protocol import (
     RunSwitchCode,
     WaitReason,
 )
+from vonk_agent_protocol.agent_words import ProfileChildJobKind
 
 from .. import job_states
 from ..admission_locking import AdmissionLockBusy, AdmissionRowLock, lock_admission_rows
@@ -73,7 +74,7 @@ def _lock_phase_owner(
             job
             for job in session.scalars(
                 select(Job).where(
-                    Job.kind == "recipe.run-switch.v2",
+                    Job.kind == ProfileChildJobKind.RUN_SWITCH.value,
                     Job.state.in_(
                         job_states.words(
                             LifecycleState.QUEUED,
@@ -158,7 +159,7 @@ def _lock_current_build_parent(
         raise RecipeBuildAdmissionBusy() from error
     if (
         job is None
-        or job.kind != "recipe.run-switch.v2"
+        or job.kind != ProfileChildJobKind.RUN_SWITCH.value
         or job.actor != actor
         or set(job.targets) != targets
         or len(nodes) != len(locked_nodes)

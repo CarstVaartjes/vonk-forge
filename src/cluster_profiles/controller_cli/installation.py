@@ -9,6 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import cast
 
 from ..cli_outcome import Submission, SubmissionAcceptance
+from ..cli_states_generated import JOB_KIND_CLEANUP
 from ..control_client import (
     ControlClientError,
     ControlForbidden,
@@ -81,7 +82,7 @@ def _run_switch_request_operation(
     parents = [
         item
         for item in summaries
-        if item.get("kind") == "recipe.cleanup.v2" and item.get("id") == owner_id
+        if item.get("kind") == JOB_KIND_CLEANUP and item.get("id") == owner_id
     ]
     if not isinstance(owner_id, str) or len(parents) != 1:
         raise ControlMalformedResponse("request ownership projection is incomplete")
@@ -109,7 +110,7 @@ def _validate_installation_reconcile_operation(
     if (
         (operation_id is not None and value.get("operation_id") != operation_id)
         or value.get("request_key") != request_key
-        or value.get("kind") != "recipe.cleanup.v2"
+        or value.get("kind") != JOB_KIND_CLEANUP
         or value.get("action") != "cleanup"
         or value.get("cleanup_mode") != "reconcile"
         or value.get("installation_id") != installation_id
