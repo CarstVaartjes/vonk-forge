@@ -33,7 +33,6 @@ from vonk_control.lifecycle import (
 )
 from vonk_control.lifecycle.model_cache import (
     RECOVERY_BUDGET,
-    adopt_legacy_operations,
     legacy_claim,
     legacy_retry_due,
 )
@@ -135,13 +134,6 @@ def test_a_legacy_retry_clock_is_adopted_honoured_and_healed(
     assert (adopted.state, adopted.next_action_at) == (State.BACKOFF, due)
     assert service._claim_operations(limit=1, respect_backoff=True) == []
 
-    # Startup adoption moves it onto the column once, idempotently.
-    with sessions.begin() as session:
-        assert adopt_legacy_operations(session.connection()) == 1
-    with sessions.begin() as session:
-        assert adopt_legacy_operations(session.connection()) == 0
-    assert _aware(_row(sessions, operation.id).next_action_at) == due
-
     # It heals: due, it is claimed; the legacy clock is gone with the claim.
     now[0] = due + timedelta(seconds=1)
     assert service._claim_operations(limit=1, respect_backoff=True) == [
@@ -175,15 +167,12 @@ def test_a_legacy_live_claim_is_untouched_and_a_dead_one_is_retried(
         },
     )
     assert legacy_claim(_row(sessions, operation.id).payload) is not None
-    with sessions.begin() as session:
-        assert adopt_legacy_operations(session.connection()) == 1
     live = _row(sessions, operation.id)
-    assert (live.state, live.fence) == ("running", "older-process")
+    assert live.state == "running"
 
     # A live lease is never touched: not claimed, not decided, not rewritten.
     assert service._claim_operations(limit=1, respect_backoff=False) == []
     assert service._reconciler.reconcile().changed == 0
-    assert _row(sessions, operation.id).fence == "older-process"
 
     # Its process dies: once the lease lapses the core retries the attempt (the
     # kind is idempotent) and the next claim takes it.

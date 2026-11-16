@@ -48,8 +48,7 @@ two steps (core ``queued``) and a lapsed process costs nothing.
 
 Legacy rows: ``payload.retry.next_retry_at`` / ``retry_after_seconds`` and
 ``payload.claim`` are read by ``adopt`` when the columns are empty, never
-written; ``apply`` strips them on the row's next transition and
-:func:`adopt_legacy_operations` moves them at startup.
+written; ``apply`` strips them on the row's next transition.
 """
 
 from __future__ import annotations
@@ -60,8 +59,7 @@ from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select, true, update
-from sqlalchemy.engine import Connection
+from sqlalchemy import select, true
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
     Disposition,
@@ -924,60 +922,11 @@ class ModelCacheStore:
                 operation.last_error = reason[:_MAX_REASON]
 
 
-def adopt_legacy_operations(connection: Connection) -> int:
-    """Startup adoption: move the legacy retry clock and claim onto the columns.
-
-    Idempotent and bounded to active operations whose columns are still empty.
-    A live claim of another process keeps its operation ``running`` under that
-    process's lease (never touched); an expired one is left for the core to
-    lapse.  Everything this misses is adopted lazily by
-    :meth:`ModelCacheAdapter.lifecycle`, so a gap heals instead of stranding a row.
-    """
-
-    rows = connection.execute(
-        select(
-            ModelCacheOperation.id,
-            ModelCacheOperation.state,
-            ModelCacheOperation.payload,
-        )
-        .where(
-            ModelCacheOperation.state.in_(ACTIVE_STORED_STATES),
-            ModelCacheOperation.next_action_at.is_(None),
-            ModelCacheOperation.lease_deadline.is_(None),
-        )
-        .limit(SWEEP_LIMIT * 10)
-    ).all()
-    now = datetime.now(UTC)
-    adopted = 0
-    for row_id, state, payload in rows:
-        values: dict[str, Any] = {}
-        claim = legacy_claim(payload)
-        if claim is not None:
-            owner, expires = claim
-            values.update(fence=owner[:64], lease_deadline=expires)
-            if expires > now and state != "running":
-                values["state"] = "running"
-        due = legacy_retry_due(payload)
-        if due is not None and "state" not in values:
-            values["next_action_at"] = due
-        if not values:
-            continue
-        connection.execute(
-            update(ModelCacheOperation)
-            .where(ModelCacheOperation.id == row_id)
-            .values(**values)
-            .execution_options(synchronize_session=False)
-        )
-        adopted += 1
-    return adopted
-
-
 __all__ = [
     "ACTIVE_STORED_STATES",
     "CacheEffects",
     "ModelCacheAdapter",
     "ModelCacheStore",
-    "adopt_legacy_operations",
     "cancellation_of",
     "legacy_claim",
     "legacy_retry_due",

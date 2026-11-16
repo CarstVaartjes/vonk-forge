@@ -15,32 +15,13 @@ from .connections import (
     run_with_database_startup_retry,
     upgrade_schema,
 )
-from .constants import _ALEMBIC_CONFIG, _LOGGER, _STARTUP_ADVISORY_LOCK
+from .constants import _ALEMBIC_CONFIG, _STARTUP_ADVISORY_LOCK
 from .schema import reconcile_schema
 
 
 def verify_schema_is_current(connection: Connection) -> None:
     """Reconcile the live catalog to current metadata within this transaction."""
     reconcile_schema(connection)
-
-
-def adopt_legacy_rows(connection: Connection) -> None:
-    """Move rows written before a model change onto their current encoding.
-
-    Idempotent and bounded; it runs inside the startup advisory lock, after the
-    schema is current.  Rows it misses are adopted lazily by their kind's
-    lifecycle adapter, so a gap here heals instead of stranding a row.
-    """
-    from ..lifecycle.model_cache import adopt_legacy_operations
-
-    adopted = adopt_legacy_operations(connection)
-    if adopted:
-        _LOGGER.info("Adopted %d cache operations onto the lifecycle schedule", adopted)
-    from ..reference_facts import fill_reference_facts
-
-    filled = fill_reference_facts(connection)
-    if filled:
-        _LOGGER.info("Filled %d stored reference facts", filled)
 
 
 def initialize_database(
@@ -80,17 +61,6 @@ def initialize_database(
                     try:
                         with lock_connection.begin():
                             verify_schema_is_current(lock_connection)
-                            # Adoption is derived bookkeeping, not schema authority.
-                            # A savepoint keeps a damaged historical row from undoing
-                            # current schema reconciliation; readers heal rows lazily.
-                            try:
-                                with lock_connection.begin_nested():
-                                    adopt_legacy_rows(lock_connection)
-                            except SQLAlchemyError:
-                                _LOGGER.exception(
-                                    "Lifecycle bookkeeping adoption deferred; "
-                                    "current schema remains available"
-                                )
                     except SQLAlchemyError as error:
                         if _database_sqlstate(error) == "55P03":
                             raise _DatabaseStartupContention(
