@@ -289,13 +289,18 @@ def _unused_removal(payload: object) -> None:
         _field("Not reviewed", f"{entry.get('selector')}: {entry.get('failure')}")
     for entry in _records(document, "submissions") if "submissions" in document else ():
         if entry.get("failure") is not None:
-            _field("Refused", f"{entry.get('selector')}: {entry.get('failure')}")
+            _field(
+                "Refused",
+                f"{entry.get('selector')}: {entry.get('failure')} "
+                f"(request key {entry.get('request_key')})",
+            )
         elif entry.get("retained") is not None:
             _field("Now kept", f"{entry.get('selector')}: {entry.get('retained')}")
         else:
             _field(
                 "Submitted",
-                f"{entry.get('selector')} (vonkctl model progress "
+                f"{entry.get('selector')} (request key {entry.get('request_key')}; "
+                f"vonkctl model progress "
                 f"{shlex.quote(str(entry.get('operation_id')))})",
             )
     if remove and "submissions" not in document:

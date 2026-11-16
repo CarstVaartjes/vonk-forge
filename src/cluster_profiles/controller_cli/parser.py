@@ -259,7 +259,8 @@ def add_controller_commands[ControllerParserT: argparse.ArgumentParser](
         action="store_true",
         help="Instead of one MODEL: remove every cached model that no saved or "
         "loaded profile, live operation or running workload keeps, on the NAS "
-        "and every Spark. Review it first with --review; --yes submits the "
+        "and every Spark. Covers the models the library lists as cached; "
+        "Spark-only leftovers are cleared by the 24 h Spark retention. Review it first with --review; --yes submits the "
         "removals (follow them with 'vonkctl model progress')",
     )
     model_remove.add_argument(

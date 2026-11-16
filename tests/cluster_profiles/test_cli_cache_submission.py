@@ -707,17 +707,13 @@ def test_model_resume_access_rejects_other_request_receipt():
     assert acceptance(result) == "unknown"
 
 
-class _NoRouteCheck(SubmissionClient):
-    def _validate_request(self, *_args):
-        return
-
-
-def _fleet_review(selector, *, removable, nas_bytes=100, digest="d"):
+def _fleet_review(selector, *, removable, nas_bytes=100, digest="d", blocker=None):
     from test_controller_cli import _removal_review
 
     return _removal_review("model", selector, model_digest="a" * 64) | {
         "review_digest": digest * 64,
         "nas_reclaimable_bytes": nas_bytes,
+        "blockers": [] if blocker is None else [blocker],
         "fleet": {
             "nas_remove": removable,
             "nas_reason": "unused" if removable else "referenced",
@@ -735,16 +731,43 @@ def _fleet_review(selector, *, removable, nas_bytes=100, digest="d"):
     }
 
 
-def _unused_client():
-    return _NoRouteCheck(
+def _fleet_receipt(selector, key):
+    return {
+        "action": "remove",
+        "selector": selector,
+        "request_key": key,
+        "model_content_sha256": "a" * 64,
+        "operation_id": "11111111-1111-4111-8111-111111111121",
+        "state": "queued",
+        "phase": "queued",
+        "progress": {"phase": "queued"},
+        "transferred_bytes": 0,
+        "fleet": {
+            "deadline_at": "2026-11-17T00:00:00Z",
+            "effects": _fleet_review(selector, removable=True)["fleet"],
+        },
+    }
+
+
+def _unused_client(extra=None):
+    return SubmissionClient(
         {
             ("GET", "/api/model/library"): {
                 "models": [{"selector": "a"}, {"selector": "b"}, {"selector": "c"}],
                 "next_cursor": None,
             },
             ("GET", "/api/model/a/remove-review"): _fleet_review("a", removable=True),
-            ("GET", "/api/model/b/remove-review"): _fleet_review("b", removable=False),
+            ("GET", "/api/model/b/remove-review"): _fleet_review(
+                "b",
+                removable=False,
+                blocker={
+                    "code": "reference.live",
+                    "detail": "A live operation names this model.",
+                    "retryable": False,
+                },
+            ),
             ("GET", "/api/model/c/remove-review"): ControlNotFound(404, "gone"),
+            **(extra or {}),
         }
     )
 
@@ -755,64 +778,63 @@ def test_unused_review_keeps_what_the_controller_keeps_and_totals_the_rest():
     )
     assert status == 0
     assert [e["selector"] for e in result["removals"]] == ["a"]
-    assert [e["selector"] for e in result["retained"]] == ["b"]
+    assert [(e["selector"], e["reason"]) for e in result["retained"]] == [
+        ("b", "A live operation names this model.")
+    ]
     assert [e["selector"] for e in result["unreviewed"]] == ["c"]
     assert result["totals"] == {"nas_bytes": 100, "sparks": {"spk_1": 7}}
 
 
-def test_unused_yes_submits_only_removable_and_replans_a_moved_scope(monkeypatch):
-    digests = []
-
-    def submit(_client, args, _factory):
-        digests.append(args.fleet_review_digest)
-        if len(digests) == 1:
-            raise ControlConflict(409, "scope moved")
-        return {"operation_id": "op-a"}
-
-    monkeypatch.setattr(controller_cli.unused_removal, "_submit_model_removal", submit)
-    client = _unused_client()
+def test_unused_yes_replans_a_moved_scope_with_the_fresh_digest():
+    client = _unused_client(
+        {
+            ("POST", "/api/model/a/remove"): [
+                ControlConflict(409, "scope moved"),
+                _fleet_receipt("a", KEY),
+            ],
+            ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
+        }
+    )
     client.responses[("GET", "/api/model/a/remove-review")] = [
         _fleet_review("a", removable=True),
         _fleet_review("a", removable=True, digest="e"),
     ]
     status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
-    assert status == 0
-    assert digests == ["d" * 64, "e" * 64]
-    assert [(e["selector"], e["operation_id"]) for e in result["submissions"]] == [
-        ("a", "op-a")
-    ]
+    posts = [call[2] for call in client.calls if call[0] == "POST"]
+    assert [body["review_digest"] for body in posts] == ["d" * 64, "e" * 64]
+    assert [e["request_key"] for e in result["submissions"]] == [KEY]
+    assert status == 0 and "partial" not in result
 
 
-def test_model_remove_replans_once_when_the_scope_moved_before_acceptance():
-    from test_controller_cli import _removal_review
-
-    selector = "qwen"
-    done = {
-        "action": "remove",
-        "selector": selector,
-        "request_key": KEY,
-        "model_content_sha256": "a" * 64,
-        "operation_id": "11111111-1111-4111-8111-111111111121",
-        "state": "queued",
-        "phase": "queued",
-        "progress": {"phase": "queued"},
-        "transferred_bytes": 0,
-    }
-    client = SubmissionClient(
+def test_unused_yes_refused_everywhere_exits_nonzero_and_keeps_the_key():
+    client = _unused_client(
         {
-            ("GET", f"/api/model/{selector}/remove-review"): _removal_review(
-                "model", selector, model_digest="a" * 64
-            ),
+            ("POST", "/api/model/a/remove"): ControlConflict(409, "scope moved"),
             ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
-            ("POST", f"/api/model/{selector}/remove"): [
-                ControlConflict(
-                    409, "scope changed", code="artifact.reference_identity_mismatch"
-                ),
-                done,
-            ],
         }
     )
-    argv = ("model", "remove", selector, "--yes", "--detach", "--json")
+    status, result = run(("model", "remove", "--unused", "--yes", "--json"), client)
+    assert status != 0 and result["partial"] is True
+    [entry] = result["submissions"]
+    assert entry["request_key"] == KEY and entry["failure"]
+
+
+def test_fleet_remove_replans_once_when_the_scope_moved_before_acceptance():
+    client = _unused_client(
+        {
+            ("POST", "/api/model/a/remove"): [
+                ControlConflict(409, "scope moved"),
+                _fleet_receipt("a", KEY),
+            ],
+            ("GET", f"/api/model/requests/{KEY}"): ControlNotFound(404, "none"),
+        }
+    )
+    client.responses[("GET", "/api/model/a/remove-review")] = [
+        _fleet_review("a", removable=True),
+        _fleet_review("a", removable=True, digest="e"),
+    ]
+    argv = ("model", "remove", "a", "--fleet", "--yes", "--detach", "--json")
     status, result = run(argv, client)
-    assert status == 0 and result == done
-    assert [call[0] for call in client.calls].count("POST") == 2
+    assert status == 0 and result["operation_id"]
+    posts = [call[2] for call in client.calls if call[0] == "POST"]
+    assert [body["review_digest"] for body in posts] == ["d" * 64, "e" * 64]

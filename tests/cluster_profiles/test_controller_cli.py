@@ -239,7 +239,7 @@ class FakeClient:
                     assert query is not None and set(query) == {"with_model"}
                     assert type(query["with_model"]) is bool
                 else:
-                    assert query is None
+                    assert query in (None, {"fleet": True})
             elif operation_path is not None:
                 assert query is None
             elif path.startswith("/api/jobs/"):
@@ -294,7 +294,10 @@ class FakeClient:
         }:
             assert isinstance(payload, dict)
             if selector_path.group(1) == "model" and selector_path.group(2) == "remove":
-                assert set(payload) == {"request_key"}
+                assert set(payload) in (
+                    {"request_key"},
+                    {"request_key", "fleet", "review_digest"},
+                )
                 uuid.UUID(payload["request_key"])
             else:
                 assert set(payload) <= {"request_key", "with_model"}

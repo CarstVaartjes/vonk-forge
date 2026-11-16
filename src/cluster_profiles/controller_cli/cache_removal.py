@@ -381,6 +381,7 @@ def _submit_recipe_removal(
         action="remove",
         validate=validate,
         lookup_validate=validate,
+        conflict_is_refusal=True,
         reconnect=shlex.join(
             [
                 "vonkctl",
@@ -453,7 +454,8 @@ def _remove_model(
     try:
         return _submit_model_removal(client, args, factory)
     except ControlConflict:
-        # The reviewed scope moved before acceptance: plan again once.
+        if not getattr(args, "fleet", False):
+            raise
         existing = _existing_cache_removal(
             client, args, factory, noun="model", selector=selector, with_model=None
         )
