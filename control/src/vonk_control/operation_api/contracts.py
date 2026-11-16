@@ -14,6 +14,7 @@ from vonk_agent_protocol import OperationProgress, UnknownOutcomeError, WaitReas
 from vonk_agent_protocol.http_failure import HttpTransient
 
 from ..auth import CursorCodec
+from ..cursor_contract import MAX_CURSOR_LENGTH
 from ..fleet_profile_contract import (
     FleetProfileApplicationCancellationView,
     FleetProfileEndpointsView,
@@ -250,7 +251,7 @@ class OperationDetailResponse(StrictModel):
 
 class OperationsResponse(StrictModel):
     operations: list[OperationDetailResponse] | None = Field(max_length=100)
-    next_cursor: str | None = Field(default=None, max_length=512)
+    next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
     total: int | None = Field(ge=0)
     projection_issue: str | None = Field(default=None, max_length=256)
     continuation_unavailable: bool = False
@@ -295,12 +296,14 @@ class JobDetailResponse(StrictModel):
     kind: str = Field(min_length=1, max_length=80)
     authority_revision: str = Field(min_length=1, max_length=128)
     targets: list[BoundedIdentifier] = Field(max_length=100)
-    target_next_cursor: str | None = Field(default=None, max_length=512)
+    target_next_cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
     target_total: int = Field(ge=0)
     current_attempt: int = Field(le=MAX_DATABASE_INTEGER, ge=0)
     status_reason: str | None = Field(default=None, max_length=1024)
     operations: list[JobOperationResponse] | None = Field(max_length=100)
-    operation_next_cursor: str | None = Field(default=None, max_length=512)
+    operation_next_cursor: str | None = Field(
+        default=None, max_length=MAX_CURSOR_LENGTH
+    )
     operation_total: int | None = Field(ge=0)
     progress: JobProgress | None
     projection_issue: str | None = Field(default=None, max_length=256)
