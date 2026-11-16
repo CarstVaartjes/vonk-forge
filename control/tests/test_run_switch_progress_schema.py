@@ -167,38 +167,6 @@ def test_replan_replaces_measurements_owned_by_the_previous_transfer_budget(
     assert not current.result.force_replan
 
 
-def test_replan_after_a_failed_attempt_ignores_scans_older_than_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Catches a re-plan trusting a Spark scan received before the failed attempt."""
-    from vonk_control.inventory_repository import SPARK_SCAN_RECEIVED_AFTER
-
-    from .test_run_switch_bookkeeping import _accepted
-
-    accepted = _accepted(tmp_path)
-    with accepted.sessions.begin() as session:
-        row = session.get(Job, accepted.operation.operation_id)
-        assert row is not None and row.result is not None
-        progress = _read_progress(row.result)
-        progress.force_replan = True
-        row.result = _persisted_result(progress)
-        row.updated_at = NOW
-    seen = []
-    real = accepted.service.preview
-    monkeypatch.setattr(
-        accepted.service,
-        "preview",
-        lambda *a, **k: (seen.append(SPARK_SCAN_RECEIVED_AFTER.get()), real(*a, **k))[
-            1
-        ],
-    )
-    accepted.service._refresh_blocked_plan(accepted.operation.operation_id, NOW)
-    assert [moment and moment.replace(tzinfo=None) for moment in seen] == [
-        NOW.replace(tzinfo=None)
-    ]
-    assert SPARK_SCAN_RECEIVED_AFTER.get() is None
-
-
 @pytest.mark.usefixtures("damaged_json_rows")
 def test_unreadable_checkpoint_replans_from_current_observation(tmp_path: Path) -> None:
     """Catches unreadable checkpoints ending the accepted request instead of replanning."""

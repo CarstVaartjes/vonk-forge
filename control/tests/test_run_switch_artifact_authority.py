@@ -13,18 +13,22 @@ from vonk_agent_protocol import (
 from vonk_control.disk_reservations import runtime_images_named_on_nodes
 from vonk_control.inventory_repository import (
     INVENTORY_MAX_AGE,
-    SPARK_SCAN_RECEIVED_AFTER,
     InventoryRepository,
     NodeInventoryReport,
     spark_model_objects,
 )
 from vonk_control.library_assessment import LibraryAssessment
 from vonk_control.library_contract import RecipeReadinessCheck
-from vonk_control.models import RecipeBuild
-from vonk_control.run_switch_contract import RunSwitchReason
+from vonk_control.models import Job, RecipeBuild
+from vonk_control.run_switch_contract import RunSwitchApplyRequest, RunSwitchReason
 from vonk_control.run_switch_operations import (
     DatabaseRunSwitchArtifactInspector,
     RunSwitchOperationService,
+)
+from vonk_control.run_switch_operations.planning_helpers import _stored_job_plan
+from vonk_control.run_switch_operations.result_helpers import (
+    _persisted_result,
+    _read_progress,
 )
 
 from .runtime_image_fixtures import hold_image_through_another_recipe
@@ -76,15 +80,22 @@ def test_missing_artifact_authority_does_not_poison_repaired_inspection(
     assert repaired.required_bytes == repaired.artifact_set_bytes
 
 
-def _report_store(sessions, node_id: str, objects) -> None:
+def _report_store(
+    sessions,
+    node_id: str,
+    objects,
+    *,
+    received: datetime = NOW,
+    observed: timedelta = timedelta(seconds=1),
+) -> None:
     """The agent's next inventory, ingested like any other, with its store scan."""
 
-    InventoryRepository(sessions, clock=lambda: NOW).record(
+    InventoryRepository(sessions, clock=lambda: received).record(
         NodeInventoryReport.model_validate_json(
             canonical_message(
                 {
                     "node_id": node_id,
-                    "observed_at": NOW + timedelta(seconds=1),
+                    "observed_at": NOW + observed,
                     "disk_total_bytes": 10_000,
                     "disk_free_bytes": 8_000,
                     "host_memory_total_bytes": 10_000,
@@ -109,7 +120,7 @@ def _report_store(sessions, node_id: str, objects) -> None:
     )
 
 
-@pytest.mark.parametrize("scan", ["held", "empty", "unknown", "held-before-failure"])
+@pytest.mark.parametrize("scan", ["held", "empty", "unknown"])
 def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
     tmp_path, scan: str
 ) -> None:
@@ -136,12 +147,9 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
             {"sha256": spec.sha256, "bytes": spec.expected_bytes}
             for spec in manifest.artifacts
         ]
-        if scan.startswith("held")
+        if held
         else [],
     )
-    if scan == "held-before-failure":
-        # A re-plan after a failed attempt does not trust a scan older than it.
-        SPARK_SCAN_RECEIVED_AFTER.set(NOW)
     service = RunSwitchOperationService(
         sessions,
         lifecycle=lifecycle,
@@ -152,10 +160,7 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
         memory_floor_bytes=50,
     )
 
-    try:
-        plan = service.preview(request, actor="admin")
-    finally:
-        SPARK_SCAN_RECEIVED_AFTER.set(None)
+    plan = service.preview(request, actor="admin")
 
     assert plan.allowed, [reason.code for reason in plan.blockers]
     copies = [phase for phase in plan.phases if phase.subphase == "target-copy"]
@@ -168,6 +173,73 @@ def test_rerun_of_an_installed_workload_copies_only_what_the_spark_lacks(
             assert spark_model_objects(session, nodes[0], now=NOW)
             stale = NOW + INVENTORY_MAX_AGE + timedelta(seconds=1)
             assert spark_model_objects(session, nodes[0], now=stale) is None
+
+
+def test_replan_after_a_failed_target_copy_waits_for_a_scan_received_after_it(
+    tmp_path,
+) -> None:
+    """A copy that ended definite re-plans the copy while the only scan that
+    lists the files pre-dates it; a scan received after it settles the plan."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    provider = ModelCacheManifestProvider(missing_nas_bytes=0)
+    request = _request(sessions, nodes[0])
+    manifest = provider.resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    held = [
+        {"sha256": spec.sha256, "bytes": spec.expected_bytes}
+        for spec in manifest.artifacts
+    ]
+    first_scan = NOW - timedelta(minutes=2)
+    failed_at = NOW - timedelta(minutes=1)
+    _report_store(sessions, nodes[0], held, received=first_scan)
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=provider,
+        build_archive_available=lambda _digest, _size: True,
+        memory_floor_bytes=50,
+    )
+    plan = service.preview(request, actor="admin")
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=plan.plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    op_id = operation.operation_id
+
+    def copies() -> list[str]:
+        with sessions() as session:
+            stored = _stored_job_plan(session.get(Job, op_id))
+        assert stored is not None
+        return [p.subphase for p in stored.phases if p.subphase == "target-copy"]
+
+    def fail_attempt(subphase: str) -> None:
+        with sessions.begin() as session:
+            row = session.get(Job, op_id)
+            progress = _read_progress(row.result)
+            progress.force_replan = True
+            progress.subphase = subphase
+            row.result = _persisted_result(progress)
+            row.updated_at = failed_at
+
+    assert not copies()
+    fail_attempt("target-copy")
+    assert service._refresh_blocked_plan(op_id, NOW)
+    assert copies()
+    _report_store(sessions, nodes[0], held, received=NOW, observed=timedelta(seconds=2))
+    fail_attempt("target-copy")
+    assert service._refresh_blocked_plan(op_id, NOW)
+    assert not copies()
 
 
 class _FullNas(ModelCacheManifestProvider):

@@ -320,9 +320,13 @@ class ReservationMixin:
             due = row.next_action_at
             if due is not None and now < _aware(due):
                 return False
-            # A failed attempt re-plans from Spark scans received after it.
+            # A failed target copy re-plans from Spark scans received after
+            # it: an older scan can still list what the copy found gone.
             failed_at = (
-                _aware(row.updated_at) if persisted_progress.force_replan else None
+                _aware(row.updated_at)
+                if persisted_progress.force_replan
+                and persisted_progress.subphase == "target-copy"
+                else None
             )
             parent = _run_switch_payload(row)
             intent = parent.intent if parent is not None else None
