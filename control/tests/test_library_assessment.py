@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from vonk_control.auth import Actor, TokenCodec
 from vonk_control.inventory_repository import (
     InventoryRepository,
@@ -424,7 +424,6 @@ def test_a_library_pass_reads_failed_copies_once_for_every_candidate(
     assessed_library, monkeypatch
 ):
     """Catches one jobs scan per candidate placement."""
-    from sqlalchemy import event
     from vonk_agent_protocol import LibraryAssessmentCode
     from vonk_control import library_assessment
     from vonk_control.library_contract import RecipeReadinessCheck
