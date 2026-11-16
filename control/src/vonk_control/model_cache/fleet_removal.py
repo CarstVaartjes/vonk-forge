@@ -552,7 +552,9 @@ class FleetRemovalMixin:
         assets = [
             asset.model_copy(
                 update={
-                    "disposition": CacheAssetDisposition.RETAIN_REFERENCED
+                    "disposition": CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE
+                    if effects.nas_reason == R.OBSERVATION_UNAVAILABLE
+                    else CacheAssetDisposition.RETAIN_REFERENCED
                     if not effects.nas_remove
                     else CacheAssetDisposition.RETAIN_SHARED
                     if asset.sha256 in shared

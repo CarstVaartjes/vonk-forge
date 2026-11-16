@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from vonk_agent_protocol import ArtifactLifecycleCode
 from vonk_agent_protocol.inventory import ModelStoreObject
 from vonk_agent_protocol.state_machines import NodeIdentityState
-from vonk_control.cache_removal_review import CacheRemovalReview
+from vonk_control.cache_removal_review import CacheAssetDisposition, CacheRemovalReview
 from vonk_control.fleet_model_removal_contract import FleetRemovalReason
 from vonk_control.model_cache import ModelCacheService
 from vonk_control.models import (
@@ -113,6 +113,16 @@ def test_review_of_shared_content_survives_partial_evidence_and_heals(
         # Acceptance refuses on any of these, so the review never shows removable.
         assert not wire.fleet.nas_remove
         assert wire.fleet.nas_reason == FleetRemovalReason.OBSERVATION_UNAVAILABLE
+        # Kept assets say why: the missing observation, not a reference.
+        assert not any(
+            asset.disposition == CacheAssetDisposition.RETAIN_REFERENCED
+            for asset in wire.assets
+        )
+        assert all(
+            asset.disposition == CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE
+            for asset in wire.assets
+            if asset.kind == "model-object"
+        )
         if fault == "manifest":
             assert wire.nas_reclaimable_bytes is None
         assert path.read_bytes() == b"shared weights"

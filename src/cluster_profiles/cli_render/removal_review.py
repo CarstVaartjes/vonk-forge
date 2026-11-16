@@ -18,6 +18,7 @@ from ..cli_states_generated import (
     ASSET_MODEL_OBJECT,
     ASSET_MODEL_SET,
     ASSET_REMOVE,
+    ASSET_RETAIN_OBSERVATION_UNAVAILABLE,
     ASSET_RETAIN_REFERENCED,
     ASSET_RETAIN_SHARED,
     ASSET_RUNTIME_IMAGE,
@@ -132,7 +133,11 @@ def _summary(
                 k if len(states) == 1 else f"{n} {k}" for k, n in sorted(states.items())
             )
         )
-    for disposition in (ASSET_RETAIN_SHARED, ASSET_RETAIN_REFERENCED):
+    for disposition in (
+        ASSET_RETAIN_SHARED,
+        ASSET_RETAIN_REFERENCED,
+        ASSET_RETAIN_OBSERVATION_UNAVAILABLE,
+    ):
         kept = [a for a in review.assets if a.disposition == disposition]
         if not kept:
             continue

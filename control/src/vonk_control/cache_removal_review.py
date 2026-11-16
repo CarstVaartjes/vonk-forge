@@ -33,12 +33,14 @@ class CacheAssetDisposition(StrEnum):
     REMOVE = "remove"
     RETAIN_SHARED = "retain-shared"
     RETAIN_REFERENCED = "retain-referenced"
+    RETAIN_OBSERVATION_UNAVAILABLE = "retain-observation-unavailable"
 
 
 AssetDisposition = Literal[
     CacheAssetDisposition.REMOVE,
     CacheAssetDisposition.RETAIN_SHARED,
     CacheAssetDisposition.RETAIN_REFERENCED,
+    CacheAssetDisposition.RETAIN_OBSERVATION_UNAVAILABLE,
 ]
 FindingClassification = Literal["saved-reference", "active-work"]
 MAX_CACHE_REMOVAL_REVIEW_BYTES = MAX_CONTROL_DOCUMENT_BYTES
