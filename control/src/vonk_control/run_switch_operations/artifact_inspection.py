@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import (
+    LifecycleState,
     RunSwitchCode,
     WaitReason,
 )
@@ -17,15 +19,28 @@ from vonk_agent_protocol.agent_words import (
 from vonk_agent_protocol.state_machines import PlacementInstallState
 
 from ..categorized_errors import BookkeepingUnknown
-from ..inventory_repository import SPARK_SCAN_RECEIVED_AFTER, spark_model_objects
+from ..inventory_repository import (
+    INVENTORY_MAX_AGE,
+    SPARK_SCAN_RECEIVED_AFTER,
+    spark_model_objects,
+)
+from ..lifecycle.evidence import Residue
 from ..model_cache import ModelCacheService
 from ..model_cache.artifacts import ArtifactSetManifest
 from ..model_cache_contract import ModelCacheDownloadPreviewResponse
+from ..models import Job
 from ..run_switch_contract import (
     RunSwitchReason,
 )
+from ..stored_json import read_row_column
 from .interfaces import ArtifactInspection
-from .planning_helpers import _as_reason, _inspection_unavailable
+from .planning_helpers import (
+    _as_reason,
+    _aware,
+    _inspection_unavailable,
+    _stored_job_plan,
+)
+from .result_helpers import _read_progress
 
 
 def missing_spark_bytes_by_node(
@@ -48,11 +63,43 @@ def missing_spark_bytes_by_node(
                 session,
                 node_id,
                 now=now,
-                received_after=SPARK_SCAN_RECEIVED_AFTER.get(),
+                received_after=_scan_floor(session, manifest, node_id, now),
             )
             for node_id in node_ids
         },
     )
+
+
+def _scan_floor(
+    session: Session, manifest: ArtifactSetManifest, node_id: str, now: datetime
+) -> datetime | None:
+    """The time at or before which this Spark's store scan no longer counts.
+
+    A target copy that ended failed found the files gone, so a scan received
+    before it can still list them: the plan for the same node and model waits
+    for a newer scan and plans the copy until then. Only an end younger than
+    a scan can be is read; an older scan is already unknown.
+    """
+
+    floors = [SPARK_SCAN_RECEIVED_AFTER.get()]
+    for job in session.scalars(
+        select(Job).where(
+            Job.kind == "recipe.run-switch.v2",
+            Job.state == LifecycleState.FAILED.value,
+            Job.updated_at >= now - INVENTORY_MAX_AGE,
+        )
+    ):
+        plan = _stored_job_plan(job)
+        result = read_row_column(job, "result")
+        if (
+            plan is not None
+            and not isinstance(result, Residue)
+            and plan.model_content_sha256 == manifest.model_content_sha256
+            and node_id in job.targets
+            and _read_progress(result).subphase == "target-copy"
+        ):
+            floors.append(_aware(job.updated_at))
+    return max((f for f in floors if f is not None), default=None)
 
 
 def missing_spark_bytes(

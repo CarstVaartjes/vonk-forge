@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from vonk_agent_protocol import (
     LibraryAssessmentCode,
+    LifecycleState,
     ModelCacheBlockerCode,
     RunSwitchCode,
     canonical_message,
@@ -242,6 +243,63 @@ def test_replan_after_a_failed_target_copy_waits_for_a_scan_received_after_it(
     _report_store(sessions, nodes[0], held, received=NOW, observed=timedelta(seconds=2))
     fail_attempt()
     assert service._refresh_blocked_plan(op_id, NOW)
+    assert not copies()
+
+
+def test_new_plan_after_a_definite_target_copy_failure_waits_for_a_newer_scan(
+    tmp_path,
+) -> None:
+    """A copy that ended failed (no re-plan of its own) still makes the next
+    plan for that Spark and model ignore the scan that pre-dates it."""
+
+    sessions, lifecycle, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    installed_recipe(
+        lifecycle, mapping_id, build_id, nodes, request_id=str(uuid.uuid4())
+    )
+    provider = ModelCacheManifestProvider(missing_nas_bytes=0)
+    request = _request(sessions, nodes[0])
+    manifest = provider.resolve_artifact_set(
+        model_content_sha256=request.model_content_sha256
+    )
+    held = [
+        {"sha256": spec.sha256, "bytes": spec.expected_bytes}
+        for spec in manifest.artifacts
+    ]
+    _report_store(sessions, nodes[0], held, received=NOW - timedelta(minutes=2))
+    service = RunSwitchOperationService(
+        sessions,
+        lifecycle=lifecycle,
+        clock=lambda: NOW,
+        artifact_phase_executor=RecordingArtifactExecutor(),
+        model_cache=provider,
+        build_archive_available=lambda _digest, _size: True,
+        memory_floor_bytes=50,
+    )
+
+    def copies() -> list[str]:
+        plan = service.preview(request, actor="admin")
+        return [p.subphase for p in plan.phases if p.subphase == "target-copy"]
+
+    assert not copies()
+    operation = service.apply(
+        RunSwitchApplyRequest(
+            **request.model_dump(),
+            plan_digest=service.preview(request, actor="admin").plan_digest,
+            request_key=str(uuid.uuid4()),
+        ),
+        actor="admin",
+    )
+    with sessions.begin() as session:
+        row = session.get(Job, operation.operation_id)
+        assert row is not None and row.result is not None
+        progress = _read_progress(row.result)
+        progress.subphase = "target-copy"
+        row.result = _persisted_result(progress)
+        row.state = LifecycleState.FAILED.value
+        row.updated_at = NOW - timedelta(minutes=1)
+
+    assert copies()
+    _report_store(sessions, nodes[0], held, received=NOW, observed=timedelta(seconds=2))
     assert not copies()
 
 
