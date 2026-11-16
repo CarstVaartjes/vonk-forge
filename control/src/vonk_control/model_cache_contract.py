@@ -277,11 +277,6 @@ class ModelCacheRetry(StrippedStrictModel):
     credential_fingerprint: str | None = Field(default=None, max_length=128)
 
 
-class ModelCacheClaim(StrippedStrictModel):
-    owner: str = Field(min_length=1)
-    expires_at: str
-
-
 class ModelCacheAccessRecheck(StrippedStrictModel):
     request_key: str = Field(pattern=UUID_PATTERN)
     checked_at: str | None = None
@@ -324,7 +319,6 @@ class ModelCacheCancellation(StrippedStrictModel):
 class _ModelCacheOperationPayload(StrippedStrictModel):
     schema_version: Literal[2]
     source_policy: Literal["nas-first"]
-    claim: ModelCacheClaim | None = None
     access_recheck: ModelCacheAccessRecheck | None = None
     failure: AvailabilityOperationFailure | None = None
     cancellation: ModelCacheCancellation | None = None
@@ -911,7 +905,6 @@ __all__ = [
     "ModelCacheAccessResumeRequest",
     "ModelCacheCancellation",
     "ModelCacheCancellationRequest",
-    "ModelCacheClaim",
     "ModelCacheCoverage",
     "ModelCacheDownloadPayload",
     "ModelCacheDownloadPreviewRequest",

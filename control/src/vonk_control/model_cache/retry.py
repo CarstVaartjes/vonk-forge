@@ -260,7 +260,6 @@ class RetryMixin:
                 previous_payload,
                 failure=None,
                 blockers=[],
-                claim=None,
                 result=None,
                 resume_of=previous.id,
                 retry=previous_payload.retry.model_copy(

@@ -21,7 +21,7 @@ core state             stored operation
                        ``backoff`` (interrupted, removal deferral) with
                        ``next_action_at`` set (the one retry clock)
 ``running``            ``running`` with ``fence`` (the claiming process) and
-                       ``lease_deadline`` (replaces the payload ``claim``)
+                       ``lease_deadline``
 ``observing``          the current stored state with ``observe_count > 0``: only
                        a cancel observes (a stop and its confirmation)
 ``needs-operator``     never built for this kind (see below); a legacy row that
@@ -45,8 +45,6 @@ a content change or an explicit operator check through
 A removal has no lease: its steps are short, fenced transactions the worker
 advances one per tick, so a stored ``running`` removal is a queued one between
 two steps (core ``queued``) and a lapsed process costs nothing.
-
-Legacy rows: a stored ``payload.claim`` is stripped on the row's next transition.
 """
 
 from __future__ import annotations
@@ -578,7 +576,7 @@ class ModelCacheAdapter:
     def _tidy_payload(
         self, operation: ModelCacheOperation, after: Lifecycle, *, spent: bool
     ) -> bool:
-        """Strip the retired claim and retry clock keys; count a consumed attempt."""
+        """Strip retired retry clock keys; count a consumed attempt."""
 
         payload = self._payload(operation)
         if payload is None:
@@ -597,8 +595,7 @@ class ModelCacheAdapter:
                     "retry_after_seconds": None,
                 }
             )
-        updated = payload.model_copy(update={"retry": retry, "claim": None})
-        updated = updated.model_copy(update={"failure": failure})
+        updated = payload.model_copy(update=dict(retry=retry, failure=failure))
         if updated.model_dump(mode="json") == operation.payload:
             return False
         self._store_payload(operation, updated)
