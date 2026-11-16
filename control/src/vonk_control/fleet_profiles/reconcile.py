@@ -92,7 +92,6 @@ class FleetProfileService:
         )
         if application_id is None and self._reconcile_selected_roster(now):
             return True
-        parked_observed = self._heal_legacy_applications(now, application_id)
         recovery_deferred = False
         cancellation_observed = self._observe_pending_cancellation(now, application_id)
         recovery = self._automatic_profile_recovery(now, application_id)
@@ -214,7 +213,6 @@ class FleetProfileService:
                 return (
                     pending_admission_observed
                     or cancellation_observed
-                    or parked_observed
                     or recovery_deferred
                 )
             self._ordinary_cursor = row.id
@@ -250,7 +248,6 @@ class FleetProfileService:
                 return (
                     pending_admission_observed
                     or cancellation_observed
-                    or parked_observed
                     or recovery_deferred
                 )
             if (
@@ -416,7 +413,6 @@ class FleetProfileService:
                         return (
                             pending_admission_observed
                             or cancellation_observed
-                            or parked_observed
                             or recovery_deferred
                         )
                     self._lifecycle.project(

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast as _typing_cast
 
 from pydantic import ValidationError
-from sqlalchemy import func, or_, select, true
+from sqlalchemy import or_, select, true
 from vonk_agent_protocol import LifecycleState, ProfileReasonCode
 from vonk_agent_protocol.agent_words import (
     ProfileCancellationCause,
@@ -15,7 +15,7 @@ from vonk_agent_protocol.agent_words import (
     ProfileReasonSeverity,
 )
 
-from .. import fleet_profile_states, job_states
+from .. import job_states
 from ..admission_locking import patient_admission
 from ..fleet_profile_contract import (
     FleetProfileOperationState,
@@ -423,51 +423,3 @@ class FleetProfileService:
                 self._lifecycle.cancelled(row, reason, now, session=session)
             else:
                 self._lifecycle.fail(row, reason, now, session=session)
-
-    def _heal_legacy_applications(
-        self, now: datetime, application_id: str | None = None
-    ) -> bool:
-        """Re-evaluate a legacy ``waiting-for-operator`` load: it runs again.
-
-        An older Controller mirrored a child that waited for a person onto the load
-        and left it parked: the ordinary advancement never revisited it.  No profile
-        (or Run/Switch) action exists, so nothing can end that wait.  The load is
-        returned to the work queue (rules 1 and 3): the next ordinary tick observes
-        its exact child and records whatever that child concluded, exactly as for any
-        running load; one still being admitted retries its admission.  Nothing is
-        issued here and no child is touched, so running workloads are never
-        disturbed.  Bounded per tick, and idempotent after a restart.
-        """
-        self = _typing_cast("_FleetProfileService", self)  # noqa: PLW0642 -- assembled mixin interface
-
-        with self._sessions.begin() as session:
-            rows = tuple(
-                session.scalars(
-                    select(FleetProfileApplication)
-                    .where(
-                        FleetProfileApplication.id == application_id
-                        if application_id is not None
-                        else true()
-                    )
-                    .where(
-                        FleetProfileApplication.state.in_(
-                            job_states.words(LifecycleState.NEEDS_OPERATOR)
-                        ),
-                        func.coalesce(
-                            FleetProfileApplication.progress["cancellation"][
-                                "state"
-                            ].as_string(),
-                            "",
-                        ).not_in(fleet_profile_states.CANCEL_IN_FLIGHT),
-                    )
-                    .order_by(
-                        FleetProfileApplication.created_at,
-                        FleetProfileApplication.id,
-                    )
-                    .with_for_update(skip_locked=True)
-                    .limit(_MAX_PARKED_APPLICATION_OBSERVATIONS)
-                )
-            )
-            for row in rows:
-                self._lifecycle.heal(row, now, session=session)
-            return bool(rows)
