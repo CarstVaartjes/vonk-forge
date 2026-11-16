@@ -5,7 +5,7 @@ import {
 } from "../api/vocabulary.generated";
 import type { CacheRemovalReview } from "../api/types";
 
-const DISPOSITION_TEXT: Record<string, string> = {
+const DISPOSITION_TEXT: Record<CacheRemovalReview["assets"][number]["disposition"], string> = {
   [CacheAssetDisposition.REMOVE]: "Remove",
   [CacheAssetDisposition.RETAIN_SHARED]: "Retain shared",
   [CacheAssetDisposition.RETAIN_REFERENCED]: "Retain referenced",
@@ -14,7 +14,7 @@ const DISPOSITION_TEXT: Record<string, string> = {
 
 /** A value this build does not know shows as sent, never as a wrong reason. */
 function dispositionText(disposition: string): string {
-  return DISPOSITION_TEXT[disposition] ?? disposition;
+  return (DISPOSITION_TEXT as Record<string, string | undefined>)[disposition] ?? disposition;
 }
 
 /** Render the Controller decision without deriving a second removal policy. */
