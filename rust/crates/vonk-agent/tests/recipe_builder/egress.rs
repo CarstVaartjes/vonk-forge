@@ -94,6 +94,20 @@ fn build_routes_declared_public_hosts_through_an_ephemeral_internal_proxy() {
         assert_eq!(*program, Program::SystemdRun);
         assert!(arguments.contains(runtime));
     }
+    let creates = calls
+        .iter()
+        .filter(|(_, arguments)| {
+            arguments
+                .windows(2)
+                .any(|pair| pair == ["network", "create"])
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(creates.len(), 2);
+    assert!(
+        creates
+            .iter()
+            .all(|(_, arguments)| arguments.iter().any(|value| value == "--ignore"))
+    );
     let unit = proxy
         .1
         .iter()
