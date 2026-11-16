@@ -279,6 +279,15 @@ a disconnect or restart. Reconnect with the same selector, `--fleet` and
 `--request-key`. A stale review is refreshed once; repeated conflicts are
 reported instead of retried in a loop.
 
+`vonkctl model remove --unused --review` asks that same fleet review for every
+cached model and shows one combined answer: the models it would remove, the
+bytes freed on the NAS and on each Spark, the models it keeps (with the
+Controller's reason) and any model it could not review. `--unused --yes`
+submits the per-model fleet removals for the removable ones and lists their
+operations (follow each with `vonkctl model progress`). A removal whose scope
+moved because an earlier one ran is reviewed again and submitted only if the
+model is still unused. The keep rule is the one above; nothing else decides.
+
 Profiles (saved and loaded), running workloads, live operations and pins retain
 their files. The review names retained parts and shared content separately.
 Finished recipe history alone does not keep an unused installation. Uninstall

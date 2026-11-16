@@ -250,8 +250,17 @@ def _activity_cursor(value: str) -> str:
     return value
 
 
-def _selector(parser: argparse.ArgumentParser, metavar: str, *, help: str) -> None:
-    parser.add_argument("selector", metavar=metavar.upper(), help=help)
+def _selector(
+    parser: argparse.ArgumentParser,
+    metavar: str,
+    *,
+    help: str,
+    optional: bool = False,
+) -> None:
+    if optional:
+        parser.add_argument("selector", metavar=metavar.upper(), help=help, nargs="?")
+    else:
+        parser.add_argument("selector", metavar=metavar.upper(), help=help)
 
 
 def _filters(parser: argparse.ArgumentParser) -> None:

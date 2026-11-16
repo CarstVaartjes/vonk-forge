@@ -229,7 +229,7 @@ class RemovalReviewMixin:
         """Bytes removing this set frees, shared objects excluded; unknown defers.
 
         A ``cached`` set is answered from stored facts alone (manifest sizes and
-        set membership): receipts were verified at ingress, so this pass does no
+        set membership): bytes were verified at ingress, so this pass does no
         storage I/O.  Any other set is measured on storage.
         """
         cache = cast("ModelCacheService", self)
@@ -717,7 +717,17 @@ class RemovalReviewMixin:
     def _model_removal_scope_for_sets(
         session: Session, selected_sets: Sequence[str]
     ) -> ModelCacheRemovalScope:
-        normalized_sets = tuple(sorted(set(selected_sets)))
+        # A set whose row is gone is absent: nothing is left to remove, and no
+        # one will produce its membership, so it is not part of the scope.
+        normalized_sets = tuple(
+            sorted(
+                session.scalars(
+                    select(ModelCacheSet.artifact_set_sha256).where(
+                        ModelCacheSet.artifact_set_sha256.in_(set(selected_sets))
+                    )
+                )
+            )
+        )
         objects_by_set = model_set_objects(session, normalized_sets)
         selected_objects = tuple(
             sorted({digest for values in objects_by_set.values() for digest in values})

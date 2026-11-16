@@ -327,6 +327,8 @@ def _submit_model_removal(
         action="remove",
         validate=validate,
         lookup_validate=validate,
+        # A reviewed scope that moved is the Controller's refusal: re-plan.
+        conflict_is_refusal=True,
         reconnect=shlex.join(
             [
                 "vonkctl",
@@ -379,6 +381,7 @@ def _submit_recipe_removal(
         action="remove",
         validate=validate,
         lookup_validate=validate,
+        conflict_is_refusal=True,
         reconnect=shlex.join(
             [
                 "vonkctl",
@@ -399,9 +402,13 @@ def _remove_model(
     args: argparse.Namespace,
     factory: Callable[[], str],
 ) -> dict[str, object]:
-    selector = args.selector.strip()
+    if args.unused:
+        from .unused_removal import _remove_unused
+
+        return _remove_unused(client, args, factory)
+    selector = (args.selector or "").strip()
     if not selector:
-        raise ValueError("model remove requires a non-empty selector")
+        raise ValueError("model remove requires a selector or --unused")
     args.selector = selector
     if args.review:
         if args.yes or args.request_key is not None:

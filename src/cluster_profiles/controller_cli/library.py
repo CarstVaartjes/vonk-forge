@@ -120,7 +120,7 @@ def _model(
         return _follow_mutation(client, "model", result, args)
     if action == "remove":
         result = _remove_model(client, args, factory)
-        if args.review:
+        if args.review or args.unused:
             return result
         return _follow_mutation(client, "model", result, args)
     raise ValueError(f"unsupported model action: {action}")

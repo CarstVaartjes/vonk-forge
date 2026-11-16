@@ -259,10 +259,23 @@ def test_removing_one_set_leaves_shared_object_open_for_second_model(
             if finding.asset_kind == "model-object"
             and finding.asset_sha256 == object_digest
         ]
-        assert [
+        # A model is cached when every object of its resolved set is present,
+        # so B may hold its seeded set and an adopted canonical one. Every set
+        # of B keeps the object; no set of A is a retained owner.
+        b_sets = set(
+            session.scalars(
+                select(ModelCacheSet.artifact_set_sha256).where(
+                    ModelCacheSet.model_content_sha256 == digest_b
+                )
+            )
+        )
+        assert set_b in b_sets and set_a not in b_sets
+        assert sorted(
             (finding.owner_kind, finding.owner_id, finding.state)
             for finding in shared_findings
-        ] == [("model-cache-set-membership", set_b, "cached")]
+        ) == [
+            ("model-cache-set-membership", owner, "cached") for owner in sorted(b_sets)
+        ]
         assert review.blockers == []
         assert any(
             asset.kind == "model-object"

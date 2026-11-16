@@ -227,6 +227,7 @@ class RemovalReconcileMixin:
             resolved = checkpoint.model_copy(
                 update={
                     "scope_pending": False,
+                    "selected": list(scope.selected_sets),
                     "selected_objects": list(scope.selected_objects),
                     "delete_objects": list(scope.delete_objects),
                 }

@@ -30,7 +30,7 @@ from ..generated_control.models.fleet_model_removal_effects import (
     FleetModelRemovalEffects,
 )
 from ..generated_control.types import UNSET
-from .common import _bytes, _field, _object, _time
+from .common import _bytes, _field, _object, _records, _time
 
 _NAMED_OWNERS = 3
 
@@ -263,3 +263,45 @@ def _cache_removal_review(payload: object, *, verbose: bool = False) -> None:
     else:
         print("Next: add --verbose to list every file and owner")
     _field("Review digest", review.review_digest)
+
+
+def _unused_removal(payload: object) -> None:
+    """One combined answer for ``model remove --unused``; the Controller decided."""
+    document = _object(payload, "unused removal")
+    remove = _records(document, "removals")
+    totals = _object(document.get("totals"), "unused removal totals")
+    for entry in remove:
+        sparks = _object(entry.get("sparks"), "unused removal Spark bytes")
+        freed = ", ".join(f"{node} {_bytes(size)}" for node, size in sparks.items())
+        _field("Remove", entry.get("selector"))
+        _field("  NAS bytes freed", _bytes(entry.get("nas_bytes")))
+        if freed:
+            _field("  Spark bytes freed", freed)
+    if not remove:
+        print("Nothing to remove: every cached model is kept or already gone.")
+    else:
+        _field("Total NAS bytes freed", _bytes(totals.get("nas_bytes")))
+        for node, size in _object(totals.get("sparks"), "totals").items():
+            _field(f"Total {node} bytes freed", _bytes(size))
+    for entry in _records(document, "retained"):
+        _field("Keeps", f"{entry.get('selector')}: {entry.get('reason')}")
+    for entry in _records(document, "unreviewed"):
+        _field("Not reviewed", f"{entry.get('selector')}: {entry.get('failure')}")
+    for entry in _records(document, "submissions") if "submissions" in document else ():
+        if entry.get("failure") is not None:
+            _field(
+                "Refused",
+                f"{entry.get('selector')}: {entry.get('failure')} "
+                f"(request key {entry.get('request_key')})",
+            )
+        elif entry.get("retained") is not None:
+            _field("Now kept", f"{entry.get('selector')}: {entry.get('retained')}")
+        else:
+            _field(
+                "Submitted",
+                f"{entry.get('selector')} (request key {entry.get('request_key')}; "
+                f"vonkctl model progress "
+                f"{shlex.quote(str(entry.get('operation_id')))})",
+            )
+    if remove and "submissions" not in document:
+        print("Confirm: vonkctl model remove --unused --yes")

@@ -167,8 +167,8 @@ class InventoryMixin:
         cache = cast("ModelCacheService", self)
         with cache._lock:
             # Object availability lives in managed storage. Reconciliation
-            # rewrites a lost receipt for a same-size object, and removes the receipt of
-            # an object whose bytes are gone so admission cannot admit it.
+            # removes the leftover receipt of an object whose bytes are gone or
+            # of the wrong size.
             with cache._session() as session:
                 sets = list(session.scalars(select(ModelCacheSet)))
                 expected: dict[str, ArtifactSpec] = {}
@@ -188,11 +188,8 @@ class InventoryMixin:
                 if not stat.S_ISREG(metadata.st_mode):
                     cache._receipt_path(sha256).unlink(missing_ok=True)
                     continue
-                available = cache._object_is_available(sha256, spec.expected_bytes)
-                if not available:
+                if not cache._object_is_available(sha256, spec.expected_bytes):
                     cache._receipt_path(sha256).unlink(missing_ok=True)
-                if not available and metadata.st_size == spec.expected_bytes:
-                    cache._write_object_receipt(spec, cache._clock())
             with cache._session(write=True) as session:
                 sets = list(session.scalars(select(ModelCacheSet)))
                 for row in sets:

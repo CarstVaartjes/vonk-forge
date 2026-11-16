@@ -21,7 +21,7 @@ from .library import _library
 from .metrics import _metric_list, _metric_series
 from .operations import _application, _job, _operation, _run_result
 from .profile import _gateway_keys, _profile, _profile_endpoints
-from .removal_review import _cache_removal_review
+from .removal_review import _cache_removal_review, _unused_removal
 from .review import _preview
 
 
@@ -145,7 +145,9 @@ def render_payload(
         elif noun == "recipe" and action == "sync-status":
             _catalog_sync(payload)
         elif noun in {"model", "recipe"}:
-            if action == "preview":
+            if payload.get("unused_removal"):
+                _unused_removal(payload)
+            elif action == "preview":
                 _cache_removal_review(payload, verbose=wide)
             elif action in {None, "library", "detail"}:
                 _library(payload, noun, detail=action == "detail", wide=wide)

@@ -48,12 +48,12 @@ class AvailabilityMixin:
             )
 
     def _reverify_set(self, manifest: ArtifactSetManifest) -> None:
-        """A missing receipt is unknown, not final: look again, then repair.
+        """A missing object is unknown, not final: look again, then repair.
 
-        The receipts beside the bytes own availability, so the set's row follows
-        them: complete coverage heals a row that said otherwise; incomplete
-        coverage marks the set ``needs-repair`` and queues one download of the
-        missing objects (a normal download fetches only what has no receipt).
+        The stored objects own availability, so the set's row follows them:
+        complete coverage heals a row that said otherwise; incomplete coverage
+        marks the set ``needs-repair`` and queues one download of the missing
+        objects (a normal download fetches only what is not stored).
         Throttled per set: a consumer retrying every few seconds costs one scan.
         Best effort by design: the caller still gets its (retryable) refusal.
         """
@@ -79,7 +79,9 @@ class AvailabilityMixin:
                         row.last_error = None
                     elif not present and row.state == "cached":
                         row.state = "needs-repair"
-                        row.last_error = "a stored object lost its receipt"
+                        row.last_error = (
+                            "a stored object is missing or has the wrong size"
+                        )
                     row.updated_at = now
             active = cache.reusable_operation(
                 artifact_set_sha256=manifest.digest, include_succeeded=False
@@ -160,7 +162,7 @@ class AvailabilityMixin:
             )
         # Only this object is served, so only this object is checked. Whole-set
         # coverage is proven when the assignment is created; repeating it here
-        # cost one receipt read and open per file in the set on every range
+        # cost one open per file in the set on every range
         # request, which on an NFS cache dominated the transfer rate.
         path = cache._object_path(spec.sha256)
         if (
@@ -197,7 +199,7 @@ class AvailabilityMixin:
         """Record a set whose every object is already verified in storage.
 
         A new model or recipe revision can select files that other sets
-        already cached. Their ingress receipts are the evidence: nothing is
+        already cached. Their ingress verification is the evidence: nothing is
         fetched or re-hashed, and the set becomes cached for every consumer.
         """
         cache = cast("ModelCacheService", self)
