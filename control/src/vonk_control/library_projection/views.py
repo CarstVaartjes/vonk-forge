@@ -485,7 +485,9 @@ def recipe_library(
         matched: list[LibraryRecipeProjection] = []
         offset = 0
         while offset < len(filtered) and len(matched) <= limit:
-            chunk = filtered[offset : offset + limit + 1 - len(matched)]
+            # Whole page-sized chunks: each assessment call has fixed cost
+            # (roster, store scans), so one-entry calls would repeat it.
+            chunk = filtered[offset : offset + limit + 1]
             offset += len(chunk)
             matched.extend(
                 item

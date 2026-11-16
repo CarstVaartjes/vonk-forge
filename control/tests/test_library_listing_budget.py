@@ -1281,4 +1281,48 @@ def test_ready_filter_assesses_only_enough_recipes_to_fill_the_page(
     )
     shown = [item.identity.slug for item in (*first.recipes, *second.recipes)]
     assert len(set(shown)) == 4
-    assert len(assessed) < 8
+    # Page two assesses the next page and one more entry, not the rest.
+    assert len(assessed) == 6
+
+
+def test_ready_page_two_continues_after_its_boundary_stops_being_ready(
+    assessed_library,  # noqa: F811
+):
+    _, sessions, *_ = assessed_library
+    _seed_recipes_with_images(assessed_library, recipes=8, history=0)
+    blocked: set[str] = set()
+
+    def assess(recipes, *, budget_seconds):
+        def check(slug):
+            return RecipeReadinessCheck(state="blocked" if slug in blocked else "ready")
+
+        return [
+            item.model_copy(
+                update={
+                    "assessment": RecipeReadiness(
+                        observed_at=NOW,
+                        fleet_fit=check(item.identity.slug),
+                        cache=check(item.identity.slug),
+                        readiness=check(item.identity.slug),
+                    )
+                }
+            )
+            for item in recipes
+        ]
+
+    projection = LibraryProjection(
+        sessions,
+        cursors=TokenCodec(b"b" * 32).cursor_codec(),
+        clock=lambda: NOW,
+        assessment=assess,
+    )
+    first = projection.recipe_library(ready=True, limit=2, search="recipe-")
+    assert first.next_cursor is not None
+    blocked.add(first.recipes[-1].identity.slug)
+    second = projection.recipe_library(
+        ready=True, limit=2, search="recipe-", cursor=first.next_cursor
+    )
+    first_slugs = {item.identity.slug for item in first.recipes}
+    second_slugs = {item.identity.slug for item in second.recipes}
+    assert len(second_slugs) == 2
+    assert not first_slugs & second_slugs
