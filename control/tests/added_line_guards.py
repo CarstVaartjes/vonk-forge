@@ -120,6 +120,7 @@ MODES = (
     "contract-constants",
     "web-not-reported",
     "rank-installed",
+    "newest-snapshot",
     "retry-dispositions",
     "head-digests",
     "set-first-requester",
@@ -194,6 +195,17 @@ WEB_NOT_REPORTED = re.compile(r"""["'`]Not reported["'`]|>\s*Not reported\s*<"""
 RANK_INSTALLED_COPY = re.compile(r"[!=]=\s*InstallationNodeState\.INSTALLED\b")
 RANK_INSTALLED_KIND = (
     "rank INSTALLED test spelled inline; use machine_states.rank_installed"
+)
+# A node's newest inventory report is one indexed probe per node
+# (inventory_repository.newest_snapshot_ids); a window or grouped max over
+# node_id reads every retained report (~720 per node over 24 h).
+NEWEST_SNAPSHOT_SCAN = re.compile(
+    r"partition_by\s*=\s*Node(?:Inventory)?Snapshot\.node_id"
+    r"|group_by\(\s*Node(?:Inventory)?Snapshot\.node_id\s*\)"
+)
+NEWEST_SNAPSHOT_KIND = (
+    "newest report per node by window or grouped max; "
+    "use inventory_repository.newest_snapshot_ids"
 )
 WEB_NOT_REPORTED_KIND = (
     "Not reported typed in a component; use NOT_REPORTED_TEXT from lib/fleet.ts"
@@ -2551,6 +2563,17 @@ def check_source(
             (number, RANK_INSTALLED_KIND)
             for number, text in enumerate(source.splitlines(), 1)
             if RANK_INSTALLED_COPY.search(text)
+        )
+    if (
+        python
+        and not is_test
+        and "newest-snapshot" in modes
+        and path.startswith("control/src/")
+    ):
+        hits.extend(
+            (number, NEWEST_SNAPSHOT_KIND)
+            for number, text in enumerate(source.splitlines(), 1)
+            if NEWEST_SNAPSHOT_SCAN.search(text)
         )
     if (
         "web-not-reported" in modes

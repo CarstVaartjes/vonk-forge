@@ -99,7 +99,6 @@ from .references import Mapping as Mapping
 from .references import ModelCacheOperation as ModelCacheOperation
 from .references import NodeInventorySnapshot as NodeInventorySnapshot
 from .references import RecipeRun as RecipeRun
-from .references import and_ as and_
 from .references import json as json
 from .references import model_cache_states as model_cache_states
 from .references import or_ as or_

@@ -4228,3 +4228,18 @@ def test_an_inline_rank_installed_test_is_flagged() -> None:
         {1},
         modes=("rank-installed",),
     )
+
+
+def test_a_newest_snapshot_window_or_grouped_max_is_flagged() -> None:
+    path = "control/src/vonk_control/other.py"
+    for source in (
+        "f = func.row_number().over(partition_by=NodeInventorySnapshot.node_id)\n",
+        "q = select(x).group_by(NodeSnapshot.node_id)\n",
+    ):
+        assert check_source(path, source, {1}, modes=("newest-snapshot",))
+    assert not check_source(
+        path,
+        "ids = NodeInventorySnapshot.id.in_(newest_snapshot_ids(nodes))\n",
+        {1},
+        modes=("newest-snapshot",),
+    )

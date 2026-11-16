@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import AgentOperation as WireAgentOperation
 from vonk_agent_protocol import InstallationState, LifecycleState, WaitReason
@@ -21,6 +21,7 @@ from ..content_identity import (
     runs_identically,
 )
 from ..fleet_profile_contract import FleetProfilePreview, NodeId
+from ..inventory_repository import newest_snapshot_ids
 from ..models import (
     AgentNode,
     CatalogDocumentRevision,
@@ -342,13 +343,9 @@ def _latest_snapshots(
     counts the unused model files its agent removes itself before a claim
     writes: only a need beyond them uninstalls anything."""
 
-    latest = select(
-        NodeInventorySnapshot.node_id,
-        func.max(NodeInventorySnapshot.observed_at).label("observed_at"),
-    ).group_by(NodeInventorySnapshot.node_id)
+    live = select(AgentNode.node_id).where(AgentNode.revoked_at.is_(None))
     if node_id is not None:
-        latest = latest.where(NodeInventorySnapshot.node_id == node_id)
-    newest = latest.subquery()
+        live = live.where(AgentNode.node_id == node_id)
     rows = session.execute(
         select(
             NodeInventorySnapshot.node_id,
@@ -356,16 +353,11 @@ def _latest_snapshots(
             NodeInventorySnapshot.unused_model_bytes,
             NodeInventorySnapshot.disk_total_bytes,
             NodeInventorySnapshot.received_at,
+        ).where(
+            NodeInventorySnapshot.id.in_(
+                newest_snapshot_ids(tuple(session.scalars(live)))
+            )
         )
-        .join(
-            newest,
-            and_(
-                NodeInventorySnapshot.node_id == newest.c.node_id,
-                NodeInventorySnapshot.observed_at == newest.c.observed_at,
-            ),
-        )
-        .join(AgentNode, AgentNode.node_id == NodeInventorySnapshot.node_id)
-        .where(AgentNode.revoked_at.is_(None))
     )
     return {
         found: (spark_free_bytes(free, unused), total, _utc(received))
