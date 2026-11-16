@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
 
@@ -102,6 +104,26 @@ def _newest_cached_per_identity(
     return sorted({digest for _created, digest in newest.values()})
 
 
+# Catalog revisions are immutable content, so within one read an exact model
+# and recipe revision resolve to one artifact set. A read scope reuses the set
+# it resolved instead of re-reading the catalog for every placement it weighs;
+# a failure is never remembered, and nothing outlives the scope.
+_READ_SCOPE_SETS: ContextVar[
+    dict[tuple[str | None, str | None, str | None], ArtifactSetManifest] | None
+] = ContextVar("artifact_set_read_scope", default=None)
+
+
+@contextmanager
+def artifact_sets_resolved_once() -> Iterator[None]:
+    """Resolve each exact artifact set at most once inside this read."""
+
+    token = _READ_SCOPE_SETS.set({})
+    try:
+        yield
+    finally:
+        _READ_SCOPE_SETS.reset(token)
+
+
 class ResolutionMixin:
     """Resolution behavior of the cache service."""
 
@@ -176,13 +198,20 @@ class ResolutionMixin:
                 ModelCacheCode.PIN_REQUIRED,
                 "an exact model definition or recipe revision is required",
             )
+        resolved = _READ_SCOPE_SETS.get()
+        key = (model_digest, recipe_digest, recipe_revision_id)
+        if resolved is not None and key in resolved:
+            return resolved[key]
         with cache._session() as session:
-            return cache._manifest_in_session(
+            manifest = cache._manifest_in_session(
                 session,
                 model_digest=model_digest,
                 recipe_digest=recipe_digest,
                 recipe_revision_id=recipe_revision_id,
             )
+        if resolved is not None:
+            resolved[key] = manifest
+        return manifest
 
     def _manifest_in_session(
         self,

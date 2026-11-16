@@ -10,7 +10,7 @@ from vonk_agent_protocol import ModelCacheCode, canonical_message
 from vonk_forge_contracts import ModelDefinition, RecipeDefinition
 
 from ..catalog_revision_contract import (
-    CatalogRevisionContractError,
+    catalog_document_readable,
     read_catalog_document,
 )
 from ..categorized_errors import InvalidType
@@ -54,11 +54,8 @@ class CatalogMixin:
                 CatalogDocumentRevision.content_digest == row.content_digest,
             )
         ):
-            try:
-                read_catalog_document(candidate)
-            except CatalogRevisionContractError:
-                continue
-            return candidate
+            if catalog_document_readable(candidate):
+                return candidate
         return None
 
     def _recipe_document(
