@@ -264,3 +264,47 @@ async fn malformed_range_observation_ends_boundedly_and_same_digest_is_admitted_
         .unwrap();
     peer.finish().unwrap();
 }
+
+#[tokio::test]
+async fn a_controller_without_the_source_is_not_retried_in_place() {
+    // Catches both retry loops treating the typed source-gone 503 as a wait: the
+    // manifest loop (two quick retries) and the range loop (four backed-off
+    // retries). The outcome is definite, so each makes exactly one request.
+    let model = b"small model object";
+    let digest = hex_sha256(model);
+    let assignment = distribution_assignment_fixture(model);
+    let (client, server) = distribution_fixture_server(
+        assignment.clone(),
+        HashMap::new(),
+        1,
+        DistributionFixtureMode::SourceGone,
+    );
+    let error = client
+        .distribution_manifest_until(
+            TEST_PLAN_DIGEST,
+            tokio::time::Instant::now() + Duration::from_secs(5),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.distribution_source_unavailable(), "{error:?}");
+    assert_eq!(server.finish().unwrap().len(), 1);
+
+    let (client, server) = distribution_fixture_server(
+        assignment,
+        HashMap::new(),
+        1,
+        DistributionFixtureMode::SourceGone,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let error = client
+        .download_distribution_object(
+            TEST_PLAN_DIGEST,
+            &digest,
+            model.len() as u64,
+            &root.path().join(&digest),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.distribution_source_unavailable(), "{error:?}");
+    assert_eq!(server.finish().unwrap().len(), 1);
+}

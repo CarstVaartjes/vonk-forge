@@ -339,11 +339,11 @@ pub(super) fn controller_denial_diagnostic(error: &ClientError) -> String {
     parts.join(" ").chars().take(400).collect()
 }
 
-/// Classify a refused distribution and keep the bounded denial facts.
-///
-/// The incident's `invalid-authority` outcome reported only that the
-/// distribution failed, so the denied request and status were unrecoverable.
-pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
+/// The result of a distribution order, whose Controller re-plans a download
+/// when the source is gone (see [`ClientError::distribution_source_unavailable`]).
+/// A standalone install uses [`distribution_failure_result`] and keeps waiting:
+/// it has no plan the Controller could change.
+pub(super) fn distribution_order_failure_result(error: &ClientError) -> ExecutionResult {
     if error.distribution_source_unavailable() {
         // The Controller has no copy of the files this Spark lacks. Waiting
         // cannot bring them back; the definite outcome makes the Controller plan
@@ -358,6 +358,14 @@ pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResul
         }
         return ExecutionResult::Failed(failure);
     }
+    distribution_failure_result(error)
+}
+
+/// Classify a refused distribution and keep the bounded denial facts.
+///
+/// The incident's `invalid-authority` outcome reported only that the
+/// distribution failed, so the denied request and status were unrecoverable.
+pub(super) fn distribution_failure_result(error: &ClientError) -> ExecutionResult {
     let failure_kind = recipe_build_client_failure_kind(error);
     let mut failure = Failure::new("Controller distribution could not be verified and retained")
         .kind(failure_kind)

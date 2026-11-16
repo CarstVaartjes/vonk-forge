@@ -138,8 +138,9 @@ def test_execution_request_creates_delivery_without_an_earlier_distribution(
     )
 
 
+@pytest.mark.parametrize("transient", [False, True])
 def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
-    tmp_path,
+    tmp_path, transient: bool
 ) -> None:
     """A Spark that holds the model's files still needs its grant to pull the
     image. The accepted plan names the files, so the grant needs no NAS copy;
@@ -180,13 +181,23 @@ def test_a_request_delivers_its_image_after_the_nas_evicted_the_model(
     assert {(item.sha256, item.bytes) for item in grant.objects} == {
         (item.sha256, item.size_bytes) for item in spec.artifacts
     }
+    if transient:
+        # A read that fails for any other cause is a wait, not a deleted set.
+        def unreadable(*_args: object, **_kwargs: object) -> object:
+            raise OSError("cache database unavailable")
+
+        nas.manifest_for_artifact_set = unreadable  # type: ignore[method-assign]
     with pytest.raises(DistributionError) as unread:
         delivery.open_object(
             node_id=operation.node_id,
             plan_digest=payload.plan_digest,
             digest=spec.artifacts[0].sha256,
         )
-    assert unread.value.code == DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
+    assert unread.value.code == (
+        DistributionCode.OBJECT_UNAVAILABLE
+        if transient
+        else DistributionCode.MODEL_SET_IDENTITY_UNAVAILABLE
+    )
     with pytest.raises(DistributionError) as foreign:
         delivery.open_object(
             node_id=operation.node_id, plan_digest=payload.plan_digest, digest="f" * 64

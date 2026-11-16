@@ -1065,7 +1065,7 @@ fn a_missing_controller_source_during_distribution_is_a_definite_typed_outcome()
     )));
     assert!(error.retryable(), "the wire status alone reads as a wait");
     assert!(error.distribution_source_unavailable());
-    let raw = distribution_failure_result(&error);
+    let raw = distribution_order_failure_result(&error);
     let failure = raw.failure().expect("a failure");
     assert_eq!(failure.code, Some(FailureCode::ArtifactSourceUnavailable));
     assert_eq!(
@@ -1073,11 +1073,18 @@ fn a_missing_controller_source_during_distribution_is_a_definite_typed_outcome()
         Some(AgentFailureKind::InvalidContract)
     );
     assert_eq!(failure.retry_after_seconds, None);
+    // A standalone install has no plan the Controller could change: it keeps
+    // waiting, as before.
+    let install = distribution_failure_result(&error);
+    assert_eq!(
+        install.failure().expect("a failure").failure_kind,
+        Some(AgentFailureKind::TemporaryDependency)
+    );
     // Any other 503 stays a wait.
     let other = ClientError::Controller(Box::new(ControllerError::from_status(503)));
     assert!(!other.distribution_source_unavailable());
     assert_eq!(
-        distribution_failure_result(&other)
+        distribution_order_failure_result(&other)
             .failure()
             .expect("a failure")
             .failure_kind,

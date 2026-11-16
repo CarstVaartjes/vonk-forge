@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session, sessionmaker
 from vonk_agent_protocol import (
     DesiredAssignmentState,
     Disposition,
-    FailureCode,
     InvalidRequestReason,
     LifecycleState,
     ReservationState,
@@ -679,9 +678,6 @@ def _ending_disposition(child: RunSwitchOperation) -> Disposition:
         or code is None
         or result.retryable
         or is_redownload(code)
-        # The Controller has no copy of what the Spark lacks: planning again
-        # adds the model download, within the same repeat budget.
-        or code == FailureCode.ARTIFACT_SOURCE_UNAVAILABLE
     ):
         return Disposition.OBSERVE
     return Disposition.FAIL

@@ -10,12 +10,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy import select, text
-from vonk_agent_protocol import (
-    FailureCode,
-    LifecycleState,
-    RuntimeImageCode,
-    canonical_message,
-)
+from vonk_agent_protocol import LifecycleState, RuntimeImageCode, canonical_message
 from vonk_agent_protocol.agent_words import ProfileChildPhase
 from vonk_agent_protocol.claims import AgentRuntimeIdentity
 from vonk_control.bounded_json import require_mapping, require_sequence
@@ -179,54 +174,6 @@ def test_typed_cache_loss_queues_one_scope_bound_profile_retry(
         assert all(
             phase.subphase != ProfileChildPhase.MODEL_DOWNLOAD
             for phase in retry_parent.plan.phases
-        )
-
-
-def test_a_source_the_controller_lost_replans_the_load_with_a_model_download(
-    tmp_path: Path,
-) -> None:
-    # Wrong implementation: the agent's definite "cannot serve the files this
-    # Spark lacks" ended the load failed, or waited out the observation window,
-    # instead of planning again with a download of the evicted model.
-    sessions, _lifecycle, service, _profile, _desired, first, child_id, _nodes = (
-        _failed_profile(tmp_path)
-    )
-    with sessions.begin() as session:
-        child = session.get(Job, child_id)
-        application = session.get(FleetProfileApplication, first.id)
-        assert child is not None and child.result is not None
-        assert application is not None
-        child.result = {
-            **child.result,
-            "phase": "transfer",
-            "subphase": "target-copy",
-            "failed_phase": "transfer",
-            "failure_code": FailureCode.ARTIFACT_SOURCE_UNAVAILABLE.value,
-            "retryable": False,
-        }
-        _make_due(application)
-    adapter = cast(RunSwitchFleetProfileAdapter, service._switch_adapter)
-    with sessions() as session:
-        assert not adapter.recovery_refused(first.id, session=session)
-    # The NAS copy is gone while the Sparks still lack the files.
-    adapter._run_switch._artifacts = _ColdInspector(missing_spark_bytes=1024)
-
-    assert service.tick() is True
-    assert service.tick() in {False, True}
-    with sessions() as session:
-        retried = tuple(
-            child
-            for child in session.scalars(
-                select(Job).where(Job.kind == "recipe.run-switch.v2")
-            )
-            if child.id != child_id
-        )
-        assert len(retried) == 1
-        payload = read_row_column(retried[0], "payload")
-        assert isinstance(payload, RunSwitchJobPayload)
-        assert any(
-            phase.subphase == ProfileChildPhase.MODEL_DOWNLOAD
-            for phase in payload.plan.phases
         )
 
 
