@@ -14,6 +14,9 @@ free text when it is
   ``why`` or ``*_reason``, or returned by a function named ``*_reason``;
 * the fallback (``reason or "text"``) or a branch of any of those.
 
+Reading is the same fault: ``reason.startswith(...)`` (or ``endswith``) on a
+reason name decides by prose; branch on the typed code or the state instead.
+
 Rows written before keep their text and still read.  Count-free: the caller
 reports only added lines.
 """
@@ -105,3 +108,18 @@ def scan_source(source: str, *, path: str = "") -> list[int]:
             )
     lines = {hit.lineno for value in values if (hit := free_text(value)) is not None}
     return sorted(lines - enums)
+
+
+def prose_reason_reads(source: str) -> list[int]:
+    """Lines that decide by reason text: ``<reason>.startswith(...)``."""
+
+    return sorted(
+        {
+            node.lineno
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"startswith", "endswith"}
+            and _REASON_NAME.match(_name(node.func.value))
+        }
+    )
