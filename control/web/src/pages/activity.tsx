@@ -5,6 +5,7 @@ import {
   formatWire,
   type WireNumber,
 } from "../api/contract-numeric";
+import { ApiError } from "../api/errors";
 import {
   availabilityProgress,
   LibraryAvailabilityProgress,
@@ -1330,6 +1331,17 @@ export function ActivityPage({ api, now = new Date() }: { api: ActivityApi; now?
       api.operations(canonicalCursor, undefined, filters),
     ]);
     if (requestGeneration.current !== generation) return;
+    if (
+      "reason" in canonicalResult &&
+      canonicalResult.reason instanceof ApiError &&
+      canonicalResult.reason.status === 422
+    ) {
+      // A rejected cursor will never be accepted: drop it and reload page 1.
+      setCanonicalCursor(null);
+      setLoadingMore(false);
+      setAttempt((value) => value + 1);
+      return;
+    }
     const additional: ActivityRecord[] = [];
     const errors: string[] = [];
     if (canonicalResult.status === "fulfilled" && canonicalResult.value) {

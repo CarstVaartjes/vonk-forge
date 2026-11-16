@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -28,7 +28,6 @@ from vonk_control.fleet_profiles import (
 )
 from vonk_control.models import (
     AgentNode,
-    AgentOperation,
     CatalogDocumentRevision,
     FleetProfile,
     FleetProfileApplication,
@@ -36,7 +35,6 @@ from vonk_control.models import (
     ResourceReservation,
 )
 from vonk_control.operation_blockers import make_blocker
-from vonk_control.recovery_policy import RecoveryPolicy
 from vonk_control.run_switch_operations import RunSwitchOperationService
 
 from .display_fixtures import reword
@@ -342,73 +340,6 @@ def test_intent_checks_do_not_resolve_storage_inside_coordination(tmp_path: Path
         assert service._retry_eligible(session, application)
 
 
-def _park_exhausted_application(
-    sessions, application, child_id, nodes, *, attempt: int
-):
-    """Re-park a real Run/Switch child with one bounded exhausted operation.
-
-    The child and its application are left exactly as a spent retry budget
-    leaves them: parked, non-terminal, and still holding the node until an
-    operator decision or a newer intent replaces them.
-    """
-
-    parked_id = str(uuid.uuid4())
-    with sessions.begin() as session:
-        child = session.get(Job, child_id)
-        assert child is not None
-        child.state = "needs-operator"
-        child.status_reason = "interrupted before the exact effect was observed"
-        row = session.get(FleetProfileApplication, application.id)
-        assert row is not None
-        row.state = "needs-operator"
-        row.status_reason = "interrupted before the exact effect was observed"
-        session.add(
-            AgentOperation(
-                id=parked_id,
-                parent_job_id=child_id,
-                node_id=nodes[0],
-                kind="recipe.start",
-                payload_digest="a" * 64,
-                payload={},
-                authority_revision="b" * 64,
-                state="needs-operator",
-                status_reason=(
-                    f"exact recipe.start retry budget exhausted at attempt {attempt}"
-                ),
-                current_attempt=attempt,
-                created_at=datetime(2020, 1, 1, tzinfo=UTC),
-                updated_at=datetime(2020, 1, 1, tzinfo=UTC),
-            )
-        )
-    return parked_id
-
-
-def test_new_intent_supersedes_a_parked_exhausted_application(tmp_path: Path) -> None:
-    """A newer authorized load replaces a parked order instead of queueing behind it."""
-
-    sessions, _lifecycle, service, profile, _desired, first, child_id, nodes = (
-        _failed_profile(tmp_path)
-    )
-    _park_exhausted_application(
-        sessions,
-        first,
-        child_id,
-        nodes,
-        attempt=RecoveryPolicy().max_failures,
-    )
-
-    second = service.load(
-        profile.number,
-        request_key=_uuid(810),
-        actor="admin",
-    )
-
-    assert second.id != first.id
-    assert second.state == "queued"
-    ended = service.application(first.id)
-    assert ended.state == "superseded"
-
-
 def test_a_changed_saved_draft_does_not_cancel_accepted_backing_off_application(
     tmp_path: Path,
 ) -> None:
@@ -474,40 +405,6 @@ def test_pending_admission_is_not_cancelled_by_parked_child_observer(
     assert parked.progress.admission_pending is True
     assert parked.progress.workload_intent_ordinal is None
     assert service.tick() is False
-
-
-def test_exhausted_profile_retry_keeps_an_automatic_due_time(
-    tmp_path: Path,
-) -> None:
-    """Automatic retry has a due time and does not stop at the old retry cap."""
-
-    sessions, lifecycle, service, _profile, _desired, first, child_id, nodes = (
-        _failed_profile(tmp_path)
-    )
-    _park_exhausted_application(
-        sessions,
-        first,
-        child_id,
-        nodes,
-        attempt=RecoveryPolicy().max_failures + 10,
-    )
-    due = lifecycle._clock() + timedelta(minutes=1)
-    with sessions.begin() as session:
-        row = session.get(FleetProfileApplication, first.id)
-        assert row is not None
-        progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(row.progress), strict=True
-        ).model_dump(mode="json")
-        row.next_action_at = due
-        row.progress = FleetProfileApplicationProgress.model_validate_json(
-            canonical_message(progress), strict=True
-        ).model_dump(mode="json")
-
-    assert service._automatic_profile_recovery(lifecycle._clock()) is None
-    candidate = service._automatic_profile_recovery(due + timedelta(seconds=1))
-    assert candidate == (first.id, "admin")
-    # Scheduling recovery does not rewrite the parked row into a new state.
-    assert service.application(first.id).state == LifecycleState.NEEDS_OPERATOR
 
 
 def test_retry_of_a_backing_off_order_with_a_live_child_resumes_it(

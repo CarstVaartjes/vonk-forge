@@ -75,6 +75,7 @@ from ..model_cache_contract import (
 from ..models import ModelCacheOperation
 from ..persisted_waits import initialize_wait, lifecycle_wait, schedule_wait
 from ..stall_window import stall_deadline
+from ..strict_json import serialize_json_value
 from .adapter import Dispatch
 from .agent_operation import same_order
 from .core import transition
@@ -597,7 +598,7 @@ class ModelCacheAdapter:
             )
         # dict(): a "retry" literal here trips the added-line contract-literal guard
         updated = payload.model_copy(update=dict(retry=retry, failure=failure))  # noqa: C408
-        if updated.model_dump(mode="json") == operation.payload:
+        if serialize_json_value(updated) == operation.payload:
             return False
         self._store_payload(operation, updated)
         return True

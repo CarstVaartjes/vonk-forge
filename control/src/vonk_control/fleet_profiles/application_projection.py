@@ -313,7 +313,6 @@ class FleetProfileService:
                     LifecycleState.RUNNING,
                     LifecycleState.BACKOFF,
                     LifecycleState.FAILED,
-                    LifecycleState.NEEDS_OPERATOR,
                 )
                 else []
             ),

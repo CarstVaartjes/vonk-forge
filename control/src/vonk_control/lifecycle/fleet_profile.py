@@ -95,7 +95,6 @@ from .types import (
 )
 
 KIND = "fleet-profile"
-WAITING = LifecycleState.NEEDS_OPERATOR.value
 SUPERSEDED = LifecycleState.SUPERSEDED.value
 BACKOFF = LifecycleState.BACKOFF.value
 KEEP: Any = object()
@@ -109,7 +108,6 @@ _STORED = {
     State.RUNNING: "running",
     State.BACKOFF: "running",
     State.OBSERVING: "running",
-    State.NEEDS_OPERATOR: WAITING,
     State.SUCCEEDED: "succeeded",
     State.FAILED: "failed",
     State.CANCELLED: "cancelled",
@@ -255,8 +253,6 @@ class FleetProfileAdapter:
                 retry_count = progress.attempt
                 if application.next_action_at is not None:
                     due = aware(application.next_action_at)
-        elif job_states.means(stored, State.NEEDS_OPERATOR):
-            state = State.NEEDS_OPERATOR
         elif stored == "succeeded":
             state = State.SUCCEEDED
         elif stored == "failed":
@@ -731,12 +727,9 @@ class FleetProfileAdapter:
 
     @staticmethod
     def retry_pending(application: FleetProfileApplication) -> bool:
-        """A live load whose automatic retry is pending: it backs off after a
-        failure, or its word is not known (read as ``needs-operator``)."""
+        """A live load whose automatic retry is pending: it backs off after a failure."""
 
-        return application.state == BACKOFF or job_states.means(
-            application.state, State.NEEDS_OPERATOR
-        )
+        return application.state == BACKOFF
 
     def supersede(
         self,
@@ -912,7 +905,6 @@ __all__ = [
     "CANCEL_BUDGET",
     "KEEP",
     "KIND",
-    "WAITING",
     "FleetProfileAdapter",
     "cancellation_state",
     "doc_state",
