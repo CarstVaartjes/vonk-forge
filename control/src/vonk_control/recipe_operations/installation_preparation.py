@@ -58,6 +58,7 @@ from ..recipe_progress import (
 from ..stored_json import read_row_column
 from ..strict_json import serialize_json_value
 from .errors import RecipeRetryLater, retry_later_unless_deterministic
+from .install_failure_bound import exhausted_install
 from .interfaces import RecipeOperationView
 from .observation_helpers import (
     _active_recipe_revision,
@@ -410,6 +411,13 @@ class InstallationPreparationMixin:
                         "prior installation intent requires exact observation before replacement"
                     )
                 return service._view(active)
+            exhausted = exhausted_install(
+                session, installation_id, installation.plan_digest, service._view
+            )
+            if exhausted is not None:
+                # The same definite failure of this plan, again and again: the
+                # stored failed install is the answer, not another launch.
+                return exhausted
             if not receipt_missing and installation.state not in {
                 InstallationState.PLANNED,
                 InstallationState.PARTIAL,

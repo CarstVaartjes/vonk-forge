@@ -3744,6 +3744,60 @@ def test_partial_install_fails_as_a_group_and_can_retry(tmp_path: Path) -> None:
     assert service.get(first.id).result is None
 
 
+def _fail_install_n_times(
+    service: Any, installation_id: str, node: str, evidence: object, n: int
+) -> list[str]:
+    ids = []
+    for index in range(n):
+        view = service.start_installation(
+            installation_id, actor="admin", request_id=f"{index + 1:036d}"
+        )
+        service.record_node_result(view.id, node, succeeded=False, evidence=evidence)
+        ids.append(view.id)
+    return ids
+
+
+def test_install_failing_the_same_definite_way_is_not_relaunched(
+    tmp_path: Path,
+) -> None:
+    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    first = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="2" * 36
+    )
+    service.record_node_result(
+        first.id, nodes[0], succeeded=False, evidence={"code": "pull.refused"}
+    )
+    ids = [first.id]
+    ids += _fail_install_n_times(
+        service, first.owner_id, nodes[0], {"code": "pull.refused"}, 2
+    )
+    assert len(set(ids)) == 3
+
+    again = service.start_installation(
+        first.owner_id, actor="admin", request_id="9" * 36
+    )
+    assert again.id in ids
+    assert again.state == "failed"
+
+
+def test_install_failing_by_a_wait_is_launched_again(tmp_path: Path) -> None:
+    _sessions, service, _queue, mapping_id, build_id, nodes = setup_services(tmp_path)
+    plan = service.preview_install(mapping_id, build_id)
+    first = service.install(
+        plan, plan_digest=plan.plan_digest, actor="admin", request_id="2" * 36
+    )
+    evidence = {"failure_kind": "temporary-dependency", "reason": "registry down"}
+    service.record_node_result(first.id, nodes[0], succeeded=False, evidence=evidence)
+    ids = [first.id]
+    ids += _fail_install_n_times(service, first.owner_id, nodes[0], evidence, 2)
+
+    again = service.start_installation(
+        first.owner_id, actor="admin", request_id="9" * 36
+    )
+    assert again.id not in ids
+
+
 def test_failed_install_retry_state_rolls_back_when_queue_write_fails(
     tmp_path: Path,
 ) -> None:
