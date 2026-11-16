@@ -110,8 +110,8 @@ class InventoryMixin:
             seen: set[str] = set()
             for spec in manifest.artifacts if manifest is not None else ():
                 # One owner per fact: managed storage decides availability, and
-                # the same descriptor check reports the stored length, so a
-                # receipt alone cannot invent bytes.
+                # the same descriptor check reports the stored length, so no
+                # recorded fact can invent bytes.
                 stored = cache._stored_object(spec.sha256, spec.expected_bytes)
                 actual = stored or 0
                 state = (

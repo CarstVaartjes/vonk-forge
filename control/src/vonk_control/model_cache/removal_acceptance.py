@@ -466,7 +466,7 @@ class RemovalAcceptanceMixin:
             os.close(objects_fd)
 
     def _remove_model_object_files(self, digest: str) -> None:
-        """Unlink one exact object and its managed receipt, then fsync its shard."""
+        """Unlink one exact object (and any receipt an earlier build left beside it), then fsync its shard."""
         cache = cast("ModelCacheService", self)
 
         objects_fd = os.open(
