@@ -1,6 +1,5 @@
 """Db: startup."""
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import text
@@ -8,7 +7,6 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import (
     SQLAlchemyError,
 )
-from sqlalchemy.orm import sessionmaker
 
 from .connections import (
     _database_sqlstate,
@@ -112,20 +110,6 @@ def initialize_database(
                         {"key": _STARTUP_ADVISORY_LOCK},
                     )
                     lock_connection.commit()
-            # Schema authority is committed and released. Retained journals need
-            # exact SQL child proof, owned by the converter's bounded row locks.
-            # Normal worker passes continue remaining or temporarily locked rows.
-            from ..fleet_profile_adapter_conversion import (
-                convert_due_retained_applications,
-            )
-
-            converted = convert_due_retained_applications(
-                sessionmaker(engine, expire_on_commit=False), datetime.now(UTC)
-            )
-            if converted:
-                _LOGGER.info(
-                    "Converted %d retained profile adapter journals", converted
-                )
         except SQLAlchemyError as error:
             if _database_sqlstate(error) == "55P03":
                 raise _DatabaseStartupContention(
