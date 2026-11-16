@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import ConfigDict, TypeAdapter, ValidationError
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, load_only, sessionmaker
 from vonk_agent_protocol import ClusterMappingCode
 from vonk_forge_contracts import RecipeDefinition, RecipeOptionError, read_recipe
 from vonk_forge_contracts.recipe import RecipeTopology, Scalar
@@ -343,6 +343,11 @@ def _topology_capabilities(
         item.node_id: item
         for item in session.scalars(
             select(NodeInventorySnapshot)
+            .options(
+                load_only(
+                    NodeInventorySnapshot.node_id, NodeInventorySnapshot.capabilities
+                )
+            )
             .join(ranked, ranked.c.inventory_id == NodeInventorySnapshot.id)
             .where(ranked.c.inventory_rank == 1)
         )
