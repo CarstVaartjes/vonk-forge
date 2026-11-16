@@ -224,9 +224,7 @@ class FleetProfileService:
         elif state == LifecycleState.QUEUED.value and typed_progress.admission_pending:
             next_attempt = row.next_action_at
         failure = None
-        if state in job_states.words(
-            LifecycleState.FAILED, LifecycleState.NEEDS_OPERATOR
-        ):
+        if state in job_states.words(LifecycleState.FAILED):
             # A failed row that recorded no reason still shows what is known of it.
             reason = (
                 row.status_reason
@@ -235,14 +233,10 @@ class FleetProfileService:
             )
             failure = OperationFailureEvidence(
                 error_code=OperationFailureCode.FLEET_PROFILE_APPLICATION_FAILED,
-                summary=(
-                    "Profile application needs attention"
-                    if state in fleet_profile_states.NEEDS_OPERATOR
-                    else "Profile application failed"
-                ),
+                summary="Profile application failed",
                 detail=redact_text(reason),
                 retryable=retry_available,
-                uncertain=state in fleet_profile_states.NEEDS_OPERATOR,
+                uncertain=False,
             )
         wait = read_wait(row)
         return OperationItem(
@@ -297,7 +291,6 @@ class FleetProfileService:
                     LifecycleState.RUNNING,
                     LifecycleState.BACKOFF,
                     LifecycleState.FAILED,
-                    LifecycleState.NEEDS_OPERATOR,
                 )
                 else []
             ),

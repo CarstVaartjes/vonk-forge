@@ -251,8 +251,7 @@ def _owns_pending_admission(
 ) -> bool:
     """A late admission observer cannot replace a newer lifecycle decision."""
     return (
-        row.state
-        in job_states.words(LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR)
+        row.state in job_states.words(LifecycleState.QUEUED)
         and progress.admission_pending
         and progress.cancellation is None
     )
@@ -267,9 +266,7 @@ def _newer_pending_profile_load(
         select(FleetProfileApplication).where(
             FleetProfileApplication.selection_generation.is_(None),
             FleetProfileApplication.created_at >= order[0],
-            FleetProfileApplication.state.in_(
-                job_states.words(LifecycleState.QUEUED, LifecycleState.NEEDS_OPERATOR)
-            ),
+            FleetProfileApplication.state.in_(job_states.words(LifecycleState.QUEUED)),
         )
     ):
         progress = _stored_progress(load)
