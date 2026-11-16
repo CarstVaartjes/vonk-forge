@@ -9,7 +9,6 @@ from typing import cast as _typing_cast
 from sqlalchemy.orm import Session
 from vonk_agent_protocol import LifecycleState, UnknownOutcomeError, canonical_message
 
-from .. import job_states
 from ..agent_jobs import AgentJobService
 from ..fleet_profile_contract import (
     FleetProfileApplicationProgress,
@@ -197,9 +196,7 @@ class FleetProfileService:
                     row.next_action_at if progress.switch_adapter is not None else None
                 ),
             )
-            if child.state in _CHILD_PENDING_STATES or child.state in job_states.words(
-                LifecycleState.NEEDS_OPERATOR
-            ):
+            if child.state in _CHILD_PENDING_STATES:
                 row.status_reason = (
                     child.status_reason
                     or "Cancellation is waiting for the active profile child"
