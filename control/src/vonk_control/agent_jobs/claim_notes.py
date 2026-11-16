@@ -19,14 +19,16 @@ from ..logging import redact_text
 from ..models import AgentCertificate, AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..persisted_waits import read_wait
+from ..status_notes import (
+    BOUNDARY_NOTES,
+    StatusNote,
+    is_replaceable,
+)
 from .contracts import (
-    _BOUNDARY_REFUSAL_PREFIXES,
-    _CLAIM_REFUSAL_PREFIX,
     _CONCLUDED_OUTCOMES,
     _DATABASE_REPOLL_SECONDS,
     _LOGGER,
 )
-from .evidence import _is_refusal_reason
 from .predicates import (
     _claim_condition_facts,
     _claim_note_reason,
@@ -187,7 +189,7 @@ def _write_refusal_note(
         operation is not None
         and operation.state not in _CONCLUDED_OUTCOMES
         and operation.status_reason != reason
-        and _is_refusal_reason(operation.status_reason)
+        and is_replaceable(operation)
     ):
         # A domain reason such as "retry budget exhausted" already explains
         # why the operation is not progressing; a refusal must add evidence,
@@ -201,7 +203,7 @@ def _write_refusal_note(
             job is not None
             and job.state not in _CONCLUDED_OUTCOMES
             and job.status_reason != reason
-            and _is_refusal_reason(job.status_reason)
+            and is_replaceable(job)
         ):
             job.status_reason = reason
 
@@ -241,14 +243,10 @@ def _refresh_parent_claim_refusal(
     """Replace a recovered claim's stale note with a live sibling's cause."""
 
     job = session.get(Job, operation.parent_job_id)
-    if (
-        job is None
-        or not isinstance(job.status_reason, str)
-        or not job.status_reason.startswith(_CLAIM_REFUSAL_PREFIX)
-    ):
+    if job is None or job.status_note != StatusNote.CLAIM_REFUSED:
         return
-    sibling_reason = session.scalar(
-        select(StoredOperation.status_reason)
+    sibling = session.execute(
+        select(StoredOperation.status_reason, StoredOperation.status_note)
         .where(
             StoredOperation.parent_job_id == job.id,
             StoredOperation.id != operation.id,
@@ -257,9 +255,11 @@ def _refresh_parent_claim_refusal(
         )
         .order_by(StoredOperation.node_id, StoredOperation.id)
         .limit(1)
-    )
+    ).one_or_none()
+    sibling_reason, sibling_note = sibling or (None, None)
     if job.status_reason != sibling_reason:
         job.status_reason = sibling_reason
+        job.status_note = sibling_note
         job.updated_at = now
 
 
@@ -281,10 +281,8 @@ def record_boundary_refusal(
     receives the same note on the same surface the jobs API returns.
     """
 
-    prefix = next(
-        (p for p in _BOUNDARY_REFUSAL_PREFIXES if p.startswith(f"{boundary} ")), None
-    )
-    if prefix is None:
+    note = next((n for n in BOUNDARY_NOTES if n.value == f"{boundary}-refused"), None)
+    if note is None:
         raise InvalidValue(
             "agent boundary is invalid", reason=InvalidRequestReason.MALFORMED
         )
@@ -301,7 +299,7 @@ def record_boundary_refusal(
         )
         if operation is None or operation.current_attempt != current.attempt:
             return False
-        reason = _refusal_reason(prefix, check, attempt=current.attempt, **facts)
+        reason = _refusal_reason(note, check, attempt=current.attempt, **facts)
         self._write_refusal_note(
             session,
             operation=operation,

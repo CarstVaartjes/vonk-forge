@@ -111,6 +111,9 @@ class RunSwitchOperationResult(StrictModel):
     retry_attempt: int | None = Field(default=None, ge=2)
     retry_reason: Annotated[str, StringConstraints(max_length=512)] | None = None
     observation_deadline_at: datetime | None = None
+    #: When the accepted start deadline passed with no exact final evidence;
+    #: the expiry is recorded once, and cleared when the wait is no longer expired.
+    final_verification_expired_at: datetime | None = None
     recovery_deadline_at: datetime | None = None
     recovery_child_operation_id: UuidId | None = None
     startup_budget_seconds: int | None = Field(default=None, ge=1)

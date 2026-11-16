@@ -19,7 +19,6 @@ from vonk_agent_protocol.package_upgrade import PackageRollbackAuthority
 
 from .. import agent_operation_states, job_states
 from ..agent_jobs import (
-    _BOUNDARY_REFUSAL_PREFIXES,
     agent_upgrade_in_flight,
 )
 from ..agent_upgrade_contract import (
@@ -30,6 +29,7 @@ from ..inventory_items import runtime_value
 from ..lifecycle import CancelRequested
 from ..lifecycle.agent_operation import AgentOperationAdapter
 from ..models import AgentNode, AgentOperation, Job
+from ..status_notes import BOUNDARY_NOTES
 from ..strict_json import read_stored_model
 
 if TYPE_CHECKING:
@@ -88,7 +88,7 @@ class DispatchMixin:
                 # A legacy wait or dispatch: no action exists for a rollout,
                 # and its orders are moving by themselves.
                 service._rollouts.project(parent, now)
-            elif (parent.status_reason or "").startswith(_BOUNDARY_REFUSAL_PREFIXES):
+            elif parent.status_note in BOUNDARY_NOTES:
                 # A heartbeat or result refusal named an attempt this order
                 # change ended: a live order's own reason is the wait.
                 service._rollouts.project(

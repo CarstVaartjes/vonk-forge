@@ -19,9 +19,10 @@ from vonk_agent_protocol import (
     canonical_message,
 )
 from vonk_agent_protocol import AgentOperation as WireOperation
-from vonk_control.agent_jobs import _REFUSAL_PREFIXES, AgentJobService
+from vonk_control.agent_jobs import AgentJobService
 from vonk_control.models import AgentOperation, Job
 from vonk_control.run_switch_operations.result_helpers import _child_progress_payload
+from vonk_control.status_notes import NoteText, StatusNote
 
 from .runtime_identity_support import claim_agent
 from .test_agent_jobs import COMMIT, parent
@@ -98,13 +99,15 @@ def _outcome(sessions, job_id: str) -> str:
         return job.status_reason or ""
 
 
+_NOTE_PREFIXES = tuple(note.prefix for note in StatusNote)
+
+
 @pytest.mark.parametrize("succeeded", [True, False], ids=["succeeded", "failed"])
-@pytest.mark.parametrize("prefix", _REFUSAL_PREFIXES)
-def test_no_refusal_note_survives_as_the_outcome(tmp_path, prefix, succeeded) -> None:
+@pytest.mark.parametrize("note", list(StatusNote))
+def test_no_refusal_note_survives_as_the_outcome(tmp_path, note, succeeded) -> None:
     """Catches any refusal note, of any prefix, becoming a recipe job's outcome.
 
-    Driven by the refusal prefix tuple, so a new prefix is covered without a
-    list here.
+    Driven by the note enum, so a new kind is covered without a list here.
     """
 
     sessions, service, jobs, _clock, started, nodes, claim = _running_start(tmp_path)
@@ -115,7 +118,10 @@ def test_no_refusal_note_survives_as_the_outcome(tmp_path, prefix, succeeded) ->
             .one()
         )
         jobs._write_refusal_note(
-            session, operation=operation, job_id=started.id, reason=prefix + "x"
+            session,
+            operation=operation,
+            job_id=started.id,
+            reason=NoteText(note, note.prefix + "x"),
         )
     jobs.record_result(_result(claim, succeeded=succeeded))
     if succeeded:
@@ -126,10 +132,10 @@ def test_no_refusal_note_survives_as_the_outcome(tmp_path, prefix, succeeded) ->
             if following is not None:
                 jobs.record_result(_result(following, succeeded=True))
         assert service.get(started.id).state == LifecycleState.SUCCEEDED
-        assert not _outcome(sessions, started.id).startswith(_REFUSAL_PREFIXES)
+        assert not _outcome(sessions, started.id).startswith(_NOTE_PREFIXES)
         return
     reason = _outcome(sessions, started.id)
-    assert not reason.startswith(_REFUSAL_PREFIXES)
+    assert not reason.startswith(_NOTE_PREFIXES)
     assert _AGENT_REASON in reason
 
 
@@ -170,7 +176,7 @@ def test_a_failure_behind_a_503_ends_with_the_agents_reason(tmp_path) -> None:
     assert job.state == LifecycleState.FAILED
     reason = _outcome(sessions, started.id)
     assert _AGENT_REASON in reason
-    assert not reason.startswith(_REFUSAL_PREFIXES)
+    assert not reason.startswith(_NOTE_PREFIXES)
     # What the run-switch phase reports to the operator is the real failure.
     evidence = _child_progress_payload(job)
     detail = evidence.reason or evidence.status_reason or ""
@@ -179,7 +185,7 @@ def test_a_failure_behind_a_503_ends_with_the_agents_reason(tmp_path) -> None:
     assert launched.error_code == FailureCode.RECIPE_START_FAILED
     assert launched.reason == _AGENT_REASON
     assert _AGENT_REASON in detail
-    assert not detail.startswith(_REFUSAL_PREFIXES)
+    assert not detail.startswith(_NOTE_PREFIXES)
     # A fresh request is still admitted on the same node.
     clock.advance(timedelta(seconds=1).total_seconds())
     fresh_parent = parent(sessions, clock)
@@ -205,3 +211,44 @@ def test_a_failure_behind_a_503_ends_with_the_agents_reason(tmp_path) -> None:
         if claimed.operation == WireOperation.RUNTIME_PREFLIGHT:
             break
     assert WireOperation.RUNTIME_PREFLIGHT in handed_out, handed_out
+
+
+def test_a_reason_is_a_note_by_its_kind_not_its_text(tmp_path) -> None:
+    """A domain reason that reads like a note is still never replaced by one."""
+
+    sessions, _service, jobs, _clock, started, nodes, _claim = _running_start(tmp_path)
+    lookalike = StatusNote.CLAIM_REFUSED.prefix + "an outcome, not a note"
+    with sessions.begin() as session:
+        parent = session.get(Job, started.id)
+        assert parent is not None
+        parent.status_reason = lookalike
+        operation = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=started.id, node_id=nodes[0])
+            .one()
+        )
+        jobs._write_refusal_note(
+            session,
+            operation=operation,
+            job_id=started.id,
+            reason=NoteText(StatusNote.CLAIM_REFUSED, "claim refused: newer"),
+        )
+    assert _outcome(sessions, started.id) == lookalike
+
+    with sessions.begin() as session:
+        parent = session.get(Job, started.id)
+        assert parent is not None
+        parent.status_reason = StatusNote.CLAIM_REFUSED.prefix + "older"
+        parent.status_note = StatusNote.CLAIM_REFUSED
+        operation = (
+            session.query(AgentOperation)
+            .filter_by(parent_job_id=started.id, node_id=nodes[0])
+            .one()
+        )
+        jobs._write_refusal_note(
+            session,
+            operation=operation,
+            job_id=started.id,
+            reason=NoteText(StatusNote.CLAIM_REFUSED, "claim refused: newer"),
+        )
+    assert _outcome(sessions, started.id).endswith("newer")

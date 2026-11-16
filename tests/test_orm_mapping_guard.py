@@ -287,6 +287,7 @@ AUDITED_OUTSIDE_COLUMNS: dict[str, frozenset[str]] = {
             "workload_intent_ordinal",
             "state",
             "status_reason",
+            "status_note",
             "current_attempt",
             "observe_count",
             "recovery_deadline",

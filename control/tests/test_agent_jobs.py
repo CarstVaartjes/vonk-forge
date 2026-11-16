@@ -77,6 +77,7 @@ from vonk_control.recipe_start_payloads import (
 )
 from vonk_control.run_admission import RunAdmissionService
 from vonk_control.runtime_adapters import resolve_runtime_adapter
+from vonk_control.status_notes import StatusNote
 from vonk_control.workload_intent import (
     allocate_workload_intent,
     take_workload_intent,
@@ -666,6 +667,7 @@ def test_new_intent_retires_stopped_legacy_parent_with_unissued_child(service) -
         parked_row.state = "needs-operator"
         parked_row.current_attempt = 1
         parked_row.status_reason = "claim refused: operator-retry-not-authorized"
+        parked_row.status_note = StatusNote.CLAIM_REFUSED
         succeeded_row.workload_intent_ordinal = None
         parked_row.workload_intent_ordinal = None
         node_a.workload_intent_ordinal = 2

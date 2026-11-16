@@ -28,16 +28,15 @@ from ..logging import redact_text
 from ..models import AgentNode, AgentOperationAttempt, Job
 from ..models import AgentOperation as StoredOperation
 from ..own_cleanup import CLEANUP_KINDS
+from ..status_notes import NoteText, StatusNote
 from ..stored_json import read_row_column
 from .contracts import (
-    _CLAIM_NOTE_PREFIX,
-    _CLAIM_REFUSAL_PREFIX,
     _MAX_CLAIM_REFUSAL_REASON,
     _WORKLOAD_INTENT_OPERATIONS,
 )
 
 
-def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
+def _refusal_reason(note: StatusNote, check: str, **facts: object) -> NoteText:
     """Render one bounded, redacted control-plane refusal note.
 
     Only bounded control-plane facts belong here: the name of the refusing
@@ -51,16 +50,16 @@ def _refusal_reason(prefix: str, check: str, **facts: object) -> str:
     rendered = "; ".join(
         f"{key}={value}" for key, value in facts.items() if value is not None
     )
-    reason = prefix + check + (f" ({rendered})" if rendered else "")
-    return redact_text(reason)[:_MAX_CLAIM_REFUSAL_REASON]
+    text = note.prefix + check + (f" ({rendered})" if rendered else "")
+    return NoteText(note, redact_text(text)[:_MAX_CLAIM_REFUSAL_REASON])
 
 
-def _claim_refusal_reason(check: str, **facts: object) -> str:
-    return _refusal_reason(_CLAIM_REFUSAL_PREFIX, check, **facts)
+def _claim_refusal_reason(check: str, **facts: object) -> NoteText:
+    return _refusal_reason(StatusNote.CLAIM_REFUSED, check, **facts)
 
 
-def _claim_note_reason(check: str, **facts: object) -> str:
-    return _refusal_reason(_CLAIM_NOTE_PREFIX, check, **facts)
+def _claim_note_reason(check: str, **facts: object) -> NoteText:
+    return _refusal_reason(StatusNote.CLAIM_NOTE, check, **facts)
 
 
 def _document(value: BaseModel) -> Any:
