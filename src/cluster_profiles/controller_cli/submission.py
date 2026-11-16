@@ -16,6 +16,7 @@ from ..cli_outcome import (
 from ..cli_states_generated import PROFILE_REFUSAL_CODES
 from ..control_client import (
     ControlClientError,
+    ControlConflict,
     ControlHTTPError,
     ControlMalformedResponse,
     ControlNotFound,
@@ -66,6 +67,7 @@ def _submit_idempotent_request(
     lookup_fetch: Callable[[float], object] | None = None,
     deadline: float | None = None,
     extra_headers: Mapping[str, str] | None = None,
+    conflict_is_refusal: bool = False,
 ) -> dict[str, object]:
     """Bounded submission, exact-request reconciliation, and one identical replay."""
     normal_timeout = client.request_timeout_seconds
@@ -166,6 +168,7 @@ def _submit_idempotent_request(
         return result
 
     retry_error: ControlHTTPError | ControlTransportError | None = None
+    submit_error: ControlClientError | None = None
     retry_not_before = 0.0
     submission.acceptance = SubmissionAcceptance.UNKNOWN
     try:
@@ -173,6 +176,7 @@ def _submit_idempotent_request(
     except OSError:
         may_replay = True
     except ControlClientError as error:
+        submit_error = error
         status = _known_http_refusal_status(error)
         if status in {400, 401, 403, 422} or (
             status == 409 and getattr(error, "code", None) in PROFILE_REFUSAL_CODES
@@ -226,6 +230,12 @@ def _submit_idempotent_request(
         except ControlNotFound:
             if may_replay:
                 pass
+            elif conflict_is_refusal and isinstance(submit_error, ControlConflict):
+                # The Controller answered the submit with a conflict and holds no
+                # request under this key: it was refused, not unknown. Its
+                # answer reaches the caller, which may plan again.
+                submission.acceptance = SubmissionAcceptance.REFUSED
+                raise submit_error
             else:
                 return _poll_path(
                     client,
